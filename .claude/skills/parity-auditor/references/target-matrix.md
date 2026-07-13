@@ -181,8 +181,8 @@ implementation. They are not parity gaps in the silent/honest sense (nothing rea
 them, so nothing mis-emits); they're future cross-cutting concerns. Note them as
 N/A-pending, with the owning proposal:
 
-- `emitAuthGate` → `docs/proposals/authorization.md`
-- `emitAuditInit` → `docs/proposals/audit-and-logging.md`
-- `emitCompliancePolicy` → `docs/proposals/sensitivity-and-compliance.md`
-- `emitTenancyFilter` → `docs/proposals/multi-tenancy-design-note.md`
-- `emitI18nAdapter` → `docs/proposals/i18n.md`
+- `emitAuthGate` → `docs/old/proposals/authorization.md`
+- `emitAuditInit` → `docs/old/proposals/audit-and-logging.md`
+- `emitCompliancePolicy` → `docs/old/proposals/sensitivity-and-compliance.md`
+- `emitTenancyFilter` → `docs/old/proposals/multi-tenancy-design-note.md`
+- `emitI18nAdapter` → `docs/old/proposals/i18n.md`

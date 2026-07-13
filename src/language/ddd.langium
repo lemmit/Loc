@@ -20,12 +20,12 @@ ModelMember:
     // expression-form function visible workspace-wide, like a root
     // `valueobject` / `enum`.  It INLINES at every call site during lowering
     // (no emitted function), so it needs no owning aggregate.  See
-    // docs/plans/stdlib.md → Phase B.
+    // docs/old/plans/stdlib.md → Phase B.
     | FunctionDecl
     // Implicit-system composition (Tier 2): the deployment-shape members are
     // also admissible at file top level and compose into the project's single
     // `system` — so deployment can live in its own file.  See
-    // docs/proposals/implicit-system-composition.md.
+    // docs/old/proposals/implicit-system-composition.md.
     | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E
     // Typed capabilities (typed-capabilities.md): a `capability` pure-mixin is
     // top-level declarable (and a `SystemMember` inside `system { }`).
@@ -143,7 +143,7 @@ Enforcement returns string:
     'denyByDefault' | 'opt';
 
 // System-level tenancy declaration (multi-tenancy Phase 1a; cross-refs
-// since 1b.1 — see docs/plans/multi-tenancy-implementation.md).  Sibling
+// since 1b.1 — see docs/old/plans/multi-tenancy-implementation.md).  Sibling
 // to `user { … }` and `auth { … }`: names WHICH user claim partitions
 // the data (`user.tenantId`) and WHICH aggregate is the tenant registry
 // (`of Organization`).  The `user.` prefix is fixed surface syntax; both
@@ -423,7 +423,7 @@ StoreDecl:
 // nesting.  Optional + additive — area-less pages stay flat.  v1 carries
 // name + members only; a base `route:` prefix and cascading
 // layout/requires/label are the documented growth path
-// (docs/proposals/unfoldable-page-scaffolding.md).
+// (docs/old/proposals/unfoldable-page-scaffolding.md).
 Area:
     'area' name=ID '{'
         members+=AreaMember*
@@ -696,7 +696,7 @@ MenuMetaEntry:
 // path>"` declares the typed param contract but no `body:` — the
 // generator imports the user's module at call sites and emits a
 // `<Name>.props.ts` typed-props interface (the UI escape hatch; see
-// docs/proposals/extern-component-escape-hatch.md).  The `extern`
+// docs/old/proposals/extern-component-escape-hatch.md).  The `extern`
 // keyword always carries its `from` path; the body is omitted (the
 // validator pins both halves of this exclusivity).
 Component:
@@ -936,7 +936,7 @@ Aggregate:
     // The aggregate id is always a `guid` — Loom mints it. The former
     // `ids guid` explicit spelling (a single-value no-op; `ids int|long|string`
     // were removed earlier as a footgun) was dropped as pure ceremony: see
-    // docs/plans/non-guid-id-http-params.md.
+    // docs/old/plans/non-guid-id-http-params.md.
     (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? (crossTenant?='crossTenant')? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
@@ -1068,7 +1068,7 @@ StampEvent returns string:
 // error rather than a generic linker message, and the scope provider needs no
 // change.  `name` is optional (a context may hold one anonymous policy).
 //
-// FUNCTION FORM (authorization Phase 3.2, docs/plans/authorization-phase3-2.md):
+// FUNCTION FORM (authorization Phase 3.2, docs/old/plans/authorization-phase3-2.md):
 // `policy <Name>(<params>): bool ( = <expr> | { <expr> } )` is a named, ambient,
 // parameterised boolean AUTHORIZATION predicate — the reusable twin of an inline
 // `requires` gate, referenced from a `requires PolicyName(args)` clause and
@@ -1088,7 +1088,7 @@ PolicyDecl:
     );
 
 // `allow [write] <level> on <Aggregate>` — the optional `write` verb selects
-// the ladder (authorization Phase 3 P3.1, docs/plans/authorization-phase3.md):
+// the ladder (authorization Phase 3 P3.1, docs/old/plans/authorization-phase3.md):
 // bare = the read reachability ladder (Phase 2, unchanged); `write` gates
 // INSTANCE mutations (update-style ops, destroy, applier dispatch) on the target
 // row's write scope.  `write global` PARSES but is a phase-⑦ validator error
@@ -1100,7 +1100,7 @@ PolicyDecl:
 // structurally); the IR splits them by verb.
 //
 // `deny [write] on <Aggregate>` — the DENY-WINS carve-out (authorization Phase 4,
-// docs/plans/authorization-phase4-deny.md).  `effect` discriminates the two forms:
+// docs/old/plans/authorization-phase4-deny.md).  `effect` discriminates the two forms:
 // `allow` carries a widening `level` (local/deep/global); `deny` is ALL-OR-NOTHING
 // at the aggregate — no level word (a partial deny is the field-mask / `data {}`
 // row-clause territory of a later slice).  Deny reuses the same optional `write`
@@ -1117,7 +1117,7 @@ PolicyReadRule:
 PolicyVerb returns string:
     'write';
 
-// The directional read ladder (docs/plans/multi-tenancy-phase2.md P2.4):
+// The directional read ladder (docs/old/plans/multi-tenancy-phase2.md P2.4):
 //   - `local`  — the caller's own org node (today's `tenantId ==` floor; default)
 //   - `deep`   — the caller's org + all descendants (`dataKey` path prefix)
 //   - `global` — all in the caller's tenant (tenant-root-floored)
@@ -1158,7 +1158,7 @@ ImplementsDecl:
 //
 // Top-level declarable (a `SystemMember`); globally visible because the
 // expander resolves by name, not by Langium scope.  See
-// docs/plans/typed-capabilities-implementation.md.
+// docs/old/plans/typed-capabilities-implementation.md.
 Capability:
     'capability' name=ID '{'
         (members+=CapabilityMember ','?)*
@@ -1400,7 +1400,7 @@ ProjectionOn:
 // See docs/views.md for the full surface.
 // A view's source is an aggregate (the wire shape is its repository read)
 // or a workflow (the wire shape is its persisted instance / saga-state row —
-// see docs/proposals/workflow-instance-views.md).  The grammar admits both;
+// see docs/old/proposals/workflow-instance-views.md).  The grammar admits both;
 // the validator restricts the workflow case (shorthand only, non-event-sourced).
 type ViewSource = Aggregate | Workflow;
 
@@ -1469,8 +1469,8 @@ Criterion:
 // shaping a real query carries — `sort` ordering and a `loads` fetch
 // shape.  Pagination is NOT a slot here: `page` is a call-site argument
 // on `Repo.run(R(args), page?)`, never part of the declaration.  See
-// docs/proposals/retrieval.md.  Lowers to RetrievalIR
-// (docs/proposals/reified-criteria.md).
+// docs/old/proposals/retrieval.md.  Lowers to RetrievalIR
+// (docs/old/proposals/reified-criteria.md).
 //
 //   retrieval AllActive of Customer = ActiveCustomer
 //   retrieval HighValueInRegion(region: string) of Order {
@@ -1522,7 +1522,7 @@ LoadSegment:
 // extern / api / workflow-start / emit / this-write inside a body.
 // Callable from operation / workflow / api bodies via a member call
 // (`Pricing.quote(cart, customer)`), lowered to a Call with
-// `callKind: "domain-service"`.  See docs/proposals/domain-services.md.
+// `callKind: "domain-service"`.  See docs/old/proposals/domain-services.md.
 //
 //   domainService Pricing {
 //     operation quote(cart: Cart, customer: Customer): Money {
@@ -1659,7 +1659,7 @@ Property:
     // Default value — `field: T = <expr>`.  Placed after the access
     // modifier so the expression can't greedily swallow a trailing
     // modifier keyword.  Enables synthesising a create when no explicit
-    // one is declared (see docs/proposals); for now it lowers onto the
+    // one is declared (see docs/old/proposals); for now it lowers onto the
     // FieldIR and downstream phases may consume it.
     ('=' default=Expression)?
     ('check' check=Expression)?;
@@ -1668,7 +1668,7 @@ Property:
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
 // conventional choices but any identifier is accepted.  Multiple tags
 // (`sensitive(pii, audited)`) declare the value carries every listed
-// classification simultaneously.  See `docs/proposals/sensitivity-and-compliance.md`.
+// classification simultaneously.  See `docs/old/proposals/sensitivity-and-compliance.md`.
 SensitivityClause:
     'sensitive' '(' tags+=ID (',' tags+=ID)* ')';
 
@@ -1728,7 +1728,7 @@ Operation:
 // arguments.  An unnamed `create(...)` is the aggregate's canonical
 // creator.  Lowers to an `OperationIR` with `kind: "create"`; never
 // joins `agg.operations` (which stays mutate-only).  See
-// docs/proposals/lifecycle-operations.md.
+// docs/old/proposals/lifecycle-operations.md.
 Create:
     'create' (name=ID)? '(' (params+=Parameter (',' params+=Parameter)*)? ')' (audited?='audited')? '{'
         body+=Statement*
@@ -1753,7 +1753,7 @@ Destroy:
 // lives here.  Applier bodies are pure folds — assignments (`:=`/`+=`/
 // `-=`) and derivations only, no `emit` and no side-effecting calls.
 // Lowers to `ApplyIR`; never joins `agg.operations`.  See
-// docs/proposals/workflow-and-applier.md.
+// docs/old/proposals/workflow-and-applier.md.
 Apply:
     'apply' '(' param=LooseName ':' event=[EventDecl:ID] ')' '{'
         body+=Statement*
@@ -2401,7 +2401,7 @@ PrimaryExpr infers Expression:
     | IdRef
     | NameRef;
 
-// String interpolation (A6, docs/plans/stdlib.md) — a backtick-delimited
+// String interpolation (A6, docs/old/plans/stdlib.md) — a backtick-delimited
 // template with `{expr}` holes, e.g. `Order {id} for {customer.name}`.
 // It lowers (phase ⑤) to plain string concatenation of the literal
 // segments and the `string()`-converted holes, so NO backend sees a new

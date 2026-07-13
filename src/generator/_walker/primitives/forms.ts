@@ -619,7 +619,7 @@ function emitFormOfOperation(
  *  `primitive-modal-controlled` template wraps the walked children in a
  *  controlled dialog.  Returns undefined when `open:` is not a state ref or the
  *  pack ships no controlled-modal template (→ caller falls back to the stub).
- *  See docs/proposals/state-controlled-modal.md. */
+ *  See docs/old/proposals/state-controlled-modal.md. */
 function emitControlledModal(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,

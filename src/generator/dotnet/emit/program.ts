@@ -780,7 +780,7 @@ export function renderCsproj(
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>${ns}</RootNamespace>
-    <!-- Roslyn analyzer level — see docs/proposals/cross-stack-static-analysis.md.
+    <!-- Roslyn analyzer level — see docs/old/proposals/cross-stack-static-analysis.md.
          latest-recommended brings in ~200 high-signal CA-prefixed rules
          on top of the compiler warnings the existing CI /warnaserror gates. -->
     <AnalysisLevel>latest-recommended</AnalysisLevel>

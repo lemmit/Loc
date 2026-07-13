@@ -6,7 +6,7 @@
 // (SPRING_DATASOURCE_URL) and HTTP-dispatches the SAME emitted `test e2e`
 // api suite at it — the emitted suite is written against the HTTP contract, so
 // it is backend-agnostic (matched on pathname). Sibling of run-dotnet.mjs; see
-// docs/plans/runtime-semantics-tier-followups.md (RST-3).
+// docs/old/plans/runtime-semantics-tier-followups.md (RST-3).
 //
 // This gates the *behavioral* runtime-semantics RS-rules (conformance-
 // semantics.md) on a FOURTH backend per-PR: camelCase keys both directions

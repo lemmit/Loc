@@ -1,5 +1,5 @@
 // IR-level tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/plans/multi-tenancy-implementation.md §1): the explicit-stance lint
+// docs/old/plans/multi-tenancy-implementation.md §1): the explicit-stance lint
 // (registry + abstract exemptions), stance markers without a `tenancy by`
 // declaration, and conflicting markers.  Stance is derived per aggregate via
 // `classifyTenantStance` (derive-don't-stamp).  Registry existence is the

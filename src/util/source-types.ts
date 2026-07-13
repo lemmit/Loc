@@ -1,6 +1,6 @@
 // The platform-internal sourceType registry — the single source of
 // truth for what each technology family can do.  See
-// `docs/proposals/resource-model-and-source-types.md` §3.4.
+// `docs/old/proposals/resource-model-and-source-types.md` §3.4.
 //
 // A `sourceType` is built-in platform knowledge, never authored in
 // `.ddd`.  For each infrastructure `kind` it supports, it declares the

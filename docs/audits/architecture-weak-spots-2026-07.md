@@ -17,7 +17,7 @@ Loom's pitch has four legs: (1) architecturally correct business apps from conci
 The scaffold→primitives path produces a polished v1 admin console, then drops the user off a cliff the day they need anything the closed set (33+2 primitives, `src/generator/_walker/registry.ts`) can't say:
 
 - **Tables are display-only** — no sort, no interactive filter, no pagination (`src/generator/_walker/primitives/table.ts`); the wire `paged` carrier exists but no frontend consumes it. A real admin UI dies at a few hundred rows.
-- **No file upload, no charts** (`Stat` is a number tile), no repeatable dynamic sub-forms, no optimistic updates, in-memory-only `state`, SSE-toast-only realtime, **no i18n at all** (`docs/proposals/i18n.md` unadopted), and `A11yContract` is declared but almost nothing emits ARIA (64 `aria-` attrs across all 17 packs, zero in the primitive emitters).
+- **No file upload, no charts** (`Stat` is a number tile), no repeatable dynamic sub-forms, no optimistic updates, in-memory-only `state`, SSE-toast-only realtime, **no i18n at all** (`docs/old/proposals/i18n.md` unadopted), and `A11yContract` is declared but almost nothing emits ARIA (64 `aria-` attrs across all 17 packs, zero in the primitive emitters).
 - **The escape hatch is asymmetric and total:** `component extern` exists on React/Vue/Svelte only — **no Angular, no HEEx hatch**. And it's all-or-nothing: no way to partially edit a generated page and keep regenerating it; `unfold` ejects domain macros, explicitly not UI (`unfold-macro.ts:190-191`).
 
 Why this ranks #1: every user of the "no-code feel" hits this ceiling on their first real app, and the exit is hand-written framework code — the exact thing the product exists to avoid.

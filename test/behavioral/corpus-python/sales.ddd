@@ -5,7 +5,7 @@
 // keys both directions (RS-1 `externalRef`/`customerId`/`placedAt`), enum
 // declared casing (RS-2), temporal round-trip (RS-4 `placedAt`), bool create
 // default (RS-6 `active`), value-object survival (RS-7 `price`), and association
-// round-trip (RS-8 `lines`). See docs/plans/a6.2-behavioral-tier-second-backend.md.
+// round-trip (RS-8 `lines`). See docs/old/plans/a6.2-behavioral-tier-second-backend.md.
 
 system SalesPy {
 

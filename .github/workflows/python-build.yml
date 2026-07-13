@@ -8,7 +8,7 @@ name: Python build verification
 # `/warnaserror` sets for .NET).  Catches emission bugs in the Python
 # generator that the string-match unit tests cannot see.
 #
-# Mirrors `dotnet-build.yml`.  See docs/plans/python-backend-plan.md.
+# Mirrors `dotnet-build.yml`.  See docs/old/plans/python-backend-plan.md.
 
 on:
   push:

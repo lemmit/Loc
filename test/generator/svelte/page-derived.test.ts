@@ -3,7 +3,7 @@
 // runes before the body.  Svelte 5's `$derived` takes the expression directly
 // (not a thunk) and auto-tracks its `$state` / `$props` deps.  Sequential
 // (a derived may reference an earlier derived; runes reads are bare names).
-// See docs/proposals/page-derived-bindings.md.
+// See docs/old/proposals/page-derived-bindings.md.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";

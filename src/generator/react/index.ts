@@ -281,7 +281,7 @@ export function generateReactForContexts(
   // cost; erased at compile time).  `apply-server-errors.ts` decodes
   // RFC 7807 ProblemDetails 422 responses into per-field RHF errors
   // via the per-action FieldMap instance the form walker passes in.
-  // See docs/proposals/frontend-acl.md.
+  // See docs/old/proposals/frontend-acl.md.
   out.set("src/lib/strict-field-map.ts", REACT_LIB_STRICT_FIELD_MAP_TS);
   out.set("src/lib/apply-server-errors.ts", REACT_LIB_APPLY_SERVER_ERRORS_TS);
   // Theme — every generated app gets a tasteful baseline (indigo

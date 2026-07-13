@@ -5,7 +5,7 @@
 // assign-driven conditional render: `<%= if @open do %> … <% end %>`, with the
 // `open:` ref reading the page-state assign and the close driven by a child
 // button that writes the state (the existing handle_event machinery).
-// See docs/proposals/state-controlled-modal.md.
+// See docs/old/proposals/state-controlled-modal.md.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";

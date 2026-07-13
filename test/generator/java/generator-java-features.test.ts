@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java backend — workflows, views, auth, extern (slice S6 of
-// docs/plans/java-backend-implementation.md).  The same surface boots and
+// docs/old/plans/java-backend-implementation.md).  The same surface boots and
 // behaves against Postgres (manually verified; LOOM_JAVA_BUILD compiles
 // examples/showcase.ddd's java deployable); these unit tests pin the
 // emitted shapes.

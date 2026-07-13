@@ -1,5 +1,5 @@
 // Multi-backend e2e expansion — Phase A Item 2 from
-// `docs/plans/phase-a-platform-expansion-prereqs.md`.
+// `docs/old/plans/phase-a-platform-expansion-prereqs.md`.
 //
 // Each `test e2e "..." against <deployable>` block must emit one
 // `it("<name> against <slug>")` per BACKEND deployable whose

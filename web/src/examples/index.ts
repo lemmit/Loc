@@ -63,7 +63,7 @@ export interface LoomExample {
    *  e.g. `shared/money.ddd`) so the example author doesn't have to
    *  type the prefix at every entry.  The picker writes these to
    *  the workspace VFS when the example is chosen.  See
-   *  `docs/plans/multi-file-source.md`. */
+   *  `docs/old/plans/multi-file-source.md`. */
   files?: Record<string, string>;
   /** Optional one-liner shown under the dropdown — what the
    *  example demonstrates and whether it supports the Preview

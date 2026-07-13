@@ -8,7 +8,7 @@ import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
-// Phase 1 compile tier (docs/plans/global-test-coverage-plan.md) for the Python
+// Phase 1 compile tier (docs/old/plans/global-test-coverage-plan.md) for the Python
 // (FastAPI / SQLAlchemy) backend — the sibling of `corpus-tsc-build.test.ts`.
 // The fast `corpus-coverage` gate proves every corpus feature *generates* on
 // `python`; this gate proves the emitted project is statically clean under

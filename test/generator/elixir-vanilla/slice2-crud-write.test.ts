@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// Slice 2 of docs/plans/vanilla-foundation-tdd-plan.md — write path
+// Slice 2 of docs/old/plans/vanilla-foundation-tdd-plan.md — write path
 // (create / update / destroy) + Changeset module.
 //
 // Verifies the vanilla emit produces:

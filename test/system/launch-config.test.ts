@@ -5,7 +5,7 @@ import { parseValid } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // M26 — `.vscode/launch.json` fan-out across every debuggable backend
-// (node/coreclr/java) via `PlatformSurface.debugLaunch()`. `docs/plans/
+// (node/coreclr/java) via `PlatformSurface.debugLaunch()`. `docs/old/plans/
 // dap-node-debug.md` is the design record; `src/system/launch-config.ts` is
 // the renderer under test indirectly (through `generateSystems`).
 // ---------------------------------------------------------------------------

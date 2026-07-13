@@ -14,7 +14,7 @@ import { renderPhoenixLogCall } from "../../../src/generator/_obs/render-phoenix
 // Neutral log-event catalog — the single source of truth for every log
 // line the generated backends emit.  These tests guard the contract:
 // stable event names, level discipline, and the domain-injection rule.
-// See docs/proposals/observability.md.
+// See docs/old/proposals/observability.md.
 // ---------------------------------------------------------------------------
 
 const VALID_LEVELS: ReadonlySet<LogLevel> = new Set(["trace", "debug", "info", "warn", "error"]);

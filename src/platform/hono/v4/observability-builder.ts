@@ -30,7 +30,7 @@
 // mechanism, JSON output keeps the existing playground line-streaming
 // working unchanged, and the level check happens before any field-object
 // construction so suppressed levels cost ~nothing.  See
-// docs/proposals/observability.md.
+// docs/old/proposals/observability.md.
 // ---------------------------------------------------------------------------
 
 const LOG_TS = `// Auto-generated.

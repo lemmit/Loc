@@ -7,7 +7,7 @@ import { generateCorpusCase } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
-// Phase 1 compile tier (docs/plans/global-test-coverage-plan.md) for the
+// Phase 1 compile tier (docs/old/plans/global-test-coverage-plan.md) for the
 // reference backend (Hono/TS).  The fast `corpus-coverage` gate proves every
 // corpus feature *generates* on `node`; this gate proves the emitted project
 // actually *type-checks* under strict `tsc` — upgrading the corpus from a

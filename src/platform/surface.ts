@@ -250,7 +250,7 @@ export interface PlatformSurface extends PlatformDescriptor {
     styleAdapter?: StyleAdapter;
     layoutAdapter?: LayoutAdapter;
     /** Generate-time source-map recorder (`--sourcemap`, off by default —
-     *  see docs/plans/source-map-debug-kickoff.md).  Platforms that
+     *  see docs/old/plans/source-map-debug-kickoff.md).  Platforms that
      *  implement the emit bracket record whole-file construct regions
      *  into it as they place each per-aggregate/-operation artifact;
      *  absent means "record nothing" — every platform without a bracket
@@ -296,7 +296,7 @@ export interface PlatformSurface extends PlatformDescriptor {
    *  `serviceSlug(deployable.name)`, passed in so the surface doesn't
    *  re-derive it.  Implemented by node (hono), dotnet, and java — the
    *  three backends with a native step-through debugger the emitted
-   *  source-map substrate targets (see docs/plans/dap-node-debug.md).
+   *  source-map substrate targets (see docs/old/plans/dap-node-debug.md).
    *  python, elixir, and every frontend platform omit this method
    *  entirely (optional — no method is equivalent to always returning
    *  `undefined`). */

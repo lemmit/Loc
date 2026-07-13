@@ -100,7 +100,7 @@ export function emitVanillaContextModule(
   // plus named/returning-op bodies land in ONE file, so (unlike a
   // per-aggregate file) there is no single IR node whose `origin` a
   // whole-file `sourcemap.file(...)` region could honestly point at; that's
-  // a deliberate milestone-1 decision (see docs/plans/
+  // a deliberate milestone-1 decision (see docs/old/plans/
   // source-map-debug-kickoff.md).  What we CAN record honestly is
   // statement-granular sub-regions inside each operation body — anchored by
   // exact-text search against THIS file's own final content, independent of

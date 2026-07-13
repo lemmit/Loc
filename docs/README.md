@@ -72,10 +72,10 @@ These cover a single language feature each.  Each one is self-contained.
 
 ## Subdirectories
 
+- [`new-plan/`](new-plan/) — **the global implementation plan.**  One consolidated roadmap, divided into feature tracks and agent-pickable missions, with a coverage table dispositioning every archived proposal/plan.  This is the only live status/ordering source — start at [`new-plan/README.md`](new-plan/README.md).
 - [`architecture/`](architecture/) — cross-cutting design specs shared by several proposals (`RequestContext`, wire envelope, modifier propagation, diagnostic catalog, CLI surface, fixture re-baseline).  Pin shapes that multiple features consume; back the `D-*` decisions in [`decisions.md`](decisions.md).
-- [`plans/`](plans/) — implementation plans, roadmaps, and design notes for in-flight or future work.  Not authoritative for what ships today; treat as historical context.  Start with [`plans/debt-prioritized-backlog.md`](plans/debt-prioritized-backlog.md) — the ranked list of every reserved stub, parity gap, and TODO, worked through top-down.
-- [`audits/`](audits/) — empirical audits of shipped state (pack equivalence, stack version pins).  Snapshot-in-time documents.
-- `proposals/` — formal proposals not yet adopted.  Aspirational; do not treat as describing the shipped system.  **Not deployed** to the published docs site; browse on [GitHub](https://github.com/lemmit/Loc/tree/main/docs/proposals).
+- [`old/`](old/) — the archived design corpus: [`old/proposals/`](old/proposals/) (formal proposals — grammar sketches, semantics, rationale) and [`old/plans/`](old/plans/) (implementation plans and design notes).  **Design record only** — statuses and orderings in these files are frozen as of 2026-07-13 and superseded by `new-plan/`; missions link back into them for the design detail.
+- [`audits/`](audits/) — empirical audits of shipped state (parity matrices, code reviews, weak-spot reviews).  Snapshot-in-time documents; their still-open findings are mission-mapped in [`new-plan/coverage.md`](new-plan/coverage.md).
 - [`decisions.md`](decisions.md) — pinned cross-proposal decisions (the `D-*` tags).  The binding answer when a proposal cites a tag.
 
 ## See also

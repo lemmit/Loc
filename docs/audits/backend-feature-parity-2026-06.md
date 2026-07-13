@@ -41,7 +41,7 @@
 > (`validateMikroOrmSupport` no longer rejects `auditable`); it still rejects
 > non-relational shapes, inheritance, `X id[]` associations, nested parts, any
 > capability `filter`, and provenanced/non-stamp managed fields (the full adapter
-> sub-matrix lives in `docs/proposals/platform-parity-debt.md`). The
+> sub-matrix lives in `docs/old/proposals/platform-parity-debt.md`). The
 > backend-level audit/provenance gate *sets* are unchanged from 2026-06-23; the
 > `system-checks.ts` line numbers below were re-synced (they shifted ~+13). Also
 > folded in: **python capability `filter` reached parity with node/java** — the

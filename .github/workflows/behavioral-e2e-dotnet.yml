@@ -12,7 +12,7 @@ name: Behavioral e2e — .NET (ASP.NET + EF Core)
 # both directions (RS-1), enum declared casing (RS-2), no leaked columns
 # (RS-3), temporal round-trip (RS-4), bool create default (RS-6), value-object
 # survival (RS-7), association round-trip (RS-8). See
-# docs/plans/runtime-semantics-tier-followups.md (RST-2).
+# docs/old/plans/runtime-semantics-tier-followups.md (RST-2).
 #
 # Reuses the proven boot recipe from dotnet-obs-e2e.yml (dotnet restore +
 # dotnet run against ConnectionStrings__Default) and the harness wiring from

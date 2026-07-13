@@ -10,7 +10,7 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/plans/multi-tenancy-implementation.md §1).
+// docs/old/plans/multi-tenancy-implementation.md §1).
 //
 // The AST-level tenancy rule (duplicate `tenancy by`) lives in
 // `src/language/validators/tenancy.ts`; claim / registry existence is the
@@ -196,7 +196,7 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
 }
 
 /** Validate `policy { allow write <level> on <Aggregate> }` rules (authorization
- *  Phase 3 P3.1 — `docs/plans/authorization-phase3.md`).  Fail-closed:
+ *  Phase 3 P3.1 — `docs/old/plans/authorization-phase3.md`).  Fail-closed:
  *
  *   - the shared target checks (`loom.policy-unknown-aggregate`,
  *     `loom.policy-target-not-tenant-owned`, `loom.policy-duplicate-target`) —
@@ -309,7 +309,7 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
 }
 
 /** Validate `policy { deny [write] on <Aggregate> }` carve-outs (authorization
- *  Phase 4 — deny-wins, docs/plans/authorization-phase4-deny.md):
+ *  Phase 4 — deny-wins, docs/old/plans/authorization-phase4-deny.md):
  *
  *   - `loom.policy-deny-unknown-aggregate` — the target names no aggregate in the
  *     policy's own context (a carve-out scopes a concrete local aggregate).

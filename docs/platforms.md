@@ -79,9 +79,9 @@ orchestrator dispatches against.
 Beyond *which* backend, a deployable can pick *how* that backend
 realises the code, via an optional block on `platform:` — the
 **realization axes** (full design in
-[`proposals/platform-realization-axes.md`](proposals/platform-realization-axes.md);
+[`proposals/platform-realization-axes.md`](old/proposals/platform-realization-axes.md);
 in-flight tracker in
-[`plans/realization-axes-rollout.md`](plans/realization-axes-rollout.md)):
+[`plans/realization-axes-rollout.md`](old/plans/realization-axes-rollout.md)):
 
 ```ddd
 deployable api { platform: dotnet { persistence: dapper }                  ... }
@@ -223,6 +223,6 @@ one tree and writes the cross-cutting `docker-compose.yml`,
   design pack + stack.
 - [`technical.md`](technical.md) — pipeline phases, including how
   phase ⑨ dispatches over the platform registry.
-- [`plans/backend-packages.md`](plans/backend-packages.md) — the
+- [`plans/backend-packages.md`](old/plans/backend-packages.md) — the
   in-flight design for distributing backends as installable npm
   packages.

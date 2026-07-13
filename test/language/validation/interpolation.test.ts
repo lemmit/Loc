@@ -1,4 +1,4 @@
-// A6 string interpolation (docs/plans/stdlib.md) — the backtick template
+// A6 string interpolation (docs/old/plans/stdlib.md) — the backtick template
 // `` `Order {id} for {customer.name}` ``.  Parse-level coverage: the
 // two-mode lexer (interpolation coexists with ordinary block braces), and
 // the hole-type gate:

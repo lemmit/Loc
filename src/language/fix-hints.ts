@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Fix-hint providers — turn a diagnostic into an applyable model patch
-// (docs/proposals/ai-diagnostics-contract.md §3.3).  This is what closes the
+// (docs/old/proposals/ai-diagnostics-contract.md §3.3).  This is what closes the
 // validate→repair loop into a *self-suggesting* one: a diagnostic carries a
 // `fixHint` whose `patch` the agent (or a human) hands straight to
 // `applyPatches`, never reading generated code.
@@ -95,7 +95,7 @@ const PROVIDERS: Record<string, FixHintProvider> = {
   // grammar (the `ui:` binding has a fixed slot), so the generic `add` op
   // (append before `}`) produces invalid source.  It needs a position-aware
   // "insert into a sequenced body" patch kind — tracked in
-  // docs/proposals/agent-tools-and-mcp.md §4c.
+  // docs/old/proposals/agent-tools-and-mcp.md §4c.
 };
 
 /**

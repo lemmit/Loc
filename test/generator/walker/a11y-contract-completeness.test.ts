@@ -1,5 +1,5 @@
 // Completeness gate for the per-primitive accessibility contract
-// (docs/proposals/accessibility.md, Phase 1).
+// (docs/old/proposals/accessibility.md, Phase 1).
 //
 // The `a11y` field on `PrimitiveDef` is REQUIRED, so the compiler already
 // forces every WALKER_PRIMITIVES entry to declare a contract — adding a

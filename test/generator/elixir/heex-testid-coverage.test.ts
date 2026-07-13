@@ -1,6 +1,6 @@
 // HEEx walker — `testid:` named-arg coverage across primitives.
 //
-// Phase D leftover from `docs/plans/phase-a-platform-expansion-prereqs.md`
+// Phase D leftover from `docs/old/plans/phase-a-platform-expansion-prereqs.md`
 // (the "broader HEEx testid emission" follow-up flagged in Item 3).
 //
 // Two regression classes covered:

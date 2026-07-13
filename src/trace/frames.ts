@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Stack-frame parsing — the first step of `ddd trace` (docs/proposals/
+// Stack-frame parsing — the first step of `ddd trace` (docs/old/proposals/
 // source-map-and-debugging.md §6B).  Recognizes one stack-frame line per
 // backend's native crash-log dialect and reduces it to a
 // `{file, line}` (for Java `{file, line, javaFqn}`; for V8/Node

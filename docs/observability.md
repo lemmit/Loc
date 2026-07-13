@@ -245,7 +245,7 @@ Phoenix where `:telemetry` carries it).
 
 ## Further reading
 
-- [`docs/proposals/observability.md`](https://github.com/lemmit/Loc/blob/main/docs/proposals/observability.md)
+- [`docs/old/proposals/observability.md`](https://github.com/lemmit/Loc/blob/main/docs/old/proposals/observability.md)
   — design rationale, level-as-concept analysis.  (`proposals/`
   isn't deployed to the docs site; link points at GitHub.)
 - [`docs/traceability.md`](./traceability.md) — separate concern;

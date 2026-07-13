@@ -2,7 +2,7 @@
 
 Two smaller context-level declarations that sit *beside* the aggregates rather than inside them. A `domainService` is a stateless, named container of non-mutating `operation`s — the pure-calculator floor for a cross-aggregate computation that belongs to the domain layer but to no single aggregate, with a strict no-infrastructure contract. A `seed` is declarative first-boot data: typed records that lower through each aggregate's canonical `create` (so invariants hold), plus a `raw` opt-out for table-level inserts the domain model does not own. Reach for the first when a calculation spans aggregates and has no `this`; reach for the second when the app must boot with rows instead of empty lists.
 
-> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo`, `loom.domain-service-no-workflow-start`, `loom.domain-service-single-aggregate`, `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field` · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../proposals/database-seeding.md`](../proposals/database-seeding.md)
+> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo`, `loom.domain-service-no-workflow-start`, `loom.domain-service-single-aggregate`, `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field` · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../proposals/database-seeding.md`](../old/proposals/database-seeding.md)
 
 ## `domainService` — a stateless pure calculator
 

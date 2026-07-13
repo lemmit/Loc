@@ -41,8 +41,8 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // Entity, the standard for input-shape errors).  Shape matches
         // Hono's defaultHook output byte-for-byte so the frontend
         // ACL's `applyServerErrors` works against either backend.
-        // See docs/proposals/validation-error-extension.md and
-        // docs/proposals/frontend-acl.md.
+        // See docs/old/proposals/validation-error-extension.md and
+        // docs/old/proposals/frontend-acl.md.
         if (context.Exception is FluentValidation.ValidationException fv)
         {
             var problem = new ProblemDetails

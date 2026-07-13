@@ -13,7 +13,7 @@
 // every catalogue row has a snippet on every backend (in-memory and — for
 // `queryable` rows — in each backend's find-predicate renderer), so adding
 // a row here fails CI until every target is filled.  See
-// docs/plans/stdlib.md (Phase A).
+// docs/old/plans/stdlib.md (Phase A).
 
 /** Scalar receiver types an intrinsic can be declared on. */
 export type IntrinsicReceiver = "string" | "int" | "long" | "decimal" | "money" | "datetime";

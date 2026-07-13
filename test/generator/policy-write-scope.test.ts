@@ -1,5 +1,5 @@
 // `policy { allow write <level> on <Agg> }` — the WRITE ladder (authorization
-// Phase 3 P3.1, docs/plans/authorization-phase3.md).  Pins that every one of the
+// Phase 3 P3.1, docs/old/plans/authorization-phase3.md).  Pins that every one of the
 // five domain-logic backends emits a WRITE-scope-narrowed command-load seam
 // (distinct from the read-scoped by-id load) when the write scope is narrower
 // than the read scope — and that a plain flat-tenancy aggregate's command load

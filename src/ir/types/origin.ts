@@ -3,7 +3,7 @@
 // `.ddd` source that produced it (or the macro call / derivation that did,
 // when there is no direct source span).
 //
-// See docs/proposals/source-map-and-debugging.md §4 for the north star and
+// See docs/old/proposals/source-map-and-debugging.md §4 for the north star and
 // the pinned design decisions (byte offsets not line/col, a chain not a
 // single span, inline field not a side-table).
 // ---------------------------------------------------------------------------

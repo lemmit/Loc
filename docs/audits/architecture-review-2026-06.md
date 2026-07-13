@@ -122,7 +122,7 @@ and DTO seams are lower urgency.
 >   (byte-identical-gated). The *envelope* (transaction wrap / event dispatch /
 >   route shell) proved to be per-driver scaffolding and stayed per-backend, and
 >   **Elixir was assessed and declined** (its tagged-line `with`-chain assembly is
->   a topological mismatch). Full writeup: `docs/plans/workflow-choreographer-seam.md`.
+>   a topological mismatch). Full writeup: `docs/old/plans/workflow-choreographer-seam.md`.
 > - **Repository emission — assessed, DECLINED.** The method *inventory* is
 >   uniform (auto `getById`/`save`/`findAll`, one method per `find`, paged finds,
 >   retrievals), but unlike workflows there is **no shared algorithmic spine** —
@@ -278,7 +278,7 @@ called production-ready.
 5. Resolve the `platform/` layout dichotomy (document or migrate).
 6. ~~Extract the `WorkflowChoreographer` seam (largest duplication payoff)~~ —
    done as `WorkflowStmtTarget` across Hono/Python/Java/.NET (Elixir declined);
-   see [`docs/plans/workflow-choreographer-seam.md`](../plans/workflow-choreographer-seam.md).
+   see [`docs/old/plans/workflow-choreographer-seam.md`](../old/plans/workflow-choreographer-seam.md).
    The lower-urgency siblings (repository, DTO) were **assessed and declined** —
    repository has no shared algorithmic spine (ORM-specific bodies) and the DTO
    spine is already shared via `wireShape`; see the OUTCOME note under finding #4.

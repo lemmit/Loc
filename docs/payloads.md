@@ -4,7 +4,7 @@ Loom's **transport layer** — the structured data that crosses a boundary
 (HTTP, queue, internal call) rather than living as durable aggregate state.
 This is the reference for what *ships today*; the design rationale and the
 phased roadmap live in
-[`proposals/payload-transport-layer.md`](proposals/payload-transport-layer.md).
+[`proposals/payload-transport-layer.md`](old/proposals/payload-transport-layer.md).
 
 Aggregates are nominal state machines; **payloads are structurally-typed
 records**. The two ladders coexist: reach for an `aggregate` when you have
@@ -177,7 +177,7 @@ agree by construction (the wire matches a plain optional find); the tagged
 > not a domain-modelled alternative the producer chose — so it belongs at a
 > status code, exactly like an optional find's miss. An operation return is
 > producer-selected variant data, so it carries the tag. (Rationale:
-> [`proposals/exception-less.md`](proposals/exception-less.md) §4.)
+> [`proposals/exception-less.md`](old/proposals/exception-less.md) §4.)
 
 ### Precedence
 
@@ -224,13 +224,13 @@ generated on every backend. The two surfaces differ in who selects the variant:
   producer-selected: the domain body returns the variant it chose, which the
   backend maps to the tagged wire (success) or an RFC-7807 ProblemDetails
   (error). Shipped across all five backends (rationale:
-  [`proposals/exception-less.md`](proposals/exception-less.md)).
+  [`proposals/exception-less.md`](old/proposals/exception-less.md)).
 
 ## What's deferred
 
 - **`match` over a union** with exhaustiveness checking + per-backend narrowing
   (`switch(x.type)` / C# pattern match / Elixir `case`) — the consumer side.
-- **`option` PATCH** semantics ([`partial-update`](proposals/partial-update.md)).
+- **`option` PATCH** semantics ([`partial-update`](old/proposals/partial-update.md)).
   (Exception-less **operation returns** of unions have shipped — see §5.)
 - **User-declared generic payloads** beyond the blessed `paged` / `envelope` /
   `option` set.

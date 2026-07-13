@@ -21,7 +21,7 @@ import { parseString } from "../_helpers/parse.js";
 const text = (name: string): ScaffoldColumn => ({ name, kind: { tag: "text" } });
 
 // ---------------------------------------------------------------------------
-// Phase 1 of docs/proposals/unfoldable-page-scaffolding.md — the macro-layer
+// Phase 1 of docs/old/proposals/unfoldable-page-scaffolding.md — the macro-layer
 // (AST→AST) scaffolders produce printable, re-parseable `.ddd` source from AST
 // data alone — this is the whole scaffold body path: `scaffoldList` scaffolds
 // a list, `scaffoldNewForm` scaffolds a new-form, and each returns real AST.

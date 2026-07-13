@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java backend — domain-layer emission (slice S3 of
-// docs/plans/java-backend-implementation.md): ids, enums, value objects,
+// docs/old/plans/java-backend-implementation.md): ids, enums, value objects,
 // events, aggregate roots + parts.  The same fixture compiles under
 // `mvn compile` in the opt-in LOOM_JAVA_BUILD suite; these unit tests pin
 // the emitted Java shape.

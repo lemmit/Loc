@@ -6,7 +6,7 @@
 //   - the machine-stable `event` name (the value of the `event` envelope key
 //     on every emitted line),
 //   - its level (= concept, not verbosity tier: see
-//     docs/proposals/observability.md),
+//     docs/old/proposals/observability.md),
 //   - the structured-field names it carries beyond the envelope
 //     (envelope = ts, level, event, request_id — auto-supplied by the
 //     per-request child logger).

@@ -90,7 +90,7 @@ export interface GenerateSystemOptions {
    *  `.loom/sourcemap.json` mapping generated file regions back to the
    *  `.ddd` spans (or macro-call sites) that produced them.  Off by
    *  default so byte-identical output is preserved for every existing
-   *  fixture/gate.  See docs/plans/source-map-debug-kickoff.md. */
+   *  fixture/gate.  See docs/old/plans/source-map-debug-kickoff.md. */
   sourcemap?: boolean;
   /** `.ddd` source text for every path an `OriginRef` can resolve to
    *  (`SourceRef.path` — a Langium `URI.path`), keyed the same way.  Feeds
@@ -104,7 +104,7 @@ export interface GenerateSystemOptions {
    *  browser-safe (no `fs`), so the CLI/playground supply the text; a
    *  mapped file with no entry here is skipped (no sidecar), never guessed.
    *  No effect unless `sourcemap` is also true.  See
-   *  docs/proposals/source-map-and-debugging.md §8. */
+   *  docs/old/proposals/source-map-and-debugging.md §8. */
   sourceTexts?: ReadonlyMap<string, string>;
 }
 
@@ -245,7 +245,7 @@ function emitSystem(
   // sibling of docker-compose.yml, `--sourcemap`-gated.  Each surface owns
   // its own naming (assembly / main-class FQN); the system layer only
   // collects the results in deployable order.  See
-  // docs/plans/dap-node-debug.md and src/system/launch-config.ts.
+  // docs/old/plans/dap-node-debug.md and src/system/launch-config.ts.
   if (options.sourcemap) {
     const debugConfigs = sys.deployables
       .map((d) =>

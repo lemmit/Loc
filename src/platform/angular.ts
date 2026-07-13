@@ -18,7 +18,7 @@ import {
 //
 // Deployable contract mirrors `react`: `targets:` a backend, inherits its
 // contexts via enrichment, owns no database.
-// See docs/plans/angular-frontend-plan.md.
+// See docs/old/plans/angular-frontend-plan.md.
 // ---------------------------------------------------------------------------
 
 const angularPlatform: PlatformSurface = {

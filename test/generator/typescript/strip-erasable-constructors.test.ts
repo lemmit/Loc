@@ -1,4 +1,4 @@
-// M19 phase 8 slice 2 (docs/plans/dap-node-debug.md, "Non-erasable syntax
+// M19 phase 8 slice 2 (docs/old/plans/dap-node-debug.md, "Non-erasable syntax
 // — RESOLVED (slice 2)"). The value object's constructor
 // (`constructor(public readonly amount: number, ...)`) was a TypeScript
 // parameter property — sugar the type checker must desugar, not syntax that

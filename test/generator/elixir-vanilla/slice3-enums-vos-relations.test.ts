@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// Slice 3 of docs/plans/vanilla-foundation-tdd-plan.md — enums, value
+// Slice 3 of docs/old/plans/vanilla-foundation-tdd-plan.md — enums, value
 // objects, and id-relationships in the vanilla schema emit.
 //
 // Slice 1 only exercised primitives.  Slice 3 verifies the schema

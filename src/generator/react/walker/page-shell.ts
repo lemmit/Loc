@@ -686,7 +686,7 @@ function renderFormOpWiring(
       parts.push("handleSubmit");
       // setError is required by the catch-block `applyServerErrors` call
       // emitted by the pack's form-op-module template (see
-      // docs/proposals/frontend-acl.md).  Always included.
+      // docs/old/proposals/frontend-acl.md).  Always included.
       parts.push("setError");
       if (useController) parts.push("control");
       if (usesErrors) parts.push("formState: { errors }");

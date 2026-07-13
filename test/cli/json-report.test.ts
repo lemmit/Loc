@@ -6,7 +6,7 @@ import type { ValidateReport } from "../../src/diagnostics/contract.js";
 
 // ---------------------------------------------------------------------------
 // `ddd parse --json` — the structured-diagnostics contract
-// (docs/proposals/ai-diagnostics-contract.md).  Asserts on stable `loom.*`
+// (docs/old/proposals/ai-diagnostics-contract.md).  Asserts on stable `loom.*`
 // codes (not message prose, per the contract's design goal §2), the
 // always-valid envelope on a bad model, and byte-identical determinism.
 // ---------------------------------------------------------------------------

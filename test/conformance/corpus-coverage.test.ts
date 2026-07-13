@@ -7,7 +7,7 @@ import { generateCorpusCase } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
-// Corpus coverage gate (Phase 0/1 of docs/plans/global-test-coverage-plan.md).
+// Corpus coverage gate (Phase 0/1 of docs/old/plans/global-test-coverage-plan.md).
 //
 // The shared fixture corpus declares, per feature, which backends it generates
 // on (`manifest.ts`).  This gate enforces that matrix WITHOUT docker: every

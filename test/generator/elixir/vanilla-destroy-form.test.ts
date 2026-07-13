@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Vanilla-Phoenix DestroyForm seam (gap §10, docs/plans/vanilla-phoenix-gaps.md).
+// Vanilla-Phoenix DestroyForm seam (gap §10, docs/old/plans/vanilla-phoenix-gaps.md).
 //
 // A detail page hosting `DestroyForm(of: <Agg>)` hoists a `handle_event`
 // whose body calls `<Ctx>.destroy_<agg>!(id)` directly (a `byId`

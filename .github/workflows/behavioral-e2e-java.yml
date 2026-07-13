@@ -12,7 +12,7 @@ name: Behavioral e2e — Java (Spring Boot + JPA)
 # both directions (RS-1), enum declared casing (RS-2), no leaked columns
 # (RS-3), temporal round-trip (RS-4), bool create default (RS-6), value-object
 # survival (RS-7), association round-trip (RS-8). See
-# docs/plans/runtime-semantics-tier-followups.md (RST-3).
+# docs/old/plans/runtime-semantics-tier-followups.md (RST-3).
 #
 # Reuses the proven boot recipe from java-obs-e2e.yml (gradle bootJar +
 # java -jar against SPRING_DATASOURCE_URL) and the harness wiring from

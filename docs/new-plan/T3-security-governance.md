@@ -1,0 +1,51 @@
+# T3 — Security, tenancy & governance
+
+*Weak-spot #3: the enforcement machinery is genuinely strong (tenancy by construction, policy ladders, OIDC on all targets) but the DEFAULTS are demo-grade: authz default-open, finds ungatable, sessions shallow, concurrency opt-in. The governance spine (execution-context → tenancy → authorization) is mostly built — these missions finish and default-harden it.*
+
+## M-T3.1 — Deny-by-default + read/find gating — `partial` · **M** · P1
+`enforcement: opt` is the default and repository finds have no `requires` surface at all (the structural authz hole). Ship: `requires`-on-query grammar (auth-providers Phase 4 remainder), then flip the recommended default to `denyByDefault` (docs + `ddd new` templates first, then the language default under a major).
+Sources: [auth-providers-implementation](../old/plans/auth-providers-implementation.md) Phase 4, [auth.md](../auth.md) §enforcement, weak-spots §3.
+
+## M-T3.2 — Authorization completion: items 3, 5, 6, 7 — `partial` · **L** · P1
+Remaining from the policy family: item 3 operation/view/workflow gates (handler pre-checks → 403, relocating gating out of domain bodies); item 5 `exists <Aggregate>` quantifier (new ExprIR kind + per-backend EXISTS); item 6 field rules (mask/write + partial-update gating + wire-spec `fieldCapabilities`); item 7 `implies` permission closure + stable policy decision-id for audit. Honor the [policies-supplementary-note](../old/proposals/policies-supplementary-note.md) asks (converge on `requires <expr>`, decision-id, IR-inspectable gates).
+Sources: [authorization](../old/proposals/authorization.md), D-POLICY-STYLE.
+
+## M-T3.3 — P4 `deny` carve-outs — `open` · **M** · P2
+`deny on X` / `deny write on X` deny-wins sentinel through the existing filter/write-scope seam (design checkpoint written; grammar `effect`, `PolicyDenyIR`, enrichment, 3 diagnostics, 5-backend always-false fragment). Open fork: `loom.policy-deny-shadows-allow` severity.
+Sources: [authorization-phase4-deny](../old/plans/authorization-phase4-deny.md). Foundation for item 6 field masking.
+
+## M-T3.4 — Versioned default-on + structural-409 mapper + idempotency — `open` · **L** · P1 ⚠ coordinated
+`versioned` (optimistic concurrency) ships but is opt-in — default LWW contradicts "aggregate = consistency boundary". Phased per expressible-builtins: (a) route structural 409s (unique/version/when/FK/event-store) through the `httpStatus` error→status mapper with first-class error payloads; (b) versioning default-on for every aggregate (`unversioned` opt-out, ETag/If-Match; delete the capability) — breaking wire change, one coordinated PR; (c) HTTP `Idempotency-Key` support so retried POST creates don't duplicate (new slice, no owning proposal yet).
+Sources: [expressible-builtins](../old/proposals/expressible-builtins.md) Phases 1–2, weak-spots §3, ddd-review S4.
+
+## M-T3.5 — OIDC session depth — `open` · **M** · P1
+The callback stores the raw access token in a cookie: no refresh rotation, no PKCE, no silent renewal; no password reset story (IdP-owned by D-AUTH-OIDC — document the boundary loudly). Add PKCE + refresh rotation across the five backends' auth emitters; Phoenix-LiveView frontend `auth: ui` guard (the last frontend target).
+Sources: `src/platform/hono/v*/auth-emit.ts`, [auth-providers-implementation](../old/plans/auth-providers-implementation.md), weak-spots §3.
+
+## M-T3.6 — `organizationContext` + tenancy final surface — `blocked(M-T3.2)` · **L** · P2
+The reconciled surface (7 pinned decisions): split principal (`currentUser`) from operating tenant scope (`organizationContext`); one unconditional `dataKey` stamp; `startsWith` prefix filter operator (expressible-builtins Phase 3, retiring `__loomDeepScope__`); `crossTenant` fail-closed; drop the ambient row pronoun. HARD PREREQ: the fail-closed, validator-enforced context-switch authorization gate on all five backends (+ a tenancy-e2e-sibling parity test) — sequenced after M-T3.2, never before.
+Sources: [tenancy-authorization-final-surface](../old/proposals/tenancy-authorization-final-surface.md), [organization-context](../old/proposals/organization-context.md), [expressible-builtins](../old/proposals/expressible-builtins.md) Phase 3.
+
+## M-T3.7 — Tenancy hardening tail — `partial` · **M** · P2
+(a) `tenantOwned`'s filter claim is hardcoded to `tenantId`, ignoring `tenancy by user.<claim>` — plumb the declared claim; (b) tenancy isolation is runtime-e2e'd on node/python/java/dotnet ⚠ verify current matrix — extend to elixir; (c) malformed-claim 500 → clean 403/empty-set decision; (d) `loom.tenancy-claim-type-mismatch` gate if still missing.
+Sources: [completeness-audit](../audits/completeness-audit-2026-07.md) §tenancy, [multi-tenancy-implementation](../old/plans/multi-tenancy-implementation.md) 1b-tail, [tenancy.md](../tenancy.md).
+
+## M-T3.8 — Sensitivity phases 2–4 — `partial` · **L** · P2
+Phase 2 `authorized(<category>)` declassification (2-lite warnings → errors); Phase 3 wire masking (`mask:` strategies in DTO emitters — today `sensitive()` only redacts logs, not the wire); Phase 4 sink-call classification (logs/errors/traces/metrics never receive plaintext).
+Sources: [sensitivity-and-compliance](../old/proposals/sensitivity-and-compliance.md).
+
+## M-T3.9 — Audit promotion: `audited(...)` + `logged` — `partial` · **M** · P2
+Boolean `audited` ships on all five (ops + lifecycle). Remaining: the argument form `audited(actions|access|events|off)` (grammar change on three productions; prerequisite for access-audit mode), the `logged` marker, and the AuditRecord snapshot enrichment. Fold the lifecycle-audit design forks (soft-delete after-state, ES redundancy).
+Sources: [audit-and-logging](../old/proposals/audit-and-logging.md), [lifecycle-audit-todo](../old/plans/lifecycle-audit-todo.md).
+
+## M-T3.10 — Offerability: authz-aware `can_<op>` — `open` · **M** · P3
+Fold the param-free authz slice into the `can_<op>` companion (`{allowed, reason, pendingValidation}`), so UIs can hide/disable correctly. Depends on M-T3.2 item 3 (gates relocated into policy).
+Sources: [offerability-can-query](../old/proposals/offerability-can-query.md).
+
+## M-T3.11 — Execution-context tail — `partial` · **S** · P3
+Backbone complete on all 5. Remaining: user-facing build-flag surface (`emitContextBoundaries`/`emitProvenance`/`emitTracing`), scope-event genealogy fields, parallel-branch frame copying, the `scopeId` semantics decision (pin as D-tag).
+Sources: [execution-context](../old/proposals/execution-context.md), D-CTX-SHAPE.
+
+## M-T3.12 — Account management & identity batteries — `open` · **L** · P3 (proposal needed)
+Signup/invite/role-assignment flows as macro-level batteries over the OIDC boundary (production-readiness §3.6); tenant provisioning/onboarding hooks into the registry.
+Sources: [production-readiness](../old/proposals/production-readiness.md) §3.6, [quickstart-and-day-one-batteries](../old/proposals/quickstart-and-day-one-batteries.md) `saas` template.

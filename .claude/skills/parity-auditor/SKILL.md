@@ -9,7 +9,7 @@ description: >-
   feature: "audit parity across backends", "which backends support X / where
   does feature Y work", "feature Y works on node but not java/python/elixir",
   "drain the compile-tier skip-list", "refresh / redo the parity audit", "is
-  this gap real or stale", or picking up `docs/proposals/platform-parity-debt.md`
+  this gap real or stale", or picking up `docs/old/proposals/platform-parity-debt.md`
   or any `docs/audits/*-parity-*.md`. Reach for it even when the user just says
   "what's the state of X across the stack" or "find the silent gaps". Its core
   discipline is separating a SILENT gap (a backend # TODOs / throws / crashes on
@@ -202,7 +202,7 @@ When *refreshing* an existing audit, re-derive every row from current lines and
 audit's `[2026-06-20 audit]` blocks are the model). Mark a superseded older audit
 as superseded; don't delete the history.
 
-The précis register `docs/proposals/platform-parity-debt.md` is the
+The précis register `docs/old/proposals/platform-parity-debt.md` is the
 prioritisation roll-up that links each gap to its owning proposal — keep it in
 sync with the audit, but the audit (code-verified) is authoritative when they
 drift (its own header says so).

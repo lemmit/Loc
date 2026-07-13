@@ -1,7 +1,7 @@
 // Page & component `derived name: T = expr` bindings on React — read-only
 // computed values in the render scope, hoisted as `useMemo` before the
 // body.  Reactive over `state` (deps array), sequential (a derived may
-// reference earlier derived).  See docs/proposals/page-derived-bindings.md.
+// reference earlier derived).  See docs/old/proposals/page-derived-bindings.md.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";

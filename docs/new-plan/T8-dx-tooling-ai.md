@@ -1,0 +1,43 @@
+# T8 — DX, tooling & the AI platform
+
+*Diagnostics (123 stable codes + machine-applyable fix-hints) and the LSP are best-in-class; interactive debugging is essentially absent; the AI-platform loop (validate→repair→verify) is mostly built and needs its last mile + the wedge demo.*
+
+## M-T8.1 — Delegating DAP debugger — `open` · **XL** · P2
+The shipped DAP server is a remap shim (breakpoint/stack-trace translation only; no stepping/variables; VS Code has no `debuggers` contribution). Build the delegating proxy: spawn js-debug (node first), forward launch/attach/continue/stepIn, remap both directions; register the debugger in the extension; the manual VS Code breakpoint confirmation. Then coreclr/JDWP per backend.
+Sources: [source-map-and-debugging](../old/proposals/source-map-and-debugging.md) §6E, [dap-node-debug](../old/plans/dap-node-debug.md) frontier list.
+
+## M-T8.2 — Sourcemap fan-out — `partial` · **M** · P3
+Column-accurate span tracking shipped on TS/Hono (slices 3–4 incl. `ddd trace` columns); fan out `renderExprWithMarks` to the other four backends when a consumer exists (DAP or per-backend crash remap). Deliberately deferred — re-check the consumer question first.
+Sources: [span-tracking-emission](../old/plans/span-tracking-emission.md), [source-map-debug-kickoff](../old/plans/source-map-debug-kickoff.md).
+
+## M-T8.3 — Agent-loop last mile: chat UI + context pack + wedge demo — `partial` · **L** · P1
+The strategic demo: prose → `.ddd` → multi-backend generate → conformance green, driven by an agent in the playground. Remaining: playground chat UI (`Complete` transport decision, ChatPanel, apply-edits affordance), the model context-pack (system-prompt bundle; gate: frontier model zero-shots valid systems), `loom_verify`/`loom_read_model`/`loom_list_primitives` tools, next fix-hint batch, `rename` patch op.
+Sources: [ai-authoring-loop](../old/proposals/ai-authoring-loop.md) items 7+9, [agent-tools-and-mcp](../old/proposals/agent-tools-and-mcp.md) §8-5, [ai-generation-platform](../old/proposals/ai-generation-platform.md) §6, D-AI-EMPHASIS, D-AGENT-TOOLS.
+
+## M-T8.4 — LSP correctness tail — `open` · **S** · P2
+The LValue blind spot (rename-from-call-site, member-call highlighting in statement position), uninferrable-receiver rename miss; the `Fold to macro` inverse code action.
+Sources: [agent-tools-and-mcp](../old/proposals/agent-tools-and-mcp.md) §4c.
+
+## M-T8.5 — Diagnostics contract completion — `partial` · **M** · P3
+`related[]`, IR-diagnostic ranges + fixHints (needs CST provenance through lowering), GenerateReport file counts + `.loom` paths, multi-file generate, code-registry single-sourcing, `contractVersion`.
+Sources: [ai-diagnostics-contract](../old/proposals/ai-diagnostics-contract.md).
+
+## M-T8.6 — Playground sandbox completion — `partial` · **M** · P2
+The cross-origin flip (`SANDBOX_ORIGIN` → distinct origin — no real isolation until then; gates untrusted user expressions), Phase 3 API test runner, Phase 4 UI driver + `page` shim, Phase 5 console/screenshots, CSP pack-render confirmation.
+Sources: [playground-sandbox-redesign](../old/plans/playground-sandbox-redesign.md).
+
+## M-T8.7 — Packaging split unblock — `blocked(browser discovery)` · **L** · P3
+P3-s5 (move `src/platform/hono/v*` into `packages/`) is blocked on browser-capable backend discovery for the playground worker (`ResolutionStrategy` seam, esbuild-wasm spike → RegistryStrategy → WorkspaceStrategy). P4 publish follows. Related: [per-package-output-tree](../old/proposals/per-package-output-tree.md) (output-side twin, deferred), [server-side-generation](../old/proposals/server-side-generation.md) (fills the same worker seam with a server call — evaluate together).
+Sources: [packaging-split](../old/plans/packaging-split.md), [backend-packages](../old/plans/backend-packages.md) B3+.
+
+## M-T8.8 — Mutation testing — `open` · **XL** · P3 (explicitly parked)
+IR-level mutation testing (mutate `ExprIR`, render via the shared dispatcher, kill/survive against emitted suites → `VERIFIED_WEAK` verdicts in `ddd verify`). The old global plan marked it out-of-scope; the proposal is complete. Revisit after T9's runtime tiers mature.
+Sources: [mutation-testing](../old/proposals/mutation-testing.md).
+
+## M-T8.9 — Static-analysis breadth — `open` · **S** · P3
+markdownlint + biome JSON/JSONC extension; Credo; `ddd fmt` stays a separate future proposal.
+Sources: [static-analysis-followups](../old/plans/…) — see [cross-stack-static-analysis](../old/proposals/cross-stack-static-analysis.md).
+
+## M-T8.10 — Playground preview breadth — `open` · **M** · P3
+In-browser preview boots Hono+React only; Vue/Svelte previews need their compilers in the VFS bundler; multi-backend mounting ties to M-T7.4 slice 4. Nice-to-have; the builder already edits all frontends' source.
+Sources: [vue-frontend-plan](../old/plans/vue-frontend-plan.md)/[svelte-frontend-plan](../old/plans/svelte-frontend-plan.md) deferrals, [playground.md](../playground.md).

@@ -2145,7 +2145,7 @@ function renderInstancesController(
     // The `{id}` param binds the correlation id's CLR value type (Guid / int /
     // long / string), so Swashbuckle emits the matching param schema — parity
     // with Hono / Java / Python / Phoenix by construction
-    // (docs/plans/non-guid-id-http-params.md).
+    // (docs/old/plans/non-guid-id-http-params.md).
     const corrClr = csIdValueClrType(workflowCorrIdValueType(wf));
     if (wf.eventSourced) {
       const eventSet = esEventDbSet(wf, ownerOf);

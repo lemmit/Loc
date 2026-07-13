@@ -1,4 +1,4 @@
-// A1 pilot for the scalar-intrinsic catalogue (docs/plans/stdlib.md):
+// A1 pilot for the scalar-intrinsic catalogue (docs/old/plans/stdlib.md):
 // `string.trim()` end-to-end on the Hono backend — in-memory rendering in
 // domain bodies AND SQL rendering in a queryable `find … where` position.
 // The catalogue row lives in src/util/intrinsics.ts; the TS snippet in

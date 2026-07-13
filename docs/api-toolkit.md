@@ -6,7 +6,7 @@ It is **browser-safe by construction**: every entry point parses in-memory on La
 
 ## Why it exists
 
-The structured operations were growing inside `src/cli/` (Node-bound), but the *same* operations are needed by at least four surfaces. Re-implementing per surface is exactly the drift the structured contract exists to prevent, and the patch/diagnostic format is *Loom's own* ([`ai-diagnostics-contract.md`](proposals/ai-diagnostics-contract.md)), not an editor/agent standard — so it needs one authoritative implementation plus thin adapters at the boundaries. The toolkit is that core; the CLI shrank to argv + stdout + exit-code wrappers, and `applyPatches` moving from `NodeFileSystem` to `EmptyFileSystem` restored the "`src/language/` is browser-safe" invariant.
+The structured operations were growing inside `src/cli/` (Node-bound), but the *same* operations are needed by at least four surfaces. Re-implementing per surface is exactly the drift the structured contract exists to prevent, and the patch/diagnostic format is *Loom's own* ([`ai-diagnostics-contract.md`](old/proposals/ai-diagnostics-contract.md)), not an editor/agent standard — so it needs one authoritative implementation plus thin adapters at the boundaries. The toolkit is that core; the CLI shrank to argv + stdout + exit-code wrappers, and `applyPatches` moving from `NodeFileSystem` to `EmptyFileSystem` restored the "`src/language/` is browser-safe" invariant.
 
 ## The entry points
 

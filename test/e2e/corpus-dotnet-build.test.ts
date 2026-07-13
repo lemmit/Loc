@@ -8,7 +8,7 @@ import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
-// Phase 1 compile tier (docs/plans/global-test-coverage-plan.md) for the .NET
+// Phase 1 compile tier (docs/old/plans/global-test-coverage-plan.md) for the .NET
 // (ASP.NET + EF Core + Mediator) backend — the sibling of `corpus-tsc-build`
 // (node) and `corpus-java-build` (Java).  The fast `corpus-coverage` gate
 // proves every corpus feature *generates* on `dotnet`; this gate proves the

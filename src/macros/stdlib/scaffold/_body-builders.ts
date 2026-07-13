@@ -3,7 +3,7 @@
 // Each scaffolder builds a page body as Langium AST, so its output prints to
 // literal `.ddd` source and unfolds like any other macro.  `scaffoldList`
 // scaffolds a list; `scaffoldNewForm` scaffolds a new-form — the name is the
-// spec.  See `docs/proposals/unfoldable-page-scaffolding.md`.
+// spec.  See `docs/old/proposals/unfoldable-page-scaffolding.md`.
 //
 // Status: this is the ONLY scaffold body path.  The scaffold macro family
 // (`_pages.ts`) returns these full AST trees directly as page bodies — `unfold`

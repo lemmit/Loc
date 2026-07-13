@@ -195,7 +195,7 @@ export function buildRepositoryFile(
     `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
     // Explicit field declarations + constructor assignments, not
     // parameter properties — the latter is non-erasable sugar Node's
-    // type stripping rejects; see docs/plans/dap-node-debug.md
+    // type stripping rejects; see docs/old/plans/dap-node-debug.md
     // "Non-erasable syntax" and emit/value-objects.ts's renderValueObject.
     `  private readonly db: Db;`,
     `  private readonly events: DomainEventDispatcher;`,

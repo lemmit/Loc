@@ -29,7 +29,7 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     // of DomainExceptionFilter emits on 422 validation responses.
     // Consumed by the frontend ACL's `applyServerErrors`.  Idempotent;
     // safe to run per operation.  See
-    // docs/proposals/validation-error-extension.md (Phase D).
+    // docs/old/proposals/validation-error-extension.md (Phase D).
     private static void AugmentProblemDetailsSchema(SchemaRepository repo)
     {
         if (!repo.Schemas.TryGetValue("ProblemDetails", out var problem)) return;

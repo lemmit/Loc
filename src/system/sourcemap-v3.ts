@@ -3,7 +3,7 @@ import { offsetToLineCol } from "../generator/_trace/sourcemap.js";
 import { resolveToSource } from "../ir/types/origin.js";
 
 // ---------------------------------------------------------------------------
-// Source Map v3 sidecars — Milestone 5 of docs/proposals/source-map-and-
+// Source Map v3 sidecars — Milestone 5 of docs/old/proposals/source-map-and-
 // debugging.md.  Sibling of sourcemap.ts (the construct-granular
 // `.loom/sourcemap.json` artifact): renders the SAME recorded regions into
 // the standard `<file>.map` shape a debugger / browser devtools already

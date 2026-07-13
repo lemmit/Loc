@@ -894,7 +894,7 @@ system DevPlatform {
     // bad input with the SAME status" at runtime — the behavioral complement
     // to the static `errorResponseDiffs` OpenAPI parity gate.  Status contract
     // (identical across all three backends) — the two-tier error model from
-    // `docs/proposals/validation-error-extension.md` (SHIPPED):
+    // `docs/old/proposals/validation-error-extension.md` (SHIPPED):
     //   • a *field-mirrorable* `invariant` / `check` (each case below is a
     //     single-field rule) is caught at the WIRE validator and surfaces as a
     //     ValidationError → 422 (Unprocessable Entity, the stdlib default in

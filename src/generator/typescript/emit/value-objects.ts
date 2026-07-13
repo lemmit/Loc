@@ -54,7 +54,7 @@ function renderValueObject(v: ValueObjectIR): string[] {
   // parameter properties — the latter is non-erasable sugar the type
   // checker must desugar, which Node's `--experimental-strip-types` /
   // unflagged type stripping (Node 24) rejects outright
-  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`); see docs/plans/dap-node-debug.md
+  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`); see docs/old/plans/dap-node-debug.md
   // "Non-erasable syntax". Semantically identical output otherwise.
   const fieldDecls = v.fields.map((f) => `  readonly ${f.name}: ${renderTsType(f.type)};`);
   const ctorParams = v.fields.map(

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // The DAP `setBreakpoints` resolution core — the testable heart of the
-// eventual `ddd-dap` adapter (docs/proposals/source-map-and-debugging.md
-// §6E, docs/plans/dap-node-debug.md phase 8). Given a DAP
+// eventual `ddd-dap` adapter (docs/old/proposals/source-map-and-debugging.md
+// §6E, docs/old/plans/dap-node-debug.md phase 8). Given a DAP
 // `SetBreakpointsArguments` for a `.ddd` source, resolves each requested
 // `SourceBreakpoint` to the generated location the debugger should arm, by
 // calling the already-shipped `translateBreakpoint` once per breakpoint.

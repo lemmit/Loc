@@ -4,7 +4,7 @@ name: Elixir / Vanilla build verification
 # generate the project then `mix deps.get && mix compile
 # --warnings-as-errors` inside the hexpm/elixir Docker image.  This is
 # the acceptance gate for the `foundation: vanilla` emit subtree —
-# Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md.  Catches every
+# Slice 6 of docs/old/plans/vanilla-foundation-tdd-plan.md.  Catches every
 # Elixir-side error the unit-test string-assertion layer can't see.
 #
 # The generate + compile loop lives in

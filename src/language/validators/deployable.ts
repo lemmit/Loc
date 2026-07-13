@@ -273,7 +273,7 @@ function resolveAxisFamily(platform: string): Platform {
 /** D-REALIZATION-AXES gating.  Ships **R1** (out-of-menu, incl. reserved
  *  stubs) and **R3** (application style ↔ directoryLayout compatibility).
  *  R2/R7 still have no reachable trigger and are deferred (see
- *  `docs/proposals/platform-realization-axes.md` §7). */
+ *  `docs/old/proposals/platform-realization-axes.md` §7). */
 export function checkDeployableRealizationAxes(d: Deployable, accept: ValidationAcceptor): void {
   if (d.platform == null) return;
   const family = resolveAxisFamily(d.platform);

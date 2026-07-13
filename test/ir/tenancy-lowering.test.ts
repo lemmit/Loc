@@ -1,5 +1,5 @@
 // Tenancy IR lowering — slice 1a.1 of multi-tenancy Phase 1a
-// (docs/plans/multi-tenancy-implementation.md).  `tenancy by user.<claim>
+// (docs/old/plans/multi-tenancy-implementation.md).  `tenancy by user.<claim>
 // of <Registry>` lowers to `SystemIR.tenancy: TenancyIR`; the
 // `crossTenant` aggregate header flag lowers to `AggregateIR.crossTenant`.
 // NO stance classification is stamped on the IR — that is derived on

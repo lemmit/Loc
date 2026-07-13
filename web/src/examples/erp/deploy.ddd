@@ -2,7 +2,7 @@
 // `storage` / `resource` / `channelSource` / `ui` / `deployable` /
 // `test e2e` are top-level declarations here that compose into the single
 // `system AcmeErp` declared in main.ddd — see
-// docs/proposals/implicit-system-composition.md.
+// docs/old/proposals/implicit-system-composition.md.
 
 // ════════════════════════════════════════════════════════════════════
 //  Deployment topology (grows as contexts are added).

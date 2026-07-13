@@ -7,7 +7,7 @@
 // layer (`src/language/macro-origin.ts`), not under `src/macros/` — so this
 // stays an `ir/` → `language/` import, same as every other lowering module,
 // with no `ir/` → `macros/` edge.  See
-// docs/plans/source-map-debug-kickoff.md §3-4.
+// docs/old/plans/source-map-debug-kickoff.md §3-4.
 // ---------------------------------------------------------------------------
 
 import type { AstNode } from "langium";

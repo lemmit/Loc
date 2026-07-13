@@ -1,7 +1,7 @@
 # Loom decisions log
 
 Pinned decisions referenced by the design corpus in
-[`docs/proposals/`](./proposals/) and the implementation plans. Each
+[`docs/old/proposals/`](old/proposals/) and the implementation plans. Each
 entry has a stable **D-tag** that proposals cite when their grammar
 or semantics depends on the outcome. Tag scope:
 
@@ -14,7 +14,7 @@ decision wins; the proposal text needs a rewrite (tracked per entry
 under "Affects").
 
 Decision tags were introduced by the original
-[`proposals/global-implementation-plan.md`](./proposals/global-implementation-plan.md)
+[`proposals/global-implementation-plan.md`](old/proposals/global-implementation-plan.md)
 ("Decisions to pin before any grammar edit"; that plan was rewritten
 2026-06-10 — this log is now the sole home of the tags) and are
 elaborated in the per-proposal docs.
@@ -229,7 +229,7 @@ no open-shape JSON field; and a document/event-store backend (Marten)
 has nowhere to attach. The shipped `persistenceStrategy:` clause also
 conflates the event-sourcing *body contract* with *persistence* and
 sits anomalously inside the aggregate body. Full analysis in
-[`proposals/document-and-json-hierarchies.md`](./proposals/document-and-json-hierarchies.md).
+[`proposals/document-and-json-hierarchies.md`](old/proposals/document-and-json-hierarchies.md).
 
 **Decision.** Two orthogonal **per-aggregate header modifiers**, plus a
 `json` field type. "Document" is a field type **and** a saving choice —
@@ -345,7 +345,7 @@ in #724 — `shape(relational)` == old `shape(relational)`, `shape(document)`
 backend code lives. `platform-directory-layout.md` recommends
 **Option A** — reverse the `src/platform/hono/v4/` hoist back down
 into `src/generator/<platform>/frameworks/…`, shrinking `src/platform/`
-to thin surface records. Separately, `docs/plans/packaging-split.md`
+to thin surface records. Separately, `docs/old/plans/packaging-split.md`
 (P0–P4, partly shipped) drives toward the opposite: each backend
 becomes a **separately-installable per-version npm package**
 (`@loom/backend-hono-v4`, `@loom/backend-dotnet-v8`, `-v10`, …)
@@ -389,7 +389,7 @@ hoist is correct, not to be reversed.
   (per-layer output packages). Right direction, **deferred** on one-time
   cost + playground-workspace prerequisite, not rejected; expressible as
   a `LayoutAdapter` extension.
-- `docs/plans/packaging-split.md` / `backend-packages.md` — promoted
+- `docs/old/plans/packaging-split.md` / `backend-packages.md` — promoted
   from "plan" to the pinned target for backend layout.
 
 ---
@@ -488,7 +488,7 @@ table-layout resolution.
 
 **Status:** PINNED (the six grammar-shaping tags). The remaining
 type-system decisions D5–D37 keep their **recommended** answers in
-[`proposals/implementation-plan.md`](./proposals/implementation-plan.md)
+[`proposals/implementation-plan.md`](old/proposals/implementation-plan.md)
 and may be taken per-phase without separate ratification (per that
 doc's workflow note); only D1–D4 + D14–D15 are pinned here because they
 fix the grammar surface before P3.
@@ -635,7 +635,7 @@ emitter; the `conformance-parity.yml` OpenAPI gate.
 ## D-URLSTYLE — lifecycle URL style on the api body + per-action routeSlug
 
 **Status:** PINNED. Full design in
-[`proposals/lifecycle-url-style.md`](./proposals/lifecycle-url-style.md);
+[`proposals/lifecycle-url-style.md`](old/proposals/lifecycle-url-style.md);
 amends `lifecycle-operations.md` Phase 2, whose grammar sketch assumed a
 fictional per-aggregate `api … for <Aggregate> { urlStyle }` form.
 
@@ -1528,7 +1528,7 @@ completion it always anticipated).
 
 **Status:** PINNED.
 
-**Problem.** [`ai-generation-platform.md`](./proposals/ai-generation-platform.md)
+**Problem.** [`ai-generation-platform.md`](old/proposals/ai-generation-platform.md)
 §4.4/§7 leaves the platform-vs-IR emphasis open. Three coherent paths
 were on the table:
 
@@ -1567,7 +1567,7 @@ motions** — a land-and-expand:
 
 - The emphasis question is **GTM and narrative, not architecture.** Platform
   and IR run the *same* validate→repair→verify loop over the same model
-  patches ([`ai-authoring-loop.md`](./proposals/ai-authoring-loop.md)); the
+  patches ([`ai-authoring-loop.md`](old/proposals/ai-authoring-loop.md)); the
   wedge demo advances all paths. So committing to B+C costs nothing
   technically and keeps A open.
 - Owning the customer (B+C) is the only path that monetises Loom's defensible
@@ -1604,7 +1604,7 @@ plus `outline` and the diagnostics/fixHint serializers) were being grown inside
 server (agents), the LSP (Monaco/VS Code), and the in-browser playground — and
 re-implementing them per surface is exactly the drift the structured contract
 exists to prevent. The patch/diagnostic format is also ours
-([`ai-diagnostics-contract.md`](./proposals/ai-diagnostics-contract.md)), not an
+([`ai-diagnostics-contract.md`](old/proposals/ai-diagnostics-contract.md)), not an
 editor/agent standard, so it needs *one* authoritative implementation plus thin
 adapters at the boundaries.
 
@@ -1823,11 +1823,11 @@ prefix, which a SvelteKit bundle needs `paths.base` threading for; its
 surface excludes `svelte` until that lands.  The in-browser playground
 preview is likewise deferred (Svelte compiler in the VFS bundler).
 
-See `docs/plans/svelte-frontend-plan.md` for the slice history.
+See `docs/old/plans/svelte-frontend-plan.md` for the slice history.
 ## D-VUE-FRONTEND — reuse the shared walker, Vite+vue-router SPA, hand-rolled forms
 
 `platform: vue` (Phase B of the platform-expansion roadmap;
-`docs/plans/vue-frontend-plan.md`) ships as the third frontend with
+`docs/old/plans/vue-frontend-plan.md`) ships as the third frontend with
 three locked choices:
 
 1. **Reuse, not fork.**  Vue pages render through the SHARED markup

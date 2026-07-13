@@ -1,5 +1,5 @@
 // Tenancy stance classification (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/plans/multi-tenancy-implementation.md §3).
+// docs/old/plans/multi-tenancy-implementation.md §3).
 //
 // An aggregate's tenancy *stance* is a pure function of facts already on
 // the IR — the `crossTenant` header flag, `tenantOwned` capability
@@ -24,7 +24,7 @@ export const TENANT_REGISTRY_CAPABILITY = "tenantRegistry";
 
 /** The field name the `tenantOwned` capability provides for the materialized
  *  DataKey path (multi-tenancy Phase 2, plan P2.3 —
- *  `docs/plans/multi-tenancy-phase2.md`).  Unlike the `tenantRegistry`
+ *  `docs/old/plans/multi-tenancy-phase2.md`).  Unlike the `tenantRegistry`
  *  capability's own `dataKey` (a managed field that stays ON the wire — the
  *  registry's path is meant to be readable), `tenantOwned`'s `dataKey` is a
  *  **persistence-only column**: `authorization.md §2` calls for it "kept out
@@ -152,7 +152,7 @@ export const DATA_KEY_PATH_DELIMITER = ".";
 export const DEEP_SCOPE_MEMBER = "__loomDeepScope__";
 
 /** Marker member for the DENY carve-out sentinel (authorization Phase 4 —
- *  `deny [write] on X`, docs/plans/authorization-phase4-deny.md).  Like
+ *  `deny [write] on X`, docs/old/plans/authorization-phase4-deny.md).  Like
  *  {@link DEEP_SCOPE_MEMBER} it is a recognizable `method-call` marker each
  *  backend's filter translator special-cases — here to its native *always-false*
  *  fragment.  Double-underscore fenced so it can never collide with a user

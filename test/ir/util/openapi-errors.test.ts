@@ -3,7 +3,7 @@
 // backend reads this same matrix so the conformance error-response
 // dimension stays in lockstep.
 //
-// Phase D of docs/proposals/validation-error-extension.md added 422
+// Phase D of docs/old/proposals/validation-error-extension.md added 422
 // (Unprocessable Entity) to every body-bearing kind — `create`,
 // `operation`, `workflow` — for the per-field validation envelope
 // consumed by the frontend ACL's `applyServerErrors`.

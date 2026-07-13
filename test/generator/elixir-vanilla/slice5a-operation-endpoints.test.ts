@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// Slice P4.0 of docs/plans/elixir-eventsourcing-vanilla-plan.md —
+// Slice P4.0 of docs/old/plans/elixir-eventsourcing-vanilla-plan.md —
 // per-operation HTTP endpoints on the vanilla foundation.
 //
 // The vanilla emit previously exposed only index/show/create/update/delete;
@@ -96,7 +96,7 @@ describe("vanilla — Slice P4.0 per-operation endpoints", () => {
 // A NAMED (non-returning) op with `requires`/`precondition` guards must deny
 // with a typed tuple (403/422), NOT raise an ArgumentError (→ 500).  The guards
 // hoist into a leading `with ensure(...)` chain that runs BEFORE the persist,
-// and the controller `else` maps the atoms.  (docs/plans/phoenix-op-guards-403-422.md)
+// and the controller `else` maps the atoms.  (docs/old/plans/phoenix-op-guards-403-422.md)
 // ---------------------------------------------------------------------------
 
 const GUARDED_NAMED = `

@@ -11,7 +11,7 @@ name: Behavioral e2e — Python (FastAPI)
 # (docs/conformance-semantics.md) from documented to gated on a second backend
 # per-PR: camelCase keys both directions (RS-1), enum declared casing (RS-2),
 # no leaked columns (RS-3), temporal round-trip (RS-4), value-object survival
-# (RS-7). See docs/plans/a6.2-behavioral-tier-second-backend.md.
+# (RS-7). See docs/old/plans/a6.2-behavioral-tier-second-backend.md.
 #
 # Reuses the proven boot pattern from python-obs-e2e.yml (uv + uvicorn) and the
 # harness wiring from behavioral-e2e.yml.

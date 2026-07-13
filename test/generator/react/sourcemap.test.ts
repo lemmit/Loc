@@ -9,7 +9,7 @@ import { parseValid } from "../../_helpers/index.js";
 // is the generator-local proof that a react deployable's scaffolded page
 // lands in `.loom/sourcemap.json` under the deployable's slug, with the
 // `${ui.name}.<area>.<page>` construct id (disambiguates repeated role names
-// like "List" across per-aggregate areas — see docs/plans/
+// like "List" across per-aggregate areas — see docs/old/plans/
 // source-map-debug-kickoff.md and pageConstructId's doc comment).
 // ---------------------------------------------------------------------------
 

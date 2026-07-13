@@ -842,7 +842,7 @@ In a separate PR after the new version has soaked:
 ## 13. References
 
 - [`audits/pack-equivalence-audit.md`](./audits/pack-equivalence-audit.md) — what's shared vs per-pack, with evidence
-- [`plans/per-pack-migration.md`](./plans/per-pack-migration.md) — per-library historical migration notes (mantine→v9, mui→v7, chakra→v3, shadcn→v4)
+- [`plans/per-pack-migration.md`](old/plans/per-pack-migration.md) — per-library historical migration notes (mantine→v9, mui→v7, chakra→v3, shadcn→v4)
 - `src/generator/_packs/loader.ts` — pure compile core
 - `src/generator/_packs/loader-fs.ts` — Node FS adapter
 - `web/src/build/loader-vfs.ts` — playground VFS adapter

@@ -50,7 +50,7 @@ validator-grounded matrix of who-emits-what, and separating **silent gaps** (a
 backend `# TODO`s or crashes on valid `.ddd`) from **honest feature gaps** (gated
 by a validator). #1477 and #1478 are exactly this, done by hand; #1467 re-checked a
 skip-list against fresh `main` and found half the entries already stale. There's a
-standing debt register (`docs/proposals/platform-parity-debt.md`) and audit
+standing debt register (`docs/old/proposals/platform-parity-debt.md`) and audit
 (`docs/audits/gated-features-inventory.md`) that want a repeatable refresh.
 
 **What it does.**
@@ -112,7 +112,7 @@ the multi-backend Docker topology.
 ## 3. `dependency-upgrade` — walk both surfaces, gate both  ⭐
 
 **Trigger.** "Bump <dep>", "upgrade to <runtime> N", "currency batch", picking up
-`docs/proposals/dependency-upgrades.md`, an `npm audit` finding, a Dependabot-shaped
+`docs/old/proposals/dependency-upgrades.md`, an `npm audit` finding, a Dependabot-shaped
 task.
 
 **Why.** The #1422–#1430 currency batch left `main` red on four jobs (#1464) because
@@ -193,7 +193,7 @@ once even before the skills wrap them.
 A second pass over the prior ~50 PRs surfaced one more skill worth building and
 sharpened the case for the first four.
 
-## 5. `status-refresh` — re-verify docs/proposals/comments against fresh `main`  ⭐ new
+## 5. `status-refresh` — re-verify docs/old/proposals/comments against fresh `main`  ⭐ new
 
 **Trigger.** "The docs are stale", "refresh the trackers", "audit the proposals
 against `main`", after any rename/removal/refactor ("scrub the stale references to
@@ -228,7 +228,7 @@ code. `parity-auditor` can hand off to it; they share the "fresh `main` wins ove
 prose" discipline.
 
 **What it does.**
-1. Take a scope: a doc set (`docs/`, `docs/proposals/`, `CLAUDE.md`) or a *concept*
+1. Take a scope: a doc set (`docs/`, `docs/old/proposals/`, `CLAUDE.md`) or a *concept*
    just renamed/removed (then grep the concept name across `src/`/`test/`/`docs/`,
    per the #1443 guardrail).
 2. For each claim, find the authoritative code (the validator gate, the emitter, the

@@ -142,7 +142,7 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   // `lowerProject` composes the whole import graph as one project — the
   // lone `system { }` block plus top-level `subdomain` / `context`
   // declarations from any file fold into a single system (see
-  // docs/proposals/implicit-system-composition.md).
+  // docs/old/proposals/implicit-system-composition.md).
   const merged = lowerProject(all.map((doc) => doc.parseResult.value as Model));
   const loom = enrichLoomModel(merged);
   return { loom, diagnostics, errorCount, warningCount, sourceTexts };
@@ -178,7 +178,7 @@ async function runParse(file: string) {
 
 /**
  * `ddd patch <file> --patches <json>` — apply node-addressed model patches
- * (docs/proposals/ai-authoring-loop.md §4).  Default output is the patched
+ * (docs/old/proposals/ai-authoring-loop.md §4).  Default output is the patched
  * source on stdout (so it composes: `ddd patch m.ddd --patches p.json > m2.ddd`);
  * `--json` emits the structured PatchResult.  Exits 1 if any patch fails.
  */
@@ -222,7 +222,7 @@ function readSource(file: string): { absolute: string; source: string } {
 
 /**
  * `ddd parse --json` — the structured-diagnostics contract
- * (docs/proposals/ai-diagnostics-contract.md).  Thin wrapper over the toolkit
+ * (docs/old/proposals/ai-diagnostics-contract.md).  Thin wrapper over the toolkit
  * `validate()`: prints the `ValidateReport` to stdout, exits 1 when not `ok`.
  */
 async function runParseJson(file: string): Promise<void> {
@@ -315,7 +315,7 @@ interface RunOptions {
    * trace-level domain instrumentation (`value_computed`,
    * `precondition_evaluated`, etc., via `requestLog().trace(...)`).  Off
    * by default keeps the artefact lean and the domain layer pure; on
-   * regenerate to diagnose.  See docs/proposals/observability.md. */
+   * regenerate to diagnose.  See docs/old/proposals/observability.md. */
   emitTrace?: boolean;
   /** `--k8s` switch — when true, `generate system` additionally emits a Helm
    * chart (`helm/`) and the raw manifests it renders to (`k8s/`) alongside
@@ -331,7 +331,7 @@ interface RunOptions {
    * spans / macro-call sites.  Off by default (byte-identical output).
    * System target only — the legacy single-project `generate ts` /
    * `generate dotnet` paths don't accept this flag.
-   * See docs/plans/source-map-debug-kickoff.md. */
+   * See docs/old/plans/source-map-debug-kickoff.md. */
   sourcemap?: boolean;
 }
 
@@ -627,7 +627,7 @@ interface NewOptions {
 
 /**
  * `ddd new <name>` — scaffold a small, provably-valid starter project
- * (docs/proposals/quickstart-and-day-one-batteries.md §3.1).  Picks the
+ * (docs/old/proposals/quickstart-and-day-one-batteries.md §3.1).  Picks the
  * backend platform (`--platform`) and frontend (`--design`: a React pack, or
  * `coreComponents` for a Phoenix LiveView fullstack), renders a `main.ddd` +
  * `README.md` + `.loomignore`, validates the rendered model in-memory, and
@@ -945,7 +945,7 @@ program
   .description("Parse and validate a .ddd file")
   .option(
     "--json",
-    "emit structured diagnostics + outline as JSON (also runs IR validation); see docs/proposals/ai-diagnostics-contract.md",
+    "emit structured diagnostics + outline as JSON (also runs IR validation); see docs/old/proposals/ai-diagnostics-contract.md",
   )
   .action(async (file: string, options: { json?: boolean }) => {
     if (options.json) await runParseJson(file);
@@ -955,7 +955,7 @@ program
 program
   .command("patch <file>")
   .description(
-    "Apply node-addressed model patches (JSON) to a .ddd file; prints the patched source, or --json for the structured PatchResult. See docs/proposals/ai-authoring-loop.md.",
+    "Apply node-addressed model patches (JSON) to a .ddd file; prints the patched source, or --json for the structured PatchResult. See docs/old/proposals/ai-authoring-loop.md.",
   )
   .requiredOption(
     "--patches <file>",
@@ -975,7 +975,7 @@ generate
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
   .option(
     "--trace",
-    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/old/proposals/observability.md",
   )
   .action(
     async (
@@ -998,7 +998,7 @@ generate
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
   .option(
     "--trace",
-    "emit trace-level seam instrumentation (tx_begin/commit/rollback around SaveChangesAsync) — off by default; see docs/proposals/observability.md",
+    "emit trace-level seam instrumentation (tx_begin/commit/rollback around SaveChangesAsync) — off by default; see docs/old/proposals/observability.md",
   )
   .action(
     async (
@@ -1023,11 +1023,11 @@ generate
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
   .option(
     "--json",
-    "validate and print the deployable manifest as JSON (GenerateReport); writes no files. See docs/proposals/ai-diagnostics-contract.md.",
+    "validate and print the deployable manifest as JSON (GenerateReport); writes no files. See docs/old/proposals/ai-diagnostics-contract.md.",
   )
   .option(
     "--trace",
-    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/old/proposals/observability.md",
   )
   .option(
     "--k8s",
@@ -1039,7 +1039,7 @@ generate
   )
   .option(
     "--sourcemap",
-    "emit .loom/sourcemap.json mapping generated code back to .ddd spans; off by default. See docs/plans/source-map-debug-kickoff.md.",
+    "emit .loom/sourcemap.json mapping generated code back to .ddd spans; off by default. See docs/old/plans/source-map-debug-kickoff.md.",
   )
   .action(
     async (
@@ -1095,7 +1095,7 @@ program
   .command("trace <logfile>")
   .description(
     "Annotate a crash log / stack trace with the .ddd construct + source location each " +
-      "frame maps to, via .loom/sourcemap.json. See docs/proposals/source-map-and-debugging.md §6B.",
+      "frame maps to, via .loom/sourcemap.json. See docs/old/proposals/source-map-and-debugging.md §6B.",
   )
   .option(
     "--map <path>",
@@ -1113,7 +1113,7 @@ program
   .command("breakpoints <file>")
   .description(
     "Resolve a .ddd source line to the generated file:line(s) it produced, via " +
-      ".loom/sourcemap.json — the reverse of `ddd trace`. See docs/proposals/source-map-and-debugging.md §6E.",
+      ".loom/sourcemap.json — the reverse of `ddd trace`. See docs/old/proposals/source-map-and-debugging.md §6E.",
   )
   .requiredOption("--line <n>", "1-based .ddd source line to resolve")
   .option(

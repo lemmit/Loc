@@ -182,7 +182,7 @@ Two **realization classes** cover every target:
   into every generated call site (`render-stmt` / `render-expr` call
   emission), not just the boundary middleware. A backend in this class is
   the real test of the "ambient" framing — see
-  [`../proposals/execution-context.md`](../proposals/execution-context.md)
+  [`../proposals/execution-context.md`](../old/proposals/execution-context.md)
   § Lowering & generation.
 
 | Platform × foundation | Class | Carrier | Frame open |
@@ -274,7 +274,7 @@ from a `TraceId` (`ActivitySource.StartActivity` returns `null` on
 unsampled requests, so trace state is not a place governance can live).
 *If* the observability layer later wants to project a frame onto a span
 for log↔trace correlation, that is its concern (owned by
-[`../proposals/observability.md`](../proposals/observability.md), which
+[`../proposals/observability.md`](../old/proposals/observability.md), which
 already wires `Activity.Current?.TraceId` into log scopes in
 `emit/program.ts`) — a one-way read of the frame, never a write governance
 reads back, and never via `Baggage` (it serialises to the W3C `baggage`
@@ -321,7 +321,7 @@ behaviours observe the frame), and — because it restores the frame in
 emitted in a transaction and relayed later by the outbox must **capture
 the frame ids into the persisted record** (`correlationId`/`causationId`),
 not read `AsyncLocal` at relay time (see
-[`../proposals/dispatch-delivery-semantics.md`](../proposals/dispatch-delivery-semantics.md)).
+[`../proposals/dispatch-delivery-semantics.md`](../old/proposals/dispatch-delivery-semantics.md)).
 The behaviour is a convenience for one subset on one backend; the carrier,
 boundary middleware, and emitted inline scopes are the actual mechanism.
 

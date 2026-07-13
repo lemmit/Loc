@@ -1,5 +1,5 @@
 // Minimal python-backend system — the LOOM_PYTHON_BUILD gate corpus.
-// Grows alongside the generator slices (docs/plans/python-backend-plan.md).
+// Grows alongside the generator slices (docs/old/plans/python-backend-plan.md).
 system PyShell {
   subdomain Ops {
     context Ops {

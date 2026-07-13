@@ -1,4 +1,4 @@
-// Collection-op completeness gate (docs/plans/stdlib.md, slice A4).
+// Collection-op completeness gate (docs/old/plans/stdlib.md, slice A4).
 //
 // The catalogue (src/util/collection-ops.ts) is the single source of truth for
 // which collection ops exist on an array receiver.  Each of the five domain

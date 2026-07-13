@@ -29,7 +29,7 @@ Nothing found suggests the "no backend IR" bet is wrong — but the cost has vis
 > **[2026-07-11 remediation status, code-verified against `main` @ `ad81732e`]** A
 > `Status` column is appended below (per the remediation plan's definition-of-done —
 > the snapshot text is left intact). **22 of the 24 findings have landed** via #1629
-> and successors (see `docs/plans/full-review-remediation.md` §Status and the
+> and successors (see `docs/old/plans/full-review-remediation.md` §Status and the
 > "Remediated in PR #1629" addendum). The **two still-open** findings are **#6**
 > (strict decimal/money bounds — a real correctness bug, fix in progress on a
 > separate branch, still inclusive-folding on `main`) and **#22** (macro expansion
@@ -161,7 +161,7 @@ Nothing found suggests the "no backend IR" bet is wrong — but the cost has vis
 ## Remediated in PR #1629
 
 The findings above are being drained by the plan in
-[`docs/plans/full-review-remediation.md`](../plans/full-review-remediation.md).
+[`docs/old/plans/full-review-remediation.md`](../old/plans/full-review-remediation.md).
 As of this note, the following waves have landed (this section is an addendum —
 the findings above are the original snapshot and are deliberately left intact):
 
@@ -177,7 +177,7 @@ Still open at the time of this note: A5 (WorkflowIR facade retirement), A6.2/A6.
 > and is stale — **all four landed** (the audit's migration repros #16–19): A8.1
 > `schema?` on every `MigrationStep`, A8.2 reverse-topological drops, A8.3
 > `MigrationDestructiveError`/`--allow-destructive` gate, A8.4 `loom.duplicate-table`
-> (see `docs/plans/full-review-remediation.md` §Status, "A8.1–A8.4 — DONE"). Of the
+> (see `docs/old/plans/full-review-remediation.md` §Status, "A8.1–A8.4 — DONE"). Of the
 > 24 findings, only **#6** (strict decimal/money bounds — fix in progress on a
 > separate branch, still inclusive-folding on `main`) and **#22** (macro LSP
 > incremental rebuild — C5, no landing found) remain open.

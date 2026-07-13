@@ -821,7 +821,7 @@ function collectionElementType(t: TypeIR): TypeIR | undefined {
  *
  *  `originFor` walks `$container` / `getDocument` from the AST node (a
  *  shallow 5-10 hop root-walk per node) — accepted per-node cost, no
- *  cache; see docs/plans/source-map-debug-kickoff.md. */
+ *  cache; see docs/old/plans/source-map-debug-kickoff.md. */
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   const lowered = lowerExprInner(expr, env);
   return { ...lowered, origin: lowered.origin ?? originFor(expr) };

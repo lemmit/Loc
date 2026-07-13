@@ -44,7 +44,7 @@ async function loadExample(file: string) {
   const { all } = await loadProject(URI.file(path.join(repoRoot, file)), services.shared);
   // `lowerProject` composes the whole import graph as one project (the
   // same path the CLI/playground use), so top-level `subdomain`s fold into
-  // the lone system — see docs/proposals/implicit-system-composition.md.
+  // the lone system — see docs/old/proposals/implicit-system-composition.md.
   const loom = enrichLoomModel(lowerProject(all.map((doc) => doc.parseResult.value as Model)));
   return { all, loom };
 }

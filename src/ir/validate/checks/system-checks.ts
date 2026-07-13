@@ -894,7 +894,7 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
 //      currentUser.tenantId`).  Binding the request principal into the
 //      always-on read path is deferred (Hono: thread through findById +
 //      callers; Phoenix: an actor-bound Ecto `where:`) — see
-//      docs/proposals/criterion-everywhere.md.
+//      docs/old/proposals/criterion-everywhere.md.
 //   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
 //      Fields live inside a jsonb column, so `this.isDeleted` is not a
 //      top-level column the predicate can reference without JSON-path

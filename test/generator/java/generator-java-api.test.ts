@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java backend — API layer (slice S5 of
-// docs/plans/java-backend-implementation.md): controllers (route shape =
+// docs/old/plans/java-backend-implementation.md): controllers (route shape =
 // the cross-backend OpenAPI contract), DTO records in wireShape order
 // with the money/datetime string wire convention, the layered service,
 // wire validators (shared classifier → 422), and the RFC 7807 advice.

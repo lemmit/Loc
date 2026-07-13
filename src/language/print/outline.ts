@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Outline + node addressing for the structured-diagnostics contract
-// (docs/proposals/ai-diagnostics-contract.md §5).
+// (docs/old/proposals/ai-diagnostics-contract.md §5).
 //
 // `addressOf` turns an AST node into a canonical address
 // `<keyword> <Context>.<Decl>[.<member>]`; `buildOutline` walks a parsed

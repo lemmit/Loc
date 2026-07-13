@@ -1,8 +1,8 @@
 // Frontend ACL emission — verifies that the React generator writes the
 // two shared utility files (`src/lib/strict-field-map.ts` and
 // `src/lib/apply-server-errors.ts`) into every generated React project,
-// regardless of pack or example.  See docs/proposals/frontend-acl.md
-// and docs/plans/frontend-acl-implementation.md (Phase 1, Steps 1.1–1.2).
+// regardless of pack or example.  See docs/old/proposals/frontend-acl.md
+// and docs/old/plans/frontend-acl-implementation.md (Phase 1, Steps 1.1–1.2).
 //
 // These files are pack-agnostic — Mantine and shadcn projects must emit
 // byte-identical copies — and behaviourally inert in Phase 1 (no

@@ -662,7 +662,7 @@ system Shop {
 // a leading `with ensure(...)` chain — an expected denial returns a typed tuple
 // the controller maps to 403 / 422, instead of raising an ArgumentError (500).
 // A guard-free document op stays byte-identical.
-// (docs/plans/phoenix-op-guards-403-422.md)
+// (docs/old/plans/phoenix-op-guards-403-422.md)
 // ---------------------------------------------------------------------------
 const DOC_GUARDS = `
 system S {

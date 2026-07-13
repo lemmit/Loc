@@ -4,7 +4,7 @@
 // may reference them by bare name without restating the body.  Acme ERP
 // pulls money, geography and the common primitives in from three kernel
 // files so that Sales, Procurement, Finance and the rest all speak the
-// same `Money`.  See docs/plans/multi-file-source.md.
+// same `Money`.  See docs/old/plans/multi-file-source.md.
 
 // ISO-4217 currencies the group trades in.
 enum Currency { USD, EUR, GBP, JPY, PLN }

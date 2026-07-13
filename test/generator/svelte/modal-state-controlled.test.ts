@@ -1,7 +1,7 @@
 // Feature: state-controlled `Modal { open: <state> }` on the Svelte packs
 // (shadcnSvelte / flowbite — hand-rolled `{#if}` overlay driven by a $state
 // rune, matching their op-form modal idiom).
-// See docs/proposals/state-controlled-modal.md.
+// See docs/old/proposals/state-controlled-modal.md.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";

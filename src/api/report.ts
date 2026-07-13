@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Structured-diagnostics serializers — the pure core that turns Langium
 // (phases ①③④) and IR (phase ⑦) diagnostics into the contract wire shape
-// (docs/proposals/ai-diagnostics-contract.md).  Transport-neutral: consumed by
+// (docs/old/proposals/ai-diagnostics-contract.md).  Transport-neutral: consumed by
 // the CLI, the (future) MCP server, the LSP adapters, and the in-browser
 // playground alike.  No Node-only imports — safe in the browser.
 // ---------------------------------------------------------------------------

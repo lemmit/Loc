@@ -13,7 +13,7 @@
 //  and `theme` singletons.  Each `subdomain` and every deployment
 //  declaration (`storage` / `resource` / `deployable` / `ui` / `test e2e`)
 //  is a top-level declaration in its own file that composes into this single
-//  `system` (docs/proposals/implicit-system-composition.md).
+//  `system` (docs/old/proposals/implicit-system-composition.md).
 //
 //  ── File layout (open the tabs above the editor) ──────────────────────
 //    main.ddd ................ this file — just `system AcmeErp { user theme }`

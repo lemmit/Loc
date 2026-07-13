@@ -1,7 +1,7 @@
 // HEEx form — value-object field renders as <.inputs_for :let={…}> nested form.
 //
 // Phase D Slice D from
-// `docs/plans/platform-expansion-roadmap.md`.  Closes the VO half
+// `docs/old/plans/platform-expansion-roadmap.md`.  Closes the VO half
 // of the "expand types beyond text input" gap; arrays remain as
 // future work (need event-handler scaffolding for add/remove).
 //

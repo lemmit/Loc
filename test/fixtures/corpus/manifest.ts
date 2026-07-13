@@ -7,7 +7,7 @@
 // and a feature with no manifest row fails the completeness check.
 //
 // This is the machine-readable form of the matrix in
-// `docs/plans/global-test-coverage-plan.md`.  Adding a feature = drop a
+// `docs/old/plans/global-test-coverage-plan.md`.  Adding a feature = drop a
 // `<feature>.ddd` here + one row below.  Widening a backend's support = add the
 // key to that row (the gate proves it generates).  See the plan for the
 // behavioural / compile tiers layered on top of this generation gate.

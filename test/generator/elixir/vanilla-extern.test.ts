@@ -1,5 +1,5 @@
 // Extern operation seam on the vanilla Phoenix/Ecto backend
-// (docs/proposals/extern-domain-extension-point.md, Slice 1).
+// (docs/old/proposals/extern-domain-extension-point.md, Slice 1).
 //
 // Before this slice an `operation X() extern { precondition … }` emitted a
 // context function that ran the preconditions and then persisted an EMPTY

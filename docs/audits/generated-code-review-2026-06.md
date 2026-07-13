@@ -25,7 +25,7 @@
 | Walker (all frontends + HEEx) | `Image { "/logo.png" }` positional arg dropped → bare `<Image />`; now feeds `src` | `e94f4b5` |
 
 Plus: tightened the over-claiming showcase status-contract comment, pinned the
-two-tier error→status mapping, and the [runtime-conformance-harness](../plans/runtime-conformance-harness.md)
+two-tier error→status mapping, and the [runtime-conformance-harness](../old/plans/runtime-conformance-harness.md)
 plan (Tier-0 fast source assertions, Tier-1 runtime conformance).
 
 ## Verified NOT a bug — intentional / consistent / working (left untouched)
@@ -68,7 +68,7 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
   a `loom.bindable-input-value-arg` validator warning so the silent no-op can't
   recur (`94de0e9`); the state-controlled `Modal { open: <state> }` is built
   (`84231f7`, React Mantine+shadcn; spec in
-  `docs/proposals/state-controlled-modal.md`). showcase's ProjectDetail now
+  `docs/old/proposals/state-controlled-modal.md`). showcase's ProjectDetail now
   generates a fully controlled, stateful detail page. The controlled-modal
   template now covers ALL EIGHT frontend packs — React (Mantine/shadcn/MUI/
   Chakra, `ec21114`), Vue+Svelte (vuetify/shadcnVue/shadcnSvelte/flowbite,
@@ -90,7 +90,7 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
   stub is a transitional placeholder being replaced per-backend by generated
   OIDC verifiers in the in-flight auth-providers track (#1222 OIDC providers,
   #1225 default-deny, #1228 .NET `/auth/me`; plan:
-  `docs/plans/auth-providers-implementation.md` — the OIDC verifier
+  `docs/old/plans/auth-providers-implementation.md` — the OIDC verifier
   auto-registers *instead of* the dev stub when a provider is configured).
   Per the maintainer, the dev stub itself is a candidate for removal once
   authorization is fully in place — so seeding permissions into it now would be

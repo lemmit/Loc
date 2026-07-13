@@ -1,7 +1,7 @@
 // Phase 1 IR side — `lowerField` captures `sensitive(<tag>, ...)` from
 // the AST into `FieldIR.sensitivity` (normalised: sorted, deduped) and
 // mirrors the same tag set onto the field's `TypeIR.sensitivity`.
-// See `docs/proposals/sensitivity-and-compliance.md`.
+// See `docs/old/proposals/sensitivity-and-compliance.md`.
 
 import { describe, expect, it } from "vitest";
 import { allAggregates } from "../../src/ir/types/loom-ir.js";

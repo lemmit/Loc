@@ -17,7 +17,7 @@ import {
 // turns the deployable into a fullstack host serving an embedded React
 // SPA from Spring's static resources.  All project emission lives under
 // `../generator/java/`; this module is the thin `PlatformSurface` wiring.
-// See docs/plans/java-backend-implementation.md for the slice plan.
+// See docs/old/plans/java-backend-implementation.md for the slice plan.
 // ---------------------------------------------------------------------------
 
 const javaPlatform: PlatformSurface = {

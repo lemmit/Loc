@@ -2,7 +2,7 @@
 // LightningFS instance + git repo bootstrap.
 //
 // First step of the playground's git-backed VFS migration (see
-// `docs/plans/playground-git-vfs-implementation.md`).  This module owns
+// `docs/old/plans/playground-git-vfs-implementation.md`).  This module owns
 // the single durable store: a LightningFS filesystem (IndexedDB-backed)
 // with an isomorphic-git repo on top.  `/workspace/**` is the tracked
 // user content and `/.git/**` is the repo — both ordinary files in the

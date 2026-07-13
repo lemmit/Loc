@@ -3,7 +3,7 @@ import { generateVanillaElixirProject } from "../../../src/generator/elixir/vani
 import type { DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
-// Slice 0 of docs/plans/vanilla-foundation-tdd-plan.md — orchestrator
+// Slice 0 of docs/old/plans/vanilla-foundation-tdd-plan.md — orchestrator
 // branch + minimal shell.
 //
 // Verifies that `foundation: vanilla` on `platform: elixir` dispatches

@@ -16,9 +16,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT  = join(HERE, '_site');
 
 // Subdirs whose .md content is also rendered so links from reference
-// docs into plans/audits don't 404.  proposals/ is excluded — those
-// docs deliberately don't ship as the source of truth.
-const RENDERED_SUBDIRS = ['plans', 'audits', 'language-reference'];
+// docs into the plan/audit corpus don't 404.  Nested paths are
+// supported (depth derived from the path).  old/proposals ships too
+// now that new-plan/ links into it as the archived design record.
+const RENDERED_SUBDIRS = ['new-plan', 'old/plans', 'old/proposals', 'audits', 'language-reference'];
 
 // Nav surfaces the top-level reading order — keep in sync with
 // docs/README.md's "Start here" table and docs/index.html's footer.
@@ -34,7 +35,7 @@ const NAV = [
 ];
 
 // rewrite ./foo.md, ../foo.md, foo.md or sub/foo.md (with optional #anchor) → .html
-const MD_LINK = /^((?:\.\.?\/)*(?:[a-zA-Z0-9_\-]+\/)?[a-zA-Z0-9_\-]+)\.md(#.*)?$/;
+const MD_LINK = /^((?:\.\.?\/)*(?:[a-zA-Z0-9_\-]+\/)*[a-zA-Z0-9_\-]+)\.md(#.*)?$/;
 
 marked.use({
   gfm: true,
@@ -251,14 +252,15 @@ async function writeSubdirIndex(subdir, entries) {
   if (entries.length === 0) return;
   const body = buildIndexBody(subdir, entries);
   const outPath = join(OUT, subdir, 'index.html');
-  const styleHref = '../style.css';
+  const depth = subdir.split('/').length;
+  const styleHref = `${'../'.repeat(depth)}style.css`;
   await writeFile(
     outPath,
     page({
       title: `${subdir}/`,
       body,
       currentHref: `${subdir}/index.html`,
-      depth: 1,
+      depth,
       styleHref,
     }),
   );
@@ -276,9 +278,10 @@ async function main() {
     await renderMdFile(join(HERE, f), 0);
   }
 
-  // Rendered subdirs.
+  // Rendered subdirs (nested paths supported; depth = path segments).
   for (const sub of RENDERED_SUBDIRS) {
     const subDir = join(HERE, sub);
+    const depth = sub.split('/').length;
     let subEntries;
     try {
       subEntries = await readdir(subDir);
@@ -291,7 +294,7 @@ async function main() {
       const full = join(subDir, f);
       const s = await stat(full);
       if (!s.isFile()) continue;
-      rendered.push(await renderMdFile(full, 1));
+      rendered.push(await renderMdFile(full, depth));
     }
     await writeSubdirIndex(sub, rendered);
   }

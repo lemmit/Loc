@@ -1,4 +1,4 @@
-// A1 pilot for the scalar-intrinsic catalogue (docs/plans/stdlib.md):
+// A1 pilot for the scalar-intrinsic catalogue (docs/old/plans/stdlib.md):
 // `string.trim()` end-to-end on the .NET backend — in-memory rendering in
 // domain bodies AND the LINQ `Where` lambda in a queryable `find … where`
 // position (EF Core translates `.Trim()` to SQL natively, so no separate

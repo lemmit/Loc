@@ -22,7 +22,7 @@ import {
 // plus a Spring Data `JpaRepository` over it.  This is the persistence
 // foundation the in-process dispatcher (load-or-allocate / route-or-drop) and
 // the read-only instance endpoints build on — slice 1 of the Java saga track
-// (docs/plans/workflow-debt-backend-parity.md).
+// (docs/old/plans/workflow-debt-backend-parity.md).
 //
 // Field mapping mirrors the aggregate entity emitter (jpa-annotations.ts):
 // `X id` → `@Embedded`/`@EmbeddedId` record over one column, enums →

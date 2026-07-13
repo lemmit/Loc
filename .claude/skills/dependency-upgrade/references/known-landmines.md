@@ -120,7 +120,7 @@ Format: symptom → cause → fix → where it's pinned / who found it.
   rides on it. **Gate: full `npm test` + `langium-generated.yml` determinism must
   stay green.** When it lands, `npm audit` should reach ~0 (drops the
   chevrotain→lodash chain that has no patched version).
-- **Found by:** #1430; backlog in `docs/proposals/dependency-upgrades.md` and the
+- **Found by:** #1430; backlog in `docs/old/proposals/dependency-upgrades.md` and the
   root-toolchain row of `docs/audits/stack-versions-audit.md`. **Status: landed**
   — root is `langium ~4.3.0` / `langium-cli ~4.3.0` / `vscode-languageserver
   ~10.0.0`, and the renames are live (`collectExportedSymbols` in

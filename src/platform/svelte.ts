@@ -15,7 +15,7 @@ import {
 //
 // Deployable contract mirrors `react`: `targets:` a backend, inherits
 // its contexts via enrichment, owns no database.
-// See docs/plans/svelte-frontend-plan.md.
+// See docs/old/plans/svelte-frontend-plan.md.
 // ---------------------------------------------------------------------------
 
 const sveltePlatform: PlatformSurface = {

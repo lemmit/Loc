@@ -1,5 +1,5 @@
 // Aggregate `function` members on the vanilla foundation — the compile gate for
-// gap §11b (docs/plans/vanilla-phoenix-gaps.md).
+// gap §11b (docs/old/plans/vanilla-phoenix-gaps.md).
 //
 // `function passed(): bool = …` and `function bonus(extra): int = …` are pure
 // domain helpers.  Before §11b they were emitted NOWHERE on vanilla and the call

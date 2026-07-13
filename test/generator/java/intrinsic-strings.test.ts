@@ -1,4 +1,4 @@
-// A2 string batch of the scalar-intrinsic catalogue (docs/plans/stdlib.md)
+// A2 string batch of the scalar-intrinsic catalogue (docs/old/plans/stdlib.md)
 // on the Java/Spring backend — in-memory rendering in derived bodies,
 // JPQL rendering for the queryable rows (toUpper/toLower) in a
 // `find … where` position, and the Criteria/Specification path for a

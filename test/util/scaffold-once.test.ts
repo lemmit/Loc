@@ -1,5 +1,5 @@
 // The scaffold-once regeneration-preservation marker
-// (docs/proposals/extern-domain-extension-point.md, Slice 1).
+// (docs/old/proposals/extern-domain-extension-point.md, Slice 1).
 
 import { describe, expect, it } from "vitest";
 import { isScaffoldOnce, SCAFFOLD_ONCE_MARKER } from "../../src/util/scaffold-once.js";

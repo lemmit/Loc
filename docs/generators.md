@@ -54,7 +54,7 @@ validator gate sets in `src/ir/validate/checks/` and frozen against drift by
 The dated baseline write-up is
 [`audits/backend-feature-parity-2026-06.md`](audits/backend-feature-parity-2026-06.md);
 remaining gaps + sequencing are in
-[`plans/backend-parity-plan.md`](plans/backend-parity-plan.md).
+[`plans/backend-parity-plan.md`](old/plans/backend-parity-plan.md).
 
 | Feature | node | dotnet | java | python | elixir | Gate set |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
@@ -678,7 +678,7 @@ markup walker (`src/generator/_walker/`) through `vueTarget` and the
 SAME `_frontend/` api/views/workflows module builders (only the
 TanStack Query import specifier differs).  Design packs: `vuetify`
 (default) and `shadcnVue` (reka-ui + Tailwind 4, source-copy).  See
-[D-VUE-FRONTEND](decisions.md) and `docs/plans/vue-frontend-plan.md`.
+[D-VUE-FRONTEND](decisions.md) and `docs/old/plans/vue-frontend-plan.md`.
 
 ### File map (deltas vs the React project)
 
@@ -754,7 +754,7 @@ Angular 22 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
 the same `vite preview`-style way as the other SPAs in docker.  Pages flow
 through the **same shared markup walker** the React / Vue / Svelte generators use
 (`src/generator/_walker/walker-core.ts`) with `angularTarget` + the
-`angularMaterial` design pack.  See `docs/plans/angular-frontend-plan.md`.
+`angularMaterial` design pack.  See `docs/old/plans/angular-frontend-plan.md`.
 
 Angular renders **idiomatic Angular**, not a transliterated React app: standalone
 `@Component`s, signals/`computed` for view state, typed Reactive Forms, and —
@@ -852,9 +852,9 @@ Aggregate IR maps onto Ecto/Phoenix:
 | `workflow placeOrder(...) { ... }` | a context function wrapping `Repo.transaction(fn -> with … end)` |
 | `view ActiveOrders = Order where …` | thin module wrapping `from o in Order, where: …` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
-| `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](proposals/channels.md). |
+| `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](old/proposals/channels.md). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no schema; each concrete is a standalone `Ecto.Schema` on its own table; the context module gains `list_parties/0` (the union of the concrete `list_<concrete>/0` reads). |
-| `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | the concretes share one table: each concrete `Ecto.Schema` declares `schema "<base_plural>"`, a `:kind` string field defaulted to its own name, and every read self-filters on `where: c.kind == "<Concrete>"` so it reads/writes only its rows. The base owns no schema; the context module gains the same polymorphic `list_parties/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
+| `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | the concretes share one table: each concrete `Ecto.Schema` declares `schema "<base_plural>"`, a `:kind` string field defaulted to its own name, and every read self-filters on `where: c.kind == "<Concrete>"` so it reads/writes only its rows. The base owns no schema; the context module gains the same polymorphic `list_parties/0` union reader. See [`phoenix-tph-emission.md`](old/proposals/phoenix-tph-emission.md). |
 | `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **Supported** (`src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. |
 | `shape(document)` persistence | **Supported (CRUD + finds/ops — DEBT-07; Route A)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, where `data` is a **typed `embeds_one :data, <Agg>.Data` embed** cast via `cast_embed` (the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. **Custom finds** filter in memory (`Repo.all |> Enum.filter`), **named operations** run their body, pure **`function`s** compile, and **returning ops** (`: A or B`) emit the tagged tuple — all in **struct mode** over the loaded `row.data` struct (Route A slices 1–2 deleted the old string-keyed `docMap` fork), incl. value-object-subfield reads. The residual (audited/provenanced ops, collection mutation, derived / dereferenced-entity / collection-method reads, paged/union finds) stays gated (`loom.vanilla-document-unsupported`). `shape(embedded)` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`): each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s; `contains` on a *relational*-shape aggregate stays gated (`loom.vanilla-containment-unsupported`). |
 | `test "…" { … }` | **ExUnit** → `test/<ctx>/<agg>_test.exs` (`use ExUnit.Case, async: true`) + a once-per-project `test/test_helper.exs`. (`src/generator/elixir/vanilla/tests-emit.ts`) ports the full Loom idiom onto a **pure domain core** emitted on the aggregate module (`domain-core-emit.ts`): `def create(attrs) = base_changeset \|> Ecto.Changeset.apply_action(:insert)` and `def <op>(record, params)` = precondition + in-memory mutation — both Repo-free. So `Agg.create({…})` → `{:ok, p} = Agg.create(%{…})`, `expect(create({bad})).toThrow()` → `assert {:error, _} = …`, `o.op(x)` → `o = Agg.op(o, %{…})`, precondition `toThrow` → `assert_raise`, field reads → `assert ==` (money/decimal via `Decimal`). Verified green under `mix test` with no DB. A **value-object construction invariant** (`expect(Money{…}).toThrow()`) lowers to the VO's validating constructor — `assert {:error, _} = Money.new(%{…})` (F5; `valueobject-emit.ts` emits `<VO>.new/1`, and the aggregate `base_changeset` runs it via `validate_vo` so the invariant is enforced at the real create/update path, not just in tests). A `config/test.exs` is emitted so `mix test` can load (never copied into the prod image). See [`docs/audits/test-parity-generated-backends.md`](audits/test-parity-generated-backends.md). |
@@ -933,7 +933,7 @@ capability filter on a non-relational aggregate**
 (`loom.context-filter-unsupported` — each half ships alone; only the
 actor + jsonb intersection is deferred), and provenance/audited (gated —
 no runtime emitted; the node and .NET backends do implement these).  See
-`docs/plans/java-backend-implementation.md` for the execution record.
+`docs/old/plans/java-backend-implementation.md` for the execution record.
 
 Discriminated unions (payload fields / operation returns; union *finds* take
 the untagged optional-style path — see `payloads.md`), `shape(document)` /

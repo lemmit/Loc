@@ -6,8 +6,8 @@
 // `placedAt`), enum declared casing (RS-2), temporal round-trip (RS-4
 // `placedAt`), bool create default (RS-6 `active`), value-object survival
 // (RS-7 `price`), and association round-trip (RS-8 `lines`). Mirrors
-// corpus-python/sales.ddd — see docs/plans/runtime-semantics-tier-followups.md
-// (RST-2) + docs/plans/a6.2-behavioral-tier-second-backend.md.
+// corpus-python/sales.ddd — see docs/old/plans/runtime-semantics-tier-followups.md
+// (RST-2) + docs/old/plans/a6.2-behavioral-tier-second-backend.md.
 
 system SalesPy {
 
