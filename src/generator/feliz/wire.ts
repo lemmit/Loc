@@ -160,10 +160,15 @@ export interface FelizFormField {
   /** `Msg` an input's `onChange` dispatches (`SetProductFormName`). */
   setMsg: string;
   /** Thoth encoder for the field, lifting `form.<wireName>` to its wire type
-   *  (`Encode.string form.name` / `Encode.decimal (decimal form.price)`). */
+   *  (`Encode.string form.name` / `Encode.decimal (decimal form.price)`).  An
+   *  optional field's empty string encodes to `Encode.nil` (JSON `null`). */
   encodeExpr: string;
   /** HTML input widget (`number` / `checkbox` / `text`) derived from the type. */
   inputKind: FelizInputKind;
+  /** Whether the client MUST supply this field — a required, non-optional input.
+   *  Required text/number fields guard the submit (non-empty); optional fields
+   *  (and checkboxes) don't. */
+  required: boolean;
 }
 
 /** The record-shaped aspects a form (create OR operation) shares — the F#
@@ -237,12 +242,20 @@ export interface FelizOperationForm extends FormRecord {
   navigateSegs: string[];
 }
 
+/** The scalar base of a type, peeling `optional` — an optional field renders
+ *  the same widget + encodes as the same wire type as its required twin (the
+ *  optionality only changes the empty→null encoding + validation exemption). */
+function scalarBase(t: TypeIR): TypeIR {
+  return t.kind === "optional" ? t.inner : t;
+}
+
 /** The HTML input widget a field type maps to — numerics render `type: number`,
  *  bools a `checkbox`, everything else a plain text input.  Purely derived from
  *  the wire type (no stamped field); the form record stays all-string. */
 function inputKindFor(t: TypeIR): FelizInputKind {
-  if (t.kind === "primitive") {
-    switch (t.name) {
+  const base = scalarBase(t);
+  if (base.kind === "primitive") {
+    switch (base.name) {
       case "int":
       case "long":
       case "decimal":
@@ -257,46 +270,66 @@ function inputKindFor(t: TypeIR): FelizInputKind {
   return "text"; // id / enum (string name) / everything else
 }
 
-/** Build the shared form fields (`Set` Msg + encoder + input kind) for a form of
- *  `formType` from a `{name, type}` field/param list.  Reused by create +
- *  operation + workflow forms. */
+/** Build the shared form fields (`Set` Msg + encoder + input kind + required-
+ *  ness) for a form of `formType` from a `{name, type, optional?}` field/param
+ *  list.  Reused by create + operation + workflow forms.  A field is optional
+ *  when flagged so (a create `FieldIR.optional`) OR its type is `optional` (an
+ *  `x?: T` op/workflow param). */
 function formFieldsFrom(
   formType: string,
-  fields: readonly { name: string; type: TypeIR }[],
+  fields: readonly { name: string; type: TypeIR; optional?: boolean }[],
 ): FelizFormField[] {
-  return fields.map((f) => ({
-    wireName: f.name,
-    setMsg: `Set${formType}${upperFirst(f.name)}`,
-    encodeExpr: encodeExprFor(f.type, `form.${f.name}`),
-    inputKind: inputKindFor(f.type),
-  }));
+  return fields.map((f) => {
+    const optional = f.optional === true || f.type.kind === "optional";
+    return {
+      wireName: f.name,
+      setMsg: `Set${formType}${upperFirst(f.name)}`,
+      encodeExpr: encodeExprFor(f.type, `form.${f.name}`, optional),
+      inputKind: inputKindFor(f.type),
+      required: !optional,
+    };
+  });
 }
 
 /** Thoth encoder expression that lifts a string-typed form field `access`
- *  (`form.price`) back to its wire type. */
-function encodeExprFor(t: TypeIR, access: string): string {
-  if (t.kind === "primitive") {
-    switch (t.name) {
-      case "int":
-      case "long":
-        return `Encode.int (int ${access})`;
-      case "decimal":
-      case "money":
-        return `Encode.decimal (decimal ${access})`;
-      case "bool":
-        return `Encode.bool (${access} = "true")`;
-      default:
-        return `Encode.string ${access}`; // string, json, datetime (ISO)
+ *  (`form.price`) back to its wire type.  An `optional` field's empty string
+ *  encodes to `Encode.nil` (JSON `null`) — the client omitted it — while a
+ *  filled value encodes as its base type; a bool is never wrapped (unchecked is
+ *  a legitimate `false`, never absent). */
+function encodeExprFor(t: TypeIR, access: string, optional = false): string {
+  const base = scalarBase(t);
+  const encodeBase = (): string => {
+    if (base.kind === "primitive") {
+      switch (base.name) {
+        case "int":
+        case "long":
+          return `Encode.int (int ${access})`;
+        case "decimal":
+        case "money":
+          return `Encode.decimal (decimal ${access})`;
+        case "bool":
+          return `Encode.bool (${access} = "true")`;
+        default:
+          return `Encode.string ${access}`; // string, json, datetime (ISO)
+      }
     }
+    // id / enum (string name) / everything else → the string verbatim.
+    return `Encode.string ${access}`;
+  };
+  const encoded = encodeBase();
+  // A bool always has a value; only text/number optionals fold empty → null.
+  if (optional && !(base.kind === "primitive" && base.name === "bool")) {
+    return `(if ${access} = "" then Encode.nil else ${encoded})`;
   }
-  // id / enum (string name) / everything else → the string verbatim.
-  return `Encode.string ${access}`;
+  return encoded;
 }
 
-/** Whether a create-input field is a SCALAR the v1 string form can render — a
- *  nested part / value object / collection needs a sub-form (follow-up). */
+/** Whether a create-input field is a SCALAR the string form can render (peeling
+ *  `optional`) — a nested part / value object / collection needs a sub-form
+ *  (follow-up). */
 function isScalarInput(t: TypeIR): boolean {
-  return t.kind === "primitive" || t.kind === "id" || t.kind === "enum";
+  const base = scalarBase(t);
+  return base.kind === "primitive" || base.kind === "id" || base.kind === "enum";
 }
 
 /** Build the `FelizForm` for a `CreateForm(of: agg)` from the aggregate's
@@ -308,7 +341,10 @@ export function felizCreateForm(agg: AggregateIR): FelizForm {
   const formType = `${upperFirst(name)}Form`;
   const fields = formFieldsFrom(
     formType,
-    createInputFields(agg).filter((f: FieldIR) => !f.optional && isScalarInput(f.type)),
+    // All SCALAR create inputs — required AND optional (an optional field is
+    // rendered, exempt from the submit guard, and encodes empty → null).  Nested
+    // part / value object / collection inputs still need a sub-form (follow-up).
+    createInputFields(agg).filter((f: FieldIR) => isScalarInput(f.type)),
   );
   return {
     aggregate: name,
@@ -774,15 +810,25 @@ export function renderWireTypes(
   const records = collectRecords(readAggs, contexts);
   if (records.length === 0) return { domain: "", decoders: "" };
 
+  // A field is optional from EITHER signal — the wire-shape `optional` flag or
+  // an `optional`-kind type — and its option lives in ONE place.  Peel the type
+  // to its base so the record spells exactly one ` option` and the decoder pairs
+  // `get.Optional.Field` with the base decoder (`get.Optional` already yields
+  // `'T option`), instead of double-wrapping `string option option`.
+  const fieldOptional = (f: WireRecord["fields"][number]): boolean =>
+    f.optional || f.type.kind === "optional";
+  const fieldBase = (f: WireRecord["fields"][number]): TypeIR =>
+    f.type.kind === "optional" ? f.type.inner : f.type;
+
   const domain = lines(
     "// Domain records — one per aggregate / part / value-object wire shape.",
     ...records.flatMap((rec) => [
       `type ${rec.typeName} =`,
       "  {",
-      ...rec.fields.map(
-        (f) =>
-          `    ${f.name}: ${f.optional ? `${wireFieldType(f.type)} option` : wireFieldType(f.type)}`,
-      ),
+      ...rec.fields.map((f) => {
+        const base = wireFieldType(fieldBase(f));
+        return `    ${f.name}: ${fieldOptional(f) ? `${base} option` : base}`;
+      }),
       "  }",
     ]),
   );
@@ -795,14 +841,14 @@ export function renderWireTypes(
       `  let ${rec.decoderName} : Decoder<${rec.typeName}> =`,
       "    Decode.object (fun get ->",
       "      {",
-      ...rec.fields.map(
-        (f) =>
-          `        ${f.name} = ${
-            f.optional
-              ? `get.Optional.Field "${f.name}" ${decoderExprFor(f.type)}`
-              : `get.Required.Field "${f.name}" ${decoderExprFor(f.type)}`
-          }`,
-      ),
+      ...rec.fields.map((f) => {
+        const dec = decoderExprFor(fieldBase(f));
+        return `        ${f.name} = ${
+          fieldOptional(f)
+            ? `get.Optional.Field "${f.name}" ${dec}`
+            : `get.Required.Field "${f.name}" ${dec}`
+        }`;
+      }),
       "      })",
     ]),
   );
@@ -1004,10 +1050,10 @@ export function renderEncoders(forms: FormRecord[]): string {
 }
 
 /** Emit the `Validation` module — one `<form>Valid` predicate per form, true
- *  when every TEXT/NUMBER field is non-empty (the create/op/workflow fields are
- *  all required — the create builder strips optionals, params are inherently
- *  required).  Checkbox (bool) fields are excluded: an unchecked box is a
- *  legitimate `false`, never "unfilled", so a bool-only form is always valid.
+ *  when every REQUIRED text/number field is non-empty.  Optional fields and
+ *  checkbox (bool) fields are excluded: an optional field left empty encodes to
+ *  `null` (a legitimate omission), and an unchecked box is a legitimate `false`,
+ *  never "unfilled" — so a form of only optional/bool fields is always valid.
  *  The submit button's `prop.disabled` reads this, so an incomplete form can't
  *  POST (the zod-`.min(1)`-parity guard). */
 export function renderValidation(forms: FormRecord[]): string {
@@ -1017,13 +1063,13 @@ export function renderValidation(forms: FormRecord[]): string {
     "// Client-side validation — required text/number fields must be non-empty.",
     "module Validation =",
     ...withFields.flatMap((f, i) => {
-      const required = f.fields.filter((fld) => fld.inputKind !== "checkbox");
+      const required = f.fields.filter((fld) => fld.required && fld.inputKind !== "checkbox");
       const body =
         required.length > 0
           ? required
               .map((fld) => `not (System.String.IsNullOrWhiteSpace form.${fld.wireName})`)
               .join(" && ")
-          : "true"; // a bool-only form has nothing to require
+          : "true"; // nothing required (all optional / bool) → always submittable
       return [
         i > 0 ? "" : undefined,
         `  let ${f.validFn} (form: ${f.formType}) : bool =`,

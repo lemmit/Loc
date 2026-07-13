@@ -77,6 +77,47 @@ describe("feliz wire layer", () => {
     expect(app).toContain('price = get.Required.Field "price" Decode.decimal');
   });
 
+  it("decodes an optional wire field as a single `T option` (no double-option)", async () => {
+    // An optional read field must spell exactly one ` option` on the record and
+    // pair `get.Optional.Field` with the BASE decoder — `get.Optional` already
+    // yields `'T option`, so double-wrapping (`string option option`) is a
+    // decoder/record type mismatch that breaks Fable compilation.
+    const files = await generateSystemFiles(`
+      system Shop {
+        api ShopApi from Catalog
+        subdomain Catalog {
+          context Cat {
+            aggregate Product with crudish { name: string  note: string?  rank: int? }
+            repository Products for Product { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Products {
+            route: "/"
+            body: QueryView {
+              of: Shop.Product.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, p => Card { p.name } } }
+            }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    const app = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"))![1];
+    // Record: a SINGLE ` option` (not `string option option`).
+    expect(app).toContain("    note: string option");
+    expect(app).toContain("    rank: int option");
+    expect(app).not.toContain("option option");
+    // Decoder: `get.Optional.Field` over the base decoder.
+    expect(app).toContain('note = get.Optional.Field "note" Decode.string');
+    expect(app).toContain('rank = get.Optional.Field "rank" Decode.int');
+  });
+
   it("emits a Cmd-based Api module (Fable.SimpleHttp + Thoth → Result)", async () => {
     const app = await appFs();
     expect(app).toContain("open Fable.SimpleHttp");
