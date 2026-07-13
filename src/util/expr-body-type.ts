@@ -14,6 +14,34 @@
 
 import type { ExprIR, TypeIR } from "../ir/types/loom-ir.js";
 
+/** The static type of an expression ONLY when it is *provably* a `string`
+ *  from its own syntactic structure — a string literal, an explicit `→ string`
+ *  convert, or a conditional whose branches are each provably string.  Returns
+ *  `undefined` for everything else, INCLUDING `member`/`ref` reads.
+ *
+ *  Why not `bodyTypeOf` for this?  A scaffold-synthesized accessor
+ *  (`row.<field>`) is an untyped lambda param, so its `memberType` currently
+ *  resolves to `string` for EVERY field (money/bool/int included).  A consumer
+ *  that acts on "is this a string?" (the Feliz `Html.text` cast elision) must
+ *  therefore not trust a member's type until the accessor-typing work lands —
+ *  it can only trust a structurally-guaranteed string.  Once accessors carry
+ *  real field types, callers can widen from this to `bodyTypeOf`. */
+export function provableStringType(e: ExprIR): TypeIR | undefined {
+  const stringType: TypeIR = { kind: "primitive", name: "string" };
+  switch (e.kind) {
+    case "literal":
+      return e.lit === "string" ? stringType : undefined;
+    case "paren":
+      return provableStringType(e.inner);
+    case "convert":
+      return e.target === "string" ? stringType : undefined;
+    case "ternary":
+      return provableStringType(e.then) && provableStringType(e.otherwise) ? stringType : undefined;
+    default:
+      return undefined;
+  }
+}
+
 /** Best-effort type of a lambda's expression body.  Returns `undefined`
  *  for shapes it can't type cheaply. */
 export function bodyTypeOf(e: ExprIR): TypeIR | undefined {

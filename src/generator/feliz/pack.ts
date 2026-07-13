@@ -41,7 +41,10 @@ function asChild(text: string | undefined): string {
 }
 
 function primitiveStack(c: Ctx): string {
-  if (!c.hasChildren) return "Html.div []";
+  // An empty Stack/Group (e.g. a scaffold detail's operations area when the
+  // aggregate has no public operations) renders nothing — `Html.none`, not a
+  // dead empty `<div>`.
+  if (!c.hasChildren) return "Html.none";
   // The walker joins children with `\n${indent}` — so the FIRST child carries
   // no leading indent while its siblings do.  F# lists are offside-sensitive:
   // every element must share a column, so prefix the first child with the same

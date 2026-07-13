@@ -4,6 +4,7 @@
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { provableStringType } from "../../../util/expr-body-type.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   actionHandlerName,
@@ -170,7 +171,10 @@ function emitColumn(
       } else if (body.kind === "literal" && body.lit === "string") {
         cellJsx = ctx.target.escapeText(body.value);
       } else {
-        cellJsx = ctx.target.renderInterpolation(emitExpr(body, childCtx));
+        cellJsx = ctx.target.renderInterpolation(
+          emitExpr(body, childCtx),
+          provableStringType(body),
+        );
       }
     }
     propagateChildFlags(ctx, childCtx);

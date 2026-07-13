@@ -7,6 +7,7 @@
 // `Msg` (the effect body lives in `update`, not the view).  Expression syntax
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
+import type { TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
@@ -24,6 +25,14 @@ import {
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** True when a value is already an F# `string` — so `Html.text` can take it
+ *  directly, without the `string (…)` coercion.  `string` is the only F#
+ *  representation that needs no cast; every other primitive (int / decimal /
+ *  money / bool / datetime) must be coerced. */
+function isStringType(type: TypeIR | undefined): boolean {
+  return type?.kind === "primitive" && type.name === "string";
 }
 
 /** One form field → its typed `Html.input` (shared by create / operation /
@@ -285,8 +294,13 @@ export const felizTarget: WalkerTarget = {
 
   // --- Markup seams — F# flavoured ---------------------------------------
   renderComment: (text: string) => `(* ${text} *)`,
-  // Child-position interpolation: any JS expression becomes a text node.
-  renderInterpolation: (js: string) => `Html.text (string (${js}))`,
+  // Child-position interpolation → a text node.  `Html.text` takes a `string`,
+  // so a non-string value is coerced with F#'s `string` function; a value the
+  // call site knows is already a `string` (a string literal, a Yes/No ternary
+  // of string literals) skips the redundant wrap.  A field read keeps the cast
+  // until scaffold accessors carry real types (see `provableStringType`).
+  renderInterpolation: (js: string, exprType?: TypeIR) =>
+    isStringType(exprType) ? `Html.text (${js})` : `Html.text (string (${js}))`,
   renderAttrBinding: (name: string, js: string) => `prop.custom("${name}", ${js})`,
   renderStyleAttr: () => "",
   // Raw text for markup TEXT position — F# string-body escaping (the pack
