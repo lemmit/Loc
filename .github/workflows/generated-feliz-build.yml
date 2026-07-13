@@ -73,7 +73,9 @@ jobs:
           # a `DestroyForm` (delete) → a mutation Cmd + navigate-on-success and an
           # `OperationForm` (a custom `rename` op) → an id-qualified POST to
           # /{id}/rename.  The ProductNew page covers a `CreateForm` → Thoth
-          # encoders + Elmish form state (inputs → Set Msgs) + a POST Cmd.
+          # encoders + Elmish form state (inputs → Set Msgs) + a POST Cmd, with
+          # TYPED inputs (a `type: number` price, a `bool` inStock checkbox) and
+          # a `Validation`-gated submit the smoke drives (disabled → enabled).
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -81,8 +83,9 @@ jobs:
             subdomain Catalog {
               context Cat {
                 aggregate Product with crudish {
-                  name:  string
-                  price: money
+                  name:    string
+                  price:   money
+                  inStock: bool
                   operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }

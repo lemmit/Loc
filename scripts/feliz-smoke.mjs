@@ -36,14 +36,35 @@ async function main() {
     .first()
     .waitFor({ timeout: 10000 });
 
-  // 4. Back navigation works too.
+  // 3b. Typed + validated form state — open the create form and prove the
+  // validity guard runs: the "Create Product" submit is DISABLED while the
+  // required text/number fields are empty, and ENABLES once they're filled.
+  // (The bool `inStock` field is a checkbox, excluded from the guard.)
+  await page.getByRole("button", { name: "Add a product" }).click();
+  await page.getByText("New product").waitFor();
+  const create = page.getByRole("button", { name: "Create Product" });
+  if (!(await create.isDisabled())) {
+    throw new Error("create submit should be DISABLED with empty required fields");
+  }
+  await page.getByPlaceholder("name").fill("Widget");
+  await page.getByPlaceholder("price").fill("9.99");
+  // Toggle the bool field's checkbox — proves the checkbox widget dispatches.
+  await page.getByRole("checkbox").check();
+  if (!(await create.isEnabled())) {
+    throw new Error("create submit should be ENABLED once required fields are filled");
+  }
+
+  // 4. Back navigation works too (Cancel → Products → Back home).
+  await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Back home" }).click();
   await page.getByText("Clicks:", { exact: false }).waitFor();
 
   if (errors.length > 0) {
     throw new Error(`page errors:\n${errors.join("\n")}`);
   }
-  console.log("SMOKE OK — mount + MVU counter + routing + wire layer all ran");
+  console.log(
+    "SMOKE OK — mount + MVU counter + routing + wire layer + form validity guard all ran",
+  );
 }
 
 try {

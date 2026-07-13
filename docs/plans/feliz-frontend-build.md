@@ -169,8 +169,7 @@ in hand — not before F# output exists.
   and the MVU assembly (both `felizCreateForm` off the same enriched aggregate).
   All Fable + vite verified; the CI example grew a `ProductNew` page.
   **v1 caveat:** REQUIRED SCALAR create-input fields only (nested part / VO /
-  collection inputs need sub-forms — follow-up); all fields string-typed (typed
-  form state + validation is a follow-up).
+  collection inputs need sub-forms — follow-up).
 - ✅ **Operation forms.** An `OperationForm(of: X, op: Y)` on a detail page
   projects to Elmish form state (the op's params) + a curried id-qualified Api
   fn (`POST /api/<agg>/<id>/<op>`, 204 → `unit`) + a `Submit<Op><Agg>Form of
@@ -213,12 +212,27 @@ in hand — not before F# output exists.
   it's the OIDC-handshake redirect the JSX frontends emit. All Fable + vite +
   headless-smoke verified; the CI scaffold leg is now auth-gated. Non-auth uis
   stay byte-identical.
-- **Wire layer covers the full CRUD write path + workflows + auth.** list + byId
-  reads, create, delete, operation, workflow runs, and the auth gate. Remaining
-  Feliz work is polish: deeper pack coverage, the modal open-state, typed form
-  state. Enum wire fields decode as their string name (a proper DU decoder is a
-  follow-up); nested containment/VO records + decoders ARE emitted (transitive
-  off `wireShape`).
+- ✅ **Typed + validated form state.** Every form input (create / operation /
+  workflow — via a shared `renderFormInput` seam) is now typed off its wire type:
+  numerics (`int`/`long`/`decimal`/`money`) render `prop.type'.number`, `bool`
+  renders a `prop.type'.checkbox` (`isChecked` over the string state, bool
+  `onChange` writing back `"true"`/`"false"`), everything else a text input. The
+  form record STAYS all-string (the Thoth encoder already lifts it); `inputKind`
+  is derived from the type, not stamped. A `Validation` module emits one
+  `<form>Valid` predicate (every required text/number field non-empty — checkbox
+  fields excluded, since unchecked is a legitimate `false`), and each submit
+  button reads it via `prop.disabled (not (Validation.fooValid model.F))` — the
+  zod-`.min(1)` submit guard. The runtime smoke DRIVES the guard (open form →
+  submit `isDisabled()` → fill + toggle checkbox → `isEnabled()`); the showcase
+  Product grew a `bool inStock` so all three widget kinds render in CI. All Fable
+  + vite + headless-smoke verified.
+- **Wire layer covers the full CRUD write path + workflows + auth, with typed
+  validated forms.** list + byId reads, create, delete, operation, workflow runs,
+  the auth gate, and typed/validated form inputs. Remaining Feliz work is polish:
+  deeper pack coverage, the modal open-state, nested/collection form inputs,
+  `currentUser.<field>` decode. Enum wire fields decode as their string name (a
+  proper DU decoder is a follow-up); nested containment/VO records + decoders ARE
+  emitted (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

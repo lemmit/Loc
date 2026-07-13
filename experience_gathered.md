@@ -2321,3 +2321,45 @@ gate — a different shape worth noting.
 Proven end-to-end: the auth app AND an auth-gated scaffold app Fable-compile +
 vite-build + run (the scaffold smoke passes THROUGH the gate); the CI scaffold
 leg is now auth-gated. Same prove-it loop as §23–§31.
+
+## 33. Feliz typed/validated form state — the widget is typed, the record stays string (2026-07-13)
+
+The forms (§25/§26/§30) bound every field to a text `Html.input` over an
+all-string record. This slice makes the WIDGET typed and adds a submit guard,
+without touching the string record — the least-invasive path to zod-parity.
+
+- **`prop.type` doesn't lex — Feliz uses `prop.type'`.** `type` is an F#
+  keyword, so `prop.type.number` fails at the `.type.` (`Unexpected keyword
+  'type'`). Feliz names it with a trailing apostrophe: `prop.type'.number` /
+  `prop.type'.checkbox`. The Fable spike caught this immediately — worth a spike
+  before wiring any new `prop.*` you haven't emitted before.
+
+- **Type the widget, keep the record a string.** A raw `Html.input` value is
+  inherently a string, and the Thoth encoder already lifts it (`Encode.decimal
+  (decimal form.price)`). So numerics render `prop.type'.number` (browser-enforced
+  numeric entry) but the form field stays `string` — no parse-on-keystroke, no
+  partial-input state, the encoder path is untouched. The `inputKind` is DERIVED
+  from the wire type (`inputKindFor`), never stamped.
+
+- **A checkbox binds bool↔string at the seam.** `bool` → `prop.type'.checkbox`
+  + `prop.isChecked (model.F.x = "true")` + a bool `onChange` writing back the
+  STRING `"true"`/`"false"` (`if v then "true" else "false"`). The record stays
+  string; the checkbox is just a typed lens over it. `prop.value` is wrong for a
+  checkbox — use `prop.isChecked`.
+
+- **A checkbox is never "unfilled" — exclude it from the non-empty guard.** The
+  `Validation` module (`<form>Valid : Form -> bool`) requires every TEXT/NUMBER
+  field non-empty (`not (System.String.IsNullOrWhiteSpace form.x)`, `&&`-joined,
+  one line — offside-safe), and the submit button reads it via `prop.disabled
+  (not (Validation.fooValid model.F))`. But a bool field's empty-string initial
+  state is an ENCODING artifact, not a missing value (unchecked = a legitimate
+  `false`), so checkbox fields are filtered OUT of the predicate — else a bool-only
+  form could never submit until the box was toggled. A bool-only form's predicate
+  degrades to `true`.
+
+- **The runtime smoke can prove a GUARD (unlike the auth Anon path, §32).**
+  Disabled-until-valid is fully client-side, so the no-backend smoke drives it
+  for real: open the create form → assert the submit `isDisabled()` with empty
+  fields → fill name+price + toggle the checkbox → assert `isEnabled()`. The
+  showcase Product gained a `bool inStock` so all three widget kinds (text /
+  number / checkbox) render in the gated leg. Same prove-it loop as §23–§32.
