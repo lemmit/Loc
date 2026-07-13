@@ -2,9 +2,10 @@
 // (unfoldable-api-derivation.md, A3 + A3.2).  The two are a pair:
 // `scaffoldHandlers` emits a `commandHandler` / `queryHandler` per eligible
 // source of every aggregate in the context (operation, create, repository find,
-// get-by-id read); `scaffoldApi` emits the `route <M> … -> Context.Handler` that
-// binds to it.  Both derive names / methods / paths from the SAME shared helper,
-// so a route can never target a handler the other didn't emit.
+// get-by-id read, and destroy when the aggregate has a canonical `destroy { }`);
+// `scaffoldApi` emits the `route <M> … -> Context.Handler` that binds to it.
+// Both derive names / methods / paths from the SAME shared helper, so a route
+// can never target a handler the other didn't emit.
 //
 // Two things are pinned here:
 //   1. Expansion — the macros splice the expected CommandHandler / QueryHandler /
@@ -12,9 +13,9 @@
 //   2. Equivalence — the macro output lowers to the SAME IR as the hand-written
 //      explicit `commandHandler`/`queryHandler` + `route` form.
 //
-// `destroy` is intentionally NOT emitted (a destroy handler body has no
-// compiling shape today — no repo-delete verb / entity `destroy()` method); the
-// last test pins that deliberate deferral.
+// `destroy` is emitted only for an aggregate carrying a canonical (unnamed)
+// `destroy { }` — the handler body loads by id then `<Repo>.delete(o)` (a
+// first-class `repo-delete` handler statement); the last test pins that.
 
 import { AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
@@ -259,23 +260,32 @@ describe("scaffoldHandlers + scaffoldApi — A3.2 create / find source kinds", (
     const routes = api.routes.map((r) => `${r.method} ${r.path} -> ${r.target.handler}`);
     expect(routes).toContain("POST /orders -> CreateOrder");
     expect(routes).toContain("GET /orders/by_status -> ByStatus");
-    // Full ordered surface: get-by-id, find, create, operation.
+    // Full ordered surface: get-by-id, find, create, operation, destroy.
     expect(routes).toEqual([
       "GET /orders/{orderId} -> GetOrder",
       "GET /orders/by_status -> ByStatus",
       "POST /orders -> CreateOrder",
       "POST /orders/{orderId}/cancel -> CancelOrder",
+      "DELETE /orders/{orderId} -> DestroyOrder",
     ]);
   });
 
-  it("does NOT emit a destroy handler or DELETE route (deliberate deferral)", async () => {
+  it("emits a DestroyOrder commandHandler + DELETE /orders/{orderId} route (canonical destroy)", async () => {
     const { model } = await parseString(A32, { validate: false });
-    const handlerNames = [...AstUtils.streamAllContents(model)]
-      .filter((n) => isCommandHandler(n) || isQueryHandler(n))
-      .map((n) => (n as CommandHandler | QueryHandler).name);
-    expect(handlerNames).not.toContain("DestroyOrder");
+    // The aggregate carries a canonical `destroy { }`, so the destroy target is
+    // emitted: a void commandHandler whose body loads by id then `Orders.delete(o)`.
+    const cmd = [...AstUtils.streamAllContents(model)]
+      .filter(isCommandHandler)
+      .find((c) => c.name === "DestroyOrder") as CommandHandler;
+    expect(cmd).toBeDefined();
+    expect(cmd.params.map((p) => p.name)).toEqual(["orderId"]);
+    // Body: `let o = Orders.getById(orderId)` then `Orders.delete(o)`.
+    expect(cmd.body.map((s) => s.$type)).toEqual(["LetStmt", "AssignOrCallStmt"]);
+    // Void — no return value after a delete.
+    expect(cmd.returnType).toBeUndefined();
     const api = [...AstUtils.streamAllContents(model)].find(isApi) as Api;
-    expect(api.routes.map((r) => r.method)).not.toContain("DELETE");
+    const routes = api.routes.map((r) => `${r.method} ${r.path} -> ${r.target.handler}`);
+    expect(routes).toContain("DELETE /orders/{orderId} -> DestroyOrder");
   });
 
   it("IR-validates the create/find scaffolded form with no errors (generation gate)", async () => {

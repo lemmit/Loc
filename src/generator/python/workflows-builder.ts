@@ -303,7 +303,7 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
   const out = new Map<string, RepoNeed>();
   const visit = (sts: WorkflowStmtIR[]): void => {
     for (const st of sts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run") {
+      if (st.kind === "repo-let" || st.kind === "repo-run" || st.kind === "repo-delete") {
         out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
       }
       if (st.kind === "for-each") {
@@ -827,6 +827,12 @@ export function pyWorkflowStmtTarget(
         ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
       ].join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
+    },
+    repoDelete: (st, i) => {
+      // `<Repo>.delete(o)` → `await <repo>.delete(<entity>.id)`.  The generated
+      // repository's `delete(id)` takes the aggregate's id token, so append
+      // `.id`.  Repo var mirrors the repo-let arm (`snake(repoName)`).
+      return [`${i}await ${snake(st.repoName)}.delete(${renderPyExpr(st.entity, rctx)}.id)`];
     },
     forEach: (st, i, body) => {
       const saves = st.savesPerIteration.map(

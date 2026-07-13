@@ -1527,6 +1527,22 @@ export type WorkflowStmtIR =
       origin?: OriginRef;
     }
   | {
+      // `<Repo>.delete(o)` / `<Repo>.remove(o)` — a repository DELETE
+      // (destroy) call inside a handler body.  `entity` is the loaded
+      // aggregate reference to remove (e.g. the `o` from `let o =
+      // Orders.getById(id)`).  Each backend renders it to its already-emitted
+      // repository delete verb, with the argument shape that backend expects
+      // (aggregate value for .NET/Java/Elixir, `<entity>.id` for Hono/Python).
+      // Distinct from `op-call`: a delete is not an aggregate operation, and
+      // the removed entity must NOT be re-saved at handler exit (`computeSaves`
+      // never registers a `repo-delete` as a mutation target).
+      kind: "repo-delete";
+      repoName: string;
+      aggName: string;
+      entity: ExprIR;
+      origin?: OriginRef;
+    }
+  | {
       // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
       // aggregate array, binding each element to `var`.  Mutations to
       // `var` inside the body persist via `savesPerIteration` — the same

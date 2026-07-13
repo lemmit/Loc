@@ -156,7 +156,8 @@ function collectRepos(h: Handler): Map<string, string> {
   const repos = new Map<string, string>();
   const walk = (stmts: readonly WorkflowStmtIR[]): void => {
     for (const s of stmts) {
-      if (s.kind === "repo-let" || s.kind === "repo-run") repos.set(s.repoName, s.aggName);
+      if (s.kind === "repo-let" || s.kind === "repo-run" || s.kind === "repo-delete")
+        repos.set(s.repoName, s.aggName);
       else if (s.kind === "for-each") {
         walk(s.body);
         for (const sv of s.savesPerIteration) repos.set(sv.repoName, sv.aggName);

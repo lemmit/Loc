@@ -167,6 +167,7 @@ export function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string
     if (s.kind === "factory-let") aggs.add(s.aggName);
     if (s.kind === "repo-let") aggs.add(s.aggName);
     if (s.kind === "repo-run") aggs.add(s.aggName);
+    if (s.kind === "repo-delete") aggs.add(s.aggName);
     if (s.kind === "for-each") {
       for (const save of s.savesPerIteration) aggs.add(save.aggName);
       for (const b of s.body) visit(b);
@@ -270,6 +271,13 @@ export function javaWorkflowStmtTarget(
         ?.operations.find((o) => o.name === s.op);
       if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
       return [`${indent}${s.target}.${s.op}(${rendered.join(", ")});`];
+    },
+    repoDelete: (s, indent) => {
+      // `<Repo>.delete(o)` → `<repo>.delete(<entity>)`.  The Spring Data
+      // repository's `delete` takes the AGGREGATE (not its id), so the entity
+      // ref renders directly; repo field keyed by aggregate (see `repoField`).
+      collectJavaExprImports(s.entity, imports);
+      return [`${indent}${repoField(s.aggName)}.delete(${renderJavaExpr(s.entity, renderCtx)});`];
     },
     emit: (s, indent) => {
       // Workflow-level emission has no aggregate stream to ride: the

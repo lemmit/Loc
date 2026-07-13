@@ -821,6 +821,11 @@ function validateWorkflowBody(
         mutated = true;
         break;
       }
+      case "repo-delete":
+        // `<Repo>.delete(o)` — a repository DELETE is a persistence mutation, so
+        // it satisfies a `transactional` workflow's effect requirement.
+        mutated = true;
+        break;
       case "assign":
         // `field := value` / `field += value` / `field -= value` — own-state
         // mutation onto the workflow's own `Property` state.  Recognised forms:

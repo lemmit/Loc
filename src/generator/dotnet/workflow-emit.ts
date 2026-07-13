@@ -1695,6 +1695,16 @@ export function csWorkflowStmtTarget(
       }
       return [callLine];
     },
+    repoDelete: (st, indent) => {
+      // `<Repo>.delete(o)` → `await _<repo>.DeleteAsync(<entity>, cancellationToken)`.
+      // The EF repository's `DeleteAsync` takes the AGGREGATE (not its id), so the
+      // entity ref renders directly.  Field naming + cancellation token mirror the
+      // repo-let / op-call arms above.
+      const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
+      return [
+        `${indent}await ${fieldName}.DeleteAsync(${renderArg(st.entity)}, cancellationToken);`,
+      ];
+    },
     exprLet: (st, indent) => {
       // `let x = files.get(k)` — a resource-op RHS is an async helper, so
       // await it; ordinary expr-lets render unchanged.

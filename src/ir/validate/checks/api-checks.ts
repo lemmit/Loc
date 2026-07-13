@@ -41,6 +41,7 @@ function handlerMutates(h: CommandHandlerIR | QueryHandlerIR): boolean {
       s.kind === "emit" ||
       s.kind === "factory-let" ||
       s.kind === "op-call" ||
+      s.kind === "repo-delete" ||
       s.kind === "assign" ||
       s.kind === "domain-service-call"
     ) {
@@ -62,6 +63,7 @@ function aggregatesTouched(h: CommandHandlerIR | QueryHandlerIR): Set<string> {
       case "repo-let":
       case "repo-run":
       case "op-call":
+      case "repo-delete":
       case "if-let":
         aggs.add(s.aggName);
         break;

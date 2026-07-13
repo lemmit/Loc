@@ -339,6 +339,8 @@ function stepNode(id: string, s: WorkflowStmtIR): StepNode {
       return { id, decl: `${id}["${label(`${s.target.segments.join(".")} := ...`)}"]` };
     case "op-call":
       return { id, decl: `${id}["${label(`${s.target}.${s.op}()`)}"]` };
+    case "repo-delete":
+      return { id, decl: `${id}["${label(`${s.repoName}.delete(${s.aggName})`)}"]` };
     case "resource-call": {
       const op = s.call.kind === "call" ? s.call.resourceOp : undefined;
       return { id, decl: `${id}["${label(`${op?.resourceName}.${op?.verb}()`)}"]` };
@@ -499,6 +501,8 @@ function sequenceMessages(s: WorkflowStmtIR): string[] {
       return [`  WF->>${s.repoName}: ${s.method}()`, `  ${s.repoName}-->>WF: ${s.name}`];
     case "op-call":
       return [`  WF->>${s.aggName}: ${s.op}()`];
+    case "repo-delete":
+      return [`  WF->>${s.repoName}: delete(${s.aggName})`];
     case "repo-run":
       return [
         `  WF->>${s.repoName}: run(${s.retrievalName})`,

@@ -71,7 +71,12 @@ function reposUsed(h: Handler): string[] {
   const aggs = new Set<string>();
   const walk = (stmts: readonly WorkflowStmtIR[]): void => {
     for (const s of stmts) {
-      if (s.kind === "repo-let" || s.kind === "repo-run" || s.kind === "factory-let") {
+      if (
+        s.kind === "repo-let" ||
+        s.kind === "repo-run" ||
+        s.kind === "factory-let" ||
+        s.kind === "repo-delete"
+      ) {
         aggs.add(s.aggName);
       } else if (s.kind === "for-each") {
         for (const save of s.savesPerIteration) aggs.add(save.aggName);

@@ -143,6 +143,30 @@ describe("explicit api handlers — lowering", () => {
     expect(JSON.stringify([ch, qh])).not.toContain("__bad__");
   });
 
+  it("lowers `<Repo>.delete(o)` to a repo-delete stmt that does not re-save the removed entity", async () => {
+    // A destroy commandHandler loads by id then hard-deletes.  `Orders.delete(o)`
+    // must lower to a `repo-delete` WorkflowStmtIR (not an op-call on `o`, which
+    // would stamp aggName:"Unknown" and re-save the just-removed row at exit).
+    const cmd = `
+      commandHandler DestroyOrder(orderId: Order id) {
+        let o = Orders.getById(orderId)
+        Orders.delete(o)
+      }`;
+    const { model } = await parseString(
+      SYS(cmd, `route DELETE "/orders/{id}" -> Ordering.DestroyOrder`),
+      {
+        validate: false,
+      },
+    );
+    const ctx = allContexts(lowerModel(model)).find((c) => c.name === "Ordering")!;
+    const ch = ctx.commandHandlers!.find((h) => h.name === "DestroyOrder")!;
+    expect(ch.statements.map((s) => s.kind)).toEqual(["repo-let", "repo-delete"]);
+    const del = ch.statements.find((s) => s.kind === "repo-delete")!;
+    expect(del).toMatchObject({ kind: "repo-delete", repoName: "Orders", aggName: "Order" });
+    // The removed entity is NOT persisted again on the way out.
+    expect(ch.savesAtExit).toEqual([]);
+  });
+
   it("lowers routes onto ApiIR.routes", async () => {
     const { model } = await parseString(SYS(`${OK_CMD}\n${OK_QRY}`, OK_ROUTES), {
       validate: false,
@@ -172,6 +196,27 @@ describe("explicit api handlers — layering gates", () => {
       }`;
     const codes = await codesFor(bad, `route GET "/orders/{id}" -> Ordering.BadQuery`);
     expect(codes).toContain("loom.query-handler-saves");
+  });
+
+  it("loom.query-handler-saves — a queryHandler that hard-deletes via `<Repo>.delete`", async () => {
+    // A repo-delete mutates, so it is forbidden in a read-only queryHandler
+    // (permitted in a commandHandler, which has no no-mutation gate).
+    const bad = `
+      queryHandler BadDelete(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        Orders.delete(o)
+      }`;
+    const codes = await codesFor(bad, `route DELETE "/orders/{id}" -> Ordering.BadDelete`);
+    expect(codes).toContain("loom.query-handler-saves");
+    // The same body in a commandHandler is accepted (delete is a legal command mutation).
+    const ok = `
+      commandHandler OkDelete(orderId: Order id) {
+        let o = Orders.getById(orderId)
+        Orders.delete(o)
+      }`;
+    expect(await codesFor(ok, `route DELETE "/orders/{id}" -> Ordering.OkDelete`)).not.toContain(
+      "loom.query-handler-saves",
+    );
   });
 
   it("loom.handler-param-reserved-id — a handler parameter named `id`", async () => {

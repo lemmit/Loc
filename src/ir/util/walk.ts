@@ -204,6 +204,9 @@ export function walkWorkflowStmtChildren(s: WorkflowStmtIR, v: WorkflowStmtChild
     case "op-call":
       for (const a of s.args) expr?.(a);
       break;
+    case "repo-delete":
+      expr?.(s.entity);
+      break;
     case "repo-run":
       for (const a of s.retrievalArgs) expr?.(a);
       if (s.page?.offset) expr?.(s.page.offset);
