@@ -191,11 +191,22 @@ in hand — not before F# output exists.
   into the build workflow (not a separate `-e2e.yml`) to reuse the single slow
   `dotnet fable` step. The runtime sibling the JSX frontends get from
   `generated-{vue,svelte}-e2e.yml`.
-- **Wire layer now covers the full CRUD write path.** list + byId reads, create,
-  delete, and operation. Remaining Feliz work: broader pack primitive coverage,
-  workflows, and auth. Enum wire fields decode as their string name (a proper DU
-  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
-  (transitive off `wireShape`).
+- ✅ **Workflow forms.** A `WorkflowForm(runs: Y)` projects to Elmish form state
+  (the workflow's scalar params) + a PARAMLESS `Submit<Wf>Form` trigger that
+  POSTs the Thoth-encoded body to `/api/workflows/<snake wf>` (204 → `unit`) + a
+  `<Wf>Done` result that resets + navigates home. Reuses the create/operation
+  form machinery via the shared `FormRecord`; the delta is the `/workflows/<wf>`
+  endpoint (no id, no response decode). The `renderWorkflowForm` seam emits the
+  inputs + submit; `walkBody` now threads the ui's `workflowsByName` so the
+  `runs:` ref resolves. Also fixed a latent bug: a SINGLE-page ui with any form
+  now opens `Feliz.Router` (+ refs it) for `Cmd.navigate` (create/op/workflow
+  all navigate on success — previously only routed uis opened the router). All
+  Fable + vite verified; the CI scaffold leg now includes a `workflows:` form.
+- **Wire layer now covers the full CRUD write path + workflows.** list + byId
+  reads, create, delete, operation, and workflow runs. Remaining Feliz work:
+  **auth** (login/session) and deeper pack coverage. Enum wire fields decode as
+  their string name (a proper DU decoder is a follow-up); nested containment/VO
+  records + decoders ARE emitted (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

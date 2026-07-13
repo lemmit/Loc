@@ -2245,3 +2245,40 @@ sharp F# offside rule the earlier single-child emitters never hit.
 Verified the whole scaffold app end-to-end (generate → dotnet fable → vite build
 → vite preview → headless Chromium: Home + List(toolbar/table/wire) + New all
 ran) before shipping; the CI gate now runs both the showcase and a scaffold app.
+
+## 31. Feliz workflow forms — the create form at a different endpoint, and the single-page-router bug (2026-07-13)
+
+Workflow forms (`WorkflowForm(runs: Y)`) round out the Feliz form family. They're
+the smallest new increment yet — the create form's POST at a different route —
+but they surfaced a latent router bug that had been hiding behind multi-page
+examples.
+
+- **A workflow is the create form minus the id, minus the decode.** `POST
+  /api/workflows/<snake wf>` with the workflow's params as the body, 204 → unit
+  (no response record). So the `FelizWorkflowForm` reuses the shared `FormRecord`
+  (type/encoder/Model-field/init renderers unchanged, fed
+  `[...create, ...operation, ...workflow]`) and only adds its own Msg/update/Api
+  — a paramless `Submit` (unlike operation's id-carrying one) firing a POST that
+  returns unit (like operation/delete, unlike create). Three form kinds now share
+  one record abstraction; each is ~40 lines of its own wiring.
+
+- **The `runs:` ref needs `workflowsByName` threaded into `walkBody`.** The
+  shared walker resolves `WorkflowForm(runs: X)` against `ctx.workflowsByName`
+  (and `bcByWorkflow`), which Feliz's `renderPageView` was passing as empty maps
+  → the default path emitted "workflow not found". Fix: build the map from
+  `context.workflows` and pass it (plus an empty `bcByAggregate`, positionally
+  ahead of it) into the `walkBody` call. Then the `renderWorkflowForm` override
+  reads the same map. Positional-arg threading — count the params.
+
+- **A single-page ui with ANY form was silently broken.** `Feliz.Router` was
+  opened only when `routed` (>1 page / a `:id` route), but EVERY form
+  (create/operation/workflow) navigates on success via `Cmd.navigate` — which
+  lives in `Feliz.Router`. A single-page workflow app (one `/open` page) is not
+  routed, so it failed to compile (`'navigate' is not defined`). The multi-page
+  create/op examples had masked it. Fix: open `Feliz.Router` + add its package
+  ref when `routed || anyForm`. The gate for a dependency must match every
+  feature that uses it, not just the headline one.
+
+Proven end-to-end: the workflow app (and a scaffold app with a `workflows:` form)
+Fable-compile + vite-build + run (scaffold smoke still green); the CI scaffold leg
+now carries a WorkflowForm. Same prove-it loop as §23–§30.

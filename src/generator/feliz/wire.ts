@@ -26,6 +26,7 @@ import type {
   OperationIR,
   PageIR,
   TypeIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
@@ -321,6 +322,50 @@ export function felizOperationForm(agg: AggregateIR, op: OperationIR): FelizOper
   };
 }
 
+/** A workflow form a page hosts (`WorkflowForm(runs: Y)`), projected to its MVU
+ *  wiring: a string-typed `<Wf>Form` record, one `Set` `Msg` per workflow param,
+ *  a paramless `Submit<Wf>Form` trigger that POSTs to `/api/workflows/<wf>`, and
+ *  a `<Wf>Done` result (204, no body → `unit`) that resets + navigates home.
+ *  The create form's POST (no id) with the operation form's 204 result. */
+export interface FelizWorkflowForm extends FormRecord {
+  /** The workflow run (`openAccount`). */
+  workflow: string;
+  /** F# api fn name (`runOpenAccount`). */
+  apiFn: string;
+  /** `Msg` the submit button dispatches (`SubmitOpenAccountForm`). */
+  submitMsg: string;
+  /** `Msg` carrying the workflow's `Result<unit, string>` (`OpenAccountDone`). */
+  doneMsg: string;
+  /** Full POST route (`/api/workflows/open_account`). */
+  route: string;
+  /** `Router.navigate` segments after success (`[""]` → home). */
+  navigateSegs: string[];
+}
+
+/** Build the `FelizWorkflowForm` for a `WorkflowForm(runs: wf)`.  Fields are the
+ *  workflow's scalar params; the endpoint is `/api/workflows/<snake wf>`. */
+export function felizWorkflowForm(wf: WorkflowIR): FelizWorkflowForm {
+  const wfCap = upperFirst(wf.name);
+  const formType = `${wfCap}Form`;
+  const fields = formFieldsFrom(
+    formType,
+    wf.params.filter((p) => isScalarInput(p.type)),
+  );
+  return {
+    workflow: wf.name,
+    formType,
+    formField: formType,
+    emptyBinding: `empty${formType}`,
+    encoderFn: lowerFirst(formType),
+    apiFn: `run${wfCap}`,
+    submitMsg: `Submit${formType}`,
+    doneMsg: `${wfCap}Done`,
+    route: `${API_BASE_PATH}/workflows/${snake(wf.name)}`,
+    navigateSegs: [""], // home
+    fields,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Read collection — scan a page body for the `.all` query sites its view issues
 // ---------------------------------------------------------------------------
@@ -503,6 +548,44 @@ export function collectPageOperationForms(
     const key = form.formType;
     if (form.fields.length === 0 || seen.has(key)) continue;
     seen.add(key);
+    out.push(form);
+  }
+  return out;
+}
+
+/** Every `WorkflowForm(runs: <wf>)` workflow name a page body hosts, in tree
+ *  order (the `runs:` arg is a bare ref to a workflow). */
+function workflowFormRuns(body: ExprIR, workflowNames: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call" && e.name === "WorkflowForm") {
+      const names = e.argNames ?? [];
+      const idx = names.indexOf("runs");
+      const runsArg = idx >= 0 ? e.args[idx] : undefined;
+      if (runsArg?.kind === "ref" && workflowNames.has(runsArg.name)) out.push(runsArg.name);
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(body);
+  return out;
+}
+
+/** Collect the workflow forms a page hosts (`WorkflowForm(runs: X)`), deduped by
+ *  workflow.  Skips workflows with no renderable scalar params. */
+export function collectPageWorkflowForms(
+  page: PageIR,
+  workflowsByName: ReadonlyMap<string, WorkflowIR>,
+): FelizWorkflowForm[] {
+  if (!page.body) return [];
+  const nameSet = new Set(workflowsByName.keys());
+  const out: FelizWorkflowForm[] = [];
+  const seen = new Set<string>();
+  for (const wfName of workflowFormRuns(page.body, nameSet)) {
+    const wf = workflowsByName.get(wfName);
+    if (!wf) continue;
+    const form = felizWorkflowForm(wf);
+    if (form.fields.length === 0 || seen.has(form.formType)) continue;
+    seen.add(form.formType);
     out.push(form);
   }
   return out;
@@ -787,21 +870,45 @@ function renderOperationFn(f: FelizOperationForm): (string | undefined)[] {
   ];
 }
 
+/** One async workflow function — a PARAMLESS `POST /api/workflows/<wf>` with the
+ *  Thoth-encoded form body; a 2xx is `Ok ()` (the workflow returns 204). */
+function renderWorkflowFn(f: FelizWorkflowForm): (string | undefined)[] {
+  return [
+    `  let ${f.apiFn} (form: ${f.formType}) : Async<Result<unit, string>> =`,
+    "    async {",
+    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    "      let! response =",
+    `        Http.request "${f.route}"`,
+    "        |> Http.method POST",
+    "        |> Http.content (BodyContent.Text body)",
+    '        |> Http.header (Headers.contentType "application/json")',
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 204 then",
+    "        return Ok ()",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
 /** Emit the `Api` module — one `Cmd`-issuing async function per read (fetch +
  *  Thoth decode → `Result`), per mutation (verb request → `Result`), per create
- *  form (encode + POST → decoded record), and per operation form (encode + POST
- *  to `/<id>/<op>` → `unit`), all over `Fable.SimpleHttp`. */
+ *  form (encode + POST → decoded record), per operation form (encode + POST to
+ *  `/<id>/<op>` → `unit`), and per workflow form (encode + POST to
+ *  `/workflows/<wf>` → `unit`), all over `Fable.SimpleHttp`. */
 export function renderApiModule(
   reads: FelizRead[],
   mutations: FelizMutation[] = [],
   forms: FelizForm[] = [],
   operationForms: FelizOperationForm[] = [],
+  workflowForms: FelizWorkflowForm[] = [],
 ): string {
   if (
     reads.length === 0 &&
     mutations.length === 0 &&
     forms.length === 0 &&
-    operationForms.length === 0
+    operationForms.length === 0 &&
+    workflowForms.length === 0
   ) {
     return "";
   }
@@ -810,6 +917,7 @@ export function renderApiModule(
     ...mutations.map((m) => renderMutationFn(m)),
     ...forms.map((f) => renderCreateFn(f)),
     ...operationForms.map((f) => renderOperationFn(f)),
+    ...workflowForms.map((f) => renderWorkflowFn(f)),
   ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",

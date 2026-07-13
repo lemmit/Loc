@@ -12,6 +12,7 @@ import type {
   FelizMutation,
   FelizOperationForm,
   FelizRead,
+  FelizWorkflowForm,
   FormRecord,
 } from "./wire.js";
 
@@ -114,6 +115,7 @@ export function renderMsg(
   mutations: readonly FelizMutation[] = [],
   forms: readonly FelizForm[] = [],
   operationForms: readonly FelizOperationForm[] = [],
+  workflowForms: readonly FelizWorkflowForm[] = [],
 ): string {
   const cases = [
     ...(routed ? ["  | UrlChanged of string list"] : []),
@@ -137,6 +139,12 @@ export function renderMsg(
     ...operationForms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
       `  | ${f.submitMsg} of string`,
+      `  | ${f.doneMsg} of Result<unit, string>`,
+    ]),
+    // A workflow form: `Set` per param + a PARAMLESS `Submit` + a `Done` result.
+    ...workflowForms.flatMap((f) => [
+      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
   ];
@@ -179,6 +187,7 @@ export function renderUpdate(
   mutations: readonly FelizMutation[] = [],
   forms: readonly FelizForm[] = [],
   operationForms: readonly FelizOperationForm[] = [],
+  workflowForms: readonly FelizWorkflowForm[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -253,6 +262,21 @@ export function renderUpdate(
       `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
     ].join("\n");
   });
+  // A workflow form: per-field setters, a PARAMLESS submit firing the POST
+  // `Cmd`, and a `Done` result that resets + navigates.
+  const workflowArms = workflowForms.map((f) => {
+    const setters = f.fields.map(
+      (fld) =>
+        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
+    );
+    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    return [
+      ...setters,
+      `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.doneMsg}`,
+      `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
+      `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+    ].join("\n");
+  });
   const arms = [
     ...routeArms,
     ...actionArms,
@@ -260,6 +284,7 @@ export function renderUpdate(
     ...mutationArms,
     ...formArms,
     ...operationArms,
+    ...workflowArms,
   ];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";

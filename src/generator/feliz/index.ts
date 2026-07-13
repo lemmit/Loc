@@ -14,6 +14,7 @@ import type {
   PageIR,
   SystemIR,
   UiIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
@@ -33,10 +34,12 @@ import {
   collectPageMutations,
   collectPageOperationForms,
   collectPageReads,
+  collectPageWorkflowForms,
   type FelizForm,
   type FelizMutation,
   type FelizOperationForm,
   type FelizRead,
+  type FelizWorkflowForm,
   renderApiModule,
   renderEncoders,
   renderFormTypes,
@@ -86,6 +89,7 @@ function renderPageView(
   page: PageIR,
   ui: UiIR,
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  workflowsByName: ReadonlyMap<string, WorkflowIR>,
   fnName: string,
   takesRouteId = false,
 ): string {
@@ -104,6 +108,8 @@ function renderPageView(
     new Map(), // userComponents
     ui.apiParams,
     aggregatesByName,
+    new Map(), // bcByAggregate — unused by the Feliz form seams (no enum resolution)
+    workflowsByName, // WorkflowForm(runs:) resolves here
   );
   const wrappers = dispatchWrappers(page, result.usedActions ?? new Set());
   const body = indentBlock(result.tsx, 4);
@@ -249,6 +255,29 @@ function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fe
   return out;
 }
 
+/** All workflows reachable from a ui's contexts, keyed by name. */
+function workflowsForUi(contexts: EnrichedBoundedContextIR[]): Map<string, WorkflowIR> {
+  const out = new Map<string, WorkflowIR>();
+  for (const c of contexts) for (const w of c.workflows) out.set(w.name, w);
+  return out;
+}
+
+/** The workflow forms a ui hosts, across ALL its pages (deduped by workflow) —
+ *  `WorkflowForm(runs: X)`. */
+function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizWorkflowForm[] {
+  const workflowsByName = workflowsForUi(contexts);
+  const seen = new Set<string>();
+  const out: FelizWorkflowForm[] = [];
+  for (const page of ui.pages) {
+    for (const f of collectPageWorkflowForms(page, workflowsByName)) {
+      if (seen.has(f.formType)) continue;
+      seen.add(f.formType);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -288,11 +317,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const workflowsByName = workflowsForUi(contexts);
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
   const forms: FelizForm[] = formsForUi(ui, contexts);
   const operationForms: FelizOperationForm[] = operationFormsForUi(ui, contexts);
-  const formRecords = [...forms, ...operationForms]; // shared record/encoder/type wiring
+  const workflowForms: FelizWorkflowForm[] = workflowFormsForUi(ui, contexts);
+  const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
   // Http/Api are needed for reads, mutations AND forms (POST); the Thoth
@@ -309,10 +340,21 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const actions = combinedActions(ui);
   const model = renderModel(state, reads, routed, formRecords);
   const init = renderInit(state, reads, routed, formRecords);
-  const msg = renderMsg(actions, reads, routed, mutations, forms, operationForms);
-  const update = renderUpdate(actions, state, reads, routed, mutations, forms, operationForms);
+  const msg = renderMsg(actions, reads, routed, mutations, forms, operationForms, workflowForms);
+  const update = renderUpdate(
+    actions,
+    state,
+    reads,
+    routed,
+    mutations,
+    forms,
+    operationForms,
+    workflowForms,
+  );
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
-  const api = hasHttp ? renderApiModule(reads, mutations, forms, operationForms) : "";
+  const api = hasHttp
+    ? renderApiModule(reads, mutations, forms, operationForms, workflowForms)
+    : "";
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
 
@@ -322,18 +364,20 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const views = routed
     ? [
         ...pages.map((p) =>
-          renderPageView(p, ui, aggregatesByName, pageViewFn(p), hasRouteParam(p)),
+          renderPageView(p, ui, aggregatesByName, workflowsByName, pageViewFn(p), hasRouteParam(p)),
         ),
         "",
         renderRootView(pages),
       ]
-    : [renderPageView(pages[0]!, ui, aggregatesByName, "view")];
+    : [renderPageView(pages[0]!, ui, aggregatesByName, workflowsByName, "view")];
 
   return lines(
     "module App",
     "",
     "open Feliz",
-    routed && "open Feliz.Router",
+    // Feliz.Router provides `React.router` (routed) AND `Cmd.navigate` (any form
+    // navigates on success), so a single-page ui with a form still needs it.
+    (routed || hasForms) && "open Feliz.Router",
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads) AND encoders (create forms).
@@ -386,13 +430,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
 // Fable.SimpleHttp for the fetch, Thoth.Json for the decoders.  A read-free
 // (Counter-class) app omits them so its project stays minimal.
 // A multi-page ui additionally pulls in Feliz.Router for URL routing.
-function fsproj(hasHttp: boolean, routed: boolean): string {
+function fsproj(hasHttp: boolean, needsRouter: boolean): string {
   const wireRefs = hasHttp
     ? `
     <PackageReference Include="Fable.SimpleHttp" Version="3.6.0" />
     <PackageReference Include="Thoth.Json" Version="10.2.0" />`
     : "";
-  const routerRef = routed
+  const routerRef = needsRouter
     ? `
     <PackageReference Include="Feliz.Router" Version="4.0.0" />`
     : "";
@@ -510,16 +554,18 @@ export function generateFelizForContexts(
     );
   }
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
-  // when there's any Http (reads or mutations), Feliz.Router when routed (>1
-  // page OR a lone detail page carrying a `:id` route param).
-  const hasHttp =
-    readsForUi(ui, contexts).length > 0 ||
-    mutationsForUi(ui, contexts).length > 0 ||
+  // when there's any Http (reads or mutations/forms), Feliz.Router when routed
+  // (>1 page OR a lone `:id` detail page) OR any form exists (forms navigate via
+  // `Cmd.navigate` on success).
+  const anyForm =
     formsForUi(ui, contexts).length > 0 ||
-    operationFormsForUi(ui, contexts).length > 0;
-  const routed = ui.pages.length > 1 || ui.pages.some(hasRouteParam);
+    operationFormsForUi(ui, contexts).length > 0 ||
+    workflowFormsForUi(ui, contexts).length > 0;
+  const hasHttp =
+    readsForUi(ui, contexts).length > 0 || mutationsForUi(ui, contexts).length > 0 || anyForm;
+  const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
   out.set("src/App.fs", renderAppFs(ui, contexts));
-  out.set("App.fsproj", fsproj(hasHttp, routed));
+  out.set("App.fsproj", fsproj(hasHttp, needsRouter));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);

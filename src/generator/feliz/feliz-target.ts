@@ -11,7 +11,13 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
-import { byIdFieldName, felizCreateForm, felizOperationForm, readFieldName } from "./wire.js";
+import {
+  byIdFieldName,
+  felizCreateForm,
+  felizOperationForm,
+  felizWorkflowForm,
+  readFieldName,
+} from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
@@ -202,6 +208,28 @@ export const felizTarget: WalkerTarget = {
         `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
     );
     const submit = `Html.button [ prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+  },
+
+  // `WorkflowForm(runs: <wf>)` → one `Html.input` per workflow param + a
+  // (paramless) submit button dispatching `Submit<Wf>Form`.  The form state +
+  // encoder + POST `/workflows/<wf>` Cmd live in `update`/`Api` (wired by
+  // index.ts's `collectPageWorkflowForms`).  Falls through when `runs:` isn't a
+  // ref to a reachable workflow with scalar params.
+  renderWorkflowForm: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const names = call.argNames ?? [];
+    const runsArg = names.indexOf("runs") >= 0 ? call.args[names.indexOf("runs")] : undefined;
+    const wfName = runsArg?.kind === "ref" ? runsArg.name : undefined;
+    const wf = wfName ? ctx.workflowsByName.get(wfName) : undefined;
+    if (!wf) return null;
+    const form = felizWorkflowForm(wf);
+    if (form.fields.length === 0) return null;
+    const inputs = form.fields.map(
+      (fld) =>
+        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
+    );
+    const submit = `Html.button [ prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
