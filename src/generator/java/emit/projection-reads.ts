@@ -181,18 +181,19 @@ function corrWire(proj: ProjectionIR): WireField {
   return f;
 }
 
-/** Projection projection rides the three domain wildcards (enums / ids /
- *  valueobjects); a VO- or entity-typed row field would need a `<Vo>Response` /
- *  `<Part>Response` DTO that doesn't live in those packages.  Read models are
- *  scalars / ids / enums in practice — flag the unsupported shapes explicitly
- *  rather than emit a non-compiling import (same guard as the instance reads). */
+/** A VO-typed read-model row field projects through its `<Vo>Response` record,
+ *  co-located in `application.workflows` by `renderReadModelVoResponseDtos`
+ *  (`domainToWire` emits `<Vo>Response.from(...)`).  An entity (containment
+ *  part) type would need a `<Part>Response` DTO — but a part type never
+ *  resolves in projection scope, so this arm is an unreachable backstop
+ *  mirrored by the `loom.java-projection-field-unsupported` validator gate. */
 function guardProjectionField(proj: ProjectionIR, f: WireField): void {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const leaf =
     t.kind === "array" ? (t.element.kind === "optional" ? t.element.inner : t.element) : t;
-  if (leaf.kind === "valueobject" || leaf.kind === "entity") {
+  if (leaf.kind === "entity") {
     throw new Error(
-      `java projection-reads: row field '${f.name}' of '${proj.name}' is ${leaf.kind}-typed — not yet supported on the java backend.`,
+      `java projection-reads: row field '${f.name}' of '${proj.name}' is entity-typed — not yet supported on the java backend.`,
     );
   }
 }

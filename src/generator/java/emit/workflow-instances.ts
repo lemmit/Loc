@@ -289,19 +289,20 @@ function idTargetName(f: WireField): string {
   return t.targetName;
 }
 
-/** Instance projection rides the three domain wildcards (enums / ids /
- *  valueobjects); a VO- or entity-typed saga-state field would need a
- *  `<Vo>Response` / `<Part>Response` DTO that doesn't live in those packages.
- *  Saga state is scalars / ids / enums in practice — flag the unsupported
- *  shapes explicitly rather than emit a non-compiling import (the views
- *  emitter guards cross-aggregate follows the same way). */
+/** A VO-typed saga-state field projects through its `<Vo>Response` record,
+ *  which `renderReadModelVoResponseDtos` co-locates in `application.workflows`
+ *  (`domainToWire` emits `<Vo>Response.from(...)`).  An entity (containment
+ *  part) type would need a `<Part>Response` DTO — but a part type never
+ *  resolves in workflow scope (parts are private to their aggregate), so this
+ *  arm is an unreachable backstop mirrored by the
+ *  `loom.java-workflow-instance-field-unsupported` validator gate. */
 function guardInstanceField(wf: WorkflowIR, f: WireField): void {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const leaf =
     t.kind === "array" ? (t.element.kind === "optional" ? t.element.inner : t.element) : t;
-  if (leaf.kind === "valueobject" || leaf.kind === "entity") {
+  if (leaf.kind === "entity") {
     throw new Error(
-      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is ${leaf.kind}-typed — not yet supported on the java backend.`,
+      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is entity-typed — not yet supported on the java backend.`,
     );
   }
 }

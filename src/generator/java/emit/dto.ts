@@ -1,6 +1,7 @@
 import { forApiRead, forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   FieldIR,
   ParamIR,
@@ -17,6 +18,7 @@ import {
   type WireDir,
   wireJavaType,
 } from "./wire.js";
+import { observableWorkflowsOf } from "./workflow-instances.js";
 
 // ---------------------------------------------------------------------------
 // Request / response DTO records.  One record per file (Java's rule);
@@ -284,6 +286,69 @@ function wireFieldType(w: WireField): TypeIR {
     return w.type;
   }
   return eff(w.type, w.optional);
+}
+
+/** `<Vo>Response` records for a set of value objects, emitted into `pkg` (so a
+ *  read-model DTO / row in that package resolves the wire type in-package).  The
+ *  seed `voNames` are closed over nested VOs (a VO field may itself be a VO) —
+ *  the same fixpoint the aggregate DTO pass runs — then each is rendered.  Used
+ *  wherever a read shape surfaces a VO outside an aggregate's own
+ *  `application.<agg>` package (workflow-instance / projection reads →
+ *  `application.workflows`, view rows → `application.views`). */
+export function voResponseRecords(
+  voNames: Iterable<string>,
+  voLookup: ReadonlyMap<string, readonly FieldIR[]>,
+  pkg: string,
+  basePkg: string,
+): DtoFile[] {
+  const names = new Set(voNames);
+  const queue = [...names];
+  while (queue.length > 0) {
+    const vo = queue.pop()!;
+    const before = names.size;
+    referencedValueObjects(
+      (voLookup.get(vo) ?? []).map((f) => f.type),
+      names,
+    );
+    if (names.size > before) {
+      for (const v of names) if (!queue.includes(v)) queue.push(v);
+    }
+  }
+  return [...names]
+    .sort()
+    .map((vo) => voRecord(vo, voLookup.get(vo) ?? [], "Response", pkg, basePkg));
+}
+
+/** `<Vo>Response` records for every value object surfaced on a read-model wire
+ *  shape — workflow-instance views (`instanceWireShape`) and projection rows
+ *  (`wireShape`).  These land in the shared `application.workflows` package
+ *  (`pkg`), co-located with the `<Wf>InstanceResponse` / `<Proj>Response` DTOs
+ *  that reference them and imported wildcard by the instance / projection
+ *  controllers — so a VO-typed saga-state / read-model field resolves the same
+ *  way an aggregate response does (a VO used only in saga/projection state,
+ *  never on an aggregate response, has no record in any `application.<agg>`
+ *  package, so it is emitted here rather than import-resolved).  Deduped by VO
+ *  name across both read paths. */
+export function renderReadModelVoResponseDtos(
+  ctx: EnrichedBoundedContextIR,
+  pkg: string,
+  basePkg: string,
+): DtoFile[] {
+  const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+  const voNames = new Set<string>();
+  for (const wf of observableWorkflowsOf(ctx)) {
+    referencedValueObjects(
+      (wf.instanceWireShape ?? []).map((w) => w.type),
+      voNames,
+    );
+  }
+  for (const proj of ctx.projections) {
+    referencedValueObjects(
+      (proj.wireShape ?? []).map((w) => w.type),
+      voNames,
+    );
+  }
+  return voResponseRecords(voNames, voLookup, pkg, basePkg);
 }
 
 function accessor(w: WireField): string {

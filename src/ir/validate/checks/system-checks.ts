@@ -1259,6 +1259,82 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
+// Java read-model backstop gates.  Cross-aggregate view `follows` and VO-typed
+// read-model fields (workflow-instance / projection / view) are now emitted
+// (java/emit/view.ts + the read-model VO records in java/emit/dto.ts).  What
+// remains here is a defensive gate for an ENTITY (containment-part) read-model
+// field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
+// part type never resolves in workflow / projection scope, so the gate is an
+// unreachable backstop mirroring the emitters' `guardInstanceField` /
+// `guardProjectionField` throws — kept so the shape fails honestly rather than
+// crashing if that scope rule ever changes.
+// ---------------------------------------------------------------------------
+
+/** Peel optional / array wrappers to the leaf type kind — the emitters' own
+ *  guard shape: `T?` → `T`, `T[]` → element, `T?[]` element-optional → `T`. */
+function wireLeafKind(t: TypeIR): TypeIR["kind"] {
+  const inner = t.kind === "optional" ? t.inner : t;
+  const leaf =
+    inner.kind === "array"
+      ? inner.element.kind === "optional"
+        ? inner.element.inner
+        : inner.element
+      : inner;
+  return leaf.kind;
+}
+
+export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+
+      // (1) Entity-typed saga instance-view field.  VO-typed fields now emit
+      // (their `<Vo>Response` is co-located in application.workflows); an entity
+      // (containment part) field would need a `<Part>Response` DTO — but a part
+      // type never resolves in workflow scope, so this is a defensive backstop
+      // for a shape the grammar/scope already forbids.  Only observable
+      // workflows (those with an `instanceWireShape`) reach the instance emitter.
+      for (const wf of ctx.workflows) {
+        for (const f of wf.instanceWireShape ?? []) {
+          if (wireLeafKind(f.type) !== "entity") continue;
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts workflow '${ctxName}.${wf.name}' with ` +
+              `instance-view field '${f.name}' of entity type — workflow-instance read models on the ` +
+              `java backend do not yet emit a '<Part>Response' DTO. Drop the field from the observable ` +
+              `state, or host it on a node / dotnet / python deployable.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-workflow-instance-field-unsupported",
+          });
+        }
+      }
+
+      // (2) Entity-typed projection row field — same defensive backstop as (1).
+      for (const proj of ctx.projections) {
+        for (const f of proj.wireShape ?? []) {
+          if (wireLeafKind(f.type) !== "entity") continue;
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts projection '${ctxName}.${proj.name}' with ` +
+              `row field '${f.name}' of entity type — projection read models on the java backend do not ` +
+              `yet emit a '<Part>Response' DTO. Drop the field, or host it on a node / dotnet / python ` +
+              `deployable.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-projection-field-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Nested entity parts on an elixir aggregate.
 //
 // On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` persists inline:

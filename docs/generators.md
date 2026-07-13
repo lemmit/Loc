@@ -935,6 +935,25 @@ actor + jsonb intersection is deferred), and provenance/audited (gated —
 no runtime emitted; the node and .NET backends do implement these).  See
 `docs/old/plans/java-backend-implementation.md` for the execution record.
 
+**Cross-aggregate view `follows` IS implemented.** A full-form view whose
+output bind reaches another aggregate via `X id` (`customerName =
+customerId.name`, single- or multi-hop) bulk-loads each foreign aggregate
+through its own (tenancy-scoped) `findAll()` into a `Map<idValue, Agg>`
+and rewrites the traversal to a map lookup — the java analogue of the
+node / python / .NET pattern (`findAll()` rather than a bulk-by-ids method
+so the read stays behind the foreign repository's principal `@Query`).
+
+**Value-object read-model fields ARE implemented.** A VO-typed
+workflow-instance field, projection row field, or view Row field emits
+its `<Vo>Response` record co-located in the consuming package
+(`application.workflows` for instance/projection reads,
+`application.views` for view rows), the read-model analogue of an
+aggregate response's nested VO records.  Only an *entity* (containment
+part) read-model field stays gated
+(`loom.java-workflow-instance-field-unsupported` /
+`loom.java-projection-field-unsupported`) — a defensive backstop, since a
+part type never resolves in workflow / projection scope.
+
 Discriminated unions (payload fields / operation returns; union *finds* take
 the untagged optional-style path — see `payloads.md`), `shape(document)` /
 `shape(embedded)` persistence, event-sourced (`persistedAs(eventLog)`)
