@@ -23,14 +23,16 @@ aggregate Order {
 > **Backend coverage.** `extern` *operations* now ship on **all five**
 > backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  The two
 > handler-registry layouts walked through below (.NET and Hono) are
-> representative for those two; Python and Java emit the same shape (a typed
+> representative for those two; Python emits the same shape (a typed
 > per-op handler interface / registry, a register/verify gate, and a
-> fail-fast-at-startup check for a missing implementation).  **Elixir** uses a
-> different, co-located idiom — a generated `@behaviour` + a scaffold-once
-> user-owned impl module — described under *Elixir/Phoenix* below.  (This is
-> Slice 1 of `docs/proposals/extern-domain-extension-point.md`, which re-homes
-> `extern` from an injected application-layer handler to a domain-internal
-> extension point; the remaining backends migrate in later slices.)
+> fail-fast-at-startup check for a missing implementation).  **Elixir** and
+> **Java** use a co-located idiom instead — the extern op is a member of the
+> aggregate's own lifecycle, delegating to a **scaffold-once** user-owned hook
+> (Elixir a generated `@behaviour` + impl module; Java a co-located `<Agg>Extern`
+> class) — described under *Elixir/Phoenix* and *Java* below.  (This is
+> `docs/proposals/extern-domain-extension-point.md`, which re-homes `extern` from
+> an injected application-layer handler to a domain-internal extension point;
+> the remaining backends migrate in later slices.)
 >
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
@@ -222,6 +224,65 @@ the first `generate`.  `ddd generate system` reports these as
 `preserved (scaffold-once): N`.  The mechanic is in-band (no side-channel), so a
 backend opts a file into it by emitting one comment line; the other extern
 slices (.NET partial classes, TS/Python/Java overridable hooks) reuse it.
+
+## Java (Spring Boot / JPA)
+
+Java uses the same **co-located domain extension point** as Elixir — the extern
+op is a member of the aggregate's own lifecycle, delegating to a scaffold-once
+hook you own.  One file is generated per aggregate that declares an extern op:
+
+- **`<Agg>Extern`** (`.../features/<plural>/<Agg>Extern.java`) — a **scaffold-once**
+  class co-located with the aggregate (SAME package → it reaches the entity's
+  package-private fields + `_raiseEvent` natively; Java never had the .NET/Hono
+  S10 setter leak, so no widening is needed).  One `static` method per extern op,
+  taking the loaded aggregate.  Scaffolded once with a loud-throwing stub, then
+  **yours** — a `generate system` re-run never overwrites it (the
+  `loom:scaffold-once` marker).
+
+The generated aggregate method runs the preconditions, delegates to the hook, and
+re-asserts invariants (the same load → preconditions → hook → invariants → save
+flow as the other backends):
+
+```java
+// Order.java (generated) — the extern op is a real aggregate method
+public void confirm() {
+    if (!(this.isMutable())) throw new DomainException("Precondition failed: isMutable()");
+    OrderExtern.confirm(this);   // ← delegate to the co-located hook
+    this._assertInvariants();    // ← invariants re-run, always
+}
+```
+
+The scaffolded hook **fails loudly** until you fill it in — a missing
+implementation is a 500 with a clear message, never a silent success:
+
+```java
+// Order/OrderExtern.java — SCAFFOLD-ONCE, yours to edit
+// loom:scaffold-once — this file is yours.  Loom scaffolds it on the first
+// `generate` and NEVER overwrites it again …
+package com.example.features.orders;
+
+import com.example.domain.enums.*;
+import com.example.domain.events.*;
+
+final class OrderExtern {
+    private OrderExtern() {}
+
+    static void confirm(Order order) {
+        // Reaches Order's package-private fields directly; raise events via
+        // order._raiseEvent(...).  The framework re-asserts invariants + saves.
+        order.status = OrderStatus.Confirmed;
+        order._raiseEvent(new OrderConfirmed(order.id(), java.time.Instant.now()));
+        // throw new UnsupportedOperationException("extern operation `confirm` …");
+    }
+}
+```
+
+The service (and any workflow's `order.confirm()`) calls the op directly —
+`repository.getById(id)` → `aggregate.confirm()` → `repository.save(...)` — with
+no injected handler and no DI.  Adding a *new* extern op later regenerates the
+aggregate with a `<Agg>Extern.<newOp>(...)` call the scaffold-once file doesn't
+yet define, so `gradle testClasses` fails until you implement it — loud at
+compile time too.
 
 ## When to reach for `extern`
 

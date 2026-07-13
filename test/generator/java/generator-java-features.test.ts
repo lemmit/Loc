@@ -94,50 +94,50 @@ describe("java generator — auth surface (S6)", () => {
   });
 });
 
-describe("java generator — extern operations (S6)", () => {
-  it("emits the handler interface + throwing dev stub", async () => {
+describe("java generator — extern operations (domain extension point, Phase 2)", () => {
+  // The aggregate `operation X() extern` re-homes from an injected per-op handler
+  // to a co-located, scaffold-once `<Agg>Extern` hook the op delegates to
+  // (extern-domain-extension-point.md §3a; mirrors the Elixir analog #1841).
+  it("scaffolds a co-located <Agg>Extern hook — same package, loud throw, marker", async () => {
     const f = await files();
-    const iface = f.get(`${ROOT}/features/projects/SyncFromVcsProjectHandler.java`)!;
-    expect(iface).toContain("public interface SyncFromVcsProjectHandler {");
-    expect(iface).toContain("void handle(Project aggregate);");
-    const stub = f.get(`${ROOT}/features/projects/DevStubSyncFromVcsProjectHandler.java`)!;
-    expect(stub).toContain("@Component");
-    expect(stub).toContain("throw new UnsupportedOperationException(");
+    const hook = f.get(`${ROOT}/features/projects/ProjectExtern.java`)!;
+    // Scaffold-once marker on line 1 so the CLI writer preserves it on regen.
+    expect(hook.split("\n")[0]).toContain("loom:scaffold-once");
+    // Same package as the aggregate → native package-private field access.
+    expect(hook).toContain("package com.loom.hub.features.projects;");
+    expect(hook).toContain("final class ProjectExtern {");
+    // One static method per extern op, taking the loaded aggregate; loud default.
+    expect(hook).toContain("static void syncFromVcs(Project project) {");
+    expect(hook).toContain(
+      'throw new UnsupportedOperationException("extern operation `syncFromVcs` on Project is not implemented — fill in ProjectExtern.syncFromVcs(...)");',
+    );
   });
 
-  it("service runs check → handler → invariants → save", async () => {
-    const svc = (await files()).get(`${ROOT}/features/projects/ProjectService.java`)!;
-    expect(svc).toContain("aggregate.checkSyncFromVcs();");
-    expect(svc).toContain("syncFromVcsHandler.handle(aggregate);");
-    expect(svc).toContain("aggregate._assertInvariants();");
+  it("the aggregate op runs preconditions → delegates to the hook → re-asserts invariants", async () => {
+    const proj = (await files()).get(`${ROOT}/features/projects/Project.java`)!;
+    expect(proj).toContain("public void syncFromVcs() {");
+    // preconditions inline, then delegate, then invariants — the framework flow.
+    expect(proj).toContain('throw new DomainException("Precondition failed: active == true");');
+    expect(proj).toContain("ProjectExtern.syncFromVcs(this);");
+    expect(proj).toContain("this._assertInvariants();");
+    // The `_raiseEvent` hook the extern impl uses to emit domain events.
+    expect(proj).toContain("public void _raiseEvent(DomainEvent ev) {");
   });
 
-  it("wraps a throwing handler so non-domain faults log extern_handler_threw", async () => {
-    // Parity with Hono/.NET/Python: a non-domain throw from the user handler
-    // becomes an ExternHandlerException (→ catalog extern_handler_threw + a
-    // sanitized 500), distinct from a generic internal_error.  Domain
-    // exceptions re-throw untranslated so 400/403/404/409 still apply.
+  it("the service calls the op directly — no injected handler, no ExternHandlerException", async () => {
     const f = await files();
     const svc = f.get(`${ROOT}/features/projects/ProjectService.java`)!;
-    expect(svc).toContain(
-      "} catch (DomainException | ForbiddenException | DisallowedException | AggregateNotFoundException e) {",
-    );
-    expect(svc).toContain('throw new ExternHandlerException("syncFromVcs", "Project", e);');
-
-    const exc = f.get(`${ROOT}/domain/common/ExternHandlerException.java`)!;
-    expect(exc).toContain("public class ExternHandlerException extends RuntimeException {");
-    expect(exc).toContain(
-      "public ExternHandlerException(String opName, String aggName, Throwable cause) {",
-    );
-
-    const advice = f.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
-    expect(advice).toContain("@ExceptionHandler(ExternHandlerException.class)");
-    expect(advice).toContain(
-      'CatalogLog.event("extern_handler_threw", "error", "aggregate", e.aggName(), "op", e.opName(), "error", e.getMessage());',
-    );
-    expect(advice).toContain(
-      'return respond(problem(500, "Internal Server Error", e.getMessage(), request), 500);',
-    );
+    expect(svc).toContain("var aggregate = repository.getById(id);");
+    expect(svc).toContain("aggregate.syncFromVcs();");
+    // The injected apparatus is gone: no handler field/injection, no check<Op>,
+    // no ExternHandlerException wrap.
+    expect(svc).not.toContain("Handler");
+    expect(svc).not.toContain("checkSyncFromVcs");
+    expect(svc).not.toContain("ExternHandlerException");
+    // ExternHandlerException itself is deleted (grep-confirmed not shared with the
+    // Phase 1 `extern commandHandler`/`queryHandler` feature).
+    expect(f.has(`${ROOT}/domain/common/ExternHandlerException.java`)).toBe(false);
+    expect(f.get(`${ROOT}/api/ApiExceptionAdvice.java`)!).not.toContain("ExternHandlerException");
   });
 });
 
