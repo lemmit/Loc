@@ -94,4 +94,11 @@ describe("feliz scaffold primitives", () => {
     // Money stays coerced (it is a `decimal` in F#, which `Html.text` can't take).
     expect(app).toContain("Html.text (string (row.price))");
   });
+
+  // An empty container (the detail's operations area when the aggregate has no
+  // public operations) renders nothing — `Html.none`, not a dead empty `<div>`.
+  it("renders an empty Stack as Html.none, not a bare Html.div []", async () => {
+    const app = await appFs(SCAFFOLD);
+    expect(app).not.toContain("Html.div []");
+  });
 });
