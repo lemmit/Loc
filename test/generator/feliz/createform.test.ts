@@ -218,6 +218,61 @@ describe("feliz create forms", () => {
     expect(app).not.toContain("IsNullOrWhiteSpace form.rank");
   });
 
+  // An enum create field → a `<select>` of its values (not a free-text input):
+  // a REQUIRED enum defaults to its first value + guards the submit; an OPTIONAL
+  // enum leads with a blank option, starts "", encodes null, and is exempt.
+  it("renders an enum field as a select bound to its values", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Catalog
+        subdomain Catalog {
+          context Cat {
+            enum Status { active inactive archived }
+            enum Tier { free pro }
+            aggregate Product with crudish { name: string  status: Status  tier: Tier? }
+            repository Products for Product { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Products {
+            route: "/products"
+            body: QueryView {
+              of: Shop.Product.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, p => Card { p.name } } }
+            }
+          }
+          page ProductNew {
+            route: "/products/new"
+            body: Stack { CreateForm { of: Product } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // Required enum → a select of all values, NO blank option.
+    expect(app).toContain(
+      'Html.select [ prop.value model.ProductForm.status; prop.onChange (fun (v: string) -> dispatch (SetProductFormStatus v)); prop.children [ Html.option [ prop.value "active"; prop.text "active" ]; Html.option [ prop.value "inactive"; prop.text "inactive" ]; Html.option [ prop.value "archived"; prop.text "archived" ] ] ]',
+    );
+    // Required enum defaults to its FIRST value (select always has a selection).
+    expect(app).toContain('status = "active"');
+    // Required enum guards the submit.
+    expect(app).toContain("IsNullOrWhiteSpace form.status");
+    // Optional enum → a LEADING blank option, starts "", encodes null, exempt.
+    expect(app).toContain(
+      'Html.select [ prop.value model.ProductForm.tier; prop.onChange (fun (v: string) -> dispatch (SetProductFormTier v)); prop.children [ Html.option [ prop.value ""; prop.text "" ]; Html.option [ prop.value "free"; prop.text "free" ]; Html.option [ prop.value "pro"; prop.text "pro" ] ] ]',
+    );
+    expect(app).toContain('tier = ""');
+    expect(app).toContain(
+      '"tier", (if form.tier = "" then Encode.nil else Encode.string form.tier)',
+    );
+    expect(app).not.toContain("IsNullOrWhiteSpace form.tier");
+  });
+
   // A read-only ui (no CreateForm) emits no form machinery — creates are additive.
   it("a read-only ui emits no form/encoder machinery", async () => {
     const app = await appFs(`

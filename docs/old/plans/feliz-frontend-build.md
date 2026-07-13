@@ -238,15 +238,26 @@ in hand — not before F# output exists.
   — a Fable type mismatch that never fired because no prior example READ an
   optional field. Both now key off one optionality signal. All Fable + vite +
   smoke verified; the showcase Product grew an optional `note`.
+- ✅ **Enum → `<select>` dropdown.** An enum create/op/workflow field now renders
+  as an `Html.select` of `Html.option`s over the enum's values (was a free-text
+  input). The values are resolved from the field's owning bounded context — the
+  first Feliz form widget needing data off the aggregate — by threading the real
+  `bcByAggregate`/`bcByWorkflow` into `walkBody` (previously `new Map()`); the
+  seam reads `ctx.bcByAggregate.get(agg)?.enums`, and `index.ts` resolves the same
+  set via `enumsFromContexts` so both derivations of the field set agree. A
+  REQUIRED enum defaults to its first value (a select always has a selection,
+  matching React); an OPTIONAL enum leads with a blank option (→ null on encode)
+  and is exempt from the guard. All Fable + vite + smoke verified (the smoke
+  `selectOption`s a value); the showcase Product grew an `enum Status`.
 - **Wire layer covers the full CRUD write path + workflows + auth, with typed
-  validated forms + optional fields.** list + byId reads, create, delete,
-  operation, workflow runs, the auth gate, typed/validated form inputs, and
-  optional scalar fields. Remaining Feliz work is polish: deeper pack coverage,
-  the modal open-state, ENUM-as-dropdown + FK-`id` select + nested VO / array
-  form inputs (need enum/context threading + sub-form state),
-  `currentUser.<field>` decode. Enum wire fields decode as their string name (a
-  proper DU decoder is a follow-up); nested containment/VO records + decoders ARE
-  emitted (transitive off `wireShape`).
+  validated forms + optional + enum fields.** list + byId reads, create, delete,
+  operation, workflow runs, the auth gate, typed/validated form inputs, optional
+  scalar fields, and enum selects. Remaining Feliz work is polish: deeper pack
+  coverage, the modal open-state, FK-`id` select + nested VO / array form inputs
+  (need target-list reads / sub-form state), `currentUser.<field>` decode. Enum
+  wire fields decode as their string name (a proper DU decoder is a follow-up);
+  nested containment/VO records + decoders ARE emitted (transitive off
+  `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

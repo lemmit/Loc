@@ -145,9 +145,9 @@ export function felizDeleteMutation(aggregate: string): FelizMutation {
 
 /** The HTML input widget a form field renders as — derived from its wire type so
  *  the browser enforces the shape at entry (`number` for numerics, a `checkbox`
- *  for bools, `text` otherwise).  The form record itself stays all-string
- *  (raw input is a string; the encoder lifts it back at submit). */
-export type FelizInputKind = "text" | "number" | "checkbox";
+ *  for bools, a `select` for enums, `text` otherwise).  The form record itself
+ *  stays all-string (raw input is a string; the encoder lifts it back at submit). */
+export type FelizInputKind = "text" | "number" | "checkbox" | "select";
 
 /** One field of a create form — an F# form-record field (string-typed, bound to
  *  an `Html.input`), its `Set<Form><Field>` update `Msg`, the Thoth encoder
@@ -163,12 +163,18 @@ export interface FelizFormField {
    *  (`Encode.string form.name` / `Encode.decimal (decimal form.price)`).  An
    *  optional field's empty string encodes to `Encode.nil` (JSON `null`). */
   encodeExpr: string;
-  /** HTML input widget (`number` / `checkbox` / `text`) derived from the type. */
+  /** HTML input widget (`number` / `checkbox` / `select` / `text`) from the type. */
   inputKind: FelizInputKind;
   /** Whether the client MUST supply this field — a required, non-optional input.
    *  Required text/number fields guard the submit (non-empty); optional fields
    *  (and checkboxes) don't. */
   required: boolean;
+  /** For a `select` field, the enum's allowed values (rendered as `<option>`s). */
+  enumValues?: string[];
+  /** The empty-form initial value for this field — `""` for most, but a REQUIRED
+   *  enum defaults to its first value (a `<select>` always has a selection, and
+   *  it keeps the required-enum form valid from the start, mirroring React). */
+  emptyValue: string;
 }
 
 /** The record-shaped aspects a form (create OR operation) shares — the F#
@@ -250,10 +256,12 @@ function scalarBase(t: TypeIR): TypeIR {
 }
 
 /** The HTML input widget a field type maps to — numerics render `type: number`,
- *  bools a `checkbox`, everything else a plain text input.  Purely derived from
- *  the wire type (no stamped field); the form record stays all-string. */
-function inputKindFor(t: TypeIR): FelizInputKind {
+ *  bools a `checkbox`, an enum (whose values we can resolve) a `select`,
+ *  everything else a plain text input.  Purely derived from the wire type (no
+ *  stamped field); the form record stays all-string. */
+function inputKindFor(t: TypeIR, enumsByName: ReadonlyMap<string, string[]>): FelizInputKind {
   const base = scalarBase(t);
+  if (base.kind === "enum" && enumsByName.has(base.name)) return "select";
   if (base.kind === "primitive") {
     switch (base.name) {
       case "int":
@@ -267,26 +275,42 @@ function inputKindFor(t: TypeIR): FelizInputKind {
         return "text";
     }
   }
-  return "text"; // id / enum (string name) / everything else
+  return "text"; // id / unresolved enum (string name) / everything else
 }
 
 /** Build the shared form fields (`Set` Msg + encoder + input kind + required-
- *  ness) for a form of `formType` from a `{name, type, optional?}` field/param
- *  list.  Reused by create + operation + workflow forms.  A field is optional
- *  when flagged so (a create `FieldIR.optional`) OR its type is `optional` (an
- *  `x?: T` op/workflow param). */
+ *  ness + enum options) for a form of `formType` from a `{name, type, optional?}`
+ *  field/param list.  Reused by create + operation + workflow forms.  A field is
+ *  optional when flagged so (a create `FieldIR.optional`) OR its type is
+ *  `optional` (an `x?: T` op/workflow param).  `enumsByName` resolves an enum
+ *  field's allowed values (→ a `<select>`); empty for the callers that don't
+ *  thread it (the field just renders as text, byte-identical to before). */
 function formFieldsFrom(
   formType: string,
   fields: readonly { name: string; type: TypeIR; optional?: boolean }[],
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
 ): FelizFormField[] {
   return fields.map((f) => {
     const optional = f.optional === true || f.type.kind === "optional";
+    const base = scalarBase(f.type);
+    const inputKind = inputKindFor(f.type, enumsByName);
+    const enumValues =
+      inputKind === "select" && base.kind === "enum" ? enumsByName.get(base.name) : undefined;
+    // A REQUIRED enum defaults to its first value so the select and the string
+    // state agree from the start (and the required guard passes); everything
+    // else — text/number/checkbox, and an OPTIONAL enum (empty = null) — is "".
+    const emptyValue =
+      inputKind === "select" && !optional && enumValues && enumValues.length > 0
+        ? enumValues[0]!
+        : "";
     return {
       wireName: f.name,
       setMsg: `Set${formType}${upperFirst(f.name)}`,
       encodeExpr: encodeExprFor(f.type, `form.${f.name}`, optional),
-      inputKind: inputKindFor(f.type),
+      inputKind,
       required: !optional,
+      enumValues,
+      emptyValue,
     };
   });
 }
@@ -336,7 +360,10 @@ function isScalarInput(t: TypeIR): boolean {
  *  create-input contract.  v1 keeps the REQUIRED scalar fields (mirroring the
  *  React create form's `!optional` filter); non-scalar / optional inputs are a
  *  follow-up. */
-export function felizCreateForm(agg: AggregateIR): FelizForm {
+export function felizCreateForm(
+  agg: AggregateIR,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
+): FelizForm {
   const name = agg.name;
   const formType = `${upperFirst(name)}Form`;
   const fields = formFieldsFrom(
@@ -345,6 +372,7 @@ export function felizCreateForm(agg: AggregateIR): FelizForm {
     // rendered, exempt from the submit guard, and encodes empty → null).  Nested
     // part / value object / collection inputs still need a sub-form (follow-up).
     createInputFields(agg).filter((f: FieldIR) => isScalarInput(f.type)),
+    enumsByName,
   );
   return {
     aggregate: name,
@@ -368,13 +396,18 @@ export function felizCreateForm(agg: AggregateIR): FelizForm {
  *  form fields are the op's scalar params; the endpoint is
  *  `/api/<agg>/<id>/<opPath>` (the op's route slug).  Returns undefined when the
  *  op has no renderable scalar params (nothing to submit). */
-export function felizOperationForm(agg: AggregateIR, op: OperationIR): FelizOperationForm {
+export function felizOperationForm(
+  agg: AggregateIR,
+  op: OperationIR,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
+): FelizOperationForm {
   const name = agg.name;
   const opCap = `${upperFirst(op.name)}${upperFirst(name)}`;
   const formType = `${opCap}Form`;
   const fields = formFieldsFrom(
     formType,
     op.params.filter((p) => isScalarInput(p.type)),
+    enumsByName,
   );
   return {
     aggregate: name,
@@ -416,12 +449,16 @@ export interface FelizWorkflowForm extends FormRecord {
 
 /** Build the `FelizWorkflowForm` for a `WorkflowForm(runs: wf)`.  Fields are the
  *  workflow's scalar params; the endpoint is `/api/workflows/<snake wf>`. */
-export function felizWorkflowForm(wf: WorkflowIR): FelizWorkflowForm {
+export function felizWorkflowForm(
+  wf: WorkflowIR,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
+): FelizWorkflowForm {
   const wfCap = upperFirst(wf.name);
   const formType = `${wfCap}Form`;
   const fields = formFieldsFrom(
     formType,
     wf.params.filter((p) => isScalarInput(p.type)),
+    enumsByName,
   );
   return {
     workflow: wf.name,
@@ -565,6 +602,7 @@ export function collectPageMutations(
 export function collectPageForms(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
 ): FelizForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -574,7 +612,7 @@ export function collectPageForms(
     const agg = aggregatesByName.get(aggName);
     if (!agg || seen.has(aggName)) continue;
     seen.add(aggName);
-    out.push(felizCreateForm(agg));
+    out.push(felizCreateForm(agg, enumsByName));
   }
   return out;
 }
@@ -607,6 +645,7 @@ function operationFormSpecs(
 export function collectPageOperationForms(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
 ): FelizOperationForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -617,7 +656,7 @@ export function collectPageOperationForms(
     if (!agg) continue;
     const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
     if (!op) continue;
-    const form = felizOperationForm(agg, op);
+    const form = felizOperationForm(agg, op, enumsByName);
     const key = form.formType;
     if (form.fields.length === 0 || seen.has(key)) continue;
     seen.add(key);
@@ -648,6 +687,7 @@ function workflowFormRuns(body: ExprIR, workflowNames: ReadonlySet<string>): str
 export function collectPageWorkflowForms(
   page: PageIR,
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
+  enumsByName: ReadonlyMap<string, string[]> = new Map(),
 ): FelizWorkflowForm[] {
   if (!page.body) return [];
   const nameSet = new Set(workflowsByName.keys());
@@ -656,7 +696,7 @@ export function collectPageWorkflowForms(
   for (const wfName of workflowFormRuns(page.body, nameSet)) {
     const wf = workflowsByName.get(wfName);
     if (!wf) continue;
-    const form = felizWorkflowForm(wf);
+    const form = felizWorkflowForm(wf, enumsByName);
     if (form.fields.length === 0 || seen.has(form.formType)) continue;
     seen.add(form.formType);
     out.push(form);
@@ -1025,7 +1065,9 @@ export function renderFormTypes(forms: FormRecord[]): string {
       "",
       `let ${f.emptyBinding} : ${f.formType} =`,
       "  {",
-      ...f.fields.map((fld) => `    ${fld.wireName} = ""`),
+      // Most fields start empty; a required enum starts at its first value (its
+      // `<select>` always has a selection).
+      ...f.fields.map((fld) => `    ${fld.wireName} = ${JSON.stringify(fld.emptyValue)}`),
       "  }",
     ]),
   );

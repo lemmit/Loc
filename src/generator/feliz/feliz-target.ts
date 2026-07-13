@@ -7,7 +7,7 @@
 // `Msg` (the effect body lives in `update`, not the view).  Expression syntax
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
-import type { TypeIR } from "../../ir/types/loom-ir.js";
+import type { BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
@@ -35,18 +35,40 @@ function isStringType(type: TypeIR | undefined): boolean {
   return type?.kind === "primitive" && type.name === "string";
 }
 
-/** One form field → its typed `Html.input` (shared by create / operation /
- *  workflow forms — the markup is identical, only the field set differs).  The
- *  widget is derived from the field's `inputKind`:
+/** Enum name → allowed values, resolved from a form's owning bounded context so
+ *  an enum-typed field renders a `<select>`.  Empty when the BC is absent (the
+ *  enum field then renders as text — byte-identical to before enum-select). */
+function enumsFromBc(bc: BoundedContextIR | undefined): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  if (bc) for (const e of bc.enums) m.set(e.name, e.values);
+  return m;
+}
+
+/** One form field → its typed input (shared by create / operation / workflow
+ *  forms — the markup is identical, only the field set differs).  The widget is
+ *  derived from the field's `inputKind`:
+
  *   - `number` — `prop.type'.number` + string `onChange` (form state is string).
  *   - `checkbox` — `prop.type'.checkbox` + `prop.isChecked (… = "true")`; the
  *     bool `onChange` sets the string `"true"`/`"false"` (encoder reads that).
+ *   - `select` — `Html.select` of `Html.option`s over the enum's values; an
+ *     OPTIONAL enum leads with a blank option (its "" encodes to null).
  *   - `text` — a plain text input.
- *  (`type'` — Feliz's apostrophe-suffixed name, since `type` is an F# keyword.) */
+ *  Rendered on ONE line so it stays offside-safe inside the form's Feliz
+ *  children list.  (`type'` — Feliz's apostrophe-suffixed name, since `type` is
+ *  an F# keyword.) */
 function renderFormInput(formField: string, fld: FelizFormField): string {
   const value = `model.${formField}.${fld.wireName}`;
   if (fld.inputKind === "checkbox") {
     return `Html.input [ prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
+  }
+  if (fld.inputKind === "select") {
+    const opts = (fld.enumValues ?? []).map(
+      (v) => `Html.option [ prop.value "${v}"; prop.text "${v}" ]`,
+    );
+    // An optional enum can be "unset" → a leading blank option (encodes to null).
+    const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
+    return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children [ ${allOpts.join("; ")} ] ]`;
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
   return `Html.input [ ${typeProp}prop.placeholder "${fld.wireName}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
@@ -203,8 +225,8 @@ export const felizTarget: WalkerTarget = {
     const ofArg = idx >= 0 ? call.args[idx] : undefined;
     const aggName = ofArg?.kind === "ref" ? ofArg.name : undefined;
     const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
-    if (!agg) return null;
-    const form = felizCreateForm(agg);
+    if (!agg || !aggName) return null;
+    const form = felizCreateForm(agg, enumsFromBc(ctx.bcByAggregate.get(aggName)));
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled =
       form.fields.length > 0
@@ -229,7 +251,7 @@ export const felizTarget: WalkerTarget = {
     const agg = ctx.aggregatesByName.get(ofArg.name);
     const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
     if (!agg || !op) return null;
-    const form = felizOperationForm(agg, op);
+    const form = felizOperationForm(agg, op, enumsFromBc(ctx.bcByAggregate.get(ofArg.name)));
     if (form.fields.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
@@ -249,8 +271,8 @@ export const felizTarget: WalkerTarget = {
     const runsArg = names.indexOf("runs") >= 0 ? call.args[names.indexOf("runs")] : undefined;
     const wfName = runsArg?.kind === "ref" ? runsArg.name : undefined;
     const wf = wfName ? ctx.workflowsByName.get(wfName) : undefined;
-    if (!wf) return null;
-    const form = felizWorkflowForm(wf);
+    if (!wf || !wfName) return null;
+    const form = felizWorkflowForm(wf, enumsFromBc(ctx.bcByWorkflow.get(wfName)));
     if (form.fields.length === 0) return null;
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;

@@ -50,6 +50,8 @@ async function main() {
   await page.getByPlaceholder("price").fill("9.99");
   // Toggle the bool field's checkbox — proves the checkbox widget dispatches.
   await page.getByRole("checkbox").check();
+  // Pick a non-default enum value — proves the <select> widget dispatches.
+  await page.getByRole("combobox").selectOption("inactive");
   if (!(await create.isEnabled())) {
     throw new Error("create submit should be ENABLED once required fields are filled");
   }
