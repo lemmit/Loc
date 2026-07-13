@@ -20,6 +20,7 @@
     "watch": "tsc -b tsconfig.json --watch",
     "langium:generate": "langium generate",
     "langium:watch": "langium generate --watch",
+    "docs:stdlib": "npm run build && node scripts/gen-stdlib-docs.mjs",
     "test": "vitest run",
     "test:gen": "vitest run test/generator",
     "test:lang": "vitest run test/language",

@@ -632,7 +632,10 @@ Current prelude:
 - **math** — `clamp(n, lo, hi)`, `percentOf(part, whole)`, `roundTo(n, places)`
 - **temporal** — `isOverdue(due)`, `isFuture(t)`, `isPast(t)`
 
-The set grows over subsequent stdlib slices; see `docs/plans/stdlib.md` → Phase C.
+The full library — the ambient prelude, the Layer-0 scalar intrinsics, and the
+collection operations — is catalogued in [`stdlib.md`](stdlib.md) (generated from
+the registries). The set grows over subsequent stdlib slices; see
+`docs/plans/stdlib.md` → Phase C.
 
 ---
 
