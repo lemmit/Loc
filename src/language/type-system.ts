@@ -67,6 +67,7 @@ import {
   isPostfixChain,
   isPrimitiveConversion,
   isPrimitiveType,
+  isProjection,
   isProperty,
   isSlotType,
   isStringLit,
@@ -1357,6 +1358,10 @@ export function envForNode(node: AstNode): Env {
   // lowering's `inWorkflow`), since a saga has no aggregate `this`.
   const viewSource = view?.source?.ref;
   const viewWorkflowSource = viewSource && isWorkflow(viewSource) ? viewSource : undefined;
+  // A projection-sourced view resolves bare names against the projection's
+  // read-model state fields (`Property` members) — the LSP analogue of
+  // lowering's `inProjection` (projection.md v1.1).
+  const viewProjectionSource = viewSource && isProjection(viewSource) ? viewSource : undefined;
   const agg =
     AstUtils.getContainerOfType(node, isAggregate) ??
     (find ? (find.$container as Repository | undefined)?.aggregate?.ref : undefined) ??
@@ -1369,6 +1374,7 @@ export function envForNode(node: AstNode): Env {
   // A workflow-sourced view filter resolves bare names against the workflow's
   // state fields (its `Property` members) — same vocabulary lowering binds.
   if (viewWorkflowSource) addEntityMembers(viewWorkflowSource.members, bindings);
+  if (viewProjectionSource) addEntityMembers(viewProjectionSource.members, bindings);
   if (part) addEntityMembers(part.members, bindings);
   if (vo) {
     for (const m of vo.members) {
