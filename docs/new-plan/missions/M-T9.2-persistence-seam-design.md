@@ -253,19 +253,33 @@ Every slice follows the PRs #607–#627 / #843 protocol: **the generated corpus 
 
 | # | Slice | Backends | Status | Gate |
 |---|---|---|---|---|
-| **1** | `seed-datasets` spine (`groupByDataset` + `usedAggregates` + model) | TS/.NET/Python | ✅ **LANDED** — establishes `_persistence/`, byte-identical green | byte-identical ✓ + 31 seed tests ✓ + layering ✓ |
-| **2** | `WireTarget` (DTO framing over `wireShape`) | all 5 | **NEXT** — core already shared, framing regular | byte-identical + conformance-parity |
-| **3** | `QueryTarget` (find-`where` + filter predicate) | TS/Py/Java (+.NET/Elixir per Q3) | committed — **highest traffic**; read-path win; `ExprTarget` analogue | byte-identical + behavioral-e2e |
-| **4** | Remove orphaned adapter emit-layer + `resolvePersistence` (§2.5) | — | committed — closes M-T6.10; pending Q1 sign-off | `npm test` (deletes dead tests); not byte-gated |
+| **1** | `seed-datasets` spine (`groupByDataset` + `usedAggregates` + model) | TS/.NET/Python | ✅ **LANDED (#1876)** — establishes `_persistence/`, byte-identical green | byte-identical ✓ + 31 seed tests ✓ + layering ✓ |
+| **2** | `QueryTarget` (find-`where` + filter predicate) | TS/Py (+Java) | **NEXT — the sole remaining substantial seam** (read-path, high-traffic, `ExprTarget` analogue) | byte-identical + behavioral-e2e |
+| **3** | Remove orphaned adapter emit-layer + `resolvePersistence` (§2.5) | — | committed — closes M-T6.10; pending Q1 sign-off | `npm test` (deletes dead tests); not byte-gated |
+| — | ~~`WireTarget`~~ | — | **DROPPED (§0.6)** — composition diverges (.NET flag-flatten vs recurse); thin shared skeleton | — |
 | — | ~~events / ids / enum warm-ups~~ | — | **DROPPED (§0.4)** — one-line shared core, net-negative indirection | — |
 | — | `ColumnTarget` | TS + Python | **DEFER (§0.5)** — 2-backend only; feature-gated | byte-identical + `LOOM_TS_BUILD`/`python-build` |
 | — | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | **DEFER (§0.5)** — 3-backend, borderline | byte-identical + tenancy-e2e |
 | — | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | **DEFER (§0.5)** — riskiest, 2-backend pair | byte-identical + behavioral-e2e |
 | — | routes | — | **Deferred** — coordinate with M-T5.10 (`RouteIR` landed-but-unread) | — |
 
-**Committed set (post-§0.4 revision):** the seed spine (landed) → `WireTarget` → `QueryTarget` → adapter-emit removal. The value-type warm-ups are dropped (§0.4); the 2–3-backend slices stay deferred (§0.5) until feature traffic justifies them.
+**Committed set (post-implementation revision):** the seed spine (landed) → **`QueryTarget`** (the one substantial seam left) → adapter-emit removal. Everything else is dropped-as-thin (§0.4/§0.6) or deferred (§0.5).
 
-Ordering rationale: slices 1–5 are flat walks (no recursion, small leaves) that *prove the seam machinery + gate* cheaply before the one structurally-interesting committed slice (6 QueryTarget). The deferred repository slice (9) is the *riskiest* — write-side, 2-backend — so it goes last and only on demand. This is a deliberate inversion of the brief's "CRUD first."
+## 0.6 Implementation finding #2 — `WireTarget` is thin too; `QueryTarget` is the *only* substantial seam left
+
+*(Recorded while scoping slice 2, from reading the actual wire + query emitters.)*
+
+Reading the three wire type-spelling mappers (`python/emit/http-models.ts:wireFieldType`, `dotnet/dto-mapping.ts:wireType`, `java/emit/wire.ts:wireJavaType`) shows the **composition diverges structurally**, not just in spelling:
+
+- **.NET** flattens `array`/`optional` into `isCollection`/`isNullable` **flags** (via `wireTypeInfo`) and applies them as `IReadOnlyList<>`/`?` suffixes — a **non-recursive** traversal.
+- **Python** recurses: `list[…]` for array, `… | None` for optional.
+- **Java** recurses too but differently: `List<boxed element>` for array, and optional just **unwraps to the boxed inner** (no marker).
+
+The only byte-parallel arms are `enum → t.name` and `entity → ${name}Response`; every other arm is per-language spelling *and* the array/optional composition is three different shapes. A uniform recursive `WireTarget` dispatcher cannot reproduce .NET's flag-flatten byte-identically, and Python/Java diverge from each other on both `array` and `optional`. So `WireTarget` is the **events/ids situation one level up**: a thin `switch(t.kind)` skeleton whose every arm is a leaf → net-negative indirection. **Dropped.**
+
+**The consolidated conclusion.** After the already-shared substrate (`MigrationsIR`, `wireShape`, `sql-pg`, `ExprTarget`, **`intrinsicKey`/`intrinsicFor` in `util/intrinsics.js`**, and the **`isDenyFilter`/`isDeepScopeFilter` detection** — all already imported cross-backend) **plus the now-extracted seed spine**, the persistence-emit surface has far less *substantial* extractable-shared content than the raw file-counts implied. The value-shaped fragments (ids, events, enum, wire types/DTOs) are all thin-skeleton/divergent-leaf. **The one remaining seam with a genuinely substantial shared decision tree is `QueryTarget`** — the find-`where`/capability-filter predicate lowering (`lowerToDrizzle` ↔ `lowerToSqlAlchemy`, ~600/508 near-parallel lines: deny/deep/`&&`/`||`/COMPARE_OP/temporal/column-value-split/bare-boolean/`refColl.contains`). Its substrate is already shared; the work is the ~10-method dispatch seam + a per-backend leaf table (`sql\`…\`` for Drizzle, `func.*`/operator for SQLAlchemy, JPQL string for Java — the intrinsic tables stay legit per-backend leaves). This also means the **T10 unfreeze is largely already banked**: a 6th backend inherits the whole shared substrate + the seed pattern, and `QueryTarget` (once landed) covers its highest-traffic read surface.
+
+Ordering rationale: the seed spine (landed) proved the `_persistence/` home + byte-identical gate cheaply. `QueryTarget` is the one structurally-interesting, high-value slice — done next, TS↔Python first (near-line-for-line), Java after (its JPQL string form is more divergent). This is a deliberate inversion of the brief's "CRUD first."
 
 ### 2.6.1 Restated acceptance benchmark (honest, per-backend)
 
