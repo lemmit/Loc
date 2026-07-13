@@ -33,11 +33,14 @@ import type {
   NamedDecl,
   NamedType,
   NameRef,
+  ObjectFieldInit,
+  ObjectLit,
   Operation,
   Parameter,
   PostfixChain,
   PrimitiveType,
   Property,
+  QueryHandler,
   ReturnStmt,
   Route,
   SelfType,
@@ -62,11 +65,14 @@ import {
   mkNamedType,
   mkNameRef,
   mkNullLit,
+  mkObjectFieldInit,
+  mkObjectLit,
   mkOperation,
   mkParameter,
   mkPostfixChain,
   mkPrimitiveType,
   mkProperty,
+  mkQueryHandler,
   mkReturnStmt,
   mkRoute,
   mkSelfType,
@@ -522,6 +528,55 @@ export function commandHandler(
   });
   if (opts.returnType) setContainer(opts.returnType, node, "returnType");
   return node as CommandHandler & ContextMember;
+}
+
+/** An application-layer `queryHandler <name>(params): T { body }` context member.
+ * The read-side twin of `commandHandler()` — grammar `QueryHandler` requires a
+ * `returnType` (a query always produces a response), so it is not optional here.
+ * Emitted by `scaffoldHandlers` for each aggregate `find` (and the canonical
+ * get-by-id read). */
+export function queryHandler(
+  name: string,
+  params: Parameter[],
+  returnType: TypeRef,
+  body: Statement[],
+): QueryHandler & ContextMember {
+  const origin = currentOrigin();
+  const node: QueryHandler = tag(
+    mkQueryHandler({ $type: "QueryHandler", name, params, returnType, body }),
+    origin,
+  );
+  params.forEach((p, i) => {
+    setContainer(p, node, "params", i);
+  });
+  body.forEach((s, i) => {
+    setContainer(s, node, "body", i);
+  });
+  setContainer(returnType, node, "returnType");
+  return node as QueryHandler & ContextMember;
+}
+
+/** An object literal expression: `{ field: <expr>, … }` (grammar `ObjectLit` /
+ * `ObjectFieldInit`).  The single positional argument a factory call takes —
+ * `<Agg>.create({ code: code, status: status })` — which lowers to a
+ * `factory-let` (see `matchFactoryCall` in `lower-workflow.ts`).  Each entry's
+ * `value` is any Expression (a bare `nameRef(field)` in the scaffold create
+ * handler, threading the handler param of the same name into the field). */
+export function objectLit(fields: { name: string; value: Expression }[]): ObjectLit {
+  const origin = currentOrigin();
+  const inits: ObjectFieldInit[] = fields.map((f) => {
+    const node: ObjectFieldInit = tag(
+      mkObjectFieldInit({ $type: "ObjectFieldInit", name: f.name, value: f.value }),
+      origin,
+    );
+    setContainer(f.value, node, "value");
+    return node;
+  });
+  const lit: ObjectLit = tag(mkObjectLit({ $type: "ObjectLit", fields: inits }), origin);
+  inits.forEach((init, i) => {
+    setContainer(init, lit, "fields", i);
+  });
+  return lit;
 }
 
 /** A `Context.Handler` handler reference — the target of a `route`.  The

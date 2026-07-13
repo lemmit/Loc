@@ -1,30 +1,35 @@
 import type { Route, Subdomain } from "../../../language/generated/ast.js";
 import { defineMacro, handlerRef, route } from "../../api/index.js";
-import { handlerName, handlerTargets, routePath } from "./_handlers-shared.js";
+import { handlerTargets, targetHandlerName, targetMethod, targetPath } from "./_handlers-shared.js";
 
-/** Emit a `route POST <path> -> <Context>.<Handler>` for every public
- * operation of every aggregate across the named subdomain's contexts
- * (unfoldable-api-derivation.md, A3).
+/** Emit a `route <METHOD> <path> -> <Context>.<Handler>` for every eligible
+ * source of every aggregate across the named subdomain's contexts
+ * (unfoldable-api-derivation.md, A3 + A3.2).  The HTTP method and path depend on
+ * the source kind:
  *
  *   api SalesApi with scaffoldApi(of: Sales)
  *
  *   ↓ SalesApi gains
  *
- *   route POST "/orders/{orderId}/cancel" -> Ordering.CancelOrder
+ *   route GET  "/orders/{orderId}"          -> Ordering.GetOrder
+ *   route GET  "/orders/by_status"          -> Ordering.ByStatus
+ *   route POST "/orders"                    -> Ordering.CreateOrder
+ *   route POST "/orders/{orderId}/cancel"   -> Ordering.CancelOrder
  *
  * Host-local: the routes splice into the api's own `routes[]`.  The route's
- * handler segment (`CancelOrder`) is derived from the SAME `handlerTargets`
- * selection + `handlerName` helper that `scaffoldHandlers` uses, so it always
- * resolves to a handler that macro emitted.  `scaffoldHandlers` must be applied
- * to each targeted context (`context X with scaffoldHandlers`) to supply those
- * handlers. */
+ * method, path, and handler segment are all derived from the SAME
+ * `handlerTargets` selection + `target*` helpers that `scaffoldHandlers` uses,
+ * so a route always resolves to a handler that macro emitted.
+ * `scaffoldHandlers` must be applied to each targeted context
+ * (`context X with scaffoldHandlers`) to supply those handlers. */
 export default defineMacro({
   name: "scaffoldApi",
   target: "api",
   apiVersion: 1,
   description:
-    "Emits a POST route per public operation of every aggregate in the named " +
-    "subdomain, targeting the commandHandler scaffoldHandlers emits for it.",
+    "Emits a route per operation, create, find, and get-by-id read of every " +
+    "aggregate in the named subdomain — POST for writes, GET for reads — " +
+    "targeting the handler scaffoldHandlers emits for it.",
   params: {
     of: { kind: "ref", of: "Subdomain" },
   },
@@ -32,14 +37,8 @@ export default defineMacro({
     const sub = args.of as Subdomain;
     const out: Route[] = [];
     for (const ctx of sub.contexts ?? []) {
-      for (const { agg, op } of handlerTargets(ctx)) {
-        out.push(
-          route(
-            "POST",
-            routePath(agg.name, op.name),
-            handlerRef(ctx.name, handlerName(op.name, agg.name)),
-          ),
-        );
+      for (const t of handlerTargets(ctx)) {
+        out.push(route(targetMethod(t), targetPath(t), handlerRef(ctx.name, targetHandlerName(t))));
       }
     }
     return out;
