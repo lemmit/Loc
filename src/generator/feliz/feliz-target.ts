@@ -13,6 +13,7 @@ import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
+  type FelizFormField,
   felizCreateForm,
   felizOperationForm,
   felizWorkflowForm,
@@ -22,6 +23,23 @@ import {
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** One form field → its typed `Html.input` (shared by create / operation /
+ *  workflow forms — the markup is identical, only the field set differs).  The
+ *  widget is derived from the field's `inputKind`:
+ *   - `number` — `prop.type'.number` + string `onChange` (form state is string).
+ *   - `checkbox` — `prop.type'.checkbox` + `prop.isChecked (… = "true")`; the
+ *     bool `onChange` sets the string `"true"`/`"false"` (encoder reads that).
+ *   - `text` — a plain text input.
+ *  (`type'` — Feliz's apostrophe-suffixed name, since `type` is an F# keyword.) */
+function renderFormInput(formField: string, fld: FelizFormField): string {
+  const value = `model.${formField}.${fld.wireName}`;
+  if (fld.inputKind === "checkbox") {
+    return `Html.input [ prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
+  }
+  const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
+  return `Html.input [ ${typeProp}prop.placeholder "${fld.wireName}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
 }
 
 /** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
@@ -177,11 +195,12 @@ export const felizTarget: WalkerTarget = {
     const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
     if (!agg) return null;
     const form = felizCreateForm(agg);
-    const inputs = form.fields.map(
-      (fld) =>
-        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
-    );
-    const submit = `Html.button [ prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    const disabled =
+      form.fields.length > 0
+        ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
+        : "";
+    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
@@ -203,11 +222,9 @@ export const felizTarget: WalkerTarget = {
     const form = felizOperationForm(agg, op);
     if (form.fields.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
-    const inputs = form.fields.map(
-      (fld) =>
-        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
-    );
-    const submit = `Html.button [ prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
+    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
@@ -225,11 +242,9 @@ export const felizTarget: WalkerTarget = {
     if (!wf) return null;
     const form = felizWorkflowForm(wf);
     if (form.fields.length === 0) return null;
-    const inputs = form.fields.map(
-      (fld) =>
-        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
-    );
-    const submit = `Html.button [ prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
+    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 

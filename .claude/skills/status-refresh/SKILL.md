@@ -14,7 +14,8 @@ description: >-
   `CLAUDE.md`, code comments) and a post-refactor concept scrub (one renamed/
   removed concept, grepped across `src/`/`test/`/`docs/`). The single highest-yield
   pattern is the "N-backend-era freeze" — prose frozen at "three/four backends"
-  that now ship on five, plus a frontend (Angular) the docs never picked up.
+  that now ship on five, plus frontends (Angular, then Feliz F#/Fable) the docs
+  never picked up.
   Boundary: this is documentation TRUTHFULNESS, NOT parity-auditor's emitter
   feature audit (it audits whether a backend EMITS a feature; this audits whether
   the DOCS describe what's true). And it is strictly DOCS-ONLY — never edit code
@@ -29,7 +30,8 @@ Documentation drift in this repo is a **standing, sizable tax** — not a one-of
 cleanup. The proof is in the git log: **#1407** did ~150 code-verified doc-checks
 and corrected ~65 docs in one pass, diagnosing a recurring shape it named the
 **"3-backend-era freeze"** — features written up as "three/four backends" that now
-ship on five, plus a fourth frontend (Angular) the docs never picked up. **#1441 /
+ship on five, plus frontends (a fourth, Angular; a fifth, Feliz F#/Fable) the docs
+never picked up. **#1441 /
 #1438 / #1431** were *three separate follow-up PRs* to scrub stale
 `source`/`origin`/`⑤c` references after a single removal (#1408) — the code was
 clean on the first PR; the docs and comments took three more passes to catch up.
@@ -146,7 +148,8 @@ Backend-count and frontend-count claims are where the most stale text hides, bec
 the target set *grows* and prose written at "three backends" never self-updates. The
 ground truth is the registry: `src/platform/registry.ts` today registers **5 backends**
 (`node`/Hono, `dotnet`, `java`, `python`, `elixir` — vanilla Ecto/Phoenix)
-and **4 frontends** (`react`, `vue`, `svelte`, `angular`). Any doc saying "three
+and **5 frontends** (`react`, `vue`, `svelte`, `angular`, `feliz` — F#/Fable/Elmish
+via `dotnet fable`+vite). Any doc saying "three
 backends", "four targets", "the React frontend" (singular), or listing
 "node/dotnet/phoenix/react" as if that's the whole set is a freeze artifact.
 

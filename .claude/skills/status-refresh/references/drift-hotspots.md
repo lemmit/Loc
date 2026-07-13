@@ -27,8 +27,9 @@ it registers:
 
 - **5 backends:** `node` (Hono — bareword resolves to `honoV5Platform`, the v5 default
   lane), `dotnet`, `java`, `python`, `elixir` (vanilla Ecto/Phoenix).
-- **4 frontends:** `react`, `vue`, `svelte`, `angular` (plus `static`/`vite` aliasing
-  to `react`).
+- **5 frontends:** `react`, `vue`, `svelte`, `angular`, `feliz` (F#/Fable/Elmish,
+  built via `dotnet fable`+vite — not the vite-only static pipeline; plus
+  `static`/`vite` aliasing to `react`).
 
 Anything in the docs saying "three backends", "four targets", "the React frontend"
 (singular), "node/dotnet/phoenix/react", or "three DB backends" is a freeze candidate.

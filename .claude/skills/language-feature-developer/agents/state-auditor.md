@@ -42,7 +42,7 @@ Investigate and report:
 
 4. **Backends/frontends in scope.** Given the feature kind (domain-logic expr/stmt
    vs wire-shape vs UI primitive vs persistence-capability vs validate-only),
-   list exactly which of the 5 backends + 4 frontends must change, and whether a
+   list exactly which of the 5 backends + 5 frontends must change, and whether a
    shared seam (`ExprTarget` / `WalkerTarget`) carries it or each target needs
    bespoke work.
 

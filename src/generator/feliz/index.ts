@@ -43,6 +43,7 @@ import {
   renderApiModule,
   renderEncoders,
   renderFormTypes,
+  renderValidation,
   renderViewModule,
   renderWireTypes,
 } from "./wire.js";
@@ -401,6 +402,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     : "";
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
+  const validation = hasForms ? renderValidation(formRecords) : "";
 
   // Views: one root view (single-page) OR per-page `<page>View` functions + a
   // `React.router` root.  Under an auth gate the root is named `appView` and the
@@ -443,11 +445,14 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     hasReads && REMOTE_TYPE,
     hasReads && "",
     hasReads && wire.decoders,
-    // Create-form state (form record types + empty values) → encoders (write dir).
+    // Create-form state (form record types + empty values) → encoders (write dir)
+    // → validation (submit guard: every required field non-empty).
     hasForms && "",
     hasForms && formTypes,
     hasForms && "",
     hasForms && encoders,
+    hasForms && validation ? "" : false,
+    validation || undefined,
     // Api module — reads (fetch + decode), mutations (verb request), creates (POST).
     hasHttp && "",
     hasHttp && api,

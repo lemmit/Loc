@@ -2,7 +2,7 @@
 
 Per-platform reference for every file the generators emit and the
 features they implement.  This document maps each DSL construct to its
-output across the five backends and four frontends so you can answer questions like:
+output across the five backends and five frontends so you can answer questions like:
 
 - "What does `aggregate Order` produce on .NET?"
 - "Where does my `derived total: Money = …` end up in the React app?"
