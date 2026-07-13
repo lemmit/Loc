@@ -8,6 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
+import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderPyExpr } from "../render-expr.js";
 
@@ -32,16 +33,6 @@ import { renderPyExpr } from "../render-expr.js";
 // lifespan calls `run_seeds()` right after `run_migrations()`); the
 // module also runs out-of-band via `python -m app.db.seed`.
 // ---------------------------------------------------------------------------
-
-interface Entry {
-  row: SeedRowIR;
-  raw: boolean;
-}
-
-interface Dataset {
-  name: string;
-  entries: Entry[];
-}
 
 export function buildPySeedFile(
   ctx: EnrichedBoundedContextIR,
@@ -140,33 +131,6 @@ export function buildPySeedFile(
     "    asyncio.run(run_seeds())",
     "",
   );
-}
-
-function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
-  const byName = new Map<string, Dataset>();
-  const order: string[] = [];
-  for (const seed of ctx.seeds) {
-    let ds = byName.get(seed.dataset);
-    if (!ds) {
-      ds = { name: seed.dataset, entries: [] };
-      byName.set(seed.dataset, ds);
-      order.push(seed.dataset);
-    }
-    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
-  }
-  return order.map((n) => byName.get(n)!);
-}
-
-/** Aggregates whose domain class + repository the seed imports — `raw`
- *  rows emit pure SQL and import nothing. */
-function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
-  const used = new Set<string>();
-  for (const ds of datasets) {
-    for (const e of ds.entries) {
-      if (!e.raw && seedable.has(e.row.aggregate)) used.add(e.row.aggregate);
-    }
-  }
-  return [...used].sort();
 }
 
 function renderDatasetFn(
