@@ -71,8 +71,9 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/auth-oidc.ddd", "api"],
   // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
   ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
-  // `operation X() extern` — handler registry + dev-stubs + boot verify,
-  // check_<op> precondition gate, controlled mutation surface.
+  // `operation X() extern` (extern (b) Phase 2) — the op is a real method
+  // (preconditions → user-owned hook → invariants); the scaffold-once hook
+  // module `app/domain/extern/<agg>_extern.py` raises until filled in.
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
   // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],

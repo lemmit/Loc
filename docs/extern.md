@@ -21,18 +21,19 @@ aggregate Order {
 ```
 
 > **Backend coverage.** `extern` *operations* now ship on **all five**
-> backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  The two
-> handler-registry layouts walked through below (.NET and Hono) are
-> representative for those two; Python emits the same shape (a typed
-> per-op handler interface / registry, a register/verify gate, and a
-> fail-fast-at-startup check for a missing implementation).  **Elixir** and
-> **Java** use a co-located idiom instead — the extern op is a member of the
-> aggregate's own lifecycle, delegating to a **scaffold-once** user-owned hook
-> (Elixir a generated `@behaviour` + impl module; Java a co-located `<Agg>Extern`
-> class) — described under *Elixir/Phoenix* and *Java* below.  (This is
-> `docs/proposals/extern-domain-extension-point.md`, which re-homes `extern` from
-> an injected application-layer handler to a domain-internal extension point;
-> the remaining backends migrate in later slices.)
+ backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  Two
+> idioms exist, as `docs/proposals/extern-domain-extension-point.md` re-homes
+> `extern` from an injected application-layer handler to a domain-internal
+> extension point:
+> - **Domain hook (co-located, scaffold-once)** — **Python** (a scaffold-once
+>   hook module), **Java** (a co-located `<Agg>Extern` class), and **Elixir** (a
+>   generated `@behaviour` + a scaffold-once impl module) — each reaches the
+>   aggregate's own private state directly (no injected registry, no setter
+>   widening); see *Python*, *Java*, and *Elixir/Phoenix* below.
+> - **Injected handler (typed per-op interface + register/verify gate)** —
+>   **Hono** (walked through below) and **.NET** (same shape: a typed per-op
+>   handler interface / registry + a fail-fast-at-startup check for a missing
+>   implementation).  These migrate to the domain-hook idiom in later slices.
 >
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
@@ -144,6 +145,75 @@ handler `aggregate._externEditor()`, then runs invariants and saves.
 
 `createApp(...)` calls `verifyOrderExternHandlersRegistered()` at
 startup, so a missing handler fails fast.
+
+## Python (FastAPI + SQLAlchemy)
+
+Python uses a **co-located domain extension point**, not an injected handler
+registry.  The extern op is a real method on the aggregate — it runs its
+preconditions, delegates the mutation to a user-owned hook function, then
+re-asserts invariants:
+
+```python
+# app/domain/order.py — generated, regenerated every run
+class Order:
+    def confirm(self) -> None:
+        if not (self._is_mutable()):
+            raise DomainError("Precondition failed: isMutable()")
+        if not (self._risk_score < 80):
+            raise DomainError("Precondition failed: riskScore < 80")
+        order_extern.confirm(self)      # ← the hook
+        self._assert_invariants()       # invariants re-run after it mutates
+```
+
+The hook lives in a **scaffold-once** module, `app/domain/extern/<agg>_extern.py`
+— generated once with a loud raising stub, then **yours** (a `generate system`
+re-run never overwrites it; see *Regeneration preservation* below).  It receives
+the loaded aggregate and mutates its **own private state directly** — no
+per-field setters are minted, so the aggregate stays encapsulated:
+
+```python
+# app/domain/extern/order_extern.py — scaffolded once, then yours
+# loom:scaffold-once — this file is yours. …
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from app.domain.events import OrderConfirmed
+from app.domain.value_objects import OrderStatus
+
+if TYPE_CHECKING:
+    from app.domain.order import Order
+
+
+def confirm(order: Order) -> None:
+    # Your business decision — a bespoke state transition, a computed score, …
+    order._status = OrderStatus.Confirmed
+    order.raise_event(OrderConfirmed(order=order.id, at=datetime.now(UTC)))
+```
+
+The generated stub each op starts as **raises loudly** until you fill it in, so a
+missing implementation is never a silent success:
+
+```python
+def confirm(order: Order) -> None:
+    raise NotImplementedError(
+        "extern operation `confirm` on Order is not implemented — "
+        "fill in app/domain/extern/order_extern.py"
+    )
+```
+
+The aggregate imports the hook module at load time; the hook imports the
+aggregate **`TYPE_CHECKING`-only** (annotations are deferred via
+`from __future__ import annotations`), so there is no import cycle and the whole
+project still passes `ruff` + `mypy --strict`.  The auto route drives the op
+exactly like a non-extern one (`found.confirm()` → save), and a workflow can
+call it too (`order.confirm()`).
+
+> **External-service case.** If the op needs to *talk to an external service*
+> rather than run pure domain logic, that is the case-2 home — an
+> `extern commandHandler` / `queryHandler` (see the end of this doc), not the
+> aggregate-op hook above.
 
 ## Elixir/Phoenix (plain Ecto)
 
