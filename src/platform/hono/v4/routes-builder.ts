@@ -177,13 +177,9 @@ export function buildRoutesFile(
   if (whenEnums.size > 0) {
     lines.push(`import { ${[...whenEnums].sort().join(", ")} } from "../domain/value-objects";`);
   }
-  // Extern handler registry — the per-aggregate file is always emitted
-  // when the aggregate has at least one extern op, never imported when
-  // it has none.  Type-only import keeps the route file fine when
-  // there are no extern ops; the runtime ref is gated below.
-  if (agg.operations.some((o) => o.extern)) {
-    lines.push(`import { externHandlers } from "../domain/${lowerFirst(agg.name)}-extern";`);
-  }
+  // Extern operations (extern (b) Phase 2) are now aggregate-owned hooks: the
+  // route calls `aggregate.<op>(...)` like any other operation, so there is no
+  // handler-registry import.
   if (needsTx) {
     // Audited / provenanced operations write extra rows per successful
     // invocation, inside the same transaction as the aggregate save.
@@ -1015,31 +1011,12 @@ function emitOperationRoute(
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
   // so it's shared verbatim between the plain and transactional paths.
-  const mutation = (pad: string): string[] => {
-    if (op.extern) {
-      // Extern: run preconditions, dispatch to the user-registered
-      // handler, then run invariants.  The handler call is wrapped so any
-      // non-domain throw becomes an ExternHandlerError naming the op +
-      // aggregate (see app.onError below for the 500 mapping).  Domain
-      // errors re-throw unchanged so 400 / 403 / 404 still apply.
-      const handlerKey = `${lowerFirst(op.name)}${agg.name}`;
-      return [
-        `${pad}aggregate.check${upperFirst(op.name)}(${callArgs});`,
-        `${pad}const handler = externHandlers.${handlerKey};`,
-        `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${upperFirst(op.name)}${agg.name}Handler(...) before app.listen().");`,
-        `${pad}try {`,
-        `${pad}  await handler(aggregate._externEditor(), body);`,
-        `${pad}} catch (err) {`,
-        `${pad}  if (err instanceof DomainError) throw err;`,
-        `${pad}  if (err instanceof ForbiddenError) throw err;`,
-        `${pad}  if (err instanceof AggregateNotFoundError) throw err;`,
-        `${pad}  throw new ExternHandlerError("${op.name}", "${agg.name}", err);`,
-        `${pad}}`,
-        `${pad}aggregate.assertInvariants();`,
-      ];
-    }
-    return [`${pad}aggregate.${lowerFirst(op.name)}(${callArgs});`];
-  };
+  // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned hook,
+  // so the operation method itself runs preconditions → hook → invariants —
+  // the route calls it exactly like a non-extern op.
+  const mutation = (pad: string): string[] => [
+    `${pad}aggregate.${lowerFirst(op.name)}(${callArgs});`,
+  ];
 
   if (!audit && !prov) {
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);

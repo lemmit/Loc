@@ -98,14 +98,6 @@ export function buildWorkflowsFile(
   // import list is still the intersection with the emitted text below, so a
   // candidate that isn't actually referenced is dropped — keeping a
   // subscription-free project byte-identical.
-  const externAggs = new Set<string>();
-  for (const wf of ctx.workflows) {
-    for (const st of allHandlerStmts(wf)) {
-      if (st.kind !== "op-call") continue;
-      const op = lookupOp(ctx, st.aggName, st.op);
-      if (op?.extern) externAggs.add(st.aggName);
-    }
-  }
   const usedVOs = ctx.valueObjects.map((v) => v.name);
   const usedEnums = ctx.enums.map((e) => e.name);
   const valueObjectImport = [...usedVOs, ...usedEnums];
@@ -311,9 +303,6 @@ export function buildWorkflowsFile(
   const reposReferenced = allAggNames.filter((n) =>
     new RegExp(`\\bnew\\s+${n}Repository\\(`).test(bodyStr),
   );
-  const externReferenced = [...externAggs].filter((n) =>
-    new RegExp(`\\b${lowerFirst(n)}ExternHandlers\\b`).test(bodyStr),
-  );
   const voEnumReferenced = valueObjectImport.filter(hasRef);
 
   const imports: string[] = [];
@@ -384,11 +373,6 @@ export function buildWorkflowsFile(
   for (const aggName of reposReferenced) {
     imports.push(
       `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
-    );
-  }
-  for (const aggName of externReferenced) {
-    imports.push(
-      `import { externHandlers as ${lowerFirst(aggName)}ExternHandlers } from "../domain/${lowerFirst(aggName)}-extern";`,
     );
   }
   if (voEnumReferenced.length > 0) {
@@ -831,17 +815,6 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`  },`);
   out.push(`);`);
   return out;
-}
-
-/** All statements that contribute emitted handler code for a workflow — the
- *  facade body plus the reactor / event-create handler bodies this file emits.
- *  Used only to gather import candidates (intersected with the emitted text). */
-function allHandlerStmts(wf: WorkflowIR): WorkflowStmtIR[] {
-  return [
-    ...wf.statements,
-    ...(wf.subscriptions ?? []).flatMap((o) => o.statements),
-    ...wf.creates.flatMap((c) => c.statements),
-  ];
 }
 
 /** Deterministic handler-function name for an event subscription —
@@ -1466,40 +1439,9 @@ export function honoWorkflowStmtTarget(
     opCall: (st, indent) => {
       const args = st.args.map(renderArg).join(", ");
       const op = lookupOp(ctx, st.aggName, st.op);
-      if (op?.extern) {
-        // Workflows can call extern ops — emit the same dance the
-        // auto Hono route does, but with the request constructed
-        // from the workflow's domain args (parameterless externs
-        // get a `Record<string, never>`; parameterized externs get
-        // a per-param object literal that matches the user
-        // handler's typed request shape).  The handler call is
-        // wrapped so any non-domain throw becomes an
-        // ExternHandlerError; domain errors raised by the user
-        // handler bubble unchanged.
-        const handlerKey = `${lowerFirst(st.op)}${st.aggName}`;
-        const checkName = `check${upperFirst(st.op)}`;
-        const externAlias = `${lowerFirst(st.aggName)}ExternHandlers`;
-        const reqLiteral =
-          op.params.length === 0
-            ? `{} as Record<string, never>`
-            : `{ ${op.params.map((p, i) => `${p.name}: ${renderArg(st.args[i]!)}`).join(", ")} }`;
-        return [
-          `${indent}${st.target}.${checkName}(${args});`,
-          `${indent}{`,
-          `${indent}  const handler = ${externAlias}.${handlerKey};`,
-          `${indent}  if (!handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
-          `${indent}  try {`,
-          `${indent}    await handler(${st.target}, ${reqLiteral});`,
-          `${indent}  } catch (err) {`,
-          `${indent}    if (err instanceof DomainError) throw err;`,
-          `${indent}    if (err instanceof ForbiddenError) throw err;`,
-          `${indent}    if (err instanceof AggregateNotFoundError) throw err;`,
-          `${indent}    throw new ExternHandlerError("${st.op}", "${st.aggName}", err);`,
-          `${indent}  }`,
-          `${indent}}`,
-          `${indent}${st.target}.assertInvariants();`,
-        ];
-      }
+      // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned
+      // hook, so a workflow calls `<target>.<op>(...)` like any other op — the
+      // method runs preconditions → hook → invariants internally.
       // A currentUser-gated op takes a trailing `currentUser` argument
       // (appended to the method signature); thread the in-scope binding.
       const callArgs =

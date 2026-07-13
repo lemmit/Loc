@@ -2,15 +2,16 @@
 // hand-written code, neither of which the other examples show.  Files-only
 // in the playground: an extern op's backend and an extern component's
 // frontend both need a user-supplied module to boot/build, so this example
-// is for reading the generated CONTRACT (the typed registry + props
+// is for reading the generated CONTRACT (the abstract aggregate base + props
 // interface), not for the live preview.  See docs/extern.md.
 //
 //   • extern OPERATION — `operation confirm() extern` declares only its
 //     preconditions; the framework runs load → preconditions → YOUR
-//     handler → invariants → save → drain.  Hono emits
-//     `domain/order-extern.ts` (a typed registry + register helper +
-//     startup verify gate); you register the handler before listen().
-//     A workflow can call a parameterless extern like any other op.
+//     hook → invariants → save → drain.  Hono emits an abstract
+//     `domain/order.base.ts` (the op calls a `protected abstract
+//     confirmExtern()`) plus a scaffold-once concrete `domain/order.ts`
+//     subclass you own and fill in.  A workflow calls the extern like any
+//     other op.  See docs/extern.md → Hono (TypeScript).
 //
 //   • extern COMPONENT — `component RiskBadge(...) extern from "<path>"`
 //     declares the typed param contract but no body; the React generator

@@ -42,7 +42,7 @@ import {
   renderSchema,
   renderTestsFile,
 } from "../../../generator/typescript/emit.js";
-import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
+import { buildExternSubclassFile } from "../../../generator/typescript/extern-builder.js";
 import { rewriteRelativeImports } from "../../../generator/typescript/layout-imports.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
@@ -611,14 +611,24 @@ export function generateTypeScriptForContexts(
       // Only collected when a recorder is actually threaded in — a
       // no-sourcemap run pays no per-statement bookkeeping cost.
       const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
-      place(
-        "domain-aggregate",
-        agg.name,
-        renderAggregate(agg, ctx, emitProvenance, emitTrace, opFragments),
-        agg.origin,
-        construct,
-        opFragments,
-      );
+      const aggContent = renderAggregate(agg, ctx, emitProvenance, emitTrace, opFragments);
+      // Extern operations (extern-domain-extension-point.md §3a, decision (b)
+      // Phase 2): the aggregate is emitted as an abstract `<Agg>Base`
+      // (`domain/<agg>.base.ts`, regenerated) plus a scaffold-once concrete
+      // `<Agg>` subclass (`domain/<agg>.ts`, user-owned) that implements each
+      // op's extension-point hook.  Everyone still imports the concrete `<Agg>`.
+      if (agg.operations.some((o) => o.extern)) {
+        place("domain-aggregate-base", agg.name, aggContent, agg.origin, construct, opFragments);
+        place(
+          "domain-aggregate",
+          agg.name,
+          buildExternSubclassFile(agg, ctx),
+          agg.origin,
+          construct,
+        );
+      } else {
+        place("domain-aggregate", agg.name, aggContent, agg.origin, construct, opFragments);
+      }
       // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
       // over the saving-shape axis — its repository appends to / folds the
       // event stream rather than reading a state table.  Otherwise the
@@ -664,9 +674,6 @@ export function generateTypeScriptForContexts(
         const routesContent = buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace);
         out.set(routesPath, routesContent);
         sourcemap?.file(routesPath, routesContent, agg.origin, construct);
-      }
-      if (agg.operations.some((o) => o.extern)) {
-        place("domain-extern", agg.name, buildExternHandlersFile(agg, ctx), agg.origin, construct);
       }
       const testsFile = renderTestsFile(agg, ctx);
       if (testsFile) {

@@ -61,31 +61,14 @@ export function renderHttpIndex(
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
     return `  app.route("${API_BASE_PATH}/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
   });
-  const externAggs = aggregates.filter((a) => a.operations.some((o) => o.extern));
-  const externImports = externAggs.map(
-    (a) =>
-      `import { verify${a.name}ExternHandlersRegistered } from "../domain/${lowerFirst(a.name)}-extern";`,
-  );
-  // After verifying registration, emit one `extern_handlers_registered`
-  // line per aggregate so an operator can confirm at boot that every
-  // declared extern op is wired (and read which ones from the line) —
-  // matters for ops debugging where a missing handler used to surface
-  // only on the first request.
-  const externVerifyBody = externAggs.flatMap((a) => {
-    const externOpNames = a.operations
-      .filter((o) => o.extern)
-      .map((o) => `"${o.name}"`)
-      .join(", ");
-    const opsCount = a.operations.filter((o) => o.extern).length;
-    return [
-      `  verify${a.name}ExternHandlersRegistered();`,
-      `  ${renderHonoBaseLogCall("externHandlersRegistered", `aggregate: "${a.name}", count: ${opsCount}, ops: [${externOpNames}]`)}`,
-    ];
-  });
-  // baseLogger is needed at boot for any info/debug line that fires
-  // BEFORE the first request — extern verify, auth enabled, etc.  Gate
-  // the import so plain (no-extern, no-auth) deployables don't pull it in.
-  const needsBaseLogger = externAggs.length > 0 || authRequired;
+  // Extern operations (extern (b) Phase 2) re-home to aggregate-owned hooks
+  // implemented by a scaffold-once subclass — a missing implementation is a
+  // COMPILE error (unimplemented abstract), so there is no boot-time registry
+  // verify anymore.
+  // baseLogger is needed at boot for any info/debug line that fires BEFORE the
+  // first request (auth enabled, etc.).  Gate the import so plain (no-auth)
+  // deployables don't pull it in.
+  const needsBaseLogger = authRequired;
   const baseLoggerImport = needsBaseLogger ? `import { baseLogger } from "../obs/log";` : null;
   const hasWorkflows = ctx.workflows.length > 0;
   // In-process event dispatch (channels.md): when this deployable has any
@@ -190,7 +173,6 @@ export function renderHttpIndex(
       baseLoggerImport,
       authImport,
       ...aggregateImports,
-      ...externImports,
       workflowImport,
       realtimeImport,
       viewImport,
@@ -213,10 +195,6 @@ export function renderHttpIndex(
       // can still pass an explicit dispatcher (e.g. a broker publisher).
       `  events: DomainEventDispatcher = ${defaultEventsExpr},`,
       "): OpenAPIHono {",
-      externAggs.length > 0
-        ? "  // Verify every extern operation has a registered handler.  Fails\n  // fast at startup so a missing user implementation surfaces here\n  // instead of as a 500 on the first request."
-        : null,
-      ...externVerifyBody,
       authVerifyAssert,
       "  const app = new OpenAPIHono();",
       "  // Per-request correlation id + structured request_start /",
