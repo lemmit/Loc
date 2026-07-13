@@ -126,9 +126,20 @@ in hand — not before F# output exists.
   2-page routed app. **Caveat:** the flat combined Model assumes distinct
   state-field names across pages (same-named fields share one cell); per-page
   sub-models are a follow-up if that bites.
-- The procedural pack has 8 primitives (Stack/Group/Heading/Text/Button + Card/
-  Badge/Divider) + `QueryView` (via the `View.remoteList` helper); grows
-  example-by-example.
+- ✅ **Scaffold primitive coverage (e2e parity).** The pack now renders every
+  primitive a `with scaffold(...)` app uses — the containers Stack/Group/Paper/
+  Toolbar/Breadcrumbs, the leaves Heading/Text/Button/Card/Badge/Divider/Alert/
+  Empty/Skeleton/KeyValueRow/Anchor/IdLink, the `Table` (header + `yield!
+  List.map` rows), plus `QueryView` (via `View.remoteList`/`remoteOne`) and the
+  forms. A scaffold-generated CRUD app (List/New/Detail/Home) Fable-compiles,
+  vite-builds, AND runs (headless-Chromium smoke) — the CI gate now covers both
+  the hand-built showcase AND a scaffold app. **Modal** renders its trigger as a
+  present-but-inert button (the modal-wrapped operation's open-state wiring is a
+  follow-up; the operation FORM itself is still wired via `OperationForm`
+  detection). Offside note: containers keep their structural props
+  (`className`/`children [`) on the opening line + paren-wrap the whole element,
+  else a separate-line `prop.children` aligns with the parent's child column and
+  F# parses it as a parent-list element (§29-adjacent; see experience §30).
 - ✅ **byId / detail-page reads.** A `QueryView(of: X.byId(id), single: true)`
   on a `:id`-param route projects to a `Remote<'T option>` Model field, a
   `productById (id: string)` Api fetch (`Decode.option` + a `404 → Ok None`

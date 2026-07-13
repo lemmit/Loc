@@ -52,6 +52,116 @@ function primitiveStack(c: Ctx): string {
   return `Html.div [\n  prop.children [\n${children}\n  ]\n]`;
 }
 
+/** A children-container primitive (Stack/Group/Paper/Toolbar/Breadcrumbs) with a
+ *  CSS class.  Same offside-safe children handling as `primitiveStack` (multi-
+ *  line element lists are fine inside `[ … ]`; only offside-keywords aren't). */
+function containerEl(tag: string, className: string, c: Ctx): string {
+  const cls = `prop.className "${className}"`;
+  if (!c.hasChildren) return `Html.${tag} [ ${cls} ]`;
+  const indent = String(c.indent ?? "  ");
+  const children = `${indent}${String(c.childrenBlock ?? "")}`;
+  // Keep the structural props (`className`, `children [`) on the OPENING line so
+  // only the children span lines — a separate-line `prop.children` would sit at
+  // the parent's child column and F# would parse it as a PARENT-list element.
+  // Paren-wrap so a following sibling isn't absorbed as a curried arg (§24).
+  return `(Html.${tag} [ ${cls}; prop.children [\n${children}\n  ] ])`;
+}
+
+/** Paper — a surface container (Stack-shaped, with a class). */
+function primitivePaper(c: Ctx): string {
+  return containerEl("div", "loom-paper", c);
+}
+
+/** Toolbar — a page-header row (space-between container). */
+function primitiveToolbar(c: Ctx): string {
+  return containerEl("div", "loom-toolbar", c);
+}
+
+/** Breadcrumbs — a nav trail container. */
+function primitiveBreadcrumbs(c: Ctx): string {
+  return containerEl("nav", "loom-breadcrumbs", c);
+}
+
+/** Alert(message, color?, title?) — an error/info callout.  `message` arrives
+ *  as raw (unwrapped, escaped) text; an optional bold title precedes it. */
+function primitiveAlert(c: Ctx): string {
+  const kids: string[] = [];
+  if (c.hasTitle) kids.push(`Html.strong [ Html.text "${String(c.title ?? "")}" ]`);
+  kids.push(asChild(String(c.message ?? "")));
+  return `Html.div [ prop.className "loom-alert"; prop.children [ ${kids.join("; ")} ] ]`;
+}
+
+/** Empty("No results") — a centred empty-state placeholder. */
+function primitiveEmpty(c: Ctx): string {
+  return `Html.div [ prop.className "loom-empty"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
+}
+
+/** Skeleton — a loading placeholder (a plain styled block; count/height ignored
+ *  in v1). */
+function primitiveSkeleton(_c: Ctx): string {
+  return `Html.div [ prop.className "loom-skeleton" ]`;
+}
+
+/** KeyValueRow(label, value) — a detail-page field row (label + value cell).
+ *  `label` is raw text; `childJsx` is an already-walked value element. */
+function primitiveKeyValueRow(c: Ctx): string {
+  const label = `Html.dt [ Html.text "${String(c.label ?? "")}" ]`;
+  const value = `Html.dd [ prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  return `Html.div [ prop.className "loom-kv"; prop.children [ ${label}; ${value} ] ]`;
+}
+
+/** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
+ *  hash path (`#/products`); without one it's a plain text span (breadcrumb
+ *  leaf).  `to` is a JS expression (a quoted literal or a ref) — a literal
+ *  folds into a static `"#/path"`, a ref concatenates at runtime. */
+function primitiveAnchor(c: Ctx): string {
+  const label = String(c.label ?? "");
+  if (!c.hasTo) return `Html.span [ Html.text "${label}" ]`;
+  const to = String(c.to ?? '"/"');
+  const lit = to.match(/^"(.*)"$/);
+  const href = lit ? `"#${lit[1]}"` : `("#" + ${to})`;
+  return `Html.a [ prop.href ${href}; prop.text "${label}" ]`;
+}
+
+/** Table(rows:, ...Column(header, accessor)) — the list-page data table.  Rows
+ *  iterate `rowsExpr` via a `yield! … |> List.map` (offside-safe inside the
+ *  `[ … ]` children list); each column is a header cell + a per-row value cell
+ *  (the accessor already walked against the row var). */
+function primitiveTable(c: Ctx): string {
+  const cols = (c.columns as unknown as { header: string; cellJsx: string }[] | undefined) ?? [];
+  const rowsExpr = String(c.rowsExpr ?? "[]");
+  const rowVar = String(c.rowVar ?? "row");
+  const headCells = cols.map((col) => `Html.th [ Html.text "${col.header}" ]`).join("; ");
+  const bodyCells = cols
+    .map((col) => `Html.td [ prop.children [ ${asChild(col.cellJsx)} ] ]`)
+    .join("; ");
+  const head = `Html.thead [ prop.children [ Html.tr [ prop.children [ ${headCells} ] ] ] ]`;
+  // The `yield!` + its bracket-delimited body are offside-safe inside the
+  // enclosing `prop.children [ … ]`.
+  const body =
+    `Html.tbody [ prop.children [\n` +
+    `      yield! ${rowsExpr} |> List.map (fun ${rowVar} ->\n` +
+    `        Html.tr [ prop.children [ ${bodyCells} ] ])\n` +
+    `    ] ]`;
+  return `Html.table [ prop.className "loom-table"; prop.children [ ${head}; ${body} ] ]`;
+}
+
+/** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
+ *  Feliz.Router hash path (`#/products/<id>`); the id is the visible label. */
+function primitiveIdLink(c: Ctx): string {
+  const idExpr = String(c.idExpr ?? '""');
+  const prefix = String(c.pathPrefix ?? "/");
+  return `Html.a [ prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
+}
+
+/** Modal(trigger, form) — the scaffold detail's action dialog.  v1 renders the
+ *  trigger as a labelled button; the modal-wrapped operation's MVU wiring (open
+ *  state + submit) is a follow-up, so the button is present but inert. */
+function primitiveModal(c: Ctx): string {
+  const label = String(c.label ?? "Action");
+  return `Html.button [ prop.className "loom-modal-trigger"; prop.text "${label}" ]`;
+}
+
 function primitiveHeading(c: Ctx): string {
   const level = Number(c.level ?? 2);
   const tag = level >= 1 && level <= 6 ? `h${level}` : "h2";
@@ -135,6 +245,18 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-card": primitiveCard,
   "primitive-badge": primitiveBadge,
   "primitive-divider": primitiveDivider,
+  // Scaffold container/leaf primitives (List / New / Detail / Home pages).
+  "primitive-paper": primitivePaper,
+  "primitive-toolbar": primitiveToolbar,
+  "primitive-breadcrumbs": primitiveBreadcrumbs,
+  "primitive-alert": primitiveAlert,
+  "primitive-empty": primitiveEmpty,
+  "primitive-skeleton": primitiveSkeleton,
+  "primitive-key-value-row": primitiveKeyValueRow,
+  "primitive-anchor": primitiveAnchor,
+  "primitive-table": primitiveTable,
+  "primitive-id-link": primitiveIdLink,
+  "primitive-modal": primitiveModal,
 };
 
 /** Build the procedural Feliz pack.  Implements the `LoadedPack` render
