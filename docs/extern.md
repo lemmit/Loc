@@ -37,10 +37,18 @@ aggregate Order {
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
 > Svelte, Angular) and `component … extern from "…"` (hand-written page
-> component — React, Vue, Svelte). On Angular the function hook imports the
-> conformance shim and re-exposes it as a component member (Angular template
-> expressions resolve against the component instance, never a free import), so
-> a body call renders as `{{ initials(name()) }}`.
+> component — React, Vue, Svelte, Angular). On Angular the function hook imports
+> the conformance shim and re-exposes it as a component member (Angular template
+> expressions resolve against the component instance, never a free import), so a
+> body call renders as `{{ initials(name()) }}`. The Angular **component** hook
+> uses `NgComponentOutlet` — the selector-free, class-reference binding — since
+> Angular has no JSX-family `<Name prop={…} />` tag: Loom re-exports the user's
+> **named** component class through `src/components/<Name>.ts`, the page imports
+> it and re-exposes it as a member, and a body call renders
+> `<ng-container [ngComponentOutlet]="Chart" [ngComponentOutletInputs]="{ … }">`.
+> The typed `<Name>.props.ts` interface (the user types their `@Input()`s
+> against it) emits identically to the JSX frontends. Feliz (F#) and HEEx
+> (LiveView) do not yet carry either frontend hatch.
 
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns

@@ -532,6 +532,20 @@ export interface WalkerTarget {
    *  wiring on `ctx.angularForms` for the page-shell. */
   renderWorkflowForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for invoking a user-defined /
+   *  `extern` component (a `call` whose name is a known component).  The
+   *  shared `emitUserComponent` emits a JSX-family element (`<Name prop={…}
+   *  />`) that every JSX/markup frontend consumes; the JSX frontends leave
+   *  this undefined so the walker uses that path verbatim (byte-identical).
+   *  Angular has no PascalCase component tag and must register the component
+   *  in its standalone `imports: []`, so `angularTarget` overrides here to
+   *  render `<ng-container [ngComponentOutlet]="<Name>"
+   *  [ngComponentOutletInputs]="{ … }">` (v0: extern components, data props).
+   *  A non-null return is used verbatim; a null return falls back to the
+   *  shared `emitUserComponent`. Implementations must `ctx.usedUserComponents
+   *  .add(call.name)` so the shell wires the class import + directive. */
+  renderUserComponent?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
    *  shared `emitDestroyForm` delegates here first; a non-null return is used
    *  verbatim and the shared path (which records an `actionMutations` sink +

@@ -387,6 +387,23 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push(`  protected readonly ${fn} = ${fn};`);
   }
 
+  // Extern components the walked body renders (extern-component-escape-hatch.md)
+  // — invoked via `<ng-container [ngComponentOutlet]="<Name>" …>`
+  // (`angularTarget.renderUserComponent`).  Import each component CLASS from its
+  // re-export shim (`src/components/<Name>.ts` → `../../components/<Name>` from
+  // `src/app/pages/`), re-expose it as a member (the outlet reads it against the
+  // instance), and register Angular's `NgComponentOutlet` directive in the
+  // standalone `imports: []` (from `@angular/common`).
+  const usedComponents = [...result.usedUserComponents].sort();
+  if (usedComponents.length > 0) {
+    imports.push('import { NgComponentOutlet } from "@angular/common";');
+    componentImports.add("NgComponentOutlet");
+    for (const name of usedComponents) {
+      imports.push(`import { ${name} } from "../../components/${name}";`);
+      members.push(`  protected readonly ${name} = ${name};`);
+    }
+  }
+
   // Bind each route param synchronously as a class field so both the template
   // (`{{ id }}`) and a `use…ById(this.id)` hoist resolve.  Declared BEFORE the
   // api-read hoists, which reference them via `this.<param>` (class fields

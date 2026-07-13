@@ -860,7 +860,12 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // Names not in the stdlib dispatch table fall through to user-
   // component invocation when they match a registered ComponentIR.
   if (ctx.userComponents.has(call.name)) {
-    return emitUserComponent(call, ctx, depth);
+    // A target may override component invocation entirely (Angular renders an
+    // `ngComponentOutlet` container, not a JSX-family `<Name>` tag).  The
+    // JSX/markup frontends leave the seam undefined → the shared JSX path,
+    // byte-identical.
+    const override = ctx.target.renderUserComponent?.(call, ctx, depth);
+    return override ?? emitUserComponent(call, ctx, depth);
   }
   // Registered primitive without a TSX renderer (e.g. `For`, `List`,
   // `Detail` — source-admissible but unimplemented by the React

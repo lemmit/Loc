@@ -36,7 +36,7 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
-import type { WalkContext } from "../../_walker/walker-core.js";
+import { emitExpr, type WalkContext } from "../../_walker/walker-core.js";
 import { renderAngularAction } from "../action.js";
 import { renderAngularCreateForm } from "../create-form.js";
 import { renderAngularDestroyForm } from "../destroy-form.js";
@@ -202,6 +202,49 @@ export const angularTarget: WalkerTarget = {
    *  workflow command (the shared react-hook-form path is skipped). */
   renderWorkflowForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
     return call.kind === "call" ? renderAngularWorkflowForm(call, ctx, depth) : null;
+  },
+
+  /** Invoke an `extern` component via Angular's `NgComponentOutlet` — the
+   *  clean, selector-free binding: render `<ng-container
+   *  [ngComponentOutlet]="<Name>" [ngComponentOutletInputs]="{ … }">`, passing
+   *  each declared param as an input keyed by param name.  Angular has no
+   *  PascalCase component tag (the JSX-family `<Name prop={…} />` shape), so
+   *  the shared `emitUserComponent` is bypassed; the page shell imports the
+   *  component class from its re-export shim, re-exposes it as a member (the
+   *  outlet reads it against the instance), and registers `NgComponentOutlet`.
+   *  Positional + named args map to param names exactly as `emitUserComponent`
+   *  does; an extra positional arg (a JSX child on the other frontends) has no
+   *  `ngComponentOutlet` analogue in v0 and is dropped. */
+  renderUserComponent(call: ExprIR, ctx: WalkContext, _depth: number): string | null {
+    if (call.kind !== "call") return null;
+    const params = ctx.userComponents.get(call.name) ?? [];
+    ctx.usedUserComponents.add(call.name);
+    const argNames = call.argNames ?? [];
+    const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
+    const entries: string[] = [];
+    let cursor = 0;
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i]!;
+      const named = argNames[i];
+      let paramName: string | undefined;
+      if (named !== undefined) {
+        paramName = named;
+      } else {
+        while (cursor < params.length && filledByName.has(params[cursor]!.name)) cursor += 1;
+        paramName = params[cursor]?.name;
+        if (paramName !== undefined) cursor += 1;
+      }
+      if (paramName === undefined) continue;
+      entries.push(`${paramName}: ${emitExpr(arg, ctx)}`);
+    }
+    const outlet = ` [ngComponentOutlet]="${call.name}"`;
+    // Rendered value expressions use double-quoted JS string literals, so the
+    // inputs object binds as a single-quoted attribute; `emitExpr` never emits
+    // a bare single quote (string literals go through JSON.stringify), so this
+    // quote choice is always safe.
+    const inputs =
+      entries.length > 0 ? ` [ngComponentOutletInputs]='{ ${entries.join(", ")} }'` : "";
+    return `<ng-container${outlet}${inputs}></ng-container>`;
   },
 
   /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by

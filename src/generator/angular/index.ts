@@ -35,6 +35,10 @@ import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
+import {
+  renderAngularExternComponentProps,
+  renderAngularExternComponentShim,
+} from "./extern-components.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
 import { buildAngularViewsModule } from "./views-module.js";
@@ -147,6 +151,32 @@ export function generateAngularForContexts(
     out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
   }
 
+  // Extern frontend components (extern-component-escape-hatch.md): each
+  // `component <Name>(…) extern from "<path>"` (ui-scope or top-level) gets a
+  // typed props interface + a class re-export shim under `src/components/`, and
+  // is threaded into the walker's `userComponents` map so a body call renders
+  // through `angularTarget.renderUserComponent` (an `NgComponentOutlet`
+  // container).  Only EXTERN components are supported on Angular today —
+  // non-extern user components have no walked-component emit here, so they stay
+  // out of the map and fall through unchanged.  A component is `extern`, so it
+  // carries no body/state/derived to walk.
+  const externComponents = [
+    ...(options.topLevelComponents ?? []),
+    ...(ui?.components ?? []),
+  ].filter((c) => c.extern);
+  const externComponentParams = new Map<string, ComponentIR["params"]>();
+  for (const c of externComponents) {
+    externComponentParams.set(c.name, c.params);
+    out.set(
+      `src/components/${c.name}.props.ts`,
+      renderAngularExternComponentProps(c.name, c.params),
+    );
+    out.set(
+      `src/components/${c.name}.ts`,
+      renderAngularExternComponentShim(c.name, c.externPath ?? ""),
+    );
+  }
+
   // Walk context shared across every page: the aggregate / BC / workflow
   // lookups + the ui's api params power the shared walker's api-hook
   // detection (`<handle>.<Agg>.all` → `useAll<Agg>s`) and form/IdLink
@@ -187,7 +217,7 @@ export function generateAngularForContexts(
         pack,
         new Set(page.params.map((p) => p.name)),
         new Set(page.state.map((s) => s.name)),
-        new Map(),
+        externComponentParams,
         ui?.apiParams ?? [],
         aggregatesIRByName,
         bcByAggregate,
