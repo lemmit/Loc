@@ -190,6 +190,36 @@ describe("validate-expr-integrity — A4 collection-op correctness gates", () =>
   });
 });
 
+// A4 — reduction (min/max) comparable-projection gate.  The λ-body must be
+// totally ordered (int/long/decimal/money/string/datetime); a bool/enum/
+// entity/vo projection has no meaningful `<`/`>`.
+const wrapReduction = (aggBody: string) => `
+  context Shop {
+    aggregate Order {
+      contains lines: OrderLine[]
+      ${aggBody}
+      entity OrderLine { qty: int  active: bool }
+    }
+    repository Orders for Order { }
+  }`;
+
+describe("validate-expr-integrity — A4 reduction (min/max) comparable gate", () => {
+  it("flags `min(λ)` over a bool projection (loom.reduction-non-comparable)", async () => {
+    const codes = await irErrorCodes(wrapReduction("derived m: bool = lines.min(l => l.active)"));
+    expect(codes).toContain("loom.reduction-non-comparable");
+  });
+
+  it("flags `max(λ)` over a bool projection (loom.reduction-non-comparable)", async () => {
+    const codes = await irErrorCodes(wrapReduction("derived m: bool = lines.max(l => l.active)"));
+    expect(codes).toContain("loom.reduction-non-comparable");
+  });
+
+  it("does NOT flag `min(λ)` over a comparable (int) projection", async () => {
+    const codes = await irErrorCodes(wrapReduction("derived m: int = lines.min(l => l.qty)"));
+    expect(codes).not.toContain("loom.reduction-non-comparable");
+  });
+});
+
 describe("validate-expr-integrity — A4 collection-op-in-UI gate", () => {
   const arr: TypeIR = { kind: "array", element: { kind: "primitive", name: "string" } };
   const recv: ExprIR = { kind: "ref", name: "tags", refKind: "let" };
@@ -229,6 +259,10 @@ describe("validate-expr-integrity — A4 collection-op-in-UI gate", () => {
     ["distinct", distinctMember],
     ["take", mc("take", [litInt("2")])],
     ["skip", mc("skip", [litInt("1")])],
+    // Reductions are UI-unsupported too — the untyped identity λ keeps the
+    // reduction-non-comparable gate quiet so this isolates the UI-position gate.
+    ["min", mc("min", [idLambda])],
+    ["max", mc("max", [idLambda])],
   ] as [string, ExprIR][]) {
     it(`rejects '.${label}' in a UI page body (loom.collection-op-in-ui)`, async () => {
       const codes = await codesForPageBody(body);

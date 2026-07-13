@@ -103,6 +103,36 @@ describe("A4 collection transformation ops — parse + validate clean", () => {
   });
 });
 
+describe("A4 reductions (min/max) — parse + validate clean", () => {
+  it("parses min/max over comparable projections into optional `T?` derived with zero errors", async () => {
+    // min/max reduce to the PROJECTED value, optional (empty → null): the
+    // declared `T?` must match the λ-body element type.  Comparable bodies
+    // only (money/int/string/datetime), so the reduction-non-comparable gate
+    // never fires.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Shop {
+        aggregate Order {
+          contains lines: OrderLine[]
+          derived cheapest: money? = lines.min(l => l.price)
+          derived largestQty: int? = lines.max(l => l.qty)
+          derived firstName: string? = lines.min(l => l.name)
+          derived latest: datetime? = lines.max(l => l.at)
+          entity OrderLine { qty: int  price: money  name: string  at: datetime }
+        }
+        repository Orders for Order { }
+      }
+      `,
+      { validation: true },
+    );
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
+    expect(errors).toEqual([]);
+  });
+});
+
 describe("parsing & validation of examples", () => {
   it("parses sales.ddd without errors", async () => {
     const { model, errors } = await parseExample("examples/sales.ddd");

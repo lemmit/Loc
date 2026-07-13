@@ -322,6 +322,22 @@ describe("py renderPyExpr — collection ops", () => {
   it("A4 — join(sep) → `sep.join(recv)`", () => {
     expect(renderPyExpr(arr("join", [litStr(", ")]))).toBe('", ".join(self._lines)');
   });
+
+  it("A4 — min(λ)/max(λ) → applied generator with `default=None` (empty → None)", () => {
+    const proj = lam({
+      kind: "member",
+      receiver: { kind: "ref", name: "l", refKind: "lambda" },
+      member: "quantity",
+      receiverType: { kind: "entity", name: "OrderLine" },
+      memberType: INT,
+    });
+    expect(renderPyExpr(arr("min", [proj]))).toBe(
+      "min(((lambda l: l.quantity)(__x) for __x in self._lines), default=None)",
+    );
+    expect(renderPyExpr(arr("max", [proj]))).toBe(
+      "max(((lambda l: l.quantity)(__x) for __x in self._lines), default=None)",
+    );
+  });
 });
 
 describe("py renderPyExpr — calls / new / object / list", () => {

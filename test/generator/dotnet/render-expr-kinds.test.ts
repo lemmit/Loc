@@ -451,6 +451,38 @@ describe("dotnet renderCsExpr — A4 collection transformation ops", () => {
   it("renders `join(sep)` as `string.Join(sep, recv)`", () => {
     expect(renderCsExpr(mc("join", [litStr(", ")]))).toBe('string.Join(", ", (this.Items))');
   });
+
+  // `min(λ)`/`max(λ)` — LINQ `.Min`/`.Max` throw on empty, so guard on
+  // `.Count == 0` and spell the nullable projected body-type for the null arm.
+  const proj = (member: string, memberType: TypeIR): ExprIR => ({
+    kind: "lambda",
+    param: "x",
+    body: {
+      kind: "member",
+      receiver: { kind: "ref", name: "x", refKind: "lambda" },
+      member,
+      receiverType: { kind: "entity", name: "Line" },
+      memberType,
+    },
+  });
+
+  it("renders `min(λ)` as a Count-guarded `.Min(λ)` with a nullable body-type null arm", () => {
+    expect(renderCsExpr(mc("min", [proj("qty", INT)]))).toBe(
+      "((this.Items).Count == 0 ? (int?)null : (this.Items).Min(x => x.Qty))",
+    );
+  });
+
+  it("renders `max(λ)` as a Count-guarded `.Max(λ)` with a nullable body-type null arm", () => {
+    expect(renderCsExpr(mc("max", [proj("qty", INT)]))).toBe(
+      "((this.Items).Count == 0 ? (int?)null : (this.Items).Max(x => x.Qty))",
+    );
+  });
+
+  it("falls back to a bare `null` arm when the body-type can't be cheaply typed", () => {
+    expect(renderCsExpr(mc("min", [idLambda]))).toBe(
+      "((this.Items).Count == 0 ? null : (this.Items).Min(x => x))",
+    );
+  });
 });
 
 describe("dotnet renderCsExpr — call kinds", () => {

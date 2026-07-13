@@ -14,6 +14,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import {
   elixirRegexBody,
@@ -740,7 +741,37 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
   take: (recv, args) => `Enum.take(${recv}, ${args[0]})`,
   skip: (recv, args) => `Enum.drop(${recv}, ${args[0]})`,
   join: (recv, args) => `Enum.join(${recv}, ${args[0]})`,
+  // min/max return the PROJECTED value, empty → nil (the empty_fallback fn).
+  // The `Enum.min/3`/`Enum.max/3` sorter is TYPE-AWARE: native `<=`/`>=` on
+  // `Decimal` (money/decimal) and `DateTime` (datetime) structs is STRUCTURAL
+  // term comparison, not numeric/chronological order, so those dispatch through
+  // `Decimal.compare`/`DateTime.compare` (mirroring `renderDecimalBinary` /
+  // `renderDateTimeCompare`).  int/long/string keep the native `&<=/2` / `&>=/2`.
+  min: (recv, args, e) =>
+    `Enum.min(Enum.map(${recv}, ${args[0]}), ${reductionSorter(e, "min")}, fn -> nil end)`,
+  max: (recv, args, e) =>
+    `Enum.max(Enum.map(${recv}, ${args[0]}), ${reductionSorter(e, "max")}, fn -> nil end)`,
 };
+
+/** The `Enum.min/3`/`Enum.max/3` sorter capture for a `min`/`max` projection,
+ *  chosen by the λ-body type.  The sorter is a 2-arity `(a, b) -> boolean`
+ *  where `true` means `a` sorts min-ward (`&<=/2` is `Enum.min`'s default,
+ *  `&>=/2` `Enum.max`'s), so:
+ *    - min: `a <= b`  → `Decimal.compare(a, b) != :gt` / `DateTime.compare(a, b) != :gt`
+ *    - max: `a >= b`  → `Decimal.compare(a, b) != :lt` / `DateTime.compare(a, b) != :lt`
+ *  `Decimal.compare`/`DateTime.compare` return `:lt | :eq | :gt`. */
+function reductionSorter(
+  e: Extract<ExprIR, { kind: "method-call" }> | undefined,
+  kind: "min" | "max",
+): string {
+  const lam = e?.args[0];
+  const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+  const name = bodyT?.kind === "primitive" ? bodyT.name : undefined;
+  const notToken = kind === "min" ? ":gt" : ":lt";
+  if (isDecimalStruct(name)) return `&(Decimal.compare(&1, &2) != ${notToken})`;
+  if (name === "datetime") return `&(DateTime.compare(&1, &2) != ${notToken})`;
+  return kind === "min" ? "&<=/2" : "&>=/2";
+}
 
 function renderCollectionOp(
   recv: string,

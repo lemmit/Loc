@@ -287,6 +287,62 @@ describe("ts renderTsExpr — A4 collection transformation ops", () => {
   });
 });
 
+describe("ts renderTsExpr — A4 reductions min(λ)/max(λ)", () => {
+  const arr: TypeIR = { kind: "array", element: STRING };
+  // Identity lambda `x => x` — untyped body, so the comparator-reduce path
+  // (native `<`/`>`) is what the assertion pins.
+  const idLambda: ExprIR = {
+    kind: "lambda",
+    param: "x",
+    body: { kind: "ref", name: "x", refKind: "lambda" },
+  };
+  // A money projection `x => x.price` — decimal.js `Decimal`, so the reduce
+  // dispatches to the `.lt`/`.gt` method form (bodyTypeOf reads memberType).
+  const moneyLambda: ExprIR = {
+    kind: "lambda",
+    param: "x",
+    body: {
+      kind: "member",
+      receiver: { kind: "ref", name: "x", refKind: "lambda" },
+      member: "price",
+      receiverType: { kind: "entity", name: "Line" },
+      memberType: MONEY,
+    },
+  };
+  const mc = (member: string, args: ExprIR[]): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("items"),
+    member,
+    args,
+    receiverType: arr,
+    isCollectionOp: true,
+  });
+
+  it("renders `min(λ)` as a length-guarded comparator-reduce (< ) → null on empty", () => {
+    expect(renderTsExpr(mc("min", [idLambda]))).toBe(
+      "((this._items).length ? (this._items).map((x) => x).reduce((__a, __b) => (__b < __a ? __b : __a)) : null)",
+    );
+  });
+
+  it("renders `max(λ)` as a length-guarded comparator-reduce (> ) → null on empty", () => {
+    expect(renderTsExpr(mc("max", [idLambda]))).toBe(
+      "((this._items).length ? (this._items).map((x) => x).reduce((__a, __b) => (__b > __a ? __b : __a)) : null)",
+    );
+  });
+
+  it("renders a money `min(λ)` via decimal.js `.lt` (native `<` doesn't compare Decimals)", () => {
+    expect(renderTsExpr(mc("min", [moneyLambda]))).toBe(
+      "((this._items).length ? (this._items).map((x) => x.price).reduce((__a, __b) => (__b.lt(__a) ? __b : __a)) : null)",
+    );
+  });
+
+  it("renders a money `max(λ)` via decimal.js `.gt`", () => {
+    expect(renderTsExpr(mc("max", [moneyLambda]))).toBe(
+      "((this._items).length ? (this._items).map((x) => x.price).reduce((__a, __b) => (__b.gt(__a) ? __b : __a)) : null)",
+    );
+  });
+});
+
 describe("ts renderTsExpr — call kinds", () => {
   it("renders value-object-ctor as `new <Name>(...)`", () => {
     expect(

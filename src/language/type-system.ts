@@ -976,6 +976,22 @@ function collectionOpType(
       return recv.element;
     case "firstOrNull":
       return T.opt(recv.element);
+    case "min":
+    case "max": {
+      // min/max project the collection through the lambda and return the
+      // PROJECTED value, optional (empty collection → null).  Mirrors `sum`'s
+      // lambda-env typing; falls back to an optional element type with no lambda.
+      const callArg = ms.args[0];
+      const lambdaArg = callArg?.value;
+      if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
+        const lambdaEnv = makeEnv(
+          env,
+          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
+        );
+        return T.opt(typeOf(lambdaArg.body, lambdaEnv));
+      }
+      return T.opt(recv.element);
+    }
     default:
       return T.unknown;
   }
