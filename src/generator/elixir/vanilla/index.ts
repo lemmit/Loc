@@ -18,6 +18,10 @@ import {
 } from "../../../ir/util/aggregate-flags.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
+import { embedSpaInto } from "../../_frontend/embedded-spa.js";
+import { generateReactForContexts } from "../../react/index.js";
+import { generateSvelteForContexts } from "../../svelte/index.js";
+import { generateVueForContexts } from "../../vue/index.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -281,6 +285,33 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     deployable.uiFramework === "react" ||
     deployable.uiFramework === "vue" ||
     deployable.uiFramework === "svelte";
+  // --- Embedded SPA (fullstack Phoenix) --------------------------------------
+  // A `hosts:` React/Vue/Svelte ui means the Phoenix deployable is a JSON-API
+  // backend that ALSO serves a client-side SPA.  Emit that SPA under `assets/`
+  // — Phoenix's conventional JS home — served at `/app` (so its client-side
+  // routes deep-link) by the endpoint `Plug.Static` + router fallback below,
+  // and packaged by the multi-stage Dockerfile's `spa-build` stage (which
+  // copies the built bundle into `priv/static/app`).  Mirrors the .NET/Java/
+  // Python fullstack embed (`generate<Fw>ForContexts` → `embedSpaInto`), with
+  // Phoenix's `assets/` prefix + `/app` sub-path instead of `ClientApp/`+root.
+  // The SPA hits `/api/*` on its own origin (`apiBaseUrl: "/api"`) — the
+  // Phoenix routes already live under `scope "/api"`, so no route-prefix
+  // rework is needed (unlike .NET).
+  const spaOutDir = deployable.uiFramework === "svelte" ? "build" : "dist";
+  if (embedReact && deployable.uiName) {
+    const embedOpts = { apiBaseUrl: "/api", pathPrefix: "assets/", basePath: "/app" };
+    const uiFw = deployable.uiFramework;
+    const spaFiles =
+      uiFw === "svelte"
+        ? generateSvelteForContexts(contexts, sys, deployable, embedOpts)
+        : uiFw === "vue"
+          ? generateVueForContexts(contexts, sys, deployable, embedOpts)
+          : generateReactForContexts(contexts, sys, deployable, embedOpts);
+    // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
+    // certs / e2e — Phoenix ships its own at the project root) and emit
+    // `assets/.gitignore`; shared with the .NET/Java/Python embed hosts.
+    embedSpaInto(out, spaFiles, uiFw, "assets/");
+  }
   const liveRoutes: LiveRoute[] = [];
   let hasSidebar = false;
   if (deployable.uiName && !embedReact) {
@@ -355,6 +386,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     !!sys.auth?.oidc,
     liveRoutes,
     hasSidebar,
+    // Embedded-SPA host: the endpoint serves `priv/static/app` at `/app`
+    // via Plug.Static and the router adds the `/app/*` deep-link fallback
+    // + a `/` → `/app` redirect (the SpaController).
+    embedReact && !!deployable.uiName,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
@@ -366,7 +401,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // the Ecto schema drops the bundled `timestamps()` macro (it would collide),
   // so the migration must too.
   emitMigrations(appName, args.migrations ?? [], appModule, out);
-  out.set("Dockerfile", renderDockerfile(appName));
+  out.set("Dockerfile", renderDockerfile(appName, embedReact && !!deployable.uiName, spaOutDir));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   out.set("rel/env.sh.eex", renderRelEnv(appName));

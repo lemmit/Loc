@@ -43,6 +43,13 @@ export function emitVanillaShellFiles(
   // no browser pipeline, no layouts/CoreComponents/Nav).
   liveRoutes: LiveRoute[] = [],
   hasSidebar = false,
+  // Embedded-SPA host (`hosts:` a React/Vue/Svelte ui): the endpoint serves the
+  // built bundle from `priv/static/app` at `/app` via Plug.Static and the
+  // router adds the `/app/*` client-side deep-link fallback (→ index.html) plus
+  // a `/` → `/app` redirect, both through a minimal `SpaController`.  False ⇒
+  // the byte-identical shell (no SPA static plug, no fallback).  Mutually
+  // exclusive with LiveView (an embedded-SPA deployable emits no HEEx pages).
+  hasEmbeddedSpa = false,
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   out.set(
@@ -73,11 +80,23 @@ export function emitVanillaShellFiles(
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule, hasLiveView));
-  out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule, hasLiveView));
+  out.set(
+    `lib/${appName}_web/endpoint.ex`,
+    renderVanillaEndpoint(appName, appModule, hasLiveView, hasEmbeddedSpa),
+  );
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc, liveRoutes),
+    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc, liveRoutes, hasEmbeddedSpa),
   );
+  // Embedded-SPA fallback controller — serves the built `priv/static/app/
+  // index.html` for `/app` deep-links (Plug.Static handles real asset files
+  // first) and redirects `/` → `/app`.  Emitted only for a `hosts:` deployable.
+  if (hasEmbeddedSpa) {
+    out.set(
+      `lib/${appName}_web/controllers/spa_controller.ex`,
+      renderVanillaSpaController(appName, appModule),
+    );
+  }
   // LiveView spine files — only when a HEEx `ui:` is mounted.  The
   // CoreComponents library + layouts (module + root/app HEEx) + the Nav
   // on_mount hook reuse the shared shell renderers.  Omitted on a
@@ -315,7 +334,12 @@ end
 `;
 }
 
-function renderVanillaEndpoint(appName: string, appModule: string, hasLiveView: boolean): string {
+function renderVanillaEndpoint(
+  appName: string,
+  appModule: string,
+  hasLiveView: boolean,
+  hasEmbeddedSpa: boolean,
+): string {
   // LiveView spine: the live socket carries the WebSocket connection
   // (session forwarded so a future auth slice can read it), and
   // `Plug.Static` serves `priv/static` so the root layout's
@@ -332,6 +356,20 @@ function renderVanillaEndpoint(appName: string, appModule: string, hasLiveView: 
 
 `
     : "";
+  // Embedded-SPA host: serve the built Vite bundle from `priv/static/app`
+  // (dropped there by the Dockerfile's `spa-build` stage) at `/app`.  The
+  // SPA's `index.html` references `/app/assets/…` (vite `base: "/app/"`), so
+  // real asset requests resolve here before the router's `/app/*` fallback
+  // fires for client-side routes.  `only:` is omitted so every hashed Vite
+  // asset filename is served (the dir holds only the SPA bundle).
+  const spaStaticPlug = hasEmbeddedSpa
+    ? `  plug Plug.Static,
+    at: "/app",
+    from: {:${appName}, "priv/static/app"},
+    gzip: false
+
+`
+    : "";
   return `# Auto-generated.
 defmodule ${appModule}Web.Endpoint do
   use Phoenix.Endpoint, otp_app: :${appName}
@@ -343,7 +381,7 @@ defmodule ${appModule}Web.Endpoint do
     same_site: "Lax"
   ]
 
-${liveViewPlugs}  plug Plug.RequestId
+${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
@@ -366,6 +404,7 @@ function renderVanillaRouter(
   authEnabled: boolean,
   oidc: boolean,
   liveRoutes: LiveRoute[] = [],
+  hasEmbeddedSpa = false,
 ): string {
   // Routes prefixed with `!root:` (e.g. the OpenAPI spec endpoint) sit OUTSIDE
   // the `/api` scope so they're served at the router root (cross-backend
@@ -453,10 +492,33 @@ ${liveLines}
   end
 `
     : "";
+  // Embedded-SPA host: an `:spa` browser-html pipeline + a `/app` scope whose
+  // catch-all serves the SPA's `index.html` for client-side deep-links
+  // (Plug.Static in the endpoint serves real asset files first, so this fires
+  // only for app routes), plus a `/` → `/app` redirect so the container root
+  // lands on the app.  Emitted only for a `hosts:` deployable.
+  const spaPipeline = hasEmbeddedSpa
+    ? `
+  pipeline :spa do
+    plug :accepts, ["html"]
+  end
+`
+    : "";
+  const spaScope = hasEmbeddedSpa
+    ? `
+  scope "/", ${appModule}Web do
+    pipe_through :spa
+
+    get "/", SpaController, :redirect_to_app
+    get "/app", SpaController, :index
+    get "/app/*path", SpaController, :index
+  end
+`
+    : "";
   return `# Auto-generated.
 defmodule ${appModule}Web.Router do
   use ${appModule}Web, :router
-${browserPipeline}
+${browserPipeline}${spaPipeline}
   pipeline :api do
     plug :accepts, ["json"]${authApiPlug}
   end
@@ -468,7 +530,7 @@ ${browserPipeline}
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
-${rootApiScope}${liveScope}${authScope}
+${rootApiScope}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}
@@ -506,6 +568,40 @@ defmodule ${appModule}Web.HealthController do
         |> put_status(:service_unavailable)
         |> json(%{status: "not_ready"})
     end
+  end
+end
+`;
+}
+
+function renderVanillaSpaController(appName: string, appModule: string): string {
+  // Embedded-SPA fallback controller (a `hosts:` React/Vue/Svelte ui).
+  // Plug.Static (endpoint, at `/app`) serves the built bundle's real asset
+  // files; this serves `index.html` for every client-side deep-link so the
+  // SPA router takes over, and redirects the container root to `/app`.
+  // `Application.app_dir/2` resolves the release-packaged bundle path
+  // (`priv/static/app/index.html`) at runtime.
+  return `# Auto-generated.
+defmodule ${appModule}Web.SpaController do
+  use ${appModule}Web, :controller
+
+  @moduledoc """
+  Serves the embedded client-side SPA (a \`hosts:\` React/Vue/Svelte ui).
+
+  GET /          — redirect to the SPA mount point (/app).
+  GET /app, /app/* — serve the SPA shell (index.html) so client-side
+    routing resolves; Plug.Static serves real asset files first.
+  """
+
+  @doc "GET / — redirect the container root to the SPA."
+  def redirect_to_app(conn, _params) do
+    redirect(conn, to: "/app")
+  end
+
+  @doc "GET /app/* — serve the SPA shell so client-side routing resolves."
+  def index(conn, _params) do
+    conn
+    |> put_resp_header("content-type", "text/html; charset=utf-8")
+    |> send_file(200, Application.app_dir(:${appName}, "priv/static/app/index.html"))
   end
 end
 `;
