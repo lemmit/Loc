@@ -1,118 +1,144 @@
-import type { EnrichedAggregateIR, OperationIR } from "../../ir/types/loom-ir.js";
+import type { AggregateIR, OperationIR } from "../../ir/types/loom-ir.js";
+import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { snake } from "../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "./py-type-imports.js";
 import { renderPyType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
-// Extern operation handlers — `app/domain/<snake(agg)>_handlers.py`
-// (docs/extern.md), the Python port of Hono's `domain/<agg>-extern.ts`:
+// Extern operation seam — the Python domain extension point (extern (b)
+// Phase 2, docs/extern.md), the Python sibling of the Elixir analog
+// (src/generator/elixir/vanilla/extern-emit.ts, #1841).
 //
-//   - One TypedDict request shape + handler type alias + module-global
-//     slot + `register_<op>_<agg>_handler` per extern operation.
-//   - `verify_<agg>_extern_handlers_registered()` — the lifespan calls
-//     it at boot so a missing registration surfaces as a clear error.
-//   - A no-op dev-stub registers at import so a fresh project boots;
-//     the user's real registration overwrites it.
+// An `operation X() extern { precondition … }` declares case-1 business logic
+// the DSL can't express: the body carries only preconditions, and the mutation
+// is HAND-WRITTEN by the user.  Before this slice the mutation lived in an
+// INJECTED, application-layer per-op handler registry — a typed request shape,
+// a module-global handler slot, `register_<op>_<agg>_handler`, a boot-time
+// `verify_..._registered` check, and per-field setters minted on the aggregate
+// so the external holder could mutate it.  That whole apparatus is deleted.
 //
-// Routes import the MODULE (not the slot) and read
-// `<agg>_handlers.<op_snake>` at request time, so late registration is
-// observed.  The framework owns the lifecycle around the dispatch:
-// load → `check_<op>` (preconditions) → handler → `assert_invariants`
-// → save; non-domain handler errors wrap into ExternHandlerError (500).
+// The re-home: the aggregate's `X()` op becomes a REAL method (preconditions →
+// hook → invariants) that delegates the mutation to a user-owned, scaffold-once
+// hook FUNCTION receiving the aggregate.  Because the function receives the
+// aggregate directly, it reaches the aggregate's own private/name-mangled state
+// natively (`order._status = …`, `order.raise_event(…)`) — no per-field setters,
+// no external write surface.  A missing implementation `raise`s loudly
+// (`NotImplementedError`), never the old silent success.
+//
+//   * one MODULE per aggregate with an extern op:
+//       `app/domain/extern/<agg>_extern.py` — one `def <op>(<agg>, …)` per
+//       extern op, each raising `NotImplementedError` until filled in.  It
+//       carries the `loom:scaffold-once` marker so `ddd generate system`
+//       re-runs PRESERVE the user's filled-in implementation (see
+//       `src/util/scaffold-once.ts`); the path is DETERMINISTIC and stable.
+//
+// The aggregate imports the module and its op body calls
+// `<agg>_extern.<op>(self, …)`; the framework flow the proposal keeps (load →
+// preconditions → hook → invariants → save → drain) is driven by the ordinary
+// operation route + repository, exactly like a non-extern void op.
 // ---------------------------------------------------------------------------
 
-export function externOpsOf(agg: EnrichedAggregateIR): OperationIR[] {
+/** The extern operations of an aggregate (public only — the ops this seam
+ *  handles; CRUD-reserved names never carry `extern`). */
+export function externOpsOf(agg: AggregateIR): OperationIR[] {
   return agg.operations.filter((op) => op.extern && op.visibility === "public");
 }
 
-export function buildPyExternHandlersFile(agg: EnrichedAggregateIR): string | null {
+/** Does the aggregate declare at least one extern operation? */
+export function aggHasExternOp(agg: AggregateIR): boolean {
+  return externOpsOf(agg).length > 0;
+}
+
+/** The user-owned hook module path (`out.set` key, minus the project prefix).
+ *  DETERMINISTIC and stable forever — a rename orphans the user's code. */
+export function externHookModulePath(aggName: string): string {
+  return `app/domain/extern/${snake(aggName)}_extern.py`;
+}
+
+/** The name the aggregate imports the hook module under
+ *  (`from app.domain.extern import <agg>_extern`). */
+export function externHookModuleName(aggName: string): string {
+  return `${snake(aggName)}_extern`;
+}
+
+/** The call the aggregate's op method makes into the hook, e.g.
+ *  `order_extern.confirm(self, score)`. */
+export function externHookCall(aggName: string, op: OperationIR): string {
+  const args = [
+    "self",
+    ...op.params.map((p) => snake(p.name)),
+    ...(operationUsesCurrentUser(op) ? ["current_user"] : []),
+  ];
+  return `${externHookModuleName(aggName)}.${snake(op.name)}(${args.join(", ")})`;
+}
+
+/** Build the scaffold-once user-owned hook module for an aggregate that
+ *  declares at least one extern op, or `null` when it has none (byte-identical
+ *  output for the common case). */
+export function buildPyExternHookModule(agg: AggregateIR): string | null {
   const ops = externOpsOf(agg);
   if (ops.length === 0) return null;
 
+  const aggParam = snake(agg.name);
+  const usesUser = ops.some(operationUsesCurrentUser);
+
+  // TYPE_CHECKING imports the signature's names (the aggregate itself, plus any
+  // id / value-object / enum param types).  `from __future__ import
+  // annotations` makes every annotation a string, so nothing is imported at
+  // runtime — the hook only touches attributes on the passed-in aggregate, and
+  // the module deliberately does NOT import the aggregate at runtime (the
+  // aggregate imports IT), so there is no import cycle.
   const types = emptyPyTypeImports();
-  for (const op of ops) {
-    for (const p of op.params) visitPyTypeImports(p.type, types);
-  }
+  for (const op of ops) for (const p of op.params) visitPyTypeImports(p.type, types);
   const idNames = [...types.idNames].sort();
   const voEnumNames = [...types.voNames, ...types.enumNames].sort();
 
-  const blocks = ops.map((op) => renderOpBlock(agg.name, op));
-  const stubs = ops.flatMap((op) => [
-    `async def _${snake(op.name)}_dev_stub(aggregate: ${agg.name}, request: ${requestName(agg.name, op)}) -> None:`,
-    "    return None",
-    "",
-    "",
-  ]);
-  const stubRegs = ops.map(
-    (op) => `register_${snake(op.name)}_${snake(agg.name)}_handler(_${snake(op.name)}_dev_stub)`,
-  );
+  const fns = ops.map((op) => {
+    const params = [
+      `${aggParam}: ${agg.name}`,
+      ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
+      ...(operationUsesCurrentUser(op) ? ["current_user: User"] : []),
+    ].join(", ");
+    const ret = op.returnType ? renderPyType(op.returnType) : "None";
+    return lines(
+      `def ${snake(op.name)}(${params}) -> ${ret}:`,
+      "    raise NotImplementedError(",
+      `        "extern operation \`${op.name}\` on ${agg.name} is not implemented — "`,
+      `        "fill in ${externHookModulePath(agg.name)}"`,
+      "    )",
+    );
+  });
 
   return lines(
-    `"""Extern operation handlers for ${agg.name} (docs/extern.md).  Auto-generated.`,
+    `# ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first`,
+    "# `generate` and NEVER overwrites it again, so your implementation survives every",
+    "# regenerate.  Replace each `raise` with the operation's real logic.",
+    `"""Hand-written extern hooks for ${agg.name} (docs/extern.md).`,
     "",
-    "The framework owns the lifecycle (load, preconditions, invariants,",
-    "save); your handler owns the mutation.  Register implementations at",
-    "app startup, BEFORE serving — until then a no-op dev-stub keeps the",
-    "project bootable.",
+    "Each function is the pure-domain extension point for an `operation … extern`",
+    `on ${agg.name}: it receives the loaded aggregate (its preconditions already`,
+    "checked) and mutates it DIRECTLY — reaching the aggregate's own private state",
+    "(`_field`, `raise_event`), no setters.  Raise a DomainError to abort; the",
+    "framework re-asserts invariants and persists after you return.",
     '"""',
+    "from __future__ import annotations",
     "",
-    "from collections.abc import Awaitable, Callable",
-    types.usesDatetime ? "from datetime import datetime" : null,
-    types.usesDecimal ? "from decimal import Decimal" : null,
-    "from typing import TypedDict",
+    "from typing import TYPE_CHECKING",
     "",
+    "if TYPE_CHECKING:",
+    usesUser ? "    from app.auth.user import User" : null,
+    `    from app.domain.${snake(agg.name)} import ${agg.name}`,
     idNames.length > 0
-      ? `from app.domain.ids import ${idNames.map((n) => `${n}Id`).join(", ")}`
+      ? `    from app.domain.ids import ${idNames.map((n) => `${n}Id`).join(", ")}`
       : null,
-    `from app.domain.${snake(agg.name)} import ${agg.name}`,
     voEnumNames.length > 0
-      ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
+      ? `    from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
     "",
     "",
-    ...blocks,
-    `def verify_${snake(agg.name)}_extern_handlers_registered() -> None:`,
-    ...ops.flatMap((op) => [
-      `    if ${snake(op.name)} is None:`,
-      "        raise RuntimeError(",
-      `            "Missing extern handler for '${op.name}' on aggregate '${agg.name}'. "`,
-      `            "Register one via register_${snake(op.name)}_${snake(agg.name)}_handler(...) before serving."`,
-      "        )",
-    ]),
-    "",
-    "",
-    ...stubs,
-    "# Dev-stub registrations — the user's real handlers overwrite these.",
-    ...stubRegs,
-    "",
-  );
-}
-
-function requestName(aggName: string, op: OperationIR): string {
-  return `${upperFirst(op.name)}${aggName}Request`;
-}
-
-function renderOpBlock(aggName: string, op: OperationIR): string {
-  const req = requestName(aggName, op);
-  const opSnake = snake(op.name);
-  return lines(
-    `class ${req}(TypedDict):`,
-    op.params.length > 0
-      ? op.params.map((p) => `    ${snake(p.name)}: ${renderPyType(p.type)}`)
-      : ["    pass"],
-    "",
-    "",
-    `${upperFirst(op.name)}${aggName}Handler = Callable[[${aggName}, ${req}], Awaitable[None]]`,
-    "",
-    `${opSnake}: ${upperFirst(op.name)}${aggName}Handler | None = None`,
-    "",
-    "",
-    `def register_${opSnake}_${snake(aggName)}_handler(fn: ${upperFirst(op.name)}${aggName}Handler) -> None:`,
-    `    """Register the ${op.name} handler.  Calling more than once overwrites."""`,
-    `    global ${opSnake}`,
-    `    ${opSnake} = fn`,
-    "",
+    fns.join("\n\n\n"),
     "",
   );
 }

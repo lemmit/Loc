@@ -54,7 +54,7 @@ import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-handlers-emit.js";
-import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
+import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
@@ -227,11 +227,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // First-boot seeding (database-seeding.md): emitted only when a
   // dataset survives filtering (rows on concrete aggregates); the
   // lifespan runs seeds right after migrations (Hono/.NET boot order).
-  // Aggregates with extern ops — the lifespan verifies their handler
-  // registrations at boot (docs/extern.md).
-  const externAggs = merged.aggregates
-    .filter((a) => !a.isAbstract && externOpsOf(a).length > 0)
-    .map((a) => a.name);
   const seedFile = buildPySeedFile(merged, (aggName) => {
     const agg = merged.aggregates.find((a) => a.name === aggName);
     return agg ? resolveDs(agg)?.schema : undefined;
@@ -266,7 +261,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasProjections,
       authRequired ? args.sys.user : undefined,
       hasSeeds,
-      externAggs,
       hasEmbeddedSpa,
       startsRelay,
       !!oidc,
@@ -450,11 +444,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           sourcemap.fragment(domainPath, domainContent, frag.fragmentText, frag.subRegions);
         }
       }
-      const externFile = buildPyExternHandlersFile(agg);
-      if (externFile != null) {
-        const externPath = `app/domain/${snake(agg.name)}_handlers.py`;
-        out.set(externPath, externFile);
-        sourcemap?.file(externPath, externFile, agg.origin, construct);
+      // Extern (b) Phase 2 (docs/extern.md): the scaffold-once, user-owned hook
+      // module the aggregate's extern-op bodies delegate to.  It carries the
+      // `loom:scaffold-once` marker, so the CLI writer PRESERVES the filled-in
+      // copy on regen (the sourcemap deliberately does NOT anchor it — it is
+      // user-owned, not regenerated).
+      const externHook = buildPyExternHookModule(agg);
+      if (externHook != null) {
+        out.set("app/domain/extern/__init__.py", "");
+        out.set(externHookModulePath(agg.name), externHook);
       }
       const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
       const repoPath = `app/db/repositories/${snake(agg.name)}_repository.py`;
@@ -664,7 +662,6 @@ function renderMain(
   hasProjections = false,
   authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
-  externAggs: string[] = [],
   hasEmbeddedSpa = false,
   startsRelay = false,
   oidc = false,
@@ -726,10 +723,6 @@ function renderMain(
     hasSeeds ? "from app.db.seed import run_seeds" : null,
     startsRelay ? "from app.dispatch import start_outbox_relay" : null,
     stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
-    ...externAggs.map(
-      (n) =>
-        `from app.domain.${snake(n)}_handlers import verify_${snake(n)}_extern_handlers_registered`,
-    ),
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
@@ -804,7 +797,6 @@ function renderMain(
     // A missing verifier registration surfaces as a clear boot error
     // instead of a 401 storm on the first request.
     authRequired ? "    assert_user_verifier_registered()" : null,
-    ...externAggs.map((n) => `    verify_${snake(n)}_extern_handlers_registered()`),
     "    await run_migrations()",
     hasSeeds ? "    await run_seeds()" : null,
     // Durable-channel relay: at-least-once redelivery of `__loom_outbox`
@@ -1108,7 +1100,6 @@ from app.domain.errors import (
     AggregateNotFoundError,
 ${versionedImport}    DisallowedError,
     DomainError,
-    ExternHandlerError,
     ForbiddenError,
 )
 from app.obs.log import log
@@ -1214,11 +1205,6 @@ def _pointer(loc: tuple[object, ...]) -> str:
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(ExternHandlerError)
-    async def _extern(request: Request, err: ExternHandlerError) -> JSONResponse:
-        log("error", "extern_handler_threw", error=str(err), status=500)
-        return problem(request, 500, "Internal Server Error", str(err))
-
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         log("warn", "forbidden", message=str(err), status=403)

@@ -19,6 +19,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
+import { externHookCall, externHookModuleName } from "../extern-builder.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
 import {
@@ -264,6 +265,12 @@ export function renderPyAggregate(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    // The user-owned extern hook module (docs/extern.md) — the op bodies call
+    // `<agg>_extern.<op>(self, …)`.  Its own aggregate import is TYPE_CHECKING-
+    // only, so this module-level import never cycles.
+    agg.operations.some((op) => op.extern && op.visibility === "public")
+      ? `from app.domain.extern import ${externHookModuleName(agg.name)}`
+      : null,
     ...serviceImports,
     emitTrace && /\blog\("trace"/.test(body) ? "from app.obs.log import log" : null,
     "",
@@ -430,9 +437,11 @@ function renderEntity(
     `    ${assertCall("<init>")}`,
   ].filter((s): s is string => s != null);
 
-  // Extern ops (docs/extern.md): the user-supplied handler owns the
-  // mutation, so the aggregate opens a controlled mutation surface —
-  // field setters, `raise_event`, and a public `assert_invariants`.
+  // Extern ops (docs/extern.md, extern (b) Phase 2): the op body delegates its
+  // mutation to a USER-OWNED hook function that receives the aggregate and
+  // reaches its own private state directly — so the aggregate needs no per-field
+  // setters (fields stay `private` behind read-only getters).  It keeps only
+  // `raise_event`, the event API the hook calls.
   const hasExtern = e.operations.some((op) => op.extern);
   const getters: string[] = [];
   const prop = (name: string, type: string, value: string): string[] => [
@@ -441,19 +450,12 @@ function renderEntity(
     `    def ${name}(self) -> ${type}:`,
     `        return ${value}`,
   ];
-  const setter = (name: string, type: string): string[] => [
-    "",
-    `    @${name}.setter`,
-    `    def ${name}(self, v: ${type}) -> None:`,
-    `        self._${name} = v`,
-  ];
   getters.push(...prop("id", `${e.name}Id`, "self._id"));
   if (!e.isRoot) {
     getters.push(...prop("parent_id", `${e.rootName}Id`, "self._parent_id"));
   }
   for (const f of e.fields) {
     getters.push(...prop(snake(f.name), renderPyType(f.type), `self._${snake(f.name)}`));
-    if (hasExtern) getters.push(...setter(snake(f.name), renderPyType(f.type)));
   }
   for (const c of e.contains) {
     getters.push(...prop(snake(c.name), containsType(c), `self._${snake(c.name)}`));
@@ -485,20 +487,29 @@ function renderEntity(
     // currentUser-gated ops pick up a trailing actor parameter — the
     // route threads `request.state.current_user` into it.
     if (operationUsesCurrentUser(op)) params.push("current_user: User");
-    // An extern op has no body of its own — the user handler owns the
-    // logic.  Only the precondition gate is generated (`check_<op>`),
-    // run by the route before dispatching to the registered handler.
     const trace = emitTrace ? { aggregate: e.name, op: op.name } : undefined;
+    // An extern op (extern (b) Phase 2, docs/extern.md) is a REAL method whose
+    // DSL body carries only its preconditions: run them, delegate the mutation
+    // to the user-owned hook (`<agg>_extern.<op>(self, …)`, which reaches the
+    // aggregate's private state and may `raise_event`), then re-assert
+    // invariants — the framework flow the proposal keeps (preconditions → hook
+    // → invariants).  A missing hook impl raises `NotImplementedError` (500).
     if (op.extern) {
-      const body = renderPyStatements(op.statements, undefined, {
+      const preconditions = renderPyStatements(op.statements, undefined, {
         eventSourced: e.eventSourced,
         trace,
         emitProvenance,
       });
+      const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
+      const hook = `        ${op.returnType ? "return " : ""}${externHookCall(e.name, op)}`;
       return [
         "",
-        `    def check_${snake(op.name)}(${params.join(", ")}) -> None:`,
-        ...(body.length > 0 ? [body] : ["        return None"]),
+        `    def ${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,
+        ...(preconditions.length > 0 ? [preconditions] : []),
+        hook,
+        // A void extern op re-asserts invariants after the hook; a returning
+        // one ends in `return`, so the trailing assert would be unreachable.
+        ...(op.returnType ? [] : [assertCall(op.name)]),
       ];
     }
     const prefix = op.visibility === "public" ? "" : "_";
@@ -538,14 +549,15 @@ function renderEntity(
         "        out = self._events",
         "        self._events = []",
         "        return out",
+        // Extern hooks (docs/extern.md) mutate the aggregate directly and raise
+        // events through this event API; invariants are re-asserted by the op
+        // method itself (`self._assert_invariants()`), so no public assert seam
+        // is exposed.
         ...(hasExtern
           ? [
               "",
               "    def raise_event(self, ev: DomainEvent) -> None:",
               "        self._events.append(ev)",
-              "",
-              "    def assert_invariants(self) -> None:",
-              assertCall("extern"),
             ]
           : []),
       ]

@@ -73,13 +73,14 @@ export function buildPyRoutesFile(
 ): string {
   const slug = snake(plural(agg.name));
   const parts: EnrichedEntityPartIR[] = agg.parts;
-  const publicOps = agg.operations.filter((o) => o.visibility === "public" && !o.extern);
-  // Extern ops (docs/extern.md) get the same request model + route slot
-  // but dispatch through the user-registered handler module.
-  const externOps = agg.operations.filter((o) => o.visibility === "public" && o.extern);
+  // Extern ops (docs/extern.md, extern (b) Phase 2) route exactly like any
+  // other public operation: the aggregate's `<op>` method (preconditions → hook
+  // → invariants) is a real method now, so `found.<op>(…)` drives the whole
+  // framework flow — no separate registry dispatch.
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
   // `when`-gated ops (criterion.md, use site 2) each expose a
   // side-effect-free `GET /{id}/can_<op>` → `{ allowed }` companion.
-  const whenGatedOps = [...publicOps, ...externOps].filter((o) => o.when);
+  const whenGatedOps = publicOps.filter((o) => o.when);
 
   // One <Name>Paged response model per distinct paged carrier.
   const pagedNames = new Set<string>();
@@ -119,7 +120,6 @@ export function buildPyRoutesFile(
     ...pagedModels,
     hasCreateFactory(agg) ? createModels(agg, ctx) : null,
     ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
-    ...externOps.map((op) => opRequestModel(agg, op, ctx)),
   );
 
   const routes = lines(
@@ -142,7 +142,6 @@ export function buildPyRoutesFile(
     byIdRoute(agg),
     agg.canonicalDestroy ? ["", "", destroyRoute(agg)] : null,
     ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
-    ...externOps.map((op) => ["", "", externRoute(agg, op, ctx)]),
     // Can-query companions register after the operation routes (static
     // `can_<op>` paths, no collision with `/{id}`).
     ...whenGatedOps.map((op) => ["", "", canOpRoute(agg, op, ctx)]),
@@ -190,7 +189,7 @@ export function buildPyRoutesFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
-    [...publicOps, ...externOps].some(operationUsesCurrentUser) ||
+    publicOps.some(operationUsesCurrentUser) ||
       emittableFinds(repo).some(findUsesCurrentUser) ||
       stampUsesUser(agg, "create") ||
       stampUsesUser(agg, "update")
@@ -199,7 +198,6 @@ export function buildPyRoutesFile(
     "from app.db.engine import get_session",
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
-    externOps.length > 0 ? `from app.domain import ${snake(agg.name)}_handlers` : null,
     errorImports(refersTo),
     // Only the create route constructs the domain class directly.
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
@@ -272,15 +270,12 @@ function versionedConflictStatuses(agg: EnrichedAggregateIR, op: OperationIR): n
  *  carry the same format. */
 export const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
 
-/** The domain error names this routes file actually references —
- *  extern dispatch re-raises the domain taxonomy and wraps everything
- *  else in ExternHandlerError. */
+/** The domain error names this routes file actually references. */
 function errorImports(refersTo: (n: string) => boolean): string | null {
   const names = [
     "AggregateNotFoundError",
     "DisallowedError",
     "DomainError",
-    "ExternHandlerError",
     "ForbiddenError",
   ].filter(refersTo);
   return names.length > 0 ? `from app.domain.errors import ${names.join(", ")}` : null;
@@ -875,63 +870,6 @@ function operationRoute(
     vsave.save,
     op.audited ? "    __after = repo.to_wire(found)" : null,
     ...(op.audited ? auditRecordCall(agg, op) : []),
-    "    return Response(status_code=204)",
-  );
-}
-
-/** Extern operation route: the framework owns the lifecycle — load,
- *  `check_<op>` preconditions, dispatch to the registered handler
- *  (read off the module at request time so late registration is
- *  observed), `assert_invariants`, save.  Domain errors re-raise
- *  untranslated; anything else wraps into ExternHandlerError (500). */
-function externRoute(
-  agg: EnrichedAggregateIR,
-  op: OperationIR,
-  ctx: EnrichedBoundedContextIR,
-): string {
-  const opSnake = snake(op.routeSlug ?? op.name);
-  const usesUser = operationUsesCurrentUser(op);
-  // Update stamps apply after the handler mutates, right before persist; a
-  // principal-referencing stamp threads `current_user` (and takes `request`).
-  const stampUpdateUsesUser = stampUsesUser(agg, "update");
-  const versioned = aggregateIsVersioned(agg);
-  const needsRequest = usesUser || stampUpdateUsesUser || versioned;
-  const sig = [
-    ID_PARAM,
-    `body: ${upperFirst(op.name)}${agg.name}Request`,
-    ...(needsRequest ? ["request: Request"] : []),
-    "session: SessionDep",
-  ].join(", ");
-  const checkArgs = [
-    ...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)),
-    ...(usesUser ? ["current_user"] : []),
-  ];
-  const reqEntries = op.params.map(
-    (p) => `"${snake(p.name)}": ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`,
-  );
-  const vsave = versionedSave(agg);
-  return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
-    `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
-    usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
-    "    repo = _repo(session)",
-    `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
-    `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
-    ...whenGate(agg, op),
-    `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
-    `    handler = ${snake(agg.name)}_handlers.${snake(op.name)}`,
-    "    if handler is None:",
-    `        raise RuntimeError("Missing extern handler for '${op.name}' on aggregate '${agg.name}'.")`,
-    "    try:",
-    `        await handler(found, {${reqEntries.join(", ")}})`,
-    "    except (AggregateNotFoundError, DomainError, ForbiddenError):",
-    "        raise",
-    "    except Exception as err:",
-    `        raise ExternHandlerError(${JSON.stringify(op.name)}, ${JSON.stringify(agg.name)}, err) from err`,
-    "    found.assert_invariants()",
-    hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
-    ...vsave.ifMatch,
-    vsave.save,
     "    return Response(status_code=204)",
   );
 }
