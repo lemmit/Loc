@@ -49,7 +49,7 @@ describe("dotnet event-sourced workflows", () => {
     expect(state).toContain("var s = new TallyState { OrderId = __key, Total = 0 };");
     // The stream shares the per-context event log, so the fold codec reads the
     // shared `EventRecord` row (event-log-architecture.md).
-    expect(state).toContain("public static IDomainEvent RowToEvent(EventRecord __r)");
+    expect(state).toContain("public static IDomainEvent RowToEvent(OEventRecord __r)");
     expect(state).toContain("public static string ToData(IDomainEvent ev)");
   });
 
@@ -57,15 +57,15 @@ describe("dotnet event-sourced workflows", () => {
     const files = await gen();
     // The workflow stream shares the per-context `<ctx>_events` log: ONE shared
     // `EventRecord` POCO + the per-context `<Ctx>EventRecordConfiguration` (ctx O).
-    expect(file(files, "Persistence/Events/EventRecord.cs")).toContain(
-      "public sealed class EventRecord",
+    expect(file(files, "Persistence/Events/OEventRecord.cs")).toContain(
+      "public sealed class OEventRecord",
     );
     // No per-workflow record entity.
     expect(
       [...files.keys()].some((k) => k.endsWith("Persistence/Events/TallyEventRecord.cs")),
     ).toBe(false);
     const dbctx = file(files, "Persistence/AppDbContext.cs");
-    expect(dbctx).toContain("public DbSet<EventRecord> Events => Set<EventRecord>();");
+    expect(dbctx).toContain("public DbSet<OEventRecord> OEvents => Set<OEventRecord>();");
     expect(dbctx).toContain(
       "modelBuilder.ApplyConfiguration(new Configurations.OEventRecordConfiguration());",
     );
@@ -86,7 +86,7 @@ describe("dotnet event-sourced workflows", () => {
     expect(h).toContain(
       "var state = TallyState._FromEvents(__key, __rows.Select(TallyState.RowToEvent).ToList());",
     );
-    expect(h).toContain("_eventStore.Append(new EventRecord");
+    expect(h).toContain("_eventStore.Append(new OEventRecord");
     expect(h).toContain('StreamType = "Tally",');
     expect(h).toContain("Data = TallyState.ToData(__ev),");
     expect(h).toContain("await _eventStore.SaveChangesAsync(cancellationToken);");
@@ -117,7 +117,7 @@ describe("dotnet event-sourced workflow instance reads", () => {
     expect(ctrl).toContain('[HttpGet("tally/instances")]');
     expect(ctrl).toContain("public async Task<IActionResult> AllTallyInstances()");
     expect(ctrl).toContain(
-      'var __rows = await _db.Events.AsNoTracking().Where(e => e.StreamType == "Tally").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();',
+      'var __rows = await _db.OEvents.AsNoTracking().Where(e => e.StreamType == "Tally").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();',
     );
     expect(ctrl).toContain(
       "var rows = __rows.GroupBy(e => e.StreamId).Select(g => TallyState._FromEvents(new OrderId(Guid.Parse(g.Key)), g.Select(TallyState.RowToEvent).ToList()));",
@@ -132,7 +132,7 @@ describe("dotnet event-sourced workflow instance reads", () => {
     expect(ctrl).toContain("public async Task<IActionResult> GetTallyInstanceById(Guid id)");
     expect(ctrl).toContain("var __sid = id.ToString();");
     expect(ctrl).toContain(
-      'var __rows = await _db.Events.AsNoTracking().Where(e => e.StreamType == "Tally" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();',
+      'var __rows = await _db.OEvents.AsNoTracking().Where(e => e.StreamType == "Tally" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();',
     );
     expect(ctrl).toContain("if (__rows.Count == 0) return NotFound();");
     expect(ctrl).toContain(

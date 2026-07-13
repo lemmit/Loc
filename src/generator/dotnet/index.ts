@@ -136,7 +136,7 @@ import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitDispatchHandlers, emitWorkflowInstanceReads, emitWorkflows } from "./workflow-emit.js";
-import { emitEventSourcedWorkflowFiles } from "./workflow-eventsourced-emit.js";
+import { emitEventSourcedWorkflowFiles, type OwnerOf } from "./workflow-eventsourced-emit.js";
 import { emitWorkflowStatePersistence } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -304,6 +304,10 @@ function emitProjectFromContexts(
         layoutAdapter: system.layoutAdapter,
       }
     : undefined;
+  // Maps each event-sourced stream to its OWNING context so the merged
+  // AppDbContext, the workflow handlers, and the instance readers all name the
+  // same per-context `<ctx>_events` entity/DbSet.
+  const ownerOf = makeOwnerOf(contexts);
   // Each context contributes its enums / VOs / events / aggregates.
   for (const ctx of contexts) {
     emitIds(ctx, ns, out);
@@ -327,7 +331,7 @@ function emitProjectFromContexts(
     // `commandHandler` / `queryHandler` Mediator records + handlers.  A no-op
     // for a context that declares none.
     emitExplicitHandlers(ctx, ns, out);
-    emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
+    emitWorkflowInstanceReads(ctx, ns, out, ownerOf, { routePrefix });
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
     // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
     emitProjectionReads(ctx, ns, out, { routePrefix });
@@ -352,7 +356,7 @@ function emitProjectFromContexts(
   // channel-routed reactor / event-create, derived over the merged context so
   // a reactor in one hosted context can route off another's channel.
   if (hasSubscriptions) {
-    emitDispatchHandlers(merged, ns, out, system?.sys, sourcemap);
+    emitDispatchHandlers(merged, ns, out, system?.sys, ownerOf, sourcemap);
     // Projection fold handlers (one INotificationHandler<TEvent> per fold),
     // derived over the merged context so a fold can route off another hosted
     // context's channel — mirrors the reactor derivation above.
@@ -448,7 +452,7 @@ function emitProjectFromContexts(
         hasOutbox,
         hasProvenance,
         hasAudit,
-        eventLogConfigClasses(contexts),
+        eventLogContexts(contexts).map((c) => c.name),
       ),
     );
     // Provenance runtime shared files — the lineage SDK + the append-only
@@ -509,7 +513,7 @@ function emitProjectFromContexts(
     // fold class.  Its stream shares the per-context `<ctx>_events` log (shared
     // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
     // context above), so no per-workflow POCO/config here.
-    emitEventSourcedWorkflowFiles(merged.workflows, ns, out);
+    emitEventSourcedWorkflowFiles(merged.workflows, ns, out, ownerOf);
     // Domain persistence-port adapters (audit S7 Slice C): the EF
     // implementations of IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
     // IReadModelStore the orchestration handlers depend on INSTEAD of the
@@ -701,6 +705,8 @@ function emitContext(
   out: Map<string, string>,
   emitTrace = false,
 ): void {
+  // Single-context path: this context owns every stream it hosts.
+  const ownerOf = makeOwnerOf([ctx]);
   const hasSubscriptions = ctx.eventSubscriptions.length > 0 || (ctx.projections?.length ?? 0) > 0;
   // Transactional outbox (dispatch-delivery-semantics.md) — see the
   // system-mode twin above for the design.
@@ -728,10 +734,10 @@ function emitContext(
   // Domain services (domain-services.md) — see the system-mode twin above.
   emitDomainServices(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
-  emitWorkflowInstanceReads(ctx, ns, out);
+  emitWorkflowInstanceReads(ctx, ns, out, ownerOf);
   emitProjectionReads(ctx, ns, out);
   if (hasSubscriptions) {
-    emitDispatchHandlers(ctx, ns, out, undefined);
+    emitDispatchHandlers(ctx, ns, out, undefined, ownerOf);
     emitProjectionDispatch(ctx, ns, out);
   }
   emitViews(ctx, ns, out);
@@ -1028,7 +1034,7 @@ function emitAggregate(
     place(
       `${agg.name}Repository.cs`,
       "repository-impl",
-      renderEventSourcedRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+      renderEventSourcedRepositoryImpl(agg, repoWithViews, ns, findBodies, ctx.name, {
         extraUsings: [...repoImplUsings].sort(),
         idClass,
       }),
@@ -1160,12 +1166,12 @@ function emitInfrastructure(
       hasOutbox,
       false,
       false,
-      eventLogConfigClasses([ctx]),
+      eventLogContexts([ctx]).map((c) => c.name),
     ),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitProjectionRowPersistence(ctx.projections, ns, out);
-  emitEventSourcedWorkflowFiles(ctx.workflows, ns, out);
+  emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));
   // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
   // single-context (`generate dotnet`) sibling of the system path's emission.
   // Gated on the SAME condition renderProgram registers the ports under
@@ -1378,12 +1384,16 @@ function eventLogContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBounded
   );
 }
 
-/** The per-context event-log EF configuration class names
- *  (`<Ctx>EventRecordConfiguration`), one per event-sourced context — consumed
- *  by `renderDbContext` to wire the ONE shared `Events` DbSet + the
- *  ApplyConfiguration(s). */
-function eventLogConfigClasses(contexts: EnrichedBoundedContextIR[]): string[] {
-  return eventLogContexts(contexts).map((c) => `${upperFirst(c.name)}EventRecordConfiguration`);
+/** Maps an event-sourced aggregate / workflow name to its OWNING bounded-context
+ *  name, so a merged multi-context deployable names each `<ctx>_events`
+ *  entity/DbSet after the stream's owner (matching the schema + migrations), not
+ *  the merged context.  Falls back to the name itself if unresolved (never
+ *  happens for a real stream). */
+function makeOwnerOf(contexts: EnrichedBoundedContextIR[]): OwnerOf {
+  return (name) =>
+    contexts.find(
+      (c) => c.aggregates.some((a) => a.name === name) || c.workflows.some((w) => w.name === name),
+    )?.name ?? name;
 }
 
 /** Emit the ONE shared `EventRecord` POCO + one `<Ctx>EventRecordConfiguration`
@@ -1397,8 +1407,15 @@ function emitEventLogFiles(
 ): void {
   const esCtxs = eventLogContexts(contexts);
   if (esCtxs.length === 0) return;
-  out.set("Infrastructure/Persistence/Events/EventRecord.cs", renderEventRecordPoco(ns));
+  // One `<Ctx>EventRecord` entity + `<Ctx>EventRecordConfiguration` per
+  // event-sourced context — a distinct EF entity per `<ctx>_events` table (EF
+  // maps each CLR type to one table), so co-hosting several event-sourced
+  // contexts in one deployable maps each stream to its own table.
   for (const c of esCtxs) {
+    out.set(
+      `Infrastructure/Persistence/Events/${upperFirst(c.name)}EventRecord.cs`,
+      renderEventRecordPoco(ns, c.name),
+    );
     out.set(
       `Infrastructure/Persistence/Configurations/${upperFirst(c.name)}EventRecordConfiguration.cs`,
       renderEventRecordConfiguration(c.name, ns, resolveSchema(c)),

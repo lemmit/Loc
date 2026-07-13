@@ -58,6 +58,7 @@ import {
   esEventDbSet,
   esEventRecordClass,
   esStreamType,
+  type OwnerOf,
 } from "./workflow-eventsourced-emit.js";
 import {
   workflowAllocateInitializer,
@@ -259,6 +260,11 @@ export function emitDispatchHandlers(
   ns: string,
   out: Map<string, string>,
   sys: SystemIR | undefined,
+  /** Maps an event-sourced workflow to its OWNING context (this `ctx` may be a
+   *  merged union of several), so the shared `<ctx>_events` DbSet/record type
+   *  matches the schema + aggregate repository.  For a single-context system it
+   *  returns `ctx.name`. */
+  ownerOf: OwnerOf,
   /** Source-map recorder (Milestone 12) — threaded ONLY from the system-mode
    *  `dotnet/index.ts` entry point; the legacy single-context path stays
    *  unmapped by design (undefined here), so its output is untouched.  Each
@@ -334,6 +340,7 @@ export function emitDispatchHandlers(
         ctx,
         sys,
         construct,
+        ownerOf,
         opFragments,
       );
       out.set(path, content);
@@ -364,6 +371,7 @@ export function emitDispatchHandlers(
       ctx,
       sys,
       construct,
+      ownerOf,
       opFragments,
     );
     out.set(path, content);
@@ -442,6 +450,7 @@ function renderEventReactorHandler(
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
   construct: string,
+  ownerOf: OwnerOf,
   /** Source-map Milestone 12 — when passed, pushes ONE `OpFragment` covering
    *  this handler's whole reactor-body chunk list (mirrors `renderHandler`'s
    *  `opFragments`, no re-indent here — the body renders flush, unlike the
@@ -526,10 +535,10 @@ function renderEventReactorHandler(
     // bare `Api.Domain...` inside `Api.Application.Workflows` mis-resolves (CS0234).
     if (eventSourced) {
       fields.push(
-        `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> _eventStore;`,
+        `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf, ownerOf)}> _eventStore;`,
       );
       ctorParamPairs.push(
-        `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> eventStore`,
+        `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf, ownerOf)}> eventStore`,
       );
       ctorAssigns.push("_eventStore = eventStore");
       usings.add(`${ns}.Infrastructure.Persistence.Events`);
@@ -675,7 +684,7 @@ function renderEventReactorHandler(
     // an applier (the A1 discipline), so all `_workflowEvents` are own-events;
     // they are also re-published below for choreography.
     if (usage.hasEmit) {
-      const recordCls = esEventRecordClass(wf);
+      const recordCls = esEventRecordClass(wf, ownerOf);
       const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       stmtLines.push(
@@ -779,6 +788,7 @@ function renderCsEsBranch(
   ns: string,
   auditsOps: boolean,
   construct: string,
+  ownerOf: OwnerOf,
   /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
    *  the merged handler (create + on) records TWO fragments, one per branch.
    *  The caller (`renderMergedEventSourcedHandler`) nests this branch's WHOLE
@@ -819,7 +829,7 @@ function renderCsEsBranch(
     lines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
   if (usage.hasEmit) {
-    const recordCls = esEventRecordClass(wf);
+    const recordCls = esEventRecordClass(wf, ownerOf);
     const st = esStreamType(wf);
     const stateCls = workflowStateClass(wf);
     lines.push(
@@ -865,6 +875,7 @@ function renderMergedEventSourcedHandler(
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
   construct: string,
+  ownerOf: OwnerOf,
   /** Source-map Milestone 12 — forwarded to `renderCsEsBranch` for BOTH
    *  branches, so a merged handler records two `OpFragment`s (create + on),
    *  each anchored at its own nested position in the final `if`/`else`. */
@@ -922,10 +933,10 @@ function renderMergedEventSourcedHandler(
   // S7 Slice C), NOT the concrete AppDbContext.  Both branches (create/on) load
   // + append through it; the EF adapter delegates to the same scoped DbContext.
   fields.push(
-    `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> _eventStore;`,
+    `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf, ownerOf)}> _eventStore;`,
   );
   ctorParamPairs.push(
-    `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> eventStore`,
+    `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf, ownerOf)}> eventStore`,
   );
   ctorAssigns.push("_eventStore = eventStore");
   usings.add(`${ns}.Infrastructure.Persistence.Events`);
@@ -960,6 +971,7 @@ function renderMergedEventSourcedHandler(
     ns,
     auditsOps,
     construct,
+    ownerOf,
     opFragments,
   );
   const onBranch = renderCsEsBranch(
@@ -973,6 +985,7 @@ function renderMergedEventSourcedHandler(
     ns,
     auditsOps,
     construct,
+    ownerOf,
     opFragments,
   );
 
@@ -2083,6 +2096,7 @@ export function emitWorkflowInstanceReads(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  ownerOf: OwnerOf,
   options?: { routePrefix?: string },
 ): void {
   const observable = ctx.workflows.filter((wf) => !!wf.instanceWireShape);
@@ -2095,7 +2109,7 @@ export function emitWorkflowInstanceReads(
   }
   out.set(
     `Api/${ctx.name}WorkflowInstancesController.cs`,
-    renderInstancesController(ctx, ns, observable, options?.routePrefix),
+    renderInstancesController(ctx, ns, observable, ownerOf, options?.routePrefix),
   );
 }
 
@@ -2132,6 +2146,7 @@ function renderInstancesController(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   workflows: WorkflowIR[],
+  ownerOf: OwnerOf,
   routePrefix?: string,
 ): string {
   const className = `${ctx.name}WorkflowInstancesController`;
@@ -2166,7 +2181,7 @@ function renderInstancesController(
     // (docs/plans/non-guid-id-http-params.md).
     const corrClr = csIdValueClrType(workflowCorrIdValueType(wf));
     if (wf.eventSourced) {
-      const eventSet = esEventDbSet(wf);
+      const eventSet = esEventDbSet(wf, ownerOf);
       const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       const corrId = esCorrIdClass(wf);

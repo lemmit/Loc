@@ -343,7 +343,9 @@ function renderWorkflowViewHandler(
   // route paths, and the response component stay identical across the two paths.
   let queryBody: string;
   if (eventSourced) {
-    const eventSet = esEventDbSet(wf);
+    // A workflow-sourced view lives in the workflow's own context, so `ctx` is
+    // the owning context of `wf` — its per-context `<Ctx>Events` DbSet.
+    const eventSet = esEventDbSet(wf, () => ctx.name);
     const st = esStreamType(wf);
     const stateCls = workflowStateClass(wf);
     const corrId = esCorrIdClass(wf);

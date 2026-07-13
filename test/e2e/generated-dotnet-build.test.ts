@@ -528,11 +528,12 @@ describe.skipIf(!ENABLED)(
           cwd: repoRoot,
         });
         const proj = path.join(outDir, "dotnet_api");
-        // Sanity: the SHARED per-context event-record entity + the fold
+        // Sanity: the per-context event-record entity + the fold
         // rehydrator made it out (per-context event log — event-log-architecture.md).
+        // The entity is named for its OWNING context (Accounts), not a shared type.
         expect(
           fs.existsSync(
-            path.join(proj, "Infrastructure", "Persistence", "Events", "EventRecord.cs"),
+            path.join(proj, "Infrastructure", "Persistence", "Events", "AccountsEventRecord.cs"),
           ),
         ).toBe(true);
         expect(
@@ -577,11 +578,48 @@ describe.skipIf(!ENABLED)(
             "utf8",
           ),
         ).toContain("_FromEvents");
+        // The workflow's event-record entity is named for its OWNING context
+        // (Fulfillment), not a shared type.
         expect(
           fs.existsSync(
-            path.join(proj, "Infrastructure", "Persistence", "Events", "EventRecord.cs"),
+            path.join(proj, "Infrastructure", "Persistence", "Events", "FulfillmentEventRecord.cs"),
           ),
         ).toBe(true);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // Multi-context event log (event-log-architecture.md follow-up): ONE dotnet
+    // deployable hosting TWO event-sourced contexts (an ES aggregate in each +
+    // an ES workflow).  EF maps one CLR type to one table, so the shared
+    // `<ctx>_events` log needs a distinct `<Ctx>EventRecord` entity + `<Ctx>Events`
+    // DbSet per context — a single shared `EventRecord` collapses to one table
+    // under EF's last-wins mapping and the model build fails.  The merged
+    // BoundedContextIR (ctx.name = Alpha) must not mis-route Beta's streams.
+    it("multi-context event log (two ES contexts, per-context EventRecord) — dotnet project builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-mces-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/multi-context-eventlog.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // A distinct per-context event-record entity — NOT one shared `EventRecord.cs`.
+        const events = path.join(proj, "Infrastructure", "Persistence", "Events");
+        expect(fs.existsSync(path.join(events, "AlphaEventRecord.cs"))).toBe(true);
+        expect(fs.existsSync(path.join(events, "BetaEventRecord.cs"))).toBe(true);
+        expect(fs.existsSync(path.join(events, "EventRecord.cs"))).toBe(false);
         execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
         execSync(`dotnet build --no-restore --nologo /warnaserror`, {
           cwd: proj,

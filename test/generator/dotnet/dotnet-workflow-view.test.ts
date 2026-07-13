@@ -108,7 +108,7 @@ describe(".NET event-sourced workflow-sourced view", () => {
     const h = get(await esFiles(), "Application/Views/PaidFulfillmentsHandler.cs");
     // Loads the event rows ordered by stream, then folds each stream group.
     expect(h).toContain(
-      'var __rows = await _db.Events.AsNoTracking().Where(e => e.StreamType == "OrderFulfillment").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);',
+      'var __rows = await _db.OpsEvents.AsNoTracking().Where(e => e.StreamType == "OrderFulfillment").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);',
     );
     expect(h).toContain(
       "var rows = __rows.GroupBy(e => e.StreamId).Select(g => OrderFulfillmentState._FromEvents(new OrderId(System.Guid.Parse(g.Key)), g.Select(OrderFulfillmentState.RowToEvent).ToList())).Where(r => r.Paid > 0);",
