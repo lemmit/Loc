@@ -126,6 +126,14 @@ function renderPageView(
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   fnName: string,
   takesRouteId = false,
+  /** Extern components declared on the ui (name → params) — threaded into the
+   *  walker so a body call renders through `felizTarget.renderUserComponent`. */
+  externComponents: ReadonlyMap<string, PageIR["params"]> = new Map(),
+  /** Extern frontend function names declared on the ui. */
+  externFunctionNames: ReadonlySet<string> = new Set(),
+  /** Accumulator: names actually USED across the ui's pages, so the App.fs head
+   *  can `open` exactly the extern modules referenced (F# unused-open warns). */
+  used?: { components: Set<string>; functions: Set<string> },
 ): string {
   // A detail page's view takes the route `id` (bound by its `Page` case); the
   // body's `byId(id)` renders through the `renderRouteId` seam to this local.
@@ -139,16 +147,44 @@ function renderPageView(
     felizPack(),
     new Set(),
     stateNames,
-    new Map(), // userComponents
+    externComponents, // userComponents (extern only)
     ui.apiParams,
     aggregatesByName,
     new Map(), // bcByAggregate — unused by the Feliz form seams (no enum resolution)
     workflowsByName, // WorkflowForm(runs:) resolves here
+    new Map(), // bcByWorkflow
+    new Map(), // paramTypes
+    new Map(), // pageRoutes
+    externFunctionNames, // extern frontend function names
   );
+  if (used) {
+    for (const c of result.usedUserComponents) used.components.add(c);
+    for (const f of result.usedExternFunctions ?? []) used.functions.add(f);
+  }
   const wrappers = dispatchWrappers(page, result.usedActions ?? new Set());
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
   return `${head}\n${preamble}${body}`;
+}
+
+/** Derive an F# module reference for an extern component / function from its
+ *  `from "<path>"` clause — Fable binds by MODULE, not file path.  Segments
+ *  (split on `/` or `.`) are PascalCased and joined with `.`, e.g.
+ *  `"widgets/order-chart"` → `Widgets.OrderChart`; write `"my_app/widgets"`
+ *  for `MyApp.Widgets`.  The App.fs head `open`s exactly the modules used. */
+function externModuleFromPath(path: string): string {
+  const pascalSeg = (seg: string): string =>
+    seg
+      .split(/[^a-zA-Z0-9]+/)
+      .filter(Boolean)
+      .map((w) => upperFirst(w))
+      .join("");
+  return path
+    .replace(/^\.?\//, "")
+    .split(/[/.]/)
+    .filter(Boolean)
+    .map(pascalSeg)
+    .join(".");
 }
 
 // --- Multi-page routing helpers (Feliz.Router) ----------------------------
@@ -353,6 +389,26 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const workflowsByName = workflowsForUi(contexts);
+
+  // Extern frontend hatches (extern-{component,function}-escape-hatch.md): the
+  // extern components (name → params, threaded into the walker's userComponents
+  // so a body call routes to `felizTarget.renderUserComponent`) and the extern
+  // function names.  `used` accumulates what the page walks actually reference
+  // so the App.fs head `open`s exactly the modules used (F# unused-open warns).
+  const externComponents = new Map<string, PageIR["params"]>(
+    ui.components.filter((c) => c.extern).map((c) => [c.name, c.params]),
+  );
+  const externFunctionNames = new Set((ui.functions ?? []).map((f) => f.name));
+  const used = { components: new Set<string>(), functions: new Set<string>() };
+  // Module lookup for a used extern name → its `from`-path-derived F# module.
+  const componentModule = new Map(
+    ui.components
+      .filter((c) => c.extern)
+      .map((c) => [c.name, externModuleFromPath(c.externPath ?? "")]),
+  );
+  const functionModule = new Map(
+    (ui.functions ?? []).map((f) => [f.name, externModuleFromPath(f.externPath)]),
+  );
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
   const forms: FelizForm[] = formsForUi(ui, contexts);
@@ -411,18 +467,56 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const rootViews = routed
     ? [
         ...pages.map((p) =>
-          renderPageView(p, ui, aggregatesByName, workflowsByName, pageViewFn(p), hasRouteParam(p)),
+          renderPageView(
+            p,
+            ui,
+            aggregatesByName,
+            workflowsByName,
+            pageViewFn(p),
+            hasRouteParam(p),
+            externComponents,
+            externFunctionNames,
+            used,
+          ),
         ),
         "",
         renderRootView(pages, rootFn),
       ]
-    : [renderPageView(pages[0]!, ui, aggregatesByName, workflowsByName, rootFn)];
+    : [
+        renderPageView(
+          pages[0]!,
+          ui,
+          aggregatesByName,
+          workflowsByName,
+          rootFn,
+          false,
+          externComponents,
+          externFunctionNames,
+          used,
+        ),
+      ];
   const views = authUi ? [...rootViews, "", renderAuthGate()] : rootViews;
+
+  // `open` one line per DISTINCT extern module actually referenced by the page
+  // walks (components + functions), so bare `OrderChart {| … |}` /
+  // `initials(args)` references resolve.  Deduped + sorted for stable output.
+  const externModules = new Set<string>();
+  for (const c of used.components) {
+    const m = componentModule.get(c);
+    if (m) externModules.add(m);
+  }
+  for (const f of used.functions) {
+    const m = functionModule.get(f);
+    if (m) externModules.add(m);
+  }
+  const externOpens = [...externModules].sort().map((m) => `open ${m}`);
 
   return lines(
     "module App",
     "",
     "open Feliz",
+    // Hand-written extern component / function modules (extern-*-escape-hatch.md).
+    ...externOpens,
     // Feliz.Router provides `React.router` (routed) AND `Cmd.navigate` (any form
     // navigates on success), so a single-page ui with a form still needs it.
     (routed || hasForms) && "open Feliz.Router",

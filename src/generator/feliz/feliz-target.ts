@@ -9,6 +9,7 @@
 
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
+import { emitExpr } from "../_walker/walker-core.js";
 import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
@@ -249,6 +250,38 @@ export const felizTarget: WalkerTarget = {
   },
 
   defaultInitFor: (type) => fsZeroValue(type),
+
+  // --- Extern component seam (extern-component-escape-hatch.md) -----------
+  // An extern `component X(…) extern from "…"` is a hand-written Feliz
+  // component FUNCTION the user owns.  It is referenced BARE (`OrderChart {|
+  // … |}`); the `App.fs` head `open`s its module (derived from the `from`
+  // path), so a fully-qualified reference isn't needed and a missing module
+  // fails `dotnet fable` — the fail-fast, matching the JSX frontends' `tsc`.
+  // Props pass as an anonymous record; a prop-less component takes unit.
+  renderUserComponent: (call, ctx, _depth) => {
+    if (call.kind !== "call") return null;
+    const params = ctx.userComponents.get(call.name) ?? [];
+    ctx.usedUserComponents.add(call.name);
+    const argNames = call.argNames ?? [];
+    const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
+    const fields: string[] = [];
+    let cursor = 0;
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i]!;
+      const named = argNames[i];
+      let paramName: string | undefined;
+      if (named !== undefined) {
+        paramName = named;
+      } else {
+        while (cursor < params.length && filledByName.has(params[cursor]!.name)) cursor += 1;
+        paramName = params[cursor]?.name;
+        if (paramName !== undefined) cursor += 1;
+      }
+      if (paramName === undefined) continue;
+      fields.push(`${paramName} = ${emitExpr(arg, ctx)}`);
+    }
+    return fields.length > 0 ? `${call.name} {| ${fields.join("; ")} |}` : `${call.name} ()`;
+  },
 
   // --- Markup seams — F# flavoured ---------------------------------------
   renderComment: (text: string) => `(* ${text} *)`,
