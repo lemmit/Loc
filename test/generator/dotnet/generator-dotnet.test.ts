@@ -377,7 +377,9 @@ describe(".NET generator", () => {
     expect(order).not.toMatch(/IOrderMutator/);
     expect(order).toMatch(/public void Confirm\(\)/);
     // Precondition, then the hook, then invariants — in that order.
-    expect(order).toMatch(/if \(!\(this\.IsMutable\(\)\)\)[\s\S]*ConfirmCore\(\);\s*AssertInvariants\(\);/);
+    expect(order).toMatch(
+      /if \(!\(this\.IsMutable\(\)\)\)[\s\S]*ConfirmCore\(\);\s*AssertInvariants\(\);/,
+    );
     expect(order).toMatch(/private partial void ConfirmCore\(\);/);
     // No leftover `Check`-only method, no injected handler.
     expect(order).not.toMatch(/public void CheckConfirm\(\)/);
@@ -1203,9 +1205,13 @@ describe(".NET generator", () => {
     expect(handler).not.toMatch(/AddLineOrderRequest/);
     // And the aggregate declares the partial hook + implements it (scaffold-once).
     const order = files.get("Domain/Orders/Order.cs")!;
-    expect(order).toMatch(/private partial void AddLineCore\(OrderId productId, int qty, Money price\);/);
+    expect(order).toMatch(
+      /private partial void AddLineCore\(OrderId productId, int qty, Money price\);/,
+    );
     const impl = files.get("Domain/Orders/Order.Extern.cs")!;
-    expect(impl).toMatch(/private partial void AddLineCore\(OrderId productId, int qty, Money price\)/);
+    expect(impl).toMatch(
+      /private partial void AddLineCore\(OrderId productId, int qty, Money price\)/,
+    );
   });
 
   it("workflow op-call to a parameterized extern calls the aggregate method with cmd-param args", async () => {
