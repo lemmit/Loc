@@ -205,6 +205,36 @@ describe("java generator — wire validators + advice (S5)", () => {
     expect(v).toContain("if (!errors.isEmpty()) throw new WireValidationException(errors);");
   });
 
+  it("mirrors create wire constraints onto the crudish update validator (SYS-1)", async () => {
+    // M-T6.8/SYS-1: the crudish `update` op's validator carries the SAME
+    // field-invariant checks as `create`, so an invalid update throws
+    // WireValidationException (422) instead of reaching the domain floor.
+    const src = `
+system Demo {
+  subdomain S {
+    context C {
+      aggregate Account with crudish {
+        handle: string
+        invariant handle.length > 0
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api AccountApi from S
+  storage primary { type: postgres }
+  deployable api { platform: java contexts: [C] serves: AccountApi port: 8080 }
+}
+`;
+    const out = await generateSystemFiles(src);
+    const v = [...out.entries()].find(([k]) => /AccountValidators\.java$/.test(k))?.[1];
+    expect(v).toBeDefined();
+    const updateMethod = v!.slice(v!.indexOf("public static void update("));
+    expect(v).toContain("public static void update(String handle)");
+    expect(updateMethod).toContain(
+      'if (!(handle.length() >= 1)) errors.add(WireValidationException.error("/handle", "Invariant violated: handle.length > 0"));',
+    );
+  });
+
   it("advice maps the exception taxonomy to the cross-backend problem envelope", async () => {
     const advice = (await files()).get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
     expect(advice).toContain("@RestControllerAdvice");

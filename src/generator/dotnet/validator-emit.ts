@@ -75,7 +75,7 @@ export function renderCreateValidator(
 
 /** Render the validator file for an <Op>Command. */
 export function renderOperationValidator(
-  agg: { name: string },
+  agg: { name: string; invariants: InvariantIR[] },
   op: OperationIR,
   ns: string,
 ): ValidatorEmission {
@@ -89,7 +89,12 @@ export function renderOperationValidator(
     ns,
     aggName: agg.name,
     commandName: `${upperFirst(op.name)}Command`,
-    invariants: preconditions,
+    // Field-level invariants (SYS-1): a mutating op's command validator gets
+    // the SAME wire constraints as Create<Agg>Command, plus the op's own
+    // preconditions.  `available = op.params` drops invariants over fields the
+    // op doesn't take (mirrors the create-input filter), so an invalid update
+    // fails FluentValidation (400 ProblemDetails) instead of the domain floor.
+    invariants: [...agg.invariants, ...preconditions],
     available: new Set(op.params.map((p) => p.name)),
   });
 }

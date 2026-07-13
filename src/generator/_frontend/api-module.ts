@@ -118,7 +118,11 @@ export function buildApiModule(
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    const opInvariants = preconditionsAsInvariants(op);
+    // Field-level invariants (SYS-1): the update/mutating-op client schema gets
+    // the SAME wire constraints as create, mirroring the server DTO, so the
+    // client form validates an update as strictly as a create.  `available =
+    // op.params` drops any invariant over a field this op doesn't take.
+    const opInvariants = [...agg.invariants, ...preconditionsAsInvariants(op)];
     lines.push(
       ...emitObjectWithRefines(
         `${upperFirst(op.name)}${agg.name}Request`,

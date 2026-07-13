@@ -309,7 +309,13 @@ export function buildRoutesFile(
         `const ${upperFirst(op.name)}${agg.name}Request`,
         `${upperFirst(op.name)}${agg.name}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
-        preconditionsAsInvariants(op),
+        // Field-level invariants (SYS-1): the update/mutating-op request DTO
+        // gets the SAME wire constraints as create, not just the op's own
+        // preconditions.  The `available = op.params` set below drops any
+        // invariant over a field this op doesn't take (identical to the
+        // create-input filtering above), so an invalid update is rejected at
+        // the wire (422) instead of reaching the domain floor.
+        [...agg.invariants, ...preconditionsAsInvariants(op)],
         new Set(op.params.map((p) => p.name)),
       ),
     );

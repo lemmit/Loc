@@ -1856,6 +1856,18 @@ describe(".NET generator", () => {
       expect(customerCreate).toMatch(/using FluentValidation;/);
     });
 
+    it("mirrors create wire constraints onto the update/op-path validator (SYS-1)", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      // M-T6.8/SYS-1: Customer's crudish `update` command validator now carries
+      // the SAME field constraint as CreateCustomerCommandValidator —
+      // `invariant email.length > 0` → `MinimumLength(1)` — so an invalid update
+      // fails FluentValidation instead of reaching the domain floor.
+      const customerUpdate = files.get("Application/Customers/Commands/UpdateCommandValidator.cs")!;
+      expect(customerUpdate).toBeDefined();
+      expect(customerUpdate).toMatch(/RuleFor\(x => x\.Email\)\.MinimumLength\(1\)/);
+    });
+
     it("emits an AbstractValidator per public op with single-field preconditions", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);

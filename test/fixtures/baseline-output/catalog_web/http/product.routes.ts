@@ -19,7 +19,7 @@ const CreateProductRequest = z.object({
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
 const UpdateProductRequest = z.object({
-  sku: z.string(),
+  sku: z.string().min(1),
   price: MoneySchema,
 }).openapi("UpdateProductRequest");
 

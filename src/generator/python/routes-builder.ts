@@ -14,6 +14,7 @@ import {
   type ExprIR,
   exprUsesCurrentUser,
   findUsesCurrentUser,
+  type InvariantIR,
   type OperationIR,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -336,11 +337,11 @@ function containmentResponseType(t: TypeIR): string {
  *  on one field (e.g. `email.matches(r) && email.length <= 120`) become a
  *  single `Field(pattern=, max_length=)`. */
 function createFieldConstraints(
-  agg: EnrichedAggregateIR,
+  invariants: InvariantIR[],
   available: ReadonlySet<string>,
 ): Map<string, string> {
   const byField = new Map<string, SingleFieldPattern[]>();
-  for (const inv of agg.invariants) {
+  for (const inv of invariants) {
     if (!classifyForWire(inv, { available })) continue;
     const cons = singleFieldConstraints(inv);
     if (!cons) continue;
@@ -420,14 +421,14 @@ function withFieldConstraint(name: string, decl: string, fieldExpr: string | und
  *  domain's DomainError → 400).  Predicates render against the request DTO's
  *  verbatim camelCase fields (`self.handle`). */
 function createModelValidator(
-  agg: EnrichedAggregateIR,
+  invariants: InvariantIR[],
   available: ReadonlySet<string>,
+  cls: string,
 ): string | null {
-  const refines = agg.invariants.filter(
+  const refines = invariants.filter(
     (inv) => classifyForWire(inv, { available }) && !singleFieldConstraints(inv),
   );
   if (refines.length === 0) return null;
-  const cls = `Create${agg.name}Request`;
   const checks = refines.map((inv) => {
     const pred = renderPyExpr(inv.expr, { thisName: "self", wireField: true });
     const ok = inv.guard
@@ -467,7 +468,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   }
   const inputs = forCreateInput(agg.fields);
   const available = new Set(inputs.map((f) => f.name));
-  const constraints = createFieldConstraints(agg, available);
+  const constraints = createFieldConstraints(agg.invariants, available);
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
     inputs.length > 0
@@ -479,7 +480,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
           ),
         )
       : ["    pass"],
-    createModelValidator(agg, available),
+    createModelValidator(agg.invariants, available, `Create${agg.name}Request`),
     "",
     "",
     `class Create${agg.name}Response(BaseModel):`,
@@ -494,14 +495,42 @@ function opRequestModel(
   op: OperationIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
+  // Field-level invariants (SYS-1): the op's request DTO gets the SAME wire
+  // constraints as Create<Agg>Request, plus the op's own preconditions.
+  // `available = op.params` drops any invariant over a field the op doesn't
+  // take (mirrors the create-input filter), so an invalid update fails at the
+  // FastAPI boundary (422) instead of reaching the domain floor.
+  const cls = `${upperFirst(op.name)}${agg.name}Request`;
+  const available = new Set(op.params.map((p) => p.name));
+  const invariants: InvariantIR[] = [...agg.invariants, ...preconditionsAsInvariants(op)];
+  const constraints = createFieldConstraints(invariants, available);
   return lines(
-    `class ${upperFirst(op.name)}${agg.name}Request(BaseModel):`,
+    `class ${cls}(BaseModel):`,
     op.params.length > 0
-      ? op.params.map((p) => `    ${p.name}: ${requestFieldDecl(p.type, false, ctx)}`)
+      ? op.params.map((p) =>
+          withFieldConstraint(
+            p.name,
+            requestFieldDecl(p.type, false, ctx),
+            constraints.get(p.name),
+          ),
+        )
       : ["    pass"],
+    createModelValidator(invariants, available, cls),
     "",
     "",
   );
+}
+
+/** Lift each `precondition` statement on an operation to an `InvariantIR` so the
+ *  same wire classification (single-field `Field(...)` + cross-field
+ *  `model_validator`) handles wire-translatable preconditions on `<Op>Request`,
+ *  mirroring Hono's `preconditionsAsInvariants`. */
+function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
+  const out: InvariantIR[] = [];
+  for (const s of op.statements) {
+    if (s.kind === "precondition") out.push({ expr: s.expr, source: s.source });
+  }
+  return out;
 }
 
 /** Request-model field declaration with the cross-backend required-set

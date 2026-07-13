@@ -12,10 +12,10 @@ export const CreateCustomerRequest = z.object({
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequest>;
 
 export const UpdateCustomerRequest = z.object({
-  username: z.string(),
+  username: z.string().min(3).max(32),
   email: z.string(),
-  age: z.number().int(),
-});
+  age: z.number().int().min(18).max(150),
+}).refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequest>;
 
 export const ByEmailQuery = z.object({

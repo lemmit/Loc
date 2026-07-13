@@ -969,6 +969,40 @@ describe("react generator", () => {
       expect(userApi).toMatch(/email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/);
     });
 
+    it("mirrors create wire constraints onto the client Update<Agg>Request schema (SYS-1)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          system Acme {
+            subdomain M {
+              context Auth {
+                aggregate User with crudish {
+                  email: string
+                  derived display: string = email
+                  invariant email.matches("^[^@]+@.+$")
+                }
+                repository Users for User { }
+              }
+            }
+            ui WebApp with scaffold(subdomains: [M]) { }
+            deployable api { platform: dotnet, contexts: [Auth], port: 8080 }
+            deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
+          }
+        `,
+        { validation: true },
+      );
+      const { files } = generateSystems(doc.parseResult.value as Model);
+      const userApi = files.get("web/src/api/user.ts")!;
+      // M-T6.8/SYS-1: the client Update<Agg>Request schema mirrors the create
+      // schema's wire constraint, so the update form validates as strictly as
+      // create (create-path already emitted it — this closes the same gap here).
+      const updateBlock = userApi.slice(userApi.indexOf("export const UpdateUserRequest"));
+      expect(userApi).toContain("export const UpdateUserRequest");
+      expect(updateBlock).toMatch(/email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/);
+    });
+
     it("desugars `field: T check <expr>` to an invariant on the parent", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
