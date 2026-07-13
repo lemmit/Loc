@@ -23,6 +23,7 @@ import type {
 import {
   isBinaryChain,
   isDerivedProp,
+  isLambda,
   isLetStmt,
   isMemberSuffix,
   isPostfixChain,
@@ -30,6 +31,7 @@ import {
   isRequiresStmt,
   isReturnStmt,
   isTernaryExpr,
+  isUi,
 } from "../generated/ast.js";
 import {
   absentRecordMember,
@@ -194,6 +196,62 @@ export function checkUnknownMemberAccess(model: Model, accept: ValidationAccepto
           // Stop walking this chain — the receiver is now indeterminate and
           // any further suffix would cascade off the unresolved access.
           break;
+        }
+      }
+      recvType = typeAfterSuffix(recvType, suffix, env);
+    }
+  }
+}
+
+/** Numeric primitives an `avg(λ)` projection may average over. */
+const AVG_NUMERIC_PRIMITIVES: ReadonlySet<string> = new Set(["int", "long", "decimal", "money"]);
+
+/** AST-level gate for `avg(λ)`.  Unlike `min`/`max`, `avg` DESUGARS during
+ *  lowering to `count == 0 ? null : sum(λ) / count` — so the IR validator
+ *  (which runs post-lowering) never sees an `avg` node.  The two checks it
+ *  would otherwise carry must therefore fire here, at the AST level:
+ *   • `loom.avg-non-numeric` — the λ-body must be int/long/decimal/money;
+ *     an average of anything else is meaningless.
+ *   • `loom.collection-op-in-ui` — like the other reducing collection ops
+ *     (`min`/`max`/`sortBy`/…), `avg` has no renderable page-body form.
+ *  Fail-open on an `unknown` λ-body (an upstream checker already reported it). */
+export function checkAvgProjection(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const env = envForNode(chain);
+    let recvType = typeOf(chain.head, env);
+    for (const suffix of chain.suffixes) {
+      if (isMemberSuffix(suffix) && suffix.member === "avg" && recvType.kind === "array") {
+        const ms = suffix as MemberSuffix;
+        const elem = recvType.element;
+        // UI page-body position — no renderable frontend form (parity with the
+        // IR-level `loom.collection-op-in-ui` gate the desugar bypasses).
+        if (AstUtils.getContainerOfType(ms, isUi)) {
+          accept(
+            "error",
+            "collection op '.avg' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.",
+            { node: ms, property: "member", code: "loom.collection-op-in-ui" },
+          );
+        }
+        // λ-body must be a numeric primitive.
+        const lambdaArg = ms.args[0]?.value;
+        if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
+          const lambdaEnv = makeEnv(
+            env,
+            new Map([[lambdaArg.param, { type: elem, origin: lambdaArg }]]),
+          );
+          const bodyT = typeOf(lambdaArg.body, lambdaEnv);
+          if (
+            bodyT.kind !== "unknown" &&
+            !(bodyT.kind === "primitive" && AVG_NUMERIC_PRIMITIVES.has(bodyT.name))
+          ) {
+            accept(
+              "error",
+              "`.avg` requires a numeric projection (int, long, decimal, or money).",
+              { node: ms, property: "member", code: "loom.avg-non-numeric" },
+            );
+          }
         }
       }
       recvType = typeAfterSuffix(recvType, suffix, env);

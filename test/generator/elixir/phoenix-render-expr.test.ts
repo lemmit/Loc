@@ -711,6 +711,46 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     );
   });
 
+  it("folds a money/decimal `sum` through Decimal.add (Enum.sum uses Kernel.+ and raises on a Decimal)", () => {
+    const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+    const proj = (member: string, memberType: TypeIR): ExprIR => ({
+      kind: "lambda",
+      param: "x",
+      body: {
+        kind: "member",
+        receiver: { kind: "ref", name: "x", refKind: "lambda" },
+        member,
+        receiverType: { kind: "entity", name: "Line" },
+        memberType,
+      },
+    });
+    const sumMc = (elem: TypeIR, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member: "sum",
+      args,
+      receiverType: { kind: "array", element: elem },
+      isCollectionOp: true,
+    });
+
+    // money AND decimal are both bare `Decimal` structs on Elixir → reduce with
+    // Decimal.add/2 from a Decimal.new(0) seed.
+    expect(renderExpr(sumMc(MONEY, [proj("price", MONEY)]), ctx)).toBe(
+      "Enum.reduce(Enum.map(record.items, fn x -> x.price end), Decimal.new(0), &Decimal.add/2)",
+    );
+    expect(renderExpr(sumMc(DECIMAL, [proj("d", DECIMAL)]), ctx)).toBe(
+      "Enum.reduce(Enum.map(record.items, fn x -> x.d end), Decimal.new(0), &Decimal.add/2)",
+    );
+    // No-arg money sum (money[] receiver) folds the receiver directly.
+    expect(renderExpr(sumMc(MONEY, []), ctx)).toBe(
+      "Enum.reduce(record.items, Decimal.new(0), &Decimal.add/2)",
+    );
+    // int is a native integer → keep Enum.sum.
+    expect(renderExpr(sumMc(INT, [proj("qty", INT)]), ctx)).toBe(
+      "Enum.sum(Enum.map(record.items, fn x -> x.qty end))",
+    );
+  });
+
   it("renders function call with receiver prepended (passed first arg)", () => {
     expect(
       renderExpr(

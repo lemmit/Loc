@@ -724,8 +724,19 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
   (recv: string, args: string[], e?: Extract<ExprIR, { kind: "method-call" }>) => string
 > = {
   count: (recv) => `Enum.count(${recv})`,
-  sum: (recv, args) =>
-    args.length === 1 ? `Enum.sum(Enum.map(${recv}, ${args[0]}))` : `Enum.sum(${recv})`,
+  // `sum` over money/decimal (both bare `Decimal` structs here) must fold with
+  // `Decimal.add/2` from a `Decimal.new(0)` seed — `Enum.sum` uses `Kernel.+`,
+  // which raises on a `Decimal`.  int/long are native integers → keep
+  // `Enum.sum`.  Numeric type is the λ-body type (lambda form) or the receiver's
+  // element type (no-arg `decimal[]`/`money[]` sum).
+  sum: (recv, args, e) =>
+    sumBodyIsDecimalStruct(e)
+      ? args.length === 1
+        ? `Enum.reduce(Enum.map(${recv}, ${args[0]}), Decimal.new(0), &Decimal.add/2)`
+        : `Enum.reduce(${recv}, Decimal.new(0), &Decimal.add/2)`
+      : args.length === 1
+        ? `Enum.sum(Enum.map(${recv}, ${args[0]}))`
+        : `Enum.sum(${recv})`,
   all: (recv, args) => `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`,
   contains: (recv, args) => `Enum.member?(${recv}, ${args[0] ?? "nil"})`,
@@ -760,6 +771,23 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
  *    - min: `a <= b`  → `Decimal.compare(a, b) != :gt` / `DateTime.compare(a, b) != :gt`
  *    - max: `a >= b`  → `Decimal.compare(a, b) != :lt` / `DateTime.compare(a, b) != :lt`
  *  `Decimal.compare`/`DateTime.compare` return `:lt | :eq | :gt`. */
+/** True iff a `sum` reduction's numeric type is a `Decimal` struct (money OR
+ *  decimal — both are bare `Decimal` here).  Reads the λ-body type for `sum(λ)`,
+ *  the receiver's element type for a no-arg sum.  A Decimal sum folds through
+ *  `Decimal.add/2`; an int/long sum stays `Enum.sum`. */
+function sumBodyIsDecimalStruct(e: Extract<ExprIR, { kind: "method-call" }> | undefined): boolean {
+  if (!e) return false;
+  const lam = e.args[0];
+  if (lam?.kind === "lambda" && lam.body) {
+    const bodyT = bodyTypeOf(lam.body);
+    return bodyT?.kind === "primitive" && isDecimalStruct(bodyT.name);
+  }
+  const rt = e.receiverType;
+  const unwrapped = rt.kind === "optional" ? rt.inner : rt;
+  const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
+  return elem?.kind === "primitive" && isDecimalStruct(elem.name);
+}
+
 function reductionSorter(
   e: Extract<ExprIR, { kind: "method-call" }> | undefined,
   kind: "min" | "max",

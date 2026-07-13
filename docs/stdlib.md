@@ -99,6 +99,7 @@ subquery).  `λ` is a lambda whose parameter is bound to the element type.
 | `join` | `(sep: string): string` |
 | `min` | `(λ): T?` |
 | `max` | `(λ): T?` |
+| `avg` | `(λ): decimal?` |
 
 ## Layer 1 — the ambient prelude
 

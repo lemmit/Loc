@@ -378,6 +378,39 @@ describe("money — array.sum is money-aware", () => {
   });
 });
 
+describe("money — array.avg types money-aware", () => {
+  // `avg(λ)` returns the MEAN, optional (empty → null).  A money projection
+  // averages to `money?`; every other numeric projection (int/long/decimal) to
+  // `decimal?`.  `avg` desugars during lowering, so its type is decided here at
+  // the AST/type-system layer (collectionOpType).
+
+  const AVG_SRC = `
+    context Billing {
+      aggregate Invoice {
+        contains lines: LineItem[]
+        derived avgPrice: money?   = lines.avg(l => l.amount)
+        derived avgQty:   decimal? = lines.avg(l => l.qty)
+        entity LineItem { amount: money  qty: int }
+      }
+      repository Invoices for Invoice { }
+    }
+  `;
+
+  it("money[].avg → money? (not decimal?)", async () => {
+    const model = await linkedModel(AVG_SRC);
+    const inv = findAgg(model, "Invoice");
+    const expr = derivedExpr(inv, "avgPrice");
+    expect(typeOf(expr, envForNode(expr))).toEqual(T.opt(T.prim("money")));
+  });
+
+  it("int[].avg → decimal? (numeric projection widens to decimal)", async () => {
+    const model = await linkedModel(AVG_SRC);
+    const inv = findAgg(model, "Invoice");
+    const expr = derivedExpr(inv, "avgQty");
+    expect(typeOf(expr, envForNode(expr))).toEqual(T.opt(T.prim("decimal")));
+  });
+});
+
 describe("money — isAssignable", () => {
   // No DSL source needed — exercise the function directly with crafted
   // DddType values.  Same-type assignment OK; cross-type with decimal

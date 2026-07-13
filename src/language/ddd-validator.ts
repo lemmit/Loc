@@ -29,6 +29,7 @@ import {
   checkActionTypePosition,
   checkAmbiguousPartRefs,
   checkAuthBlock,
+  checkAvgProjection,
   checkBinaryOperands,
   checkBindableInputArgs,
   checkBuilderCallType,
@@ -267,6 +268,10 @@ export class DddValidator {
     // condition or two incompatible branches typecheck silently — `typeOf`
     // returns the join with no way to reject the ill-formed shape.
     guard("ternary-exprs", model, () => checkTernaryExprs(model, accept));
+    // `avg(λ)` desugars to `sum/count` during lowering, so the IR validator
+    // never sees it — gate the numeric-projection + UI-position rules here at
+    // the AST level (loom.avg-non-numeric / loom.collection-op-in-ui).
+    guard("avg-projection", model, () => checkAvgProjection(model, accept));
     // Slot member access: `heading.foo` on a `(heading: slot)` param
     // is meaningless — slots are opaque JSX, no addressable fields.
     // Emits a precise diagnostic at the member position instead of

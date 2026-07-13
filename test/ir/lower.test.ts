@@ -214,3 +214,82 @@ describe("lowering — A4 reduction (min/max) result types", () => {
     expect(await reductionRecvType("minAt")).toEqual(DATETIME_OPT);
   });
 });
+
+// A4 — `avg(λ)` DESUGARS during lowering to `count == 0 ? null : sum(λ) / count`
+// (it has no renderer).  The numeric type of the fold is `money` when the λ-body
+// types as money, else `decimal` (int/long/decimal widen to decimal).  These
+// assert the desugared IR SHAPE directly — a ternary over count/sum/count — plus
+// the money-preserving vs widen-to-decimal numeric type on the division.
+const AVG_SRC = `
+  context Shop {
+    aggregate Order {
+      contains lines: OrderLine[]
+      derived avgPrice: money? = lines.avg(l => l.price)
+      derived avgQty: decimal? = lines.avg(l => l.qty)
+      entity OrderLine { qty: int  price: money }
+    }
+    repository Orders for Order { }
+  }
+`;
+
+const MONEY = { kind: "primitive", name: "money" };
+const DECIMAL = { kind: "primitive", name: "decimal" };
+const INT = { kind: "primitive", name: "int" };
+
+describe("lowering — A4 avg(λ) desugars to count/sum/count", () => {
+  async function avgExpr(name: string): Promise<Extract<ExprIR, { kind: "ternary" }>> {
+    const loom = await buildLoomModel(AVG_SRC);
+    const order = allAggregates(loom).find((a) => a.name === "Order")!;
+    const d = order.derived.find((x) => x.name === name)!;
+    expect(d, name).toBeDefined();
+    expect(d.expr.kind).toBe("ternary");
+    return d.expr as Extract<ExprIR, { kind: "ternary" }>;
+  }
+
+  it("desugars `avg` to `count == 0 ? null : sum(λ) / count`", async () => {
+    const t = await avgExpr("avgPrice");
+    // cond: `count == 0`
+    expect(t.cond.kind).toBe("binary");
+    const cond = t.cond as Extract<ExprIR, { kind: "binary" }>;
+    expect(cond.op).toBe("==");
+    expect((cond.left as Extract<ExprIR, { kind: "method-call" }>).member).toBe("count");
+    expect(cond.right).toEqual({ kind: "literal", lit: "int", value: "0" });
+    // then: null
+    expect(t.then).toEqual({ kind: "literal", lit: "null", value: "null" });
+    // otherwise: `sum(λ) / count`
+    expect(t.otherwise.kind).toBe("binary");
+    const div = t.otherwise as Extract<ExprIR, { kind: "binary" }>;
+    expect(div.op).toBe("/");
+    expect((div.left as Extract<ExprIR, { kind: "method-call" }>).member).toBe("sum");
+    expect((div.right as Extract<ExprIR, { kind: "method-call" }>).member).toBe("count");
+  });
+
+  it("keeps the money numeric type on a money projection (money-preserving fold)", async () => {
+    const div = (await avgExpr("avgPrice")).otherwise as Extract<ExprIR, { kind: "binary" }>;
+    expect(div.leftType).toEqual(MONEY);
+    expect(div.resultType).toEqual(MONEY);
+  });
+
+  it("widens an int projection to a decimal numeric type", async () => {
+    const div = (await avgExpr("avgQty")).otherwise as Extract<ExprIR, { kind: "binary" }>;
+    expect(div.leftType).toEqual(DECIMAL);
+    expect(div.resultType).toEqual(DECIMAL);
+  });
+
+  it("preserves the money `sum(λ)` projection lambda through the desugar", async () => {
+    const div = (await avgExpr("avgPrice")).otherwise as Extract<ExprIR, { kind: "binary" }>;
+    const sum = div.left as Extract<ExprIR, { kind: "method-call" }>;
+    expect(sum.args).toHaveLength(1);
+    expect(sum.args[0]!.kind).toBe("lambda");
+    // λ-body is the money member projection.
+    const lam = sum.args[0] as Extract<ExprIR, { kind: "lambda" }>;
+    expect((lam.body as Extract<ExprIR, { kind: "member" }>).memberType).toEqual(MONEY);
+    // int projection keeps its int λ-body (the widening is on the division type).
+    const qtyDiv = (await avgExpr("avgQty")).otherwise as Extract<ExprIR, { kind: "binary" }>;
+    const qtyLam = (qtyDiv.left as Extract<ExprIR, { kind: "method-call" }>).args[0] as Extract<
+      ExprIR,
+      { kind: "lambda" }
+    >;
+    expect((qtyLam.body as Extract<ExprIR, { kind: "member" }>).memberType).toEqual(INT);
+  });
+});

@@ -61,6 +61,7 @@ export { checkOrgPathReferences, checkTenancyDecls } from "./tenancy.js";
 export { checkTopLevelFunctions } from "./toplevel-function.js";
 export { checkTraceability } from "./traceability.js";
 export {
+  checkAvgProjection,
   checkBinaryOperands,
   checkDerived,
   checkFunction,
