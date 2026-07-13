@@ -15,20 +15,15 @@
 // event-sourcing, audit/provenance/managed fields, seeds, stamping).
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
-import {
-  DAPPER_PROJECT_DEPS,
-  renderDapperConnectionSetup,
-  renderDapperRepository,
-} from "../emit/dapper.js";
+import { DAPPER_PROJECT_DEPS } from "../emit/dapper.js";
 
-function nsOf(ctx: EmitCtx): string {
+function _nsOf(ctx: EmitCtx): string {
   const name = ctx.deployable.name;
   return name[0]!.toUpperCase() + name.slice(1);
 }
 
-function findRepoFor(ctx: EmitCtx, aggName: string) {
+function _findRepoFor(ctx: EmitCtx, aggName: string) {
   for (const c of ctx.contexts) {
     const r = c.repositories.find((repo) => repo.aggregateName === aggName);
     if (r) return r;
@@ -57,34 +52,5 @@ export const dapperPersistenceAdapter: PersistenceAdapter = {
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     return DAPPER_PROJECT_DEPS;
-  },
-
-  emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
-    return renderDapperConnectionSetup();
-  },
-
-  emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
-    const enriched = agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR;
-    const retrievals = ctx.contexts
-      .flatMap((c) => c.retrievals ?? [])
-      .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name);
-    return renderDapperRepository(
-      enriched,
-      findRepoFor(ctx, agg.name),
-      nsOf(ctx),
-      retrievals,
-    ).split("\n");
-  },
-
-  emitMigrations(): Lines | null {
-    // Dapper applies its own `DbSchema` (CREATE TABLE IF NOT EXISTS) at
-    // startup — no per-deployable migration files.
-    return null;
-  },
-
-  emitOutbox(): Lines | null {
-    // Integration-event outbox is out of scope for dapper v1 (the validator
-    // rejects `publish: integration | both` without a transactional store).
-    return null;
   },
 };

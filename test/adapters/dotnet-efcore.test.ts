@@ -82,41 +82,11 @@ describe("efcore PersistenceAdapter (real)", () => {
     expect(joined).toMatch(/Microsoft\.EntityFrameworkCore\.Tools/);
   });
 
-  it("emitConnectionSetup returns AddDbContext+UseNpgsql lines", async () => {
-    const ctx = await buildCtx();
-    const lines = efcorePersistenceAdapter.emitConnectionSetup([], ctx);
-    const joined = lines.join("\n");
-    expect(joined).toContain("builder.Services.AddDbContext<AppDbContext>");
-    expect(joined).toContain("opts.UseNpgsql");
-    expect(joined).toContain('GetConnectionString("Default")');
-    // The fixture has no stamping rules → simple form.
-    expect(joined).not.toContain("AuditableInterceptor");
-  });
-
-  it("emitRepository wraps renderRepositoryImpl byte-identical to today", async () => {
-    const ctx = await buildCtx();
-    const agg = ctx.contexts[0]!.aggregates.find((a) => a.name === "Order")!;
-    const ds = ctx.sys.dataSources[0]!;
-    const lines = efcorePersistenceAdapter.emitRepository(agg, ds, ctx);
-    const joined = lines.join("\n");
-    expect(joined).toContain("public sealed class OrderRepository : IOrderRepository");
-    expect(joined).toContain("private readonly AppDbContext _db;");
-    // Repository surfaces the user-declared find.
-    expect(joined).toContain("ByName(");
-    // Namespace derives from the deployable name.
-    expect(joined).toContain("namespace Api.Infrastructure.Repositories;");
-  });
-
-  it("emitMigrations returns null when ctx has no migrations", async () => {
-    const ctx = await buildCtx();
-    expect(efcorePersistenceAdapter.emitMigrations([], [], ctx)).toBeNull();
-  });
-
-  it("emitOutbox returns null (not yet implemented)", async () => {
-    const ctx = await buildCtx();
-    const storage = ctx.sys.storages[0]!;
-    expect(efcorePersistenceAdapter.emitOutbox(storage, [], ctx)).toBeNull();
-  });
+  // NOTE: the emitConnectionSetup / emitRepository / emitMigrations / emitOutbox
+  // adapter methods were removed as never-invoked scaffolding (M-T9.2 / M-T6.10);
+  // the underlying emitters (renderRepositoryImpl, emitDotnetMigrations, …) are
+  // exercised through the real orchestrator path + emitConfiguration/emitDbContext
+  // below.
 
   it("emitConfiguration helper wraps renderConfiguration", async () => {
     const ctx = await buildCtx();

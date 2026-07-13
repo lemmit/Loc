@@ -12,22 +12,14 @@
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";
-import { emitTypescriptMigrations } from "../../../../generator/typescript/emit/migrations.js";
 import { renderSchema } from "../../../../generator/typescript/emit/schema.js";
-import { buildRepositoryFile } from "../../../../generator/typescript/repository-builder.js";
-import type {
-  AggregateIR,
-  DataSourceIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  StorageIR,
-} from "../../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR } from "../../../../ir/types/loom-ir.js";
 import { dedupeByName } from "../../../../util/dedupe.js";
 import { BACKEND_PINS } from "../pins.js";
 
 /** Find the matching repository declaration across the deployable's
  *  contexts.  Mirrors `findRepoFor` in the dotnet adapter. */
-function findRepoFor(ctx: EmitCtx, aggName: string) {
+function _findRepoFor(ctx: EmitCtx, aggName: string) {
   for (const c of ctx.contexts) {
     const r = c.repositories.find((repo) => repo.aggregateName === aggName);
     if (r) return r;
@@ -37,7 +29,7 @@ function findRepoFor(ctx: EmitCtx, aggName: string) {
 
 /** The owning bounded context for an aggregate — `buildRepositoryFile`
  *  needs the context to look up view filters that share the table. */
-function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
+function _contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
   return ctx.contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
 }
 
@@ -53,10 +45,9 @@ const persistenceDeps = (): Lines => [
 ];
 
 /** The server-entry connection block (DATABASE_URL guard → pg pool →
- *  pool-error logging → drizzle db).  Single source consumed both by
- *  `emitConnectionSetup` and the server-entry renderer (`emit.ts`), so
- *  the persistence adapter owns the connection code rather than it being
- *  hardcoded inline. */
+ *  pool-error logging → drizzle db).  Consumed by the server-entry renderer
+ *  (`emit.ts`), so the persistence adapter owns the connection code rather
+ *  than it being hardcoded inline. */
 export const DRIZZLE_CONNECTION_SETUP: Lines = [
   `if (!process.env.DATABASE_URL) {`,
   `  throw new Error(`,
@@ -111,58 +102,6 @@ export const drizzlePersistenceAdapter: PersistenceAdapter = {
     // every adapter the deployable resolved and merge them at the
     // package.json render boundary.
     return [...persistenceDeps(), ...persistenceDevDeps()];
-  },
-
-  emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
-    // index.ts bootstrap lines that spin up the drizzle pool +
-    // surface pool-error logging.  The server entry (`renderProjectIndexTs`)
-    // splices exactly these lines — this adapter method is the single
-    // source.  The DATABASE_URL guard moves with this block so the same
-    // "fail-fast on missing env" check holds.
-    return DRIZZLE_CONNECTION_SETUP;
-  },
-
-  emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
-    // Wraps `buildRepositoryFile` — the per-aggregate drizzle
-    // repository module.  The orchestrator (`emit.ts`) calls
-    // `buildRepositoryFile` directly today; this adapter is the
-    // forward seam for the rewire.  Logical config (schema /
-    // tablePrefix / readonly) flows through `_logical` for the
-    // schema-aware future; today the existing fn ignores it.
-    const owningCtx = contextOf(ctx, agg.name);
-    if (!owningCtx) return [];
-    const enriched = agg as EnrichedAggregateIR;
-    const repo = findRepoFor(ctx, agg.name);
-    return splitLines(buildRepositoryFile(enriched, repo, owningCtx, !!ctx.emitTrace));
-  },
-
-  emitMigrations(
-    _aggs: readonly AggregateIR[],
-    _physicalStores: readonly StorageIR[],
-    ctx: EmitCtx,
-  ): Lines | null {
-    // Per-deployable migration emission — same pattern the dotnet
-    // efcore adapter uses: collect the multi-file output into a
-    // single Lines stream so the contract (`Lines | null`) holds.
-    // The orchestrator writes these files directly today.
-    if (!ctx.migrations || ctx.migrations.length === 0) return null;
-    const collected = new Map<string, string>();
-    emitTypescriptMigrations(ctx.migrations, collected);
-    const out: string[] = [];
-    for (const [path, content] of [...collected.entries()].sort()) {
-      out.push(`// ---- ${path} ----`);
-      out.push(...content.split("\n"));
-      out.push("");
-    }
-    return out;
-  },
-
-  emitOutbox(_physical: StorageIR, _aggs: readonly AggregateIR[], _ctx: EmitCtx): Lines | null {
-    // Hono outbox emission deferred — same posture as the dotnet
-    // adapter: the validator already rejects integration events
-    // without a transactional store, so reaching here today is a
-    // capability gap.
-    return null;
   },
 };
 

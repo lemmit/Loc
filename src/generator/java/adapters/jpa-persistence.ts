@@ -8,7 +8,6 @@
 // dotnet's efcore adapter wraps its emitters).
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
 import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 
@@ -39,33 +38,5 @@ export const jpaPersistenceAdapter: PersistenceAdapter = {
     // skeleton already boots against it, so there is nothing extra to
     // splice per-deployable.
     return [];
-  },
-
-  emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
-    // Spring Boot auto-configures the DataSource + EntityManagerFactory
-    // from `spring.datasource.*` (application.yml) — no bootstrap lines.
-    return [];
-  },
-
-  emitRepository(_agg: AggregateIR, _logical: DataSourceIR, _ctx: EmitCtx): Lines {
-    // Repository emission routes through the orchestrator's emit fns
-    // (persistence slice of the java backend plan).
-    return [];
-  },
-
-  emitMigrations(
-    _aggs: readonly AggregateIR[],
-    _physicalStores: readonly StorageIR[],
-    _ctx: EmitCtx,
-  ): Lines | null {
-    // Flyway-style versioned SQL is emitted from `MigrationsIR` by the
-    // orchestrator (persistence slice); see emit/migrations.ts.
-    return null;
-  },
-
-  emitOutbox(_physical: StorageIR, _aggs: readonly AggregateIR[], _ctx: EmitCtx): Lines | null {
-    // Transactional outbox is a capability gap on every backend today —
-    // the validator rejects `publish: integration | both` upstream.
-    return null;
   },
 };

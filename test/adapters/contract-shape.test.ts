@@ -14,18 +14,17 @@ import type {
 } from "../../src/generator/_adapters/index.js";
 
 describe("adapter contract shape (type-level)", () => {
-  it("PersistenceAdapter exposes the seven F3-spec methods", () => {
+  it("PersistenceAdapter exposes the capability half + emitProjectDeps", () => {
     // Inhabit the contract with an explicit lambda per method so any
-    // signature mismatch surfaces at `tsc`, not at runtime.
+    // signature mismatch surfaces at `tsc`, not at runtime.  The heavy
+    // emit* methods (emitConnectionSetup / emitRepository / emitMigrations /
+    // emitOutbox) were removed as never-invoked scaffolding (M-T9.2 / M-T6.10);
+    // only emitProjectDeps (live on hono v4) + the capability fields remain.
     const _: PersistenceAdapter = {
       name: "x",
       supportedStrategies: ["state"],
       supports: (_t, _k, _s) => true,
       emitProjectDeps: (_ctx: EmitCtx): Lines => [],
-      emitConnectionSetup: (_stores, _ctx: EmitCtx): Lines => [],
-      emitRepository: (_agg, _logical, _ctx: EmitCtx): Lines => [],
-      emitMigrations: (_aggs, _stores, _ctx: EmitCtx): Lines | null => null,
-      emitOutbox: (_phys, _aggs, _ctx: EmitCtx): Lines | null => null,
     };
     void _;
   });

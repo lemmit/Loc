@@ -17,12 +17,9 @@
 // ---------------------------------------------------------------------------
 
 import type {
-  AggregateIR,
-  DataSourceIR,
   DataSourceKind,
   PersistenceStrategy,
   SavingShape,
-  StorageIR,
   StorageKind,
 } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
@@ -56,31 +53,19 @@ export interface PersistenceAdapter {
   ): boolean;
   /** Project-level dependency lines spliced into the deployable's
    *  manifest (`<PackageReference …/>` rows for .NET, `dependencies`
-   *  entries for Node, `mix.exs` deps for Phoenix). */
+   *  entries for Node, `mix.exs` deps for Phoenix).  The one LIVE emit
+   *  method — consumed by the hono v4 backend (`hono/v4/emit.ts`). */
   emitProjectDeps(ctx: EmitCtx): Lines;
-  /** Bootstrap lines spliced into the deployable's startup —
-   *  `DbContext` registration, connection-pool init, etc.  Receives
-   *  every physical storage the deployable's dataSources resolve to. */
-  emitConnectionSetup(physicalStores: readonly StorageIR[], ctx: EmitCtx): Lines;
-  /** A single repository class / module for one aggregate, routed
-   *  through the logical binding (`DataSourceIR`) that resolved to
-   *  this adapter.  The `logical` arg carries the per-binding config
-   *  (`schema`, `tablePrefix`, `every`, `retain`, `ttl`, …). */
-  emitRepository(agg: AggregateIR, logical: DataSourceIR, ctx: EmitCtx): Lines;
-  /** DDL / EF migration body for every aggregate the adapter hosts
-   *  on the given physical stores.  Return `null` when the adapter
-   *  delegates schema management elsewhere. */
-  emitMigrations(
-    aggs: readonly AggregateIR[],
-    physicalStores: readonly StorageIR[],
-    ctx: EmitCtx,
-  ): Lines | null;
-  /** Transactional outbox writer + dispatcher for any aggregate that
-   *  publishes integration events.  Return `null` when the adapter
-   *  declines to emit one — the validator runs first, so reaching
-   *  this point on `publish: integration | both` is treated as a
-   *  capability gap, not silent success. */
-  emitOutbox(physical: StorageIR, aggs: readonly AggregateIR[], ctx: EmitCtx): Lines | null;
+  // NOTE: the heavy emit methods (emitConnectionSetup / emitRepository /
+  // emitMigrations / emitOutbox) were removed (M-T9.2 / M-T6.10 residue).
+  // They were never invoked on the production emit path — each backend's
+  // orchestrator calls the underlying emitters directly — and were
+  // scaffolding for a "route the orchestrator through the adapter registry"
+  // rewire that the M-T9.2 conclusion superseded (the persistence seam lives
+  // INSIDE each backend's emitters, not behind the adapter registry — see
+  // docs/new-plan/missions/M-T9.2-persistence-seam-design.md §0.7/§2.5). The
+  // live capability half (name / supportedStrategies / supportedShapes /
+  // supports) + emitProjectDeps + the menu/defaults are unchanged.
 }
 
 /** Capability subset a stub still answers at registration time.  Used

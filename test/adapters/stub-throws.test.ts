@@ -35,7 +35,12 @@ describe("stubAdapter", () => {
     expect(listed).toBe(0);
   });
 
-  it("throws AdapterNotImplementedError from every emit* method", () => {
+  it("throws AdapterNotImplementedError from a non-capability method call", () => {
+    // The stub proxy answers capability fields and throws on ANY other
+    // string-keyed access.  `emitProjectDeps` (the one live emit method) is
+    // not a capability field, so it exercises the throwing path.  (The heavy
+    // emit* methods were removed — M-T9.2 / M-T6.10 — so they no longer need
+    // per-method assertions here.)
     const stub = stubAdapter<PersistenceAdapter>(
       "persistence",
       "dapper",
@@ -49,12 +54,6 @@ describe("stubAdapter", () => {
     );
     const ctx = {} as never;
     expect(() => stub.emitProjectDeps(ctx)).toThrow(AdapterNotImplementedError);
-    expect(() => stub.emitConnectionSetup([], ctx)).toThrow(AdapterNotImplementedError);
-    expect(() => stub.emitRepository({} as never, {} as never, ctx)).toThrow(
-      AdapterNotImplementedError,
-    );
-    expect(() => stub.emitMigrations([], [], ctx)).toThrow(AdapterNotImplementedError);
-    expect(() => stub.emitOutbox({} as never, [], ctx)).toThrow(AdapterNotImplementedError);
   });
 
   it("error message lists sibling implementations (lazily, sorted)", () => {
