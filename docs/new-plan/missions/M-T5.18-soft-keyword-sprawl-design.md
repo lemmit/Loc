@@ -1,6 +1,13 @@
 # M-T5.18 — Soft-keyword sprawl: dedup, gate, and root-cause reduction (design)
 
-> **Status: design-in-progress (draft PR claim).**
+> **Status: Track B LANDED; Tracks A + C design-in-progress.**
+> Track B shipped as `test/language/parsing/keyword-identifier-completeness.test.ts`
+> (+ `keyword-identifier-coverage.snapshot.json`) — the gate found and drove one
+> real fix on first run (`parent` was declarable as a field but unreadable —
+> absent from `NameRefIdent` + `MemberName`; both now admit it). Design detail on
+> the final gate shape is in §"Track B" below (snapshot-freeze + domain-word
+> floor, not the originally-sketched single allowlist — the six lists diverge too
+> much for one clean allowlist).
 > Sources: language-surface review 2026-07-14 (finding #5 "soft-keyword sprawl");
 > `src/language/ddd.langium` (`LooseName`, `NameRefIdent`, `MemberName`,
 > `Property.name`, `StateFieldName`, `LValueIdent`); sibling missions M-T5.9
@@ -105,21 +112,39 @@ build. This is the exact pattern `print-completeness.test.ts` and
 `walker-stdlib-completeness.test.ts` already use (enumerate from Langium reflection,
 probe, assert), applied to keywords:
 
-1. Enumerate every keyword literal in the grammar from the generated grammar AST
-   (`src/language/generated/grammar.ts` / reflection) — the same reflection source
-   the printer-completeness test reads.
-2. For each keyword, attempt to parse a minimal `.ddd` that places it as an
-   **identifier** in each canonical position (aggregate field name, parameter name,
-   member access `x.<kw>`, bare name-ref, l-value target, `state {}` field).
-3. Assert it parses — **unless** the keyword is in an explicit
-   `INTENTIONALLY_HARD[position]` allowlist carrying a one-line reason (e.g.
-   `contains` is hard as a containment-member lead; `create`/`destroy` are hard as
-   lifecycle members; `state` is hard as the page block lead).
+1. Enumerate every identifier-shaped keyword literal from the generated grammar AST
+   (`DddGrammar()` + `AstUtils.streamAllContents`) — the same reflection source the
+   printer-completeness test reads. (277 keywords as of 2026-07-14.)
+2. For each keyword, probe-parse a minimal `.ddd` placing it as an identifier in
+   each of the six positions (field name, parameter name, member access `this.<kw>`,
+   bare name-ref, l-value target, `state {}` field), lexer+parser only — no linking.
 
-The day someone adds a keyword and forgets a position, CI names the keyword and the
-position instead of a user finding it months later. The allowlist makes every
-intentional hard-keyword a **reviewed, documented decision** rather than an
-accident. This gate is valuable *independently* of Track A and should land first.
+**As-built shape** (the original "single `INTENTIONALLY_HARD` allowlist" sketch was
+dropped — running the probe showed the six lists diverge far too much for one clean
+allowlist; e.g. the DataSource-key group is soft as `state {}` fields while the
+payload/tenancy group is not, and `this.kind` doesn't parse though `kind:` declares
+fine). Two assertions instead:
+
+- **Domain-word floor** — a curated set of common DDD field-name keywords (`state`,
+  `kind`, `money`, `error`, `title`, `body`, `query`, `command`, `config`, …) MUST
+  parse as a field name, a parameter name, and a bare name-ref. The non-negotiable
+  semantic guarantee, independent of the snapshot: you can always *declare and read*
+  a domain field by these names.
+- **Coverage snapshot** — the full 277×6 matrix is frozen in
+  `keyword-identifier-coverage.snapshot.json`. Any drift (a NEW keyword, a removed
+  one, or a keyword whose admissibility changed) fails with a readable diff and
+  refuses to pass until the snapshot is refreshed (`LOOM_UPDATE_KW_SNAPSHOT=1`). That
+  refresh IS the reviewed checkpoint where "should this new keyword also be soft in
+  position X?" gets asked. Same freeze-and-diff philosophy as `heex-parity` /
+  `print-completeness`.
+
+The day someone adds a keyword and forgets a position, the snapshot diff names the
+keyword and the position instead of a user finding it months later. This gate is
+valuable *independently* of Track A and landed first. **Proof of value:** its first
+run surfaced a real latent bug — `parent` was soft in `Property.name`/`LooseName`
+but absent from `NameRefIdent`+`MemberName`, so a `parent: Category id?` field could
+be declared yet never read (`= parent`, `this.parent` both failed to parse). Fixed
+in the same change; the floor now guards it.
 
 ### Track C — root-cause reduction: stop minting config-key keywords
 
