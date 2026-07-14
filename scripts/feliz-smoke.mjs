@@ -51,7 +51,9 @@ async function main() {
   // Toggle the bool field's checkbox — proves the checkbox widget dispatches.
   await page.getByRole("checkbox").check();
   // Pick a non-default enum value — proves the <select> widget dispatches.
-  await page.getByRole("combobox").selectOption("inactive");
+  // The first combobox is the `status` enum (the `category` FK select follows;
+  // its options load from a backend, absent here, so it stays blank + optional).
+  await page.getByRole("combobox").first().selectOption("inactive");
   if (!(await create.isEnabled())) {
     throw new Error("create submit should be ENABLED once required fields are filled");
   }

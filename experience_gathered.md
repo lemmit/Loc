@@ -2485,3 +2485,42 @@ NOT on the aggregate itself — the enum's VALUES, declared on the bounded conte
   keyword dodge — one-line `Html.select [ prop.value …; prop.onChange …;
   prop.children [ Html.option … ] ]` Fable-compiles and stays offside-safe in the
   form's children list. The smoke drives it (`selectOption`). Same loop as §23–§36.
+
+## 38. Feliz FK `id` → select — a form widget that wires a READ (2026-07-14)
+
+The enum select (§37) reads static values off the BC. A foreign-key `X id`
+select is a step up: its options are a RUNTIME list of the target aggregate, so
+the form must issue an implicit read that didn't exist in the page body.
+
+- **An FK select adds an IMPLICIT `.all` read — reuse the read machinery, don't
+  reinvent it.** For each FK target a form references, push a `felizAllRead(target)`
+  into the page's read set (deduped against any explicit QueryView `.all` of it).
+  Because every downstream stage — Model `Remote<T list>` field, init `Cmd`,
+  `Loaded` Msg, `update` arm, `Api` fetch fn, Thoth decoder, the `T` record —
+  is driven off the `reads` list, one push wires the ENTIRE MVU loop for free.
+  The lesson: when a new UI feature needs data, express it as a `FelizRead` and
+  let the existing pipeline carry it, rather than bolting on a parallel fetch.
+
+- **Options render offside-safe via a `List`-returning helper + `::`.**
+  `prop.children` wants a `ReactElement list`. A `match model.AllTs with Loaded
+  … | _ …` inline would be multi-line/offside. Instead `View.idOptions (r) (idOf)
+  (labelOf) : ReactElement list` does the match once, and the call site prepends
+  the blank option with cons: `prop.children (Html.option […] :: View.idOptions
+  model.AllTs (fun x -> x.id) (fun x -> x.display))` — one line, offside-safe.
+  The label/id accessors are lambdas so ONE generic helper serves every target.
+
+- **A required FK can't default — so the no-backend smoke can't submit it.**
+  Unlike an enum (static, defaults to its first value), an FK's list loads at
+  runtime; with no backend the options never arrive, so a REQUIRED FK's select
+  stays blank and its `IsNullOrWhiteSpace` guard keeps the submit disabled
+  forever. The CI showcase therefore uses an OPTIONAL FK (`Category id?`, exempt
+  from the guard) so the create form still enables; the required-FK guard is
+  pinned by a generator test. (Adding a second `<select>` also made
+  `getByRole("combobox")` ambiguous — `.first()` targets the enum.) The
+  populated-options path, like the auth Anon path (§32), needs a backend.
+
+- **Label = the target's `display` derived, else `id`.** `agg.displayDerived?.name
+  ?? "id"` — the same field the JSX id-select uses; resolved into an `idLabels`
+  map built identically in `index.ts` (from `contexts`) and the seam (from
+  `ctx.aggregatesByName`), same two-sided-consistency rule as the enum map (§37).
+  Same prove-it loop as §23–§37.

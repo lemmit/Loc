@@ -249,14 +249,25 @@ in hand — not before F# output exists.
   matching React); an OPTIONAL enum leads with a blank option (→ null on encode)
   and is exempt from the guard. All Fable + vite + smoke verified (the smoke
   `selectOption`s a value); the showcase Product grew an `enum Status`.
-- **Wire layer covers the full CRUD write path + workflows + auth, with typed
-  validated forms + optional + enum fields.** list + byId reads, create, delete,
-  operation, workflow runs, the auth gate, typed/validated form inputs, optional
-  scalar fields, and enum selects. Remaining Feliz work is polish: deeper pack
-  coverage, the modal open-state, FK-`id` select + nested VO / array form inputs
-  (need target-list reads / sub-form state), `currentUser.<field>` decode. Enum
-  wire fields decode as their string name (a proper DU decoder is a follow-up);
-  nested containment/VO records + decoders ARE emitted (transitive off
+- ✅ **Foreign-key `X id` → `<select>` populated from the target list.** An `X id`
+  form field renders as a select of the target aggregate's records (was a raw-id
+  text input): each option's value is a target `id`, its label the target's
+  `display` derived field (else `id`). The target's `.all` is an IMPLICIT list
+  read merged into the page's read set (deduped) — so the whole `Remote`/`Api`/
+  Model/init/update wiring emits for free — and a `View.idOptions` helper maps the
+  loaded `Remote<'T list>` to `<option>`s (offside-safe: a `ReactElement list`
+  the call site `::`-prepends the blank option onto). A required FK is guarded
+  (must pick); an optional FK is exempt. All Fable + vite + smoke verified; the
+  showcase grew a `Category` aggregate + an optional `category: Category id?`
+  (optional because a required FK's list can't load in the no-backend smoke).
+- **Wire layer covers the full CRUD write path + workflows + auth, with a
+  complete scalar form layer.** list + byId reads, create, delete, operation,
+  workflow runs, the auth gate, and typed/validated form inputs across every
+  scalar widget — text / number / checkbox / enum-select / FK-id-select, required
+  + optional. Remaining Feliz work is polish: deeper pack coverage, the modal
+  open-state, nested VO / array form inputs (sub-form state), `currentUser.<field>`
+  decode. Enum wire fields decode as their string name (a proper DU decoder is a
+  follow-up); nested containment/VO records + decoders ARE emitted (transitive off
   `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0

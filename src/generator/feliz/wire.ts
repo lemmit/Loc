@@ -145,9 +145,10 @@ export function felizDeleteMutation(aggregate: string): FelizMutation {
 
 /** The HTML input widget a form field renders as — derived from its wire type so
  *  the browser enforces the shape at entry (`number` for numerics, a `checkbox`
- *  for bools, a `select` for enums, `text` otherwise).  The form record itself
- *  stays all-string (raw input is a string; the encoder lifts it back at submit). */
-export type FelizInputKind = "text" | "number" | "checkbox" | "select";
+ *  for bools, a `select` for enums, an `idselect` for a foreign-key `X id`
+ *  populated from the target's runtime list, `text` otherwise).  The form record
+ *  itself stays all-string (raw input is a string; the encoder lifts it at submit). */
+export type FelizInputKind = "text" | "number" | "checkbox" | "select" | "idselect";
 
 /** One field of a create form — an F# form-record field (string-typed, bound to
  *  an `Html.input`), its `Set<Form><Field>` update `Msg`, the Thoth encoder
@@ -171,6 +172,13 @@ export interface FelizFormField {
   required: boolean;
   /** For a `select` field, the enum's allowed values (rendered as `<option>`s). */
   enumValues?: string[];
+  /** For an `idselect` field, the foreign-key target aggregate (`Customer`) —
+   *  its `.all` list populates the `<select>` (via the `All<Targets>` Model
+   *  field), and each option's value is a target `id`. */
+  idTarget?: string;
+  /** For an `idselect` field, the target record field labelling each option —
+   *  its `display` derived field when it has one, else `id`. */
+  idLabelField?: string;
   /** The empty-form initial value for this field — `""` for most, but a REQUIRED
    *  enum defaults to its first value (a `<select>` always has a selection, and
    *  it keeps the required-enum form valid from the start, mirroring React). */
@@ -256,12 +264,18 @@ function scalarBase(t: TypeIR): TypeIR {
 }
 
 /** The HTML input widget a field type maps to — numerics render `type: number`,
- *  bools a `checkbox`, an enum (whose values we can resolve) a `select`,
- *  everything else a plain text input.  Purely derived from the wire type (no
- *  stamped field); the form record stays all-string. */
-function inputKindFor(t: TypeIR, enumsByName: ReadonlyMap<string, string[]>): FelizInputKind {
+ *  bools a `checkbox`, an enum (whose values we can resolve) a `select`, a
+ *  foreign-key `X id` (whose target we can resolve) an `idselect`, everything
+ *  else a plain text input.  Purely derived from the wire type (no stamped
+ *  field); the form record stays all-string. */
+function inputKindFor(
+  t: TypeIR,
+  enumsByName: ReadonlyMap<string, string[]>,
+  idLabels: ReadonlyMap<string, string>,
+): FelizInputKind {
   const base = scalarBase(t);
   if (base.kind === "enum" && enumsByName.has(base.name)) return "select";
+  if (base.kind === "id" && idLabels.has(base.targetName)) return "idselect";
   if (base.kind === "primitive") {
     switch (base.name) {
       case "int":
@@ -289,16 +303,20 @@ function formFieldsFrom(
   formType: string,
   fields: readonly { name: string; type: TypeIR; optional?: boolean }[],
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizFormField[] {
   return fields.map((f) => {
     const optional = f.optional === true || f.type.kind === "optional";
     const base = scalarBase(f.type);
-    const inputKind = inputKindFor(f.type, enumsByName);
+    const inputKind = inputKindFor(f.type, enumsByName, idLabels);
     const enumValues =
       inputKind === "select" && base.kind === "enum" ? enumsByName.get(base.name) : undefined;
+    const idTarget = inputKind === "idselect" && base.kind === "id" ? base.targetName : undefined;
+    const idLabelField = idTarget ? (idLabels.get(idTarget) ?? "id") : undefined;
     // A REQUIRED enum defaults to its first value so the select and the string
     // state agree from the start (and the required guard passes); everything
-    // else — text/number/checkbox, and an OPTIONAL enum (empty = null) — is "".
+    // else — text/number/checkbox, an idselect (its list loads at runtime, so
+    // it starts unselected), and an OPTIONAL enum (empty = null) — is "".
     const emptyValue =
       inputKind === "select" && !optional && enumValues && enumValues.length > 0
         ? enumValues[0]!
@@ -310,6 +328,8 @@ function formFieldsFrom(
       inputKind,
       required: !optional,
       enumValues,
+      idTarget,
+      idLabelField,
       emptyValue,
     };
   });
@@ -363,6 +383,7 @@ function isScalarInput(t: TypeIR): boolean {
 export function felizCreateForm(
   agg: AggregateIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizForm {
   const name = agg.name;
   const formType = `${upperFirst(name)}Form`;
@@ -373,6 +394,7 @@ export function felizCreateForm(
     // part / value object / collection inputs still need a sub-form (follow-up).
     createInputFields(agg).filter((f: FieldIR) => isScalarInput(f.type)),
     enumsByName,
+    idLabels,
   );
   return {
     aggregate: name,
@@ -400,6 +422,7 @@ export function felizOperationForm(
   agg: AggregateIR,
   op: OperationIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizOperationForm {
   const name = agg.name;
   const opCap = `${upperFirst(op.name)}${upperFirst(name)}`;
@@ -408,6 +431,7 @@ export function felizOperationForm(
     formType,
     op.params.filter((p) => isScalarInput(p.type)),
     enumsByName,
+    idLabels,
   );
   return {
     aggregate: name,
@@ -452,6 +476,7 @@ export interface FelizWorkflowForm extends FormRecord {
 export function felizWorkflowForm(
   wf: WorkflowIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizWorkflowForm {
   const wfCap = upperFirst(wf.name);
   const formType = `${wfCap}Form`;
@@ -459,6 +484,7 @@ export function felizWorkflowForm(
     formType,
     wf.params.filter((p) => isScalarInput(p.type)),
     enumsByName,
+    idLabels,
   );
   return {
     workflow: wf.name,
@@ -474,6 +500,17 @@ export function felizWorkflowForm(
     navigateSegs: [""], // home
     fields,
   };
+}
+
+/** Aggregate name → the record field labelling its `idselect` options — the
+ *  target's `display` derived field when it declares one, else `id`.  Built from
+ *  every reachable aggregate (so an `X id` field's target is always resolvable),
+ *  consumed by the form builders (via `idLabels`) on both the MVU-assembly and
+ *  the view-seam sides so the field set agrees. */
+export function idLabelsFrom(aggregates: Iterable<AggregateIR>): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const a of aggregates) m.set(a.name, a.displayDerived?.name ?? "id");
+  return m;
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +640,7 @@ export function collectPageForms(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -612,7 +650,7 @@ export function collectPageForms(
     const agg = aggregatesByName.get(aggName);
     if (!agg || seen.has(aggName)) continue;
     seen.add(aggName);
-    out.push(felizCreateForm(agg, enumsByName));
+    out.push(felizCreateForm(agg, enumsByName, idLabels));
   }
   return out;
 }
@@ -646,6 +684,7 @@ export function collectPageOperationForms(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizOperationForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -656,7 +695,7 @@ export function collectPageOperationForms(
     if (!agg) continue;
     const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
     if (!op) continue;
-    const form = felizOperationForm(agg, op, enumsByName);
+    const form = felizOperationForm(agg, op, enumsByName, idLabels);
     const key = form.formType;
     if (form.fields.length === 0 || seen.has(key)) continue;
     seen.add(key);
@@ -688,6 +727,7 @@ export function collectPageWorkflowForms(
   page: PageIR,
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
+  idLabels: ReadonlyMap<string, string> = new Map(),
 ): FelizWorkflowForm[] {
   if (!page.body) return [];
   const nameSet = new Set(workflowsByName.keys());
@@ -696,7 +736,7 @@ export function collectPageWorkflowForms(
   for (const wfName of workflowFormRuns(page.body, nameSet)) {
     const wf = workflowsByName.get(wfName);
     if (!wf) continue;
-    const form = felizWorkflowForm(wf, enumsByName);
+    const form = felizWorkflowForm(wf, enumsByName, idLabels);
     if (form.fields.length === 0 || seen.has(form.formType)) continue;
     seen.add(form.formType);
     out.push(form);
@@ -1124,10 +1164,18 @@ export function renderValidation(forms: FormRecord[]): string {
 /** The `View` helper module — the `Remote<'T>` → element matchers the QueryView
  *  pack renderer calls (a helper CALL is offside-safe inside a Feliz `[ … ]`
  *  list where a raw multi-line `match` is not).  `remoteList` is emitted when
- *  any list read exists, `remoteOne` when any byId read exists. */
-export function renderViewModule(reads: FelizRead[]): string {
+ *  any list read exists, `remoteOne` when any byId read exists, and `idOptions`
+ *  when any `idselect` form field exists (it maps a target's loaded `Remote<'T
+ *  list>` to `<option>`s for a foreign-key select). */
+export function renderViewModule(reads: FelizRead[], hasIdSelect = false): string {
   const hasList = reads.some((r) => !r.single);
   const hasSingle = reads.some((r) => r.single);
+  const idOptions = [
+    "  let idOptions (r: Remote<'T list>) (idOf: 'T -> string) (labelOf: 'T -> string) : ReactElement list =",
+    "    match r with",
+    "    | Loaded items -> items |> List.map (fun x -> Html.option [ prop.value (idOf x); prop.text (labelOf x) ])",
+    "    | _ -> []",
+  ];
   const list = [
     "  let remoteList (r: Remote<'T list>) (loading: ReactElement) (error: ReactElement) (empty: ReactElement) (render: 'T list -> ReactElement) : ReactElement =",
     "    match r with",
@@ -1149,5 +1197,7 @@ export function renderViewModule(reads: FelizRead[]): string {
     ...(hasList ? list : []),
     hasList && hasSingle ? "" : undefined,
     ...(hasSingle ? one : []),
+    (hasList || hasSingle) && hasIdSelect ? "" : undefined,
+    ...(hasIdSelect ? idOptions : []),
   );
 }
