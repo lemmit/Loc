@@ -1,7 +1,12 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 8). No code yet. A
-> vision + grammar proposal.
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 9). No code yet. A
+> vision + grammar proposal. rev. 9 adds the **Paging** section (call-site
+> params, D-ENVELOPE `Paged<T>` result, collections-only — falls out of the
+> keyed/singleton axis) and folds in the state audit: this stacks **on top
+> of** the live **M-T5.10** contract-record track (composes, no conflict —
+> `scaffoldPaged` reuses its `response()` factory; read-path work touching
+> DTO emitters sequences after the open read-rewire PRs merge).
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
 > load-bearing primitive is a **read-only repository queried by
@@ -536,6 +541,44 @@ emitters + gates delete; the full-form projection + follow machinery
 to the projection path — the largest slice, and it *moves* code more than
 it deletes it, so it lands last, behind the primitive + `scaffoldPaged` +
 the projection-clause surface.
+
+---
+
+## Paging — call-site params, `Paged<T>` result, collections only
+
+Paging cross-cuts every read that returns a **collection**; it is a property
+of *reading a list*, not of any one construct — so it is uniform across
+`scaffoldPaged`, `Repo.run`, and collection `projection`s, and it falls out
+of the keyed/singleton axis. All of it is inherited from shipped decisions,
+not reinvented here:
+
+1. **Params at the call; result is `Paged<T>`.** `page` is a **call-site**
+   argument (`retrieval.md`'s page-is-call-only decision — it is request
+   state, not part of the rule), surfaced as HTTP query params on the read
+   route. The result is the **D-ENVELOPE `Paged<T>`** carrier (items + total
+   + page metadata), spelled by the shipped `paged` return modifier
+   (`… : <T> paged`). The exact param spelling (`offset`/`limit` vs
+   `page`/`pageSize`) is `pagination-design-note.md`'s, not this proposal's.
+2. **Only collections page.** Applies to: `scaffoldPaged` (by construction),
+   `Repo.run(<criterion>, sort?, page?)` list results, and a **keyed /
+   collection `projection`** read. It does **not** apply to a **singleton**
+   projection (one row → a single object) or a by-id read (`findById`) —
+   those have no page. So: **keyed ⇒ pageable collection; singleton ⇒ single
+   object, no page.**
+3. **The query-time `projection` gains paging** (new — `view` had none;
+   alongside the `sort` the query-time flavor already carries): params at the
+   call, `<Proj>Row paged` result. The folded projection's list read pages
+   identically. Same carrier + param convention as `scaffoldPaged` /
+   `Repo.run` — one paging model across the whole read surface.
+4. **Paging needs a deterministic order; it defaults to the key.**
+   offset/limit over an unordered set skips/repeats rows across pages, so a
+   paged read is ordered by its declared `sort` or, absent one, by its **key**
+   (source id for a query-time projection, the `keyed by` for a folded one,
+   the PK for an aggregate read) — the stable default `retrieval.md` already
+   assumes. No paged read is order-undefined.
+5. **`Paged<T>.total` costs a COUNT.** The carrier's total is a second COUNT
+   query beside the page fetch; the emitter generates both — mirroring the
+   shipped paged-`find` emission, not new machinery.
 
 ---
 
