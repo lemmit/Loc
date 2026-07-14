@@ -306,6 +306,59 @@ system Demo {
     ).not.toContain("loom.store-cross-store-on-liveview-unsupported");
   });
 
+  it("loom.feliz-store-unsupported fires for a store used by a Feliz-hosted ui; React is clean (M-T6.15)", async () => {
+    // The Feliz (F#/Fable) frontend has no store subsystem yet — a store on a
+    // `platform: feliz` deployable's ui is gated at validation rather than
+    // crashing the F# emit.  The identical model on React is clean.
+    expect(await codes(STORE, "feliz")).toContain("loom.feliz-store-unsupported");
+    expect(await codes(STORE, "react")).not.toContain("loom.feliz-store-unsupported");
+  });
+
+  it("loom.feliz-async-effect-unsupported fires for `match await` on a Feliz-hosted ui; React is clean (M-T6.15)", async () => {
+    // `match await <op>()` (async effect) lowers to a `variant-match` statement
+    // whose async envelope has no Feliz renderer — gated at validation on Feliz.
+    const asyncSystem = (plat: string) => `
+system Demo {
+  subdomain S {
+    context C {
+      error OrderMissing { missingRef: string }
+      aggregate Order with crudish {
+        customerId: string
+        operation reserve(): Order or OrderMissing {
+          return OrderMissing { missingRef: customerId }
+        }
+      }
+    }
+  }
+  api A from S
+  ui Web {
+    api C: A
+    page P {
+      route: "/p"
+      state { draftName: string = "" }
+      action reserveNow() {
+        match await C.Order.reserve() {
+          Order o => { draftName := o.customerId }
+          else    => { draftName := "unavailable" }
+        }
+      }
+      body: Heading { "P", level: 1 }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: ${plat} targets: api ui: Web { C: api } port: 3001 }
+}`;
+    const asyncCodes = async (plat: string): Promise<string[]> => {
+      const { model, errors } = await parseString(asyncSystem(plat));
+      if (errors.length) throw new Error(`unexpected errors:\n${errors.join("\n")}`);
+      return validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
+    };
+    expect(await asyncCodes("feliz")).toContain("loom.feliz-async-effect-unsupported");
+    expect(await asyncCodes("react")).not.toContain("loom.feliz-async-effect-unsupported");
+  });
+
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {
     expect(
       await codes(`

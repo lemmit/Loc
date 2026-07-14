@@ -267,5 +267,79 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         }
       }
     }
+
+    // loom.feliz-store-unsupported — the Feliz (F#/Fable/Elmish) frontend has no
+    // store subsystem yet.  A store composes SHARED reactive state across pages;
+    // in the single-program Elmish model that means folding store state into the
+    // one `Model` (with a store-scoped read seam so `Cart.count` resolves to the
+    // right namespaced field) and store actions into `Msg`/`update` — a genuine
+    // subsystem, not a single emit arm.  Rather than emit a non-reactive mutable
+    // module (silently wrong), a store used by a Feliz-hosted ui is gated here
+    // until that subsystem lands.  (`platform: feliz` hosts only `framework:
+    // feliz` — `hostableFrameworks: {feliz}` — so the deployable platform is the
+    // reliable detector; a bare `platform: feliz` resolves `uiFramework` to the
+    // frontend default, not `"feliz"`.)  Tracked in T6-backend-parity.md M-T6.15.
+    for (const dep of sys.deployables) {
+      if (dep.platform !== "feliz") continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        // (a) store gate
+        const stores = storesByUi.get(uiName);
+        if (stores && stores.length > 0) {
+          for (const store of stores) {
+            const where = `store '${store.name}'`;
+            diags.push({
+              severity: "error",
+              code: "loom.feliz-store-unsupported",
+              message:
+                `${where} is used by ui '${uiName}', hosted by the Feliz (F#/Fable) deployable ` +
+                `'${dep.name}', but the Feliz frontend has no store subsystem yet — a shared reactive ` +
+                `store needs Elmish Model/Msg composition + a store-scoped read seam, not a single emit ` +
+                `arm.  Host this ui on an SPA frontend (React/Vue/Svelte/Angular) that supports stores, ` +
+                `or move the shared state into the page's own \`state { … }\`.  Tracked in M-T6.15.`,
+              source: where,
+            });
+          }
+        }
+
+        // (b) async-effect gate — loom.feliz-async-effect-unsupported.  A
+        // frontend `match await <op>()` (async-actions-and-effects.md Stage 2)
+        // lowers to a `variant-match` statement whose async envelope (await the
+        // remote mutation, reify the thrown error into the error variant, then a
+        // discriminant switch) rides the SPA walker's `renderVariantMatch`
+        // seam — which the Feliz walker does not implement (its `Cmd.OfAsync`
+        // machinery today is form/read/mutation-shaped, not the user-authored
+        // effect form).  Gate it at validation rather than crash the F# emit.
+        const ui = sys.uis.find((u) => u.name === uiName);
+        if (!ui) continue;
+        const hosts: {
+          where: string;
+          actions: readonly { name: string; body: readonly StmtIR[] }[];
+        }[] = [
+          ...ui.pages.map((p) => ({ where: `page '${p.name}'`, actions: p.actions })),
+          ...ui.components.map((c) => ({ where: `component '${c.name}'`, actions: c.actions })),
+        ];
+        for (const host of hosts) {
+          for (const action of host.actions) {
+            forEachStmt(action.body, (s) => {
+              if (s.kind !== "variant-match") return;
+              const where = `${host.where} action '${action.name}'`;
+              diags.push({
+                severity: "error",
+                code: "loom.feliz-async-effect-unsupported",
+                message:
+                  `${where}: \`match await …\` (an async effect) is used on ui '${uiName}', hosted by ` +
+                  `the Feliz (F#/Fable) deployable '${dep.name}', but the Feliz frontend has no async ` +
+                  `effect renderer yet — the SPA walker's variant-match envelope (await → error-reify → ` +
+                  `discriminant switch) has no Feliz equivalent.  Host this ui on an SPA frontend ` +
+                  `(React/Vue/Svelte/Angular), or drive the remote op through a form primitive ` +
+                  `(CreateForm/OperationForm) instead.  Tracked in M-T6.15.`,
+                source: where,
+              });
+            });
+          }
+        }
+      }
+    }
   }
 }
