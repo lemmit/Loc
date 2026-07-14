@@ -160,6 +160,117 @@ describe("elixir — scaffolded destroy route does not collide with auto-CRUD", 
   });
 });
 
+// M-T5.10 handler-param rewrite — the scaffold now emits explicit
+// commandHandler/queryHandlers that take a SINGLE `command`/`query` RECORD param
+// (and reads declare `<Agg>Response`).  On Phoenix a handler works off a
+// string-keyed `run/1` params map, so the record param is FLATTENED into its
+// fields: each field destructures off `params` by the SAME snake key an
+// equivalent flat param used (wire-preserving), and the body's `cmd.<field>` /
+// `query.<field>` reads resolve to those flat locals.
+const SCAFFOLD_SRC = `
+system HandlerScaffold {
+  subdomain Sales {
+    context Ordering with scaffoldHandlers {
+      valueobject Money { amount: decimal  currency: string  invariant amount >= 0 }
+      enum Priority { low  high }
+      aggregate Order {
+        code: string
+        status: string
+        priority: Priority
+        total: Money
+        create(code: string) { code := code  status := "new"  priority := Priority.low  total := Money { amount: 0, currency: "USD" } }
+        operation reprice(newTotal: Money) { total := newTotal }
+        operation cancel() { status := "cancelled" }
+        destroy { }
+      }
+      repository Orders for Order {
+        find byStatus(status: string): Order[] where this.status == status
+      }
+    }
+  }
+  api SalesApi with scaffoldApi(of: Sales)
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: elixir  contexts: [Ordering]  dataSources: [st]  serves: SalesApi  port: 5001 }
+}
+`;
+
+describe("elixir — scaffolded record-param handlers flatten wire-preservingly", () => {
+  it("create: flattens the command record into its fields; cmd.<field> → flat local", async () => {
+    const h = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "lib/api/ordering/handlers/create_order.ex",
+    );
+    // The CreateOrderCommand record's fields destructure off the string-keyed
+    // run/1 map by their snake keys (byte-identical to the old flat-param form)…
+    expect(h).toContain(
+      '%{"code" => code, "status" => status, "priority" => priority, "total" => total} = params',
+    );
+    // …and `cmd.<field>` in the factory body resolves to the flat destructured
+    // local, NOT struct-dot on an unbound `cmd`.
+    expect(h).toContain(
+      "Context.create_order(%{code: code, status: status, priority: priority, total: total})",
+    );
+    expect(h).not.toContain("cmd");
+    expect(h).toContain("{:ok, o.id}");
+  });
+
+  it("operation: path-scalar id + a command record field destructure together, op keyed by param name", async () => {
+    const h = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "lib/api/ordering/handlers/reprice_order.ex",
+    );
+    // orderId (path scalar) + newTotal (flattened from RepriceOrderCommand), in
+    // declaration order, both off the same string-keyed map.
+    expect(h).toContain('%{"order_id" => order_id, "new_total" => new_total} = params');
+    expect(h).toContain("with {:ok, o} <- Context.get_order(order_id)");
+    // op-call keyed by the DECLARED op param name, valued by the flat local.
+    expect(h).toContain('{:ok, _} <- Context.reprice_order(o, %{"newTotal" => new_total})');
+    expect(h).not.toContain("cmd");
+  });
+
+  it("getById read: query record flattens; body returns the entity, projected by serialize/1", async () => {
+    const h = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "lib/api/ordering/handlers/get_order.ex",
+    );
+    // query.orderId → the flat `order_id` off the same key an id param used.
+    expect(h).toContain('%{"order_id" => order_id} = params');
+    expect(h).toContain("with {:ok, o} <- Context.get_order(order_id) do");
+    // The body returns the raw entity (returnType is OrderResponse — normalised
+    // back to the entity); the boundary projects it via the controller serialize.
+    expect(h).toContain("{:ok, o}");
+    expect(h).not.toContain("query");
+  });
+
+  it("find read: query record flattens; the collection result is bound and returned", async () => {
+    const h = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "lib/api/ordering/handlers/by_status.ex",
+    );
+    expect(h).toContain('%{"status" => status} = params');
+    expect(h).toContain("with {:ok, r} <- Context.by_status_order(status) do");
+    expect(h).toContain("{:ok, r}");
+    expect(h).not.toContain("query");
+  });
+
+  it("controller serialize/1 projects a collection element-wise (find returns an entity list)", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "lib/api_web/controllers/sales_api_routes_controller.ex",
+    );
+    // A list result maps serialize over each element — a bare Ecto-struct list is
+    // not Jason-encodable, so without this a find would 500 on encode.
+    expect(ctrl).toContain(
+      "defp serialize(list) when is_list(list), do: Enum.map(list, &serialize/1)",
+    );
+    // single-struct + scalar clauses unchanged (wire-preserving).
+    expect(ctrl).toContain(
+      "defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])",
+    );
+  });
+});
+
 // An `extern` handler is bodyless: the generated dispatch delegates to a
 // scaffold-once, user-owned impl the user fills in (extern-handler Phase 1).
 const EXTERN_SRC = `

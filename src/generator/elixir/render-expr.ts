@@ -161,6 +161,15 @@ export interface RenderCtx {
    *  back to the bare accessor rather than looping forever.  Internal — set only
    *  by the `this-derived` render arm, never by callers. */
   derivedStack?: ReadonlySet<string>;
+  /** The `command`/`query` RECORD param names of an explicit handler
+   *  (M-T5.10 handler-param rewrite).  On the Phoenix backend a handler works
+   *  off a string-keyed `run/1` params map, so `explicit-handlers-emit` FLATTENS
+   *  a record param into its fields (each destructured off `params` by its snake
+   *  string key).  A `cmd.<field>` / `query.<field>` member access whose receiver
+   *  is one of these must therefore resolve to that flat destructured LOCAL
+   *  (`snake(field)`), not struct-dot on an unbound `cmd`.  Set only by the
+   *  handler emitter; empty/undefined everywhere else (byte-identical). */
+  recordParams?: ReadonlySet<string>;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -480,6 +489,17 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
 // ---------------------------------------------------------------------------
 
 function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
+  // Explicit-handler record param (M-T5.10): `cmd.<field>` / `query.<field>` on
+  // a FLATTENED `command`/`query` record resolves to the flat destructured local
+  // (`snake(field)`), not `<recv>.field` on an unbound record — see
+  // `RenderCtx.recordParams` + `explicit-handlers-emit`.
+  if (
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "param" &&
+    ctx.recordParams?.has(e.receiver.name)
+  ) {
+    return snake(e.member);
+  }
   // Array/list size shorthand.  The DSL admits both `.count` and
   // `.length` on arrays (see the .NET renderer's matching comment);
   // both map to Elixir `Enum.count/1`.  Without the `.length` arm an

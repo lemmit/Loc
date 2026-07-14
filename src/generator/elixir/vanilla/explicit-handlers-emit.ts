@@ -33,9 +33,12 @@
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   QueryHandlerIR,
   RouteIR,
+  WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
+import { requestRecordFor } from "../../../ir/util/handler-contracts.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -49,15 +52,193 @@ import {
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
 
-/** The declared handler-params referenced anywhere in the body (statements or
- *  the terminal `return`), in declaration order (stable output).  Only these
- *  are destructured off the `run/1` map — an unused binding would trip
- *  `mix compile --warnings-as-errors`. */
-function referencedParams(h: Handler): string[] {
-  const refs = new Set<string>();
-  for (const st of h.statements) collectWorkflowStmtParamRefs(st, refs);
-  collectParamRefs(h.returnValue, refs);
-  return h.params.map((p) => p.name).filter((n) => refs.has(n));
+/** One `"snake_key" => snake_var` binding of the `run/1` string-keyed params
+ *  destructure.  `key` is the wire field name (snake) the request arrives under;
+ *  `var` is the bound local (same snake token — the destructure introduces it). */
+interface Destructure {
+  key: string;
+  var: string;
+}
+
+/** The `command`/`query` RECORD param names of a handler — the params whose
+ *  `.field` access FLATTENS to a per-field destructured local (M-T5.10).  A
+ *  plain id/scalar param is not a record. */
+function recordParamNames(h: Handler, ctx: EnrichedBoundedContextIR): Set<string> {
+  return new Set(h.params.filter((p) => requestRecordFor(p.type, ctx)).map((p) => p.name));
+}
+
+/** Collect every `<record>.<field>` member access on a RECORD param reachable
+ *  from `e` into `acc` (record-param name → the field names read).  A record
+ *  param is flattened into exactly the fields the body reads, so only referenced
+ *  fields are destructured — an unused binding would trip
+ *  `mix compile --warnings-as-errors`.  The receiver of a matched member is the
+ *  bare record ref, so recursion stops there. */
+function collectRecordFieldAccess(
+  e: ExprIR | undefined,
+  records: ReadonlySet<string>,
+  acc: Map<string, Set<string>>,
+): void {
+  if (!e) return;
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "param" &&
+    records.has(e.receiver.name)
+  ) {
+    let fields = acc.get(e.receiver.name);
+    if (!fields) {
+      fields = new Set<string>();
+      acc.set(e.receiver.name, fields);
+    }
+    fields.add(e.member);
+    return;
+  }
+  switch (e.kind) {
+    case "member":
+      collectRecordFieldAccess(e.receiver, records, acc);
+      return;
+    case "method-call":
+      collectRecordFieldAccess(e.receiver, records, acc);
+      for (const a of e.args) collectRecordFieldAccess(a, records, acc);
+      return;
+    case "call":
+      for (const a of e.args) collectRecordFieldAccess(a, records, acc);
+      return;
+    case "lambda":
+      collectRecordFieldAccess(e.body, records, acc);
+      return;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectRecordFieldAccess(f.value, records, acc);
+      return;
+    case "list":
+      for (const el of e.elements) collectRecordFieldAccess(el, records, acc);
+      return;
+    case "paren":
+      collectRecordFieldAccess(e.inner, records, acc);
+      return;
+    case "unary":
+      collectRecordFieldAccess(e.operand, records, acc);
+      return;
+    case "binary":
+      collectRecordFieldAccess(e.left, records, acc);
+      collectRecordFieldAccess(e.right, records, acc);
+      return;
+    case "ternary":
+      collectRecordFieldAccess(e.cond, records, acc);
+      collectRecordFieldAccess(e.then, records, acc);
+      collectRecordFieldAccess(e.otherwise, records, acc);
+      return;
+    case "convert":
+      collectRecordFieldAccess(e.value, records, acc);
+      return;
+    case "match":
+      for (const arm of e.arms) {
+        collectRecordFieldAccess(arm.cond, records, acc);
+        collectRecordFieldAccess(arm.value, records, acc);
+      }
+      collectRecordFieldAccess(e.otherwise, records, acc);
+      return;
+  }
+}
+
+/** Statement driver for {@link collectRecordFieldAccess} — mirrors the shape of
+ *  `collectWorkflowStmtParamRefs`, feeding every expression of every
+ *  `WorkflowStmtIR` kind through the record-field walker. */
+function collectRecordFieldsInStmt(
+  st: WorkflowStmtIR,
+  records: ReadonlySet<string>,
+  acc: Map<string, Set<string>>,
+): void {
+  switch (st.kind) {
+    case "precondition":
+    case "requires":
+    case "expr-let":
+      collectRecordFieldAccess(st.expr, records, acc);
+      return;
+    case "assign":
+      collectRecordFieldAccess(st.value, records, acc);
+      return;
+    case "factory-let":
+    case "emit":
+      for (const f of st.fields) collectRecordFieldAccess(f.value, records, acc);
+      return;
+    case "op-call":
+      for (const a of st.args) collectRecordFieldAccess(a, records, acc);
+      return;
+    case "repo-let":
+      for (const a of st.args) collectRecordFieldAccess(a, records, acc);
+      return;
+    case "repo-delete":
+      collectRecordFieldAccess(st.entity, records, acc);
+      return;
+    case "resource-call":
+      collectRecordFieldAccess(st.call, records, acc);
+      return;
+    case "domain-service-call":
+      if (st.call.kind === "call")
+        for (const a of st.call.args) collectRecordFieldAccess(a, records, acc);
+      return;
+    case "repo-run":
+      for (const a of st.retrievalArgs) collectRecordFieldAccess(a, records, acc);
+      collectRecordFieldAccess(st.page?.offset, records, acc);
+      collectRecordFieldAccess(st.page?.limit, records, acc);
+      return;
+    case "for-each":
+      collectRecordFieldAccess(st.iterable, records, acc);
+      for (const inner of st.body) collectRecordFieldsInStmt(inner, records, acc);
+      return;
+    case "if-let":
+      for (const a of st.retrievalArgs) collectRecordFieldAccess(a, records, acc);
+      for (const inner of st.thenBody) collectRecordFieldsInStmt(inner, records, acc);
+      for (const inner of st.elseBody ?? []) collectRecordFieldsInStmt(inner, records, acc);
+      return;
+  }
+}
+
+/** The `run/1` params destructure of a handler, wire-preserving under the
+ *  M-T5.10 handler-param rewrite.  A plain id/scalar param binds from its own
+ *  snake key exactly as before; a `command`/`query` RECORD param is FLATTENED —
+ *  each field the body reads (`cmd.<field>`) binds from the SAME snake key an
+ *  equivalent flat param used, so the request wire is byte-identical.  Only
+ *  referenced fields/params are bound (unused → `--warnings-as-errors`).  Also
+ *  returns the record-param name set so the body renderer can rewrite
+ *  `cmd.<field>` → the flat local. */
+function handlerDestructure(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): { entries: Destructure[]; records: Set<string> } {
+  const records = recordParamNames(h, ctx);
+  // Non-record (id/scalar) params referenced anywhere in the body/return.  This
+  // set also contains record param NAMES (their member receiver is a param ref),
+  // but those are handled via the flattened field path below, not as scalars.
+  const scalarRefs = new Set<string>();
+  for (const st of h.statements) collectWorkflowStmtParamRefs(st, scalarRefs);
+  collectParamRefs(h.returnValue, scalarRefs);
+  // Record-param field accesses (`cmd.<field>`) → which fields to destructure.
+  const fieldRefs = new Map<string, Set<string>>();
+  for (const st of h.statements) collectRecordFieldsInStmt(st, records, fieldRefs);
+  collectRecordFieldAccess(h.returnValue, records, fieldRefs);
+
+  const entries: Destructure[] = [];
+  const seen = new Set<string>();
+  const push = (name: string): void => {
+    const key = snake(name);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({ key, var: key });
+  };
+  for (const p of h.params) {
+    const rec = requestRecordFor(p.type, ctx);
+    if (rec) {
+      const used = fieldRefs.get(p.name);
+      if (!used) continue;
+      for (const f of rec.fields) if (used.has(f.name)) push(f.name);
+    } else if (scalarRefs.has(p.name)) {
+      push(p.name);
+    }
+  }
+  return { entries, records };
 }
 
 /** Compose the lowered body lines into the `run/1` inner body: the with-chain of
@@ -162,11 +343,16 @@ function renderHandlerModule(
   const contextModuleFq = `${appModule}.${ctxModule}`;
   const moduleName = `${contextModuleFq}.Handlers.${upperFirst(h.name)}`;
 
+  // M-T5.10: flatten `command`/`query` record params into their referenced
+  // fields (destructured off the string-keyed `run/1` map) and rewrite the
+  // body's `cmd.<field>` reads to those flat locals via `renderCtx.recordParams`.
+  const { entries, records } = handlerDestructure(h, ctx);
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
     foundation: "vanilla",
     resourceModules,
+    recordParams: records,
   };
 
   const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx);
@@ -178,10 +364,9 @@ function renderHandlerModule(
   // there is a context call — otherwise the alias would be unused (-Werror).
   const aliasedBody = hasContextCall ? body.replaceAll(contextModuleFq, "Context") : body;
 
-  const params = referencedParams(h);
   const paramDestructure =
-    params.length > 0
-      ? `    %{${params.map((n) => `"${snake(n)}" => ${snake(n)}`).join(", ")}} = params\n`
+    entries.length > 0
+      ? `    %{${entries.map((d) => `"${d.key}" => ${d.var}`).join(", ")}} = params\n`
       : "";
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
 
@@ -341,6 +526,10 @@ ${actions.join("\n\n")}
   def respond(conn, {:error, reason}),
     do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
 
+  # A collection result (a find handler declaring an Agg-Response array, whose
+  # body returns the raw entity list) projects each element — an Ecto schema
+  # struct is not Jason-encodable as-is, so a bare list would 500 on encode.
+  defp serialize(list) when is_list(list), do: Enum.map(list, &serialize/1)
   defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
   defp serialize(other), do: other
 end
