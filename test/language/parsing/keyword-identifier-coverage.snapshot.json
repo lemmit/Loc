@@ -1,0 +1,730 @@
+{
+  "DELETE": [],
+  "GET": [],
+  "PATCH": [],
+  "POST": [],
+  "PUT": [],
+  "Self": [],
+  "abstract": [],
+  "action": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "against": [],
+  "aggregate": [],
+  "aggregates": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "allow": [
+    "paramName"
+  ],
+  "angular": [],
+  "angularMaterial": [],
+  "api": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "apply": [],
+  "area": [],
+  "asc": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "audience": [],
+  "audited": [],
+  "auth": [],
+  "await": [
+    "fieldName",
+    "paramName"
+  ],
+  "bigquery": [],
+  "bind": [
+    "nameRef",
+    "paramName"
+  ],
+  "body": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "bool": [],
+  "broadcast": [],
+  "by": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "cache": [
+    "nameRef",
+    "paramName"
+  ],
+  "canonical": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "capability": [],
+  "carries": [],
+  "chakra": [],
+  "channel": [],
+  "channelSource": [],
+  "check": [],
+  "claims": [],
+  "clickhouse": [],
+  "clientId": [],
+  "clientSecret": [],
+  "command": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "commandHandler": [],
+  "component": [
+    "nameRef",
+    "paramName"
+  ],
+  "config": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "connection": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "contains": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "context": [],
+  "contexts": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "cookie": [],
+  "coreComponents": [],
+  "covers": [],
+  "create": [
+    "lValue",
+    "memberAccess",
+    "nameRef"
+  ],
+  "criterion": [],
+  "crossTenant": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "daisyui": [],
+  "dataSources": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "datetime": [],
+  "decimal": [],
+  "deep": [
+    "paramName"
+  ],
+  "delivery": [],
+  "deny": [],
+  "denyByDefault": [],
+  "deployable": [],
+  "derived": [],
+  "desc": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "description": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "design": [
+    "nameRef",
+    "paramName"
+  ],
+  "destroy": [
+    "lValue",
+    "memberAccess",
+    "nameRef"
+  ],
+  "directoryLayout": [
+    "paramName"
+  ],
+  "document": [],
+  "domainService": [],
+  "dotnet": [],
+  "e2e": [],
+  "elastic": [],
+  "elixir": [],
+  "else": [],
+  "embedded": [],
+  "emit": [],
+  "enforcement": [],
+  "entitles": [],
+  "entity": [],
+  "enum": [],
+  "env": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "envelope": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "ephemeral": [],
+  "error": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "event": [],
+  "eventLog": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "eventSourced": [],
+  "every": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "expect": [],
+  "extends": [],
+  "extern": [],
+  "false": [
+    "nameRef"
+  ],
+  "favicon": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "feliz": [],
+  "filter": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "find": [
+    "memberAccess"
+  ],
+  "flowbite": [],
+  "footer": [],
+  "for": [],
+  "framework": [
+    "nameRef",
+    "paramName"
+  ],
+  "from": [],
+  "function": [],
+  "global": [
+    "paramName"
+  ],
+  "guid": [],
+  "handle": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "header": [],
+  "hosts": [],
+  "httpStatus": [],
+  "id": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "if": [],
+  "ignoring": [
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "immutable": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "implements": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "import": [],
+  "in": [],
+  "inMemory": [],
+  "index": [],
+  "inheritanceUsing": [],
+  "instance": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "int": [],
+  "internal": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "invariant": [],
+  "isolationLevel": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "issuer": [],
+  "java": [],
+  "json": [],
+  "jwt": [],
+  "kafka": [],
+  "key": [],
+  "keyPrefix": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "keyed": [],
+  "kind": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "layout": [],
+  "let": [],
+  "link": [
+    "nameRef",
+    "paramName"
+  ],
+  "literal": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "loads": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "local": [
+    "paramName"
+  ],
+  "log": [],
+  "long": [],
+  "main": [],
+  "managed": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "mantine": [],
+  "match": [],
+  "meilisearch": [],
+  "menu": [
+    "nameRef",
+    "paramName"
+  ],
+  "migration": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "modules": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "money": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "mui": [],
+  "mysql": [],
+  "nats": [],
+  "node": [],
+  "now": [],
+  "null": [
+    "nameRef"
+  ],
+  "objectStore": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "of": [
+    "paramName"
+  ],
+  "ogImage": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "oidc": [],
+  "on": [],
+  "onCreate": [],
+  "onUpdate": [],
+  "operation": [],
+  "opt": [],
+  "option": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "or": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "ownTable": [],
+  "page": [
+    "nameRef",
+    "paramName"
+  ],
+  "paged": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "parent": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "payload": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "permissions": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "persist": [],
+  "persistedAs": [],
+  "persistence": [
+    "paramName"
+  ],
+  "phoenixLiveView": [],
+  "platform": [],
+  "policy": [
+    "paramName"
+  ],
+  "port": [],
+  "postgres": [],
+  "precondition": [],
+  "primeng": [],
+  "private": [],
+  "projection": [],
+  "provenanced": [],
+  "provider": [],
+  "python": [],
+  "query": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "queryHandler": [],
+  "queue": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "rabbitmq": [],
+  "raw": [],
+  "react": [],
+  "readCommitted": [],
+  "readUncommitted": [],
+  "readonly": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "redis": [],
+  "relational": [],
+  "repeatableRead": [],
+  "replica": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "repository": [],
+  "required": [],
+  "requirement": [],
+  "requires": [],
+  "resource": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "response": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "restApi": [],
+  "retain": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "retention": [],
+  "retrieval": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "return": [],
+  "route": [
+    "nameRef",
+    "paramName"
+  ],
+  "s3": [],
+  "schema": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "scopes": [],
+  "secret": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "section": [
+    "nameRef",
+    "paramName"
+  ],
+  "seed": [],
+  "sensitive": [],
+  "serializable": [],
+  "serves": [],
+  "service": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "sessions": [],
+  "shadcn": [],
+  "shadcnSvelte": [],
+  "shadcnVue": [],
+  "shape": [],
+  "sharedTable": [],
+  "sidebar": [],
+  "slot": [],
+  "snapshot": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "solution": [],
+  "sort": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "spartanNg": [],
+  "sqlite": [],
+  "stamp": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "state": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "static": [
+    "nameRef",
+    "paramName"
+  ],
+  "storage": [],
+  "store": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "string": [],
+  "subdomain": [],
+  "svelte": [],
+  "system": [],
+  "tablePrefix": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "targets": [
+    "nameRef",
+    "paramName"
+  ],
+  "tenancy": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "test": [],
+  "testCase": [],
+  "theme": [],
+  "this": [
+    "nameRef"
+  ],
+  "title": [
+    "fieldName",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "token": [
+    "fieldName",
+    "nameRef",
+    "paramName"
+  ],
+  "transactional": [
+    "paramName"
+  ],
+  "true": [
+    "nameRef"
+  ],
+  "ttl": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "type": [],
+  "ui": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "unique": [],
+  "urlStyle": [
+    "nameRef",
+    "paramName"
+  ],
+  "use": [
+    "fieldName",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
+  "user": [],
+  "valueobject": [],
+  "verifies": [],
+  "view": [],
+  "views": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "vue": [],
+  "vuetify": [],
+  "when": [],
+  "where": [
+    "memberAccess"
+  ],
+  "with": [],
+  "work": [],
+  "workflow": [],
+  "workflows": [
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName"
+  ],
+  "write": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ]
+}

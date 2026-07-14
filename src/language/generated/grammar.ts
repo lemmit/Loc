@@ -17192,6 +17192,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "crossTenant"
+          },
+          {
+            "$type": "Keyword",
+            "value": "parent"
           }
         ]
       },
@@ -18527,6 +18531,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "crossTenant"
+          },
+          {
+            "$type": "Keyword",
+            "value": "parent"
           }
         ]
       },

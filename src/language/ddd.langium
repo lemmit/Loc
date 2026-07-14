@@ -2436,7 +2436,12 @@ MemberName returns string:
        // member access on a field named `tenancy` / `crossTenant` keeps
        // parsing (`this.tenancy`).  Hard only in the `TenancyDecl` head /
        // `Aggregate` header flag slot.
-       | 'tenancy' | 'crossTenant';
+       | 'tenancy' | 'crossTenant'
+       // `parent` admitted after `.` so a field named `parent` (`parent: Self id?`)
+       // is READABLE — `this.parent`.  Hard only in the `Requirement` hierarchy
+       // clause.  Already soft in `Property.name` / `LooseName`; without this a
+       // `parent` field could be declared but never read (M-T5.18 gate finding).
+       | 'parent';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -2680,7 +2685,12 @@ NameRefIdent returns string:
        // Tenancy keywords (multi-tenancy Phase 1a) admitted as bare NameRefs
        // so an expression can read a field named `tenancy` / `crossTenant`.
        // Hard only in the `TenancyDecl` head / `Aggregate` header flag slot.
-       | 'tenancy' | 'crossTenant';
+       | 'tenancy' | 'crossTenant'
+       // `parent` as a bare NameRef so an expression can read a field named
+       // `parent` (`invariant parent != null`, `derived isRoot: bool = parent == null`).
+       // Hard only in the `Requirement` hierarchy clause.  Without this a `parent`
+       // field could be declared but never read (M-T5.18 gate finding).
+       | 'parent';
 
 // ---------------------------------------------------------------------------
 // Terminals
