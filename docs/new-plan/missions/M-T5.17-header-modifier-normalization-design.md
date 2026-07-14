@@ -37,6 +37,13 @@ The modifiers are also **order-dependent** (the rule is a fixed sequence), so
 
 ### (2) `httpStatus <Error> <Code>` — the space-delimited triple
 
+> **DONE in #1918 (hard cutover).** The load-bearing PR reshaped this clause
+> directly to arrow-only (`ApiStatus: 'httpStatus' error=ID '->' code=INT;`) and
+> migrated the whole corpus in one commit, rather than the phased accept-both
+> below. The httpStatus half of this mission is complete; the phased rollout
+> plan applies only to item (1), the aggregate-header modifiers. The section
+> below is retained as the design rationale.
+
 ```
 api SalesApi from Sales {
   httpStatus OrderClosed 409      // no colon, no arrow — reads like a shell command
