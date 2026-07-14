@@ -373,9 +373,9 @@ export async function assertHierarchyIsolation(base: string, pg: Postgres): Prom
   expect(await labels("accounts", orgZ)).toEqual(["org_z"]);
   // By-id: an in-subtree row is 200, an out-of-subtree row is 404 (hidden).
   expect(await getStatus("accounts", orgAB, acctId["org_a.b.c"])).toBe(200); // descendant
-  expect(await getStatus("accounts", orgAB, acctId["org_a"])).toBe(404); // ancestor
-  expect(await getStatus("accounts", orgAB, acctId["org_ab"])).toBe(404); // delimiter trap
-  expect(await getStatus("accounts", orgAB, acctId["org_z"])).toBe(404); // unrelated
+  expect(await getStatus("accounts", orgAB, acctId.org_a)).toBe(404); // ancestor
+  expect(await getStatus("accounts", orgAB, acctId.org_ab)).toBe(404); // delimiter trap
+  expect(await getStatus("accounts", orgAB, acctId.org_z)).toBe(404); // unrelated
 
   // === LOCAL (Memo, the default): only own-org rows (flat tenant floor). ===
   expect(await labels("memos", orgAB)).toEqual(["org_a.b"]);
