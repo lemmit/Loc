@@ -1,3 +1,4 @@
+import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
 import {
@@ -247,6 +248,13 @@ export function renderController(
   });
 
   const extraUsingsLines = (shape.extraUsings ?? []).map((n) => `using ${n};`);
+  // The `Commands` namespace exists only when at least one command file is
+  // emitted for the aggregate (cqrs-emit gates them on exactly these three
+  // facts): a REST create, a canonical destroy, or an operation.  A read-only
+  // aggregate emits none, so `using …Commands;` would reference a namespace
+  // that does not exist (CS0234 under `/warnaserror`).  (Queries/Requests/
+  // Responses always have at least the auto findAll + Response DTO.)
+  const hasCommands = emitsRestCreate(agg) || !!agg.canonicalDestroy || agg.operations.length > 0;
   return (
     lines(
       "// Auto-generated.",
@@ -257,7 +265,7 @@ export function renderController(
       "using Mediator;",
       "using Microsoft.AspNetCore.Mvc;",
       "using Microsoft.Extensions.Logging;",
-      `using ${ns}.Application.${plural(agg.name)}.Commands;`,
+      hasCommands ? `using ${ns}.Application.${plural(agg.name)}.Commands;` : null,
       `using ${ns}.Application.${plural(agg.name)}.Queries;`,
       `using ${ns}.Application.${plural(agg.name)}.Requests;`,
       `using ${ns}.Application.${plural(agg.name)}.Responses;`,

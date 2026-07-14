@@ -194,10 +194,16 @@ export function buildPyRoutesFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    // `User` is imported only when a route that actually threads the request
+    // principal is emitted.  The create/update stamps consume `current_user`,
+    // but the create stamp rides the (now `emitsRestCreate`-gated) create
+    // route and the update stamp rides the operation routes — so a read-only
+    // aggregate (no create surface, no operations) references neither and must
+    // not import `User` (ruff F401 under `--warnings-as-errors`).
     publicOps.some(operationUsesCurrentUser) ||
       emittableFinds(repo).some(findUsesCurrentUser) ||
-      stampUsesUser(agg, "create") ||
-      stampUsesUser(agg, "update")
+      (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
+      (publicOps.length > 0 && stampUsesUser(agg, "update"))
       ? "from app.auth.user import User"
       : null,
     "from app.db.engine import get_session",
