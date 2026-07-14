@@ -39,16 +39,26 @@ import {
  *
  *   ↓ Ordering gains
  *
- *   queryHandler   GetOrder(orderId: Order id): Order      { let o = Orders.getById(orderId)  return o }
- *   queryHandler   ByStatus(status: string): Order[]       { let r = Orders.byStatus(status)  return r }
- *   commandHandler CreateOrder(code: string, status: string): Order id {
- *     let o = Order.create({ code: code, status: status })
+ *   queryHandler   GetOrder(query: GetOrderQuery): OrderResponse  { let o = Orders.getById(query.orderId)  return o }
+ *   queryHandler   ByStatus(query: ByStatusQuery): OrderResponse[] { let r = Orders.byStatus(query.status)  return r }
+ *   commandHandler CreateOrder(cmd: CreateOrderCommand): Order id {
+ *     let o = Order.create({ code: cmd.code, status: cmd.status })
  *     return o.id
  *   }
- *   commandHandler CancelOrder(orderId: Order id) {
+ *   commandHandler CancelOrder(orderId: Order id) {   // cmd omitted — cancel has no params
  *     let o = Orders.getById(orderId)
  *     o.cancel()
  *   }
+ *
+ * Each handler now consumes the `command`/`query` contract record `_contracts-
+ * shared` splices alongside it (the two derive their field sets from the same
+ * source, so a handler body's `cmd.<field>` / `query.<field>` always names a
+ * record field).  A single record param per handler; a path-param id stays a
+ * SEPARATE handler param (a route `{orderId}` can't live in a body record), and
+ * an empty command record (op with no params, destroy) is omitted entirely.
+ * Read handlers (getById / find over the aggregate) declare a `<Agg>Response`
+ * return — the wire is already that shape (transport projects the entity), so
+ * the declaration only aligns with reality.
  *
  * Host-local: the handlers splice into the context's own `members[]`, so the
  * subtree-splice invariant is untouched.  Pairs with `scaffoldApi`, which emits
@@ -73,18 +83,23 @@ export default defineMacro({
   },
 });
 
-/** Build the `commandHandler` / `queryHandler` AST for one target.  The body
- * shape mirrors what the corresponding hand-written handler carries — i.e. the
- * exact AST that lowers to the same IR the equivalent explicit source would. */
+/** Build the `commandHandler` / `queryHandler` AST for one target.  Each
+ * handler takes a SINGLE `command`/`query` record param (the contract record
+ * `_contracts-shared` splices alongside it) and references its fields as
+ * `cmd.<field>` / `query.<field>`; a path-param id rides as a separate handler
+ * param, and an empty record is omitted.  The body shape otherwise mirrors the
+ * hand-written handler — the same IR the equivalent explicit source lowers to. */
 function buildHandler(t: HandlerTarget) {
   switch (t.kind) {
     case "operation": {
       const idParam = idParamName(t.agg.name);
-      // Handler params: the id (`orderId: Order id`) followed by the op's own
-      // params, threaded through verbatim so the op-call can pass them on.
+      const opParams = t.op.params.filter((p) => p.type != null);
+      // `(orderId: Order id[, cmd: <Op><Agg>Command])` — the id rides as a path
+      // param (a route `{orderId}` can't live in a body record); the op's own
+      // params ride in the command record.  An op with no params omits `cmd`.
       const params = [
         param(idParam, idRef(t.agg.name)),
-        ...t.op.params.filter((p) => p.type != null).map((p) => param(p.name, cloneType(p.type))),
+        ...(opParams.length > 0 ? [param("cmd", namedType(`${targetHandlerName(t)}Command`))] : []),
       ];
       const body = [
         // `let o = <Repo>.getById(<idParam>)`
@@ -92,71 +107,88 @@ function buildHandler(t: HandlerTarget) {
           "o",
           memberAccess(nameRef(t.repo.name), "getById", { call: true, args: [nameRef(idParam)] }),
         ),
-        // `o.<op>(<op params…>)`
+        // `o.<op>(cmd.<p>, …)` — the op's args read off the command record.
         callStmt(
           ["o", t.op.name],
-          t.op.params.filter((p) => p.type != null).map((p) => nameRef(p.name)),
+          opParams.map((p) => memberAccess(nameRef("cmd"), p.name)),
         ),
       ];
       return commandHandler(targetHandlerName(t), params, body);
     }
     case "create": {
       // A create handler takes the aggregate's create-INPUT fields (the same
-      // shape the factory `<Agg>.create(...)` accepts and the auto-derived
-      // create command exposes — deriving from the create action's declared
-      // params instead would leave the other non-null create fields unset and
-      // the factory-let would null-fill them, breaking non-nullable columns).
+      // shape the factory `<Agg>.create(...)` accepts and the create command
+      // record exposes) as a single `cmd: <Create<Agg>>Command` body record.
       const fields = writableCreateFields(t.agg).filter((f) => f.type != null);
-      const params = fields.map((f) => param(f.name, cloneType(f.type)));
+      const params =
+        fields.length > 0 ? [param("cmd", namedType(`${targetHandlerName(t)}Command`))] : [];
       const body = [
-        // `let o = <Agg>.create({ <field>: <field>, … })` — a factory-let; each
-        // field value is the handler param of the same name.  `computeSaves`
+        // `let o = <Agg>.create({ <field>: cmd.<field>, … })` — a factory-let;
+        // each field value reads off the command record.  `computeSaves`
         // persists the constructed `o` at exit.
         letStmt(
           "o",
           memberAccess(nameRef(t.agg.name), "create", {
             call: true,
-            args: [objectLit(fields.map((f) => ({ name: f.name, value: nameRef(f.name) })))],
+            args: [
+              objectLit(
+                fields.map((f) => ({ name: f.name, value: memberAccess(nameRef("cmd"), f.name) })),
+              ),
+            ],
           }),
         ),
         // `return o.id` — the new aggregate's id.
         returnStmt(memberAccess(nameRef("o"), "id")),
       ];
-      // Return type `<Agg> id`.
+      // Return type `<Agg> id` (a create yields the new id, not a response).
       return commandHandler(targetHandlerName(t), params, body, { returnType: idRef(t.agg.name) });
     }
     case "find": {
-      // A query handler running the repository find.  Params thread the find's
-      // own params through verbatim; `let r = <Repo>.<find>(<params>)` lowers to
-      // a repo-let and `return r` yields the find's declared return type.
-      const params = t.find.params
-        .filter((p) => p.type != null)
-        .map((p) => param(p.name, cloneType(p.type)));
+      // A query handler running the repository find.  Its params ride in a
+      // single `query: <Find>Query` record (assembled from path/query-string);
+      // `let r = <Repo>.<find>(query.<p>, …)` lowers to a repo-let and `return r`
+      // yields the read's response shape.
+      const findParams = t.find.params.filter((p) => p.type != null);
+      const params =
+        findParams.length > 0 ? [param("query", namedType(`${targetHandlerName(t)}Query`))] : [];
       const body = [
         letStmt(
           "r",
           memberAccess(nameRef(t.repo.name), t.find.name, {
             call: true,
-            args: t.find.params.filter((p) => p.type != null).map((p) => nameRef(p.name)),
+            args: findParams.map((p) => memberAccess(nameRef("query"), p.name)),
           }),
         ),
         returnStmt(nameRef("r")),
       ];
-      return queryHandler(targetHandlerName(t), params, cloneType(t.find.returnType), body);
+      // Reads over the aggregate declare a `<Agg>Response[]` return (the wire is
+      // already that shape via transport projection); non-aggregate finds keep
+      // their own return type.
+      return queryHandler(
+        targetHandlerName(t),
+        params,
+        responseReturnType(t.find.returnType, t.agg.name),
+        body,
+      );
     }
     case "getById": {
-      // The canonical get-by-id read: load one aggregate by id, return it.
-      const idParam = idParamName(t.agg.name);
-      const params = [param(idParam, idRef(t.agg.name))];
+      // The canonical get-by-id read: the id rides in a single-field
+      // `query: Get<Agg>Query` record (bound from the route path), then load +
+      // return the aggregate as `<Agg>Response`.
+      const idField = idParamName(t.agg.name);
+      const params = [param("query", namedType(`${targetHandlerName(t)}Query`))];
       const body = [
         letStmt(
           "o",
-          memberAccess(nameRef(t.repo.name), "getById", { call: true, args: [nameRef(idParam)] }),
+          memberAccess(nameRef(t.repo.name), "getById", {
+            call: true,
+            args: [memberAccess(nameRef("query"), idField)],
+          }),
         ),
         returnStmt(nameRef("o")),
       ];
-      // Return type is the bare aggregate.
-      return queryHandler(targetHandlerName(t), params, namedType(t.agg.name), body);
+      // Return type is the aggregate's response record.
+      return queryHandler(targetHandlerName(t), params, namedType(`${t.agg.name}Response`), body);
     }
     case "destroy": {
       // The canonical hard-delete: load one aggregate by id, then remove it.
@@ -180,6 +212,21 @@ function buildHandler(t: HandlerTarget) {
       return commandHandler(targetHandlerName(t), params, body);
     }
   }
+}
+
+/** The declared return type for a read handler.  A find/getById yielding the
+ * aggregate (`Order` / `Order[]`) declares the response record instead
+ * (`OrderResponse` / `OrderResponse[]`) — the transport layer already projects
+ * the entity to that shape, so this only aligns the declaration with the wire.
+ * A find returning a non-aggregate type (scalar / projection) keeps it. */
+function responseReturnType(t: TypeRef, aggName: string): TypeRef {
+  const b = t.base;
+  const isAgg =
+    b.$type === "NamedType" && (b as { target: { $refText: string } }).target.$refText === aggName;
+  if (isAgg) {
+    return namedType(`${aggName}Response`, { array: !!t.array, optional: !!t.optional });
+  }
+  return cloneType(t);
 }
 
 /** Rebuild a source param / field / return TypeRef as a fresh, macro-tagged

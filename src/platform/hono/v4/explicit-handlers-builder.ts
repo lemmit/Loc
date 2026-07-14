@@ -20,17 +20,24 @@
 // `app.openapi` route: bind the wire-coerced params to locals, construct repos
 // inline, render the body statements, save at exit, then return the value.
 //
-// v1 scope (matches .NET A1): handler params are ids / scalars.  A param whose
-// name appears as `{name}` in the route path binds from the path (coerced from
-// its wire type); every other param binds from the JSON body.
+// Param binding (M-T5.10 handler-param rewrite): a handler takes either a plain
+// id/scalar param (path-bound when its name is a `{token}`, else a body field)
+// OR a `command`/`query` request RECORD param (`requestRecordFor`).  A command
+// record IS the JSON body (its fields deserialise into a materialised `cmd`
+// object); a query record assembles from path + query-string (a `query` object);
+// either way the body reads `cmd.<field>` / `query.<field>`.  A path-param id
+// stays a SEPARATE handler param — a route `{orderId}` can't live in a body
+// record — so its wire binding is unchanged from the flat-param form.
 //
 // Aggregate-return projection (C2, the Hono sibling of the .NET C1 in #1830): a
 // handler that returns a domain aggregate/entity projects it to its wire shape
 // via the owning repo's `toWire(...)` — reusing the repo the body already built
 // for that aggregate (or constructing one when the return aggregate was never
-// loaded).  Id / scalar returns serialise as-is (`<expr> as unknown`).  The 200
-// body schema stays `z.unknown()` (the wire object is plain JSON); tightening it
-// to `<Agg>Response` rides with the contract-scaffold layer.
+// loaded).  A collection return maps each element; id / scalar returns serialise
+// as-is (`<expr> as unknown`).  A scaffolded read now DECLARES a `<Agg>Response`
+// return, which `normalizeHandlerReturn` maps back to the entity for projection.
+// The 200 body schema stays `z.unknown()` (the wire object is plain JSON);
+// tightening it to `<Agg>Response` is the separate #1917 Hono-200 tail.
 // ---------------------------------------------------------------------------
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
@@ -45,6 +52,7 @@ import type {
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../../ir/types/wire-types.js";
+import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
@@ -102,18 +110,24 @@ function pathParamZod(t: TypeIR): string {
   return "z.string()";
 }
 
-/** The aggregate a handler's return type resolves to, when it returns an
- *  entity (aggregate or containment part) — the projection target for the
- *  `repo.toWire(...)` wrap.  Undefined for an id / scalar / void return, which
- *  serialise as-is. */
-function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | undefined {
-  if (!h.returnType) return undefined;
-  const info = wireTypeInfo(h.returnType, "response");
+/** The aggregate a handler's return resolves to (for the `repo.toWire(...)`
+ *  projection) + whether it's a collection.  Normalises a declared `<Agg>Response`
+ *  return back to the entity it projects (a scaffolded read declares the response
+ *  record; the handler body still returns the domain entity), so both the
+ *  hand-written `: Order` and scaffolded `: OrderResponse` forms project alike.
+ *  Undefined for an id / scalar / void return, which serialises as-is. */
+function returnEntity(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): { agg: string; isCollection: boolean } | undefined {
+  const norm = normalizeHandlerReturn(h.returnType, ctx);
+  if (!norm) return undefined;
+  const info = wireTypeInfo(norm, "response");
   if (info.refKind !== "entity") return undefined;
   const owning =
     ctx.aggregates.find((a) => a.name === info.base) ??
     ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
-  return owning?.name;
+  return owning ? { agg: owning.name, isCollection: info.isCollection } : undefined;
 }
 
 /** Emit one `app.openapi(createRoute({...}), async (httpCtx) => {...})` block
@@ -126,9 +140,43 @@ function emitRouteHandler(
   ctx: EnrichedBoundedContextIR,
 ): string[] {
   const pathNames = new Set([...route.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
-  const pathParams = h.params.filter((p) => pathNames.has(p.name));
-  const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
   const method = route.method.toLowerCase();
+  // Classify each handler param: a path-bound id/scalar (name in a `{token}`),
+  // a `command`/`query` request RECORD (`cmd`/`query` — the body/query-string
+  // deserialises into the payload's DTO; the body reads `cmd.<field>`), or a
+  // legacy scalar body param.  A record's fields bind from the SAME request
+  // location an equivalent flat param would (path if the field name is a route
+  // token, else body), so the wire is unchanged.
+  type Slot = { name: string; type: TypeIR; source: "path" | "body" };
+  const bodySlots: Slot[] = [];
+  const pathSlots: Slot[] = [];
+  const addSlot = (name: string, type: TypeIR): void => {
+    (pathNames.has(name) ? pathSlots : bodySlots).push({
+      name,
+      type,
+      source: pathNames.has(name) ? "path" : "body",
+    });
+  };
+  // Per-param materialisation: a record param builds an object literal from its
+  // field slots; every other param binds one wire-coerced local.
+  type Materialised =
+    | { kind: "scalar"; name: string }
+    | { kind: "record"; name: string; fields: { field: string; type: TypeIR }[] };
+  const materialised: Materialised[] = [];
+  for (const p of h.params) {
+    const rec = requestRecordFor(p.type, ctx);
+    if (rec) {
+      for (const f of rec.fields) addSlot(f.name, f.type);
+      materialised.push({
+        kind: "record",
+        name: p.name,
+        fields: rec.fields.map((f) => ({ field: f.name, type: f.type })),
+      });
+    } else {
+      addSlot(p.name, p.type);
+      materialised.push({ kind: "scalar", name: p.name });
+    }
+  }
   // An extern handler returns iff it declares a returnType (there's no lowered
   // returnValue — the body is bodyless); a DSL-bodied handler returns iff its
   // body ends in a `return` (`returnValue`).
@@ -141,15 +189,15 @@ function emitRouteHandler(
   out.push(`    tags: ["${apiName}"],`);
   out.push(`    operationId: "${lowerFirst(ctx.name)}${h.name}",`);
   const reqParts: string[] = [];
-  if (pathParams.length > 0) {
+  if (pathSlots.length > 0) {
     reqParts.push(
-      `params: z.object({ ${pathParams.map((p) => `${p.name}: ${pathParamZod(p.type)}`).join(", ")} })`,
+      `params: z.object({ ${pathSlots.map((s) => `${s.name}: ${pathParamZod(s.type)}`).join(", ")} })`,
     );
   }
-  if (bodyParams.length > 0) {
+  if (bodySlots.length > 0) {
     reqParts.push(
-      `body: { content: { "application/json": { schema: z.object({ ${bodyParams
-        .map((p) => `${p.name}: ${zodFor(p.type)}`)
+      `body: { content: { "application/json": { schema: z.object({ ${bodySlots
+        .map((s) => `${s.name}: ${zodFor(s.type)}`)
         .join(", ")} }) } } }`,
     );
   }
@@ -173,17 +221,25 @@ function emitRouteHandler(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
-  if (pathParams.length > 0) out.push(`    const params = httpCtx.req.valid("param");`);
-  if (bodyParams.length > 0) out.push(`    const body = httpCtx.req.valid("json");`);
-  // Bind each handler param to a wire-coerced local up front (path segment or
-  // body field), so every param `ref` in the body renders as its bare name.
+  if (pathSlots.length > 0) out.push(`    const params = httpCtx.req.valid("param");`);
+  if (bodySlots.length > 0) out.push(`    const body = httpCtx.req.valid("json");`);
+  // Bind each handler param to a local (path/body scalar → one wire-coerced
+  // local; record → an object literal of wire-coerced fields), so every param
+  // `ref` / `cmd.<field>` in the body renders against a local in scope.
   const paramExprs = new Map<string, string>();
-  for (const p of h.params) {
-    const source = pathNames.has(p.name) ? `params.${p.name}` : `body.${p.name}`;
-    paramExprs.set(p.name, wireToDomainExpr(source, p.type, ctx));
-  }
-  for (const p of h.params) {
-    out.push(`    const ${p.name} = ${paramExprs.get(p.name)};`);
+  const wireSrc = (name: string): string =>
+    pathNames.has(name) ? `params.${name}` : `body.${name}`;
+  for (const m of materialised) {
+    if (m.kind === "scalar") {
+      const p = h.params.find((pp) => pp.name === m.name)!;
+      out.push(`    const ${m.name} = ${wireToDomainExpr(wireSrc(m.name), p.type, ctx)};`);
+    } else {
+      const fields = m.fields
+        .map((f) => `${f.field}: ${wireToDomainExpr(wireSrc(f.field), f.type, ctx)}`)
+        .join(", ");
+      out.push(`    const ${m.name} = { ${fields} };`);
+    }
+    paramExprs.set(m.name, m.name);
   }
   // Extern handler: no DSL body — no repos, no workflow statements, no wire
   // projection.  Delegate to the scaffold-once user impl module (imported by
@@ -215,13 +271,13 @@ function emitRouteHandler(
   // use), so the route serialises the contract — not the raw domain entity.
   // Reuse the repo the body already built for that aggregate; construct one when
   // the return aggregate was never loaded (e.g. a freshly created entity).
-  const retAgg = returnEntityAgg(h, ctx);
+  const ret = returnEntity(h, ctx);
   let retRepoVar: string | undefined;
-  if (retAgg) {
-    retRepoVar = repoVarByAgg.get(retAgg);
+  if (ret) {
+    retRepoVar = repoVarByAgg.get(ret.agg);
     if (!retRepoVar) {
-      retRepoVar = lowerFirst(plural(retAgg));
-      out.push(`    const ${retRepoVar} = new ${retAgg}Repository(db, events);`);
+      retRepoVar = lowerFirst(plural(ret.agg));
+      out.push(`    const ${retRepoVar} = new ${ret.agg}Repository(db, events);`);
     }
   }
   // Load → mutate → save body, rendered through the shared Hono workflow stmt
@@ -237,7 +293,14 @@ function emitRouteHandler(
   }
   if (hasReturn) {
     const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this");
-    const payload = retRepoVar ? `${retRepoVar}.toWire(${retExpr})` : `${retExpr} as unknown`;
+    // A domain entity/part return projects to its wire shape via the owning
+    // repo's `toWire(...)`; a collection maps each element.  Id / scalar returns
+    // serialise as-is.
+    const payload = ret
+      ? ret.isCollection
+        ? `${retExpr}.map((__e) => ${retRepoVar}.toWire(__e))`
+        : `${retRepoVar}.toWire(${retExpr})`
+      : `${retExpr} as unknown`;
     out.push(`    return httpCtx.json(${payload}, 200);`);
   } else {
     out.push(`    return httpCtx.body(null, 204);`);
@@ -274,7 +337,17 @@ export function buildExplicitRoutesFile(
     const h = cmd ?? qry;
     if (!h) continue;
     const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
-    for (const p of h.params) if (!pathNames.has(p.name)) bodySchemaSeeds.push(p.type);
+    // Seed the VO/enum wire-schema closure from every body-bound field.  A
+    // record param contributes its individual field types (the body deserialises
+    // into the record's fields), not the record type itself.
+    for (const p of h.params) {
+      const rec = requestRecordFor(p.type, ctx);
+      if (rec) {
+        for (const f of rec.fields) if (!pathNames.has(f.name)) bodySchemaSeeds.push(f.type);
+      } else if (!pathNames.has(p.name)) {
+        bodySchemaSeeds.push(p.type);
+      }
+    }
     if (h.extern) externImplImports.set(externImplFn(h.name), externImplModule(h.name));
     routeBlocks.push(emitRouteHandler(apiName, r, h, ctx));
   }
