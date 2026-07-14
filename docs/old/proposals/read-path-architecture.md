@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 11). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 12). No code yet. A
 > vision + grammar proposal. rev. 9 added the **Paging** section (call-site
 > params, D-ENVELOPE `Paged<T>` result, collections-only) and folded in the
 > state audit: this stacks **on top of** the live **M-T5.10** contract-record
@@ -15,8 +15,13 @@
 > <idRef>` clause, not property-off-an-id** — `customerId.name` (view's
 > inherited spelling) is a no-no that violates invariant 9 (refs are `X id`,
 > not hard links) and hides the load; binds read from a loaded alias instead.
+> rev. 12: **a paged read's `sort` must be columnar** (source-aggregate
+> columns — the SQL-pushable subset `where` already requires); a paged read
+> ordered by a `bind`/`join` field → `loom.projection-paged-sort-not-columnar`
+> (else `LIMIT/OFFSET` silently degrades to an in-memory sort). Paging runs on
+> the source scan pre-`join`; `total` is a pre-join COUNT (the joins are 1:1).
 > **Went through the language-feature-developer workflow**: state audit +
-> design review (GO WITH CHANGES) done; the paper simulation is next.
+> design review (GO WITH CHANGES) done; paper simulation in progress.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
 > load-bearing primitive is a **read-only repository queried by
@@ -397,7 +402,7 @@ a query-time *flavor* of `projection` rather than a new construct.
 
 `view` retires **completely** — no recast keyword, no `/views` namespace.
 
-#### `projection` generalises — a read model assembled from optional clauses (rev. 11)
+#### `projection` generalises — a read model assembled from optional clauses (rev. 12)
 
 A **projection is a derived read model**: a declared inline shape, read-only,
 disposable/rebuildable, **not a source of truth** (`projection.md`'s own
@@ -465,7 +470,7 @@ projection OrderCard keyed by order {
 }
 ```
 
-#### Cross-aggregate reads are explicit — `join`, not property-off-id (rev. 11)
+#### Cross-aggregate reads are explicit — `join`, not property-off-id (rev. 12)
 
 `view` today spells a cross-aggregate read as a **property access through an id
 field** — `bind customerName = customerId.name`. This is a **no-no** and rev. 11
@@ -643,8 +648,28 @@ not reinvented here:
    (source id for a query-time projection, the `keyed by` for a folded one,
    the PK for an aggregate read) — the stable default `retrieval.md` already
    assumes. No paged read is order-undefined.
-5. **`Paged<T>.total` costs a COUNT.** The carrier's total is a second COUNT
-   query beside the page fetch; the emitter generates both — mirroring the
+5. **A paged read's `sort` must be *columnar* (source-aggregate columns).**
+   The sort key is part of the *query* (the SQL `ORDER BY`), so it inherits the
+   **same SQL-pushable restriction as `where`** — for the same reason: the
+   app-side `join` runs *after* the source scan, so a sort key that resolves to
+   a `bind`-derived value or a `join`-followed (foreign) field can't be an
+   `ORDER BY` on the base query. `LIMIT/OFFSET` over such an order would force
+   loading the whole filtered set to sort in memory — silently defeating
+   paging. New gate **`loom.projection-paged-sort-not-columnar`**, scoped to
+   *paged* reads: paged + non-columnar sort → error. (Calibration vs. the
+   `where` dual: `where`-by-foreign is *impossible* — a hard error always;
+   sort-by-foreign is merely *expensive*, so an **unpaged** read may still sort
+   by a `bind`/`join` field, in memory — the gate fires only when combined with
+   a page.) This makes the query-time↔folded axis **self-signposting:** "page a
+   list ordered by `customerName`" is exactly the case that wants a **folded**
+   projection, where `customerName` is a stored column (sortable + pageable).
+6. **Paging runs on the source scan, before the joins; `total` is a
+   pre-join COUNT.** `LIMIT/OFFSET` (+ the `COUNT` for `total`) execute on the
+   base aggregate query; the `join` batches then load only the **page's** ids —
+   so each join stays bounded to `pageSize` rows and the count is cheap.
+   Because the `join`s are **1:1** (§ "Cross-aggregate reads"), they don't
+   change cardinality, so `Paged<T>.total` = COUNT of the *filtered source* is
+   exact. The carrier's total is one extra COUNT beside the page fetch — the
    shipped paged-`find` emission, not new machinery.
 
 ---
@@ -832,7 +857,7 @@ list `find` and a `view` warn, and a read can no longer `save`.
    paged-list read is the common case and deserves the short name — but
    confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
    a node kind). Cosmetic; either works.
-1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 11):
+1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 12):
    generalise to optional clauses.** Not two disjoint bodies but one clause
    set (`keyed by?` / `from…where?` / `on(e)?` / `bind?`) with mode derived
    from clause presence (owner steer). The reviewer's coherence caution is
@@ -841,7 +866,7 @@ list `find` and a `view` warn, and a read can no longer `save`.
    pressure-test: does the fold+follow hybrid emit cleanly on all 5 backends
    (it's a materialized read + a batched read-time join — both already exist
    separately; the hybrid composes them).
-1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 11): the *absence
+1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 12): the *absence
    of `keyed by`*.** No `singleton` keyword and no inference-from-binds. A
    keyless projection is a singleton, and the validator **requires its binds to
    be whole-table aggregations** (so "no key" can't silently mean "keyless
