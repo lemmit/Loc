@@ -947,7 +947,19 @@ Aggregate:
     // `aggregate Invoice crossTenant with x { … }`.
     //
     // The aggregate id is always a `guid` — Loom mints it.
-    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? (crossTenant?='crossTenant')? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
+    // M-T5.17 (finding #1): the enum-axis modifiers accept a COLON clause
+    // (`persistedAs: eventLog`) — matching every other enum-value pick in Loom
+    // (`type:`, `kind:`, `platform:`) — as well as the legacy PAREN form
+    // (`persistedAs(eventLog)`), which stays accepted for back-compat (Phase 1
+    // accept-both; a later phase migrates the corpus + drops the paren form).
+    // The printer emits the new colon spelling.  (The `crossTenant`-hoist half
+    // of the mission — moving the flag to lead beside `abstract` — is deferred
+    // to the Phase 2 cutover to avoid a duplicate-assignment on the flag.)
+    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? (crossTenant?='crossTenant')?
+        ('persistedAs' (':' persistedAs=TruthKind ','? | '(' persistedAs=TruthKind ')'))?
+        ('shape' (':' shape=SavingShape ','? | '(' shape=SavingShape ')'))?
+        ('inheritanceUsing' (':' inheritanceUsing=InheritanceLayout ','? | '(' inheritanceUsing=InheritanceLayout ')'))?
+        withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 

@@ -1,9 +1,9 @@
-// Saving-shape example — exercises all three `shape(…)` strategies in
+// Saving-shape example — exercises all three `shape: …` strategies in
 // one context, so the build gates compile each:
-//   - Customer  → shape(relational) (default): table-per-entity.
-//   - Cart      → shape(document): the whole aggregate as one opaque
+//   - Customer  → shape: relational (default) — table-per-entity.
+//   - Cart      → shape: document — the whole aggregate as one opaque
 //                 JSONB blob (`id, data, version`), Marten-style.
-//   - Wishlist  → shape(embedded): queryable root row + the contained
+//   - Wishlist  → shape: embedded — queryable root row + the contained
 //                 WishItem parts folded into a JSONB column (EF owned
 //                 `.ToJson()` / Drizzle jsonb / Ash embedded).
 //
@@ -31,7 +31,7 @@ context Shopping {
     create(name: string) { name := name }
   }
 
-  aggregate Cart shape(document) {
+  aggregate Cart shape: document {
     customerId: Customer id
     status: CartStatus
     contains items: CartItem[]
@@ -82,9 +82,9 @@ context Shopping {
 
   repository Customers for Customer { }
 
-  // shape(embedded): the root (customerId, label) stays queryable
+  // shape: embedded — the root (customerId, label) stays queryable
   // columns; the contained WishItem parts fold into a JSONB column.
-  aggregate Wishlist shape(embedded) {
+  aggregate Wishlist shape: embedded {
     customerId: Customer id
     label: string
     contains items: WishItem[]
