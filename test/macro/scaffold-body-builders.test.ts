@@ -67,10 +67,17 @@ describe("scaffold body-builders — AST → printable source", () => {
     expect(src).toContain("data: rows => Paper(Table(");
     // ID column links to detail; one column per scalar field, each cell
     // dispatched through its type renderer (plain text here → `Text(...)`).
-    expect(src).toContain('Column("ID", o => IdLink(o.id, of: Order))');
-    expect(src).toContain('Column("Reference", o => Text(o.reference))');
-    expect(src).toContain('Column("Status", o => Text(o.status))');
-    expect(src).toContain("rows: rows, striped: true, highlight: true, sticky: true");
+    // Every column is `sortable:` with an explicit `field:` (M-T1.1).
+    expect(src).toContain(
+      'Column("ID", o => IdLink(o.id, of: Order), sortable: true, field: "id")',
+    );
+    expect(src).toContain(
+      'Column("Reference", o => Text(o.reference), sortable: true, field: "reference")',
+    );
+    expect(src).toContain('Column("Status", o => Text(o.status), sortable: true, field: "status")');
+    expect(src).toContain(
+      "rows: rows, sortKey: sortKey, sortDir: sortDir, striped: true, highlight: true, sticky: true",
+    );
     // per-row testid accessor (anchors e2e row selectors)
     expect(src).toContain('rowTestid: r => "orders-row-" + r.id');
     expect(src).toContain('testid: "orders-list"');
@@ -91,12 +98,20 @@ describe("scaffold body-builders — AST → printable source", () => {
       { name: "note", kind: { tag: "text" } },
     ];
     const src = printExpr(scaffoldList("Order", cols));
-    expect(src).toContain('Column("Ref", o => IdLink(o.ref, of: Customer))');
-    expect(src).toContain('Column("Created At", o => DateDisplay(o.createdAt))');
-    expect(src).toContain('Column("Active", o => Text(o.active ? "Yes" : "No"))');
-    expect(src).toContain('Column("Total", o => Text(o.total))');
-    expect(src).toContain('Column("Status", o => EnumBadge(o.status))');
-    expect(src).toContain('Column("Note", o => Text(o.note))');
+    expect(src).toContain(
+      'Column("Ref", o => IdLink(o.ref, of: Customer), sortable: true, field: "ref")',
+    );
+    expect(src).toContain(
+      'Column("Created At", o => DateDisplay(o.createdAt), sortable: true, field: "createdAt")',
+    );
+    expect(src).toContain(
+      'Column("Active", o => Text(o.active ? "Yes" : "No"), sortable: true, field: "active")',
+    );
+    expect(src).toContain('Column("Total", o => Text(o.total), sortable: true, field: "total")');
+    expect(src).toContain(
+      'Column("Status", o => EnumBadge(o.status), sortable: true, field: "status")',
+    );
+    expect(src).toContain('Column("Note", o => Text(o.note), sortable: true, field: "note")');
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)

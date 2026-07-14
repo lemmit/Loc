@@ -970,6 +970,10 @@ export function scaffoldList(
   // One Column per field; the ID column links to the detail page, the rest
   // dispatch their cell renderer by type (`columnAccessor`).  Rebuilt per
   // QueryView so the filter `match`'s several views never share nodes.
+  // Every scaffold column is `sortable:` — a click on its header sorts the
+  // list client-side (M-T1.1).  `field:` names the row property to sort by
+  // (the accessor may wrap it — money/date cells — so it's passed explicitly);
+  // the ID column sorts by `"id"`.
   const makeCols = (): Array<{ name?: string; value: Expression }> => [
     {
       value: callExpr("Column", [
@@ -983,12 +987,16 @@ export function scaffoldList(
             ]),
           ),
         },
+        { name: "sortable", value: boolLit(true) },
+        { name: "field", value: stringLit("id") },
       ]),
     },
     ...columns.map((c) => ({
       value: callExpr("Column", [
         { value: stringLit(humanize(c.name)) },
         { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
+        { name: "sortable", value: boolLit(true) },
+        { name: "field", value: stringLit(c.name) },
       ]),
     })),
   ];
@@ -997,6 +1005,8 @@ export function scaffoldList(
     callExpr("Table", [
       ...makeCols(),
       { name: "rows", value: nameRefExpr("rows") },
+      { name: "sortKey", value: nameRefExpr("sortKey") },
+      { name: "sortDir", value: nameRefExpr("sortDir") },
       { name: "striped", value: boolLit(true) },
       { name: "highlight", value: boolLit(true) },
       { name: "sticky", value: boolLit(true) },

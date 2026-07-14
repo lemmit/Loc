@@ -62,7 +62,11 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       // unfoldable source (no IR-phase sentinel expansion).  The find-filter
       // inputs bind to page state named by `filterStateFields`.
       body: scaffoldList(aggName, scalarColumnsForAggregate(agg), { apiHandle, filters }),
-      state: filterStateFields(filters).map((f) => f.name),
+      // Filter-bar state + the interactive-table sort state (M-T1.1): `sortKey`
+      // holds the active column, `sortDir` the direction.  Both string-init ""
+      // (unsorted); the first header click sets them.  Consumed on the JSX
+      // frontends; Feliz/HEEx ignore the Table's sort args (plain table).
+      state: [...filterStateFields(filters).map((f) => f.name), "sortKey", "sortDir"],
       menu: {
         section: stringLit("Aggregates"),
         label: stringLit(labelPlural),
