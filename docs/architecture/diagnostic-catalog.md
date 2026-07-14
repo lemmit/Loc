@@ -61,6 +61,10 @@ tightening rule. Document the promotion phase in the registry row.
 | `loom.legacy-part-call` / `loom.legacy-vo-call` | warning | legacy call form |
 | `loom.unknown-builder-type` | error | unrecognised builder kind |
 | `loom.bare-aggregate-in-type` | error | cross-aggregate ref not spelled `X id` (scope provider) |
+| `loom.migration-duplicate-name` | error | two `migration` blocks share a name (M-T2.1) |
+| `loom.rename-to-self` | error | `rename Agg.x -> x` names the same field on both sides (M-T2.1) |
+| `loom.rename-duplicate-source` | error | one aggregate column is renamed FROM more than once (M-T2.1) |
+| `loom.rename-duplicate-target` | error | two renames collide ON one target column (M-T2.1) |
 
 ### Reserved by in-flight proposals
 

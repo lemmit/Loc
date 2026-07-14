@@ -216,6 +216,7 @@ function emitSystem(
   // modules where `module.migrationsOwner` is set.
   const migrations = buildMigrations(sys, options.snapshots, {
     allowDestructive: options.allowDestructive,
+    renameIntents: loom.renameIntents,
   });
   for (const m of migrations) {
     out.set(snapshotRelPath(m.module), serializeSnapshot(m.next));

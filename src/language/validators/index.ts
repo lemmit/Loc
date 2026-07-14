@@ -32,6 +32,7 @@ export {
   checkMatcherArity,
   checkMatchesCalls,
 } from "./match.js";
+export { checkMigrations } from "./migration.js";
 export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
 export { checkPolicyFns } from "./policy-fn.js";

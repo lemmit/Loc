@@ -29,7 +29,12 @@ ModelMember:
     | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E
     // Typed capabilities (typed-capabilities.md): a `capability` pure-mixin is
     // top-level declarable (and a `SystemMember` inside `system { }`).
-    | Capability;
+    | Capability
+    // Schema-evolution intent (M-T2.1): a dedicated `migration { rename ... }`
+    // block, isolated from the domain model, that disambiguates the derived
+    // snapshot→model migration diff.  See docs/new-plan/missions/
+    // M-T2.1-migration-surface-design.md.
+    | Migration;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -46,6 +51,30 @@ System:
     'system' name=ID '{'
         members+=SystemMember*
     '}';
+
+// ---------------------------------------------------------------------------
+// Schema-evolution intent (M-T2.1) — a dedicated, domain-model-isolated
+// migration surface.  A `migration "<name>" { … }` block is a permanent,
+// ledger-style record whose `rename` steps disambiguate the derived
+// snapshot→model diff (`src/system/migrations-builder.ts`): an explicit
+// `rename Agg.old -> new` maps the old snapshot column to the new model
+// column BEFORE the diff classifies drops/adds, so the engine emits a
+// `renameColumn` (+ `alterColumnType` on a type change) instead of the
+// data-losing drop+add the one-drop-one-add heuristic can't collapse.  The
+// block is naturally inert once its rename is baked into the baseline
+// snapshot (the next diff finds no old column to rename), so no separate
+// applied-history file is needed.  The step is keyword-free (`Agg.old ->
+// new`) — `rename` is NOT introduced as a keyword because it is used
+// pervasively as a domain identifier (operation/workflow/function names)
+// across the corpus; the `->` carries the intent.  `RenameStep` is the first
+// step kind; the block is shaped so M-T2.3's data-migration steps slot in.
+Migration:
+    'migration' name=STRING '{'
+        (renames+=RenameStep (','? renames+=RenameStep)* ','?)?
+    '}';
+
+RenameStep:
+    aggregate=[Aggregate:ID] '.' from=UserFieldName '->' to=UserFieldName;
 
 SystemMember:
     Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability | FunctionDecl;
@@ -84,7 +113,10 @@ UserField:
     name=UserFieldName ':' type=TypeRef;
 
 UserFieldName returns string:
-    ID | 'id' | 'permissions';
+    ID | 'id' | 'permissions'
+    // `migration` is hard only at the top-level `Migration` block head (M-T2.1);
+    // soft in field-name position so a domain field named `migration` parses.
+    | 'migration';
 
 // System-level OIDC authentication config (D-AUTH-OIDC).  Sibling to
 // `user { … }`: the user block declares the claim SHAPE, this block
@@ -734,7 +766,7 @@ StateField:
 // aggregate / context member positions; everywhere else they remain
 // admissible identifiers.
 StateFieldName returns string:
-    ID | 'filter' | 'stamp' | 'implements' | 'write'
+    ID | 'filter' | 'stamp' | 'implements' | 'write' | 'migration'
     // DataSource clause keys (PR-3 / D-STORAGE-SPLIT) are admitted as
     // soft so user pages can still declare a state field named `kind`,
     // `schema`, `every`, etc.  Without this, `state { kind: string }`
@@ -1655,7 +1687,11 @@ Property:
         | 'filter' | 'stamp' | 'implements'
         // Policy verb keywords (P3.1) admitted in property position so a
         // field named `read` / `write` parses.
-        | 'write')
+        | 'write'
+        // Schema-evolution keyword (M-T2.1) — soft in property position so a
+        // field named `migration` parses.  Hard only at the top-level
+        // `Migration` block head.
+        | 'migration')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1792,6 +1828,9 @@ LooseName returns string:
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
     | 'bind' | 'api'
+    // `migration` is hard only at the top-level `Migration` block head (M-T2.1);
+    // soft everywhere LooseName is used.
+    | 'migration'
     // `await` is hard only as the `match await op()` subject marker
     // (async-actions-and-effects.md Stage 2); soft everywhere else so a
     // field / param named `await` keeps parsing.
@@ -2123,7 +2162,7 @@ LValue:
       (call?='(' (args+=Expression (',' args+=Expression)*)? ')')?;
 
 LValueIdent returns string:
-    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
+    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api' | 'migration'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        // Soft-admit the lifecycle keywords so a bare-statement call
        // target like `ui.products.create({...})` parses (mirrors
@@ -2323,7 +2362,7 @@ MemberName returns string:
     'by' | 'handle' |
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-       | 'filter' | 'stamp' | 'implements'
+       | 'filter' | 'stamp' | 'implements' | 'migration'
        // Policy verb keywords (P3.1) admissible after `.` so a member named
        // `read` / `write` parses.
        | 'write'
@@ -2554,7 +2593,7 @@ NameRefIdent returns string:
     //
     // `id` is intentionally excluded: it's the magic identifier handled by
     // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
-    ID | 'permissions' | 'ui' | 'api' | 'money'
+    ID | 'permissions' | 'ui' | 'api' | 'money' | 'migration'
        // Lifecycle keywords admitted as bare NameRefs so an expression
        // can use one as the receiver of a member access — e.g. the
        // generated-hook handle in a page lambda

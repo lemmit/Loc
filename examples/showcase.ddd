@@ -981,3 +981,14 @@ testCase TC-002 verifies US-002 {
         Delivery.Builds.Build.promote
     ]
 }
+
+// M-T2.1 — schema-evolution rename intent.  A dedicated, domain-model-isolated
+// `migration` block: its keyword-free `Agg.old -> new` steps disambiguate the
+// derived snapshot→model migration diff into explicit `renameColumn` steps
+// (handling two-at-once + rename+type-change the one-drop-one-add heuristic
+// can't).  Ledger-style: permanent in source, naturally inert once the rename
+// is baked into the baseline snapshot.  See docs/migrations.md.
+migration "2026-07-build-columns" {
+    Build.sha       -> commitSha
+    Build.startTime -> startedAt
+}

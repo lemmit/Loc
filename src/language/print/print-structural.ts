@@ -206,6 +206,8 @@ export function printStructural(node: AstNode): string {
       return printProjection(node as import("../generated/ast.js").Projection);
     case "View":
       return printView(node as View);
+    case "Migration":
+      return printMigration(node as import("../generated/ast.js").Migration);
     case "Requirement":
       return printRequirement(node as Requirement);
     case "Solution":
@@ -1117,6 +1119,13 @@ function printTestStatement(node: TestStatement): string {
 // ---------------------------------------------------------------------------
 // Traceability
 // ---------------------------------------------------------------------------
+
+function printMigration(node: import("../generated/ast.js").Migration): string {
+  return block(
+    `migration ${JSON.stringify(node.name)}`,
+    node.renames.map((r) => `${r.aggregate.$refText}.${r.from} -> ${r.to}`),
+  );
+}
 
 function printRequirement(node: Requirement): string {
   const parent = node.parent ? ` parent ${node.parent.$refText}` : "";

@@ -1686,6 +1686,36 @@ export interface LoomModel {
    *  undefined by lowering so an unenriched model is a type error to
    *  consume from a report generator. */
   traceability?: TraceabilityIR;
+  /** Schema-evolution rename intents (M-T2.1) — lowered from top-level
+   *  `migration "<name>" { rename Agg.old -> new }` blocks.  Consumed only by
+   *  the phase-⑨ migration builder (`src/system/migrations-builder.ts`) to
+   *  disambiguate the snapshot→model diff into explicit `renameColumn` steps;
+   *  no backend reads them for domain-code emission.  Ledger-style: a block
+   *  stays in source permanently and is naturally inert once its rename is
+   *  baked into the baseline snapshot.  Empty when the source declares no
+   *  migration block. */
+  renameIntents: RenameIntentIR[];
+}
+
+/** One `rename Agg.old -> new` step lowered from a `migration` block.  Field
+ *  names are the RAW source names (the migration builder snake-cases them to
+ *  column names, exactly as it does for aggregate fields).  `context` scopes
+ *  the aggregate to a bounded context so the builder can resolve the owning
+ *  module + Postgres schema, disambiguating same-named aggregates. */
+export interface RenameIntentIR {
+  /** Block label — the `"<name>"` on the owning `migration` block.  Carried
+   *  for diagnostics and duplicate-name validation. */
+  migration: string;
+  /** Target aggregate name (resolves to table `plural(snake(aggregate))`). */
+  aggregate: string;
+  /** Owning bounded-context name — for module/schema resolution. */
+  context: string;
+  /** Old (pre-rename) field name — absent from the current model. */
+  from: string;
+  /** New (post-rename) field name — a live field of `aggregate`. */
+  to: string;
+  /** Provenance back to the `rename` step's `.ddd` source. */
+  origin?: OriginRef;
 }
 
 // ---------------------------------------------------------------------------

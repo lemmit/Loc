@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderPgStep } from "../../src/generator/sql-pg.js";
 import type {
+  ColumnShape,
   MigrationStep,
   SchemaSnapshot,
   TableShape,
@@ -322,6 +323,169 @@ describe("diffSchema", () => {
 
     const stepsDrop = diffSchema(next, prev);
     expect(stepsDrop.some((s) => s.op === "dropIndex")).toBe(true);
+  });
+});
+
+describe("diffSchema — explicit renames (M-T2.1)", () => {
+  // Minimal single-table snapshots (no FK/index noise) so the assertions
+  // isolate the rename pass.  Renames are a flat list keyed by table name;
+  // diffSchema indexes them internally (no schema here → public).
+  const col = (name: string, kind = "int", nullable = false): ColumnShape => ({
+    name,
+    type: { kind } as ColumnShape["type"],
+    nullable,
+  });
+  const snap = (columns: ColumnShape[]): SchemaSnapshot => ({
+    schemaVersion: 1,
+    tables: [
+      {
+        name: "orders",
+        ownerModule: "Sales",
+        columns,
+        primaryKey: ["id"],
+        foreignKeys: [],
+        indexes: [],
+      },
+    ],
+  });
+
+  it("collapses TWO simultaneous renames into two renameColumn + zero drops", () => {
+    const prev = snap([col("id", "uuid"), col("qty"), col("shipped_at", "datetime")]);
+    const next = snap([col("id", "uuid"), col("quantity"), col("fulfilled_at", "datetime")]);
+    const steps = diffSchema(prev, next, [
+      { table: "orders", from: "qty", to: "quantity" },
+      { table: "orders", from: "shipped_at", to: "fulfilled_at" },
+    ]);
+    expect(steps.filter((s) => s.op === "renameColumn")).toEqual([
+      {
+        op: "renameColumn",
+        table: "orders",
+        schema: undefined,
+        from: "qty",
+        to: "quantity",
+        type: { kind: "int" },
+      },
+      {
+        op: "renameColumn",
+        table: "orders",
+        schema: undefined,
+        from: "shipped_at",
+        to: "fulfilled_at",
+        type: { kind: "datetime" },
+      },
+    ]);
+    expect(steps.some((s) => s.op === "dropColumn" || s.op === "addColumn")).toBe(false);
+  });
+
+  it("emits renameColumn + alterColumnType for a rename that also changes type", () => {
+    const prev = snap([col("id", "uuid"), col("qty", "int")]);
+    const next = snap([col("id", "uuid"), col("quantity", "bigint")]);
+    const steps = diffSchema(prev, next, [{ table: "orders", from: "qty", to: "quantity" }]);
+    expect(steps).toEqual([
+      {
+        op: "renameColumn",
+        table: "orders",
+        schema: undefined,
+        from: "qty",
+        to: "quantity",
+        type: { kind: "bigint" },
+      },
+      {
+        op: "alterColumnType",
+        table: "orders",
+        schema: undefined,
+        name: "quantity",
+        from: { kind: "int" },
+        to: { kind: "bigint" },
+      },
+    ]);
+  });
+
+  it("resolves a chained rename (qty -> quantity -> amount) to one renameColumn", () => {
+    const prev = snap([col("id", "uuid"), col("qty")]);
+    const next = snap([col("id", "uuid"), col("amount")]);
+    const steps = diffSchema(prev, next, [
+      { table: "orders", from: "qty", to: "quantity" },
+      { table: "orders", from: "quantity", to: "amount" },
+    ]);
+    expect(steps).toEqual([
+      {
+        op: "renameColumn",
+        table: "orders",
+        schema: undefined,
+        from: "qty",
+        to: "amount",
+        type: { kind: "int" },
+      },
+    ]);
+  });
+
+  it("WITHOUT a rename intent, two-at-once degrades to drop+add (the gap M-T2.1 closes)", () => {
+    const prev = snap([col("id", "uuid"), col("qty"), col("shipped_at", "datetime")]);
+    const next = snap([col("id", "uuid"), col("quantity"), col("fulfilled_at", "datetime")]);
+    const steps = diffSchema(prev, next); // no renames
+    expect(steps.some((s) => s.op === "renameColumn")).toBe(false);
+    expect(steps.filter((s) => s.op === "dropColumn")).toHaveLength(2);
+    expect(steps.filter((s) => s.op === "addColumn")).toHaveLength(2);
+  });
+
+  it("renders the rename+retype path to Postgres DDL in the right order", () => {
+    const prev = snap([col("id", "uuid"), col("qty", "int")]);
+    const next = snap([col("id", "uuid"), col("quantity", "bigint")]);
+    const sql = diffSchema(prev, next, [{ table: "orders", from: "qty", to: "quantity" }]).map(
+      renderPgStep,
+    );
+    expect(sql[0]).toBe('ALTER TABLE "orders" RENAME COLUMN "qty" TO "quantity";');
+    expect(sql[1]).toMatch(/ALTER TABLE "orders" ALTER COLUMN "quantity" TYPE BIGINT/);
+  });
+});
+
+describe("buildMigrations — migration-block rename intent (M-T2.1)", () => {
+  const RENAME_SRC = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { quantity: int }
+      repository Orders for Order { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}
+migration "rename-qty" { Order.qty -> quantity }
+`;
+
+  it("emits an explicit renameColumn (no drop) when a migration block renames a field", async () => {
+    const loom = await buildLoomModel(RENAME_SRC);
+    const sys = loom.systems[0]!;
+    // Baseline still carries the OLD column name `qty`.
+    const next = schemaFromModule(sys.subdomains[0]!);
+    const baseline = withModifiedTable({ ...next, lastVersion: BASE_TIMESTAMP }, "orders", (t) => ({
+      ...t,
+      columns: t.columns.map((c) => (c.name === "quantity" ? { ...c, name: "qty" } : c)),
+    }));
+    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      renameIntents: loom.renameIntents,
+    });
+    const steps = out[0]!.steps;
+    expect(
+      steps.some((s) => s.op === "renameColumn" && s.from === "qty" && s.to === "quantity"),
+    ).toBe(true);
+    expect(steps.some((s) => s.op === "dropColumn")).toBe(false);
+    expect(steps.some((s) => s.op === "addColumn")).toBe(false);
+  });
+
+  it("is inert once the rename is baked into the baseline (ledger idempotency)", async () => {
+    const loom = await buildLoomModel(RENAME_SRC);
+    const sys = loom.systems[0]!;
+    // Baseline already has the NEW name — the ledger block must be a no-op now.
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(sys.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      renameIntents: loom.renameIntents,
+    });
+    expect(out[0]!.steps).toEqual([]);
   });
 });
 

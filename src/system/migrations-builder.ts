@@ -10,6 +10,7 @@ import type {
   IdValueType,
   ManualIndexIR,
   ProjectionIR,
+  RenameIntentIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -565,12 +566,24 @@ function matchTables(prev: readonly TableShape[], next: readonly TableShape[]): 
 interface DiffBuckets {
   dropIndex: MigrationStep[];
   dropColumn: MigrationStep[];
+  rename: MigrationStep[];
   addColumn: MigrationStep[];
   alter: MigrationStep[];
   addIndex: MigrationStep[];
 }
 
-export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): MigrationStep[] {
+export function diffSchema(
+  prev: SchemaSnapshot | null,
+  next: SchemaSnapshot,
+  renames: readonly TableColumnRename[] = [],
+): MigrationStep[] {
+  // Index the flat rename list by the same schema-qualified key the table
+  // match uses, so a rename is looked up against the exact relation it targets.
+  const renamesByTable = new Map<string, TableColumnRename[]>();
+  for (const r of renames) {
+    const key = qkey(r.schema, r.table);
+    (renamesByTable.get(key) ?? renamesByTable.set(key, []).get(key)!).push(r);
+  }
   const { pairs, dropped, created } = prev
     ? matchTables(prev.tables, next.tables)
     : {
@@ -582,11 +595,14 @@ export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): M
   const buckets: DiffBuckets = {
     dropIndex: [],
     dropColumn: [],
+    rename: [],
     addColumn: [],
     alter: [],
     addIndex: [],
   };
-  for (const [p, n] of pairs) diffTable(p, n, buckets);
+  for (const [p, n] of pairs) {
+    diffTable(p, n, buckets, renamesByTable.get(qkey(n.schema, n.name)) ?? []);
+  }
 
   // Drops in reverse-topological (child-first) order so a parent table is
   // never dropped while a child still FK-references it (audit finding 18).
@@ -601,20 +617,27 @@ export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): M
 
   // FK-safe global order:
   //   drop indexes/columns (unblocks table drops) → drop tables (child-first)
-  //   → create tables (parent-first) → add columns (targets now exist)
-  //   → alter columns → add indexes.
+  //   → create tables (parent-first) → rename columns (before adds/alters so a
+  //   renamed column exists under its new name for a subsequent type alter)
+  //   → add columns (targets now exist) → alter columns → add indexes.
   return [
     ...buckets.dropIndex,
     ...buckets.dropColumn,
     ...dropTableSteps,
     ...createTableSteps,
+    ...buckets.rename,
     ...buckets.addColumn,
     ...buckets.alter,
     ...buckets.addIndex,
   ];
 }
 
-function diffTable(prev: TableShape, next: TableShape, buckets: DiffBuckets): void {
+function diffTable(
+  prev: TableShape,
+  next: TableShape,
+  buckets: DiffBuckets,
+  renames: readonly TableColumnRename[] = [],
+): void {
   // ALTER/DROP steps target the table's CURRENT schema (where it now lives).
   const schema = next.schema;
   const prevCols = new Map<string, ColumnShape>();
@@ -622,15 +645,83 @@ function diffTable(prev: TableShape, next: TableShape, buckets: DiffBuckets): vo
   const nextCols = new Map<string, ColumnShape>();
   for (const c of next.columns) nextCols.set(c.name, c);
 
+  // Explicit renames (M-T2.1) — resolved BEFORE the drop/add passes so a
+  // renamed column is a `renameColumn` (+ a follow-on type/nullable alter when
+  // it also changed) rather than the data-losing drop+add the one-drop-one-add
+  // heuristic can't collapse for two-at-once or rename+type-change.  A baseline
+  // column that is a rename source and whose (chain-resolved) target is a
+  // genuine new column becomes the rename; both ends are then excluded from the
+  // drop/add loops.
+  const renamedPrev = new Set<string>();
+  const renamedNext = new Set<string>();
+  if (renames.length > 0) {
+    const edge = new Map<string, string>();
+    for (const r of renames) edge.set(r.from, r.to);
+    for (const c of prev.columns) {
+      if (nextCols.has(c.name) || !edge.has(c.name)) continue; // persisted, or not renamed
+      // Follow the rename chain (qty → quantity → amount) to the first hop
+      // that is a real column of `next` — the actual target after any
+      // intermediate renames the user stacked before regenerating.
+      let cur = c.name;
+      const seen = new Set<string>([cur]);
+      let target: string | undefined;
+      while (edge.has(cur)) {
+        const nx = edge.get(cur)!;
+        if (seen.has(nx)) break; // cycle guard
+        seen.add(nx);
+        cur = nx;
+        if (nextCols.has(cur)) {
+          target = cur;
+          break;
+        }
+      }
+      // Target must be a genuine ADD (in next, absent from prev, unclaimed).
+      if (!target || renamedNext.has(target) || prevCols.has(target)) continue;
+      const nextCol = nextCols.get(target)!;
+      buckets.rename.push({
+        op: "renameColumn",
+        table: next.name,
+        schema,
+        from: c.name,
+        to: target,
+        type: nextCol.type,
+      });
+      // A rename that also changed nullability / type carries the follow-on
+      // ALTER, keyed to the NEW column name (the rename already ran).
+      if (c.nullable !== nextCol.nullable) {
+        buckets.rename.push({
+          op: "alterColumnNullable",
+          table: next.name,
+          schema,
+          name: target,
+          type: nextCol.type,
+          nullable: nextCol.nullable,
+        });
+      }
+      if (!columnTypeEqual(c.type, nextCol.type)) {
+        buckets.rename.push({
+          op: "alterColumnType",
+          table: next.name,
+          schema,
+          name: target,
+          from: c.type,
+          to: nextCol.type,
+        });
+      }
+      renamedPrev.add(c.name);
+      renamedNext.add(target);
+    }
+  }
+
   // Drops — iterate prev order so the op stream reads source-faithful.
   for (const c of prev.columns) {
-    if (!nextCols.has(c.name)) {
+    if (!nextCols.has(c.name) && !renamedPrev.has(c.name)) {
       buckets.dropColumn.push({ op: "dropColumn", table: next.name, schema, name: c.name });
     }
   }
   // Adds — iterate next order; attach FK if present.
   for (const c of next.columns) {
-    if (!prevCols.has(c.name)) {
+    if (!prevCols.has(c.name) && !renamedNext.has(c.name)) {
       const fk = next.foreignKeys.find((f) => f.column === c.name);
       buckets.addColumn.push(
         fk
@@ -862,6 +953,23 @@ export interface BuildMigrationsOptions {
    *  flag).  First-run (Initial) migrations are always exempt — nothing
    *  pre-exists to destroy. */
   allowDestructive?: boolean;
+  /** Schema-evolution rename intents (M-T2.1), lowered from top-level
+   *  `migration { rename ... }` blocks.  Each module filters these to its own
+   *  contexts and folds them into the diff, so a renamed column produces an
+   *  explicit `renameColumn` instead of the data-losing drop+add.  Empty /
+   *  omitted for models with no migration block. */
+  renameIntents?: readonly RenameIntentIR[];
+}
+
+/** One resolved column rename (M-T2.1).  `from`/`to` are already snake-cased
+ *  column names; `table` + `schema` identify the relation it applies to so
+ *  `diffSchema` can index it internally (callers never construct the builder's
+ *  opaque schema-qualified key). */
+export interface TableColumnRename {
+  table: string;
+  schema?: string;
+  from: string;
+  to: string;
 }
 
 export function buildMigrations(
@@ -903,7 +1011,12 @@ export function buildMigrations(
       resolveContextSchema(ctx, sys);
     const next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf, contextSchemaOf);
     const baseline = snapshots.read(m.name);
-    const steps = applyDestructivePolicy(diffSchema(baseline, next), baseline, {
+    // Resolve this module's rename intents to per-table column renames, keyed
+    // by the table's schema-qualified key so the diff can fold them in.  A
+    // rename whose aggregate/context isn't in THIS module is skipped here and
+    // picked up on its owning module's iteration.
+    const renames = resolveRenames(m, options.renameIntents ?? [], schemaOf);
+    const steps = applyDestructivePolicy(diffSchema(baseline, next, renames), baseline, {
       allowDestructive,
       module: m.name,
     });
@@ -939,6 +1052,36 @@ export function buildMigrations(
       steps,
       version,
       name,
+    });
+  }
+  return out;
+}
+
+/** Resolve a model's rename intents to per-table column renames for ONE module
+ *  (M-T2.1).  Filters to intents whose aggregate lives in this module, maps the
+ *  aggregate to its table (`plural(snake(name))`) and Postgres schema (the same
+ *  binding-aware resolver the table build uses), and snake-cases the field
+ *  names to column names.  Returned as a flat list — `diffSchema` indexes it
+ *  by relation internally. */
+function resolveRenames(
+  module: EnrichedSubdomainIR,
+  intents: readonly RenameIntentIR[],
+  schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined,
+): TableColumnRename[] {
+  const out: TableColumnRename[] = [];
+  if (intents.length === 0) return out;
+  const ctxByName = new Map<string, EnrichedBoundedContextIR>();
+  for (const ctx of module.contexts) ctxByName.set(ctx.name, ctx);
+  for (const ri of intents) {
+    const ctx = ctxByName.get(ri.context);
+    if (!ctx) continue; // aggregate's context is in another module
+    const agg = ctx.aggregates.find((a) => a.name === ri.aggregate);
+    if (!agg) continue;
+    out.push({
+      table: plural(snake(ri.aggregate)),
+      schema: schemaOf(agg, ctx),
+      from: snake(ri.from),
+      to: snake(ri.to),
     });
   }
   return out;
