@@ -1000,6 +1000,15 @@ export interface BoundedContextIR {
    *  translator reads `errorStatusOverrides?.[name] ?? defaultErrorStatus(name)`.
    *  Undefined in single-context (no-api) lowering — defaults apply. */
   errorStatusOverrides?: Record<string, number>;
+  /** App-wide resolved HTTP status for each structural-conflict built-in
+   *  (`UniquenessConflict` / `ConcurrencyConflict` / `Disallowed` /
+   *  `ReferencedInUse` — expressible-builtins.md §3 / M-T3.4a). Folded across
+   *  every api (first-declared `httpStatus` wins), defaulting each to 409.
+   *  The backend runtime arms + OpenAPI declarations for the hardcoded 409s read
+   *  `structuralErrorStatuses?.[name] ?? 409` so the two can no longer drift and
+   *  `httpStatus UniquenessConflict 422` retargets both. Populated by
+   *  `enrichLoomModel`; undefined in single-context (no-api) lowering. */
+  structuralErrorStatuses?: Record<string, number>;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -1856,6 +1865,12 @@ export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
    *  operation may override it once the consumption surface exists
    *  (Phase 4); until then this is the per-resource default. */
   resourceInterfaces: Record<string, LoomInterface>;
+  /** App-wide resolved HTTP status for each structural-conflict built-in —
+   *  see `BoundedContextIR.structuralErrorStatuses`. Threaded to the app-global
+   *  exception handlers (.NET `DomainExceptionFilter`, Python handlers, Java
+   *  `ApiExceptionAdvice`, Elixir `ProblemDetails`) which have no per-context
+   *  tag. Folded across every api, each defaulting to 409. */
+  structuralErrorStatuses: Record<string, number>;
 };
 
 // ---------------------------------------------------------------------------

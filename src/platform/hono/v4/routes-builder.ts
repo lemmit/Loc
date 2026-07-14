@@ -70,7 +70,12 @@ import type {
   ClassifyContext,
   SingleFieldPattern,
 } from "../../../ir/validate/invariant-classify.js";
-import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
+import {
+  defaultErrorStatus,
+  errorTitle,
+  errorTypeUri,
+  resolveErrorStatus,
+} from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -590,6 +595,13 @@ export function buildRoutesFile(
   // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
   // then hard-delete (children/join rows cascade via FK).
   if (agg.canonicalDestroy) {
+    // FK-restrict conflict status resolved through the `httpStatus` mapper
+    // (M-T3.4a) — `ReferencedInUse`, 409 by default. Drives both the OpenAPI
+    // declaration and the runtime arm below so they can't drift.
+    const referencedInUseStatus = resolveErrorStatus(
+      "ReferencedInUse",
+      ctx.structuralErrorStatuses,
+    );
     lines.push(`  app.openapi(`);
     lines.push(`    createRoute({`);
     lines.push(`      method: "delete",`);
@@ -604,9 +616,9 @@ export function buildRoutesFile(
     );
     // Deleting a still-referenced aggregate trips a Postgres
     // foreign_key_violation (cross-aggregate `X id` FK is ON DELETE
-    // RESTRICT) → 409 Conflict.
+    // RESTRICT) → 409 Conflict (or the `httpStatus ReferencedInUse` override).
     lines.push(
-      `        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `        ${referencedInUseStatus}: { description: ${JSON.stringify(httpStatusText(referencedInUseStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
     lines.push(`      },`);
     lines.push(`    }),`);
@@ -669,7 +681,7 @@ export function buildRoutesFile(
       `        if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23503")) {`,
     );
     lines.push(
-      `          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "${agg.name} is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });`,
+      `          return c.body(JSON.stringify({ type: "about:blank", title: ${JSON.stringify(httpStatusText(referencedInUseStatus))}, status: ${referencedInUseStatus}, detail: "${agg.name} is still referenced and cannot be deleted.", instance: c.req.path }), ${referencedInUseStatus}, { "content-type": "application/problem+json" });`,
     );
     lines.push(`        }`);
     lines.push(`        throw err;`);
@@ -710,6 +722,25 @@ export function buildRoutesFile(
     }
   }
 
+  // Structural-conflict statuses resolved through the `httpStatus` mapper
+  // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
+  // api's `httpStatus <Conflict> <Code>` override. Both the runtime arm and the
+  // OpenAPI declaration read the same resolved value so they can't drift. The
+  // `problem` helper's status union widens to the set actually used — with no
+  // override every value is 409, so the union stays `400 | 403 | 404 | 409 | 500`
+  // (byte-identical); an override adds its code.
+  const disallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
+  const uniquenessStatus = resolveErrorStatus("UniquenessConflict", ctx.structuralErrorStatuses);
+  const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses);
+  // The status literals this router's `problem()` helper is actually called
+  // with — the always-present base set plus each structural-conflict status
+  // whose arm is emitted (gated exactly as the arms below). With no override
+  // every conflict is 409, so the union stays `400 | 403 | 404 | 409 | 500`.
+  const emittedProblemStatuses = new Set<number>([400, 403, 404, 500, disallowedStatus]);
+  if ((agg.uniqueKeys?.length ?? 0) > 0) emittedProblemStatuses.add(uniquenessStatus);
+  if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg))
+    emittedProblemStatuses.add(concurrencyStatus);
+  const problemStatusUnion = [...emittedProblemStatuses].sort((a, b) => a - b).join(" | ");
   // Domain-error handler.  Order matters — ForbiddenError checked
   // before DomainError so 403 wins over 400 when a `requires`
   // clause throws; ExternHandlerError checked before the generic
@@ -738,7 +769,7 @@ export function buildRoutesFile(
   // .NET / Phoenix).  `instance` is the request path; `type` is `about:blank`
   // (no per-error type registry).  Shared shape across all error arms.
   lines.push(
-    `    const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: ${problemStatusUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
@@ -748,9 +779,9 @@ export function buildRoutesFile(
   lines.push(`    }`);
   lines.push(`    if (err instanceof DisallowedError) {`);
   lines.push(
-    `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: err.message, status: 409`)}`,
+    `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: err.message, status: ${disallowedStatus}`)}`,
   );
-  lines.push(`      return problem(409, "Disallowed", err.message);`);
+  lines.push(`      return problem(${disallowedStatus}, "Disallowed", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
@@ -778,10 +809,10 @@ export function buildRoutesFile(
       `    if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")) {`,
     );
     lines.push(
-      `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: 409`)}`,
+      `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: ${uniquenessStatus}`)}`,
     );
     lines.push(
-      `      return problem(409, "Conflict", \`A ${agg.name} with these values already exists.\`);`,
+      `      return problem(${uniquenessStatus}, "Conflict", \`A ${agg.name} with these values already exists.\`);`,
     );
     lines.push(`    }`);
   }
@@ -798,9 +829,9 @@ export function buildRoutesFile(
   if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg)) {
     lines.push(`    if (err instanceof ConcurrencyError) {`);
     lines.push(
-      `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: 409`)}`,
+      `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: ${concurrencyStatus}`)}`,
     );
-    lines.push(`      return problem(409, "Conflict", err.message);`);
+    lines.push(`      return problem(${concurrencyStatus}, "Conflict", err.message);`);
     lines.push(`    }`);
   }
   lines.push(`    if (err instanceof ExternHandlerError) {`);
@@ -960,10 +991,17 @@ function emitOperationRoute(
   );
   // A `when` state gate denies with 409 (DisallowedError → onError); a
   // versioned `update` can also 409 on a stale `If-Match` (ConcurrencyError →
-  // onError) — either reason documents the same status once.
-  if (op.when || isVersionedUpdate) {
+  // onError).  Each status resolves through the `httpStatus` mapper (M-T3.4a):
+  // 409 by default (both reasons collapse to one `409:` line, byte-identical),
+  // or a per-conflict override.
+  const opConflictStatuses = new Set<number>();
+  if (op.when)
+    opConflictStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
+  if (isVersionedUpdate)
+    opConflictStatuses.add(resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses));
+  for (const status of [...opConflictStatuses].sort((a, b) => a - b)) {
     out.push(
-      `      409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `      ${status}: { description: ${JSON.stringify(httpStatusText(status))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
   // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
@@ -1183,7 +1221,8 @@ function emitReturningOperationRoute(
   // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
   if (operationIsGuarded(op)) problemStatuses.add(403);
-  if (op.when) problemStatuses.add(409);
+  if (op.when)
+    problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
   for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);
