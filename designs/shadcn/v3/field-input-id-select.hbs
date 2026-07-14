@@ -11,7 +11,7 @@
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  {({{{hookVar}}}.data ?? []).map((__o) => (
+                  {({{{hookVar}}}.data?.items ?? []).map((__o) => (
                     <SelectItem key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>
                       {__o.{{displayField}} }
                     </SelectItem>

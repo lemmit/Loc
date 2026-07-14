@@ -15,7 +15,9 @@
 //      `WalkResult.idOptionsBindings`; renderMount in liveview-emit.ts
 //      iterates these and emits one
 //      `socket |> assign(:<x_snake>_options, (case <Ctx>.list_<x_snake>s() do
-//        {:ok, items} -> items; _ -> [] end) |> Enum.map(...))` per binding.
+//        {:ok, %{items: items}} -> items; {:ok, items} -> items; _ -> [] end)
+//        |> Enum.map(...))` per binding (the paged findAll returns the
+//        `%{items: …}` envelope; an abstract base stays a bare list).
 //   3. The option-list maps each record to the id-as-label shape
 //      `{to_string(r.id), r.id}` so the select stays functional (the right
 //      value flows through on submit).
@@ -92,7 +94,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
     // `list_<x>s()` tuple-returning fetch (case-unwrapped to the list), mapped
     // to `{label, id}` option tuples.
     expect(heex).toMatch(
-      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
+      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, %\{items: items\}\} -> items; \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
     );
   });
 
@@ -129,7 +131,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
     // Fallback {to_string(id), id} shape in the Enum.map over the vanilla
     // tuple-returning list fetch.
     expect(heex).toMatch(
-      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
+      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, %\{items: items\}\} -> items; \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
     );
   });
 

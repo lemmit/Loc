@@ -570,14 +570,17 @@ function renderMount(
     assigns.push(`      |> assign(:${snake(storeName)}, %${upperFirst(storeName)}{})`);
   }
   // Option-list loads for `X id` form fields.  The label is the record id
-  // (no `:display` calculation on the vanilla path).  The vanilla read
-  // returns `{:ok, list}`, so unwrap to a bare list before mapping.
+  // (no `:display` calculation on the vanilla path).  The auto-`findAll` is
+  // paged-by-default (M-T2.6), so `list_<agg>s()` returns the `{:ok, %{items:
+  // …}}` envelope for a concrete aggregate; an abstract polymorphic base
+  // stays unpaged (`{:ok, list}`).  Match the envelope first, then the bare
+  // list, so the option load unwraps to a plain list either way.
   for (const aggName of idOptionsBindings) {
     const ctxModule = contextModuleByAggName.get(aggName);
     if (!ctxModule) continue;
     const aggSnake = snake(aggName);
     const tupleFn = `fn r -> {to_string(r.id), r.id} end`;
-    const listCall = `(case ${ctxModule}.list_${aggSnake}s() do {:ok, items} -> items; _ -> [] end)`;
+    const listCall = `(case ${ctxModule}.list_${aggSnake}s() do {:ok, %{items: items}} -> items; {:ok, items} -> items; _ -> [] end)`;
     assigns.push(`      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`);
   }
   // @form assignment — one per CreateForm / WorkflowForm call in the page body.

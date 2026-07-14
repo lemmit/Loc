@@ -7,7 +7,7 @@
               <NativeSelect.Root data-testid="{{testId}}">
                 <NativeSelect.Field value={field.value as string ?? ""} onChange={(e) => field.onChange(e.target.value)}>
                   <option value="">— select —</option>
-                  {({{{hookVar}}}.data ?? []).map((__o) => (
+                  {({{{hookVar}}}.data?.items ?? []).map((__o) => (
                     <option key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o["{{displayField}}"]}</option>
                   ))}
                 </NativeSelect.Field>

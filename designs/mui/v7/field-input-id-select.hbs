@@ -5,7 +5,7 @@
             <FormControl fullWidth size="small" error={!!fieldState.error}>
               <InputLabel>{{label}}</InputLabel>
               <Select label="{{label}}" data-testid="{{testId}}" value={field.value as string ?? ""} onChange={(e) => field.onChange(e.target.value)}>
-                {({{{hookVar}}}.data ?? []).map((__o) => (
+                {({{{hookVar}}}.data?.items ?? []).map((__o) => (
                   <MenuItem key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o["{{displayField}}"]}</MenuItem>
                 ))}
               </Select>

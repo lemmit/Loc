@@ -1,5 +1,5 @@
 <div class="flex flex-col gap-2">
           <label class="loom-label" for="{{testId}}">{{label}}</label>
-          <select id="{{testId}}" class="loom-input" data-testid="{{testId}}" bind:value={form.values.{{path}} }><option value="" disabled>Select…</option>{#each ({{{hookVar}}}.data ?? []) as __o (__o.id)}<option value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o.{{displayField}} }</option>{/each}</select>
+          <select id="{{testId}}" class="loom-input" data-testid="{{testId}}" bind:value={form.values.{{path}} }><option value="" disabled>Select…</option>{#each ({{{hookVar}}}.data?.items ?? []) as __o (__o.id)}<option value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o.{{displayField}} }</option>{/each}</select>
           {#if form.errors["{{path}}"]}<p class="text-sm text-destructive">{form.errors["{{path}}"]}</p>{/if}
         </div>
