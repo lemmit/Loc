@@ -84,6 +84,14 @@ export interface JavaRenderContext {
    *  emitters from `collectJavaRegexLiterals`; absent ⇒ inline compile (the
    *  byte-identical default, kept for contexts that don't hoist). */
   regexFields?: ReadonlyMap<string, string>;
+  /** Explicit-handler `command`/`query` RECORD params (M-T5.10 handler-param
+   *  rewrite).  The Java `@Service handle(...)` FLATTENS a request record into
+   *  its fields (each becomes a flat domain param named `<field>`), so a
+   *  `cmd.<field>` member access on one of these params reads the flat param
+   *  directly (`cmd.code` → `code`) — the record's fields ARE the flat params.
+   *  Only the explicit-handler render context sets this; absent everywhere else
+   *  ⇒ member access renders through the normal accessor (byte-identical). */
+  recordParams?: ReadonlySet<string>;
 }
 
 /** The injected repository field a Java `@Service` references for an aggregate
@@ -324,7 +332,7 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   // Cross-package contexts (view binds) go through the accessor.
   id: (ctx) => (ctx.accessorProps ? `${ctx.thisName}.id()` : `${ctx.thisName}.id`),
   ref: renderRef,
-  member: renderMember,
+  member: (recv, e, ctx) => renderMember(recv, e, ctx),
   methodCall: renderMethodCall,
   call: renderCall,
   domainServiceCall(args, serviceRef) {
@@ -455,7 +463,19 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
   }
 }
 
-function renderMember(recv: string, e: MemberExpr): string {
+function renderMember(recv: string, e: MemberExpr, ctx: JavaRenderContext = DEFAULT): string {
+  // M-T5.10: `cmd.<field>` on a FLATTENED command/query record param reads the
+  // flat `handle(...)` parameter directly (`cmd.code` → `code`) — the record's
+  // fields ARE the flat domain params, so there is no `cmd` local to accessor
+  // through.  Param names render unescaped elsewhere (`renderRef` param arm), so
+  // this bare-name read stays consistent with the flat param declaration.
+  if (
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "param" &&
+    ctx.recordParams?.has(e.receiver.name)
+  ) {
+    return e.member;
+  }
   // Collections lower to `List<T>` (`.size()`); the DSL admits both
   // `.count` and `.length` on arrays.
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {

@@ -227,6 +227,91 @@ system Shop {
   deployable api { platform: java, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
 }
 `;
+// M-T5.10 handler-param rewrite: a scaffolded handler takes a single
+// `command`/`query` RECORD param.  On Java the `@Service handle(...)` FLATTENS
+// the record's fields (byte-identical to the flat-param form) and `cmd.<field>`
+// reads the flattened flat param; a read declares `<Agg>Response` but the
+// handler still returns the ENTITY (the controller projects at the boundary).
+const SCAFFOLD_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering with scaffoldHandlers {
+      valueobject Money { amount: decimal; currency: string }
+      aggregate Order {
+        code: string
+        status: string
+        total: Money
+        create(code: string) { code := code  status := "new"  total := Money { amount: 0, currency: "USD" } }
+        operation setNote(note: string) { status := note }
+        operation reprice(newTotal: Money) { total := newTotal }
+        operation cancel() { status := "cancelled" }
+        destroy { }
+      }
+      repository Orders for Order {
+        find byStatus(status: string): Order[] where this.status == status
+      }
+    }
+  }
+  api SalesApi with scaffoldApi(of: Sales)
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: java, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("java — scaffolded handlers consume command/query record params", () => {
+  it("flattens a command record into the handle() signature + body record and reads the flat field", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    // Create: the command record's fields flatten into the handle() params, and
+    // `cmd.<field>` reads them bare (no `cmd.code()` accessor).
+    const createH = fileEndingWith(m, "CreateOrderHandler.java");
+    expect(createH).toContain("public OrderId handle(String code, String status, Money total) {");
+    expect(createH).toContain("var o = Order.create(code, status, total);");
+    expect(createH).not.toContain("cmd.");
+    // Operation: the id stays a flat param, the op's params ride the record.
+    const setNoteH = fileEndingWith(m, "SetNoteOrderHandler.java");
+    expect(setNoteH).toContain("public void handle(OrderId orderId, String note) {");
+    expect(setNoteH).toContain("o.setNote(note);");
+    expect(setNoteH).not.toContain("cmd.");
+  });
+
+  it("a read declares <Agg>Response but the handler returns the entity", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    // getById: the internal handle() types on the entity (not OrderResponse).
+    const getH = fileEndingWith(m, "GetOrderHandler.java");
+    expect(getH).toContain("public Order handle(OrderId orderId) {");
+    expect(getH).toContain("return o;");
+    expect(getH).not.toContain("OrderResponse");
+    // find: a collection read types on List<Order>, returns the raw list.
+    const byStatusH = fileEndingWith(m, "ByStatusHandler.java");
+    expect(byStatusH).toContain("public List<Order> handle(String status) {");
+    expect(byStatusH).toContain("var r = ordersRepository.byStatus(status);");
+    expect(byStatusH).toContain("return r;");
+    expect(byStatusH).not.toContain("OrderResponse");
+  });
+
+  it("the controller reads the record's fields + projects the response at the boundary", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(SCAFFOLD_SRC),
+      "SalesApiRoutesController.java",
+    );
+    // Body records carry the flattened fields, byte-identical to the flat form.
+    expect(ctrl).toContain("record CreateOrderBody(String code, String status, Money total) {}");
+    expect(ctrl).toContain("@RequestBody CreateOrderBody body");
+    // Command call args read the flattened fields off the body record.
+    expect(ctrl).toContain(
+      "var result = createOrderHandler.handle(body.code(), body.status(), body.total());",
+    );
+    expect(ctrl).toContain("setNoteOrderHandler.handle(new OrderId(orderId), body.note());");
+    // getById projects the entity to its wire DTO at the boundary.
+    expect(ctrl).toContain("return ResponseEntity.ok(OrderResponse.from(result));");
+    // find projects EACH element of the collection.
+    expect(ctrl).toContain(
+      "return ResponseEntity.ok(result.stream().map(OrderResponse::from).toList());",
+    );
+  });
+});
+
 describe("java — extern commandHandler / queryHandler", () => {
   it("the @Service handler ctor-injects the port and delegates", async () => {
     const m = await generateSystemFiles(EXTERN_SRC);

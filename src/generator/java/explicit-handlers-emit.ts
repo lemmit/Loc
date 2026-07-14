@@ -47,6 +47,7 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
+import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
@@ -94,6 +95,37 @@ function reposUsed(h: Handler): string[] {
 }
 
 const baseRenderCtx: JavaRenderContext = { thisName: "this" };
+
+/** A handler's params FLATTENED for the `handle(...)` signature + request body
+ *  (M-T5.10 handler-param rewrite): a `command`/`query` RECORD param expands to
+ *  its request fields (each a flat domain param named `<field>`, byte-identical
+ *  to the pre-rewrite flat-param form); every other param (a path-bound id /
+ *  scalar / value object) passes through unchanged. */
+function flatHandlerParams(h: Handler, ctx: EnrichedBoundedContextIR): ParamIR[] {
+  const out: ParamIR[] = [];
+  for (const p of h.params) {
+    const rec = requestRecordFor(p.type, ctx);
+    if (rec) for (const f of rec.fields) out.push({ name: f.name, type: f.type });
+    else out.push({ name: p.name, type: p.type });
+  }
+  return out;
+}
+
+/** The record-param NAMES of a handler — the refs whose `.field` member access
+ *  reads the flattened flat param directly (`cmd.code` → `code`).  Feeds the
+ *  render context's `recordParams`, so the body renderer collapses the access. */
+function recordParamNames(h: Handler, ctx: EnrichedBoundedContextIR): ReadonlySet<string> {
+  return new Set(h.params.filter((p) => requestRecordFor(p.type, ctx)).map((p) => p.name));
+}
+
+/** A handler's render context — the base one for a flat-param handler (reused so
+ *  the output stays byte-identical), or a `recordParams`-carrying context when
+ *  the handler takes a `command`/`query` record (so `cmd.<field>` collapses to
+ *  the flattened flat param). */
+function handlerRenderCtx(h: Handler, ctx: EnrichedBoundedContextIR): JavaRenderContext {
+  const records = recordParamNames(h, ctx);
+  return records.size > 0 ? { thisName: "this", recordParams: records } : baseRenderCtx;
+}
 
 // --- Extern handler (bodyless) — port + scaffold-once impl bean -------------
 // An `extern` handler has no DSL body: the generated `<Name>Handler` @Service
@@ -228,28 +260,33 @@ function renderHandlerClass(
   const imports = new Set<string>();
 
   // Body — the shared workflow statement spine, rendered at 8-space indent
-  // (method-body depth), with a DEFAULT render context (param refs stay bare).
+  // (method-body depth).  The render context carries the handler's `command`/
+  // `query` record params (M-T5.10) so a `cmd.<field>` access collapses to the
+  // flattened flat param; a flat-param handler reuses the base context, so its
+  // output stays byte-identical.
+  const renderCtx = handlerRenderCtx(h, ctx);
   const bodyLines = renderWorkflowStmtChunks(
     h.statements,
-    javaWorkflowStmtTarget(
-      ctx,
-      imports,
-      baseRenderCtx,
-      undefined,
-      collectUnionFindLets(h.statements),
-    ),
+    javaWorkflowStmtTarget(ctx, imports, renderCtx, undefined, collectUnionFindLets(h.statements)),
     "        ",
   ).flat();
   const saveLines = h.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
   const returnLines: string[] = [];
   if (h.returnValue) {
     collectJavaExprImports(h.returnValue, imports);
-    returnLines.push(`        return ${renderJavaExpr(h.returnValue, baseRenderCtx)};`);
+    returnLines.push(`        return ${renderJavaExpr(h.returnValue, renderCtx)};`);
   }
 
-  const retType = h.returnType ? renderJavaType(h.returnType) : "void";
-  if (h.returnType) collectJavaTypeImports(h.returnType, imports);
-  const params = h.params
+  // A scaffolded read DECLARES a `<Agg>Response` return, but the handler body
+  // still produces the domain entity (the controller projects at the boundary),
+  // so the internal `handle(...)` signature types on the entity —
+  // `normalizeHandlerReturn` maps `OrderResponse`/`OrderResponse[]` back to
+  // `Order`/`Order[]` (an id / scalar / plain-entity / void return passes
+  // through unchanged, keeping the flat-param handlers byte-identical).
+  const internalRet = normalizeHandlerReturn(h.returnType, ctx);
+  const retType = internalRet ? renderJavaType(internalRet) : "void";
+  if (internalRet) collectJavaTypeImports(internalRet, imports);
+  const params = flatHandlerParams(h, ctx)
     .map((p) => {
       collectJavaTypeImports(p.type, imports);
       return `${renderJavaType(p.type)} ${p.name}`;
@@ -461,9 +498,14 @@ export function emitExplicitRouteController(
     // `@PathVariable`s; the rest collect into one `@RequestBody` record.  A bare
     // complex `@PathVariable Money` param would be unbindable — Spring can't
     // materialise a value object from a URL segment that isn't even in the path.
+    // A `command`/`query` record param FLATTENS into its request fields (the
+    // body record + call args carry the flat fields, byte-identical to the
+    // pre-rewrite flat-param form — M-T5.10); an extern handler keeps its raw
+    // params (its impl owns the signature).  Then split on the route `{token}`s.
     const pathNames = pathParamNames(r.path);
-    const pathParams = h.params.filter((p) => pathNames.has(p.name));
-    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+    const effParams = h.extern ? h.params : flatHandlerParams(h, ctx);
+    const pathParams = effParams.filter((p) => pathNames.has(p.name));
+    const bodyParams = effParams.filter((p) => !pathNames.has(p.name));
     const pathArg = new Map(pathParams.map((p) => [p.name, wireActionParam(p, imports)]));
 
     const actionParamParts = pathParams.map((p) => pathArg.get(p.name)!.actionParam);
@@ -479,13 +521,16 @@ export function emitExplicitRouteController(
       actionParamParts.push(`@RequestBody ${bodyRecName} body`);
     }
     const actionParams = actionParamParts.join(", ");
-    // Handler call args keep declared param order: path params coerce from the
-    // route token, body params read off `body.<name>()` (record accessor).
-    const callArgs = h.params
+    // Handler call args keep declared (flattened) param order: path params
+    // coerce from the route token, body params read off `body.<name>()` (record
+    // accessor).
+    const callArgs = effParams
       .map((p) => (pathNames.has(p.name) ? pathArg.get(p.name)!.callArg : `body.${p.name}()`))
       .join(", ");
-    // A query always returns; a command returns only with an explicit type.
-    const retType = qry ? qry.returnType : cmd?.returnType;
+    // A query always returns; a command returns only with an explicit type.  A
+    // scaffolded read declares `<Agg>Response` — normalise to the entity the
+    // handler actually returns so the boundary projection fires on it.
+    const retType = normalizeHandlerReturn(qry ? qry.returnType : cmd?.returnType, ctx);
     const annot = HTTP_ANNOT[r.method] ?? "GetMapping";
     const callLines = retType
       ? [
