@@ -332,10 +332,10 @@ jobs:
                 requires currentUser.role == "admin"
                 body: Heading { "Admin Console", level: 1 }
               }
-              # A gated ONE-CLICK action: the byId detail hosts `Action { p.activate }`,
-              # whose op `requires currentUser.role == "admin"` — the button is a
-              # native F# dispatch (POST /{id}/activate) hidden from non-admins via
-              # the decoded claims.  Proves the Action primitive + action-button gating.
+              // A gated ONE-CLICK action: the byId detail hosts Action { p.activate },
+              // whose op requires currentUser.role == "admin" — a native F# dispatch
+              // (POST /{id}/activate) hidden from non-admins via the decoded claims.
+              // Proves the Action primitive + action-button gating.
               page ProductDetail {
                 route: "/products/:id"
                 body: QueryView {
