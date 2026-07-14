@@ -22,6 +22,7 @@ import type {
   ContextMember,
   Create,
   Destroy,
+  EntityPartMember,
   Expression,
   FieldAccess,
   HandlerRef,
@@ -37,6 +38,8 @@ import type {
   ObjectLit,
   Operation,
   Parameter,
+  PayloadDecl,
+  PayloadKind,
   PostfixChain,
   PrimitiveType,
   Property,
@@ -48,7 +51,13 @@ import type {
   TypeRef,
   UnaryExpr,
 } from "../../language/generated/ast.js";
-import { isProperty, isStampDecl, isSubdomain } from "../../language/generated/ast.js";
+import {
+  isContainment,
+  isDerivedProp,
+  isProperty,
+  isStampDecl,
+  isSubdomain,
+} from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -69,6 +78,7 @@ import {
   mkObjectLit,
   mkOperation,
   mkParameter,
+  mkPayloadDecl,
   mkPostfixChain,
   mkPrimitiveType,
   mkProperty,
@@ -555,6 +565,140 @@ export function queryHandler(
   });
   setContainer(returnType, node, "returnType");
   return node as QueryHandler & ContextMember;
+}
+
+// ---------------------------------------------------------------------------
+// Contract-record factories — `payload` / `response` / `command` / `query`
+// PayloadDecl context members (M-T5.10, contract layer / payload-transport-
+// layer.md P1).  Each is a flat record (`kind=<keyword> name '{' fields '}'`)
+// the printer ejects verbatim, so `scaffoldHandlers` can splice a
+// source-visible API contract alongside its handlers.  A `PayloadDecl`'s
+// `$container` is `BoundedContext | Model`, so it splices as a context member
+// exactly like `commandHandler` / `queryHandler`.
+// ---------------------------------------------------------------------------
+
+/** Build a flat-record `PayloadDecl` of the given `kind` from a field list.
+ * The record form (no `variants`) — the P1 flat-field shape; the printer's
+ * `printPayloadDecl` renders it as `<kind> <Name> { <fields> }`. */
+function payloadDecl(
+  kind: PayloadKind,
+  name: string,
+  fields: Property[],
+): PayloadDecl & ContextMember {
+  const origin = currentOrigin();
+  const node: PayloadDecl = tag(
+    mkPayloadDecl({ $type: "PayloadDecl", kind, name, fields, variants: [] }),
+    origin,
+  );
+  fields.forEach((f, i) => {
+    setContainer(f, node, "fields", i);
+  });
+  return node as PayloadDecl & ContextMember;
+}
+
+/** A `payload <Name> { … }` record — the umbrella carrier kind. */
+export function payload(name: string, fields: Property[]): PayloadDecl & ContextMember {
+  return payloadDecl("payload", name, fields);
+}
+
+/** A `response <Name> { … }` record — an API read-projection contract
+ * (the `<Agg>Response` shape `scaffoldResponse` derives via `apiReadFields`). */
+export function response(name: string, fields: Property[]): PayloadDecl & ContextMember {
+  return payloadDecl("response", name, fields);
+}
+
+/** A `command <Name> { … }` record — a write-request contract (the
+ * create/operation input shape a `commandHandler` will later reference). */
+export function command(name: string, fields: Property[]): PayloadDecl & ContextMember {
+  return payloadDecl("command", name, fields);
+}
+
+/** A `query <Name> { … }` record — a read-request contract (the find /
+ * get-by-id parameter shape a `queryHandler` will later reference). */
+export function query(name: string, fields: Property[]): PayloadDecl & ContextMember {
+  return payloadDecl("query", name, fields);
+}
+
+/** Rebuild a source field / param / return `TypeRef` as a fresh, macro-tagged
+ * type.  The same factory-based reconstruction `scaffoldHandlers.cloneType`
+ * uses: a hand-rolled `mk*` ref never re-links and silently lowers to `string`,
+ * so a type of `Money` / `OrderStatus` / `X id` / `Order[]` must be rebuilt
+ * through the `primType` / `idRef` / `namedType` factories to keep its resolved
+ * type after splicing. */
+export function cloneTypeRef(t: TypeRef): TypeRef {
+  const opts = { array: !!t.array, optional: !!t.optional };
+  const b = t.base;
+  if (b.$type === "PrimitiveType") {
+    return primType(b.name as Parameters<typeof primType>[0], opts);
+  }
+  if (b.$type === "IdType") {
+    return idRef(b.target.$refText, opts);
+  }
+  return namedType((b as { target: { $refText: string } }).target.$refText, opts);
+}
+
+/** The AST twin of the IR wire-projection `forApiRead(wireShape)`
+ * (`src/ir/enrich/wire-projection.ts` + `wireFieldsForAggregate` in
+ * `enrichments.ts`): the ordered field list an aggregate's `<Agg>Response`
+ * read-projection carries.  Returns, IN wire order:
+ *
+ *   1. the aggregate's `Property` members whose `access` is NOT `internal`
+ *      and NOT `secret` (editable / immutable / managed / token stay) — the
+ *      `forApiRead` matrix.  Unlike `writableCreateFields`, the origin-tag and
+ *      stamp-target exclusions are NOT applied: apiRead keeps the macro-added
+ *      managed/token fields (`createdAt`, `version`), exactly as wire shape
+ *      does.  `tenantOwned`'s `dataKey` is `internal`, so the access filter
+ *      already drops it — no special carve-out.
+ *   2. one synthesized field per `Containment`, typed `<Part>Response` (the
+ *      sibling record `scaffoldResponse` emits for the same part), array/optional
+ *      matching the containment (`optional` only when single, never a collection).
+ *   3. one synthesized field per non-`inspect` `DerivedProp` (name + cloned type).
+ *
+ * NO `id` field is emitted (grammar-reserved as a `Property` name; the wire
+ * shape's synthetic `id` row has no source-record analogue).  Each returned
+ * field is a fresh `field(...)` node (not the aggregate's own `Property`, which
+ * `setContainer` would reparent) carrying name + type only — a response record
+ * is name+type, exactly what the wire shape is. */
+export function apiReadFields(agg: Aggregate): readonly Property[] {
+  return apiReadFieldsOf(agg.members ?? []);
+}
+
+/** The shared read-projection field walk for an aggregate OR an entity part
+ * (`apiReadFields` wraps it for aggregates; `scaffoldResponse` calls it directly
+ * on a part's members).  A part has no synthetic `id` in its response body
+ * either, so — like the aggregate case — no `id` field is emitted. */
+export function apiReadFieldsOf(
+  members: readonly (AggregateMember | EntityPartMember)[],
+): Property[] {
+  const out: Property[] = [];
+  // (a) declared properties minus internal / secret.
+  for (const m of members) {
+    if (!isProperty(m)) continue;
+    const access = (m as { access?: FieldAccess }).access;
+    if (access === "internal" || access === "secret") continue;
+    out.push(field(m.name, cloneTypeRef(m.type)));
+  }
+  // (b) containments → `<Part>Response` (the sibling record), array/optional
+  //     mirroring the wire shape's `containmentTypeFor` + optionality rule.
+  for (const m of members) {
+    if (!isContainment(m)) continue;
+    out.push(
+      field(
+        m.name,
+        namedType(`${m.partType.$refText}Response`, {
+          array: m.collection,
+          optional: !!m.optional && !m.collection,
+        }),
+      ),
+    );
+  }
+  // (c) derived getters minus `inspect` (the debug-string hook kept off the wire).
+  for (const m of members) {
+    if (!isDerivedProp(m)) continue;
+    if (m.name === "inspect") continue;
+    out.push(field(m.name, cloneTypeRef(m.type)));
+  }
+  return out;
 }
 
 /** An object literal expression: `{ field: <expr>, … }` (grammar `ObjectLit` /
