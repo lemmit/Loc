@@ -1,4 +1,4 @@
-import { forApiRead, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forApiRead, forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -125,10 +125,10 @@ export function renderDtoFiles(
     out.push(voRecord(vo, fields, "Response", pkg, basePkg));
   }
 
-  // --- create request (constructible aggregates; event-sourced ones are
-  // constructible through their `create` action's params) -------------------------
+  // --- create request (aggregates exposing a REST create; event-sourced ones
+  // via their `create` action's params) -------------------------
   const createInputs = forCreateInput(agg.fields);
-  if (agg.canonicalCreate != null || esCreateParams) {
+  if (emitsRestCreate(agg)) {
     const imports = new Set<string>();
     const components = (
       esCreateParams ??
@@ -183,7 +183,7 @@ export function renderDtoFiles(
   out.push(wireRecord(agg, `${agg.name}Response`, pkg, basePkg, entityImport));
 
   // --- create response (`{ id }`) ---------------------------------------------------
-  if (agg.canonicalCreate != null || esCreateParams) {
+  if (emitsRestCreate(agg)) {
     const idJava = javaValueTypeForId(agg.idValueType);
     const imports = new Set<string>();
     if (idJava === "UUID") imports.add("java.util.UUID");

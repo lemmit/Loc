@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -135,23 +135,22 @@ export function renderJavaService(
         `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
-  const createLines =
-    agg.canonicalCreate != null || ctx.esCreateParams
-      ? [
-          `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
-          ...createLets,
-          hasCreateValidator && !ctx.esCreateParams
-            ? `        ${agg.name}Validators.create(${createArgs});`
-            : null,
-          `        var aggregate = ${agg.name}.create(${createArgs});`,
-          `        repository.save(aggregate);`,
-          ...createAuditLines,
-          `        publishEvents(aggregate);`,
-          `        return aggregate.id();`,
-          `    }`,
-          ``,
-        ].filter((l): l is string => l !== null)
-      : [];
+  const createLines = emitsRestCreate(agg)
+    ? [
+        `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
+        ...createLets,
+        hasCreateValidator && !ctx.esCreateParams
+          ? `        ${agg.name}Validators.create(${createArgs});`
+          : null,
+        `        var aggregate = ${agg.name}.create(${createArgs});`,
+        `        repository.save(aggregate);`,
+        ...createAuditLines,
+        `        publishEvents(aggregate);`,
+        `        return aggregate.id();`,
+        `    }`,
+        ``,
+      ].filter((l): l is string => l !== null)
+    : [];
 
   // --- reads -------------------------------------------------------------------
   const readLines = [
