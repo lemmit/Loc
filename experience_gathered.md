@@ -2759,3 +2759,47 @@ CLASS guard, not another one-off.
   area is a SIBLING of the QueryView, so it renders on the detail route without
   data; the smoke navigates there, clicks the `<summary>`, and asserts the
   revealed input — real runtime proof the disclosure toggles. Same loop, §23–§40.
+## 45. Cross-frontend dynamic sub-forms — the field-array VM + a reference pack (2026-07-14)
+
+Array-of-value-object form fields (`items: LineItem[]`) were **silently dropped**
+by every frontend — the shared VM routed all arrays to a `field-input-array`
+template that's a disabled "(arrays not yet supported)" stub. The zod was already
+right (`z.array(LineItemSchema)`); only the *rendering* was missing. Building real
+dynamic rows CROSS-frontend, starting with a reference:
+
+- **Enrich the shared VM, keep the template name.** `prepareFormFieldVM` now
+  attaches `rowFields` (the element VO's sub-field VMs, BARE sub-paths so a
+  template splices the runtime index) + `arrayPascal` + `defaultRowJson` to the
+  SAME `field-input-array` VM. A pack that renders rows reads them; a pack that
+  doesn't ignores them and keeps the stub — so one shared change lights up
+  pack-by-pack with zero coordinated flag-day.
+
+- **RHF `useFieldArray` is a MODULE hoist, not a field concern.** The hook
+  (`const { fields, append, remove } = useFieldArray({ control, name })`) must sit
+  at component top, so it threads through `PreparedForm.fieldArrays` →
+  `FormStateBase` → the pack's `form-of-decls` template. The field template only
+  renders `{fields.map((f, index) => …register(\`items.${index}.sku\`)…)}`. An
+  object-array forces `useController` on (useFieldArray needs `control`).
+
+- **Numeric row sub-fields need `valueAsNumber`.** `qty: int` → `z.number().int()`
+  (NOT coerced), so a plain text register hands zod a string and fails. The row
+  register adds `{ valueAsNumber: true }` for numeric sub-fields (RHF coerces).
+
+- **Shared form code only touches the frontends that DON'T fork `renderCreateForm`.**
+  Vue/Angular/Feliz fork the create-form primitive, so they never hit the shared
+  `prepareFieldsAndImports` — verified Vue emitted no `useFieldArray`/RHF leak.
+  Svelte's `formRuntimeImports` seam skips the RHF import. So the shared change is
+  safe; only React consumes it. Whitespace-control the `{{#each fieldArrays}}` so
+  an EMPTY array leaves `form-of-decls` byte-identical (489 React tests unchanged).
+
+- **`noUnusedLocals: false` in the generated tsconfig** means a not-yet-rendering
+  pack (shadcn/mui/chakra get a forced `control` + `useFieldArray` import they
+  don't use until their stage) still `tsc`s clean — so the reference pack ships
+  without a flag-day. The unused-import only matters to biome-gen, which runs on
+  CI examples only (none has an object array yet) → no CI landmine until the
+  object-array example lands alongside the other packs.
+
+- **Verify with a real `tsc --noEmit`, not just the unit test.** The mantine
+  reference generate → `npm install` → `tsc` clean in `node:20`; a shadcn variant
+  (stub + unused import) also clean. The unit test pins the emitted rows; the
+  docker tsc pins that it actually compiles.

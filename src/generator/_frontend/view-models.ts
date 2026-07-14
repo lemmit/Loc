@@ -193,4 +193,24 @@ export interface FormFieldVM {
   /** Recursive children for value-object Fieldsets.  Renderer walks
    *  these, pre-renders each, joins into `innerHtml`. */
   children?: FormFieldVM[];
+  /** Set on a field-array (`X[]` of a value-object / entity part): the
+   *  element's sub-field VMs, keyed by their BARE sub-path (`sku`, not
+   *  `items.sku`) so a dynamic-row template can splice the runtime index
+   *  (`items.${index}.sku`).  Present only for object arrays — a scalar array
+   *  leaves it undefined (stub / comma-separated).  A pack template renders
+   *  `rowFields` as repeatable rows (React `useFieldArray`, Feliz MVU list …);
+   *  a pack that doesn't yet ignores it and keeps the disabled stub. */
+  rowFields?: FormFieldVM[];
+  /** Humanised singular label for one row (`Line item`) — the add-button text. */
+  elementLabel?: string;
+  /** Pascal-cased array name (`Items`) — for the hoisted `useFieldArray` var
+   *  names a dynamic-row template references (`appendItems` / `removeItems`). */
+  arrayPascal?: string;
+  /** JSON literal for a fresh appended row (`{ sku: "", qty: 0 }`) — the
+   *  argument to RHF `append(...)` in the Add button. */
+  defaultRowJson?: string;
+  /** Set on a numeric row sub-field so a dynamic-row register uses
+   *  `{ valueAsNumber: true }` (RHF coerces the string input to a number, so a
+   *  `z.number()` schema validates). */
+  valueAsNumber?: boolean;
 }

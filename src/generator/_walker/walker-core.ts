@@ -660,6 +660,13 @@ interface FormStateBase {
    *  `field-input-*` templates) — the shell splices these into the
    *  `<form>` body. */
   fieldHtmls: readonly string[];
+  /** Field-array (`X[]` of a value-object) fields — the module template hoists
+   *  one `useFieldArray` per entry (the dynamic-row field template renders the
+   *  repeatable rows against it).  Empty for forms with no object arrays. */
+  fieldArrays: readonly {
+    readonly name: string;
+    readonly pascal: string;
+  }[];
   /** Optional user-supplied `onSubmit:` lambda body.  When null,
    *  the shell uses the scaffold-equivalent default. */
   onSubmitJs: string | null;

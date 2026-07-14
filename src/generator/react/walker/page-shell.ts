@@ -610,7 +610,7 @@ function renderFormOfWiring(
   if (state.kind === "operation") {
     return renderFormOpWiring(state, pack, srcImportPrefix);
   }
-  const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
+  const { agg, idTargets, useController, defaultValuesTs, fieldArrays, onSubmitJs } = state;
   const tplCtx = {
     aggregateName: agg.name,
     aggregateNameCamel: lowerFirst(agg.name),
@@ -625,6 +625,7 @@ function renderFormOfWiring(
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
+    fieldArrays,
     useController,
     defaultValuesTs,
     hasDefaultOnSubmit: onSubmitJs === null,

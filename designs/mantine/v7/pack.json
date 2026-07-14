@@ -435,7 +435,11 @@
       {
         "from": "@mantine/core",
         "named": [
-          "TextInput"
+          "TextInput",
+          "Stack",
+          "Group",
+          "Button",
+          "Text"
         ]
       }
     ],

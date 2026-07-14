@@ -226,6 +226,7 @@ function emitFormOfOperationByName(
     defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
     fieldHtmls: prepared.fieldHtmls,
+    fieldArrays: prepared.fieldArrays,
     onSubmitJs: null,
     triggerLabel: humanize(op.name),
     triggerPrimary: true,
@@ -238,6 +239,19 @@ interface PreparedForm {
   useController: boolean;
   defaultValuesTs: string;
   fieldHtmls: string[];
+  /** Field-array (`X[]` of a value-object) fields the form hosts — the module
+   *  template hoists one `useFieldArray` per entry; a dynamic-row field template
+   *  renders the repeatable rows.  Empty for forms with no object arrays. */
+  fieldArrays: FieldArraySpec[];
+}
+
+/** One `useFieldArray`-backed field the module template must hoist. */
+interface FieldArraySpec {
+  /** RHF field name / array path (`items`). */
+  name: string;
+  /** Pascal-cased name for the hoisted vars (`Items` → `itemsFields` /
+   *  `appendItems` / `removeItems`). */
+  pascal: string;
 }
 
 /** Shared field preparation for all three Form variants.  Resolves the
@@ -290,7 +304,22 @@ function prepareFormFields(
   for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
-  return { idTargets, useController, defaultValuesTs, fieldHtmls };
+  // Field-arrays (`X[]` of a value-object) → one `useFieldArray` per field.  The
+  // hook needs `control`, so it forces the controller on; a `useFieldArray`
+  // import joins the RHF set (TSX targets only — the pack renders the rows).
+  const fieldArrays: FieldArraySpec[] = fieldVMs
+    .filter((vm) => vm.rowFields && vm.rowFields.length > 0)
+    .map((vm) => ({ name: vm.path, pascal: upperFirst(vm.path) }));
+  if (fieldArrays.length > 0 && !ctx.target.formRuntimeImports) {
+    addImport(ctx, "react-hook-form", "useFieldArray");
+  }
+  return {
+    idTargets,
+    useController: useController || fieldArrays.length > 0,
+    defaultValuesTs,
+    fieldHtmls,
+    fieldArrays,
+  };
 }
 
 /** Walk an optional `onSubmit:` lambda into the handler-body string,
@@ -453,6 +482,7 @@ function emitFormOfAggregate(
     defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
     fieldHtmls: prepared.fieldHtmls,
+    fieldArrays: prepared.fieldArrays,
     onSubmitJs,
   });
   const slug = snake(plural(agg.name));
@@ -519,6 +549,7 @@ function emitFormRuns(
     defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
     fieldHtmls: prepared.fieldHtmls,
+    fieldArrays: prepared.fieldArrays,
     onSubmitJs,
   });
   return renderFormOfPrimitive(ctx, call, depth, testidNamespace, prepared.fieldHtmls, onSubmitJs, {
@@ -602,6 +633,7 @@ function emitFormOfOperation(
     defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
     fieldHtmls: prepared.fieldHtmls,
+    fieldArrays: prepared.fieldArrays,
     onSubmitJs: null,
     // Defaults — the enclosing Modal overrides from its trigger.
     triggerLabel: humanize(op.name),
