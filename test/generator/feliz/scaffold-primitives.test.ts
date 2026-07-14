@@ -42,20 +42,24 @@ describe("feliz scaffold primitives", () => {
     expect(app).not.toContain("no renderer");
   });
 
-  it("emits the container/leaf primitives with their Feliz classes", async () => {
+  it("emits the container/leaf primitives with their daisyUI classes", async () => {
     const app = await appFs(SCAFFOLD);
-    expect(app).toContain('prop.className "loom-toolbar"'); // list page header
-    expect(app).toContain('prop.className "loom-breadcrumbs"'); // nav trail
-    expect(app).toContain('prop.className "loom-paper"'); // surface container
-    expect(app).toContain('prop.className "loom-skeleton"'); // loading branch
-    expect(app).toContain('prop.className "loom-alert"'); // error branch
-    expect(app).toContain('prop.className "loom-empty"'); // empty branch
-    expect(app).toContain('prop.className "loom-kv"'); // detail field row
+    expect(app).toContain('prop.className "flex flex-row items-center justify-between gap-2 py-2"'); // toolbar
+    expect(app).toContain('prop.className "breadcrumbs text-sm"'); // nav trail
+    expect(app).toContain(
+      'prop.className "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm"',
+    ); // paper surface
+    expect(app).toContain('prop.className "skeleton h-24 w-full"'); // loading branch
+    expect(app).toContain('prop.className "alert alert-error"'); // error branch
+    expect(app).toContain("text-base-content/70"); // empty branch (muted)
+    expect(app).toContain("sm:flex-row sm:gap-4"); // detail field row (kv)
   });
 
   it("emits the list Table with a header row + a yield! row map", async () => {
     const app = await appFs(SCAFFOLD);
-    expect(app).toContain('Html.table [ prop.className "loom-table"');
+    expect(app).toContain('Html.table [ prop.className "table table-zebra w-full"');
+    // The table sits in a bordered, scrollable surface.
+    expect(app).toContain('prop.className "overflow-x-auto rounded-box border border-base-300"');
     expect(app).toContain("Html.thead [ prop.children [ Html.tr [ prop.children [");
     // Rows iterate the loaded data via a yield! List.map (offside-safe).
     expect(app).toMatch(/yield! \w+ \|> List\.map \(fun \w+ ->/);
@@ -65,9 +69,13 @@ describe("feliz scaffold primitives", () => {
   it("emits IdLink cells + hash-route Anchors", async () => {
     const app = await appFs(SCAFFOLD);
     // The id column links to the row's detail page (Feliz.Router hash path).
-    expect(app).toMatch(/Html\.a \[ prop\.href \("#\/products\/" \+ \w+\.id\)/);
+    expect(app).toMatch(
+      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("#\/products\/" \+ \w+\.id\)/,
+    );
     // Breadcrumb anchors fold a literal route into a static hash href.
-    expect(app).toContain('Html.a [ prop.href "#/"; prop.text "Home" ]');
+    expect(app).toContain(
+      'Html.a [ prop.className "link link-primary"; prop.href "#/"; prop.text "Home" ]',
+    );
   });
 
   // Reachability — a scaffold system must PARSE + VALIDATE cleanly.

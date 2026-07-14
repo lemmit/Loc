@@ -68,7 +68,7 @@ describe("feliz Action(x.op)", () => {
     expect(app).toContain('Http.content (BodyContent.Text "{}")');
     // view: a plain dispatching button (ungated).
     expect(app).toContain(
-      'Html.button [ prop.onClick (fun _ -> dispatch (ActivateProduct id)); prop.text "Activate" ]',
+      'Html.button [ prop.className "btn btn-primary"; prop.onClick (fun _ -> dispatch (ActivateProduct id)); prop.text "Activate" ]',
     );
   });
 
@@ -80,7 +80,7 @@ describe("feliz Action(x.op)", () => {
     expect(app).toContain("    CurrentUser: CurrentUser option");
     // The button is wrapped in a one-line claims match; no session → hidden.
     expect(app).toContain(
-      '(match model.CurrentUser with Some currentUser when (currentUser.Role = "admin") -> Html.button [ prop.onClick (fun _ -> dispatch (ActivateProduct id)); prop.text "Activate" ] | _ -> Html.none)',
+      '(match model.CurrentUser with Some currentUser when (currentUser.Role = "admin") -> Html.button [ prop.className "btn btn-primary"; prop.onClick (fun _ -> dispatch (ActivateProduct id)); prop.text "Activate" ] | _ -> Html.none)',
     );
   });
 

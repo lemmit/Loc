@@ -84,7 +84,7 @@ describe("feliz delete mutations", () => {
   it("the DestroyForm renders a button that dispatches Delete<Agg> id", async () => {
     const app = await appFs(DELETE);
     expect(app).toContain(
-      'Html.button [ prop.onClick (fun _ -> dispatch (DeleteProduct id)); prop.text "Delete Product" ]',
+      'Html.button [ prop.className "btn btn-error"; prop.onClick (fun _ -> dispatch (DeleteProduct id)); prop.text "Delete Product" ]',
     );
     // No React/RHF sentinel leaked from the shared DestroyForm default path.
     expect(app).not.toContain("window.confirm");

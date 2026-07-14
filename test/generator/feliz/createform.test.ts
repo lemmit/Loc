@@ -106,15 +106,15 @@ describe("feliz create forms", () => {
     const app = await appFs(CREATE);
     // A `string` field → a plain text input.
     expect(app).toContain(
-      'Html.input [ prop.placeholder "name"; prop.value model.ProductForm.name; prop.onChange (fun (v: string) -> dispatch (SetProductFormName v)) ]',
+      'Html.input [ prop.className "input input-bordered w-full"; prop.placeholder "name"; prop.value model.ProductForm.name; prop.onChange (fun (v: string) -> dispatch (SetProductFormName v)) ]',
     );
     // A `money` field → a `type: number` input (browser-enforced numeric entry).
     expect(app).toContain(
-      'Html.input [ prop.type\'.number; prop.placeholder "price"; prop.value model.ProductForm.price; prop.onChange (fun (v: string) -> dispatch (SetProductFormPrice v)) ]',
+      'Html.input [ prop.className "input input-bordered w-full"; prop.type\'.number; prop.placeholder "price"; prop.value model.ProductForm.price; prop.onChange (fun (v: string) -> dispatch (SetProductFormPrice v)) ]',
     );
     // The submit is disabled until the form validates (both fields non-empty).
     expect(app).toContain(
-      'Html.button [ prop.disabled (not (Validation.productFormValid model.ProductForm)); prop.onClick (fun _ -> dispatch SubmitProductForm); prop.text "Create Product" ]',
+      'Html.button [ prop.className "btn btn-primary"; prop.disabled (not (Validation.productFormValid model.ProductForm)); prop.onClick (fun _ -> dispatch SubmitProductForm); prop.text "Create Product" ]',
     );
     // No React/RHF sentinel leaked from the shared CreateForm default path.
     expect(app).not.toContain("useForm");
@@ -156,7 +156,7 @@ describe("feliz create forms", () => {
       }
     `);
     expect(app).toContain(
-      'Html.input [ prop.type\'.checkbox; prop.isChecked (model.ProductForm.inStock = "true"); prop.onChange (fun (v: bool) -> dispatch (SetProductFormInStock (if v then "true" else "false"))) ]',
+      'Html.input [ prop.className "checkbox"; prop.type\'.checkbox; prop.isChecked (model.ProductForm.inStock = "true"); prop.onChange (fun (v: bool) -> dispatch (SetProductFormInStock (if v then "true" else "false"))) ]',
     );
     // The checkbox is EXCLUDED from validation — a bool is never "unfilled"
     // (unchecked = a legitimate false), so only the required text field guards.
@@ -205,7 +205,7 @@ describe("feliz create forms", () => {
     // The FK field renders a select over the target list, blank-first, labelled
     // by the target's `display` derived; the option value is the target `id`.
     expect(app).toContain(
-      'Html.select [ prop.value model.OrderForm.customer; prop.onChange (fun (v: string) -> dispatch (SetOrderFormCustomer v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions model.AllCustomers (fun x -> x.id) (fun x -> x.display)) ]',
+      'Html.select [ prop.className "select select-bordered w-full"; prop.value model.OrderForm.customer; prop.onChange (fun (v: string) -> dispatch (SetOrderFormCustomer v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions model.AllCustomers (fun x -> x.id) (fun x -> x.display)) ]',
     );
     // The `View.idOptions` helper is emitted.
     expect(app).toContain(
@@ -309,7 +309,7 @@ describe("feliz create forms", () => {
     `);
     // Required enum → a select of all values, NO blank option.
     expect(app).toContain(
-      'Html.select [ prop.value model.ProductForm.status; prop.onChange (fun (v: string) -> dispatch (SetProductFormStatus v)); prop.children [ Html.option [ prop.value "active"; prop.text "active" ]; Html.option [ prop.value "inactive"; prop.text "inactive" ]; Html.option [ prop.value "archived"; prop.text "archived" ] ] ]',
+      'Html.select [ prop.className "select select-bordered w-full"; prop.value model.ProductForm.status; prop.onChange (fun (v: string) -> dispatch (SetProductFormStatus v)); prop.children [ Html.option [ prop.value "active"; prop.text "active" ]; Html.option [ prop.value "inactive"; prop.text "inactive" ]; Html.option [ prop.value "archived"; prop.text "archived" ] ] ]',
     );
     // Required enum defaults to its FIRST value (select always has a selection).
     expect(app).toContain('status = "active"');
@@ -317,7 +317,7 @@ describe("feliz create forms", () => {
     expect(app).toContain("IsNullOrWhiteSpace form.status");
     // Optional enum → a LEADING blank option, starts "", encodes null, exempt.
     expect(app).toContain(
-      'Html.select [ prop.value model.ProductForm.tier; prop.onChange (fun (v: string) -> dispatch (SetProductFormTier v)); prop.children [ Html.option [ prop.value ""; prop.text "" ]; Html.option [ prop.value "free"; prop.text "free" ]; Html.option [ prop.value "pro"; prop.text "pro" ] ] ]',
+      'Html.select [ prop.className "select select-bordered w-full"; prop.value model.ProductForm.tier; prop.onChange (fun (v: string) -> dispatch (SetProductFormTier v)); prop.children [ Html.option [ prop.value ""; prop.text "" ]; Html.option [ prop.value "free"; prop.text "free" ]; Html.option [ prop.value "pro"; prop.text "pro" ] ] ]',
     );
     expect(app).toContain('tier = ""');
     expect(app).toContain(

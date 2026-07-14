@@ -1,11 +1,17 @@
-// Minimal PROCEDURAL Feliz design pack (fable-elmish-frontend.md §4).
+// PROCEDURAL Feliz design pack (fable-elmish-frontend.md §4).
 //
 // The Handlebars pack format emits markup STRINGS; Feliz "markup" is F# code
 // (`Html.div [ … ]`), so the spike chose procedural emission over templates.
 // This is a `LoadedPack` whose `render(name, ctx)` dispatches to per-primitive
-// F#-emitting functions instead of compiled templates.  It starts with the
-// handful of primitives the first example needs and grows example-by-example —
-// NOT all ~80.  A missing primitive returns a visible `(* … *)` comment.
+// F#-emitting functions instead of compiled templates.  A missing primitive
+// returns a visible `(* … *)` comment.
+//
+// The design system is daisyUI (a Tailwind component layer — pure CSS classes,
+// so Feliz just emits `prop.className "card"` etc.).  The classes here resolve
+// against the `styles.css` / `tailwind.config.js` the project ships (see
+// `index.ts`); daisyUI supplies `btn` / `card` / `table` / `badge` / `alert` /
+// `collapse` / … + the theme.  This matches the in-repo HEEx daisyUI pack, so
+// the aesthetic stays consistent across the Feliz and Phoenix frontends.
 
 import { lowerFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -40,19 +46,32 @@ function asChild(text: string | undefined): string {
   return `Html.text "${s}"`;
 }
 
-function primitiveStack(c: Ctx): string {
-  // An empty Stack/Group (e.g. a scaffold detail's operations area when the
-  // aggregate has no public operations) renders nothing — `Html.none`, not a
-  // dead empty `<div>`.
+/** A flex-container primitive (Stack = vertical, Group = horizontal) with a
+ *  daisyUI/Tailwind layout class.  Same offside-safe children handling either
+ *  way — only the flex direction differs.  An empty container (e.g. a scaffold
+ *  detail's operations area when the aggregate has no public operations) renders
+ *  nothing — `Html.none`, not a dead empty `<div>`. */
+function flexContainer(className: string, c: Ctx): string {
   if (!c.hasChildren) return "Html.none";
   // The walker joins children with `\n${indent}` — so the FIRST child carries
   // no leading indent while its siblings do.  F# lists are offside-sensitive:
   // every element must share a column, so prefix the first child with the same
   // `indent` the join used.  (Later multi-line children keep their own internal
-  // indentation, which is already self-consistent.)
+  // indentation, which is already self-consistent.)  `className` + `children`
+  // share the col-2 column, offside-consistent.
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
-  return `Html.div [\n  prop.children [\n${children}\n  ]\n]`;
+  return `Html.div [\n  prop.className "${className}";\n  prop.children [\n${children}\n  ]\n]`;
+}
+
+/** Stack — a vertical flow (daisyUI/Tailwind `flex flex-col gap-4`). */
+function primitiveStack(c: Ctx): string {
+  return flexContainer("flex flex-col gap-4", c);
+}
+
+/** Group — a horizontal row that wraps (`flex flex-row flex-wrap …`). */
+function primitiveGroup(c: Ctx): string {
+  return flexContainer("flex flex-row flex-wrap items-center gap-2", c);
 }
 
 /** A children-container primitive (Stack/Group/Paper/Toolbar/Breadcrumbs) with a
@@ -70,47 +89,61 @@ function containerEl(tag: string, className: string, c: Ctx): string {
   return `(Html.${tag} [ ${cls}; prop.children [\n${children}\n  ] ])`;
 }
 
-/** Paper — a surface container (Stack-shaped, with a class). */
+/** Paper — a surface container (a bordered, padded daisyUI `rounded-box`). */
 function primitivePaper(c: Ctx): string {
-  return containerEl("div", "loom-paper", c);
+  return containerEl("div", "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm", c);
 }
 
-/** Toolbar — a page-header row (space-between container). */
+/** Toolbar — a page-header row (space-between flex container). */
 function primitiveToolbar(c: Ctx): string {
-  return containerEl("div", "loom-toolbar", c);
+  return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c);
 }
 
-/** Breadcrumbs — a nav trail container. */
+/** Breadcrumbs — a nav trail (daisyUI `breadcrumbs`). */
 function primitiveBreadcrumbs(c: Ctx): string {
-  return containerEl("nav", "loom-breadcrumbs", c);
+  return containerEl("nav", "breadcrumbs text-sm", c);
 }
 
-/** Alert(message, color?, title?) — an error/info callout.  `message` arrives
- *  as raw (unwrapped, escaped) text; an optional bold title precedes it. */
+/** daisyUI alert variant from a Loom `color:` (default `red` → `alert-error`). */
+function alertVariant(color: string): string {
+  switch (color) {
+    case "yellow":
+      return "alert-warning";
+    case "green":
+      return "alert-success";
+    case "blue":
+      return "alert-info";
+    default:
+      return "alert-error";
+  }
+}
+
+/** Alert(message, color?, title?) — a daisyUI callout.  `message` arrives as raw
+ *  (unwrapped, escaped) text; an optional bold title precedes it. */
 function primitiveAlert(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle) kids.push(`Html.strong [ Html.text "${String(c.title ?? "")}" ]`);
   kids.push(asChild(String(c.message ?? "")));
-  return `Html.div [ prop.className "loom-alert"; prop.children [ ${kids.join("; ")} ] ]`;
+  const variant = alertVariant(String(c.color ?? "red"));
+  return `Html.div [ prop.className "alert ${variant}"; prop.role "alert"; prop.children [ ${kids.join("; ")} ] ]`;
 }
 
-/** Empty("No results") — a centred empty-state placeholder. */
+/** Empty("No results") — a centred, muted empty-state placeholder. */
 function primitiveEmpty(c: Ctx): string {
-  return `Html.div [ prop.className "loom-empty"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
+  return `Html.div [ prop.className "flex min-h-40 flex-col items-center justify-center gap-2 text-center text-base-content/70"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
 }
 
-/** Skeleton — a loading placeholder (a plain styled block; count/height ignored
- *  in v1). */
+/** Skeleton — a loading placeholder (daisyUI `skeleton`; count/height v1-fixed). */
 function primitiveSkeleton(_c: Ctx): string {
-  return `Html.div [ prop.className "loom-skeleton" ]`;
+  return `Html.div [ prop.className "skeleton h-24 w-full" ]`;
 }
 
 /** KeyValueRow(label, value) — a detail-page field row (label + value cell).
  *  `label` is raw text; `childJsx` is an already-walked value element. */
 function primitiveKeyValueRow(c: Ctx): string {
-  const label = `Html.dt [ Html.text "${String(c.label ?? "")}" ]`;
-  const value = `Html.dd [ prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
-  return `Html.div [ prop.className "loom-kv"; prop.children [ ${label}; ${value} ] ]`;
+  const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
+  const value = `Html.dd [ prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  return `Html.div [ prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
 /** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
@@ -123,7 +156,7 @@ function primitiveAnchor(c: Ctx): string {
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
   const href = lit ? `"#${lit[1]}"` : `("#" + ${to})`;
-  return `Html.a [ prop.href ${href}; prop.text "${label}" ]`;
+  return `Html.a [ prop.className "link link-primary"; prop.href ${href}; prop.text "${label}" ]`;
 }
 
 /** Table(rows:, ...Column(header, accessor)) — the list-page data table.  Rows
@@ -146,7 +179,11 @@ function primitiveTable(c: Ctx): string {
     `      yield! ${rowsExpr} |> List.map (fun ${rowVar} ->\n` +
     `        Html.tr [ prop.children [ ${bodyCells} ] ])\n` +
     `    ] ]`;
-  return `Html.table [ prop.className "loom-table"; prop.children [ ${head}; ${body} ] ]`;
+  // daisyUI `table table-zebra`, wrapped in a bordered, horizontally-scrollable
+  // surface so wide tables stay contained.  Paren-wrapped against sibling
+  // absorption (§24) since the wrapper is now the returned element.
+  const table = `Html.table [ prop.className "table table-zebra w-full"; prop.children [ ${head}; ${body} ] ]`;
+  return `(Html.div [ prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
 }
 
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
@@ -154,7 +191,7 @@ function primitiveTable(c: Ctx): string {
 function primitiveIdLink(c: Ctx): string {
   const idExpr = String(c.idExpr ?? '""');
   const prefix = String(c.pathPrefix ?? "/");
-  return `Html.a [ prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
+  return `Html.a [ prop.className "link link-primary"; prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
 }
 
 /** Modal(trigger, form) — SUPERSEDED for Feliz by `felizTarget.renderModal`
@@ -163,13 +200,23 @@ function primitiveIdLink(c: Ctx): string {
  *  renders just the labelled trigger. */
 function primitiveModal(c: Ctx): string {
   const label = String(c.label ?? "Action");
-  return `Html.button [ prop.className "loom-modal-trigger"; prop.text "${label}" ]`;
+  return `Html.button [ prop.className "btn btn-sm"; prop.text "${label}" ]`;
 }
 
+/** Heading — an `<hN>` whose weight/size scales with the level (daisyUI/Tailwind
+ *  type ramp: h1 the page title, tapering to a plain bold sub-heading). */
 function primitiveHeading(c: Ctx): string {
   const level = Number(c.level ?? 2);
   const tag = level >= 1 && level <= 6 ? `h${level}` : "h2";
-  return `Html.${tag} [ ${asChild(String(c.text ?? ""))} ]`;
+  const cls =
+    level <= 1
+      ? "text-3xl font-bold"
+      : level === 2
+        ? "text-2xl font-semibold"
+        : level === 3
+          ? "text-xl font-semibold"
+          : "text-lg font-semibold";
+  return `Html.${tag} [ prop.className "${cls}"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
 }
 
 function primitiveText(c: Ctx): string {
@@ -177,12 +224,19 @@ function primitiveText(c: Ctx): string {
 }
 
 function primitiveCard(c: Ctx): string {
-  // Card("title", content) — an optional heading + a single content element.
+  // Card("title", content) — a daisyUI card: an optional `card-title` heading +
+  // a single content element, both inside the `card-body`.
   const kids: string[] = [];
-  if (c.hasTitle) kids.push(`Html.h3 [ ${asChild(String(c.titleText ?? ""))} ]`);
+  if (c.hasTitle)
+    kids.push(
+      `Html.h3 [ prop.className "card-title"; prop.children [ ${asChild(String(c.titleText ?? ""))} ] ]`,
+    );
   if (c.hasContent) kids.push(String(c.contentJsx ?? ""));
-  const children = kids.length > 0 ? `; prop.children [ ${kids.join("; ")} ]` : "";
-  return `Html.div [ prop.className "loom-card"${children} ]`;
+  const body =
+    kids.length > 0
+      ? `; prop.children [ Html.div [ prop.className "card-body"; prop.children [ ${kids.join("; ")} ] ] ]`
+      : "";
+  return `Html.div [ prop.className "card bg-base-100 shadow"${body} ]`;
 }
 
 function primitiveBadge(c: Ctx): string {
@@ -191,19 +245,20 @@ function primitiveBadge(c: Ctx): string {
     label.startsWith("Html.") || label.startsWith("(")
       ? `prop.children [ ${label} ]`
       : `prop.text "${label}"`;
-  return `Html.span [ prop.className "loom-badge"; ${inner} ]`;
+  return `Html.span [ prop.className "badge badge-neutral"; ${inner} ]`;
 }
 
 function primitiveDivider(_c: Ctx): string {
-  return "Html.hr []";
+  return `Html.div [ prop.className "divider" ]`;
 }
 
 function primitiveButton(c: Ctx): string {
   // A Feliz element list is EITHER all children (ReactElement) OR all props
   // (IReactProperty) — never mixed.  A button carries an onClick prop, so the
   // label goes through a prop too: `prop.text` for a plain string, or
-  // `prop.children [ … ]` when the label is an already-rendered element.
-  const props: string[] = [];
+  // `prop.children [ … ]` when the label is an already-rendered element.  The
+  // daisyUI `btn btn-primary` class makes it a real design-system button.
+  const props: string[] = [`prop.className "btn btn-primary"`];
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
   const label = String(c.label ?? "").trim();
   if (label.startsWith("Html.") || label.startsWith("(")) {
@@ -242,7 +297,7 @@ function primitiveQueryView(c: Ctx): string {
 const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-stack": primitiveStack,
   "primitive-query-view": primitiveQueryView,
-  "primitive-group": primitiveStack,
+  "primitive-group": primitiveGroup,
   "primitive-heading": primitiveHeading,
   "primitive-text": primitiveText,
   "primitive-button": primitiveButton,

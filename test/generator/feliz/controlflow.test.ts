@@ -32,7 +32,9 @@ describe("feliz control-flow seams", () => {
         deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
       }
     `);
-    expect(app).toContain('(if model.Active then Html.div [ prop.className "loom-card"');
+    expect(app).toContain(
+      '(if model.Active then Html.div [ prop.className "card bg-base-100 shadow"',
+    );
     // Single line — no newline between `then`/`else` and their branches.
     const cond = app.split("\n").find((l) => l.includes("if model.Active then"))!;
     expect(cond).toContain("else Html.div");
