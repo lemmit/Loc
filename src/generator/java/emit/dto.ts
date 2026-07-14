@@ -5,6 +5,7 @@ import type {
   EnrichedEntityPartIR,
   FieldIR,
   ParamIR,
+  PayloadIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
@@ -78,6 +79,10 @@ export function renderDtoFiles(
   /** Event-sourced create-input override: the `create` action's params
    *  (the command shape) replace the field-derived create inputs. */
   esCreateParams?: readonly ParamIR[],
+  /** M-T5.10: the context's declared payload records.  When a
+   *  `response <Agg>Response` is present it drives the aggregate response DTO
+   *  (read-path replacement for the `wireShape` derivation). */
+  payloads: readonly PayloadIR[] = [],
 ): DtoFile[] {
   const out: DtoFile[] = [];
   const entityImport = entityPkg !== pkg ? `import ${entityPkg}.${agg.name};` : undefined;
@@ -180,7 +185,19 @@ export function renderDtoFiles(
   }
 
   // --- aggregate response ----------------------------------------------------------
-  out.push(wireRecord(agg, `${agg.name}Response`, pkg, basePkg, entityImport));
+  const declaredRootResponse = payloads.find(
+    (p) => p.kind === "response" && p.name === `${agg.name}Response`,
+  );
+  out.push(
+    wireRecord(
+      agg,
+      `${agg.name}Response`,
+      pkg,
+      basePkg,
+      entityImport,
+      declaredRootResponse ? { payload: declaredRootResponse, payloads } : undefined,
+    ),
+  );
 
   // --- create response (`{ id }`) ---------------------------------------------------
   if (emitsRestCreate(agg)) {
@@ -249,15 +266,40 @@ function wireRecord(
   pkg: string,
   basePkg: string,
   entityImport?: string,
+  /** M-T5.10: when present, the declared `response <Agg>Response` record drives
+   *  the DTO's field selection + order + component types instead of `wireShape`.
+   *  The `from(<domain>)` mapper is still reconstructed from the domain (a
+   *  containment field is already `<Part>Response`, so its mapper peels the
+   *  `Response` name to `<Part>Response::from` — never `<Part>ResponseResponse`).
+   *  Byte-identical to the `wireShape` path for a scaffolded record. */
+  declared?: { payload: PayloadIR; payloads: readonly PayloadIR[] },
 ): DtoFile {
-  const shape = forApiRead(entity.wireShape ?? []);
   const imports = new Set<string>();
-  const components = shape.map((w) => {
-    const t = wireFieldType(w);
-    collectWireImports(t, imports);
-    return `${wireJavaType(t, "Response")} ${w.name}`;
-  });
-  const args = shape.map((w) => domainToWire(wireFieldType(w), `value.${accessor(w)}`));
+  const components: string[] = [];
+  const args: string[] = [];
+  if (declared) {
+    // The record omits `id` (grammar-reserved) — re-prepend it exactly as the
+    // wireShape id row derives, so the leading component/mapper match.
+    const idW = forApiRead(entity.wireShape ?? []).find((w) => w.source === "id");
+    if (idW) {
+      const t = wireFieldType(idW);
+      collectWireImports(t, imports);
+      components.push(`${wireJavaType(t, "Response")} ${idW.name}`);
+      args.push(domainToWire(t, `value.${accessor(idW)}`));
+    }
+    for (const f of declared.payload.fields) {
+      components.push(`${payloadFieldJavaType(f, declared.payloads, imports)} ${f.name}`);
+      args.push(payloadFieldToWire(f, declared.payloads));
+    }
+  } else {
+    const shape = forApiRead(entity.wireShape ?? []);
+    for (const w of shape) {
+      const t = wireFieldType(w);
+      collectWireImports(t, imports);
+      components.push(`${wireJavaType(t, "Response")} ${w.name}`);
+      args.push(domainToWire(t, `value.${accessor(w)}`));
+    }
+  }
   // Co-located provenance (provenance.md): each provenanced field appends a
   // trailing `<field>Provenance` component carrying the current lineage, so any
   // GET surfaces it inline (the field's own value still emits above).  Parts
@@ -286,6 +328,54 @@ function wireFieldType(w: WireField): TypeIR {
     return w.type;
   }
   return eff(w.type, w.optional);
+}
+
+/** True iff `name` is a declared `response` payload in the context — a
+ *  containment field's already-wire type, which must not be re-suffixed. */
+function isResponsePayloadName(payloads: readonly PayloadIR[], name: string): boolean {
+  return payloads.some((p) => p.kind === "response" && p.name === name);
+}
+
+/** Java component type for a field of a DECLARED `response` record.  A
+ *  value-object / scalar / enum field carries its DOMAIN type, so `wireJavaType`
+ *  maps it exactly as the wireShape path does; a CONTAINMENT field is ALREADY
+ *  the wire name (`lines: LineResponse[]` — context scope can't reference a raw
+ *  entity part, so PR1 rewrote it to the sibling `<Part>Response` record, which
+ *  lowers to an `entity` whose name is a declared `response`).  That name is
+ *  rendered DIRECTLY (peel + re-wrap `List<...>`); running it through
+ *  `wireJavaType` would append a second `Response` (`LineResponseResponse`). */
+function payloadFieldJavaType(
+  f: FieldIR,
+  payloads: readonly PayloadIR[],
+  imports: Set<string>,
+): string {
+  const t = eff(f.type, f.optional);
+  const base = t.kind === "array" ? t.element : t;
+  if (base.kind === "entity" && isResponsePayloadName(payloads, base.name)) {
+    if (t.kind === "array") {
+      imports.add("java.util.List");
+      return `List<${base.name}>`;
+    }
+    return base.name;
+  }
+  collectWireImports(t, imports);
+  return wireJavaType(t, "Response");
+}
+
+/** The `from(<domain>)` mapper argument for a DECLARED `response` field.  A
+ *  scalar / VO field maps via `domainToWire` on its (domain) type; a CONTAINMENT
+ *  field's declared type is the `<Part>Response` name, so the mapper is built
+ *  from the domain accessor with that name's `::from` directly — NOT via
+ *  `domainToWire`, which would double-suffix (`LineResponseResponse::from`). */
+function payloadFieldToWire(f: FieldIR, payloads: readonly PayloadIR[]): string {
+  const t = eff(f.type, f.optional);
+  const accessorExpr = `value.${f.name}()`;
+  const base = t.kind === "array" ? t.element : t;
+  if (base.kind === "entity" && isResponsePayloadName(payloads, base.name)) {
+    if (t.kind === "array") return `${accessorExpr}.stream().map(${base.name}::from).toList()`;
+    return `${accessorExpr} == null ? null : ${base.name}.from(${accessorExpr})`;
+  }
+  return domainToWire(t, accessorExpr);
 }
 
 /** `<Vo>Response` records for a set of value objects, emitted into `pkg` (so a
