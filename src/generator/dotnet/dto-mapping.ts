@@ -1,5 +1,4 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -411,12 +410,13 @@ export function projectEntityArgs(
    *  params, so that one call site sets `unionVariant` to suppress them. */
   opts?: { unionVariant?: boolean },
 ): string {
-  // `entity.wireShape` is populated by `enrichLoomModel` and exposed via
-  // the `Enriched...` brands threaded through `PlatformSurface.emitProject`.
+  // `wireFieldsFor` recomputes the wire shape from the enriched node's fields.
   // Each wire field maps to one positional argument on `new <Ent>Response(...)`,
-  // in the same order the Hono / React Zod schemas emit.  `forApiRead`
-  // strips `internal` and `secret` fields.
-  const fields = forApiRead(wireShapeFor(entity));
+  // in the same order the Hono / React Zod schemas emit.  A runtime projection
+  // reads DOMAIN getters by name, so it stays keyed to the domain-derived wire
+  // shape (not a hand-diverged contract record).  `forApiRead` strips `internal`
+  // and `secret` fields.
+  const fields = forApiRead(wireFieldsFor(entity));
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -531,8 +531,10 @@ function responseRecordParams(
   ctx: EnrichedBoundedContextIR,
 ): string {
   // Drop `internal` / `secret` fields so the C# record's param list
-  // matches what `projectEntityExpr` projects.
-  const fields = forApiRead(wireShapeFor(ent));
+  // matches what `projectEntityExpr` projects.  (The declared-`<Agg>Response`-
+  // record path is `responseParamsFromPayload`; this is the part / no-record
+  // fallback, which recomputes via `wireFieldsFor`.)
+  const fields = forApiRead(wireFieldsFor(ent));
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {

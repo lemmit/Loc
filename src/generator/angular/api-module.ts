@@ -1,5 +1,4 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
 import { unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
@@ -137,7 +136,7 @@ export function buildAngularApiModule(
   // renderer hoists.  Plain aggregates' modules stay delete-free.
   const hasDelete = !!agg.canonicalDestroy;
 
-  const fields = forApiRead(wireShapeFor(agg));
+  const fields = forApiRead(wireFieldsFor(agg));
   const createFields = createInputFields(agg);
 
   // Public domain operations → a `POST /<tag>/:id/<op>` mutation each

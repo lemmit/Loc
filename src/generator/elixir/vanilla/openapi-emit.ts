@@ -1,8 +1,8 @@
-import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
 import {
   createInputFields,
   forApiRead,
   wireCreateDefault,
+  wireFieldsFor,
 } from "../../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
@@ -965,7 +965,7 @@ function renderPartResponseSchema(part: EnrichedEntityPartIR, webModule: string)
   // response schema so it matches what the Phoenix LiveView controller
   // actually serves — same contract the .NET / Hono / React backends
   // follow.
-  const wireFields = forApiRead(wireShapeFor(part));
+  const wireFields = forApiRead(wireFieldsFor(part));
   return renderSchemaModule(
     moduleName,
     `${part.name}Response`,
@@ -990,7 +990,7 @@ function renderAggregateResponseSchema(
   const declared = payloads.find((p) => p.kind === "response" && p.name === `${agg.name}Response`);
   const props = declared
     ? declaredResponseProps(agg, declared, payloads)
-    : wireFieldsToProps(forApiRead(wireShapeFor(agg)));
+    : wireFieldsToProps(forApiRead(wireFieldsFor(agg)));
   return renderSchemaModule(moduleName, `${agg.name}Response`, props, `${webModule}.Api.Schemas`);
 }
 
@@ -1022,7 +1022,7 @@ function declaredResponseProps(
   payloads: readonly PayloadIR[],
 ): Array<{ name: string; type: TypeIR; optional: boolean }> {
   const props: Array<{ name: string; type: TypeIR; optional: boolean }> = [];
-  const idField = forApiRead(wireShapeFor(agg)).find((w) => w.source === "id");
+  const idField = forApiRead(wireFieldsFor(agg)).find((w) => w.source === "id");
   if (idField) props.push({ name: idField.name, type: idField.type, optional: idField.optional });
   for (const f of payload.fields) {
     props.push({
