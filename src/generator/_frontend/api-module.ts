@@ -70,11 +70,16 @@ export function buildApiModule(
   // re-renders and passes fresh args every render — no wrapper needed).
   const isVueQuery = queryPackage === "@tanstack/vue-query";
   const hasParamFind = !!repo?.finds.some((f) => f.name !== "all");
+  // A paged `all` (paged-by-default findAll, M-T2.6) also takes a
+  // `MaybeRefOrGetter` query in the Vue hook, so it needs the same vue imports
+  // even when there's no other parameterised find.
+  const hasVueGetterHook =
+    hasParamFind || !!repo?.finds.some((f) => f.name === "all" && pagedReturn(f.returnType));
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery, useMutation, useQueryClient } from "${queryPackage}";`);
-  if (isVueQuery && hasParamFind) {
+  if (isVueQuery && hasVueGetterHook) {
     lines.push(`import { type MaybeRefOrGetter, computed, toValue } from "vue";`);
   }
   lines.push(`import { api } from "./client";`);
