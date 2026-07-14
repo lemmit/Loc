@@ -1,13 +1,16 @@
 # M-T5.18 — Soft-keyword sprawl: dedup, gate, and root-cause reduction (design)
 
-> **Status: Track B LANDED; Tracks A + C design-in-progress.**
+> **Status: Tracks B + A LANDED; Track C design-in-progress.**
 > Track B shipped as `test/language/parsing/keyword-identifier-completeness.test.ts`
 > (+ `keyword-identifier-coverage.snapshot.json`) — the gate found and drove one
 > real fix on first run (`parent` was declarable as a field but unreadable —
-> absent from `NameRefIdent` + `MemberName`; both now admit it). Design detail on
-> the final gate shape is in §"Track B" below (snapshot-freeze + domain-word
-> floor, not the originally-sketched single allowlist — the six lists diverge too
-> much for one clean allowlist).
+> absent from `NameRefIdent` + `MemberName`; both now admit it). Track A then
+> factored the shared `CommonSoftKeywords` core into the three value rules
+> (`Property.name`/`LooseName`/`NameRefIdent`), with the gate confirming **zero
+> snapshot drift** — i.e. byte-identical acceptance. Design detail on the final
+> gate shape is in §"Track B" below (snapshot-freeze + domain-word floor, not the
+> originally-sketched single allowlist — the six lists diverge too much for one
+> clean allowlist); the as-built Track A scope is the note under §"Track A".
 > Sources: language-surface review 2026-07-14 (finding #5 "soft-keyword sprawl");
 > `src/language/ddd.langium` (`LooseName`, `NameRefIdent`, `MemberName`,
 > `Property.name`, `StateFieldName`, `LValueIdent`); sibling missions M-T5.9
@@ -63,7 +66,20 @@ mechanism, gate it in CI, and stop minting keywords that don't need to exist.
 
 ## Direction — three tracks
 
-### Track A — collapse the six lists to `ID | CommonSoftKeywords | <extras>`
+### Track A — collapse the value rules to `ID | CommonSoftKeywords | <extras>`
+
+> **LANDED (scoped to the three value rules).** Measured reality: only **5**
+> keywords are soft in all six positions, so a single all-six core is worthless —
+> but **62** are shared across the three "value" positions (`Property.name` /
+> `LooseName` / `NameRefIdent`), which are the largest lists and the bulk of the
+> sprawl. So `CommonSoftKeywords` (the 62) is factored into those three
+> (byte-identical: `62+34`, `62+25`, `62+1` reproduce the original `96`/`87`/`63`
+> memberships). `MemberName` / `StateFieldName` / `LValueIdent` are smaller and
+> diverge (their shared core with the value rules is tiny), so they stay as-is
+> rather than be widened. The keyword-identifier gate confirmed **zero snapshot
+> drift** — proof the refactor changed how acceptance is expressed, not what is
+> accepted. A new payload/storage/tenancy-style defensive keyword now goes in one
+> place (`CommonSoftKeywords`) instead of three.
 
 Define one datatype rule holding the keywords that are soft **everywhere** (the
 purely-defensive ones — payload family, storage/dataSource keys, page-metadata,

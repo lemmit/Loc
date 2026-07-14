@@ -1579,82 +1579,9 @@ FieldAccess returns string:
 // the `FieldAccess` slot below.  See `LooseName` and `NameRefIdent`
 // for the same admission in parameter / expression positions.
 Property:
-    name=(ID | 'money' | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
-        // Page-metadata + favicon keywords — soft in property position.
-        | 'description' | 'ogImage' | 'canonical' | 'favicon'
-        // Storage / connection-source soft keywords — soft in property
-        // position so user-declared fields named `env`, `service`, etc.
-        // (`event BuildPromoted { … env: string … }`) still parse.
-        | 'instance' | 'connection' | 'service' | 'env' | 'literal'
-        // DataSource clause keys — soft in property position so
-        // user-declared fields named `kind`, `schema`, `every`, etc.
-        // (`entity AccountTransaction { kind: string }`) still parse.
-        | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
-        | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-        | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
-        // Payload-family keywords — soft in property position so pre-existing
-        // fields named `payload`, `error`, `query`, etc. (e.g.
-        // `event Foo { payload: string }`) keep parsing.  They act as hard
-        // keywords only at `ContextMember` position, where `PayloadDecl`
-        // (`kind=PayloadKind name=ID '{'`) begins.
-        | 'payload' | 'command' | 'query' | 'response' | 'error'
-        // Generic-carrier keywords — soft in property position so a
-        // pre-existing field named `paged` / `envelope` / `option` / `or`
-        // keeps parsing.  Hard only in the `GenericCtor` postfix-type slot /
-        // the `or` union separator.
-        | 'paged' | 'envelope' | 'option' | 'or'
-        // Retrieval keywords — soft in property position so user-declared
-        // fields named `sort` / `loads` / `asc` / `desc` / `retrieval` keep
-        // parsing.  Hard only inside the `Retrieval` slots.
-        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
-        // `by` / `handle` soft in property position so fields named `by`
-        // (`event Bumped { by: int }`) / `handle` (`engineer { handle: string }`)
-        // keep parsing — hard only in the reactor clause / workflow handle member.
-        | 'by' | 'handle'
-        // `action` soft in property position so audit-shaped fields
-        // (`AuditEntry { action: string }`) keep parsing — hard only in the
-        // `ActionType` type position.
-        | 'action'
-        // `state` / `title` / `body` soft in property position so common domain
-        // fields by those names (`state: Status`, `title: string`, `body: string`)
-        // parse — they are hard keywords only in the page DSL (`state { … }`
-        // block, page `title:` / `body:` metadata) and the storage-kind enum,
-        // none of which begins an aggregate / VO / event member.  All three are
-        // already in `LooseName`; this mirrors them for the `Property.name`
-        // dispatch (which can't reuse `LooseName` wholesale because that set
-        // includes member-starter keywords like `contains`).
-        | 'state' | 'title' | 'body'
-        // `parent` is hard only in the Requirement hierarchy clause
-        // (`requirement R parent R0`); soft in property position so the
-        // canonical self-referential field `parent: Self id?` (and any
-        // domain field named `parent`) parses.
-        | 'parent'
-        // `store` is hard only as the leading keyword of the `Store` UI member
-        // (`store Cart { … }`); soft in property position so a pre-existing
-        // domain field named `store` (`Receipt { store: string }`) keeps
-        // parsing.
-        | 'store'
-        // `await` is hard only as the match-subject marker
-        // (`match await op() { … }`); soft in property position so a domain
-        // field named `await` parses.
-        | 'await'
-        // Tenancy keywords — soft in property position so a pre-existing field
-        // named `tenancy` / `crossTenant` keeps parsing.  Hard only in the
-        // `TenancyDecl` head / `Aggregate` header flag slot.
-        | 'tenancy' | 'crossTenant'
-        // Capability source-surface keywords — soft in property position so an
-        // aggregate / VO / event field named `filter` / `stamp` / `implements`
-        // parses (already soft in `StateFieldName` / `MemberName` /
-        // `NameRefIdent`).  Hard only at aggregate / context member position
-        // (`FilterDecl` / `StampDecl` / `ImplementsDecl`).
-        | 'filter' | 'stamp' | 'implements'
-        // Policy verb keyword admitted in property position so a
-        // field named `read` / `write` parses.
-        | 'write'
-        // Schema-evolution keyword — soft in property position so a
-        // field named `migration` parses.  Hard only at the top-level
-        // `Migration` block head.
-        | 'migration')
+    name=(ID | CommonSoftKeywords
+        // Property-only (soft here but not in every value position):
+        | 'await')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1762,6 +1689,27 @@ Apply:
 Parameter:
     name=LooseName ':' type=TypeRef;
 
+// The soft keywords admitted as ordinary identifiers in EVERY "value"
+// position: a field name (`Property.name`), a parameter / object-field /
+// call-arg name (`LooseName`), and a bare name-ref in expression position
+// (`NameRefIdent`).  These are the purely-defensive keywords (payload family,
+// storage / dataSource keys, page-metadata, tenancy, retrieval, capability,
+// generic carriers, …) that carry structural meaning ONLY at their own
+// declaration site and must never steal a domain identifier.  Factored here
+// (M-T5.18 Track A) so a new such keyword is admitted ONCE instead of threaded
+// into three rules by hand; `keyword-identifier-completeness.test.ts` proves
+// the factoring is byte-identical, and a keyword with a HARD position in one of
+// the three rules stays a per-rule extra, NOT here.
+CommonSoftKeywords returns string:
+      'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection'
+      | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
+      | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
+      | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'migration' | 'money'
+      | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
+      | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
+      | 'secret' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix'
+      | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
+
 // LooseName — admissible identifiers in name positions that need to
 // accept Loom keywords as ordinary names.  Used by `Parameter.name`
 // (so `id` works as a route-param name on pages — `page Detail(id:
@@ -1774,120 +1722,13 @@ Parameter:
 // remains `NameRefIdent`.  Validators enforce semantic constraints
 // (e.g. only specific names are valid for menu metadata).
 LooseName returns string:
-    ID
-    // `of` is a hard keyword only in the `criterion <Name>(...) of <T>`
-    // rule.  Admit it as a soft keyword everywhere LooseName is used so
-    // the page-metamodel arg name `of` keeps parsing — `CreateForm(of: Order)`,
-    // `CreateForm { of: x }` — and pre-existing files that named a field `of`
-    // are unaffected (mirrors the `money` / field-access soft-keyword
-    // treatment).
-    | 'of'
-    | 'id' | 'permissions' | 'contains'
-    | 'ui' | 'page' | 'component' | 'store' | 'state' | 'menu'
-    | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
-    | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-    | 'design' | 'targets'
-    | 'bind' | 'api'
-    // `migration` is hard only at the top-level `Migration` block head;
-    // soft everywhere LooseName is used.
-    | 'migration'
-    // `await` is hard only as the `match await op()` subject marker;
-    // soft everywhere else so a field / param named `await` keeps parsing.
-    | 'await'
-    // `by` is a hard keyword only in the `on(...) by <expr>` reactor clause;
-    // admit it as a soft keyword in field / parameter / object-field /
-    // emit-field name position so pre-existing identifiers named `by` (e.g.
-    // `event Bumped { by: int }`) keep parsing.
-    | 'by'
-    // `handle` is a hard keyword only as the `handle name(...) { }` workflow
-    // member; admit it as a soft keyword in identifier positions so
-    // pre-existing fields/params named `handle` keep parsing.
-    | 'handle'
-    // `cache` is a hard keyword as a `DataSourceKind`; admit it as soft so a
-    // field / theme key named `cache` parses.
-    | 'cache'
-    // `money` is a soft keyword — the only places it acts as a
-    // hard keyword are `PrimitiveType` (`amount: money`) and
-    // `MoneyLit` (`money("10.50")`).  Admitting it here lets
-    // pre-existing .ddd files keep using `money` as an ordinary
-    // identifier in field / parameter / property positions.
-    | 'money'
-    // Field-access modifier keywords (`FieldAccess` rule) are likewise
-    // soft.  They only act as hard keywords in the optional `access`
-    // slot of `Property`; everywhere else (parameter names, field
-    // names, property bindings) they're admitted as identifiers.
-    | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
-    // Page-metadata + favicon keywords.  Admitted as soft so
-    // user code can still name fields `description`, `ogImage`,
-    // `canonical`, `favicon`.
-    | 'description' | 'ogImage' | 'canonical' | 'favicon'
-    // Storage / dataSource clause + connection-source keywords admitted
-    // as soft so user code can still name a field `env`, `service`,
-    // `instance`, `connection`, or `literal`.
-    | 'instance' | 'connection' | 'service' | 'env' | 'literal'
-    // DataSource clause keys admitted as soft so user code can
-    // still use `kind`, `schema`, `every`, etc. as parameter / property
-    // / loose-name positions.  `cache` is already admitted above
-    // (storage roles), `for` is a hard keyword.
-    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
-    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
-    // Api-body keyword admitted as soft so user code can still name a field
-    // `urlStyle`.  (`resource` is already soft-admitted just above.)
-    | 'urlStyle'
-    // Payload-family keywords admitted as soft in loose-name positions; hard
-    // only at `ContextMember` (`PayloadDecl`).
-    | 'payload' | 'command' | 'query' | 'response' | 'error'
-    // Generic-carrier keywords admitted as soft in loose-name positions; hard
-    // only in the `GenericCtor` postfix-type slot.
-    | 'paged' | 'envelope' | 'option'
-    // Anonymous type-union separator admitted as soft so user code can still
-    // name a field / parameter `or`; hard only between `TypeAtom`s in a
-    // `TypeRef`.
-    | 'or'
-    // The platform-block axis keywords admitted as soft so user code can still
-    // name a field `persistence`, etc.  `transactional` is the
-    // storage-isolation flag keyword (`transactional?='transactional'`) —
-    // admit it here so it parses as a `LooseName` value too.
-    | 'persistence' | 'directoryLayout' | 'transactional'
-    // Retrieval keywords admitted as soft so user code can still name a field
-    // `retrieval` / `sort` / `loads` / `asc` / `desc`.  Hard only inside the
-    // `Retrieval` rule's slots.
-    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
-    // `action` admitted as soft so user code can still name a field / arg
-    // `action`; hard only in the `ActionType` type position.
-    | 'action'
-    // `ignoring` is a soft keyword — hard only in the `IgnoringClause`
-    // filter-bypass tail on a read (find / view / inline `Repo.findAll`).
-    // Admit it here so user code can still name a field / parameter `ignoring`.
-    | 'ignoring'
-    // Capability source-surface keywords (`FilterDecl` / `StampDecl` /
-    // `ImplementsDecl`) are hard only at aggregate / context member position;
-    // admit them here so a field / parameter / call-arg named `filter` /
-    // `stamp` / `implements` parses (matches their admission in
-    // `StateFieldName` / `MemberName` / `NameRefIdent`).
-    | 'filter' | 'stamp' | 'implements'
-    // Tenancy keywords admitted as soft so user code can still name a field /
-    // parameter `tenancy` / `crossTenant`.  `tenancy` is hard only at the head
-    // of the `TenancyDecl` SystemMember; `crossTenant` only in the `Aggregate`
-    // header flag slot.
-    | 'tenancy' | 'crossTenant'
-    // `parent` is hard only in the `Requirement` hierarchy clause
-    // (`requirement R parent R0`); admit it here so it parses as a call-arg /
-    // object-literal field name — e.g. the tenant-registry signup factory
-    // `Organization.create({ name: nm, parent: par })` setting the immutable
-    // self-FK the `tenantRegistry` capability provides.  Already soft in
-    // `Property.name`; this mirrors it for `LooseName`.
-    | 'parent'
-    // Policy-block keywords admitted as soft so user code can still name a
-    // field / parameter / arg `policy` / `allow` / `local` / `deep` /
-    // `global`.  `policy` is hard only at the head of the `PolicyDecl`
-    // ContextMember; `allow` / the three `ReadLevel` words only inside a
-    // `policy {}` block's read rules.  `read` / `write` (the policy verb) are
-    // soft only in the optional verb slot of a `PolicyReadRule`; admit them
-    // here so user code can still name a field / parameter / arg `read` /
-    // `write`.
-    | 'policy' | 'allow' | 'local' | 'deep' | 'global' | 'write';
+    ID | CommonSoftKeywords
+    // LooseName-only (soft here but not in every value position):
+    | 'aggregates' | 'allow' | 'api' | 'await' | 'bind' | 'cache' | 'component' | 'contains'
+    | 'contexts' | 'deep' | 'design' | 'directoryLayout' | 'framework' | 'global' | 'id' | 'ignoring'
+    | 'link' | 'local' | 'menu' | 'modules' | 'of' | 'page' | 'permissions' | 'persistence'
+    | 'policy' | 'route' | 'section' | 'static' | 'targets' | 'transactional' | 'ui' | 'urlStyle'
+    | 'views' | 'workflows';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
@@ -2496,105 +2337,12 @@ NameRef:
     name=NameRefIdent;
 
 NameRefIdent returns string:
-    // `ui` is admissible as a NameRef so e2e test bodies can reference
-    // the magic `ui` identifier (`ui.products.create(...)`) rooted at
-    // a react/static deployable's page-object surface.  The `ui { ... }`
-    // SystemMember declaration keeps the keyword form because the
-    // surrounding `system { ... }` context disambiguates.
-    //
-    // `permissions` is admissible for the analogous reason —
-    // `currentUser.permissions.contains(x)` in expression bodies.
-    //
-    // `api` is admissible so e2e test bodies can use the existing
-    // `api.<aggregate>.<verb>(...)` magic-identifier form even
-    // though `api` is now a system-level keyword (Api declaration).
-    // `money` admitted so pre-existing field names like `money:
-    // int` can still be referenced in expression position without
-    // colliding with the `MoneyLit` `money("...")` form.  MoneyLit comes
-    // before NameRef in PrimaryExpr, so the parser picks the literal form
-    // whenever `(` follows and falls back to NameRef otherwise.
-    // Every soft keyword that LooseName admits is also admissible as a bare
-    // NameRef in expression position.  This lets a BuilderCall's
-    // bare-positional entry (`Card { title, Slot {} }`) parse when the entry
-    // happens to be a NameRef whose token is a soft keyword — without this, the
-    // parser commits to the named-slot alternative (`name=LooseName ':'`) and
-    // fails on the missing `:`.
-    //
-    // Field-access modifier keywords (`FieldAccess` rule) are admitted
-    // here so `let s = secret`, `currentUser.token`, etc. keep working
-    // even though `secret`/`token`/etc. are reserved in the access slot
-    // of a `Property` declaration.  Same soft-keyword treatment `money`
-    // gets above.
-    //
-    // `id` is intentionally excluded: it's the magic identifier handled by
-    // IdRef and would create an ambiguity with IdRef inside PrimaryExpr.
-    ID | 'permissions' | 'ui' | 'api' | 'money' | 'migration'
-       // Lifecycle keywords admitted as bare NameRefs so an expression
-       // can use one as the receiver of a member access — e.g. the
-       // generated-hook handle in a page lambda
-       // (`onSubmit: v => create.mutateAsync(v)`).  They only act as
-       // hard keywords at aggregate-member position (`Create`/`Destroy`).
-       | 'create' | 'destroy'
-       | 'contains' | 'page' | 'component' | 'store' | 'state' | 'menu'
-       | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-       | 'design' | 'targets' | 'bind'
-       // `by` admitted as a bare NameRef so expressions can read a field
-       // named `by` (e.g. `emit Bumped { by: by }`).  Hard only in the
-       // `on(...) by <expr>` reactor clause.
-       | 'by'
-       | 'handle'
-       // `cache` is a hard keyword as a `DataSourceKind`; admit it as soft so a
-       // field / theme key named `cache` parses.
-    | 'cache'
-       | 'filter' | 'stamp' | 'implements'
-       // Policy verb keyword — soft in NameRef so an expression can
-       // read a field named `read` / `write`.
-       | 'write'
-       | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
-       // Page-metadata + favicon keywords admitted as NameRef
-       // so expressions can read a field named `description`,
-       // `ogImage`, etc. (e.g. `description != null` in a derived
-       // property).
-       | 'description' | 'ogImage' | 'canonical' | 'favicon'
-       // Storage / connection-source soft keywords — see LooseName for
-       // the rationale.  Admitted here so expressions can read a field
-       // named `env`, `service`, etc.
-       | 'instance' | 'connection' | 'service' | 'env' | 'literal'
-       // DataSource clause keys — admitted as bare NameRefs so
-       // expression bodies can reference a state/property field named
-       // `kind` (`Field { kind + ":", bind: v }` in walker tests).
-       | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
-       | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-       | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config' | 'resource' | 'dataSources'
-       | 'urlStyle'
-       // Payload-family keywords admitted as bare NameRefs so expressions can
-       // read a field named `payload`, `error`, `query`, etc.  Hard only at
-       // `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords admitted as bare NameRefs so expressions can
-       // read a field named `paged` / `envelope` / `option` / `or`.  Hard only
-       // in the `GenericCtor` postfix-type slot / the `or` union separator.
-       | 'paged' | 'envelope' | 'option' | 'or'
-       // Retrieval keywords admitted as bare NameRefs so an expression can read
-       // a field named `retrieval` / `sort` / `loads` / `asc` / `desc`.  Hard
-       // only inside the `Retrieval` rule's slots.
-       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
-       // `action` admitted as a bare NameRef (`ActionType` is the only hard
-       // position).
-       | 'action'
-       // `ignoring` admitted as a bare NameRef so an expression can read a
-       // field named `ignoring`.  Hard only in the `IgnoringClause` read tail.
-       | 'ignoring'
-       // Tenancy keywords admitted as bare NameRefs so an expression can read a
-       // field named `tenancy` / `crossTenant`.  Hard only in the
-       // `TenancyDecl` head / `Aggregate` header flag slot.
-       | 'tenancy' | 'crossTenant'
-       // `parent` as a bare NameRef so an expression can read a field named
-       // `parent` (`invariant parent != null`, `derived isRoot: bool = parent == null`).
-       // Hard only in the `Requirement` hierarchy clause.  Without this a `parent`
-       // field could be declared but never read.
-       | 'parent';
+    ID | CommonSoftKeywords
+    // NameRefIdent-only (soft here but not in every value position):
+    | 'aggregates' | 'api' | 'bind' | 'cache' | 'component' | 'contains' | 'contexts' | 'create'
+    | 'design' | 'destroy' | 'framework' | 'ignoring' | 'link' | 'menu' | 'modules' | 'page'
+    | 'permissions' | 'route' | 'section' | 'static' | 'targets' | 'ui' | 'urlStyle' | 'views'
+    | 'workflows';
 
 // ---------------------------------------------------------------------------
 // Terminals
