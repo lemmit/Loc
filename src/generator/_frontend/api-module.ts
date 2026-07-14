@@ -1,5 +1,9 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { createInputFields, emitsRestCreate, forApiRead } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  emitsRestCreate,
+  forApiRead,
+  wireFieldsFor,
+} from "../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -533,13 +537,13 @@ function emitResponseSchema(
   const lines: string[] = [];
   const name = `${ent.name}Response`;
   lines.push(`export const ${name} = z.object({`);
-  // Single canonical walk — populated by `enrichLoomModel` (see
-  // src/ir/enrich/enrichments.ts).  Backends + frontend all read the same
-  // field list, so Zod schemas line up field-for-field with what
-  // the wire actually carries.  `forApiRead` strips `internal` and
-  // `secret` fields so the React response schema matches what the
+  // Single canonical walk — `wireFieldsFor` recomputes the wire shape from the
+  // enriched node's fields (the scaffold-time helper in wire-projection.ts).
+  // Backends + frontend all read the same field list, so Zod schemas line up
+  // field-for-field with what the wire actually carries.  `forApiRead` strips
+  // `internal` and `secret` fields so the response schema matches what the
   // .NET and Hono backends actually serve.
-  const fields = forApiRead(wireShapeFor(ent));
+  const fields = forApiRead(wireFieldsFor(ent));
   void ctx;
   void isAgg;
   for (const wf of fields) {

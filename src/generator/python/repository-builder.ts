@@ -1,5 +1,4 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../ir/stdlib/generics.js";
 import {
   type AssociationIR,
@@ -1426,7 +1425,7 @@ function wireProjection(
   varExpr: string,
   ctx: EnrichedBoundedContextIR,
 ): string[] {
-  const fields = forApiRead(wireShapeFor(ent));
+  const fields = forApiRead(wireFieldsFor(ent));
   const pairs: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {

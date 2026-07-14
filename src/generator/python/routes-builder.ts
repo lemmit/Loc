@@ -1,5 +1,9 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { emitsRestCreate, forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
+import {
+  emitsRestCreate,
+  forApiRead,
+  forCreateInput,
+  wireFieldsFor,
+} from "../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -327,7 +331,7 @@ function responseModel(
   // a containment field is already the sibling `<Part>Response` name and is
   // rendered directly to avoid a double `Response` suffix.
   if (declared) {
-    const idWf = forApiRead(wireShapeFor(ent)).find((wf) => wf.source === "id");
+    const idWf = forApiRead(wireFieldsFor(ent)).find((wf) => wf.source === "id");
     return lines(
       `class ${name}Response(BaseModel):`,
       idWf ? `    ${idWf.name}: ${responsePyType(idWf.type, ctx)}` : [],
@@ -343,7 +347,7 @@ function responseModel(
       "",
     );
   }
-  const fields = forApiRead(wireShapeFor(ent));
+  const fields = forApiRead(wireFieldsFor(ent));
   return lines(
     `class ${name}Response(BaseModel):`,
     fields.map((wf) => {

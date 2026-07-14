@@ -4,8 +4,7 @@
 // mirrors the .NET <Agg>Response record so the parity check sees
 // identical specs across backends.
 
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
@@ -28,14 +27,15 @@ function wireProjectionEntity(
   varExpr: string,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  // Single canonical walk — see `agg.wireShape` (populated by
-  // src/ir/enrich/enrichments.ts).  This serializer feeds repo.toWire();
-  // its output's keys must line up with the route's response Zod
-  // schema and the .NET DTO.  `forApiRead` strips `internal` and
-  // `secret` fields so the wire output matches the response schema's
-  // field set.  Enriched brand flows in via
-  // `PlatformSurface.emitProject(contexts: EnrichedBoundedContextIR[])`.
-  const fields = forApiRead(wireShapeFor(ent));
+  // Single canonical walk — `wireFieldsFor` recomputes the wire shape from the
+  // enriched node's fields (the scaffold-time helper in wire-projection.ts).
+  // This serializer feeds repo.toWire(); its output's keys must line up with
+  // the route's response Zod schema and the .NET DTO.  A runtime serializer
+  // projects DOMAIN getters by name, so it stays keyed to the domain-derived
+  // wire shape (not a hand-diverged contract record, whose fields need not have
+  // getters).  `forApiRead` strips `internal` and `secret` fields so the wire
+  // output matches the response schema's field set.
+  const fields = forApiRead(wireFieldsFor(ent));
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
