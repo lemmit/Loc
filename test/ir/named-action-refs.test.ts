@@ -258,7 +258,7 @@ describe("loom.missing-effect-marker (async-actions-and-effects.md Stage 2b)", (
             repository Orders for Order {}
           }
         }
-        api CApi from S { httpStatus Failed 422 }
+        api CApi from S { httpStatus Failed -> 422 }
         ui Web {
           api C: CApi
           page P {

@@ -29,8 +29,8 @@ const STDLIB_ERROR_STATUS: Readonly<Record<string, number>> = {
   // backend used to hardcode a literal 409 at the runtime site AND declare it
   // independently in OpenAPI (so the two could drift and a user couldn't remap
   // them). They are now blessed stdlib names defaulting to 409, so their status
-  // flows through the SAME `httpStatus <Error> <Code>` override path as user
-  // errors — `httpStatus UniquenessConflict 422` retargets both the runtime
+  // flows through the SAME `httpStatus <Error> -> <Code>` override path as user
+  // errors — `httpStatus UniquenessConflict -> 422` retargets both the runtime
   // response and the OpenAPI declaration. Absent an override, the resolved value
   // is 409 → byte-identical output.
   UniquenessConflict: 409, // a `unique (...)` invariant tripped (PG 23505)

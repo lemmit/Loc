@@ -724,7 +724,7 @@ export function buildRoutesFile(
 
   // Structural-conflict statuses resolved through the `httpStatus` mapper
   // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
-  // api's `httpStatus <Conflict> <Code>` override. Both the runtime arm and the
+  // api's `httpStatus <Conflict> -> <Code>` override. Both the runtime arm and the
   // OpenAPI declaration read the same resolved value so they can't drift. The
   // `problem` helper's status union widens to the set actually used — with no
   // override every value is 409, so the union stays `400 | 403 | 404 | 409 | 500`
@@ -1188,7 +1188,7 @@ function httpStatusText(status: number): string {
     404: "Not Found",
     409: "Conflict",
     422: "Unprocessable Entity",
-    // Codes a `httpStatus <StructuralConflict> <Code>` override may retarget a
+    // Codes a `httpStatus <StructuralConflict> -> <Code>` override may retarget a
     // conflict to (M-T3.4a) — so the OpenAPI `description` stays a real reason
     // phrase, not a generic fallback.
     423: "Locked",

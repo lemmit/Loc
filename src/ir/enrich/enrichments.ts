@@ -171,7 +171,7 @@ function enrichSystem(
       urlStyleBySubdomain.set(a.sourceModule, a.urlStyle);
   }
   // Merge each subdomain's per-error HTTP status overrides from every api that
-  // surfaces it (`httpStatus <Error> <Code>`).  First-declared api wins on a
+  // surfaces it (`httpStatus <Error> -> <Code>`).  First-declared api wins on a
   // conflicting code for the same error (mirrors urlStyle).  Consumed by the
   // route translator as `ctx.errorStatusOverrides` (exception-less.md A1).
   const errorStatusesBySubdomain = new Map<string, Record<string, number>>();

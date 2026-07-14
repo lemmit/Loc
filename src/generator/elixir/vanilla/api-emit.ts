@@ -405,7 +405,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
   // while the OpenAPI already declared 409 (a runtime/spec drift + cross-backend
   // divergence — every other backend serves 409).  Reconcile by rescuing that
   // ConstraintError and serving the resolved `ReferencedInUse` status (409 by
-  // default, or the `httpStatus ReferencedInUse <Code>` override).  A non-FK
+  // default, or the `httpStatus ReferencedInUse -> <Code>` override).  A non-FK
   // constraint can't fire on a delete, so any other type reraises (keeps its
   // 500).  Mirrors the Hono 23503 → 409 arm.
   const referencedInUseStatus = resolveErrorStatus("ReferencedInUse", ctx.structuralErrorStatuses);

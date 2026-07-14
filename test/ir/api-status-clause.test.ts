@@ -31,7 +31,9 @@ const SYS = (apiBody: string) => `
 
 describe("api httpStatus clause — surface + lowering", () => {
   it("parses `httpStatus <Error> <Code>` and lowers it onto ApiIR.errorStatuses", async () => {
-    const { model } = await parseString(SYS("{ httpStatus OutOfStock 409 }"), { validate: false });
+    const { model } = await parseString(SYS("{ httpStatus OutOfStock -> 409 }"), {
+      validate: false,
+    });
     const api = lowerModel(model).systems[0]!.apis.find((a) => a.name === "SalesApi")!;
     expect(api.errorStatuses).toEqual({ OutOfStock: 409 });
   });
@@ -44,7 +46,9 @@ describe("api httpStatus clause — surface + lowering", () => {
   });
 
   it("merges the override onto each context as errorStatusOverrides (enrichment)", async () => {
-    const { model } = await parseString(SYS("{ httpStatus OutOfStock 409 }"), { validate: false });
+    const { model } = await parseString(SYS("{ httpStatus OutOfStock -> 409 }"), {
+      validate: false,
+    });
     const ctx = allContexts(enrichLoomModel(lowerModel(model))).find((c) => c.name === "Shop")!;
     expect(ctx.errorStatusOverrides).toEqual({ OutOfStock: 409 });
   });
@@ -52,7 +56,7 @@ describe("api httpStatus clause — surface + lowering", () => {
 
 describe("api httpStatus clause — route translation", () => {
   it("translates the error variant with the overridden status, not the stdlib default", async () => {
-    const files = await generateSystemFiles(SYS("{ httpStatus OutOfStock 409 }"));
+    const files = await generateSystemFiles(SYS("{ httpStatus OutOfStock -> 409 }"));
     const routes = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"))?.[1] ?? "";
     expect(routes).toContain('if (result.type === "OutOfStock") {');
     expect(routes).toMatch(/c\.json\(\{ \.\.\.result,[^}]*status: 409/);

@@ -4048,6 +4048,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             }
           },
           {
+            "$type": "Keyword",
+            "value": "->"
+          },
+          {
             "$type": "Assignment",
             "feature": "code",
             "operator": "=",

@@ -339,7 +339,7 @@ export function renderApiExceptionAdvice(
 ): string {
   // Structural-conflict statuses resolved through the `httpStatus` mapper
   // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
-  // api's `httpStatus <Conflict> <Code>` override. Baked into the emitted Java
+  // api's `httpStatus <Conflict> -> <Code>` override. Baked into the emitted Java
   // so the runtime arm and the OpenAPI declaration can't drift.
   const disallowedStatus = resolveErrorStatus("Disallowed", structuralErrorStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);

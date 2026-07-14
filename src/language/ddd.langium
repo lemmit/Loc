@@ -505,12 +505,13 @@ Api:
         '}')?;
 
 // Per-error HTTP status override for the exception-less ProblemDetails
-// translator (exception-less.md A1).  `httpStatus <Error> <Code>` overrides the
-// stdlib default for an `error` payload this api can return.  `httpStatus`
+// translator (exception-less.md A1).  `httpStatus <Error> -> <Code>` overrides
+// the stdlib default for an `error` payload this api can return.  `httpStatus`
 // (not the proposal's `status`) is the clause head so the very common
-// `status: OrderStatus` field name keeps parsing without a soft keyword.
+// `status: OrderStatus` field name keeps parsing without a soft keyword; the
+// `->` ("maps to") separator matches house style (`route`/`link`/`migration`).
 ApiStatus:
-    'httpStatus' error=ID code=INT;
+    'httpStatus' error=ID '->' code=INT;
 
 // Explicit transport binding (unfoldable-api-derivation.md, Layer 4):
 //

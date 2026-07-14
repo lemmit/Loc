@@ -18,7 +18,7 @@ export function renderVanillaProblemDetailsModule(
   hasVersioned = false,
   /** Resolved HTTP status for the `unique (...)` breach (`UniquenessConflict`)
    *  and the optimistic-/event-store concurrency conflict (`ConcurrencyConflict`)
-   *  — 409 by default, or the api's `httpStatus <Conflict> <Code>` override
+   *  — 409 by default, or the api's `httpStatus <Conflict> -> <Code>` override
    *  (M-T3.4a).  Baked into the emitted responders so the runtime status moves
    *  in lockstep with the OpenAPI declaration.  Both default to 409, so an
    *  override-free app stays byte-identical. */

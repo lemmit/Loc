@@ -454,7 +454,7 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // ApiStatus — per-error HTTP status mapping in an api contract block.
     api ProjectsApi from Projects {
-        httpStatus ProjectNotFound 404
+        httpStatus ProjectNotFound -> 404
     }
     api DeliveryApi from Delivery
     api AccountsApi from Accounts

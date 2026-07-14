@@ -657,8 +657,8 @@ export function validateUnmappedErrorStatuses(
           code: "loom.unmapped-error-status",
           message:
             `error '${name}' returned by '${agg.name}.${op.name}' has no stdlib default HTTP ` +
-            `status and no api \`httpStatus ${name} <code>\` mapping, so it defaults to 500. Add ` +
-            `a \`httpStatus ${name} <code>\` line to the api serving this context to set an ` +
+            `status and no api \`httpStatus ${name} -> <code>\` mapping, so it defaults to 500. Add ` +
+            `a \`httpStatus ${name} -> <code>\` line to the api serving this context to set an ` +
             `explicit status.`,
           source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
         });
@@ -687,7 +687,7 @@ export function validateReservedStructuralErrorNames(
       message:
         `error '${p.name}' collides with a built-in structural-conflict name ` +
         `(M-T3.4a). That name is reserved: its HTTP status defaults to 409 and a ` +
-        `\`httpStatus ${p.name} <code>\` line retargets the framework conflict, not ` +
+        `\`httpStatus ${p.name} -> <code>\` line retargets the framework conflict, not ` +
         `just this payload. Rename the error to avoid the shadow.`,
       source: `${ctx.name}/error ${p.name}`,
     });

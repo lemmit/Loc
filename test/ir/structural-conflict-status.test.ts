@@ -53,7 +53,9 @@ describe("structural-conflict status — app-wide fold (enrichment)", () => {
   });
 
   it("applies a `httpStatus <StructuralConflict> <Code>` override, leaving the rest at 409", async () => {
-    expect(await fold("{ httpStatus UniquenessConflict 422 httpStatus Disallowed 423 }")).toEqual({
+    expect(
+      await fold("{ httpStatus UniquenessConflict -> 422 httpStatus Disallowed -> 423 }"),
+    ).toEqual({
       UniquenessConflict: 422,
       ConcurrencyConflict: 409,
       Disallowed: 423,
@@ -80,7 +82,7 @@ describe("structural-conflict status — Hono route translation", () => {
 
   it("retargets both the runtime arm and the OpenAPI declaration under an override", async () => {
     const routes = await orderRoutes(
-      "{ httpStatus UniquenessConflict 422 httpStatus Disallowed 423 }",
+      "{ httpStatus UniquenessConflict -> 422 httpStatus Disallowed -> 423 }",
     );
     // Runtime arms move to the overridden status.
     expect(routes).toContain(

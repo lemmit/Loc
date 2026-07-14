@@ -79,9 +79,9 @@ describe("vanilla structural-conflict status (M-T3.4a)", () => {
   it("OVERRIDE — httpStatus retargets both the runtime arm and the OpenAPI response", async () => {
     const files = await generateSystemFiles(
       src(
-        "\n    httpStatus UniquenessConflict 422" +
-          "\n    httpStatus ConcurrencyConflict 423" +
-          "\n    httpStatus ReferencedInUse 412",
+        "\n    httpStatus UniquenessConflict -> 422" +
+          "\n    httpStatus ConcurrencyConflict -> 423" +
+          "\n    httpStatus ReferencedInUse -> 412",
       ),
     );
     const pd = file(files, "/problem_details.ex");

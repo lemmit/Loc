@@ -557,7 +557,7 @@ export function renderExceptionFilter(
 ): string {
   const usesValidators = !!options?.usesValidators;
   // Resolved structural-conflict statuses baked as literals into the arms
-  // below — 409 by default, or the api's `httpStatus <Conflict> <Code>`
+  // below — 409 by default, or the api's `httpStatus <Conflict> -> <Code>`
   // override.  Both the log-event `status` field and the ProblemDetails status
   // read the same resolved value so they can't drift.
   const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);

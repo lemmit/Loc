@@ -20,7 +20,7 @@ Everything below was generated from one scratch `system Shop` (one `Orders` cont
 
 ```
 Api:       'api' name=ID 'from' source=[Subdomain:ID] ('{' ('urlStyle' ':' …)? ApiStatus* '}')?
-ApiStatus: 'httpStatus' error=ID code=INT
+ApiStatus: 'httpStatus' error=ID '->' code=INT
 ```
 
 An `api` is a **derived contract**, not a hand-written one — it names a *subdomain*, and the operation/query/create/destroy declarations inside that subdomain's aggregates become its HTTP surface. The block is optional; the bare `api OrdersApi from Sales` form derives everything. A backend deployable exposes a contract with `serves: OrdersApi`.
@@ -28,7 +28,7 @@ An `api` is a **derived contract**, not a hand-written one — it names a *subdo
 ```ddd
 api OrdersApi from Sales {
   urlStyle: resource     // route segments use the plural noun (default: literal → the op name)
-  httpStatus NotFound 404 // map an `error NotFound` variant to 404 (default for unmapped: 500)
+  httpStatus NotFound -> 404 // map an `error NotFound` variant to 404 (default for unmapped: 500)
 }
 ```
 
@@ -50,7 +50,7 @@ createRoute({ method: "get",  path: "/",      operationId: "listOrders",  /* …
 
 `urlStyle` only changes the **route segment of custom operations** — `op.routeSlug` is `op.name` under `literal` and `plural(op.name)` under `resource` (`src/platform/hono/v4/routes-builder.ts`, enriched per-subdomain in `enrichments.ts`). The base CRUD paths above are identical either way; the operationId, request DTO names, and extern-handler keys always stay keyed on the op name.
 
-`httpStatus <Error> <Code>` overrides the HTTP status the RFC-7807 ProblemDetails translator emits for an exception-less operation returning that `error` variant. It only surfaces on an operation that actually returns the named error (`operation cancel(): Order or NotFound`); with no such operation it emits nothing, and the validator (`structural-checks.ts`) warns when a returned custom error has neither a stdlib default nor an `httpStatus` mapping (it would default to 500). The per-error → status map carries into every backend's error translator (`errorStatuses` in the IR; consumed by the .NET `[ProducesResponseType]`, Python `errors.py`, Java/Hono ProblemDetails emitters).
+`httpStatus <Error> -> <Code>` overrides the HTTP status the RFC-7807 ProblemDetails translator emits for an exception-less operation returning that `error` variant. It only surfaces on an operation that actually returns the named error (`operation cancel(): Order or NotFound`); with no such operation it emits nothing, and the validator (`structural-checks.ts`) warns when a returned custom error has neither a stdlib default nor an `httpStatus` mapping (it would default to 500). The per-error → status map carries into every backend's error translator (`errorStatuses` in the IR; consumed by the .NET `[ProducesResponseType]`, Python `errors.py`, Java/Hono ProblemDetails emitters).
 
 ## `storage`
 

@@ -995,7 +995,7 @@ export interface BoundedContextIR {
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
   /** Per-error HTTP status overrides reaching this context, merged from the
-   *  `httpStatus <Error> <Code>` clauses of every api over its subdomain
+   *  `httpStatus <Error> -> <Code>` clauses of every api over its subdomain
    *  (exception-less.md A1).  Populated by `enrichLoomModel`; the route
    *  translator reads `errorStatusOverrides?.[name] ?? defaultErrorStatus(name)`.
    *  Undefined in single-context (no-api) lowering — defaults apply. */
@@ -1006,7 +1006,7 @@ export interface BoundedContextIR {
    *  every api (first-declared `httpStatus` wins), defaulting each to 409.
    *  The backend runtime arms + OpenAPI declarations for the hardcoded 409s read
    *  `structuralErrorStatuses?.[name] ?? 409` so the two can no longer drift and
-   *  `httpStatus UniquenessConflict 422` retargets both. Populated by
+   *  `httpStatus UniquenessConflict -> 422` retargets both. Populated by
    *  `enrichLoomModel`; undefined in single-context (no-api) lowering. */
   structuralErrorStatuses?: Record<string, number>;
   /** Provenance chain back to the `.ddd` source — see
@@ -2391,7 +2391,7 @@ export interface ApiIR {
    *  pluralises it.  Drives `OperationIR.routeSlug` derivation in
    *  enrichment (D-URLSTYLE / lifecycle-operations.md Phase 2). */
   urlStyle: "literal" | "resource";
-  /** Per-error HTTP status overrides declared via `httpStatus <Error> <Code>`
+  /** Per-error HTTP status overrides declared via `httpStatus <Error> -> <Code>`
    *  in the api block (exception-less.md A1).  Keyed by error-payload name; an
    *  error absent here falls back to the stdlib default
    *  (`src/util/error-defaults.ts`).  Empty when the api declares none. */

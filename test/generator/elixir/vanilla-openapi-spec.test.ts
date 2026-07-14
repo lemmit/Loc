@@ -161,7 +161,7 @@ system Shop {
     }
   }
   api OrdersApi from Sales {
-    httpStatus OrderNotFound 404
+    httpStatus OrderNotFound -> 404
   }
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
