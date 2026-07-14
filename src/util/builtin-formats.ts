@@ -169,3 +169,50 @@ export function builtinVersionsForFamily(family: BuiltinPackFamily): string[] {
     .map((k) => k.slice(prefix.length))
     .sort();
 }
+
+// ---------------------------------------------------------------------------
+// Feliz design themes.  Feliz renders F#, not a component-library pack — its
+// design system is daisyUI, so a feliz deployable's `design:` slot selects a
+// daisyUI THEME (`data-theme`) rather than a pack family.  This is daisyUI v4's
+// built-in theme set.  Two consumers read it:
+//   1. The validator (Rule 14, feliz branch) rejects a `design:` that isn't one
+//      of these.
+//   2. The Feliz generator maps `design:` → the emitted `data-theme` + the
+//      compiled-in `tailwind.config.js` theme list.
+// The Loom defaults (`corporate` light + `business` dark) are always available.
+// ---------------------------------------------------------------------------
+
+export const DAISYUI_THEMES: readonly string[] = [
+  "light",
+  "dark",
+  "cupcake",
+  "bumblebee",
+  "emerald",
+  "corporate",
+  "synthwave",
+  "retro",
+  "cyberpunk",
+  "valentine",
+  "halloween",
+  "garden",
+  "forest",
+  "aqua",
+  "lofi",
+  "pastel",
+  "fantasy",
+  "wireframe",
+  "black",
+  "luxury",
+  "dracula",
+  "cmyk",
+  "autumn",
+  "business",
+  "acid",
+  "lemonade",
+  "night",
+  "coffee",
+  "winter",
+  "dim",
+  "nord",
+  "sunset",
+];

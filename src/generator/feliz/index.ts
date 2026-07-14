@@ -18,6 +18,7 @@ import type {
   UserIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
@@ -361,19 +362,69 @@ function renderRouting(pages: readonly PageIR[]): string {
 /** The root routing `view` — a `React.router` that dispatches `UrlChanged` and
  *  renders the active page's view fn (threading the route `id` to detail pages).
  *  Named `view` normally; `appView` under an auth gate (the gate owns `view`). */
-function renderRootView(pages: readonly PageIR[], fnName = "view"): string {
+/** Humanise an identifier for a nav label: `ProductNew` → `Product New`. */
+function humanizeLabel(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+}
+
+/** The persistent daisyUI `navbar` above the routed content — a brand link plus
+ *  one menu item per TOP-LEVEL page (a static route, no `:param`; detail pages
+ *  are reached from their list, not the nav).  Returns "" when there are fewer
+ *  than two top-level pages (a lone nav item isn't worth a bar). */
+function renderNavbar(pages: readonly PageIR[], brand: string): string {
+  const navPages = pages.filter((p) => !hasRouteParam(p));
+  if (navPages.length < 2) return "";
+  const items = navPages
+    .map((p) => {
+      const href = `#${p.route ?? "/"}`;
+      return `          Html.li [ prop.children [ Html.a [ prop.href "${href}"; prop.text "${humanizeLabel(p.name)}" ] ] ]`;
+    })
+    .join("\n");
+  return [
+    '    Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.children [',
+    '      Html.div [ prop.className "flex-1"; prop.children [',
+    `        Html.a [ prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "${humanizeLabel(brand)}" ]`,
+    "      ] ]",
+    '      Html.div [ prop.className "flex-none"; prop.children [',
+    '        Html.ul [ prop.className "menu menu-horizontal px-1"; prop.children [',
+    items,
+    "        ] ]",
+    "      ] ]",
+    "    ] ]",
+  ].join("\n");
+}
+
+function renderRootView(pages: readonly PageIR[], fnName = "view", brand = ""): string {
   const arms = pages.map((p) =>
     hasRouteParam(p)
-      ? `      | ${pageCase(p)} id -> ${pageViewFn(p)} model dispatch id`
-      : `      | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`,
+      ? `        | ${pageCase(p)} id -> ${pageViewFn(p)} model dispatch id`
+      : `        | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`,
   );
+  const navbar = renderNavbar(pages, brand);
+  const router = [
+    "    React.router [",
+    "      router.onUrlChanged (UrlChanged >> dispatch)",
+    "      router.children [",
+    "        match model.CurrentPage with",
+    ...arms,
+    "      ]",
+    "    ]",
+  ];
+  // A persistent app shell wraps the router so the navbar stays put across route
+  // changes (only the router's children swap).  With no navbar (a single top-
+  // level page) the router is the view body directly — byte-identical to before.
+  if (navbar === "") {
+    return [
+      `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`,
+      ...router.map((l) => l.replace(/^ {2}/, "")),
+    ].join("\n");
+  }
   return [
     `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`,
-    "  React.router [",
-    "    router.onUrlChanged (UrlChanged >> dispatch)",
-    "    router.children [",
-    "      match model.CurrentPage with",
-    ...arms,
+    "  Html.div [",
+    "    prop.children [",
+    navbar,
+    ...router,
     "    ]",
     "  ]",
   ].join("\n");
@@ -791,7 +842,7 @@ function renderAppFs(
           ),
         ),
         "",
-        renderRootView(pages, rootFn),
+        renderRootView(pages, rootFn, ui.name),
       ]
     : [
         renderPageView(
@@ -992,10 +1043,18 @@ export default defineConfig({
 
 // The default daisyUI theme applied on <html data-theme="…">.  `corporate` is a
 // clean, flat, professional light theme; `business` is its dark sibling (wired
-// as `darkTheme` so `prefers-color-scheme: dark` degrades gracefully).  Swapping
-// this one string re-themes the whole app — the seam a future `design:`-driven
-// theme selector plugs into.
-const FELIZ_THEME = "corporate";
+// as `darkTheme` so `prefers-color-scheme: dark` degrades gracefully).
+const DEFAULT_FELIZ_THEME = "corporate";
+
+/** The daisyUI theme a feliz deployable renders under, chosen by its `design:`
+ *  slot.  A `design:` naming a built-in daisyUI theme (`design: dracula`) selects
+ *  it; anything else (unset → the lowered `mantine@v7` default, or a non-theme
+ *  value) falls back to `corporate`.  The validator (Rule 14, feliz branch)
+ *  already rejects a user-written non-theme `design:`, so the fallback only ever
+ *  fires for the unset default. */
+function felizThemeFor(design: string | undefined): string {
+  return design && DAISYUI_THEMES.includes(design) ? design : DEFAULT_FELIZ_THEME;
+}
 
 // PostCSS config — Vite auto-discovers this and runs Tailwind + Autoprefixer
 // over any CSS it processes (here, `styles.css` linked from index.html).
@@ -1011,7 +1070,12 @@ const POSTCSS_CONFIG = `export default {
 // classes the pack emits).  `content` scans index.html + the Fable-compiled JS
 // (`out/**/*.js`, where every \`prop.className "btn"\` becomes a \`"btn"\` string
 // literal) so Tailwind keeps exactly the utilities/components in use.
-const TAILWIND_CONFIG = `import daisyui from "daisyui";
+const TAILWIND_CONFIG = (theme: string): string => {
+  // Compile in the chosen theme + `business` as the dark sibling (deduped so
+  // `design: business` doesn't list it twice).  `data-theme` on <html> picks
+  // the active one; `darkTheme` answers `prefers-color-scheme: dark`.
+  const themes = [...new Set([theme, "business"])];
+  return `import daisyui from "daisyui";
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -1019,12 +1083,13 @@ export default {
   theme: { extend: {} },
   plugins: [daisyui],
   daisyui: {
-    themes: ["${FELIZ_THEME}", "business"],
+    themes: ${JSON.stringify(themes)},
     darkTheme: "business",
     logs: false,
   },
 };
 `;
+};
 
 // The design-system stylesheet — Tailwind's three layers (daisyUI injects its
 // component classes into the `components` layer) plus a couple of app-shell
@@ -1066,8 +1131,8 @@ EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]
 `;
 
-const INDEX_HTML = `<!doctype html>
-<html lang="en" data-theme="${FELIZ_THEME}">
+const INDEX_HTML = (theme: string): string => `<!doctype html>
+<html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -1129,11 +1194,12 @@ export function generateFelizForContexts(
   out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user));
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
+  const theme = felizThemeFor(deployable.design);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);
-  out.set("index.html", INDEX_HTML);
+  out.set("index.html", INDEX_HTML(theme));
   out.set("styles.css", STYLES_CSS);
-  out.set("tailwind.config.js", TAILWIND_CONFIG);
+  out.set("tailwind.config.js", TAILWIND_CONFIG(theme));
   out.set("postcss.config.js", POSTCSS_CONFIG);
   out.set("Dockerfile", DOCKERFILE);
   return out;

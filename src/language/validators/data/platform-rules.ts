@@ -119,6 +119,7 @@ export function expectedFrameworkFor(
   if (fam === "svelte") return "svelte";
   if (fam === "vue") return "vue";
   if (fam === "angular") return "angular";
+  if (fam === "feliz") return "feliz";
   if (fam === "elixir") return "phoenixLiveView";
   // dotnet and java are dual-mode: backend-only without `ui:`, embedded
   // React SPA host with it.

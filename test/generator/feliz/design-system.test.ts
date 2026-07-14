@@ -7,8 +7,9 @@
 import { describe, expect, it } from "vitest";
 import { generateFelizForContexts } from "../../../src/generator/feliz/index.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
+import { parseString } from "../../_helpers/parse.js";
 
-const APP = `
+const app = (design = ""): string => `
 system ShopApp {
   subdomain S { context C { } }
   ui WebApp {
@@ -16,15 +17,21 @@ system ShopApp {
     page Home { route: "/"  body: Heading { "Home", level: 1 } }
   }
   deployable api { platform: node contexts: [C] port: 3000 }
-  deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
+  deployable web { platform: feliz targets: api ui: WebApp ${design} port: 3005 }
 }
 `;
 
-async function felizFiles(): Promise<Map<string, string>> {
-  const model = await buildLoomModel(APP);
+const APP = app();
+
+async function felizFilesFor(source: string): Promise<Map<string, string>> {
+  const model = await buildLoomModel(source);
   const sys = model.systems[0]!;
   const web = sys.deployables.find((d) => d.name === "web")!;
   return generateFelizForContexts([], sys, web);
+}
+
+async function felizFiles(): Promise<Map<string, string>> {
+  return felizFilesFor(APP);
 }
 
 describe("feliz design system", () => {
@@ -42,7 +49,7 @@ describe("feliz design system", () => {
     // Scans index.html + the Fable-compiled JS (where className literals live).
     expect(tw).toContain('content: ["./index.html", "./out/**/*.js"]');
     // The default theme + a dark sibling.
-    expect(tw).toContain('themes: ["corporate", "business"]');
+    expect(tw).toContain('themes: ["corporate","business"]');
 
     const pc = files.get("postcss.config.js")!;
     expect(pc).toContain("tailwindcss: {}");
@@ -70,9 +77,27 @@ describe("feliz design system", () => {
 
   it("the pack renders daisyUI component classes on the primitives", async () => {
     const files = await felizFiles();
-    const app = files.get("src/App.fs")!;
+    const appFs = files.get("src/App.fs")!;
     // The heading rides the daisyUI/Tailwind type ramp — a class-based, not
     // unstyled, element (the whole point of the design system).
-    expect(app).toContain('prop.className "text-3xl font-bold"');
+    expect(appFs).toContain('prop.className "text-3xl font-bold"');
+  });
+
+  it("selects a daisyUI theme from the deployable's design: slot", async () => {
+    // A theme name is a quoted STRING (the DesignPack grammar's custom-value arm).
+    const files = await felizFilesFor(app('design: "dracula"'));
+    // The chosen theme drives both the <html data-theme> and the compiled themes.
+    expect(files.get("index.html")!).toContain('data-theme="dracula"');
+    expect(files.get("tailwind.config.js")!).toContain('themes: ["dracula","business"]');
+  });
+
+  it("validates a daisyUI theme name on a feliz design: slot", async () => {
+    const { errors } = await parseString(app('design: "dracula"'), { validate: true });
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects a non-daisyUI-theme design: on a feliz deployable", async () => {
+    const { errors } = await parseString(app("design: mantine"), { validate: true });
+    expect(errors.some((e) => /not a daisyUI theme/.test(e))).toBe(true);
   });
 });

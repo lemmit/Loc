@@ -14,6 +14,7 @@ import {
 } from "../../platform/metadata.js";
 import {
   builtinVersionsForFamily,
+  DAISYUI_THEMES,
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../../util/builtin-formats.js";
@@ -355,6 +356,20 @@ export function checkDeployableDesignPack(
     return;
   }
   const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
+  // Feliz has no component-library pack: its `design:` slot selects a daisyUI
+  // THEME (`data-theme`), not a pack family.  Validate against the built-in
+  // daisyUI theme set instead of the pack-format machinery (which would flag
+  // any theme name as an unchecked "custom pack").
+  if (framework === "feliz") {
+    if (!DAISYUI_THEMES.includes(d.design)) {
+      accept(
+        "error",
+        `Design '${d.design}' on Feliz deployable '${d.name}' is not a daisyUI theme. Feliz's 'design:' selects a daisyUI theme; use one of: ${DAISYUI_THEMES.join(", ")}.`,
+        { node: d, property: "design" },
+      );
+    }
+    return;
+  }
   const expectedFormat = expectedPackFormatFor(framework);
   // Parse the slot value into {family, version, qualified}.
   // Bareword (`mantine`) and pinned
