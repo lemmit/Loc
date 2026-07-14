@@ -35,7 +35,7 @@ import {
 } from "../../ir/util/feliz-async-effect.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { typeToFs } from "./type-fs.js";
 
@@ -270,6 +270,49 @@ export interface FelizOperationForm extends FormRecord {
   opPath: string;
   /** `Router.navigate` segments after success (`["products"]`). */
   navigateSegs: string[];
+}
+
+/** A one-click operation action a page hosts — `Action { <instance>.<op> }` on a
+ *  single-record (byId) detail page.  The instance-form sibling of
+ *  `FelizOperationForm`: NO form fields (a parameterless op), a plain button that
+ *  dispatches a trigger `Msg` carrying the route id → a `POST /<id>/<op>` (empty
+ *  body) → a `Done` result.  On success it refetches the detail read so the UI
+ *  reflects the mutation (the MVU analogue of React's query invalidation). */
+export interface FelizAction {
+  /** The aggregate operated on (`Product`). */
+  aggregate: string;
+  /** The operation name (`activate`). */
+  op: string;
+  /** F# api fn name (`activateProduct`) — takes `(id: string)`. */
+  apiFn: string;
+  /** `Msg` the button dispatches, carrying the route id (`ActivateProduct`). */
+  triggerMsg: string;
+  /** `Msg` carrying the op's `Result<unit, string>` (`ActivateProductDone`). */
+  doneMsg: string;
+  /** Collection base route (`/api/products`) — the api fn appends `/<id>/<op>`. */
+  route: string;
+  /** The op's URL path segment (`activate` — `snake(routeSlug ?? name)`). */
+  opPath: string;
+  /** Button label (`Activate` — `humanize(op)`). */
+  label: string;
+}
+
+/** Build the `FelizAction` for an `Action { <instance>.<op> }` — the MVU wiring
+ *  for a fieldless operation button (trigger/done `Msg`s + the id-qualified POST
+ *  route), keyed off the aggregate + op.  Naming mirrors `felizOperationForm`
+ *  (the with-fields sibling) so the two never collide. */
+export function felizAction(aggregate: string, op: OperationIR): FelizAction {
+  const opCap = `${upperFirst(op.name)}${upperFirst(aggregate)}`;
+  return {
+    aggregate,
+    op: op.name,
+    apiFn: `${op.name}${upperFirst(aggregate)}`,
+    triggerMsg: opCap,
+    doneMsg: `${opCap}Done`,
+    route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
+    opPath: snake(op.routeSlug ?? op.name),
+    label: humanize(op.name),
+  };
 }
 
 /** The scalar base of a type, peeling `optional` — an optional field renders
@@ -809,6 +852,83 @@ export function collectPageOperationForms(
   return out;
 }
 
+/** The aggregate a single-record QueryView yields, from its `of:` query
+ *  expression (`<handle>.<Agg>.byId(id)` → `Agg`, or `<Agg>.byId`).  Mirrors the
+ *  walker's `singleAggregateOfQuery` so the collector's binding map agrees with
+ *  the render-time `ctx.paramTypes`.  Returns the aggregate name when known. */
+function singleQueryAggregate(ofArg: ExprIR, aggNames: ReadonlySet<string>): string | undefined {
+  const recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  const name = recv.kind === "member" ? recv.member : recv.kind === "ref" ? recv.name : undefined;
+  return name && aggNames.has(name) ? name : undefined;
+}
+
+/** Collect the one-click actions a page hosts (`Action { <instance>.<op> }`),
+ *  deduped by trigger `Msg`.  Resolution is bounded to the shape the walker can
+ *  type: an `Action` inside the `data:` lambda of a single-record (byId)
+ *  `QueryView`, whose param binds to the queried aggregate.  A parameterless
+ *  public op qualifies; anything else (unresolved instance, missing/non-public
+ *  op, or an op with params — that's an `OperationForm`) is skipped. */
+export function collectPageActions(
+  page: PageIR,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FelizAction[] {
+  if (!page.body) return [];
+  const aggNames = new Set(aggregatesByName.keys());
+  const out: FelizAction[] = [];
+  const seen = new Set<string>();
+  // Walk carrying `binding`: single-QueryView data-lambda param → aggregate name
+  // (the render-time `ctx.paramTypes` twin).
+  const walk = (e: ExprIR, binding: ReadonlyMap<string, string>): void => {
+    if (e.kind === "call" && e.name === "QueryView") {
+      const names = e.argNames ?? [];
+      const ofArg = names.indexOf("of") >= 0 ? e.args[names.indexOf("of")] : undefined;
+      const single = isSingleQueryView(e);
+      const dataArg = names.indexOf("data") >= 0 ? e.args[names.indexOf("data")] : undefined;
+      const agg = single && ofArg ? singleQueryAggregate(ofArg, aggNames) : undefined;
+      // The data lambda's param binds to the queried aggregate; other args walk
+      // under the ambient binding.
+      for (let i = 0; i < e.args.length; i++) {
+        const arg = e.args[i]!;
+        if (arg === dataArg && arg.kind === "lambda" && arg.body && agg) {
+          walk(arg.body, new Map([...binding, [arg.param, agg]]));
+        } else {
+          walk(arg, binding);
+        }
+      }
+      return;
+    }
+    if (e.kind === "call" && e.name === "Action") {
+      const opRef = (e.args ?? []).find((a) => !(e.argNames ?? [])[e.args.indexOf(a)]);
+      if (opRef?.kind === "member" && opRef.receiver.kind === "ref") {
+        const aggName = binding.get(opRef.receiver.name);
+        const agg = aggName ? aggregatesByName.get(aggName) : undefined;
+        const op = agg?.operations.find(
+          (o) => o.name === opRef.member && o.visibility === "public" && o.params.length === 0,
+        );
+        if (agg && op) {
+          const action = felizAction(agg.name, op);
+          if (!seen.has(action.triggerMsg)) {
+            seen.add(action.triggerMsg);
+            out.push(action);
+          }
+        }
+      }
+      return;
+    }
+    for (const c of exprChildren(e)) walk(c, binding);
+  };
+  walk(page.body, new Map());
+  return out;
+}
+
+/** True when a `QueryView` call is `single: true` (byId — one record, not a list). */
+function isSingleQueryView(e: Extract<ExprIR, { kind: "call" }>): boolean {
+  const names = e.argNames ?? [];
+  const idx = names.indexOf("single");
+  const arg = idx >= 0 ? e.args[idx] : undefined;
+  return arg?.kind === "literal" && arg.lit === "bool" && arg.value === "true";
+}
+
 /** Every `WorkflowForm(runs: <wf>)` workflow name a page body hosts, in tree
  *  order (the `runs:` arg is a bare ref to a workflow). */
 function workflowFormRuns(body: ExprIR, workflowNames: ReadonlySet<string>): string[] {
@@ -1306,11 +1426,33 @@ function renderWorkflowFn(f: FelizWorkflowForm): (string | undefined)[] {
   ];
 }
 
+/** One async action function — a fieldless operation.  POSTs an empty JSON body
+ *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body).
+ *  The instance-form sibling of `renderOperationFn` (no encoder — no fields). */
+function renderActionFn(a: FelizAction): (string | undefined)[] {
+  return [
+    `  let ${a.apiFn} (id: string) : Async<Result<unit, string>> =`,
+    "    async {",
+    "      let! response =",
+    `        Http.request (sprintf "${a.route}/%s/${a.opPath}" id)`,
+    "        |> Http.method POST",
+    '        |> Http.content (BodyContent.Text "{}")',
+    '        |> Http.header (Headers.contentType "application/json")',
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 204 then",
+    "        return Ok ()",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
 /** Emit the `Api` module — one `Cmd`-issuing async function per read (fetch +
  *  Thoth decode → `Result`), per mutation (verb request → `Result`), per create
  *  form (encode + POST → decoded record), per operation form (encode + POST to
- *  `/<id>/<op>` → `unit`), and per workflow form (encode + POST to
- *  `/workflows/<wf>` → `unit`), all over `Fable.SimpleHttp`. */
+ *  `/<id>/<op>` → `unit`), per one-click action (empty POST to `/<id>/<op>` →
+ *  `unit`), and per workflow form (encode + POST to `/workflows/<wf>` → `unit`),
+ *  all over `Fable.SimpleHttp`. */
 export function renderApiModule(
   reads: FelizRead[],
   mutations: FelizMutation[] = [],
@@ -1318,6 +1460,7 @@ export function renderApiModule(
   operationForms: FelizOperationForm[] = [],
   workflowForms: FelizWorkflowForm[] = [],
   asyncEffects: FelizAsyncEffect[] = [],
+  opActions: FelizAction[] = [],
 ): string {
   if (
     reads.length === 0 &&
@@ -1325,7 +1468,8 @@ export function renderApiModule(
     forms.length === 0 &&
     operationForms.length === 0 &&
     workflowForms.length === 0 &&
-    asyncEffects.length === 0
+    asyncEffects.length === 0 &&
+    opActions.length === 0
   ) {
     return "";
   }
@@ -1336,6 +1480,7 @@ export function renderApiModule(
     ...operationForms.map((f) => renderOperationFn(f)),
     ...workflowForms.map((f) => renderWorkflowFn(f)),
     ...asyncEffects.map((e) => renderAsyncEffectFn(e)),
+    ...opActions.map((a) => renderActionFn(a)),
   ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",

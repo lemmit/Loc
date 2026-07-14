@@ -25,6 +25,7 @@ import { walkBody } from "../_walker/walker-core.js";
 import {
   AUTH_MODULE_CLAIMS,
   FORBIDDEN_VIEW,
+  opActionGate,
   renderCurrentUserDecoder,
   renderCurrentUserType,
   renderFelizGate,
@@ -42,12 +43,14 @@ import {
   renderUpdate,
 } from "./update-emit.js";
 import {
+  collectPageActions,
   collectPageAsyncEffects,
   collectPageForms,
   collectPageMutations,
   collectPageOperationForms,
   collectPageReads,
   collectPageWorkflowForms,
+  type FelizAction,
   type FelizAsyncEffect,
   type FelizForm,
   type FelizMutation,
@@ -208,6 +211,10 @@ function renderPageView(
    *  `match model.CurrentUser with Some currentUser when <gate> -> … | _ ->
    *  forbiddenView` guard (the client mirror of the backend 403). */
   pageGate = false,
+  /** True when the hosting frontend deployable has `auth: ui` — threaded into the
+   *  walk so `Action { instance.op }` buttons gate on currentUser-only op
+   *  `requires` (the action-level mirror of the page gate). */
+  authUi = false,
 ): string {
   // A detail page's view takes the route `id` (bound by its `Page` case); the
   // body's `byId(id)` renders through the `renderRouteId` seam to this local.
@@ -230,6 +237,8 @@ function renderPageView(
     new Map(), // paramTypes
     new Map(), // pageRoutes
     externFunctionNames, // extern frontend function names
+    new Set(), // derivedNames (Feliz has no page-derived bindings)
+    authUi, // gate `Action` buttons on currentUser-only op `requires`
   );
   if (used) {
     for (const c of result.usedUserComponents) used.components.add(c);
@@ -312,17 +321,22 @@ function routePattern(route: string | undefined): string {
 
 /** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
  *  page's case carries its route param (`| ProductDetail of string`); `parseUrl`
- *  binds the segment.  Arms are emitted in page order; the first page is the
- *  catch-all fallback (paramless, so a valid fallback ctor). */
+ *  binds the segment.  Arms are emitted in page order; the catch-all falls back
+ *  to the first PARAMLESS page (a valid nullary ctor).  When every page carries a
+ *  route param (a degenerate single-detail app), the fallback ctor takes an empty
+ *  id (`ProductDetail ""`) so the match still returns a `Page`, not a partially-
+ *  applied `string -> Page`. */
 function renderRouting(pages: readonly PageIR[]): string {
   const caseDecl = (p: PageIR): string =>
     hasRouteParam(p) ? `  | ${pageCase(p)} of string` : `  | ${pageCase(p)}`;
   const ctor = (p: PageIR): string => (hasRouteParam(p) ? `${pageCase(p)} id` : pageCase(p));
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
   const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
+  const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
+  const fallbackCtor = hasRouteParam(fallback) ? `${pageCase(fallback)} ""` : pageCase(fallback);
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
-    `${arms.join("\n")}\n  | _ -> ${pageCase(pages[0]!)}`;
+    `${arms.join("\n")}\n  | _ -> ${fallbackCtor}`;
   return `${union}\n\n${parse}`;
 }
 
@@ -455,6 +469,23 @@ function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fe
   return out;
 }
 
+/** The one-click actions a ui hosts (`Action { instance.op }`), across ALL its
+ *  pages (deduped by trigger `Msg`) — the fieldless operation buttons. */
+function actionsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizAction[] {
+  const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
+  for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const seen = new Set<string>();
+  const out: FelizAction[] = [];
+  for (const page of ui.pages) {
+    for (const a of collectPageActions(page, aggregatesByName)) {
+      if (seen.has(a.triggerMsg)) continue;
+      seen.add(a.triggerMsg);
+      out.push(a);
+    }
+  }
+  return out;
+}
+
 /** The `match await` async effects a ui hosts, across ALL its pages (deduped by
  *  action name) — `match await <api>.<Agg>.<op>() { <Agg> b => … else => … }`. */
 function asyncEffectsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizAsyncEffect[] {
@@ -550,13 +581,22 @@ function renderAppFs(
   if (pages.length === 0) {
     return `module App\n\nopen Feliz\n\n// ui '${ui.name}' declares no pages\n`;
   }
-  // UI-gate mode: an `auth: ui` app (claims available) where at least one page
-  // declares `requires`.  Upgrades the status-only probe to a claims decode +
-  // adds `CurrentUser` to the Model + emits the gated page views.  A gate-free
-  // auth app stays byte-for-byte on the boolean probe.
-  const pageGate = authUi && !!user && uiHasPageGate(ui);
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  // One-click actions (`Action { instance.op }`) — the fieldless operation
+  // buttons; their trigger/done Msg + POST Cmd + refetch wire like a mutation.
+  const opActions: FelizAction[] = actionsForUi(ui, contexts);
+  // UI-gate mode: an `auth: ui` app (claims available) where a page declares
+  // `requires` OR an action button gates on a currentUser-only op `requires`.
+  // Either upgrades the status-only probe to a claims decode + adds `CurrentUser`
+  // to the Model.  A gate-free auth app stays byte-for-byte on the boolean probe.
+  const aggByNameEnriched = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
+  for (const c of contexts) for (const a of c.aggregates) aggByNameEnriched.set(a.name, a);
+  const hasGatedAction = opActions.some((act) => {
+    const op = aggByNameEnriched.get(act.aggregate)?.operations.find((o) => o.name === act.op);
+    return !!op && opActionGate(op) !== null;
+  });
+  const pageGate = authUi && !!user && (uiHasPageGate(ui) || hasGatedAction);
   const workflowsByName = workflowsForUi(contexts);
   // Aggregate/workflow → owning bounded context (form seams resolve enum-typed
   // fields to their `<select>` values from the owning BC's enum declarations).
@@ -619,7 +659,14 @@ function renderAppFs(
   // (POST + decode); the auth probe also uses `Http.get`.  The Thoth
   // record/decoder layer is needed for reads AND async effects (the op's
   // `type`-tagged 200 body); the `Remote`/View envelope is reads-only.
-  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi || hasEffects || pageGate;
+  const hasHttp =
+    hasReads ||
+    mutations.length > 0 ||
+    hasForms ||
+    authUi ||
+    hasEffects ||
+    pageGate ||
+    opActions.length > 0;
   const hasWire = hasReads || hasEffects;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
@@ -659,6 +706,7 @@ function renderAppFs(
     authUi,
     asyncEffects,
     pageGate,
+    opActions,
   );
   const update = renderUpdate(
     actions,
@@ -673,6 +721,7 @@ function renderAppFs(
     ui.stores,
     asyncEffects,
     pageGate,
+    opActions,
   );
   const wire = hasWire
     ? renderWireTypes(
@@ -682,7 +731,15 @@ function renderAppFs(
       )
     : { domain: "", decoders: "" };
   const api = hasHttp
-    ? renderApiModule(reads, mutations, forms, operationForms, workflowForms, asyncEffects)
+    ? renderApiModule(
+        reads,
+        mutations,
+        forms,
+        operationForms,
+        workflowForms,
+        asyncEffects,
+        opActions,
+      )
     : "";
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
@@ -709,6 +766,7 @@ function renderAppFs(
             used,
             asyncEffectActions,
             pageGate,
+            authUi,
           ),
         ),
         "",
@@ -729,6 +787,7 @@ function renderAppFs(
           used,
           asyncEffectActions,
           pageGate,
+          authUi,
         ),
       ];
   // A gated app defines `forbiddenView` ahead of the page views that render it

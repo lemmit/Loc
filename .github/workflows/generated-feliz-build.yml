@@ -313,7 +313,12 @@ jobs:
             api ShopApi from Catalog
             subdomain Catalog {
               context Cat {
-                aggregate Product { name: string  price: money }
+                aggregate Product {
+                  name:   string
+                  price:  money
+                  active: bool
+                  operation activate() { requires currentUser.role == "admin"  active := true }
+                }
                 repository Products for Product { }
               }
             }
@@ -326,6 +331,21 @@ jobs:
                 route: "/admin"
                 requires currentUser.role == "admin"
                 body: Heading { "Admin Console", level: 1 }
+              }
+              # A gated ONE-CLICK action: the byId detail hosts `Action { p.activate }`,
+              # whose op `requires currentUser.role == "admin"` — the button is a
+              # native F# dispatch (POST /{id}/activate) hidden from non-admins via
+              # the decoded claims.  Proves the Action primitive + action-button gating.
+              page ProductDetail {
+                route: "/products/:id"
+                body: QueryView {
+                  of: Shop.Product.byId(id), single: true,
+                  loading: Text { "Loading…" }, error: Text { "err" }, empty: Text { "none" },
+                  data: p => Stack {
+                    Heading { p.name, level: 1 },
+                    Action { p.activate }
+                  }
+                }
               }
             }
             deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 auth: required }

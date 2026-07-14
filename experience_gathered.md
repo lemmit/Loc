@@ -2665,6 +2665,57 @@ of the backend 403, the F# sibling of the shared JS `gate-expr.ts`):
   viewer claims → `forbiddenView`. Compile-only would have missed the whole
   runtime story.
 
+## 43. Feliz `Action { x.op }` was emitting broken React — a silent gap (2026-07-14)
+
+Asked to add action-button GATING, I found the button itself was unimplemented:
+`Action { p.activate }` fell through to the shared (React-shaped) `emitAction` and
+emitted `prop.onClick (() => void activateProduct.mutateAsync({}))` — JS spliced
+into F#, which won't Fable-compile. No example exercised it, so CI never caught
+it. Lesson: before layering a feature (gating) onto a primitive, generate a
+minimal case and READ the output — "it goes through the shared walker" ≠ "it
+emits valid code for this backend."
+
+- **Own the primitive via the `renderAction` seam — don't fall through.** Like
+  Angular, Feliz implements `felizTarget.renderAction` so it NEVER hits the React
+  `emitAction`. For an unresolved instance / param-carrying op it returns a
+  `(* comment *)`, not `null` (null → the broken shared path). `Action` is the
+  FIELDLESS-op sibling of `OperationForm` (which *skips* zero-field ops, line 805
+  of wire.ts) — so a parameterless op has NO other rendering; Action is its only
+  home.
+
+- **Resolution is bounded to what the walker can type.** `Action(p.op)` resolves
+  `p` via `ctx.paramTypes` — populated ONLY by a single-record QueryView's `data:`
+  lambda (`For`-row params are NOT typed). The collector (`collectPageActions`,
+  running outside the walk) replicates that ONE binding by tracking single-
+  QueryView `data:` params → aggregate. Don't trust `member.receiverType` here —
+  for `p.op` it came back `{primitive,string}`, not the aggregate (the op member
+  isn't a field). The `paramTypes` binding is the source of truth.
+
+- **Collector and seam must agree byte-for-byte** (the §two-sided-consistency
+  rule again): both derive the trigger Msg from `felizAction(agg, op)`, both
+  require a parameterless public op. If the seam emitted a button the collector
+  didn't wire, the `Msg`/`update`/`Api` arm would be missing → compile error.
+
+- **Action gating pulls in the SAME claims machinery as the page gate.** The gated
+  button references `model.CurrentUser`, so `pageGate` (the flag that emits the
+  `CurrentUser` record + decoder + claims probe) must fire when authUi AND any
+  action's op has a currentUser-only `requires` — not just on a page `requires`.
+  `hasGatedAction` (opActionGate ≠ null over the collected actions) joins the
+  trigger. A gate-free auth app still stays byte-identical on the boolean probe.
+
+- **A latent routing bug surfaced (§34 again).** My minimal single-detail-page
+  probe made `parseUrl`'s catch-all `| _ -> ProductDetail` — but `ProductDetail`
+  is `of string`, so that's a partial application (`string -> Page`), not a
+  `Page`. Fixed the fallback to prefer a paramless page (`ProductDetail ""` only
+  in the degenerate all-detail case). Byte-identical for the normal first-page-
+  is-Home app.
+
+- **Runtime smoke proves the WRITE path + gating, not just render.** Stub
+  `/api/auth/me` (claims), `GET /<id>` (so the `data:` branch with the button
+  renders), and `POST /<id>/activate` (record it fired). Admin → button renders +
+  click POSTs; viewer → button hidden. Clicking and asserting the POST is the only
+  way to prove the trigger→Cmd→Api chain actually runs.
+
 - **A `<details>` is smoke-drivable with zero backend.** The scaffold operations
   area is a SIBLING of the QueryView, so it renders on the detail route without
   data; the smoke navigates there, clicks the `<summary>`, and asserts the
