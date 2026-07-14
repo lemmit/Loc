@@ -196,38 +196,30 @@ export function checkMigrationBaseline(
       continue;
     }
 
-    // (b) Snapshot present: its recorded history must match the files on
-    //     disk.  A history entry with no file, or a file with no history
-    //     entry, means the snapshot and the output tree have drifted — the
-    //     next delta would be computed against a baseline the disk doesn't
-    //     agree with.
+    // (b) Snapshot present: every migration the recorded history claims must
+    //     have a file on disk.  A history entry with no file means the
+    //     snapshot and the output tree have drifted — the next delta would be
+    //     computed against a baseline the disk doesn't agree with.
+    //
+    //     This is a one-directional check (history ⊆ files), NOT files ⊆
+    //     history.  Backends legitimately emit migration files the version
+    //     chain never records: the feature-local audit/provenance late
+    //     migrations (fixed far-future `2999…` versions, deliberately sorted
+    //     after every real migration — see dotnet/elixir/java emitters) are
+    //     never in `migrationHistory`.  Flagging "extra" files would false-
+    //     positive on every audited/provenanced system; the stale-baseline
+    //     case it would otherwise catch is caught instead by guard (c) on the
+    //     next real delta (the reissued version collides with the file).
     const history = m.baseline.migrationHistory ?? [];
-    const historyVersions = new Set(history.map((h) => h.version));
-    const missing = [...historyVersions].filter((v) => !onDiskSet.has(v));
-    // Only flag EXTRA files once there is a history to compare against — a
-    // brand-new snapshot with an empty history (first regen after an initial
-    // one that emitted no steps) legitimately predates any files.
-    const unexpected = history.length > 0 ? onDisk.filter((v) => !historyVersions.has(v)) : [];
-    if (missing.length > 0 || unexpected.length > 0) {
-      const parts: string[] = [];
-      if (missing.length > 0) {
-        parts.push(
-          `migration file(s) for version(s) ${missing.join(", ")} are recorded in the ` +
-            `snapshot history but absent from the output tree`,
-        );
-      }
-      if (unexpected.length > 0) {
-        parts.push(
-          `migration file(s) for version(s) ${unexpected.join(", ")} exist in the output ` +
-            `tree but are not recorded in the snapshot history`,
-        );
-      }
+    const missing = history.map((h) => h.version).filter((v) => !onDiskSet.has(v));
+    if (missing.length > 0) {
       throw new MigrationBaselineError(
         m.module,
         `migration files for module '${m.module}' are inconsistent with the snapshot ` +
-          `(.loom/snapshots/${m.module}.snapshot.json): ${parts.join("; ")}. The snapshot and the ` +
-          `generated migrations have drifted — restore both from version control together, or ` +
-          `re-baseline deliberately.`,
+          `(.loom/snapshots/${m.module}.snapshot.json): migration file(s) for version(s) ` +
+          `${missing.join(", ")} are recorded in the snapshot history but absent from the output ` +
+          `tree. The snapshot and the generated migrations have drifted — restore both from ` +
+          `version control together, or re-baseline deliberately.`,
       );
     }
 

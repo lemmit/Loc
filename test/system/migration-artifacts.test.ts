@@ -116,7 +116,11 @@ describe("checkMigrationBaseline — guard (b) files ↔ history drift", () => {
     expect(() => checkMigrationBaseline(migrations, index)).toThrow(/20250201000000.*absent/s);
   });
 
-  it("errors when a file on disk is not recorded in the history (stale baseline)", () => {
+  it("tolerates untracked extra files (feature-local audit/provenance migrations)", () => {
+    // Backends emit audit/provenance late migrations under fixed far-future
+    // `2999…` versions that are deliberately NOT part of the version chain and
+    // never appear in migrationHistory.  The history⊆files check must not flag
+    // them, or every audited/provenanced system would false-positive.
     const migrations = [
       migrationsIR({
         module: "Sales",
@@ -125,46 +129,34 @@ describe("checkMigrationBaseline — guard (b) files ↔ history drift", () => {
       }),
     ];
     const index = memoryMigrationArtifactIndex({
-      Sales: ["20250101000000", "20250201000000"],
+      Sales: ["20250101000000", "29991231235959"],
     });
-    expect(() => checkMigrationBaseline(migrations, index)).toThrow(
-      /20250201000000.*not recorded/s,
-    );
+    expect(() => checkMigrationBaseline(migrations, index)).not.toThrow();
   });
 });
 
 describe("checkMigrationBaseline — guard (c) version reuse", () => {
   it("rejects a new migration whose version already exists on disk", () => {
+    // A stale baseline: its lastVersion lags the files, so the builder
+    // recomputed ...02 as the "next" version — but ...02 is already on disk
+    // (a real chain migration a newer run wrote, that this stale snapshot
+    // forgot).  Emitting under the same version would clobber it.
     const migrations = [
       migrationsIR({
         module: "Sales",
-        // Snapshot history lags the files: lastVersion points at ...01, so the
-        // builder computed ...02 as "next" — but ...02 is already on disk.
+        // History only knows ...01 (stale); the builder computed ...02 as next.
         baseline: snapshotWithHistory(["20250101000000"]),
         steps: [{ op: "sqlComment", comment: "x" }],
         version: "20250201000000",
       }),
     ];
     const index = memoryMigrationArtifactIndex({
-      // ...02 present on disk but absent from history → drift catches first;
-      // narrow to only the reuse condition by recording it in history too.
+      // ...02 is already on disk (written by a newer run this snapshot forgot).
       Sales: ["20250101000000", "20250201000000"],
     });
-    // With ...02 unrecorded, guard (b) fires; record it so (c) is the sole
-    // failing condition.
-    const recorded = [
-      migrationsIR({
-        module: "Sales",
-        baseline: snapshotWithHistory(["20250101000000", "20250201000000"]),
-        steps: [{ op: "sqlComment", comment: "x" }],
-        version: "20250201000000",
-      }),
-    ];
-    expect(() => checkMigrationBaseline(recorded, index)).toThrow(
+    expect(() => checkMigrationBaseline(migrations, index)).toThrow(
       /version '20250201000000'.*already present/s,
     );
-    // sanity: the un-recorded variant also refuses (via drift)
-    expect(() => checkMigrationBaseline(migrations, index)).toThrow(MigrationBaselineError);
   });
 
   it("does not flag a no-op regen (no steps ⇒ no new file emitted)", () => {
