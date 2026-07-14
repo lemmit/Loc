@@ -35,10 +35,11 @@ migration "rename-order-fields" {
     expect(errors).toEqual([]);
     const block = model.members.find(isMigration);
     expect(block?.name).toBe("rename-order-fields");
-    expect(block?.renames.map((r) => `${r.aggregate.$refText}.${r.from}->${r.to}`)).toEqual([
-      "Order.qty->quantity",
-      "Order.shippedAt->fulfilledAt",
-    ]);
+    expect(
+      block?.renames.map((r) =>
+        r.$type === "ColumnRename" ? `${r.aggregate.$refText}.${r.from}->${r.to}` : "TABLE",
+      ),
+    ).toEqual(["Order.qty->quantity", "Order.shippedAt->fulfilledAt"]);
   });
 
   it("keeps `migration` usable as an ordinary field / operation name (soft keyword; step is keyword-free)", async () => {
