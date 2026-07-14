@@ -126,6 +126,10 @@ function renderPageView(
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   fnName: string,
   takesRouteId = false,
+  /** Aggregate/workflow → owning bounded context, so a form seam can resolve an
+   *  enum-typed field's values (→ a `<select>`). */
+  bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR> = new Map(),
+  bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR> = new Map(),
   /** Extern components declared on the ui (name → params) — threaded into the
    *  walker so a body call renders through `felizTarget.renderUserComponent`. */
   externComponents: ReadonlyMap<string, PageIR["params"]> = new Map(),
@@ -150,9 +154,9 @@ function renderPageView(
     externComponents, // userComponents (extern only)
     ui.apiParams,
     aggregatesByName,
-    new Map(), // bcByAggregate — unused by the Feliz form seams (no enum resolution)
+    bcByAggregate, // form seams resolve enum-typed fields → <select> options
     workflowsByName, // WorkflowForm(runs:) resolves here
-    new Map(), // bcByWorkflow
+    bcByWorkflow, // workflow-form enum resolution
     new Map(), // paramTypes
     new Map(), // pageRoutes
     externFunctionNames, // extern frontend function names
@@ -292,15 +296,26 @@ function mutationsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizMu
   return out;
 }
 
+/** All enum declarations across a ui's contexts, keyed name → values — so a
+ *  form's enum-typed field resolves to a `<select>`.  Built the same in the
+ *  MVU-assembly collectors (here) and the view seams (from the owning BC), so a
+ *  form's field set is identical on both sides. */
+function enumsFromContexts(contexts: EnrichedBoundedContextIR[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const c of contexts) for (const e of c.enums) out.set(e.name, e.values);
+  return out;
+}
+
 /** The create forms a ui hosts, across ALL its pages (deduped by aggregate) —
  *  `CreateForm(of: X)`. */
 function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[] {
   const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const enumsByName = enumsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageForms(page, aggregatesByName)) {
+    for (const f of collectPageForms(page, aggregatesByName, enumsByName)) {
       if (seen.has(f.aggregate)) continue;
       seen.add(f.aggregate);
       out.push(f);
@@ -314,10 +329,11 @@ function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[]
 function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizOperationForm[] {
   const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const enumsByName = enumsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizOperationForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageOperationForms(page, aggregatesByName)) {
+    for (const f of collectPageOperationForms(page, aggregatesByName, enumsByName)) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);
@@ -337,10 +353,11 @@ function workflowsForUi(contexts: EnrichedBoundedContextIR[]): Map<string, Workf
  *  `WorkflowForm(runs: X)`. */
 function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizWorkflowForm[] {
   const workflowsByName = workflowsForUi(contexts);
+  const enumsByName = enumsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizWorkflowForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageWorkflowForms(page, workflowsByName)) {
+    for (const f of collectPageWorkflowForms(page, workflowsByName, enumsByName)) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);
@@ -389,6 +406,14 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const workflowsByName = workflowsForUi(contexts);
+  // Aggregate/workflow → owning bounded context (form seams resolve enum-typed
+  // fields to their `<select>` values from the owning BC's enum declarations).
+  const bcByAggregate = new Map<string, EnrichedBoundedContextIR>();
+  const bcByWorkflow = new Map<string, EnrichedBoundedContextIR>();
+  for (const c of contexts) {
+    for (const a of c.aggregates) bcByAggregate.set(a.name, c);
+    for (const w of c.workflows) bcByWorkflow.set(w.name, c);
+  }
 
   // Extern frontend hatches (extern-{component,function}-escape-hatch.md): the
   // extern components (name → params, threaded into the walker's userComponents
@@ -474,6 +499,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
             workflowsByName,
             pageViewFn(p),
             hasRouteParam(p),
+            bcByAggregate,
+            bcByWorkflow,
             externComponents,
             externFunctionNames,
             used,
@@ -490,6 +517,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
           workflowsByName,
           rootFn,
           false,
+          bcByAggregate,
+          bcByWorkflow,
           externComponents,
           externFunctionNames,
           used,

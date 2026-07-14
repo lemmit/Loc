@@ -2450,3 +2450,38 @@ surfaced a latent read-path bug that had been dormant for the whole Feliz build.
   dormant bug lived. Generating a project that both READS (QueryView) and CREATES
   the aggregate, then Fable-compiling, caught it — a form-only or read-only spike
   would have missed it. Same prove-it loop as §23–§33.
+
+## 37. Feliz enum → `<select>` — the seam finally needs context (2026-07-13)
+
+Enum create/op/workflow fields rendered as free-text inputs (type a raw enum
+string). Making them a `<select>` is the first Feliz form widget that needs data
+NOT on the aggregate itself — the enum's VALUES, declared on the bounded context.
+
+- **`walkBody` already carried `bcByAggregate` — the Feliz call just passed
+  `new Map()`.** Every prior form slice's `// bcByAggregate — unused (no enum
+  resolution)` comment was the standing TODO. Threading the real BC map (built in
+  `renderAppFs` from `contexts`, alongside a `bcByWorkflow`) lets the form seam
+  resolve `ctx.bcByAggregate.get(aggName)?.enums`. The plumbing existed; the
+  feature was one argument.
+
+- **Both sides of the form must resolve the SAME enum map.** The field set is
+  built TWICE — in `index.ts` (Model/encoder) and the view seam — and they must
+  agree byte-for-byte. `index.ts` builds `enumsFromContexts(contexts)` (all
+  enums); the seam builds `enumsFromBc(agg's BC)`. Since an enum a field
+  references is declared in that field's BC, both yield the same values for that
+  field → identical `inputKind`/options/`emptyValue`. Keep the resolution rule
+  the same on both sides or the two derivations drift.
+
+- **A `<select>` always has a selection — a REQUIRED enum must default to its
+  first value.** Init a required enum's string state to `enumValues[0]` (matches
+  React's `initialValueTs`), else the model says `""` while the select visually
+  shows the first option — a silent mismatch that submits `""`. An OPTIONAL enum
+  keeps `""` + a LEADING blank `<option>` so "unset" is reachable (and folds to
+  null on encode). So the empty-form value is no longer uniformly `""` —
+  `renderFormTypes` reads a per-field `emptyValue`.
+
+- **`prop.type` doesn't lex but `Html.select`/`prop.value`/`prop.children` are
+  fine.** Unlike the input-type widget (§33's `prop.type'`), the select needs no
+  keyword dodge — one-line `Html.select [ prop.value …; prop.onChange …;
+  prop.children [ Html.option … ] ]` Fable-compiles and stays offside-safe in the
+  form's children list. The smoke drives it (`selectOption`). Same loop as §23–§36.
