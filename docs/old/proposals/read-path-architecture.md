@@ -1,0 +1,981 @@
+# Read-path architecture — the read-only repository query port
+
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 13). No code yet. A
+> vision + grammar proposal. rev. 9 added the **Paging** section (call-site
+> params, D-ENVELOPE `Paged<T>` result, collections-only) and folded in the
+> state audit: this stacks **on top of** the live **M-T5.10** contract-record
+> track (composes, no conflict). rev. 10 **generalises `projection`** to a
+> read model assembled from **optional clauses** (`keyed by?` / `from…where?`
+> / `on(e)?` / `bind?`), with keyed-vs-singleton and query-time-vs-folded
+> **derived from clause presence** — unlocking the fold+read-time-join
+> **hybrid** neither `view` nor today's `projection` could express. Singleton
+> = absence of `keyed by` (validator-checked against whole-table aggregation
+> binds); the `from`+`on` and group-by combos are deferred behind gates.
+> rev. 11: **cross-aggregate reads are an explicit `join <alias> from
+> <idRef>` clause, not property-off-an-id** — `customerId.name` (view's
+> inherited spelling) is a no-no that violates invariant 9 (refs are `X id`,
+> not hard links) and hides the load; binds read from a loaded alias instead.
+> rev. 12: **a paged read's `sort` must be columnar** (source-aggregate
+> columns — the SQL-pushable subset `where` already requires); a paged read
+> ordered by a `bind`/`join` field → `loom.projection-paged-sort-not-columnar`
+> (else `LIMIT/OFFSET` silently degrades to an in-memory sort). Paging runs on
+> the source scan pre-`join`; `total` is a pre-join COUNT (the joins are 1:1).
+> **rev. 13: the query-time projection is a LINQ/SQL comprehension**
+> (`from Order as o … join Customer as c on o.customerId … where … order by …
+> select …`) whose *expressions* are Loom's **one existing language** — the
+> `where` composes named `criterion`s, and `criterion` gains an optional
+> `of T as <alias>` binder so the source is aliasable consistently (no second
+> predicate dialect; `this` stays the default). The `join` is **by-id only**
+> (boundary-respecting; SQL-push when co-located is a later optimization).
+>
+> **Phase-3 sign-off — LOCKED decisions (maintainer):** pagination =
+> **`page`/`pageSize`**; **`keyed by` explicit** (no 1:1 derivation);
+> **`scaffoldPaged` ships first** (standalone, behind the read-rewire PRs for
+> DTO-touching work); join **by-id-only**, LINQ-shaped; namespace =
+> scaffold reads on the **aggregate route** + projections under
+> **`/projections`** (`/views` folds in); **per-criterion opt-in** for
+> `scaffoldPaged` (no auto-fan). Surface renames from `view`: `bind`→`select`,
+> `sort`→`order by`, dotted-follow→`join … on`.
+>
+> **Workflow status:** state audit + design review (GO WITH CHANGES) + paper
+> simulation (real-grounded) **done and signed off**; ready for implementation
+> (Phase 4), sliced per the Migration story — `scaffoldPaged` first.
+>
+> **The core primitive** (owner steer, rev. 2): the read path's one
+> load-bearing primitive is a **read-only repository queried by
+> `criterion`** — `Repo.run(<criterion>, sort?, page?)` under a
+> **read-only setting** that structurally forbids writes. That single
+> mechanism is *sufficient for almost every read*.
+>
+> **The ergonomic default** (owner steer, rev. 3): the common case — a
+> named, paged, filtered list read — is a **scaffold macro,
+> `scaffoldPaged(of: X)`**, that emits a real (unfoldable) paged
+> `queryHandler` over that primitive. Not a new construct, not a new
+> keyword: the ergonomics live in the macro layer where `scaffold`
+> already lives. rev. 3 **drops the rev. 2 `read` keyword** (the scaffold
+> replaces it).
+>
+> **`view` dies; its full form moves into a generalized `projection`**
+> (owner steer, rev. 6 — resolving rev. 5's open naming knot). The
+> *shorthand* (`view X = Agg where P`, returns the aggregate) is redundant
+> with a filtered read → `scaffoldPaged(of: criterion)`. The *full form*
+> (`view X { <fields> from … bind … }`) — an inline anonymous shape +
+> join-capable binds — is the *one* irreducible thing, and it **is a
+> projection**: `view` and `projection` are the same read model at two
+> points on one axis (`projection.md`'s own framing — always-current
+> query-time vs materialized event-folded, with a shipped lint nudging
+> between them). So the full form becomes a **query-time flavor of
+> `projection`** (`projection X(params) { <fields> from <source> where …
+> bind … }`, no `keyed by`/`on`), sitting beside the existing folded flavor
+> (`projection X keyed by k { … on(e){…} }`). This resolves the naming knot
+> (the survivor *is* a projection — no new word) and fully retires `view`
+> (both forms). The inline anonymous shape (the `<View>Row`) is preserved.
+> rev. 7: the query-time flavor is **parameterized**. rev. 8: keyed
+> *collection* vs unkeyed *singleton*. **rev. 10 generalises further** (owner
+> steer): the projection body is a set of **optional clauses** —
+> `keyed by?` / `from…where?` / `on(e)?` / `bind?` — and *both* axes are
+> **derived from clause presence**: keyed vs singleton ← `keyed by` present or
+> absent; query-time vs folded (materialized) ← any `on(e)` fold present. This
+> unlocks the **fold + read-time-join hybrid** (materialized base enriched by
+> a bind that follows an `X id` ref) neither `view` nor today's `projection`
+> could express. Singleton is the *absence* of `keyed by`, validator-checked
+> against whole-table aggregation binds; `from`+`on` and group-by are deferred
+> behind gates. See § "`projection` generalises". The `/views` namespace dies;
+> the follow + `<View>Row` synthesis **relocate** to the projection path.
+>
+> Composes, all already shipped: [`criterion.md`](./criterion.md) (the
+> predicate atom — the query language), [`retrieval.md`](./retrieval.md)
+> (the *named* criterion+sort+loads bundle), [`domain-services.md`](./domain-services.md)
+> (the `reading` tier — **where the read-only setting already lives and
+> is already enforced**), the `repo-run` / `Repo.findAll(<criterion>)`
+> read builtins (`src/ir/types/loom-ir.ts:1494`, `:3173`), and
+> [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) (the
+> landed `queryHandler` / `route` seam — the orchestration escape hatch).
+> a hand-written `queryHandler` (arbitrary read logic) and
+> [`projection.md`](./projection.md) (the generalised read-model construct —
+> query-time *or* folded) are the heavier escape hatches. (`view` — rev. 6
+> retires it; its full form is the query-time `projection` flavor, see the
+> banner above.)
+
+---
+
+## TL;DR
+
+The whole read path is one primitive: **a repository, accessed
+read-only, queried by a criterion.**
+
+```ddd
+context Sales {
+  aggregate Customer { region: string; active: bool; ... }
+  repository Customers for Customer { }          // getById / save (write) + the read-only face
+
+  criterion ActiveInRegion(region: string) of Customer = this.active && this.region == region
+}
+
+# An imperative read — from a read-only position, so the compiler guarantees it can't mutate:
+#   (inside a workflow / handler / reading service)
+let activeEU = Customers.run(ActiveInRegion("EU"), sort: [name asc], page: page)
+
+# The exposed default — a paged, filtered list read, one line:
+with scaffoldPaged(of: ActiveInRegion)   # → a real, unfoldable paged queryHandler + route
+```
+
+- **`run` takes a `criterion`** (inline composed predicate) or a named
+  `retrieval`; `findAll` is `run` with no predicate. This collapses the
+  "repository-with-40-finders" smell into one generic, specification-driven
+  query — you stop minting a `find byX` method per query.
+- **The read-only setting** is what makes this the *layer of indirection*
+  the api was missing: the api binds to the repository's **read-only
+  face** (a query port that exposes `findById` / `run` / `findAll` and
+  *nothing that writes*), never to the mutating write repository. Reads
+  structurally cannot mutate, and cannot accrete bespoke finders.
+- **The exposed read is a scaffold, not a keyword.** A named, paged,
+  filtered list read — the overwhelming common case — is
+  `scaffoldPaged(of: X)`, a macro (§ "The ergonomic default") that emits
+  a real `queryHandler` over the read-only-repo primitive. It composes
+  what ships; it does not add a construct.
+- **That is sufficient for almost everything.** Most reads are "list/one
+  of aggregate X, optionally filtered." The read-only query port +
+  `scaffoldPaged` cover them. The heavier read constructs are opt-in for
+  the minority that earn them:
+
+| Need | Use | Not the default |
+|---|---|---|
+| list / one / filtered read of an aggregate | **read-only repository + `criterion`** (via `scaffoldPaged`) | — (this *is* the default) |
+| stitch several reads / arbitrary read logic | `queryHandler` | only when a plain read won't do |
+| a **custom-shaped read model** (inline shape, projected fields, cross-aggregate follow) | **`projection`** — query-time flavor (always-current) | when the aggregate's own shape won't do |
+| a **materialized denormalised read model** folded from events | **`projection`** — folded flavor (indexed, eventual) | when query-time refold is too costly |
+
+(`view` was a fifth row here through rev. 3; rev. 6 retires it entirely —
+its full form is the query-time `projection` flavor. See § "`view` dies".)
+
+This is the Ardalis `IReadRepository<T>` + Specification pattern, mapped
+onto Loom's existing `criterion`/`retrieval`/`reading`-tier machinery.
+Almost nothing here is new — the proposal is to make the read-only
+query port the **named, enforced, default** shape of a read.
+
+---
+
+## The problem, precisely
+
+Today the read path is the *mutating* repository, exposed directly, with
+finders accreting on it:
+
+1. `api SalesApi from Sales` names a subdomain; `ApiIR` stores only
+   `sourceModule` (`loom-ir.ts:2344`). The read surface is re-derived
+   from the subdomain's repositories every generate.
+2. Enrichment injects an implicit `find all(): T[]` on every aggregate's
+   repository (`enrichments.ts:1542`).
+3. The generated Hono route handler *is* a repository call, and the
+   repository handed to the router is the **full read/write** object:
+
+```ts
+// src/generator/typescript/emit/routes.ts:60
+app.route("/api/orders", ordersRoutes(new OrderRepository(db, events)));  // full repo — can save()
+
+// route handler body — repository-find-builder.ts
+const result = await repo.byCustomer(customerId);    // a bespoke finder method
+return c.json(repo.toWire(found));
+```
+
+### Two DDD smells
+
+- **Smell 1 — the interface layer reaches into the *mutating* domain
+  collection.** The router gets `new OrderRepository(db, events)` — the
+  same object a command uses to `save`. Nothing structural stops a read
+  path from mutating; the split is by convention, not by capability.
+- **Smell 2 — the repository accretes finders.** Every distinct query
+  becomes a `find byX(...)` method on the domain collection, welded to
+  the aggregate's wire shape via `repo.toWire`. This is the classic
+  "repository-with-40-methods."
+
+The fix for **both** is the same one primitive: expose a **read-only**
+repository face, and express queries as **criteria** passed to a generic
+`run`, not as finder methods. Read-only kills Smell 1 (the api can't
+mutate through a query port). Specification-by-criterion kills Smell 2
+(no per-query method to accrete).
+
+### The mechanism already half-exists
+
+- `Repo.run(<retrieval>, page?)` (retrieval.md, shipped 5 backends) and
+  `Repo.findAll(<criterion>)` (lowered to a `repo-run` riding a synthetic
+  `findAllBy<Criterion>` retrieval — `loom-ir.ts:1494`, `:3173`) are the
+  read builtins.
+- The **read-only setting is already a shipped, enforced concept**: the
+  `reading` domain-service tier permits `repo-read` calls and rejects
+  writes — `loom.domain-service-no-repo-write` says verbatim *"a domain
+  service may run read-only queries (the 'reading' tier), but persistence
+  writes … belong to the orchestrator"* (`domain-service-checks.ts:129`).
+
+What's missing is making this the **default and only** way the api
+reads — instead of the mutating-repository-with-finders auto-derivation.
+
+---
+
+## Target — the read-only query port
+
+### A repository has two faces
+
+| Face | Exposes | Callable from |
+|---|---|---|
+| **write** | `save`, and `getById` for the load→mutate→save cycle | orchestrator tier only — `workflow`, `commandHandler` |
+| **read-only** | `findById`, `run(<criterion \| retrieval>, sort?, page?)`, `findAll(sort?, page?)` | any **read position** — an api read route, a `reading` service, a `queryHandler` |
+
+The read-only face **is** the layer of indirection the original
+complaint asked for. It is not a separate service class; it is a
+capability-narrowed view of the repository. The api binds to it; the
+mutating face is unreachable from a read.
+
+```
+   api read route ──► repository (read-only face) ──► store
+                          run(criterion), findById, findAll
+                          — no save, structurally
+
+   workflow / commandHandler ──► repository (write face) ──► store
+                          getById → mutate → save
+```
+
+### The read-only setting
+
+Read-only-ness is conferred by **position**, exactly as the `reading`
+tier already does it — no per-call ceremony:
+
+- Inside a `workflow` / `commandHandler`, a repository reference is the
+  **write** face (may `save`).
+- Inside an **api read route**, a `reading` service, or a `queryHandler`,
+  a repository reference is the **read-only** face. A write
+  builtin there is a validation error (generalise the shipped
+  `loom.domain-service-no-repo-write` from the `reading` tier to *every*
+  read position → `loom.read-context-repo-write`).
+
+This keeps the common case free of markers: you write `Customers.run(...)`
+and the compiler already knows, from where you wrote it, whether that
+repository can save.
+
+> **Open (the one real fork):** should read-only also be spellable
+> **explicitly** — a `read` marker on a repository handle
+> (`read Customers` / `Customers: read Customer`) — for authors who want
+> the capability visible at the reference site, or is implicit-by-position
+> enough? Lean: **implicit-by-position** (matches the shipped `reading`
+> tier; zero new syntax), with an explicit `read` marker as a later
+> nicety if empirical pressure appears. See Open questions.
+
+### `run` takes a criterion — the query language
+
+`run` accepts an **inline composed criterion** (predicate) or a **named
+retrieval**; both already lower through the same `repo-run` /
+`findAllBy<Criterion>` path (`loom-ir.ts:1494`):
+
+```ddd
+Customers.run(ActiveCustomer && InRegion("EU"), sort: [name asc], page: page)  # inline criterion
+Customers.run(ActiveInRegion("EU"), page: page)                                 # named retrieval (adds sort/loads)
+Customers.findAll(page: page)                                                   # run with no predicate
+Customers.findById(id)                                                          # by-identity reconstitution
+```
+
+- **`page` is call-site only** (retrieval.md's decision, unchanged — it's
+  request state, not part of the rule).
+- Returns the aggregate (`T` / `T[]` / `Paged<T>`). For the common CRUD
+  read, that's the wire shape you want — no separate DTO required. When
+  the wire shape must *diverge* from the aggregate, reach for a
+  `queryHandler` returning a `response` (escape hatch, below).
+
+This is why "sufficient for almost everything": list, one, and filtered
+reads of an aggregate — the overwhelming majority — are exactly
+`run(criterion)` / `findById`, with the read-only setting doing the
+architectural work for free.
+
+### The default api read derivation, re-pointed
+
+`api X from Sales` keeps its terseness but its read routes now derive
+onto the **read-only face**:
+
+- `GET /customers` → `Customers.findAll(page)` (the auto-`findAll`
+  becomes a read-only-face call, not a mutating-repo call).
+- `GET /customers/{id}` → `Customers.findById(id)`.
+- A declared `criterion` / `retrieval` marked exposable →
+  `GET /customers?<params>` → `Customers.run(<criterion>(params), page)`.
+
+The wire is byte-identical to today for the CRUD case; what changes is
+that the router receives a **read-only handle**, and query surface comes
+from criteria, not accreted finder methods. `scaffoldApi` (unfoldable-api-derivation)
+remains the unfold path when you want the routes as literal source.
+
+---
+
+## The ergonomic default — `scaffoldPaged(of: X)`
+
+The read-only-repo + criterion primitive is the *floor*. But a
+named, paged, filtered list read exposed on the wire — the single most
+common read — should be **one line**, not a hand-written
+`query` + `response` + `queryHandler` + `route` quartet. That one line is
+a **scaffold macro**, the criterion-driven sibling of
+unfoldable-api-derivation's `scaffoldQuery(of: <Find>)`:
+
+```ddd
+context Sales {
+  aggregate Order { region: string; status: OrderStatus; placedAt: datetime; ... }
+  repository Orders for Order { }
+  criterion InRegion(region: string) of Order = this.region == region
+
+  with scaffoldPaged(of: InRegion)          // ← the whole exposed read, one line
+}
+```
+
+It expands (AST→AST, at macro time — real, unfoldable source) to the
+honest application read path over the read-only primitive:
+
+```ddd
+  query    OrdersInRegionQuery { region: string, page: int = 1, pageSize: int = 25 }
+  response OrderResponse       { ... }                     // apiRead projection of Order
+  queryHandler ListOrdersInRegion(q: OrdersInRegionQuery): OrderResponse paged {
+    return Orders.run(InRegion(q.region), page: q.page)    // read-only repo + criterion
+  }
+  // + route GET "/orders/in-region" -> Sales.ListOrdersInRegion
+```
+
+### One polymorphic macro — reads its argument's kind
+
+`scaffoldPaged` reads the IR kind of its `of:` target and picks the query
+body — the same "scaffold reads its input to decide" rule the
+`scaffoldApi` family uses. This collapses what could be
+`scaffoldPaged` + `scaffoldPagedView` + a per-aggregate variant into one:
+
+| `of:` target | Body it emits | Handler params from |
+|---|---|---|
+| an **aggregate** (`of: Order`) | `Orders.findAll(page)` | `page` only |
+| a **criterion** (`of: InRegion`) | `Orders.run(InRegion(args), page)` | the criterion's params + `page` |
+| a **retrieval** (`of: HighValueInRegion`) | `Orders.run(HighValueInRegion(args), page)` — its `sort` / `loads` ride along | the retrieval's params + `page` |
+
+- The aggregate is **inferred** from a criterion/retrieval's `of T`, so
+  one argument suffices (no `scaffoldPaged(of: Order, by: InRegion)`
+  redundancy).
+- The criterion/retrieval's **parameters become the route's query params**
+  and the handler signature (`scaffoldPaged` reads `InRegion.params`).
+- `page` is call-site (query params), per retrieval.md's page-is-call-only
+  decision.
+- Returns the aggregate's `apiRead` projection (`OrderResponse paged`) by
+  default — the DTO boundary is scaffolded, not hand-written. When the read
+  needs a *custom* shape (renamed/combined fields, a cross-aggregate
+  follow), that is a `projection` (query-time flavor) — § "`view` dies".
+
+### Why a macro, not a new construct
+
+The shared job the macro covers (a named, paged, filtered *passthrough*
+read) is a *macro output*, not a new read keyword. The primitives stay
+orthogonal and each keeps its one job:
+
+- `criterion` — the filter atom (composes, inlines to SQL).
+- `retrieval` — the *named* filter+sort+loads bundle a handler/macro runs.
+- `queryHandler` — the imperative read the macro *emits* (and the escape
+  hatch when you hand-write arbitrary read logic).
+- `projection` — the custom-shaped read model (query-time or folded); where
+  a divergent shape + cross-aggregate follow lives (ex-`view` full form).
+
+`scaffoldPaged` *composes* these; it does not replace any. Naming follows
+the `scaffold<Thing>(of: X)` stdlib convention (named `of:` arg); whether
+it is spelled `scaffoldPaged` or folded into `scaffoldQuery(of:, paged:)`
+is cosmetic (Open questions).
+
+---
+
+## When the read-only port isn't enough — the escape hatches
+
+Deliberately *not* on the default path; each earns its use:
+
+- **`queryHandler`** (landed, unfoldable-api-derivation) — when a read
+  must **orchestrate** (stitch several `run`s / call a `reading` service)
+  or **diverge the wire shape** from the aggregate (a `response` DTO that
+  hides/renames/combines fields, or **follows a cross-aggregate `X id`
+  ref** — the ex-`view` capability, see below). It runs the read-only port
+  internally and projects. `loom.query-handler-saves` already keeps it
+  read-only.
+- **`projection`** (projection.md, generalised here) — a **derived read
+  model with a custom inline shape**, in two flavors: **query-time**
+  (`from … where … bind …`, was `view`'s full form — always-current,
+  join-capable, no extra storage) and **folded** (`keyed by … on(e){…}` —
+  materialized from events, indexed, eventual). The escape hatch whenever
+  the read needs a shape other than the aggregate's own. Opt-in per read
+  model — never forced.
+
+The ladder is legible: **`scaffoldPaged` / `run(criterion)` for the 90%;
+`queryHandler` when you orchestrate or reshape; `projection` when you need a
+custom-shaped read model (query-time or folded).**
+
+### `view` dies — its full form becomes a `projection` flavor
+
+rev. 4 deprecated `view` and folded its custom shape into a `response`;
+rev. 5 kept the inline shape but left the survivor's *name* open. **rev. 6
+closes it: the surviving thing is a `projection`** — `view` and `projection`
+are the same read model at two points on one axis, so the full form becomes
+a query-time *flavor* of `projection` rather than a new construct.
+
+- **Shorthand** (`view X = Agg where P`, returns the aggregate's wire
+  shape) — redundant with a filtered read. **Dies**, → `scaffoldPaged(of:
+  criterion)`.
+- **Full form** (`view X { <fields> from Agg where P bind … }`) — an inline
+  anonymous shape + join-capable binds — **is a projection**. It moves into
+  `projection` as the **query-time flavor** (below), keeping its inline
+  shape and follow verbatim.
+
+`view` retires **completely** — no recast keyword, no `/views` namespace.
+
+#### `projection` generalises — a read model assembled from optional clauses (rev. 13)
+
+A **projection is a derived read model**: a declared inline shape, read-only,
+disposable/rebuildable, **not a source of truth** (`projection.md`'s own
+defining criterion). rev. 6–9 modelled it as *two disjoint flavors* (query-time
+vs folded) with keying as a second axis. **rev. 10 generalises**: the body is a
+set of **optional clauses**, and every "mode" fact is **derived from which
+clauses are present** — never stamped (invariant 4; the structure *is* the
+discriminant, like `ExprIR.kind`).
+
+The body is a **LINQ/SQL-shaped comprehension** (rev. 13 — owner steer), but the
+*expressions* inside it are Loom's **one existing candidate-rooted language** (the
+same one `criterion` is written in) — the LINQ-ness is purely structural, no
+second predicate dialect (see § "Aligned with `criterion`"):
+
+```
+projection <Name>[(params)] [keyed by <k>] {
+  <field>: <Type> ...                          // the row shape (wire types)
+  [ from <Source> [as <a>] ]                   // PULL — a query source (candidate `this`, or aliased `as a`)
+  [ where <criterion-expr> ]                   // criterion position — composes named criteria
+  [ join <Aggregate> as <c> on <idRef> ]*      // by-id follow (boundary-respecting, batched) → alias `c`
+  [ order by <expr> [asc|desc], … ]            // ordering (paged reads)
+  [ on(e: <Event>) { <field> := <expr> } ]*    // PUSH — event folds (set stored fields)
+  [ select <field> = <expr>, … ]               // projection — fills fields; source via `this`/alias, joins via alias
+}
+```
+
+Derived facts (not declared, not stamped):
+
+- **keyed collection vs singleton** ← `keyed by` **present or absent.**
+  Present → one row per key (list + by-key, pageable). Absent → a **singleton**
+  (exactly one row; single-object read; disambiguated by a validator, below).
+- **materialized vs query-time** ← any `on(e)` fold → the read model needs a
+  **table** (materialized, eventual, O(1)/read); only `from` → **computed per
+  read** (always-current, O(query)/read, no table).
+- **read-time join** ← each `join <Aggregate> as <c> on <idRef>` clause → one
+  batched load-by-id through that aggregate's repository (`auxiliaries`,
+  relocated from `lower-view`), available in **either** mode.
+
+```ddd
+// QUERY-TIME, keyed (was view's full form, now parameterized) — always-current.
+// LINQ-shaped; `where` composes the SAME criterion; source + join both `as`-aliased.
+projection OrdersInRegion(region: string) keyed by orderId {
+  orderId: Order id;  lineCount: int;  customerName: string
+  from Order as o
+  where InRegion(region) && o.status == Confirmed
+  join Customer as c on o.customerId
+  order by o.placedAt desc
+  select orderId = o.id, lineCount = o.lines.count, customerName = c.name
+}
+
+// FOLDED, keyed (today's projection) — materialized, event-driven.
+projection OrderBook keyed by order {
+  order: Order id;  status: OrderStatus
+  on(e: OrderPlaced) { order := e.order; status := Placed }
+}
+
+// SINGLETON (no `keyed by`) — one row. Query-time aggregates; folded accumulates.
+projection SalesDashboard { openOrders: int; revenue: Money
+  from Order as o where o.status == Confirmed
+  select openOrders = count, revenue = sum(o.total) }          // whole-table aggregation
+projection RevenueTotals { total: Money; orders: int
+  on(e: OrderPlaced) { total += e.amount; orders += 1 } }       // global accumulator
+
+// HYBRID (rev. 10's payoff — "folded projection with a query inside"): materialized
+// base ENRICHED by a read-time join. `on(e)` sets stored columns; `join`+`select` derive read-time.
+projection OrderCard keyed by order {
+  order: Order id;  customer: Customer id;  status: OrderStatus;  customerName: string
+  on(e: OrderPlaced) { order := e.order; customer := e.customer; status := Placed }  // PUSH: stored
+  join Customer as c on customer                                // resolve the stored `customer` id
+  select customerName = c.name                                 // PULL: read the loaded aggregate
+}
+```
+
+#### Aligned with `criterion` — one expression language, one `as`-binder
+
+The LINQ comprehension is **structural only**; every expression in `where` /
+`order by` / `select` / the fold `on(e)` bodies is Loom's existing
+candidate-rooted expression language — the same one `criterion`, invariants, and
+operation bodies use. There is **no second predicate dialect**:
+
+- The projection's **`where` is a criterion position** — it composes named
+  `criterion`s (`where InRegion(region) && o.status == Confirmed`) with the
+  identical rooting; it is the same filter you pass to `Repo.run(InRegion(...))`
+  or write in a `find … where`.
+- **`criterion` gains an optional `of T as <alias>` binder** (the "something
+  more" that makes the source aliasable *consistently*): `criterion
+  InRegion(region: string) of Order as o = o.region == region`. This is **not**
+  the rejected fixed `self` receiver — it's an **optional author-chosen alias**,
+  exactly like the `join … as <c>` alias and lambda params ("just like our
+  binding"). `this`/bare stays the default (back-compat; every shipped criterion
+  keeps parsing).
+- So `from Order as o`, `join Customer as c`, and `criterion … of Order as o`
+  all share **one `as`-binding convention**; the source is the candidate
+  (`this` or its alias), joins bind a second aggregate's alias. `select` projects
+  any type (aggregations, field access, join-alias reads) — the same expression
+  language in a projection position rather than a boolean one.
+
+#### Cross-aggregate reads are an explicit `join … on <idRef>` — by-id only (rev. 13)
+
+`view` today spells a cross-aggregate read as a **property access through an id
+field** — `bind customerName = customerId.name`. This is a **no-no**. An `X id`
+is an opaque handle; `.name` on it (a) pretends the id *is* the referenced
+aggregate, (b) hides that a **load** happens (a round-trip, the N+1 risk), and
+(c) **violates invariant 9** — cross-aggregate references are `X id`, *not* hard
+object links; dotting through the id treats the reference as exactly the hard
+link Loom refuses to model.
+
+The read is instead an **explicit SQL/LINQ-shaped `join` clause** that resolves
+an id ref to a loaded aggregate under an alias; `select`/`where`/`order by` read
+from the **alias** (a real aggregate), never from an id:
+
+```
+join <Aggregate> as <c> on <idRef>   // <idRef> types to `<Aggregate> id`; binds <c>: <Aggregate>
+```
+
+- **The join condition is always the referenced aggregate's identity** — `on
+  o.customerId` means `c.id == o.customerId`. Arbitrary join keys (`on x equals
+  y`) are **rejected**: a cross-aggregate SQL join would break the
+  aggregate-as-store boundary (aggregates may live in different stores). This is
+  the by-id-only decision.
+- Each `join` is **one batched load-by-id** through the aggregate's own
+  repository — so the N+1 avoidance is *visible* (count the `join`s = count the
+  round-trips). Multi-hop is an explicit chain (`join Customer as c on
+  o.customerId; join Region as r on c.regionId`).
+- **Default semantics = app-side batched load** (boundary-respecting, works
+  across stores). **Optimization (transparent, later):** when the two aggregates
+  are proven **co-located in one SQL store**, the emitter *may* push the `join`
+  to a real SQL `JOIN` — same surface, faster plan — without the author changing
+  a line. The default stays boundary-safe.
+- **IR unchanged:** each `join` *is* an `auxiliaries` entry (path + aggName +
+  mapVar) — the machinery `collectIdFollows` builds today, now **declared** (read
+  the `join` clauses) rather than **inferred** (walk binds for id-dots).
+- **This corrects `view`:** the dotted follow was `view`'s design mistake; the
+  migration rewrites `bind customerName = customerId.name` → `join Customer as c
+  on customerId` + `select customerName = c.name`.
+
+(The filter (`where`) stays **single-aggregate** and never joins — a paged
+read's `order by` is likewise restricted to source columns, § Paging point 5.
+`join` reads like SQL/LINQ but is a 1:1 boundary-respecting by-id load, not a
+SQL set-join.)
+
+**Why generalise (owner steer) rather than two disjoint arms.** The clause set
+composes: `on(e)` sets stored columns, `select` derives read-time columns
+(joins/computes), `keyed by` names the collection key or its absence makes a
+singleton. This unlocks the **fold + read-time-join hybrid** that neither `view`
+(query-only) nor today's `projection` (fold-only) could express — a real,
+common read model (materialize the cheap authoritative fields, join reference
+data at read). The reviewer costed the *disjoint-template* version; this is more
+expressive and widens the validation surface, so the discipline below is
+load-bearing.
+
+**Discipline that keeps it one coherent construct (not a nullable bag):**
+
+- **Lowering normalises to a validated shape**, deriving `materialized` and
+  `singleton` from clause presence — emitters read a disciplined IR, never a
+  half-nullable optional-bag (the reviewer's inv-4/type-safety caution).
+- **Singleton disambiguation:** no `keyed by` ⇒ singleton, and the validator
+  **requires its `select` projections to be whole-table aggregations**
+  (`sum`/`count`/…) — so "no key" can't silently mean "a keyless list"; a keyed
+  projection's `select` must be per-row. Aggregation operators already ship
+  (`lower-expr.ts:2097`); the new part is whole-table (keyless) aggregation.
+- **Exotic combos are deferred behind gates, not left undefined:**
+  - `from` **and** `on(e)` together (query source *and* folds — a
+    seed-then-update pattern) → `loom.projection-query-and-fold-unsupported`.
+  - keyed **and** aggregating `select` (group-by — one row per group) →
+    `loom.projection-groupby-unsupported`. Singleton (whole-table) is the clean
+    v1 case.
+- **The `loom.view-source-eventsourced-refold` lint becomes an
+  *intra-`projection`* nudge:** a query-time projection over an ES source
+  refolds per request → add `on(e)` folds (make it materialized).
+- **Exposure** unifies under the projection read surface (the `/views`
+  namespace folds into it); keyed projections keep a by-key route.
+
+**v1 ships:** query-time (keyed/singleton), folded (keyed/singleton), and the
+folded+follow hybrid. The `from`+`on` and group-by combos are reserved.
+
+**The two `view` capabilities are preserved by the move:**
+
+- **The follow** survives — but **corrected to an explicit `join` clause**
+  (rev. 11, § "Cross-aggregate reads are explicit"): binds read from a loaded
+  alias, never property-off-an-id. The `auxiliaries` machinery **relocates**
+  from the view lowerer (now populated by reading `join` clauses, not walking
+  binds for id-dots) — same IR, honest surface. Available in a query-time
+  projection, the folded+`join` hybrid, or a hand-written `queryHandler` body.
+- **The inline anonymous shape** is intrinsic to `projection` already — a
+  projection declares its `<Proj>Row` inline (the folded flavor does today);
+  the query-time flavor does the same. No hand-declared `response` is forced;
+  a named `response` stays the opt-in for a shape reused across reads.
+
+#### The `join` is an app-side join — which is why it's a projection concern, not a query one
+
+A `join <alias> from <idRef>` clause is genuinely a **join**, but *not* a SQL
+one. `customerId: Customer id` is a cross-aggregate reference, and Loom **never
+SQL-joins across aggregate roots** (aggregates are consistency/storage
+boundaries; the `X id` rule links them by id, never by FK). So the clause
+compiles to an **application-side, batched, aggregate-respecting load** — the
+aggregate loaded through *its own* repository, stitched in memory:
+
+```ts
+const orders       = await orderRepo.run(...);                    // source aggregate
+const customerById = await customerRepo.findManyByIds(            // ONE batch (the `join` clause), not N per row
+  orders.map(o => o.customerId));
+return orders.map(o => ({ ..., customerName: customerById.get(o.customerId)!.name }));
+```
+
+This pins *where* the follow belongs, and answers **"should `retrieval`
+hold the `bind`?" — no:**
+
+- A **filter** (`criterion` / `retrieval.where`) is **single-aggregate,
+  pushed to SQL** — you cannot `where customer.tier == Gold` (that needs
+  the join *at filter time*, which Loom doesn't do across aggregates;
+  filtering by a foreign field is a `projection`'s job). So the join
+  **never appears in the query** — only in the projection.
+- `retrieval` is the *query* ("which rows, order, hydration"). Giving it
+  `bind` re-fuses query + projection (that *is* `view`), forces the output
+  shape to be redeclared per query, and adds a **second** cross-aggregate
+  knob next to its existing `loads:` (which fetches for *hydration*, not
+  projection) — two overlapping mechanisms.
+- Keeping query and projection split is the SQL insight done right:
+  `retrieval` = `WHERE`/`ORDER BY` (one table); the projection = `SELECT`
+  (where a join-derived column belongs). Orthogonal ⇒ **N queries × M
+  output shapes without N×M constructs** — the reuse `view` (one shape
+  welded to one query) can't offer.
+
+The follow therefore lives on the **projection**, never on `criterion` or
+`retrieval`. For true SQL-join-level or hot denormalized reads
+(filter-by-foreign-field, cross-aggregate aggregation), the tool is
+`projection` (a materialized read model) — the app-side batched follow
+covers moderate cardinality; `projection` covers the rest.
+
+**Migration.** `view` stays parsing through a deprecation window
+(`loom.view-deprecated`, warning), with `ddd migrate reads` rewriting the
+two shapes differently: the **shorthand** `view X = Agg where P` →
+`with scaffoldPaged(of: <criterion(P)>)`; the **full form**
+`view X { fields from Agg where P bind … }` → a read whose query is the
+`criterion(P)` and whose projection is the fields+binds kept **inline**
+(the shape is *not* forced into a named `response` — its `<View>Row`
+becomes the inferred inline-projection row). The `/views` routers retire
+(the read mounts on the normal route scheme) and the vague-`view` shorthand
+emitters + gates delete; the full-form projection + follow machinery
+(`collectIdFollows` / `auxiliaries`, the `<View>Row` synthesis) **relocate**
+to the projection path — the largest slice, and it *moves* code more than
+it deletes it, so it lands last, behind the primitive + `scaffoldPaged` +
+the projection-clause surface.
+
+---
+
+## Paging — call-site params, `Paged<T>` result, collections only
+
+Paging cross-cuts every read that returns a **collection**; it is a property
+of *reading a list*, not of any one construct — so it is uniform across
+`scaffoldPaged`, `Repo.run`, and collection `projection`s, and it falls out
+of the keyed/singleton axis. All of it is inherited from shipped decisions,
+not reinvented here:
+
+1. **Params at the call; result is `Paged<T>`.** `page` is a **call-site**
+   argument (`retrieval.md`'s page-is-call-only decision — it is request
+   state, not part of the rule), surfaced as HTTP query params on the read
+   route. The result is the **D-ENVELOPE `Paged<T>`** carrier (items + total
+   + page metadata), spelled by the shipped `paged` return modifier
+   (`… : <T> paged`). The exact param spelling (`offset`/`limit` vs
+   `page`/`pageSize`) is `pagination-design-note.md`'s, not this proposal's.
+2. **Only collections page.** Applies to: `scaffoldPaged` (by construction),
+   `Repo.run(<criterion>, sort?, page?)` list results, and a **keyed /
+   collection `projection`** read. It does **not** apply to a **singleton**
+   projection (one row → a single object) or a by-id read (`findById`) —
+   those have no page. So: **keyed ⇒ pageable collection; singleton ⇒ single
+   object, no page.**
+3. **The query-time `projection` gains paging** (new — `view` had none;
+   alongside the `sort` the query-time flavor already carries): params at the
+   call, `<Proj>Row paged` result. The folded projection's list read pages
+   identically. Same carrier + param convention as `scaffoldPaged` /
+   `Repo.run` — one paging model across the whole read surface.
+4. **Paging needs a deterministic order; it defaults to the key.**
+   offset/limit over an unordered set skips/repeats rows across pages, so a
+   paged read is ordered by its declared `sort` or, absent one, by its **key**
+   (source id for a query-time projection, the `keyed by` for a folded one,
+   the PK for an aggregate read) — the stable default `retrieval.md` already
+   assumes. No paged read is order-undefined.
+5. **A paged read's `sort` must be *columnar* (source-aggregate columns).**
+   The sort key is part of the *query* (the SQL `ORDER BY`), so it inherits the
+   **same SQL-pushable restriction as `where`** — for the same reason: the
+   app-side `join` runs *after* the source scan, so a sort key that resolves to
+   a `bind`-derived value or a `join`-followed (foreign) field can't be an
+   `ORDER BY` on the base query. `LIMIT/OFFSET` over such an order would force
+   loading the whole filtered set to sort in memory — silently defeating
+   paging. New gate **`loom.projection-paged-sort-not-columnar`**, scoped to
+   *paged* reads: paged + non-columnar sort → error. (Calibration vs. the
+   `where` dual: `where`-by-foreign is *impossible* — a hard error always;
+   sort-by-foreign is merely *expensive*, so an **unpaged** read may still sort
+   by a `bind`/`join` field, in memory — the gate fires only when combined with
+   a page.) This makes the query-time↔folded axis **self-signposting:** "page a
+   list ordered by `customerName`" is exactly the case that wants a **folded**
+   projection, where `customerName` is a stored column (sortable + pageable).
+6. **Paging runs on the source scan, before the joins; `total` is a
+   pre-join COUNT.** `LIMIT/OFFSET` (+ the `COUNT` for `total`) execute on the
+   base aggregate query; the `join` batches then load only the **page's** ids —
+   so each join stays bounded to `pageSize` rows and the count is cheap.
+   Because the `join`s are **1:1** (§ "Cross-aggregate reads"), they don't
+   change cardinality, so `Paged<T>.total` = COUNT of the *filtered source* is
+   exact. The carrier's total is one extra COUNT beside the page fetch — the
+   shipped paged-`find` emission, not new machinery.
+
+---
+
+## Grammar
+
+Very little is new — the primitive exists; the proposal *positions* it.
+
+### EXISTING — leveraged unchanged (shipped)
+
+- `criterion` (`ddd.langium:1477`), `retrieval` (`ddd.langium:~1502`) —
+  the query language.
+- `Repo.run` / `Repo.findAll(<criterion>)` read builtins
+  (`loom-ir.ts:1494`, `:3173`).
+- `reading` domain-service tier + `loom.domain-service-no-repo-write`
+  (`domain-service-checks.ts:129`) — the read-only setting, already
+  enforced.
+- `QueryHandler` / `Route` — the escape hatch + the `queryHandler` +
+  `route` `scaffoldPaged` emits into. (`View` — deprecated, § "`view`
+  deprecates".)
+
+### NO NEW KEYWORD — the exposed read is a scaffold
+
+rev. 2 floated a `read` context member as sugar for a single-`run`
+exposed read. **rev. 3 drops it.** The named, paged, exposed read is
+`scaffoldPaged(of: X)` (§ "The ergonomic default"), which emits an
+ordinary `queryHandler` — no new declaration kind, no `ReadDecl` rule.
+The scaffold stdlib is the right home for "assemble the common quartet
+from primitives"; a keyword would duplicate what the macro already does,
+and the `view`/`retrieval` merge (also considered) was declined for the
+same reason — the shared job is a macro *output*, not a new construct.
+
+### CHANGED — `run` accepts a criterion; repository finders deprecate
+
+- `run`'s argument widens from "named retrieval only" to
+  **`criterion | retrieval`** (the inline-criterion path already lowers;
+  this makes it first-class and documented).
+- A wire-shaped repository `find byX(...)` (a list query as a bespoke
+  method) warns `loom.repository-find-deprecated` → "pass a `criterion`
+  to `run`, or name it a `retrieval`." A `find` returning `T?` by a
+  **unique key** is *reconstitution*, not a list query, and stays legal
+  (see Open questions). Deprecation, not removal — existing `.ddd` parses.
+
+### CHANGED — the api read derivation targets the read-only face
+
+Unchanged surface (`api X from Y`); the derived read routes bind to the
+read-only face and query via criteria (above). The load-bearing rule:
+`loom.route-targets-write-repository` — a route may not reach the
+mutating face.
+
+---
+
+## IR
+
+Minimal:
+
+- The **read-only face** is a resolution/validation fact, not a new node:
+  a `RepoReadCall` (`readKind: "run" | "find" | "findAll" | "named"`,
+  `loom-ir.ts:3173`) in a read position is read-only; a write builtin in a
+  read position is rejected. No IR shape change — the existing `repo-run`
+  path already carries inline criteria via `findAllBy<Criterion>`
+  (`loom-ir.ts:1494`).
+- `scaffoldPaged` lowers to nothing new — it *emits* existing nodes
+  (`QueryHandlerIR` + a `query`/`response` payload + `RouteIR`) at macro
+  time, then lowers as ordinary AST. Reuses, not reinvents.
+- The **follow** (ex-`view`): the `collectIdFollows` / `auxiliaries` planner
+  (`lower-view.ts:96`) relocates from the view lowerer to the **query-time
+  `projection`** lowering, so a query-time projection's binds can follow an
+  `X id` ref (batch-loaded). Not a new node — a relocated pass onto the
+  generalised `ProjectionIR`.
+- `ApiIR` read routes derive onto read-only-face calls (a `scaffoldApi` /
+  enrich-relocation concern, per unfoldable-api-derivation).
+
+`wireShape` retirement (unfoldable-api-derivation) is **no longer central**
+to this proposal: a plain `run` read returns the aggregate wire shape,
+which is correct for the CRUD default. The DTO/`response` boundary only
+enters via the `queryHandler` escape hatch, where it's explicit anyway.
+
+---
+
+## Validation
+
+Shipped, reused:
+
+- `loom.query-handler-saves` (`api-checks.ts:120`) — read escape hatch stays read-only.
+- `loom.domain-service-no-repo-write` (`domain-service-checks.ts:129`) — the `reading` tier's read-only gate.
+
+New:
+
+| Code | Rule | Severity |
+|---|---|---|
+| `loom.read-context-repo-write` | a write builtin (`save`/mutation) called from a read position (api read route / `queryHandler`) — the generalisation of the shipped `reading`-tier gate | error |
+| `loom.route-targets-write-repository` | a route reaches the mutating repository face | error |
+| `loom.repository-find-deprecated` | a wire-shaped list `find` on a repository (pass a `criterion` to `run` / name a `retrieval`) | warning |
+| `loom.view-deprecated` | a `view` declaration (fold into `scaffoldPaged` + `response`; `ddd migrate reads`) | warning |
+
+`loom.read-context-repo-write` is the load-bearing one — it *is* the
+read-only setting, made structural, extended from the `reading` tier to
+every read position.
+
+---
+
+## Per-backend emission
+
+Uniform, because the primitive is portable and mostly already emitted:
+
+| Backend | Read-only port renders as |
+|---|---|
+| **Hono / node** | the router receives a **read-only repository handle** (the read subset — `findById` / `run` / `findAll`), not the full `new OrderRepository(db, events)`; `run(<criterion>)` renders the existing Drizzle predicate + `orderBy`/`limit`/`offset` (retrieval.md path). |
+| **.NET** | the read-only `IReadRepository<T>` / `AsNoTracking` query the `reading` tier already emits (`domain-services.md:137`); `run(<criterion>)` is the Ardalis `Specification<T>` (retrieval.md). |
+| **Java / Spring** | a read-only repository / `Specification<T>` executed via `findAll(spec, Pageable)`. |
+| **Python / FastAPI** | a read-only repository object; `run` → the SQLAlchemy predicate. |
+| **Elixir / Phoenix** | a context read function; `run(<criterion>)` → a composable `Ecto.Query`. |
+
+The `.NET`/`reading`-tier `AsNoTracking` read repository is the existing
+proof this shape emits cleanly; the change is making it the **api's** read
+handle, not only a domain-service dependency.
+
+---
+
+## Migration story
+
+No flag day; each slice independent:
+
+1. **`run` accepts an inline `criterion`** first-class + documented (the
+   lowering path exists; surface + validation + one test per backend).
+2. **The read position gate** — `loom.read-context-repo-write` generalises
+   the `reading`-tier check to api read routes / `queryHandler`. Pure
+   validation; no emit change.
+3. **Read routes bind the read-only handle** — the router receives the
+   read subset; `save` becomes unreachable from a read. Wire byte-identical.
+4. **`scaffoldPaged(of: X)` stdlib macro** — the polymorphic scaffold
+   (aggregate / criterion / retrieval → paged `queryHandler` + `response`
+   + `route`), joining the `scaffoldApi` family. This is the ergonomic
+   default; ship it before deprecating the legacy derivation.
+5. **Generalise the `projection` body to optional clauses** — add
+   `from … where`, `sort`, `bind`, and `(params)` to the projection grammar
+   beside the existing `keyed by … on`, with lowering **deriving** materialized
+   (any `on`) / singleton (no `keyed by`) and **normalising to a validated IR**
+   (a discriminated shape, not a nullable bag). Relocate the `X id` follow /
+   batch-load (`collectIdFollows`, `auxiliaries`) from the view lowerer. Gate
+   the deferred combos (`loom.projection-query-and-fold-unsupported`,
+   `-groupby-unsupported`). Add the `print-structural.ts` arms for the new body
+   (printer-completeness). This is where `view`'s full form + the hybrid land;
+   ship before the view deprecation. Sequence after the read-rewire PRs
+   (#1909–#1912) merge so the response emission reads the settled contract factory.
+6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
+   `ddd migrate reads` codemod over in-repo examples.
+7. **`view` retirement (last, largest)** — `loom.view-deprecated` warning +
+   `ddd migrate reads` rewrites the two shapes (shorthand → `scaffoldPaged`;
+   full form → a query-time `projection`); then delete the 5-backend view
+   emitters, the `/views` routers, the `loom.view-*` gates, and the view UI
+   scaffold. Lands last: biggest change, and depends on slices 4–5 (the fold
+   targets — `scaffoldPaged` + the query-time projection flavor) existing.
+
+Existing `.ddd` keeps parsing throughout; the visible changes are that a
+list `find` and a `view` warn, and a read can no longer `save`.
+
+---
+
+## What this deliberately is NOT
+
+- **Not full event-sourced CQRS by default.** One write model. The default
+  read returns the aggregate queried by criterion at query time. A custom
+  read model is a `projection` — and even its *folded* (materialized,
+  event-sourced) flavor is opt-in per read model, never forced; the
+  query-time flavor needs no events at all.
+- **Not a mandatory DTO layer.** A plain `run` read returns the aggregate
+  wire shape — right for the CRUD majority. The `response` DTO boundary is
+  the `queryHandler` escape hatch, not a tax on every read. *(This is the
+  main rev. 1 → rev. 2 change: rev. 1 forced a DTO + handler per read; the
+  owner steer is that the read-only criterion port is enough for almost
+  everything.)*
+- **Not removing repositories or all finders.** The repository stays; it
+  gains an enforced read-only face and stops accreting list-finders in
+  favour of criteria. Unique-key reconstitution finds stay.
+
+---
+
+## Open questions
+
+1. **`scaffoldPaged` naming.** Its own word (`scaffoldPaged(of: X)`), or
+   folded into `scaffoldQuery(of: X, paged: true)` (the
+   unfoldable-api-derivation leaf)? Lean: a distinct `scaffoldPaged` — the
+   paged-list read is the common case and deserves the short name — but
+   confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
+   a node kind). Cosmetic; either works.
+1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 13):
+   generalise to optional clauses.** Not two disjoint bodies but one clause
+   set (`keyed by?` / `from…where?` / `on(e)?` / `bind?`) with mode derived
+   from clause presence (owner steer). The reviewer's coherence caution is
+   answered by *lowering to a validated/normalised IR* (a discriminated shape,
+   not a nullable bag) + deferring the exotic combos behind gates. The residual
+   pressure-test: does the fold+follow hybrid emit cleanly on all 5 backends
+   (it's a materialized read + a batched read-time join — both already exist
+   separately; the hybrid composes them).
+1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 13): the *absence
+   of `keyed by`*.** No `singleton` keyword and no inference-from-binds. A
+   keyless projection is a singleton, and the validator **requires its binds to
+   be whole-table aggregations** (so "no key" can't silently mean "keyless
+   list"). Group-by (keyed + aggregating → one row per group) stays **deferred**
+   behind `loom.projection-groupby-unsupported`.
+2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
+   *setting* purely positional (recommended — matches the `reading` tier,
+   no new syntax), or should a marker make the capability visible at the
+   reference site? Positional covers the semantics; explicit is a
+   readability nicety. Lean positional. *(Distinct from the dropped `read`
+   member — this is about how the read-only face is spelled at a call, not
+   a new declaration.)*
+3. **What `scaffoldPaged` returns.** The aggregate's `apiRead` projection
+   (`OrderResponse paged`) by default. When a caller needs a divergent
+   shape, do they (a) unfold and edit the emitted `queryHandler` (its
+   `response` binds may follow `X id` refs), or (b) pass a `response:`
+   override to the macro naming a declared `response`? Lean: (a) for
+   one-offs, a named `response` + override for reused custom shapes; this
+   is where `view`'s custom-projection job now lives.
+4. **Unique-key reconstitution `find`.** A `find bySlug(slug): T?` with a
+   unique-key `where` is reconstitution, not a list query — stays exempt
+   from `loom.repository-find-deprecated`? Lean: yes; the deprecation
+   targets list finders (`T[]`) only.
+5. **Does `run` supersede `findAll`?** `findAll(page)` is `run` with no
+   predicate. Keep `findAll` as the readable no-filter spelling, or make it
+   `run()` with an empty criterion? Lean: keep `findAll` (reads better;
+   already shipped).
+6. **Which criteria does `scaffoldPaged` get pointed at?** The macro is
+   explicit (`with scaffoldPaged(of: InRegion)`) — the author names the
+   criterion/retrieval/aggregate to expose. An `exposed`-style
+   auto-exposure of *every* criterion is rejected (too much surface); the
+   `scaffoldApi` composer may fan `scaffoldPaged` across an aggregate's
+   declared exposable retrievals, but per-criterion opt-in stays the rule.
+
+## Cross-references
+
+- [`criterion.md`](./criterion.md) — the predicate atom; the query
+  language `run` consumes. Its deferred `from <Criterion>` auto-exposure
+  is open question 5 here.
+- [`retrieval.md`](./retrieval.md) — the *named* criterion+sort+loads
+  bundle; `run`'s other argument form.
+- [`domain-services.md`](./domain-services.md) — the `reading` tier: where
+  the read-only setting already lives and is already enforced. This
+  proposal generalises that gate to every read position.
+- [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) — the
+  `queryHandler` / `route` orchestration escape hatch (landed) and
+  `scaffoldApi` unfold path.
+- [`views.md`](../views.md) — the `view` construct this proposal **retires
+  entirely** (§ "`view` dies"): shorthand → `scaffoldPaged(of: criterion)`;
+  full form → the **query-time flavor of `projection`** (inline shape +
+  join-capable binds, moved verbatim).
+- [`projection.md`](./projection.md) — the read-model construct this
+  proposal **generalises**: it already frames `view` and `projection` as one
+  read model at two consistency points (always-current query-time vs
+  materialized folded) and ships the refold lint between them. rev. 6 makes
+  that literal — `projection` gains the query-time flavor and absorbs
+  `view`'s full form; the folded flavor is unchanged.
+- `docs/architecture.md` — the api-derivation table this rewrites:
+  repository `find` → a `criterion`-driven read on the read-only face, not
+  a bespoke route-bound finder.
