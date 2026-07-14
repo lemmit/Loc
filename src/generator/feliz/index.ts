@@ -97,11 +97,11 @@ function renderAuthGate(): string {
   return [
     "let view (model: Model) (dispatch: Msg -> unit) =",
     "  match model.Session with",
-    '  | Checking -> Html.p [ Html.text "Loading…" ]',
+    '  | Checking -> Html.div [ prop.className "flex min-h-screen items-center justify-center"; prop.children [ Html.span [ prop.className "loading loading-spinner loading-lg" ] ] ]',
     "  | Anon ->",
-    "      Html.div [ prop.children [",
+    '      Html.div [ prop.className "flex min-h-screen flex-col items-center justify-center gap-4"; prop.children [',
     '        Html.p [ Html.text "Please sign in." ]',
-    '        Html.button [ prop.onClick (fun _ -> Auth.signIn ()); prop.text "Sign in" ]',
+    '        Html.button [ prop.className "btn btn-primary"; prop.onClick (fun _ -> Auth.signIn ()); prop.text "Sign in" ]',
     "      ] ]",
     "  | Authed -> appView model dispatch",
   ].join("\n");
@@ -945,7 +945,18 @@ const PACKAGE_JSON = (name: string): string =>
         dev: "npm run fable && vite",
       },
       dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" },
-      devDependencies: { vite: "^5.4.0" },
+      // Tailwind + daisyUI drive the design system: the pack emits daisyUI
+      // component classes (`btn` / `card` / `table` / `badge` / …), Vite runs
+      // the Tailwind PostCSS plugin over `styles.css` at build, and daisyUI
+      // supplies the component layer + themes.  Pinned to Tailwind v3 / daisyUI
+      // v4 (the v3 `@tailwind base` directive syntax, matching the HEEx pack).
+      devDependencies: {
+        vite: "^5.4.0",
+        tailwindcss: "^3.4.0",
+        daisyui: "^4.12.0",
+        autoprefixer: "^10.4.0",
+        postcss: "^8.4.0",
+      },
     },
     null,
     2,
@@ -956,6 +967,59 @@ const VITE_CONFIG = `import { defineConfig } from "vite";
 export default defineConfig({
   build: { outDir: "dist" },
 });
+`;
+
+// The default daisyUI theme applied on <html data-theme="…">.  `corporate` is a
+// clean, flat, professional light theme; `business` is its dark sibling (wired
+// as `darkTheme` so `prefers-color-scheme: dark` degrades gracefully).  Swapping
+// this one string re-themes the whole app — the seam a future `design:`-driven
+// theme selector plugs into.
+const FELIZ_THEME = "corporate";
+
+// PostCSS config — Vite auto-discovers this and runs Tailwind + Autoprefixer
+// over any CSS it processes (here, `styles.css` linked from index.html).
+const POSTCSS_CONFIG = `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+`;
+
+// Tailwind config — daisyUI is registered as a plugin (it supplies the component
+// classes the pack emits).  `content` scans index.html + the Fable-compiled JS
+// (`out/**/*.js`, where every \`prop.className "btn"\` becomes a \`"btn"\` string
+// literal) so Tailwind keeps exactly the utilities/components in use.
+const TAILWIND_CONFIG = `import daisyui from "daisyui";
+
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./out/**/*.js"],
+  theme: { extend: {} },
+  plugins: [daisyui],
+  daisyui: {
+    themes: ["${FELIZ_THEME}", "business"],
+    darkTheme: "business",
+    logs: false,
+  },
+};
+`;
+
+// The design-system stylesheet — Tailwind's three layers (daisyUI injects its
+// component classes into the `components` layer) plus a couple of app-shell
+// rules the class contract can't express: `#root` is centred to a readable
+// measure with page padding, and a scaffold detail's <details>-based Modal gets
+// a hanging list-marker reset so the daisyUI `collapse` arrow reads cleanly.
+const STYLES_CSS = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* App shell — centre every page to a readable measure with page padding. */
+#root {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
 `;
 
 // Multi-stage build — the Fable step (F# → JS) needs the .NET SDK, the bundle
@@ -982,13 +1046,16 @@ CMD ["nginx", "-g", "daemon off;"]
 `;
 
 const INDEX_HTML = `<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="${FELIZ_THEME}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Loom · Feliz</title>
+    <!-- Vite runs Tailwind (+ daisyUI) PostCSS over this at build; the daisyUI
+         component classes the pack emits resolve here. -->
+    <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="bg-base-100 text-base-content">
     <div id="root"></div>
     <!-- Fable mirrors the fsproj source layout: src/App.fs → out/src/App.js.
          Relative (not root-absolute) so Vite/Rollup resolves it at build. -->
@@ -1044,6 +1111,9 @@ export function generateFelizForContexts(
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);
   out.set("index.html", INDEX_HTML);
+  out.set("styles.css", STYLES_CSS);
+  out.set("tailwind.config.js", TAILWIND_CONFIG);
+  out.set("postcss.config.js", POSTCSS_CONFIG);
   out.set("Dockerfile", DOCKERFILE);
   return out;
 }

@@ -75,7 +75,9 @@ describe("feliz auth gate", () => {
     expect(app).toContain(
       "let view (model: Model) (dispatch: Msg -> unit) =\n  match model.Session with",
     );
-    expect(app).toContain('| Checking -> Html.p [ Html.text "Loading…" ]');
+    expect(app).toContain(
+      '| Checking -> Html.div [ prop.className "flex min-h-screen items-center justify-center"; prop.children [ Html.span [ prop.className "loading loading-spinner loading-lg" ] ] ]',
+    );
     expect(app).toContain("| Authed -> appView model dispatch");
     // The sign-in prompt dispatches the redirect.
     expect(app).toContain('prop.onClick (fun _ -> Auth.signIn ()); prop.text "Sign in"');

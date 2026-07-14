@@ -41,9 +41,14 @@ async function appFs(source: string): Promise<string> {
 describe("feliz modal", () => {
   it("renders a Modal as a <details> disclosure wrapping the operation form", async () => {
     const app = await appFs(SCAFFOLD);
-    // A native disclosure: the trigger label is the summary; no MVU open-state.
-    expect(app).toContain('Html.details [ prop.className "loom-modal"; prop.children [');
-    expect(app).toContain('Html.summary [ prop.text "Rename" ]');
+    // A native disclosure styled as a daisyUI `collapse`: the trigger label is
+    // the summary; no MVU open-state.
+    expect(app).toContain(
+      'Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [',
+    );
+    expect(app).toContain(
+      'Html.summary [ prop.className "collapse-title font-medium"; prop.text "Rename" ]',
+    );
     // The wrapped operation form renders inline inside the disclosure (its inputs
     // + the id-carrying submit — the same `renderOperationForm` markup).
     expect(app).toContain('prop.placeholder "newName"');

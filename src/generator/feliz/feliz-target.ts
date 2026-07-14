@@ -88,7 +88,7 @@ function vosFromBc(bc: BoundedContextIR | undefined): Map<string, readonly Field
 function renderFormInput(formField: string, fld: FelizFormField): string {
   const value = `model.${formField}.${fld.wireName}`;
   if (fld.inputKind === "checkbox") {
-    return `Html.input [ prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
+    return `Html.input [ prop.className "checkbox"; prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
   }
   if (fld.inputKind === "select") {
     const opts = (fld.enumValues ?? []).map(
@@ -96,7 +96,7 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     );
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
-    return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children [ ${allOpts.join("; ")} ] ]`;
+    return `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children [ ${allOpts.join("; ")} ] ]`;
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
     // Options load at runtime from the target's `.all` (`View.idOptions` maps the
@@ -104,13 +104,13 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     // (a required FK is guarded, so it must be chosen before submit).
     const listField = `model.${readFieldName(fld.idTarget)}`;
     const label = fld.idLabelField ?? "id";
-    return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`;
+    return `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`;
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
   // A scalar array renders as a comma-separated text input (the encoder splits
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
-  return `Html.input [ ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
+  return `Html.input [ prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
 }
 
 /** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
@@ -260,7 +260,7 @@ export const felizTarget: WalkerTarget = {
     const agg = ofArg?.kind === "ref" ? ofArg.name : undefined;
     if (!agg) return null;
     ctx.usesRouteId = true; // the delete dispatches with the route `id`
-    return `Html.button [ prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
+    return `Html.button [ prop.className "btn btn-error"; prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
   },
 
   // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
@@ -292,7 +292,7 @@ export const felizTarget: WalkerTarget = {
     }
     const action = felizAction(agg.name, op);
     ctx.usesRouteId = true; // the action dispatches with the route `id`
-    const button = `Html.button [ prop.onClick (fun _ -> dispatch (${action.triggerMsg} id)); prop.text "${action.label}" ]`;
+    const button = `Html.button [ prop.className "btn btn-primary"; prop.onClick (fun _ -> dispatch (${action.triggerMsg} id)); prop.text "${action.label}" ]`;
     if (ctx.authUi) {
       const gate = opActionGate(op);
       if (gate) {
@@ -329,8 +329,8 @@ export const felizTarget: WalkerTarget = {
       form.fields.length > 0
         ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
         : "";
-    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
   // `OperationForm(of: <Agg>, op: <op>)` → one `Html.input` per op param + a
@@ -359,8 +359,8 @@ export const felizTarget: WalkerTarget = {
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
-    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
   // `WorkflowForm(runs: <wf>)` → one `Html.input` per workflow param + a
@@ -384,8 +384,8 @@ export const felizTarget: WalkerTarget = {
     if (form.fields.length === 0) return null;
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
-    const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
-    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
   // `Modal(trigger: Button(…), OperationForm(<agg>.<op>))` — the scaffold detail's
@@ -409,7 +409,9 @@ export const felizTarget: WalkerTarget = {
     const label = modalTriggerLabel(call).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     // ONE line (the op form is one line) so it stays offside-safe spliced into
     // the enclosing Group's children list; paren-wrapped against sibling absorption.
-    return `(Html.details [ prop.className "loom-modal"; prop.children [ Html.summary [ prop.text "${label}" ]; ${form} ] ])`;
+    // A native <details> styled as a daisyUI `collapse` disclosure — the summary
+    // is the trigger, the operation form the revealed `collapse-content`.
+    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ prop.className "collapse-title font-medium"; prop.text "${label}" ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),

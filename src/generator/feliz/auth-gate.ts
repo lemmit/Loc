@@ -92,9 +92,11 @@ export const AUTH_MODULE_CLAIMS = `module Auth =
 /** The `forbiddenView` fallback a gated page renders when the predicate fails —
  *  the client mirror of the backend's 403.  Pack-agnostic plain elements. */
 export const FORBIDDEN_VIEW = `let forbiddenView =
-  Html.div [ prop.children [
-    Html.h2 [ Html.text "Forbidden" ]
-    Html.p [ Html.text "You do not have access to this page." ]
+  Html.div [ prop.className "alert alert-error"; prop.children [
+    Html.div [ prop.children [
+      Html.h2 [ prop.className "font-bold"; prop.text "Forbidden" ]
+      Html.p [ Html.text "You do not have access to this page." ]
+    ] ]
   ] ]`;
 
 /** Render a currentUser-only gate `ExprIR` to an F# boolean expression, with

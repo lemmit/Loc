@@ -66,7 +66,9 @@ describe("feliz Counter", () => {
     expect(app).toContain("let dec () = dispatch Dec");
     // Feliz element tree via the shared walkBody + procedural pack.
     expect(app).toContain("Html.div [");
-    expect(app).toContain('Html.h1 [ Html.text "Counter" ]');
+    expect(app).toContain(
+      'Html.h1 [ prop.className "text-3xl font-bold"; prop.children [ Html.text "Counter" ] ]',
+    );
     // Button props (label + onClick as props, never mixed with children).
     expect(app).toContain("prop.onClick (fun _ -> inc())");
     // The state read is F#, not JS — `string model.Count`, never `String(...)`.
