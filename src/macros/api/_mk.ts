@@ -59,6 +59,7 @@ import type {
   Page,
   PageMenuMeta,
   Parameter,
+  PayloadDecl,
   PostfixChain,
   PrimitiveType,
   Property,
@@ -188,6 +189,10 @@ export function mkHandlerRef(shape: AstLiteral<HandlerRef>): HandlerRef {
 
 export function mkCommandHandler(shape: AstLiteral<CommandHandler>): CommandHandler {
   return mkAst<CommandHandler>(shape);
+}
+
+export function mkPayloadDecl(shape: AstLiteral<PayloadDecl>): PayloadDecl {
+  return mkAst<PayloadDecl>(shape);
 }
 
 export function mkQueryHandler(shape: AstLiteral<QueryHandler>): QueryHandler {
