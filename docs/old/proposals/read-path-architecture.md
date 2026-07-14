@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 4). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 5). No code yet. A
 > vision + grammar proposal.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
@@ -17,18 +17,23 @@
 > already lives. rev. 3 **drops the rev. 2 `read` keyword** (the scaffold
 > replaces it).
 >
-> **`view` is deprecated** (owner steer, rev. 4). Once `scaffoldPaged`
-> emits the endpoint and `criterion` owns the filter, `view` has no job
-> left that earns a keyword: its filter → `criterion`, its passthrough
-> shorthand → `scaffoldPaged`, its auto `GET /views/<name>` → the scaffold
-> `route` (killing the parallel `/views` namespace), its custom shape →
-> a `response` DTO, its materialized case → `projection`. Its *one* unique
-> capability — the cross-aggregate `bind`-follow with N+1-avoiding
-> batch-load — **graduates to a general response-projection capability**
-> (a `response` bind may follow an `X id` ref, in any read), so the follow
-> survives without the construct. This is a **deprecate + fold + codemod**
-> on a landed feature (5 backends, UI scaffold, ~14 `loom.view-*` gates),
-> not free.
+> **`view`: the shorthand deprecates, the full-form projection survives**
+> (owner steer, rev. 5 — sharpening rev. 4's blunter "kill it all"). The
+> *shorthand* (`view X = Agg where P`, returns the aggregate) is redundant
+> with a filtered read and folds into `scaffoldPaged(of: criterion)`. The
+> *full form* (`view X { <fields> from … bind … }`) is **not** redundant:
+> it uniquely pairs an **inline anonymous output shape** (`<View>Row`, never
+> a hand-declared DTO) with **join-capable binds** (`customerId.name`,
+> app-side batched). That pairing survives as a **projection**, decoupled
+> from the query it over-bundles (`from … where` → a reusable
+> `criterion`/`retrieval`). rev. 4's "fold the full form into a *named*
+> `response`" was an overreach — it drops the inline anonymous shape and
+> forces a name; rev. 5 keeps the inline projection (row type inferred) as
+> the default, a named `response` as the reuse opt-in. The `/views`
+> namespace still dies; the follow + `<View>Row` synthesis **relocate** to
+> the projection path (moved, not rewritten). Naming knot (open): the
+> survivor *is* a projection but `projection` is taken (event-folded) — keep
+> `view` recast as "a query-time joined projection," or a fresh word.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -348,35 +353,76 @@ The ladder is legible: **`scaffoldPaged` / `run(criterion)` for the 90%;
 `queryHandler` when you orchestrate or reshape; `projection` when you fold
 events.**
 
-### `view` deprecates — folded, not kept
+### `view` — the shorthand deprecates; the full-form's projection survives
 
-`view` was the fourth escape hatch through rev. 3. rev. 4 removes it: with
-`scaffoldPaged` emitting the endpoint and `criterion` owning the filter,
-nothing `view` does earns a keyword. Each capability has a cleaner home:
+rev. 4 deprecated `view` wholesale and folded its custom shape into a
+declared `response`. **rev. 5 corrects that overreach**: `view`'s two forms
+are not equally redundant, and folding the full form into a *named*
+`response` loses its inline anonymous return type.
 
-| `view` did | Folds into |
+- **Shorthand** (`view X = Agg where P`, returns the aggregate's wire
+  shape) — genuinely redundant with a filtered read. **Deprecates**,
+  folds into `scaffoldPaged(of: criterion)`.
+- **Full form** (`view X { <fields> from Agg where P bind … }`) — declares
+  its output shape **inline and anonymously** (the view-local `<View>Row`,
+  never a hand-declared DTO), co-located with the join-capable binds. This
+  pairing — *inline anonymous shape + binds that follow `X id` refs* — is
+  the **one irreducible thing** no other construct provides. It **survives
+  as a projection**, decoupled from the query it over-bundles.
+
+| `view` (full form) bundled | Where it goes |
 |---|---|
-| filter which rows (`where`) | `criterion` |
-| passthrough shorthand (`view X = Agg where P`) | `scaffoldPaged(of: criterion)` |
+| filter which rows (`from … where`) | `criterion` / `retrieval` (the *query*, decoupled) |
 | auto endpoint `GET /views/<name>` | the `route` `scaffoldPaged` emits — **removes the parallel `/views` namespace** |
-| custom projection shape (`<View>Row` + `bind`) | a `response` DTO |
-| **cross-aggregate `bind`-follow** (`customerId.name`, batch-loaded, no N+1) | a **response-projection capability** (below) |
-| source = workflow-instance / projection | the read path is source-agnostic — read the projection row / workflow state through the same handler |
+| **inline anonymous output shape** (`<View>Row`) | **preserved** — an inferred projection row type, *not* a forced named `response` |
+| **cross-aggregate `bind`-follow** (`customerId.name`, batched) | **preserved** — a projection capability (below) |
+| source = workflow-instance / projection | the read path is source-agnostic — read the projection row / workflow state through the same read |
 | auto browse UI page | the page scaffold (already separate) |
-| materialized / hot denormalized read | `projection` |
+| materialized / hot denormalized read | `projection` (the event-folded construct) |
 
-**The one capability to preserve — the follow — graduates to response
-projection.** `view`'s genuinely-unique feature is that
-`bind customerName = customerId.name` auto-generates a batched
-`findManyByIds` (`lower-view.ts:96` `collectIdFollows`) so projecting a
-foreign field doesn't N+1. Killing `view` must **not** demote this to
-"hand-write a `queryHandler` with two `run`s" (that re-introduces the
-footgun). Instead the follow becomes a property of the **projection
-expression** (the `aggregate → response DTO` map) — a bind may traverse an
-`X id` ref, and the emitter batch-loads it — available in `scaffoldPaged`'s
-generated projector, a hand-written `queryHandler` body, or a named
-projection. The `collectIdFollows` / `auxiliaries` machinery **relocates**
-from the view lowerer to the projection path; it is not rewritten.
+**The projection decouples from the query and keeps its inline shape.** A
+projection is *shape + binds (+ follow)*, applied to a source the query
+supplies. Attach it inline to a read — the row type is inferred (anonymous,
+exactly like `<View>Row`), the query is a reusable `criterion`/`retrieval`:
+
+```ddd
+scaffoldPaged(of: activeOrders) as {
+  orderId      = id,
+  customerName = customerId.name,     // the follow — app-side batched
+  lineCount    = lines.count
+}
+```
+
+When the shape should be **named and reused**, project into a declared
+`response` instead. Both tiers; the inline form is the default (preserves
+view's one-place ergonomic), the named form is for reuse. One projection
+composes with any query, and vice-versa — the N×M reuse `view` (shape
+welded to query) can't offer.
+
+**Naming knot (open).** The surviving thing *is* a projection, but
+`projection` is taken (the event-folded read model). Options: keep the word
+`view` recast precisely as "a query-time joined projection with an inline
+shape" (a far sharper identity than today's vague "saved query"), or a
+fresh word for the inline-projection clause. Deferred — see Open questions.
+
+**Two capabilities to preserve — the follow, and the inline anonymous
+shape.** `view`'s full form uniquely (a) auto-generates a batched
+`findManyByIds` for `bind customerName = customerId.name`
+(`lower-view.ts:96` `collectIdFollows`) so a foreign-field projection
+doesn't N+1, and (b) declares its output shape **inline** (the view-local
+`<View>Row`), never a hand-declared DTO. Both must survive the cut:
+
+- **The follow** becomes a property of the **projection expression** (the
+  `aggregate → row` map) — a bind may traverse an `X id` ref, batch-loaded
+  — available in `scaffoldPaged`'s generated projector, a hand-written
+  `queryHandler` body, or a named projection. `collectIdFollows` /
+  `auxiliaries` **relocates** from the view lowerer to the projection path;
+  not rewritten.
+- **The inline anonymous shape** stays the *default*: an inline projection
+  clause infers its row type (like `<View>Row`), so the common case needs
+  no hand-declared `response`. A named `response` is the opt-in for reuse,
+  never forced. (This is the rev. 4 → rev. 5 correction: rev. 4 wrongly
+  forced the full form into a named `response`.)
 
 #### The follow is an app-side join — which is why it's a projection concern, not a query one
 
@@ -421,13 +467,18 @@ covers moderate cardinality; `projection` covers the rest.
 
 **Migration.** `view` stays parsing through a deprecation window
 (`loom.view-deprecated`, warning), with `ddd migrate reads` rewriting the
-two shapes: `view X = Agg where P` → `with scaffoldPaged(of: <criterion(P)>)`;
-`view X { fields from Agg … bind … }` → a `response` (the fields+binds) +
-`with scaffoldPaged`/`queryHandler`. The 5-backend view emitters, the
-`/views` routers, the ~14 `loom.view-*` gates, and the view UI scaffold are
-deleted once examples migrate; the follow/batch-load code moves to response
-projection. This is the largest slice of the proposal — deletion of a
-landed feature — so it lands last, behind the primitive + `scaffoldPaged`.
+two shapes differently: the **shorthand** `view X = Agg where P` →
+`with scaffoldPaged(of: <criterion(P)>)`; the **full form**
+`view X { fields from Agg where P bind … }` → a read whose query is the
+`criterion(P)` and whose projection is the fields+binds kept **inline**
+(the shape is *not* forced into a named `response` — its `<View>Row`
+becomes the inferred inline-projection row). The `/views` routers retire
+(the read mounts on the normal route scheme) and the vague-`view` shorthand
+emitters + gates delete; the full-form projection + follow machinery
+(`collectIdFollows` / `auxiliaries`, the `<View>Row` synthesis) **relocate**
+to the projection path — the largest slice, and it *moves* code more than
+it deletes it, so it lands last, behind the primitive + `scaffoldPaged` +
+the projection-clause surface.
 
 ---
 
@@ -561,9 +612,10 @@ No flag day; each slice independent:
    (aggregate / criterion / retrieval → paged `queryHandler` + `response`
    + `route`), joining the `scaffoldApi` family. This is the ergonomic
    default; ship it before deprecating the legacy derivation.
-5. **Response follow** — relocate the `X id` follow / batch-load
-   (`collectIdFollows`, `auxiliaries`) from the view lowerer to the
-   response-projection path, so it's available before `view` retires.
+5. **Projection clause + follow** — the inline projection surface (`as {
+   field = expr, … }` with inferred row type) and the relocated `X id`
+   follow / batch-load (`collectIdFollows`, `auxiliaries`) moved from the
+   view lowerer, so both are available before `view`'s full form retires.
 6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
 7. **`view` deprecation (last, largest)** — `loom.view-deprecated` warning
@@ -602,6 +654,14 @@ list `find` and a `view` warn, and a read can no longer `save`.
    paged-list read is the common case and deserves the short name — but
    confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
    a node kind). Cosmetic; either works.
+1a. **The projection surface + its name.** The surviving full-form-`view`
+   capability — inline anonymous shape + join-capable binds — needs a
+   spelling. Sketch: an inline `as { field = expr, … }` clause on a read
+   (row type inferred), plus a named `response` for reuse. What is the
+   *named*, reusable form called? `projection` is taken (event-folded read
+   model); options are keeping `view` recast as "a query-time joined
+   projection with an inline shape," or a fresh word (`shape` / `select` /
+   `readModel`). Load-bearing for the migration; **the main open item.**
 2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
    *setting* purely positional (recommended — matches the `reading` tier,
    no new syntax), or should a marker make the capability visible at the
