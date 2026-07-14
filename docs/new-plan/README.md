@@ -2,6 +2,8 @@
 
 *Created 2026-07-13 from a full re-classification of the design corpus: all 118 `docs/proposals/*`, all 71 `docs/plans/*`, the DEBT backlog, the parity registers, the audit findings, and the 2026-07 architecture weak-spot review. This document — plus the track files beside it — **supersedes** `docs/old/proposals/global-implementation-plan.md`, the `docs/old/proposals/README.md` status table, and `docs/old/plans/debt-prioritized-backlog.md` as the single source of ordering and open work. The archived corpus under [`../old/`](../old/) remains the design record (grammar sketches, semantics, rationale) — missions link into it; nothing was deleted.*
 
+*Last refreshed: **2026-07-14** — a focused, code-verified status pass (not a full re-classification). Flipped **M-T5.6** (strict decimal/money bounds) `open → done` and reconciled the Priority shortlist annotations against fresh `main` + open PRs (see the dated note under §Priority shortlist). Per-track P1 rows were spot-checked, not exhaustively re-audited — treat every status as verify-first per the rule below.*
+
 ## What Loom is building toward
 
 Loom lets you program architecturally correct business apps concisely, with a no-code feel: the `.ddd` model is the single source of truth; UI can be scaffolded from the domain and customized through escape hatches (`extern`, unfold); the model is editable as text, visually (builder), or by an AI agent through the compiler's tool surface; and backend/frontend targets are a config choice. The plan below is organized so that every open thread in the old corpus lands in exactly one **mission** — a self-contained, agent-pickable unit of work.
@@ -46,11 +48,13 @@ Loom lets you program architecturally correct business apps concisely, with a no
 
 **Architecture-risk work outranks feature breadth.** The [weak-spot review](../audits/architecture-weak-spots-2026-07.md) is the ranking authority: anything it names as a structural risk (silent data loss, silent/crash parity failure modes, security defaults, the un-abstracted persistence axis, the nightly-only feedback loop) is P1 by default, ahead of new surface area. We strive for excellence — a smaller platform whose claims all hold beats a wider one with hollow cells.
 
-1. **M-T2.1 + M-T2.2** rename intent + migration-baseline safety — closes the silent-data-loss class.
-2. **M-T6.1 + M-T6.4 + M-T6.7 + M-T6.8** the wrong-failure-mode set — silent SPA-embed hole, Java codegen crashes, node filter leak, update-path wire validation. Small missions, correctness-grade.
-3. **M-T3.1 + M-T3.4** deny-by-default + versioned-on/409-mapper — the security-default flips.
-4. **M-T9.1 + M-T9.2 + M-T9.3** Langium 4, the persistence-emit seam, per-PR boot gates — the three structural investments everything else compounds on.
-5. **M-T1.1** paged/sorted/filtered `Table` — the cheapest, highest-visibility product win (the wire already ships `paged`).
+> **[2026-07-14 refresh — code-verified against `main`]** Most of this list has since shipped; what remains genuinely open is called out per row. Fully done: **row 2** (the correctness set — M-T6.1/6.4/6.7/6.8 all `done`), M-T2.2, M-T9.1, M-T9.2 (concluded), and — not listed here but the same class — **M-T5.6** (strict decimal/money bounds). Partly landed: M-T2.1 (column-rename shipped; **table-rename slice in flight**), M-T9.3 (all five per-PR behavioral gates exist; unit-tier + coverage phases remain), M-T1.1 (**in flight**). Still genuinely open + unclaimed P1: **M-T3.1**, **M-T3.4**. Verify against fresh `main` + open PRs before claiming any of these — the list rots fast.
+
+1. **M-T2.1 + M-T2.2** rename intent + migration-baseline safety — closes the silent-data-loss class. *(M-T2.2 `done` #1895; M-T2.1 column-rename `done`, table-rename slice in flight.)*
+2. **M-T6.1 + M-T6.4 + M-T6.7 + M-T6.8** the wrong-failure-mode set — silent SPA-embed hole, Java codegen crashes, node filter leak, update-path wire validation. Small missions, correctness-grade. *(All four `done` — #1886 / #1879 / main / #1883.)*
+3. **M-T3.1 + M-T3.4** deny-by-default + versioned-on/409-mapper — the security-default flips. *(Both still open — the highest-value unclaimed P1 pair.)*
+4. **M-T9.1 + M-T9.2 + M-T9.3** Langium 4, the persistence-emit seam, per-PR boot gates — the three structural investments everything else compounds on. *(M-T9.1 `done`; M-T9.2 `concluded`; M-T9.3 partial.)*
+5. **M-T1.1** paged/sorted/filtered `Table` — the cheapest, highest-visibility product win (the wire already ships `paged`). *(In flight.)*
 
 ## Statuses rot — verify, then verify the verifier
 

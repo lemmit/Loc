@@ -22,8 +22,8 @@ Sources: [criterion](../old/proposals/criterion.md), [reified-criteria](../old/p
 A4 reductions verified complete 2026-07-13 (`src/util/collection-ops.ts:18-34` — count/sum/min/max/avg all registered). Remaining: block-form top-level functions (`loom.function-toplevel-block`), storable `duration`/PG interval columns, externalising the prelude to `std/*.ddd`.
 Sources: [stdlib plan](../old/plans/stdlib.md), completeness-audit Tier 1.
 
-## M-T5.6 — Strict decimal/money bounds bug — `open` · **S** · P1 ⭐ correctness
-Full-code-review #6: strict `>`/`<` bounds on decimal/money get folded to inclusive comparisons somewhere in lowering/emission — a real, shipping correctness bug. Reproduce, fix across the five `ExprTarget`s, add per-backend kind tests.
+## M-T5.6 — Strict decimal/money bounds bug — `done` (verified 2026-07-14) · **S** · P1 ⭐ correctness
+Full-code-review #6: strict `>`/`<` bounds on decimal/money were folded to inclusive comparisons via the `n±1` identity — a real, shipping correctness bug (`weight > 0.5` → `min(1.5)`, rejecting the whole open interval at the wire boundary). **Fixed on `main`:** `src/ir/validate/invariant-classify.ts:468-484` reads the left operand's lowered type via `isNonIntegerNumericType` (`decimal`/`money`) and, for a strict `>`/`<` on a non-integer field, carries the RAW literal with `exclusive: true` instead of `n±1`; integer fields keep the (sound) inclusive fold. All five wire-validator emitters honour the flag: zod `zod-refine.ts:37/39` (`.gt`/`.lt`), .NET `validator-emit.ts:193/195` (`.GreaterThan`/`.LessThan`), Python `routes-builder.ts:384/386` (`gt=`/`lt=`), Java `emit/validator.ts:201/203` (`>`/`<`), Elixir `changeset-validators.ts` + `document-emit.ts`. Repro on fresh `main`: `invariant weight > 0.5` on a `decimal` emits `weight: z.coerce.number().gt(0.5)` (was the buggy `.min(1.5)`) and domain guard `this._weight.gt(new Decimal("0.5"))`.
 Sources: [full-code-review-2026-07](../audits/full-code-review-2026-07.md) #6.
 
 ## M-T5.7 — Inheritance tail — `partial` · **M** · P3

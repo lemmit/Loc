@@ -30,10 +30,15 @@ Nothing found suggests the "no backend IR" bet is wrong — but the cost has vis
 > `Status` column is appended below (per the remediation plan's definition-of-done —
 > the snapshot text is left intact). **22 of the 24 findings have landed** via #1629
 > and successors (see `docs/old/plans/full-review-remediation.md` §Status and the
-> "Remediated in PR #1629" addendum). The **two still-open** findings are **#6**
-> (strict decimal/money bounds — a real correctness bug, fix in progress on a
-> separate branch, still inclusive-folding on `main`) and **#22** (macro expansion
-> under LSP incremental rebuilds — C5, no landing found).
+> "Remediated in PR #1629" addendum). The two findings still open at that snapshot were
+> **#6** (strict decimal/money bounds) and **#22** (macro expansion under LSP incremental
+> rebuilds — C5, no landing found).
+>
+> **[2026-07-14 refresh, code-verified against `main`]** **#6 has since landed** — the
+> exclusive-bound fix is on `main` (`invariant-classify.ts:468-484` + all five wire-validator
+> emitters; `weight > 0.5` on a `decimal` now emits `.gt(0.5)`, not `.min(1.5)`). **#22 was
+> not re-checked this pass** and is left as-is. So **23 of 24 findings have landed**; #22 is
+> the sole unverified/open item.
 
 | # | Finding | Where | Status |
 |---|---|---|---|
@@ -42,7 +47,7 @@ Nothing found suggests the "no backend IR" bet is wrong — but the cost has vis
 | 3 | **Domain-service `findAll(Criterion)` drops the criterion** (returns all rows — data-exposure-grade) **and calls a nonexistent repo method.** *(repro)* | `src/ir/lower/repo-read.ts:277-292`, `src/ir/enrich/enrichments.ts:442` | ✅ FIXED (B10, #1629 W2) |
 | 4 | **Collection-op lambda params typed as a `string` placeholder** → wrong money code inside lambdas (`String(10.00)` concat, raw `>` instead of `.gt`). Falsifies "backends never re-resolve" inside lambdas. *(repro)* | `src/ir/lower/lower-expr.ts:631` | ✅ FIXED (B9, #1629 W2 — collection-op lambda element types) |
 | 5 | **Multi-level `extends` silently drops grandparent fields**; migrations emit the column the domain layer never populates → every insert fails. `extends` cycles are also undetected and truncate inheritance. *(repro)* | `src/ir/enrich/enrichments.ts:333-341`; `src/language/validators/inheritance.ts:46-51` | ✅ FIXED (B7 extends-cycle + B11 transitive merge, #1629 W2) |
-| 6 | **Strict `>`/`<` invariant bounds folded to inclusive via `n±1`** — wrong for decimal/money: `weight > 0.5` becomes `z.coerce.number().min(1.5)`, rejecting valid input at the API boundary. *(repro)* | `src/ir/validate/invariant-classify.ts:437-458` | 🔴 **OPEN** — still inclusive-folding on `main` (`:445`/`:449`); fix in progress on a separate branch |
+| 6 | **Strict `>`/`<` invariant bounds folded to inclusive via `n±1`** — wrong for decimal/money: `weight > 0.5` becomes `z.coerce.number().min(1.5)`, rejecting valid input at the API boundary. *(repro)* | `src/ir/validate/invariant-classify.ts:437-458` | ✅ FIXED (verified 2026-07-14) — `invariant-classify.ts:468-484` carries the raw literal with `exclusive: true` for non-integer (`decimal`/`money`) fields via `isNonIntegerNumericType`; all five wire-validator emitters honour it (zod `.gt`/`.lt`, .NET `.GreaterThan`, Python `gt=`, Java `>`, Elixir changeset). Repro on `main`: `weight > 0.5` on a `decimal` now emits `z.coerce.number().gt(0.5)`, not `.min(1.5)`. |
 | 7 | **Ownership stamp persists the wrong principal attribute on Hono + Java** (`currentUser.role` stamp collapsed to actor id) — declared read filter never matches; per-backend auth divergence. | `src/generator/typescript/emit/audit-stamp.ts:51`, `src/generator/java/emit/entity.ts:290` | ✅ FIXED (B17, #1629 W2 — principal-attribute stamp) |
 | 8 | **`isAssignable` accepts any `T?` → any `U?`** (`value.kind === "optional"` disjunct). `int? := string?` validates clean. *(repro)* | `src/language/type-system.ts:273` | ✅ FIXED (B1, #1629 W0 — optional-to-optional assignability) |
 | 9 | **Ternaries are completely unchecked** (condition needn't be bool; branches needn't agree). *(repro)* | `src/language/type-system.ts:442-448` | ✅ FIXED (B2, #1629 W2 — ternary typing) |
@@ -178,9 +183,9 @@ Still open at the time of this note: A5 (WorkflowIR facade retirement), A6.2/A6.
 > `schema?` on every `MigrationStep`, A8.2 reverse-topological drops, A8.3
 > `MigrationDestructiveError`/`--allow-destructive` gate, A8.4 `loom.duplicate-table`
 > (see `docs/old/plans/full-review-remediation.md` §Status, "A8.1–A8.4 — DONE"). Of the
-> 24 findings, only **#6** (strict decimal/money bounds — fix in progress on a
-> separate branch, still inclusive-folding on `main`) and **#22** (macro LSP
-> incremental rebuild — C5, no landing found) remain open.
+> 24 findings, only **#22** (macro LSP incremental rebuild — C5, no landing found)
+> remains open as of the 2026-07-14 refresh — **#6** (strict decimal/money bounds)
+> has since landed (see the header addendum + its row).
 
 ---
 
