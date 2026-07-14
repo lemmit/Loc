@@ -221,13 +221,14 @@ export function renderVuePage(input: VuePageShellInput): string {
   );
   const actionLines = actionResult.lines;
 
-  // The magic route `id` (`byId(id)`) binds from `route.params.id` when the
-  // body — OR an action that awaited an instance op (Stage 2) — referenced it
-  // and the route declares an `:id` segment.  (Unlike declared params, the
-  // `:id` segment isn't in `routeParams`, so check the route string.)
-  const routeHasId = /:id\b/.test(page.route ?? "");
+  // The magic route `id` (`byId(id)`, or a `DestroyForm`'s hoisted handler)
+  // binds from `route.params.id` whenever the body — OR an action that awaited
+  // an instance op (Stage 2) — referenced it, regardless of an `:id` segment.
+  // Matches React's unconditional `useParams<{id:string}>()`: a `DestroyForm`
+  // on a non-detail page still needs `id` declared (it reads `undefined` at
+  // runtime there, typed via the `as string` cast — same as React's generic).
   const usesRouteId = result.usesRouteId || actionResult.usesRouteId;
-  const routeIdParam = usesRouteId && routeHasId ? ["id"] : [];
+  const routeIdParam = usesRouteId ? ["id"] : [];
   const usedParams = [
     ...new Set([
       ...[...result.usedParams].filter((p) => routeParams.includes(p)),
@@ -551,6 +552,9 @@ export function renderVuePage(input: VuePageShellInput): string {
   for (const line of storeWiring.decls) script.push(line);
   script.push(...stateLines);
   script.push(...hookLines);
+  // Handlers a target hoisted out of template position (Vue `DestroyForm`'s
+  // `window.confirm` handler) — after the route-id + mutation decls they read.
+  if (result.hoistedHandlers) script.push(...result.hoistedHandlers);
   script.push(...opFormLines);
   script.push(...derivedLines);
   script.push(...actionLines);

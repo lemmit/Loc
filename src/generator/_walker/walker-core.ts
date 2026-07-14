@@ -201,6 +201,12 @@ export interface WalkResult {
    *  shell to declare `const <localVar> = <hookName>(<idExpr>)` at
    *  function top and import the hook from `<prefix>api/<aggCamel>`. */
   actionMutations: ActionMutationState[];
+  /** Fully-rendered `<script setup>` handler lines a target hoisted out of
+   *  template position (Vue's `DestroyForm`: its `window.confirm(...)` handler
+   *  can't live in a `@click` template expression, so it lands here and the
+   *  page shell emits it after the route-id / mutation declarations it reads).
+   *  Optional — only the hoisting targets write it. */
+  hoistedHandlers?: string[];
   /** True when any walked node emitted a `CodeBlock`
    *  primitive.  The React generator's orchestrator aggregates this
    *  across every page in the deployable and threads the result into
@@ -445,6 +451,7 @@ export function walkBody(
     formOfs: ctx.formOfs,
     sink: ctx.sink,
     actionMutations: ctx.actionMutations,
+    hoistedHandlers: ctx.hoistedHandlers,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
     usesFragment: ctx.usesFragment,
@@ -584,6 +591,9 @@ export interface Sink {
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];
+  /** Rendered `<script setup>` handler lines hoisted out of template position
+   *  (Vue `DestroyForm`); see the `WalkResult` field. Lazily created. */
+  hoistedHandlers?: string[];
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;

@@ -36,6 +36,7 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
+import { renderVueDestroyForm } from "./destroy-form.js";
 
 /** Attribute-quote a rendered JS/binding expression for a Vue directive
  *  value (`:key`, `v-if`, `v-for`, `v-else-if`, testid, …).  Vue decodes
@@ -468,5 +469,12 @@ export const vueTarget: WalkerTarget = {
         // statement is never dropped) — leave a typed placeholder await.
         `Promise.reject(new Error("no remote op for variant-match"))`;
     return renderJsVariantMatch(spec, mutate);
+  },
+
+  /** `DestroyForm(of: <Agg>)` — forked so the `window.confirm(...)` handler is
+   *  hoisted into `<script setup>` instead of an (impossible) `@click` template
+   *  expression. See `./destroy-form.ts`. */
+  renderDestroyForm(call, ctx, depth): string | null {
+    return renderVueDestroyForm(call, ctx, depth);
   },
 };
