@@ -1564,14 +1564,23 @@ function ensureFindAll(
       // failure mode of every generated list endpoint.  Every backend already
       // emits the paged path (route page/pageSize/sort/dir + repo count +
       // limit/offset + ORDER BY); the scaffold list consumes it server-side.
+      //
+      // EXCEPTION — event-sourced aggregates (`persistedAs(eventLog)`): their
+      // `all` is a fold over every event stream, not a SQL `LIMIT/OFFSET`
+      // query, so the paged route/repo emission doesn't apply (the ES
+      // read-path emitters emit an unpaged list on every backend).  DEBT-28
+      // targets the unbounded *SQL* findAll; a bounded ES read model is a
+      // separate projection concern.  Keeping the ES `all` an unbounded `T[]`
+      // keeps the IR honest against what the ES emitters actually produce
+      // (otherwise the paged flag would be a lie the controllers ignore —
+      // e.g. an unused `page_param/3` helper that fails `--warnings-as-errors`).
+      const paged = agg.persistedAs !== "eventLog";
       const all: FindIR = {
         name: "all",
         params: [],
-        returnType: {
-          kind: "genericInstance",
-          ctor: "paged",
-          arg: { kind: "entity", name: agg.name },
-        },
+        returnType: paged
+          ? { kind: "genericInstance", ctor: "paged", arg: { kind: "entity", name: agg.name } }
+          : { kind: "array", element: { kind: "entity", name: agg.name } },
       };
       repo.finds = [all, ...repo.finds];
     }
