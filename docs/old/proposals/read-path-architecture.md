@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 10). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 11). No code yet. A
 > vision + grammar proposal. rev. 9 added the **Paging** section (call-site
 > params, D-ENVELOPE `Paged<T>` result, collections-only) and folded in the
 > state audit: this stacks **on top of** the live **M-T5.10** contract-record
@@ -11,6 +11,10 @@
 > **hybrid** neither `view` nor today's `projection` could express. Singleton
 > = absence of `keyed by` (validator-checked against whole-table aggregation
 > binds); the `from`+`on` and group-by combos are deferred behind gates.
+> rev. 11: **cross-aggregate reads are an explicit `join <alias> from
+> <idRef>` clause, not property-off-an-id** — `customerId.name` (view's
+> inherited spelling) is a no-no that violates invariant 9 (refs are `X id`,
+> not hard links) and hides the load; binds read from a loaded alias instead.
 > **Went through the language-feature-developer workflow**: state audit +
 > design review (GO WITH CHANGES) done; the paper simulation is next.
 >
@@ -393,7 +397,7 @@ a query-time *flavor* of `projection` rather than a new construct.
 
 `view` retires **completely** — no recast keyword, no `/views` namespace.
 
-#### `projection` generalises — a read model assembled from optional clauses (rev. 10)
+#### `projection` generalises — a read model assembled from optional clauses (rev. 11)
 
 A **projection is a derived read model**: a declared inline shape, read-only,
 disposable/rebuildable, **not a source of truth** (`projection.md`'s own
@@ -408,8 +412,9 @@ projection <Name>[(params)] [keyed by <k>] {
   <field>: <Type> ...                // the row shape (always)
   [ from <Source> where <pred> ]     // PULL — a query source
   [ sort [ … ] ]                     // ordering (paged reads)
+  [ join <alias> from <idRef> ]*     // resolve a cross-aggregate ref → a loaded aggregate
   [ on(e: <Event>) { <fold> } ]*     // PUSH — event folds
-  [ bind <field> = <expr> ]*         // derive fields; may follow `X id` refs (read-time join)
+  [ bind <field> = <expr> ]*         // derive fields (read from joined aliases, not ids)
 }
 ```
 
@@ -417,16 +422,14 @@ Derived facts (not declared, not stamped):
 
 - **keyed collection vs singleton** ← `keyed by` **present or absent.**
   Present → one row per key (list + by-key, pageable). Absent → a **singleton**
-  (exactly one row; single-object read). *(This is the rev.-10 answer to "how is
-  a singleton spelled": not an explicit `singleton` word and not inferred from
-  the binds alone — it's the **absence of a key**, disambiguated by a validator,
-  below.)*
+  (exactly one row; single-object read). *(rev.-10 answer to "how is a singleton
+  spelled": the **absence of a key**, disambiguated by a validator, below.)*
 - **materialized vs query-time** ← any `on(e)` fold → the read model needs a
   **table** (materialized, eventual, O(1)/read); only `from` → **computed per
   read** (always-current, O(query)/read, no table).
-- **read-time join** ← any bind that follows an `X id` ref → the batched
-  app-side join (`collectIdFollows`/`auxiliaries`, relocated from `lower-view`),
-  available in **either** mode.
+- **read-time join** ← each `join <alias> from <idRef>` clause → one batched
+  load-by-id through that aggregate's repository (`auxiliaries`, relocated from
+  `lower-view`), available in **either** mode.
 
 ```ddd
 // QUERY-TIME, keyed (was view's full form, now parameterized) — always-current.
@@ -434,7 +437,8 @@ projection OrdersInRegion(region: string) keyed by orderId {
   orderId: Order id;  lineCount: int;  customerName: string
   from Order where this.region == region
   sort [placedAt desc]
-  bind orderId = id, lineCount = lines.count, customerName = customerId.name  // follow = join
+  join customer from customerId                                  // explicit load; alias `customer`
+  bind orderId = id, lineCount = lines.count, customerName = customer.name
 }
 
 // FOLDED, keyed (today's projection) — materialized, event-driven.
@@ -451,13 +455,55 @@ projection RevenueTotals { total: Money; orders: int
   on(e: OrderPlaced) { total += e.amount; orders += 1 } }       // global accumulator
 
 // HYBRID (rev. 10's payoff — "folded projection with a query inside"): materialized
-// base ENRICHED by a read-time join. `on(e)` sets stored columns; `bind` derives read-time.
+// base ENRICHED by a read-time join. `on(e)` sets stored columns; `join`+`bind` derive read-time.
 projection OrderCard keyed by order {
   order: Order id;  status: OrderStatus;  customerName: string
   on(e: OrderPlaced) { order := e.order; status := Placed }     // PUSH: stored
-  bind customerName = order.customerId.name                      // PULL: joined at read
+  join theOrder from order                                       // resolve the row's Order ref
+  join customer from theOrder.customerId                         // then the Customer ref
+  bind customerName = customer.name                              // PULL: read the loaded aggregate
 }
 ```
+
+#### Cross-aggregate reads are explicit — `join`, not property-off-id (rev. 11)
+
+`view` today spells a cross-aggregate read as a **property access through an id
+field** — `bind customerName = customerId.name`. This is a **no-no** and rev. 11
+corrects it on the way into `projection`. An `X id` is an opaque handle;
+`.name` on it (a) pretends the id *is* the referenced aggregate, (b) hides that a
+**load** happens (a round-trip, the N+1 risk), and (c) **violates invariant 9** —
+cross-aggregate references are `X id`, *not* hard object links; dotting through
+the id treats the reference as exactly the hard link Loom refuses to model.
+
+The read is instead an **explicit `join` clause** that resolves an id ref to a
+loaded aggregate under an alias; binds read from the **alias** (a real
+aggregate), never from an id:
+
+```
+join <alias> from <idRef>          // <idRef> types to `T id` ⇒ loads aggregate T, binds <alias>: T
+```
+
+- The target aggregate is **inferred from the id's type** (`customerId: Customer
+  id` → loads `Customer`); the alias names it.
+- Each `join` is **one batched load-by-id** through the aggregate's own
+  repository — so the N+1 avoidance is *visible* (count the `join`s = count the
+  round-trips), not reverse-engineered from dotted binds.
+- Multi-hop is an explicit chain (`join customer from customerId; join region
+  from customer.regionId`), each hop a declared load.
+- **IR unchanged:** each `join` *is* an `auxiliaries` entry (path + aggName +
+  mapVar) — the machinery `collectIdFollows` builds today, now **declared**
+  rather than inferred. The relocation from `lower-view` becomes a
+  read-the-`join`-clauses pass instead of a walk-the-binds-for-id-dots pass.
+- **This corrects `view`, not just the new projection:** the dotted follow was
+  `view`'s design mistake; the migration rewrites `customerId.name` →
+  `join customer from customerId` + `customer.name`.
+
+(Keyword open: `join <alias> from <idRef>` reads honestly and matches the "join"
+the maintainer asked for; `load`/`resolve`/`follow` are alternatives — `load`
+risks confusion with `retrieval`'s eager-`loads:` plan, so `join` leads. It is a
+by-id single-aggregate load, **not** a SQL set-join — a `join` clause is
+1:1 and boundary-respecting; the filter (`where`) stays single-aggregate and
+never joins.)
 
 **Why generalise (owner steer) rather than two disjoint arms.** The clause set
 composes: `on(e)` sets stored columns, `bind` derives read-time columns
@@ -496,28 +542,29 @@ folded+follow hybrid. The `from`+`on` and group-by combos are reserved.
 
 **The two `view` capabilities are preserved by the move:**
 
-- **The follow** stays a property of the **query-time projection's binds**:
-  a bind may traverse an `X id` ref, batch-loaded. The `collectIdFollows` /
-  `auxiliaries` machinery **relocates** from the view lowerer to the
-  query-time projection path — moved, not rewritten. (The same follow is
-  also available in a hand-written `queryHandler` body's projection.)
+- **The follow** survives — but **corrected to an explicit `join` clause**
+  (rev. 11, § "Cross-aggregate reads are explicit"): binds read from a loaded
+  alias, never property-off-an-id. The `auxiliaries` machinery **relocates**
+  from the view lowerer (now populated by reading `join` clauses, not walking
+  binds for id-dots) — same IR, honest surface. Available in a query-time
+  projection, the folded+`join` hybrid, or a hand-written `queryHandler` body.
 - **The inline anonymous shape** is intrinsic to `projection` already — a
   projection declares its `<Proj>Row` inline (the folded flavor does today);
   the query-time flavor does the same. No hand-declared `response` is forced;
   a named `response` stays the opt-in for a shape reused across reads.
 
-#### The follow is an app-side join — which is why it's a projection concern, not a query one
+#### The `join` is an app-side join — which is why it's a projection concern, not a query one
 
-The follow is genuinely a **join**, but *not* a SQL one. `customerId:
-Customer id` is a cross-aggregate reference, and Loom **never SQL-joins
-across aggregate roots** (aggregates are consistency/storage boundaries;
-the `X id` rule links them by id, never by FK). So `customerId.name`
-compiles to an **application-side, batched, aggregate-respecting join** —
-each aggregate loaded through *its own* repository, stitched in memory:
+A `join <alias> from <idRef>` clause is genuinely a **join**, but *not* a SQL
+one. `customerId: Customer id` is a cross-aggregate reference, and Loom **never
+SQL-joins across aggregate roots** (aggregates are consistency/storage
+boundaries; the `X id` rule links them by id, never by FK). So the clause
+compiles to an **application-side, batched, aggregate-respecting load** — the
+aggregate loaded through *its own* repository, stitched in memory:
 
 ```ts
 const orders       = await orderRepo.run(...);                    // source aggregate
-const customerById = await customerRepo.findManyByIds(            // ONE batch, not N per row
+const customerById = await customerRepo.findManyByIds(            // ONE batch (the `join` clause), not N per row
   orders.map(o => o.customerId));
 return orders.map(o => ({ ..., customerName: customerById.get(o.customerId)!.name }));
 ```
@@ -785,7 +832,7 @@ list `find` and a `view` warn, and a read can no longer `save`.
    paged-list read is the common case and deserves the short name — but
    confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
    a node kind). Cosmetic; either works.
-1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 10):
+1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 11):
    generalise to optional clauses.** Not two disjoint bodies but one clause
    set (`keyed by?` / `from…where?` / `on(e)?` / `bind?`) with mode derived
    from clause presence (owner steer). The reviewer's coherence caution is
@@ -794,7 +841,7 @@ list `find` and a `view` warn, and a read can no longer `save`.
    pressure-test: does the fold+follow hybrid emit cleanly on all 5 backends
    (it's a materialized read + a batched read-time join — both already exist
    separately; the hybrid composes them).
-1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 10): the *absence
+1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 11): the *absence
    of `keyed by`*.** No `singleton` keyword and no inference-from-binds. A
    keyless projection is a singleton, and the validator **requires its binds to
    be whole-table aggregations** (so "no key" can't silently mean "keyless
