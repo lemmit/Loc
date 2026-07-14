@@ -24,6 +24,10 @@ export function renderPgStep(step: MigrationStep): string {
       return renderCreateTable(step.table);
     case "dropTable":
       return `DROP TABLE ${qualified(step.schema, step.name)};`;
+    case "renameTable":
+      // Postgres `RENAME TO` takes an UNqualified new name (the table stays in
+      // its schema); qualify the source, bare the target.
+      return `ALTER TABLE ${qualified(step.schema, step.from)} RENAME TO ${ident(step.to)};`;
     case "addColumn":
       return renderAddColumn(step.table, step.schema, step.column, step.fk);
     case "dropColumn":

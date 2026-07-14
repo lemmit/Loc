@@ -97,6 +97,29 @@ describe("phoenix migrations-emit — delta path", () => {
     expect(body).toMatch(/create index\(:orders, \[:status\]\)/);
   });
 
+  it("renders a renameTable step as an Ecto `rename table(...), to: table(...)` (M-T2.1)", () => {
+    const ir: MigrationsIR = {
+      module: "Sales",
+      storageName: "",
+      baseline: EMPTY_SNAP,
+      next: EMPTY_SNAP,
+      steps: [
+        { op: "renameTable", from: "orders", to: "purchase_orders" },
+        { op: "renameTable", from: "orders", to: "purchase_orders", schema: "sales" },
+      ],
+      version: "20260101000004",
+      name: "RenameOrdersToPurchaseOrders",
+    };
+    const body = emit(ir).get(
+      "priv/repo/migrations/20260101000004_rename_orders_to_purchase_orders.exs",
+    )!;
+    expect(body).toMatch(/rename table\(:orders\), to: table\(:purchase_orders\)/);
+    // Schema-qualified rename carries the prefix on both ends.
+    expect(body).toMatch(
+      /rename table\(:orders, prefix: "sales"\), to: table\(:purchase_orders, prefix: "sales"\)/,
+    );
+  });
+
   it("modifies a column with its current type on a nullability flip", () => {
     // Ecto's `modify` requires the type to be re-stated even when only
     // nullability changes — the step carries it so the emitter doesn't

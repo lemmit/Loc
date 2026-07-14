@@ -70,3 +70,59 @@ migration "b" { Order.quantity -> amount }`);
     expect(found.filter((c) => c.startsWith("loom.rename"))).toEqual([]);
   });
 });
+
+// Table/aggregate renames (`OldName -> NewAggregate`) — the `toAggregate` side
+// is a live cross-reference; `fromTable` is a bare (now-absent) name.
+const tableCodes = async (migration: string): Promise<string[]> =>
+  (
+    await parseString(`
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { quantity: int }
+      aggregate Invoice { total: int }
+      repository Orders for Order { }
+      repository Invoices for Invoice { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}
+${migration}
+`)
+  ).diagnostics
+    .map((d) => String(d.code ?? ""))
+    .filter(Boolean);
+
+describe("migration table rename — validation", () => {
+  it("accepts a well-formed table rename (no migration diagnostics)", async () => {
+    const found = await tableCodes(`migration "ok" { Legacy -> Order }`);
+    expect(
+      found.filter((c) => c.startsWith("loom.migration") || c.startsWith("loom.rename")),
+    ).toEqual([]);
+  });
+
+  it("flags a table self-rename (loom.rename-to-self)", async () => {
+    expect(await tableCodes(`migration "x" { Order -> Order }`)).toContain("loom.rename-to-self");
+  });
+
+  it("flags an aggregate renamed from twice (loom.rename-duplicate-source)", async () => {
+    const found = await tableCodes(`
+migration "a" { Legacy -> Order }
+migration "b" { Legacy -> Invoice }`);
+    expect(found).toContain("loom.rename-duplicate-source");
+  });
+
+  it("flags two renames onto one aggregate (loom.rename-duplicate-target)", async () => {
+    const found = await tableCodes(`
+migration "a" { Legacy -> Order }
+migration "b" { Ancient -> Order }`);
+    expect(found).toContain("loom.rename-duplicate-target");
+  });
+
+  it("an unknown live aggregate on the target side is a linking error", async () => {
+    const found = await tableCodes(`migration "x" { Legacy -> Nonexistent }`);
+    // Langium's linker reports the bad cross-reference; the structural checks
+    // do not re-flag it.
+    expect(found.filter((c) => c.startsWith("loom.rename"))).toEqual([]);
+  });
+});

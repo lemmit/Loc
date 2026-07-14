@@ -120,6 +120,7 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
     solutions: loom.solutions,
     testCases: loom.testCases,
     renameIntents: loom.renameIntents,
+    tableRenameIntents: loom.tableRenameIntents,
     traceability: computeTraceability(loom),
   } as EnrichedLoomModel;
 }

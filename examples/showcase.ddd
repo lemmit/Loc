@@ -991,4 +991,9 @@ testCase TC-002 verifies US-002 {
 migration "2026-07-build-columns" {
     Build.sha       -> commitSha
     Build.startTime -> startedAt
+    // Keyword-free table/aggregate rename: the old `LegacyBuild` table renames
+    // to the live `Build` aggregate (only the NEW name is a cross-reference).
+    // Derives a `renameTable` for the root + owned-child cascade instead of a
+    // destructive drop+recreate.  See docs/migrations.md (M-T2.1).
+    LegacyBuild -> Build
 }

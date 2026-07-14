@@ -33,9 +33,9 @@ interface MigrationsIR {
 
 A `SchemaSnapshot` is an alphabetically-sorted list of `TableShape`s
 (`{ name, schema?, columns, primaryKey, foreignKeys, indexes }`). `MigrationStep`
-is a closed union of `createTable` / `dropTable` / `addColumn` / `dropColumn` /
-`renameColumn` / `alterColumnNullable` / `alterColumnType` / `addIndex` /
-`dropIndex` / `sqlComment`. Backends only translate steps to native syntax — they
+is a closed union of `createTable` / `dropTable` / `renameTable` / `addColumn` /
+`dropColumn` / `renameColumn` / `alterColumnNullable` / `alterColumnType` /
+`addIndex` / `dropIndex` / `sqlComment`. Backends only translate steps to native syntax — they
 never re-derive the schema from the IR.
 
 **Every delta step carries a `schema?`** — the owning bounded context's Postgres
@@ -104,6 +104,37 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
   ALTER TABLE "orders" RENAME COLUMN "qty" TO "quantity";
   ALTER TABLE "orders" RENAME COLUMN "shipped_at" TO "fulfilled_at";
   ```
+- **Table / aggregate rename (M-T2.1).** A bare `OldName -> NewAggregate` step in
+  the same block renames a whole aggregate's table. Only the NEW aggregate is a
+  cross-reference (the old name is gone); the diff emits a `renameTable` for the
+  root table plus the full **owned-child cascade** — value-collection child
+  tables and association join tables (each a `renameTable`), and the owner FK
+  column on every child + contained-part table (each a `renameColumn`). The whole
+  set is non-destructive; Postgres/Ecto keep FK constraints valid across a table
+  rename, so no FK is re-emitted. Guarded on baseline existence, so it is a no-op
+  once baked in. (Derived FK-index names embed the renamed table/column, so they
+  drop+recreate under the new name — a non-destructive rebuild, not a
+  `renameIndex`.)
+
+  ```ddd
+  migration "rename-order" {
+    Order -> PurchaseOrder
+  }
+  ```
+  ```sql
+  ALTER TABLE "orders" RENAME TO "purchase_orders";
+  ALTER TABLE "order_charges" RENAME TO "purchase_order_charges";
+  ALTER TABLE "order_tags" RENAME TO "purchase_order_tags";
+  ALTER TABLE "lines" RENAME COLUMN "order_id" TO "purchase_order_id";
+  ALTER TABLE "purchase_order_charges" RENAME COLUMN "order_id" TO "purchase_order_id";
+  ALTER TABLE "purchase_order_tags" RENAME COLUMN "order_id" TO "purchase_order_id";
+  ```
+  ```elixir
+  rename table(:orders), to: table(:purchase_orders)
+  ```
+  Renaming an aggregate that is the *target* of a sibling aggregate's reference
+  collection (`Other.xs: Order id[]`) is not yet cascaded — that sibling join
+  table's `targetFk` change falls under the destructive gate (never silent).
 - **Rename detection (heuristic fallback).** With no explicit block, a table with
   *exactly one* `dropColumn` and *one* `addColumn` **of identical type** is an
   unambiguous rename → the pair collapses into a single non-destructive

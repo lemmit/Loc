@@ -66,15 +66,36 @@ System:
 // applied-history file is needed.  The step is keyword-free (`Agg.old ->
 // new`) — `rename` is NOT introduced as a keyword because it is used
 // pervasively as a domain identifier (operation/workflow/function names)
-// across the corpus; the `->` carries the intent.  `RenameStep` is the first
-// step kind; the block is shaped so M-T2.3's data-migration steps slot in.
+// across the corpus; the `->` carries the intent.  A `RenameStep` is either a
+// COLUMN rename (`Agg.old -> new`) or a TABLE/aggregate rename
+// (`OldName -> NewAggregate`); the block is shaped so M-T2.3's data-migration
+// steps slot in as further alternatives.
 Migration:
     'migration' name=STRING '{'
         (renames+=RenameStep (','? renames+=RenameStep)* ','?)?
     '}';
 
+// A rename step: column (has the `.field` selector) or table/aggregate (bare
+// `OldName -> NewAggregate`).  The two are disambiguated by the token after
+// the first identifier — `.` selects a column, `->` a whole table.  Only the
+// LIVE side is a cross-reference: a column rename's `aggregate` is the still-
+// present aggregate; a table rename's `toAggregate` is the post-rename
+// aggregate.  The dead side (`from` old column / `fromTable` old name) is a
+// bare identifier the model no longer declares — a ledger block legitimately
+// names things that have since moved on, so it is NOT cross-referenced.
 RenameStep:
+    ColumnRename | TableRename;
+
+ColumnRename:
     aggregate=[Aggregate:ID] '.' from=UserFieldName '->' to=UserFieldName;
+
+// `OldName -> NewAggregate` — the aggregate's table `plural(snake(OldName))`
+// is renamed to `plural(snake(NewAggregate))` in the derived diff, cascading
+// to the aggregate's owned child tables (parts / value-collections /
+// associations) and their owner FK columns.  `fromTable` is the OLD, now-
+// absent aggregate name (bare ID); `toAggregate` is the live cross-reference.
+TableRename:
+    fromTable=ID '->' toAggregate=[Aggregate:ID];
 
 SystemMember:
     Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability | FunctionDecl;
