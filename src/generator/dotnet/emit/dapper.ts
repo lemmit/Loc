@@ -19,6 +19,7 @@
 // `text` (`.ToString()` / `Enum.Parse`).
 // ---------------------------------------------------------------------------
 
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   ExprIR,
@@ -30,6 +31,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
@@ -252,9 +254,9 @@ function whereToSql(e: ExprIR): string {
   }
 }
 
-function renderParams(params: ParamIR[]): string {
+function renderParams(params: ParamIR[], extra: readonly string[] = []): string {
   const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
-  return [...ps, "CancellationToken cancellationToken = default"].join(", ");
+  return [...ps, ...extra, "CancellationToken cancellationToken = default"].join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +410,33 @@ export function renderDapperRepository(
       );
     }
     const sql = `SELECT ${colList} FROM ${table}${where}${andFilter(where !== "")}`;
+    // Paged-by-default findAll (M-T2.6): a COUNT + a whitelisted ORDER BY / LIMIT
+    // / OFFSET page query returning the domain `Paged<Agg>` envelope (1-based).
+    // The sort column is resolved from a fixed whitelist server-side (an unknown
+    // key falls to `id`) so the interpolated column can't inject SQL; `dir` maps
+    // to a literal ASC/DESC.
+    if (pagedReturn(f.returnType)) {
+      const fromClause = `FROM ${table}${where}${andFilter(where !== "")}`;
+      const sortArms = sortableFields(agg)
+        .filter((wf) => wf !== "id")
+        .map((wf) => `"${wf}" => "${snake(wf)}"`)
+        .join(", ");
+      return lines(
+        `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"])})`,
+        `    {`,
+        `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+        `        var offset = (page - 1) * pageSize;`,
+        `        var sortColumn = sort switch { ${sortArms}${sortArms ? ", " : ""}_ => "id" };`,
+        `        var sortDir = dir == "desc" ? "DESC" : "ASC";`,
+        `        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) ${fromClause}"${paramObj}, cancellationToken: cancellationToken));`,
+        `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
+        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset }, cancellationToken: cancellationToken));`,
+        `        var items = rows.Select(Map).ToList();`,
+        ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
+        `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
+        `    }`,
+      );
+    }
     if (isList) {
       return lines(
         `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
