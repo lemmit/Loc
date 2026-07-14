@@ -540,6 +540,13 @@ export interface WalkerTarget {
     autoPaged?: boolean,
   ): string;
 
+  /** OPTIONAL — set when the target decodes a paged `.all` straight to a
+   *  list (Feliz: the Elmish decoder pulls `items` out of the envelope, so
+   *  the Model holds a `'T list`).  The scaffold's `rows.items` unwrap is then
+   *  a no-op — the shared member walk strips it.  Omitted (falsy) on every
+   *  JSX target, which keeps the `Paged<T>` envelope and reads `.items`. */
+  pagedDataIsList?: boolean;
+
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The
    *  shared `emitExpr` sets `ctx.usesRouteId` and returns this; the page-shell

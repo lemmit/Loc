@@ -518,6 +518,11 @@ export interface WalkEnv {
    *  walks the accessor body with `o → "row"`; refs to `o` resolve
    *  to the JS identifier `row`.  Outer scope is unaffected. */
   lambdaParams: ReadonlyMap<string, string>;
+  /** Lambda-param names bound to a PAGED query result on a target that
+   *  decodes the envelope straight to a list (Feliz).  The scaffold's
+   *  `rows.items` unwrap is a no-op on such a binding, so the member walk
+   *  strips the `.items`.  Empty/absent on every JSX target (envelope kept). */
+  pagedListBindings?: ReadonlySet<string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
@@ -1346,6 +1351,19 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       ) {
         ctx.usesCurrentUser = true;
         return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
+      }
+      // Feliz decodes a paged `.all` straight to a `'T list` (no envelope),
+      // so the scaffold's `rows.items` unwrap is a no-op there — strip the
+      // `.items` on a paged-list binding rather than emit `list.items` (which
+      // doesn't type-check under Fable).  Every JSX target keeps the envelope,
+      // so the flag is off and the access renders verbatim.
+      if (
+        ctx.target.pagedDataIsList &&
+        expr.member === "items" &&
+        expr.receiver.kind === "ref" &&
+        ctx.pagedListBindings?.has(expr.receiver.name)
+      ) {
+        return emitExpr(expr.receiver, ctx);
       }
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain

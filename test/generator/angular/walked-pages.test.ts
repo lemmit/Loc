@@ -489,14 +489,14 @@ describe("angular generator — QueryView collection read", () => {
     expect(page).toContain("@if (orderAll.isLoading()) {");
     expect(page).toContain("@if (orderAll.isError()) {");
     expect(page).toContain(
-      "@if (!orderAll.isLoading() && !orderAll.isError() && (orderAll.data() ?? []).length === 0) {",
+      "@if (!orderAll.isLoading() && !orderAll.isError() && (orderAll.data()?.items ?? []).length === 0) {",
     );
-    expect(page).toContain("@if ((orderAll.data() ?? []).length > 0) {");
+    expect(page).toContain("@if ((orderAll.data()?.items ?? []).length > 0) {");
   });
 
   it("binds the data lambda to the called data signal and iterates rows", async () => {
     const page = await queryPage();
-    expect(page).toContain("@for (o of (orderAll.data() ?? []); track $index) {");
+    expect(page).toContain("@for (o of orderAll.data()!.items; track $index) {");
     expect(page).toContain("<div>{{ o.customerId }}</div>");
   });
 });
@@ -578,7 +578,7 @@ describe("angular generator — Table in a QueryView data branch", () => {
       '<table class="loom-table loom-table-striped loom-table-highlight loom-table-sticky">',
     );
     expect(page).toContain("<tr><th>ID</th><th>Customer</th><th>Status</th><th>Placed</th></tr>");
-    expect(page).toContain("@for (row of (orderAll.data() ?? []); track row.id) {");
+    expect(page).toContain("@for (row of orderAll.data()!.items; track row.id) {");
     expect(page).toContain("[attr.data-testid]='(\"orders-row-\" + row.id)'");
   });
 

@@ -431,10 +431,17 @@ export function emitQueryView(
     const dataAccess =
       ctx.target.renderQueryDataAccess?.(queryExpr, single, paged, autoPaged) ??
       (autoPaged ? `${queryExpr}.data.items` : `${queryExpr}.data`);
+    // On a list-decoding target (Feliz), a paged binding IS already the array,
+    // so mark it for the member walk to strip the scaffold's `rows.items`.
+    const childPagedListBindings =
+      paged && ctx.target.pagedDataIsList
+        ? new Set([...(ctx.pagedListBindings ?? []), data.param])
+        : ctx.pagedListBindings;
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, data.param, dataAccess),
       paramTypes: childParamTypes,
+      pagedListBindings: childPagedListBindings,
     };
     dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : "null";
     propagateChildFlags(ctx, childCtx);

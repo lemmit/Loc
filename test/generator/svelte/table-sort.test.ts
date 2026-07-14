@@ -51,7 +51,7 @@ describe("Table client-side sort (Svelte)", () => {
       `onclick={() => { if (sortKey === "name") { sortDir = sortDir === "asc" ? "desc" : "asc"; } else { sortKey = "name"; sortDir = "asc"; } }}`,
     );
     expect(content).toContain(`{sortKey === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}`);
-    expect(content).toContain("sortRows(customerAll.data, sortKey, sortDir)");
+    expect(content).toContain("sortRows(customerAll.data.items, sortKey, sortDir)");
     expect(content).toContain(`import { sortRows } from "$lib/table-sort";`);
     expect(files.get("web/src/lib/table-sort.ts")).toContain("export function sortRows");
   });

@@ -63,8 +63,8 @@ describe("QueryView macro", () => {
     expect(tsx).toMatch(/const orderAll = useAllOrders\(\)/);
     expect(tsx).toMatch(/\{ orderAll\.isLoading && \(/);
     expect(tsx).toMatch(/\{ orderAll\.isError && \(/);
-    expect(tsx).toMatch(/\{ orderAll\.data && orderAll\.data\.length === 0 && \(/);
-    expect(tsx).toMatch(/\{ orderAll\.data && orderAll\.data\.length > 0 && \(/);
+    expect(tsx).toMatch(/\{ orderAll\.data && orderAll\.data\.items\.length === 0 && \(/);
+    expect(tsx).toMatch(/\{ orderAll\.data && orderAll\.data\.items\.length > 0 && \(/);
   });
 
   it("loading branch renders the supplied loading body (Skeleton)", async () => {
@@ -100,7 +100,7 @@ describe("QueryView macro", () => {
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // `rows` in `Table { rows: rows, ... }` resolves to `orderAll.data`.
     expect(tsx).toMatch(
-      /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row\) => \(/,
+      /orderAll\.data && orderAll\.data\.items\.length > 0 && \([\s\S]*orderAll\.data\.items\.map\(\(row\) => \(/,
     );
     // Inner Column accessors still work — `o.status` resolves to
     // `row.status` (the lambda-param scope).

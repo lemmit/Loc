@@ -63,7 +63,7 @@ describe("feliz scaffold primitives", () => {
     expect(app).toContain("Html.thead [ prop.children [ Html.tr [ prop.children [");
     // Rows iterate the loaded data via a yield! List.map (offside-safe).
     // Paged-by-default: the read envelope's `.items` is what the table maps.
-    expect(app).toMatch(/yield! \w+\.items \|> List\.map \(fun \w+ ->/);
+    expect(app).toMatch(/yield! \w+ \|> List\.map \(fun \w+ ->/);
     expect(app).toContain("Html.tbody [ prop.children [");
   });
 
