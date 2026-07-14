@@ -11,11 +11,13 @@ import type { BoundedContextIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/l
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
+import { opActionGate } from "./auth-gate.js";
 import { FS_LEAVES, fsString, storeModelField } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
   type FelizFormField,
+  felizAction,
   felizCreateForm,
   felizOperationForm,
   felizWorkflowForm,
@@ -259,6 +261,47 @@ export const felizTarget: WalkerTarget = {
     if (!agg) return null;
     ctx.usesRouteId = true; // the delete dispatches with the route `id`
     return `Html.button [ prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
+  },
+
+  // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
+  // `<Op><Agg> id` (the route id bound by the detail page's view fn).  The
+  // trigger `Msg` + POST `Cmd` + refetch-on-success live in `update`/`Api` (wired
+  // by index.ts's `collectPageActions`); the view only dispatches.  The Feliz
+  // seam OWNS the primitive (never falls through to the shared React-shaped
+  // `emitAction`): resolution is bounded to a parameterless public op on a
+  // single-record QueryView instance (`ctx.paramTypes` — the collector's twin);
+  // an unresolved instance / param-carrying op (that's an `OperationForm`) emits
+  // a comment, not broken F#.  Under `auth: ui`, a currentUser-only op `requires`
+  // hides the button via `model.CurrentUser` (the action-level page-gate mirror).
+  renderAction: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const opRef = (call.args ?? []).find((_, i) => !argNames[i]);
+    if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") {
+      return felizTarget.renderComment("Action: first argument must be <instance>.<operation>");
+    }
+    const aggName = ctx.paramTypes?.get(opRef.receiver.name);
+    const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
+    const op = agg?.operations.find(
+      (o) => o.name === opRef.member && o.visibility === "public" && o.params.length === 0,
+    );
+    if (!agg || !op) {
+      return felizTarget.renderComment(
+        `Action(${opRef.receiver.name}.${opRef.member}): no parameterless public operation in scope (use OperationForm for an op with parameters)`,
+      );
+    }
+    const action = felizAction(agg.name, op);
+    ctx.usesRouteId = true; // the action dispatches with the route `id`
+    const button = `Html.button [ prop.onClick (fun _ -> dispatch (${action.triggerMsg} id)); prop.text "${action.label}" ]`;
+    if (ctx.authUi) {
+      const gate = opActionGate(op);
+      if (gate) {
+        // One-line `match` (offside-safe, §24) referencing the Model's decoded
+        // claims; no session → the button is hidden.
+        return `(match model.CurrentUser with Some currentUser when ${gate} -> ${button} | _ -> Html.none)`;
+      }
+    }
+    return button;
   },
 
   // `CreateForm(of: <Agg>)` → one `Html.input` per required create-input field

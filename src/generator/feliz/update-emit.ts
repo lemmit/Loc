@@ -8,6 +8,7 @@ import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
+  FelizAction,
   FelizAsyncEffect,
   FelizForm,
   FelizMutation,
@@ -132,6 +133,7 @@ export function renderMsg(
   authUi = false,
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
+  opActions: readonly FelizAction[] = [],
 ): string {
   const cases = [
     // Under a page gate the probe carries the decoded claims (None on 401);
@@ -171,6 +173,12 @@ export function renderMsg(
     ...asyncEffects.flatMap((e) => [
       `  | ${e.triggerMsg} of string`,
       `  | ${e.resultMsg} of Result<${e.successType} option, string>`,
+    ]),
+    // A one-click action (`Action { instance.op }`): a trigger carrying the
+    // route id + a `Done` result (the op returns 204 → `unit`).
+    ...opActions.flatMap((a) => [
+      `  | ${a.triggerMsg} of string`,
+      `  | ${a.doneMsg} of Result<unit, string>`,
     ]),
   ];
   if (cases.length === 0) return "type Msg = | NoOp";
@@ -310,6 +318,7 @@ export function renderUpdate(
   stores: readonly StoreIR[] = [],
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
+  opActions: readonly FelizAction[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -466,6 +475,18 @@ export function renderUpdate(
       assembleArm(`  | ${e.resultMsg} (Error _) ->`, e.elseBody, elseCtx),
     ];
   });
+  // A one-click action: the trigger fires the id-qualified POST `Cmd`; on
+  // success it refetches the detail read (`pageCmd` when byId reads exist, so the
+  // UI reflects the mutation — the MVU twin of React's query invalidation), on
+  // error it stays put.
+  const opActionArms = opActions.map((a) => {
+    const refetch = hasPageCmd ? "pageCmd model.CurrentPage" : "Cmd.none";
+    return (
+      `  | ${a.triggerMsg} id -> model, Cmd.OfAsync.perform Api.${a.apiFn} id ${a.doneMsg}\n` +
+      `  | ${a.doneMsg} (Ok ()) -> model, ${refetch}\n` +
+      `  | ${a.doneMsg} (Error _) -> model, Cmd.none`
+    );
+  });
   const arms = [
     ...authArms,
     ...routeArms,
@@ -477,6 +498,7 @@ export function renderUpdate(
     ...formArms,
     ...operationArms,
     ...workflowArms,
+    ...opActionArms,
   ];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";

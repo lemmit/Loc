@@ -312,19 +312,37 @@ in hand — not before F# output exists.
   app stays byte-for-byte on the boolean probe. Fable + vite + a dedicated
   headless smoke that STUBS `/api/auth/me` to prove BOTH branches (admin→body,
   viewer→forbiddenView); new `generated-feliz-build.yml` auth-gate leg.
+- ✅ **One-click actions (`Action { instance.op }`) + action-button gating.** A
+  parameterless public op invoked on a single-record (byId) detail instance now
+  renders as a native F# dispatch button (was silently emitting broken React
+  `mutateAsync` — a dormant gap no example hit). It projects to the MVU exactly
+  like the operation form minus the fields: a trigger `Msg` carrying the route id
+  → `POST /<id>/<op>` (empty body) → a `Done` result that refetches the detail
+  (`pageCmd`, so the UI reflects the mutation). Forked via `felizTarget.
+  renderAction` (like Angular) so it never hits the shared React `emitAction`; the
+  wiring is collected by `collectPageActions` (a single-QueryView `data:`-param →
+  aggregate binding tracker, the `ctx.paramTypes` twin). Under `auth: ui`, a
+  currentUser-only op `requires` HIDES the button via the decoded claims
+  (`match model.CurrentUser with Some currentUser when <gate> -> button | _ ->
+  Html.none`) — the action-level mirror of the page gate, reusing `renderFelizGate`
+  + `opActionGate`; a gated action alone pulls in the claims machinery. All Fable +
+  vite + runtime-smoke verified (the auth-gate leg now stubs the byId read + the
+  POST, clicks the gated Action, and asserts admin → POST fires / viewer → button
+  hidden). Also fixed a latent `parseUrl` fallback bug (a param-carrying first page
+  produced a partial-application `string -> Page` catch-all).
 - **Wire layer covers the full CRUD write path + workflows + auth (session gate +
-  page authorization gate), with a complete scalar + value-object + scalar-array
-  form layer + the modal disclosure.** list + byId reads, create, delete,
-  operation, workflow runs, the auth session gate, the page-`requires` gate,
+  page authorization gate + action gate), with a complete scalar + value-object +
+  scalar-array form layer + the modal disclosure + one-click actions.** list + byId
+  reads, create, delete, operation, workflow runs, the auth session gate, the
+  page-`requires` gate, one-click `Action` buttons + action-button gating,
   typed/validated form inputs across every scalar widget — text / number /
   checkbox / enum-select / FK-id-select — plus flattened value-object fields,
   comma-separated scalar arrays, and the `<details>` action modal. Remaining Feliz
   work is refinement: deeper pack coverage, a dynamic-row / array-of-VO /
-  entity-part sub-form UI, action-button gating (the `renderFelizGate` renderer now
-  exists — wiring it into `Action(x.op)` buttons is the remaining step), and
-  `currentUser.<field>` in a body (a cross-frontend shared-walker gap). Enum wire
-  fields decode as their string name (a proper DU decoder is a follow-up); nested
-  containment/VO records + decoders ARE emitted (transitive off `wireShape`).
+  entity-part sub-form UI, and `currentUser.<field>` in a body (a cross-frontend
+  shared-walker gap). Enum wire fields decode as their string name (a proper DU
+  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
+  (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
