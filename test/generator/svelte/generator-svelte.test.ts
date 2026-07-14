@@ -98,8 +98,12 @@ describe("svelte generator — project shape", () => {
     const customer = out.get("web/src/lib/api/customer.ts") ?? "";
     expect(customer).toContain('from "@tanstack/svelte-query"');
     expect(customer).toContain("export const CreateCustomerRequest = z.object({");
-    expect(customer).toContain("export function useAllCustomers() {");
-    expect(customer).toContain("return createQuery(() => ({");
+    // Paged-by-default findAll (M-T2.6): the `all` hook takes a query getter and
+    // parses the `<Agg>Paged` envelope (a block body, not the `() => ({` form).
+    expect(customer).toContain(
+      "export function useAllCustomers(query: () => AllQueryInput = () => ({})) {",
+    );
+    expect(customer).toContain("return CustomerPaged.parse(r);");
     expect(customer).toContain("export function useCustomerById(id: () => string | undefined) {");
     expect(customer).toContain("export function useCreateCustomer() {");
     // The schema half must match the react module byte-for-byte (the

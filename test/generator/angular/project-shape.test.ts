@@ -145,14 +145,16 @@ describe("angular generator — project shape", () => {
     expect(api).toContain('import { HttpClient } from "@angular/common/http";');
     expect(api).toContain('@Injectable({ providedIn: "root" })');
     expect(api).toContain("export class CustomerService {");
-    expect(api).toContain("this.http.get<CustomerResponse[]>(`${API_BASE_URL}/customers`)");
+    // Paged-by-default findAll (M-T2.6): the service returns the `<Agg>Paged`
+    // envelope and the factory takes a page/pageSize/sort/dir query getter.
+    expect(api).toContain("this.http.get<CustomerPaged>(");
     // TanStack injectQuery read factory — shared cache keyed by the collection tag.
     expect(api).toContain(
       'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
     );
-    expect(api).toContain("export function useAllCustomers() {");
-    expect(api).toContain('queryKey: ["customers"] as const,');
-    expect(api).toContain("queryFn: () => firstValueFrom(service.findAll()),");
+    expect(api).toContain("export function useAllCustomers(query: () => AllQuery = () => ({})) {");
+    expect(api).toContain('queryKey: ["customers", "list", query()] as const,');
+    expect(api).toContain("queryFn: () => firstValueFrom(service.findAll(query())),");
   });
 
   it("emits the create request type + service POST + an injectMutation factory that invalidates", async () => {
