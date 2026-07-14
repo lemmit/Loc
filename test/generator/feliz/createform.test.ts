@@ -326,6 +326,58 @@ describe("feliz create forms", () => {
     expect(app).not.toContain("IsNullOrWhiteSpace form.tier");
   });
 
+  // A value-object field → FLATTENED into one input per scalar VO sub-field; the
+  // encoder re-nests them under the object key. The form record stays flat/string.
+  it("flattens a value-object field into per-sub-field inputs, re-nested in the encoder", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Sales
+        subdomain Sales {
+          context Cat {
+            valueobject Address { street: string  city: string  zip: string? }
+            aggregate Order with crudish { ref: string  address: Address }
+            repository Orders for Order { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Orders {
+            route: "/orders"
+            body: QueryView {
+              of: Shop.Order.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, o => Card { o.ref } } }
+            }
+          }
+          page OrderNew {
+            route: "/orders/new"
+            body: Stack { CreateForm { of: Order } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // Flat form record — one string field per VO sub-field.
+    expect(app).toContain(
+      "type OrderForm =\n  {\n    ref: string\n    addressStreet: string\n    addressCity: string\n    addressZip: string\n  }",
+    );
+    // Each VO sub-field renders its own input (bound to the flat field).
+    expect(app).toContain('prop.placeholder "addressStreet"');
+    expect(app).toContain('prop.placeholder "addressCity"');
+    // The encoder RE-NESTS the flat fields under the object key.
+    expect(app).toContain(
+      '"address", Encode.object [\n        "street", Encode.string form.addressStreet\n        "city", Encode.string form.addressCity\n        "zip", (if form.addressZip = "" then Encode.nil else Encode.string form.addressZip)',
+    );
+    // Required VO sub-fields guard the submit; the optional `zip` is exempt.
+    expect(app).toContain(
+      "not (System.String.IsNullOrWhiteSpace form.addressStreet) && not (System.String.IsNullOrWhiteSpace form.addressCity)",
+    );
+    expect(app).not.toContain("IsNullOrWhiteSpace form.addressZip");
+  });
+
   // A read-only ui (no CreateForm) emits no form machinery — creates are additive.
   it("a read-only ui emits no form/encoder machinery", async () => {
     const app = await appFs(`

@@ -2524,3 +2524,43 @@ the form must issue an implicit read that didn't exist in the page body.
   map built identically in `index.ts` (from `contexts`) and the seam (from
   `ctx.aggregatesByName`), same two-sided-consistency rule as the enum map (§37).
   Same prove-it loop as §23–§37.
+
+## 39. Feliz nested value-object inputs — flatten, and the dormant record-ordering bug (2026-07-14)
+
+A value-object create field (`address: Address`) was the last structural form
+gap. FLATTEN it — one string form field per scalar VO sub-field — rather than
+nest a sub-record; the encoder re-nests. And, like §34, the first read of a
+record-referencing-a-record exposed a dormant F# ordering bug.
+
+- **Flatten the form, group the encoder.** `address: Address {street, city}` →
+  flat form fields `addressStreet`/`addressCity` (all-string, trivial MVU
+  updates), and ONE encoder change: group contiguous same-`objectKey` fields into
+  `"address", Encode.object [ "street", …; "city", … ]`. Everything else (record
+  type, inputs, Set Msgs, validation) treats them as plain flat fields. A NESTED
+  sub-record would have meant a sub-form record + sub-encoder + verbose nested
+  `{ m with F = { m.F with … } }` updates — flattening is the cheaper model that
+  fits the all-string form philosophy. One level only (scalar VO sub-fields);
+  nested-VO / array sub-fields are dropped.
+
+- **The dormant bug: a wire record referencing another must be a `type … and …`
+  group.** F# is order-sensitive: `type Order = { … address: Address }` fails if
+  `Address` is declared after it. `renderWireTypes` emitted aggregate-first,
+  VO-after — broken, but never fired because no shipped Feliz read had a VO/part
+  field (the FK case doesn't count: an `X id` wire field is a `string`, not an `X`
+  reference). Fix: emit multi-record groups as one mutually-recursive `type X =
+  {…} and Y = {…}` + `let rec x … and y …`. Single-record output (the common
+  scalar case) stays plain `type`/`let` — byte-identical, no churn.
+
+- **Second facet: sibling decoders are referenced UNqualified inside the group.**
+  `decoderExprFor` returns `Decoders.address` (right for external callers — the
+  Api module), but INSIDE `module Decoders`'s `let rec … and …` group the name
+  `Decoders` isn't in scope yet, so the sibling ref must be bare `address`. Strip
+  the `Decoders.` prefix in the decoder-body emission only. Two faces of one
+  "self-referential module during definition" gotcha.
+
+- **Optional VO sub-fields keep the smoke submittable.** The showcase VO
+  (`Contact { email? phone? }`) has optional sub-fields → exempt from the guard,
+  so the create form still enables without filling them; the smoke fills
+  `contactEmail` to prove the flattened input dispatches. Same prove-it loop as
+  §23–§38 — and the same §34 lesson twice: *the first example to exercise a
+  dormant codegen arm finds it broken; prove BOTH read and write.*

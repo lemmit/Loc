@@ -118,6 +118,49 @@ describe("feliz wire layer", () => {
     expect(app).toContain('rank = get.Optional.Field "rank" Decode.int');
   });
 
+  it("emits a mutually-recursive record group when a record references another", async () => {
+    // A wire record with a value-object field (`address: Address`) references the
+    // `Address` record — F# is order-sensitive, so the two must be one recursive
+    // `type … and …` group and the decoder `let rec … and …` (with the sibling
+    // decoder referenced UNqualified), else it fails `dotnet fable`.
+    const files = await generateSystemFiles(`
+      system Shop {
+        api ShopApi from Sales
+        subdomain Sales {
+          context Cat {
+            valueobject Address { street: string  city: string }
+            aggregate Order with crudish { ref: string  address: Address }
+            repository Orders for Order { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Orders {
+            route: "/"
+            body: QueryView {
+              of: Shop.Order.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, o => Card { o.ref } } }
+            }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    const app = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"))![1];
+    // Records: one recursive `type … and …` group (Order references Address).
+    expect(app).toContain("type Order =");
+    expect(app).toContain("    address: Address");
+    expect(app).toContain("and Address =");
+    // Decoders: `let rec order … and address …`, sibling ref UNqualified.
+    expect(app).toContain("  let rec order : Decoder<Order> =");
+    expect(app).toContain('address = get.Required.Field "address" address');
+    expect(app).toContain("  and address : Decoder<Address> =");
+  });
+
   it("emits a Cmd-based Api module (Fable.SimpleHttp + Thoth → Result)", async () => {
     const app = await appFs();
     expect(app).toContain("open Fable.SimpleHttp");

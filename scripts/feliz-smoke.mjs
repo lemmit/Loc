@@ -54,6 +54,9 @@ async function main() {
   // The first combobox is the `status` enum (the `category` FK select follows;
   // its options load from a backend, absent here, so it stays blank + optional).
   await page.getByRole("combobox").first().selectOption("inactive");
+  // Fill a flattened value-object sub-field — proves the nested-VO input renders
+  // + dispatches (the `contact: Contact` VO flattens to `contactEmail`/`Phone`).
+  await page.getByPlaceholder("contactEmail").fill("a@b.com");
   if (!(await create.isEnabled())) {
     throw new Error("create submit should be ENABLED once required fields are filled");
   }
