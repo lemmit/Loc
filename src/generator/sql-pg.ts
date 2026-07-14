@@ -135,7 +135,7 @@ function renderAddIndex(idx: IndexShape, schema?: string): string {
   );
 }
 
-export function renderPgType(t: ColumnType): string {
+function renderPgType(t: ColumnType): string {
   switch (t.kind) {
     case "uuid":
       return "UUID";

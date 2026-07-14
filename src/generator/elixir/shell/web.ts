@@ -1,142 +1,14 @@
 // ---------------------------------------------------------------------------
-// Web-shell files — the `<App>Web` entrypoint module, the SPA controller
-// (embedded-React mode), the CoreComponents function-component library the
-// HEEx walker dispatches into, the layouts (module + root/app HEEx), and
-// the minimal Error views.  Consumed by `emitShellFiles` in ../shell-emit.ts
-// (renderSpaController is additionally re-exported there for the orchestrator).
+// Web-shell files — the CoreComponents function-component library the HEEx
+// walker dispatches into, and the layouts (module + root/app HEEx).  Consumed
+// by `emitShellFiles` in ../shell-emit.ts.
+//
+// NOTE: the vanilla Ecto/Phoenix backend emits its `<App>Web` entrypoint, the
+// SPA controller (embedded-react mode, M-T6.1) and the Error views from
+// `renderVanilla{WebModule,SpaController,ErrorJson}` in
+// `../vanilla/shell-emit.ts`, NOT from here — those functions used to live in
+// this file but were superseded and removed (M-T9.8 dead-export drain).
 // ---------------------------------------------------------------------------
-
-export function renderWebModule(_appName: string, appModule: string): string {
-  const webModule = `${appModule}Web`;
-  return `# Auto-generated.
-defmodule ${webModule} do
-  @moduledoc """
-  The entrypoint for defining web interface, such as controllers, components,
-  channels, and so on.  This can be used in your application as:
-
-      use ${webModule}, :live_view
-
-  """
-
-  def live_view do
-    quote do
-      use Phoenix.LiveView, layout: {${webModule}.Layouts, :app}
-      unquote(html_helpers())
-    end
-  end
-
-  def live_component do
-    quote do
-      use Phoenix.LiveComponent
-      unquote(html_helpers())
-    end
-  end
-
-  def router do
-    quote do
-      use Phoenix.Router, helpers: false
-      import Plug.Conn
-      import Phoenix.Controller
-      import Phoenix.LiveView.Router
-    end
-  end
-
-  def channel do
-    quote do
-      use Phoenix.Channel
-    end
-  end
-
-  # Controller bundle for the API + LV controllers we emit
-  # (AggregatesController, OpenapiController, HealthController, …).
-  # Standard Phoenix 1.7 shape — pulls in the controller DSL plus
-  # the formats this generator emits (json + html for layout-bearing
-  # endpoints).  Caller modules use \`use PhoenixAppWeb, :controller\`.
-  def controller do
-    quote do
-      use Phoenix.Controller, formats: [:html, :json], layouts: [html: ${webModule}.Layouts]
-
-      import Plug.Conn
-      unquote(verified_routes())
-    end
-  end
-
-  # Verified-routes helper bundle — exposed both to controllers and
-  # LiveView modules so \`~p\` paths are reachable everywhere.
-  def verified_routes do
-    quote do
-      use Phoenix.VerifiedRoutes,
-        endpoint: ${webModule}.Endpoint,
-        router: ${webModule}.Router,
-        statics: ~w(assets fonts images favicon.ico robots.txt)
-    end
-  end
-
-  def component do
-    quote do
-      use Phoenix.Component
-      unquote(html_helpers())
-    end
-  end
-
-  # HTML helper bundle for layouts + function components.  Required
-  # by \`use PhoenixAppWeb, :html\` invocations (e.g. Layouts).  Mirrors
-  # the standard Phoenix 1.7 generator shape — pulls in Phoenix.HTML,
-  # core components, and a CSRF helper.
-  def html do
-    quote do
-      use Phoenix.Component
-      import Phoenix.Controller,
-        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
-      unquote(html_helpers())
-    end
-  end
-
-  defp html_helpers do
-    quote do
-      # phoenix_html 4.x dropped \`use Phoenix.HTML\` — import the
-      # safe-string helpers directly instead.  Same surface, no
-      # macro fan-out.
-      import Phoenix.HTML
-      # Phoenix.LiveView.Helpers was folded into Phoenix.Component in
-      # LiveView 0.18+; the function components surface (\`~H\`, etc.)
-      # comes from \`use Phoenix.Component\` on the caller side.
-      import ${webModule}.CoreComponents
-      alias Phoenix.LiveView.JS
-      # Verified routes — provides the \`~p\` sigil that emitted
-      # sidebar / page templates use for path interpolation.
-      unquote(verified_routes())
-    end
-  end
-
-  defmacro __using__(which) when is_atom(which) do
-    apply(__MODULE__, which, [])
-  end
-end
-`;
-}
-
-/** SpaController (D-PHOENIX-SURFACE phase 6b) — serves the embedded
- *  React SPA's `index.html` for any `/app/*` client-side route.  Only
- *  emitted in embedded-react mode; the router's `/app` catch-all points
- *  here.  Reads the bundle the Dockerfile placed at
- *  `priv/static/app/index.html`. */
-export function renderSpaController(appName: string, appModule: string): string {
-  const webModule = `${appModule}Web`;
-  return `# Auto-generated.
-defmodule ${webModule}.SpaController do
-  use ${webModule}, :controller
-
-  @index_path Path.join(:code.priv_dir(:${appName}), "static/app/index.html")
-
-  def index(conn, _params) do
-    conn
-    |> put_resp_content_type("text/html")
-    |> send_file(200, @index_path)
-  end
-end
-`;
-}
 
 export function renderCoreComponents(appModule: string): string {
   const webModule = `${appModule}Web`;
@@ -642,39 +514,5 @@ export function renderAppLayout(
     </div>
   </main>
 </div>
-`;
-}
-
-/** Minimal ErrorJSON module — Phoenix's render_errors pipeline calls
- *  `render/2` with template names like "404.json" / "500.json" and
- *  expects a map back.  Phoenix.Controller.status_message_from_template/1
- *  turns the template ("500.json") into a status reason string ("Internal
- *  Server Error"), which we surface in the envelope. */
-export function renderErrorJson(appModule: string): string {
-  return `# Auto-generated.
-defmodule ${appModule}Web.ErrorJSON do
-  @moduledoc "Render exceptions as JSON envelopes for the API."
-
-  # Catch-all: e.g. "404.json" → %{error: "Not Found"}, "500.json" → %{error: "Internal Server Error"}.
-  def render(template, _assigns) do
-    %{error: Phoenix.Controller.status_message_from_template(template)}
-  end
-end
-`;
-}
-
-/** Minimal ErrorHTML module — Phoenix's render_errors pipeline picks
- *  json or html based on the request's Accept header.  Browser requests
- *  hit this one; the body is intentionally minimal so an exception
- *  doesn't leak internal state. */
-export function renderErrorHtml(appModule: string): string {
-  return `# Auto-generated.
-defmodule ${appModule}Web.ErrorHTML do
-  @moduledoc "Render exceptions as a plain HTML body for browser callers."
-
-  def render(template, _assigns) do
-    Phoenix.Controller.status_message_from_template(template)
-  end
-end
 `;
 }

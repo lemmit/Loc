@@ -104,11 +104,7 @@ export function renderProjectionRowEntity(proj: ProjectionIR, ns: string): strin
 
 /** The read-model row's EF configuration — `ToTable` / `HasKey(correlation)` /
  *  per-field `HasConversion` (id / enum), mirroring the saga-state config. */
-export function renderProjectionRowConfiguration(
-  proj: ProjectionIR,
-  ns: string,
-  schema?: string,
-): string {
+function renderProjectionRowConfiguration(proj: ProjectionIR, ns: string, schema?: string): string {
   const corr = proj.correlationField;
   const cls = projectionRowClass(proj);
   const toTableArgs = schema
