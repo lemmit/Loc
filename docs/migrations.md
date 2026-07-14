@@ -122,6 +122,38 @@ ddd generate system app.ddd -o out                       # aborts on a destructi
 ddd generate system app.ddd -o out --allow-destructive   # applies it (drops; NOT-NULL → 3-step)
 ```
 
+## Baseline safety — the `--allow-rebaseline` gate (M-T2.2)
+
+The snapshot at `.loom/snapshots/<module>.snapshot.json` **is** the migration
+baseline. A *corrupt* snapshot fails loudly (`SnapshotReadError`), but a
+*missing* one used to read as `null` — a first run — so `buildMigrations` would
+re-emit a full `Initial` migration and reset the version/history chain, silently
+re-baselining against a database that already has migrations applied. Three
+generate-time guards ([`migration-artifacts.ts`](../src/system/migration-artifacts.ts),
+`checkMigrationBaseline`) close that window by comparing the freshly-built
+`MigrationsIR` against the migration files already in the output tree:
+
+- **(a) Missing snapshot over existing files → refuse.** If the snapshot is gone
+  but migration files exist for the module, the run **aborts** rather than
+  re-baselining. `--allow-rebaseline` overrides it for a deliberate reset.
+- **(b) Files ↔ history drift → refuse.** With a snapshot present, its
+  `migrationHistory` versions must match the files on disk; a recorded version
+  with no file, or a file with no history entry (a stale baseline), aborts.
+- **(c) Version reuse → refuse.** The version this run would emit must not
+  already exist on disk — the tell of a stale baseline whose `lastVersion` lags
+  the files.
+
+The check runs on the platform-neutral `MigrationsIR`, so it's backend-agnostic
+(it recognises every backend's migration filenames — `<version>_…` and Flyway's
+`V<version>.<n>__…`). It's wired only where there's a real output tree to scan
+(the CLI passes `fsMigrationArtifactIndex(outDir, loom)`); the web playground,
+with no filesystem, omits it and keeps the prior behaviour.
+
+```bash
+ddd generate system app.ddd -o out                     # aborts if the snapshot is lost but files remain
+ddd generate system app.ddd -o out --allow-rebaseline  # overwrites the migration history deliberately
+```
+
 ## `migrationsOwner` — one backend per module owns schema
 
 Schema emission is assigned to exactly one deployable per module so two backends

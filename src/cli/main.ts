@@ -24,6 +24,7 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
+import { fsMigrationArtifactIndex, MigrationBaselineError } from "../system/migration-artifacts.js";
 import { MigrationDestructiveError } from "../system/migrations-builder.js";
 import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
 import { annotateTrace, type SourceMap } from "../trace/index.js";
@@ -326,6 +327,12 @@ interface RunOptions {
    * table).  Off by default: a destructive delta aborts the run with a
    * `loom.migration-destructive` error.  See docs/migrations.md. */
   allowDestructive?: boolean;
+  /** `--allow-rebaseline` switch — override the M-T2.2 baseline guard that
+   * refuses to re-emit an "Initial" migration when the snapshot is missing
+   * but migration files already exist.  Off by default: the run aborts with
+   * a `MigrationBaselineError` so a lost snapshot doesn't silently reset the
+   * migration history.  See docs/migrations.md. */
+  allowRebaseline?: boolean;
   /** `--sourcemap` switch — when true, `generate system` additionally emits
    * `.loom/sourcemap.json` mapping generated file regions back to `.ddd`
    * spans / macro-call sites.  Off by default (byte-identical output).
@@ -434,19 +441,30 @@ async function runGenerate(
         emitKubernetes: options.emitKubernetes,
         snapshots: fsSnapshotStore(outDir),
         allowDestructive: options.allowDestructive,
+        // M-T2.2: inventory the migration files already in the output tree so
+        // the baseline guards can refuse a silent re-baseline / verify the
+        // snapshot history / reject version reuse.  fs-backed; only the CLI
+        // scans a real tree.
+        existingMigrations: fsMigrationArtifactIndex(outDir, loom),
+        allowRebaseline: options.allowRebaseline,
         sourcemap: options.sourcemap,
         // Harmless to pass unconditionally — v3 sidecar emission is still
         // gated on `sourcemap` inside `generateSystemsFromLoom`.
         sourceTexts,
       }).files;
     } catch (err) {
-      // A corrupted/truncated migration snapshot, or a destructive delta
-      // without --allow-destructive, is a recoverable operator problem, not
-      // a compiler crash — report it as a clean CLI failure (with the
-      // recovery hint from the error message), matching how the other fatal
-      // generation errors above surface.  Re-throw anything else for the
-      // top-level handler to print.
-      if (err instanceof SnapshotReadError || err instanceof MigrationDestructiveError) {
+      // A corrupted/truncated migration snapshot, a destructive delta
+      // without --allow-destructive, or a baseline-safety violation (missing
+      // snapshot over existing files / history drift / version reuse) is a
+      // recoverable operator problem, not a compiler crash — report it as a
+      // clean CLI failure (with the recovery hint from the error message),
+      // matching how the other fatal generation errors above surface.
+      // Re-throw anything else for the top-level handler to print.
+      if (
+        err instanceof SnapshotReadError ||
+        err instanceof MigrationDestructiveError ||
+        err instanceof MigrationBaselineError
+      ) {
         console.error(`${file}: ${err.message}`);
         if (!options.continueOnError) process.exit(1);
         return { hadError: true };
@@ -1038,6 +1056,10 @@ generate
     "permit destructive delta migrations (column/table drops, NOT-NULL adds without a default on an existing table); off by default a destructive delta aborts. See docs/migrations.md.",
   )
   .option(
+    "--allow-rebaseline",
+    "permit re-emitting an 'Initial' migration when the snapshot is missing but migration files already exist; off by default the run aborts so a lost snapshot doesn't silently reset the migration history. See docs/migrations.md.",
+  )
+  .option(
     "--sourcemap",
     "emit .loom/sourcemap.json mapping generated code back to .ddd spans; off by default. See docs/old/plans/source-map-debug-kickoff.md.",
   )
@@ -1052,6 +1074,7 @@ generate
         trace?: boolean;
         k8s?: boolean;
         allowDestructive?: boolean;
+        allowRebaseline?: boolean;
         sourcemap?: boolean;
       },
     ) => {
@@ -1068,6 +1091,7 @@ generate
         emitTrace: !!options.trace,
         emitKubernetes: !!options.k8s,
         allowDestructive: !!options.allowDestructive,
+        allowRebaseline: !!options.allowRebaseline,
         sourcemap: !!options.sourcemap,
       };
       await runGenerate("system", file, options.out, runOpts);
