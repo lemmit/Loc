@@ -378,6 +378,52 @@ describe("feliz create forms", () => {
     expect(app).not.toContain("IsNullOrWhiteSpace form.addressZip");
   });
 
+  // A scalar-array `X[]` field → a comma-separated text input; the encoder splits
+  // it into a JSON array (trim + drop blanks), encoding each element by its type.
+  it("renders a scalar-array field as a comma-separated input encoded to a JSON array", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Sales
+        subdomain Sales {
+          context Cat {
+            aggregate Order with crudish { ref: string  tags: string[]  counts: int[] }
+            repository Orders for Order { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Orders {
+            route: "/orders"
+            body: QueryView {
+              of: Shop.Order.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, o => Card { o.ref } } }
+            }
+          }
+          page OrderNew {
+            route: "/orders/new"
+            body: Stack { CreateForm { of: Order } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // The array field is a flat STRING in the form record (comma-separated).
+    expect(app).toContain("tags: string");
+    // A comma-separated text input with a format hint.
+    expect(app).toContain('prop.placeholder "tags (comma-separated)"');
+    // The encoder splits/trims/drops-blanks and encodes each element by type.
+    expect(app).toContain(
+      '"tags", Encode.list (form.tags.Split(\',\') |> Array.toList |> List.map (fun s -> s.Trim()) |> List.filter (fun s -> s <> "") |> List.map Encode.string)',
+    );
+    expect(app).toContain(
+      '"counts", Encode.list (form.counts.Split(\',\') |> Array.toList |> List.map (fun s -> s.Trim()) |> List.filter (fun s -> s <> "") |> List.map (fun s -> Encode.int (int s)))',
+    );
+  });
+
   // A read-only ui (no CreateForm) emits no form machinery — creates are additive.
   it("a read-only ui emits no form/encoder machinery", async () => {
     const app = await appFs(`

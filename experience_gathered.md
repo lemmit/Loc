@@ -2564,3 +2564,32 @@ record-referencing-a-record exposed a dormant F# ordering bug.
   `contactEmail` to prove the flattened input dispatches. Same prove-it loop as
   §23–§38 — and the same §34 lesson twice: *the first example to exercise a
   dormant codegen arm finds it broken; prove BOTH read and write.*
+
+## 40. Feliz scalar-array inputs — comma-separated beats dynamic rows for a v1 (2026-07-14)
+
+A `tags: string[]` create field was the last form gap. Two ways to render it:
+dynamic add/remove rows (a `string list` form field + `Add`/`Remove of int`/`Set
+of int*string` Msgs + indexed update arms + a mapped row render) OR a single
+comma-separated text input the encoder splits. Chose comma-separated.
+
+- **The all-string form invariant is worth preserving.** Dynamic rows would make
+  ONE field a `string list` — breaking the "every form field is a flat string,
+  reused by every renderer (record / input / Set-Msg / update-arm / validation)"
+  model that all five form slices lean on, and adding three bespoke Msg kinds +
+  arms *per array field* to `update-emit.ts`. Comma-separated keeps the field a
+  `string`: the record, input, Set-Msg, update-arm, and validation are all the
+  existing flat path — ONLY the encoder differs. Crude UX, but a big-vs-small
+  slice for the last, nichest gap; dynamic rows are a documented follow-up.
+
+- **The array encoder is a split→trim→drop-blank→map pipeline.** `Encode.list
+  (form.tags.Split(',') |> Array.toList |> List.map (fun s -> s.Trim()) |>
+  List.filter (fun s -> s <> "") |> List.map <elemEncode>)`. Empty input →
+  `Encode.list []` (never null), so an array needs NO optional-null wrapping — it
+  short-circuits the optional path. The element encoder is point-free
+  (`Encode.string`) or a lambda (`(fun s -> Encode.int (int s))`) by element type.
+
+- **Only scalar arrays.** `isExpandableInput` gained `array && isScalarInput
+  (element)`; an array-of-VO / array-of-entity-part still needs a repeatable
+  sub-form (the dynamic-rows work). The READ side (`string list` record +
+  `(Decode.list …)` decoder) already worked — arrays don't reference a sibling
+  record, so no §39-style ordering trap. Same prove-it loop as §23–§39.
