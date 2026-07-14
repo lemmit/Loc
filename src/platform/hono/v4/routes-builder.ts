@@ -1188,6 +1188,12 @@ function httpStatusText(status: number): string {
     404: "Not Found",
     409: "Conflict",
     422: "Unprocessable Entity",
+    // Codes a `httpStatus <StructuralConflict> <Code>` override may retarget a
+    // conflict to (M-T3.4a) — so the OpenAPI `description` stays a real reason
+    // phrase, not a generic fallback.
+    423: "Locked",
+    428: "Precondition Required",
+    429: "Too Many Requests",
     500: "Internal Server Error",
     502: "Bad Gateway",
   };
@@ -1221,8 +1227,7 @@ function emitReturningOperationRoute(
   // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
   if (operationIsGuarded(op)) problemStatuses.add(403);
-  if (op.when)
-    problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
+  if (op.when) problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
   for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);

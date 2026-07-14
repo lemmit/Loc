@@ -6,7 +6,12 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
+import {
+  defaultErrorStatus,
+  errorTitle,
+  errorTypeUri,
+  resolveErrorStatus,
+} from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
@@ -327,7 +332,19 @@ export function renderApiExceptionAdvice(
   basePkg: string,
   hasUniqueKeys = false,
   hasVersioned = false,
+  /** App-wide `httpStatus` overrides for the structural-conflict built-ins
+   *  (M-T3.4a). Every hardcoded 409 site below resolves through it, defaulting
+   *  to 409 → byte-identical output with no override. */
+  structuralErrorStatuses?: Record<string, number>,
 ): string {
+  // Structural-conflict statuses resolved through the `httpStatus` mapper
+  // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
+  // api's `httpStatus <Conflict> <Code>` override. Baked into the emitted Java
+  // so the runtime arm and the OpenAPI declaration can't drift.
+  const disallowedStatus = resolveErrorStatus("Disallowed", structuralErrorStatuses);
+  const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);
+  const referencedInUseStatus = resolveErrorStatus("ReferencedInUse", structuralErrorStatuses);
+  const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -382,18 +399,24 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,
     `    public ResponseEntity<ProblemDetail> onDisallowed(DisallowedException e, WebRequest request) {`,
-    `        CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", 409);`,
-    `        return respond(problem(409, "Disallowed", e.getMessage(), request), 409);`,
+    `        CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", ${disallowedStatus});`,
+    `        return respond(problem(${disallowedStatus}, "Disallowed", e.getMessage(), request), ${disallowedStatus});`,
     `    }`,
     ``,
     hasUniqueKeys && [
       `    @ExceptionHandler(DataIntegrityViolationException.class)`,
       `    public ResponseEntity<ProblemDetail> onConflict(DataIntegrityViolationException e, WebRequest request) {`,
-      `        // A DB constraint (e.g. a \`unique (...)\` index → Postgres 23505) tripped;`,
-      `        // Spring translates it to DataIntegrityViolationException. Return a friendly`,
-      `        // 409 instead of leaking a 500, reusing the catalog 409 \`disallowed\` event.`,
-      `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", 409);`,
-      `        return respond(problem(409, "Conflict", "A resource with these values already exists.", request), 409);`,
+      `        // A DB constraint tripped; Spring translates it to DataIntegrityViolationException.`,
+      `        // Discriminate by Postgres SQLState so a still-referenced delete (23503`,
+      `        // foreign_key_violation → \`ReferencedInUse\`) is not conflated with a`,
+      `        // \`unique (...)\` breach (23505 unique_violation → \`UniquenessConflict\`).`,
+      `        // Either way return a friendly conflict instead of leaking a 500.`,
+      `        if ("23503".equals(sqlState(e))) {`,
+      `            CatalogLog.event("conflict", "warn", "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
+      `            return respond(problem(${referencedInUseStatus}, "Conflict", "This resource is still referenced and cannot be deleted.", request), ${referencedInUseStatus});`,
+      `        }`,
+      `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
+      `        return respond(problem(${uniquenessStatus}, "Conflict", "A resource with these values already exists.", request), ${uniquenessStatus});`,
       `    }`,
       ``,
     ],
@@ -404,8 +427,8 @@ export function renderApiExceptionAdvice(
       `        // client's If-Match expected version was stale (think-time CAS) or the`,
       `        // load→save window lost a race (Hibernate @Version write-time CAS).`,
       `        // Return a friendly 409 instead of leaking a 500.`,
-      `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", 409);`,
-      `        return respond(problem(409, "Conflict", "The resource was modified by another request; reload and retry.", request), 409);`,
+      `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
+      `        return respond(problem(${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", request), ${concurrencyStatus});`,
       `    }`,
       ``,
     ],
@@ -439,6 +462,20 @@ export function renderApiExceptionAdvice(
     `            .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
     `            .body(problem);`,
     `    }`,
+    // The SQLState reader is emitted only alongside the DataIntegrityViolation
+    // handler that calls it (gated on `hasUniqueKeys`), so a unique-free project
+    // stays byte-identical.
+    hasUniqueKeys && [
+      ``,
+      `    /** First Postgres SQLState in a DataAccessException's cause chain, or null`,
+      `     *  — 23503 = foreign_key_violation (still referenced), 23505 = unique. */`,
+      `    private static String sqlState(Throwable e) {`,
+      `        for (Throwable t = e; t != null; t = t.getCause()) {`,
+      `            if (t instanceof java.sql.SQLException sql) return sql.getSQLState();`,
+      `        }`,
+      `        return null;`,
+      `    }`,
+    ],
     `}`,
     ``,
   );

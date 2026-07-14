@@ -131,6 +131,9 @@ export const cqrsStyleAdapter: StyleAdapter = {
       idClass,
       idClrType: csIdValueClrType(agg.idValueType),
       emitTrace: !!ctx.emitTrace,
+      // Structural-conflict `httpStatus` overrides (M-T3.4a) — the per-op
+      // when/versioned 409 declarations resolve through this map.
+      structuralStatuses: owningCtx.structuralErrorStatuses,
     });
   },
 

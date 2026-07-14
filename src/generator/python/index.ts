@@ -4,6 +4,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EnrichedSystemIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
@@ -21,6 +22,7 @@ import {
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
+import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
@@ -361,6 +363,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       collectOpUnions([merged]),
       aggregatesHaveUniqueKeys(merged.aggregates),
       hasConcurrency,
+      // App-wide structural-conflict statuses (M-T3.4a): the enriched system
+      // carries the map folded across every api's `httpStatus`. The global
+      // exception handlers have no per-context tag, so they read it here.
+      (args.sys as EnrichedSystemIR).structuralErrorStatuses,
     ),
   );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
@@ -1038,7 +1044,19 @@ function renderProblemPy(
   opUnions: PyOpUnion[],
   hasUniqueKeys = false,
   hasVersioned = false,
+  /** App-wide resolved HTTP status per structural-conflict built-in
+   *  (M-T3.4a). The global exception handlers have no per-context tag, so
+   *  their hardcoded 409s resolve through this map (`httpStatus <Conflict>
+   *  <Code>` override, defaulting to 409 → byte-identical). */
+  structuralErrorStatuses?: Record<string, number>,
 ): string {
+  // Structural-conflict statuses resolved through the `httpStatus` mapper: the
+  // 23505 unique-violation handler → UniquenessConflict, the ConcurrencyError
+  // handler → ConcurrencyConflict, the DisallowedError (`when`-gate) handler →
+  // Disallowed. With no override every value is 409 (byte-identical).
+  const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);
+  const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
+  const disallowedStatus = resolveErrorStatus("Disallowed", structuralErrorStatuses);
   // JSON literals are valid Python for the value kinds used here (strings,
   // arrays, objects — no booleans/nulls cross).
   const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
@@ -1059,12 +1077,12 @@ function renderProblemPy(
         # \`.sqlstate\` on the driver error SQLAlchemy wraps in \`.orig\`.
         sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
         if sqlstate == "23505":
-            log("warn", "disallowed", message=str(err), status=409)
+            log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
             return problem(
-                request, 409, "Conflict", "A resource with these values already exists."
+                request, ${uniquenessStatus}, "Conflict", "A resource with these values already exists."
             )
-        log("warn", "disallowed", message=str(err), status=409)
-        return problem(request, 409, "Conflict", "The request conflicts with the current state.")
+        log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
+        return problem(request, ${uniquenessStatus}, "Conflict", "The request conflicts with the current state.")
 
 `
     : "";
@@ -1081,9 +1099,9 @@ function renderProblemPy(
         # row's version no longer matched the caller's expected version — a
         # competing write won the race.  Surface a friendly 409 so the client
         # reloads and retries instead of clobbering the newer state.
-        log("warn", "conflict", message=str(err), status=409)
+        log("warn", "conflict", message=str(err), status=${concurrencyStatus})
         return problem(
-            request, 409, "Conflict", "The resource was modified by another request; reload and retry."
+            request, ${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry."
         )
 
 `
@@ -1214,8 +1232,8 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DisallowedError)
     async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
-        log("warn", "disallowed", message=str(err), status=409)
-        return problem(request, 409, "Conflict", str(err))
+        log("warn", "disallowed", message=str(err), status=${disallowedStatus})
+        return problem(request, ${disallowedStatus}, "Conflict", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:

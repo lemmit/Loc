@@ -21,7 +21,7 @@ import {
 } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { defaultErrorStatus } from "../../../util/error-defaults.js";
+import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
@@ -176,6 +176,14 @@ export function buildJavaOpenApiContract(
 
   const err = (statuses: number[]): RouteError[] => statuses.map((status) => ({ status }));
 
+  // Structural-conflict `httpStatus` resolver (M-T3.4a) — app-wide, folded across
+  // every api and stamped identically on each enriched context. Threaded into the
+  // destroy matrix (`ReferencedInUse`) and the versioned-update ad-hoc 409
+  // (`ConcurrencyConflict`) so the OpenAPI declaration moves with the runtime
+  // arm; undefined ⇒ every conflict defaults to 409 (byte-identical output).
+  const structuralMap = contexts.find((c) => c.structuralErrorStatuses)?.structuralErrorStatuses;
+  const resolveStructural = (name: string): number => resolveErrorStatus(name, structuralMap);
+
   // Index every declared enum (root + per-context) so a referenced one can be
   // resolved to its value list.
   for (const e of [...contexts.flatMap((c) => c.enums ?? [])]) allEnums.set(e.name, e);
@@ -244,7 +252,7 @@ export function buildJavaOpenApiContract(
         routes.push({
           method: "delete",
           path: `${route}/{id}`,
-          errors: err(errorStatuses("destroy")),
+          errors: err(errorStatuses("destroy", false, resolveStructural)),
         });
       }
 
@@ -272,7 +280,7 @@ export function buildJavaOpenApiContract(
           unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
           const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
           for (const a of spec.arms) if (a.isError) statuses.add(a.status);
-          if (versionedUpdate) statuses.add(409);
+          if (versionedUpdate) statuses.add(resolveStructural("ConcurrencyConflict"));
           routes.push({
             method: "post",
             path: opPath,
@@ -281,7 +289,7 @@ export function buildJavaOpenApiContract(
           });
         } else {
           const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
-          if (versionedUpdate) statuses.add(409);
+          if (versionedUpdate) statuses.add(resolveStructural("ConcurrencyConflict"));
           routes.push({
             method: "post",
             path: opPath,

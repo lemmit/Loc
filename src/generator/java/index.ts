@@ -316,10 +316,18 @@ function emitProjectFromContexts(
   // event-sourced append rethrows the SAME exception on a `(stream_id, version)`
   // 23505 collision.  A project with neither stays byte-identical.
   const hasConcurrency = contexts.some((c) => aggregatesNeedConcurrency(c.aggregates));
+  // App-wide `httpStatus` overrides for the structural-conflict built-ins
+  // (M-T3.4a) — folded across every api by enrichment and stamped identically
+  // on every enriched context. The advice is app-global (no per-context tag), so
+  // any context's copy is the same map; undefined ⇒ every conflict defaults to
+  // 409 (byte-identical output).
+  const structuralErrorStatuses = contexts.find(
+    (c) => c.structuralErrorStatuses,
+  )?.structuralErrorStatuses;
   place(
     "ApiExceptionAdvice.java",
     "api-common",
-    renderApiExceptionAdvice(basePkg, hasUniqueKeys, hasConcurrency),
+    renderApiExceptionAdvice(basePkg, hasUniqueKeys, hasConcurrency, structuralErrorStatuses),
   );
   // Observability catalog — always-on, like dotnet's request log +
   // Hono's pino lines (the obs e2e suites assert this envelope).

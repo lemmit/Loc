@@ -11,6 +11,7 @@ import {
   opOperation,
 } from "../../../ir/util/openapi-ids.js";
 import { lines } from "../../../util/code-builder.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import type { ReturnUnionSpec } from "../cqrs/controller.js";
@@ -26,8 +27,17 @@ function actionName(tokens: OpIdTokens): string {
  *  responses for an operation kind (from the shared matrix).  A Swashbuckle
  *  operation filter (see Program.cs) rewrites their content-type to
  *  `application/problem+json` so the emitted spec matches Hono/Phoenix. */
-function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): string[] {
-  return errorStatuses(kind, guarded).map(
+function producesProblem(
+  kind: OpErrorKind,
+  guarded = false,
+  indent = "    ",
+  /** Resolver for the structural-conflict built-ins (M-T3.4a) — threads the
+   *  api's `httpStatus` overrides so `destroy`'s FK-restrict 409
+   *  (`ReferencedInUse`) declaration moves in lockstep with its runtime arm.
+   *  Omitted ⇒ literal 409 (byte-identical default). */
+  resolve?: (name: string) => number,
+): string[] {
+  return errorStatuses(kind, guarded, resolve).map(
     (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
   );
 }
@@ -128,6 +138,13 @@ export interface ControllerShape {
    *  Spliced into the using block so each controller imports only
    *  the namespaces its own argument lowering touched. */
   extraUsings?: readonly string[];
+  /** App-wide resolved HTTP statuses for the structural-conflict built-ins
+   *  (M-T3.4a) — the api's `httpStatus` override map, each defaulting to 409.
+   *  Drives the destroy FK-restrict arm (`ReferencedInUse`) + its OpenAPI
+   *  declaration, and the per-op `when`/versioned 409 declarations
+   *  (`Disallowed` / `ConcurrencyConflict`). Undefined ⇒ 409 everywhere
+   *  (byte-identical default). */
+  structuralStatuses?: Record<string, number>;
 }
 
 /** The `return …` line(s) for a union-find's absent variant.  `none` rides the
@@ -170,6 +187,21 @@ export function renderController(
   const className = `${plural(upperFirst(agg.name))}Controller`;
   const route = `${shape.routePrefix ?? ""}${snake(plural(agg.name))}`;
   const idClass = shape.idClass ?? `${agg.name}Id`;
+  // Structural-conflict status resolver (M-T3.4a) — routes the hardcoded 409s
+  // through the api's `httpStatus` override map, defaulting each to 409. With
+  // no override the resolved value is 409, so output stays byte-identical.
+  const resolveStruct = (name: string): number =>
+    resolveErrorStatus(name, shape.structuralStatuses);
+  // FK-restrict destroy → 409 by default, or the `httpStatus ReferencedInUse`
+  // override. The default keeps the `Conflict(...)` helper (its 409 == the
+  // resolved value, byte-identical); an override switches to `StatusCode(...)`
+  // so the HTTP status matches the remapped value the OpenAPI declaration
+  // advertises (the `Conflict()` helper is hardwired to 409).
+  const referencedInUseStatus = resolveStruct("ReferencedInUse");
+  const fkConflictReturn =
+    referencedInUseStatus === 409
+      ? `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`
+      : `            return StatusCode(${referencedInUseStatus}, new ProblemDetails { Title = "Conflict", Status = ${referencedInUseStatus}, Detail = "${agg.name} is still referenced and cannot be deleted." });`;
 
   const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
 
@@ -178,6 +210,7 @@ export function renderController(
       idClass,
       idClrType: shape.idClrType,
       emitTrace: shape.emitTrace,
+      structuralStatuses: shape.structuralStatuses,
     }),
   );
 
@@ -328,7 +361,7 @@ export function renderController(
         ? [
             '    [HttpDelete("{id}")]',
             "    [ProducesResponseType(204)]",
-            ...producesProblem("destroy"),
+            ...producesProblem("destroy", false, "    ", resolveStruct),
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
             // EF wraps a Postgres foreign_key_violation in DbUpdateException
@@ -345,7 +378,7 @@ export function renderController(
                   "        }",
                   "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
                   "        {",
-                  `            return Conflict(new ProblemDetails { Title = "Conflict", Status = 409, Detail = "${agg.name} is still referenced and cannot be deleted." });`,
+                  fkConflictReturn,
                   "        }",
                 ]),
             "        return NoContent();",
@@ -369,7 +402,15 @@ export function renderController(
 export function renderOperationActionBlock(
   agg: AggregateIR,
   op: ControllerShape["publicOps"][number],
-  shape: { idClass?: string; idClrType: string; emitTrace?: boolean },
+  shape: {
+    idClass?: string;
+    idClrType: string;
+    emitTrace?: boolean;
+    /** App-wide resolved structural-conflict statuses (M-T3.4a) — routes the
+     *  per-op `when` (Disallowed) / versioned-update (ConcurrencyConflict) 409
+     *  declarations through the `httpStatus` mapper. Undefined ⇒ 409. */
+    structuralStatuses?: Record<string, number>;
+  },
 ): string[] {
   const idClass = shape.idClass ?? `${agg.name}Id`;
   const cmdArgs = [`new ${idClass}(id)`, ...op.cmdArgs];
@@ -404,10 +445,18 @@ export function renderOperationActionBlock(
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
   const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
-  const when409 =
-    op.whenGated || op.versionedUpdate
-      ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"]
-      : [];
+  // A `when` state gate declares 409 (Disallowed); a versioned `update` can also
+  // 409 on a stale `If-Match` (ConcurrencyConflict). Each status resolves
+  // through the `httpStatus` mapper (M-T3.4a) — deduped, so with no override
+  // both collapse to a single `409` attribute (byte-identical); an override
+  // splits them into their distinct declarations.
+  const when409Statuses = new Set<number>();
+  if (op.whenGated) when409Statuses.add(resolveErrorStatus("Disallowed", shape.structuralStatuses));
+  if (op.versionedUpdate)
+    when409Statuses.add(resolveErrorStatus("ConcurrencyConflict", shape.structuralStatuses));
+  const when409 = [...when409Statuses]
+    .sort((a, b) => a - b)
+    .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]`);
   const responseDecls = ru
     ? [
         `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
@@ -498,9 +547,22 @@ export function renderExceptionFilter(
     usingDapper?: boolean;
     hasUniqueKeys?: boolean;
     hasVersioned?: boolean;
+    /** App-wide resolved structural-conflict statuses (M-T3.4a) — the api's
+     *  `httpStatus` override map, each defaulting to 409. Routes this global
+     *  filter's hardcoded 409 arms (Disallowed / UniquenessConflict /
+     *  ConcurrencyConflict) through the mapper. Undefined ⇒ 409 everywhere
+     *  (byte-identical default). */
+    structuralStatuses?: Record<string, number>;
   },
 ): string {
   const usesValidators = !!options?.usesValidators;
+  // Resolved structural-conflict statuses baked as literals into the arms
+  // below — 409 by default, or the api's `httpStatus <Conflict> <Code>`
+  // override.  Both the log-event `status` field and the ProblemDetails status
+  // read the same resolved value so they can't drift.
+  const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);
+  const uniquenessStatus = resolveErrorStatus("UniquenessConflict", options?.structuralStatuses);
+  const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", options?.structuralStatuses);
   // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
   // without uniqueness is byte-identical to before the feature (the proposal's
   // strict-additivity guarantee — only a `unique` index can raise 23505).
@@ -539,9 +601,9 @@ export function renderExceptionFilter(
         {
             ${renderDotnetLogCall("disallowed", [
               { name: "message", valueExpr: `"A resource with these values already exists."` },
-              { name: "status", valueExpr: "409" },
+              { name: "status", valueExpr: `${uniquenessStatus}` },
             ])}
-            context.Result = Problem(context, 409, "Conflict", "A resource with these values already exists.", trace_id);
+            context.Result = Problem(context, ${uniquenessStatus}, "Conflict", "A resource with these values already exists.", trace_id);
             context.ExceptionHandled = true;
             return;
         }`
@@ -564,9 +626,9 @@ export function renderExceptionFilter(
                 name: "message",
                 valueExpr: `"The resource was modified by another request; reload and retry."`,
               },
-              { name: "status", valueExpr: "409" },
+              { name: "status", valueExpr: `${concurrencyStatus}` },
             ])}
-            context.Result = Problem(context, 409, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
+            context.Result = Problem(context, ${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
             context.ExceptionHandled = true;
             return;
         }`
@@ -657,9 +719,9 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             ${renderDotnetLogCall("disallowed", [
               { name: "message", valueExpr: "dx.Message" },
-              { name: "status", valueExpr: "409" },
+              { name: "status", valueExpr: `${disallowedStatus}` },
             ])}
-            context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
+            context.Result = Problem(context, ${disallowedStatus}, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }${uniqueConflictArm}${concurrencyConflictArm}

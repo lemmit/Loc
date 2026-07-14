@@ -18,6 +18,7 @@ import {
 } from "../../../ir/util/aggregate-flags.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
 import { generateReactForContexts } from "../../react/index.js";
 import { generateSvelteForContexts } from "../../svelte/index.js";
@@ -92,9 +93,26 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // `{:error, :conflict}` → this responder.  A project with neither stays
   // byte-identical (strict additivity).
   const hasConcurrency = contexts.some((c) => aggregatesNeedConcurrency(c.aggregates));
+  // App-wide resolved structural-conflict statuses (M-T3.4a) — the same map on
+  // every context (folded across every api by `enrichLoomModel`, each defaulting
+  // to 409).  Baked into the ProblemDetails responders so their runtime status
+  // moves in lockstep with the OpenAPI declaration; a `httpStatus <Conflict>
+  // <Code>` override retargets both.  Absent (single-context / no-api lowering)
+  // ⇒ `resolveErrorStatus` falls back to the 409 default ⇒ byte-identical.
+  const structuralStatuses = contexts.find(
+    (c) => c.structuralErrorStatuses,
+  )?.structuralErrorStatuses;
+  const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralStatuses);
+  const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralStatuses);
   out.set(
     `lib/${appName}_web/problem_details.ex`,
-    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys, hasConcurrency),
+    renderVanillaProblemDetailsModule(
+      appModule,
+      hasUniqueKeys,
+      hasConcurrency,
+      uniquenessStatus,
+      concurrencyStatus,
+    ),
   );
 
   // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.
