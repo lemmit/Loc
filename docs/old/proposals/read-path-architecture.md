@@ -1,16 +1,25 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 2). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 3). No code yet. A
 > vision + grammar proposal.
 >
-> **rev. 2 reframes the core** (owner steer): the read path's one
+> **The core primitive** (owner steer, rev. 2): the read path's one
 > load-bearing primitive is a **read-only repository queried by
 > `criterion`** — `Repo.run(<criterion>, sort?, page?)` under a
 > **read-only setting** that structurally forbids writes. That single
-> mechanism is *sufficient for almost every read*. The heavier machinery
-> rev. 1 put on the default path (mandatory `queryHandler` + per-read
-> `response` DTO + `find`→`retrieval` migration) demotes to **escape
-> hatches** for the cases that actually need them.
+> mechanism is *sufficient for almost every read*.
+>
+> **The ergonomic default** (owner steer, rev. 3): the common case — a
+> named, paged, filtered list read — is a **scaffold macro,
+> `scaffoldPaged(of: X)`**, that emits a real (unfoldable) paged
+> `queryHandler` over that primitive. Not a new construct, not a
+> `view`/`retrieval` merge, not a new keyword: the ergonomics live in the
+> macro layer where `scaffold` already lives. rev. 3 **drops the rev. 2
+> `read` keyword** (the scaffold replaces it) and records why the
+> `view`/`retrieval` merge was declined (the shared job is a macro
+> *output*, not a fourth keyword). The heavier read constructs
+> (`queryHandler` hand-written, `view`, `projection`) stay **escape
+> hatches**.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -38,8 +47,12 @@ context Sales {
   criterion ActiveInRegion(region: string) of Customer = this.active && this.region == region
 }
 
-# A read — from a read-only position, so the compiler guarantees it can't mutate:
-read activeEU: Customer[] = Customers.run(ActiveInRegion("EU"), sort: [name asc], page: page)
+# An imperative read — from a read-only position, so the compiler guarantees it can't mutate:
+#   (inside a workflow / handler / reading service)
+let activeEU = Customers.run(ActiveInRegion("EU"), sort: [name asc], page: page)
+
+# The exposed default — a paged, filtered list read, one line:
+with scaffoldPaged(of: ActiveInRegion)   # → a real, unfoldable paged queryHandler + route
 ```
 
 - **`run` takes a `criterion`** (inline composed predicate) or a named
@@ -51,10 +64,15 @@ read activeEU: Customer[] = Customers.run(ActiveInRegion("EU"), sort: [name asc]
   face** (a query port that exposes `findById` / `run` / `findAll` and
   *nothing that writes*), never to the mutating write repository. Reads
   structurally cannot mutate, and cannot accrete bespoke finders.
+- **The exposed read is a scaffold, not a keyword.** A named, paged,
+  filtered list read — the overwhelming common case — is
+  `scaffoldPaged(of: X)`, a macro (§ "The ergonomic default") that emits
+  a real `queryHandler` over the read-only-repo primitive. It composes
+  what ships; it does not add a construct.
 - **That is sufficient for almost everything.** Most reads are "list/one
-  of aggregate X, optionally filtered." The read-only query port covers
-  them. The heavier read constructs are opt-in for the minority that earn
-  them:
+  of aggregate X, optionally filtered." The read-only query port +
+  `scaffoldPaged` cover them. The heavier read constructs are opt-in for
+  the minority that earn them:
 
 | Need | Use | Not the default |
 |---|---|---|
@@ -217,6 +235,83 @@ remains the unfold path when you want the routes as literal source.
 
 ---
 
+## The ergonomic default — `scaffoldPaged(of: X)`
+
+The read-only-repo + criterion primitive is the *floor*. But a
+named, paged, filtered list read exposed on the wire — the single most
+common read — should be **one line**, not a hand-written
+`query` + `response` + `queryHandler` + `route` quartet. That one line is
+a **scaffold macro**, the criterion-driven sibling of
+unfoldable-api-derivation's `scaffoldQuery(of: <Find>)`:
+
+```ddd
+context Sales {
+  aggregate Order { region: string; status: OrderStatus; placedAt: datetime; ... }
+  repository Orders for Order { }
+  criterion InRegion(region: string) of Order = this.region == region
+
+  with scaffoldPaged(of: InRegion)          // ← the whole exposed read, one line
+}
+```
+
+It expands (AST→AST, at macro time — real, unfoldable source) to the
+honest application read path over the read-only primitive:
+
+```ddd
+  query    OrdersInRegionQuery { region: string, page: int = 1, pageSize: int = 25 }
+  response OrderResponse       { ... }                     // apiRead projection of Order
+  queryHandler ListOrdersInRegion(q: OrdersInRegionQuery): OrderResponse paged {
+    return Orders.run(InRegion(q.region), page: q.page)    // read-only repo + criterion
+  }
+  // + route GET "/orders/in-region" -> Sales.ListOrdersInRegion
+```
+
+### One polymorphic macro — reads its argument's kind
+
+`scaffoldPaged` reads the IR kind of its `of:` target and picks the query
+body — the same "scaffold reads its input to decide" rule the
+`scaffoldApi` family uses. This collapses what could be
+`scaffoldPaged` + `scaffoldPagedView` + a per-aggregate variant into one:
+
+| `of:` target | Body it emits | Handler params from |
+|---|---|---|
+| an **aggregate** (`of: Order`) | `Orders.findAll(page)` | `page` only |
+| a **criterion** (`of: InRegion`) | `Orders.run(InRegion(args), page)` | the criterion's params + `page` |
+| a **retrieval** (`of: HighValueInRegion`) | `Orders.run(HighValueInRegion(args), page)` — its `sort` / `loads` ride along | the retrieval's params + `page` |
+
+- The aggregate is **inferred** from a criterion/retrieval's `of T`, so
+  one argument suffices (no `scaffoldPaged(of: Order, by: InRegion)`
+  redundancy).
+- The criterion/retrieval's **parameters become the route's query params**
+  and the handler signature (`scaffoldPaged` reads `InRegion.params`).
+- `page` is call-site (query params), per retrieval.md's page-is-call-only
+  decision.
+- Returns the aggregate's `apiRead` projection (`OrderResponse paged`) by
+  default — the DTO boundary is scaffolded, not hand-written. When the
+  shape must diverge further, unfold and edit, or reach for `view` /
+  hand-written `queryHandler`.
+
+### Why a macro, not a merged construct
+
+This is the resolution of "is `view` redundant / should `view` and
+`retrieval` merge?" — **no merge.** The shared job (a named, paged,
+filtered read) is a *macro output*, not a fourth read keyword. The
+primitives stay orthogonal and each keeps its one job:
+
+- `criterion` — the filter atom (composes, inlines to SQL).
+- `retrieval` — the *named* filter+sort+loads bundle a handler/macro runs.
+- `queryHandler` — the imperative read the macro *emits* (and the escape
+  hatch when you hand-write one).
+- `view` — the declarative custom-projection + cross-aggregate `bind`-follow
+  read (its genuinely-unique capability; see § escape hatches).
+
+`scaffoldPaged` *composes* these; it does not replace any. Naming follows
+the `scaffold<Thing>(of: X)` stdlib convention (named `of:` arg); whether
+it is spelled `scaffoldPaged` or folded into `scaffoldQuery(of:, paged:)`
+is cosmetic (Open questions).
+
+---
+
 ## When the read-only port isn't enough — the escape hatches
 
 Deliberately *not* on the default path; each earns its use:
@@ -256,30 +351,19 @@ Very little is new — the primitive exists; the proposal *positions* it.
 - `reading` domain-service tier + `loom.domain-service-no-repo-write`
   (`domain-service-checks.ts:129`) — the read-only setting, already
   enforced.
-- `QueryHandler` / `Route` / `View` — the escape hatches.
+- `QueryHandler` / `Route` / `View` — the escape hatches, and the
+  `queryHandler` + `route` `scaffoldPaged` emits into.
 
-### NEW — a read position for a top-level exposed read (optional sugar)
+### NO NEW KEYWORD — the exposed read is a scaffold
 
-For a read that isn't inside a handler/service/view but should still be a
-first-class, named, route-exposable read, a thin `read` member (sugar
-over "a `queryHandler` whose body is a single `run`"):
-
-```langium
-// ContextMember += ReadDecl  (soft keyword, like `criterion` / `channel`)
-ReadDecl:
-    'read' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')?
-    ':' returnType=TypeRef
-    '=' query=Expression ;      // an expression in read position: Repo.run(...) / findById / findAll
-```
-
-`read` bodies are validated **read-only** (`loom.read-context-repo-write`)
-and route-exposable directly (`route GET "/customers" -> Sales.activeEU`).
-It is the declarative twin of `queryHandler` for the single-`run` case —
-so the 90% path has a one-liner and only the orchestrating/​reshaping
-minority reaches for the full `queryHandler` body. (If review prefers
-*zero* new keywords, drop `read` and let the scaffold emit a
-single-expression `queryHandler`; `read` is ergonomic sugar, not
-load-bearing.)
+rev. 2 floated a `read` context member as sugar for a single-`run`
+exposed read. **rev. 3 drops it.** The named, paged, exposed read is
+`scaffoldPaged(of: X)` (§ "The ergonomic default"), which emits an
+ordinary `queryHandler` — no new declaration kind, no `ReadDecl` rule.
+The scaffold stdlib is the right home for "assemble the common quartet
+from primitives"; a keyword would duplicate what the macro already does,
+and the `view`/`retrieval` merge (also considered) was declined for the
+same reason — the shared job is a macro *output*, not a new construct.
 
 ### CHANGED — `run` accepts a criterion; repository finders deprecate
 
@@ -374,7 +458,10 @@ No flag day; each slice independent:
    `read`. Pure validation; no emit change.
 3. **Read routes bind the read-only handle** — the router receives the
    read subset; `save` becomes unreachable from a read. Wire byte-identical.
-4. **`read` member** (if adopted) + route-exposability.
+4. **`scaffoldPaged(of: X)` stdlib macro** — the polymorphic scaffold
+   (aggregate / criterion / retrieval → paged `queryHandler` + `response`
+   + `route`), joining the `scaffoldApi` family. This is the ergonomic
+   default; ship it before deprecating the legacy derivation.
 5. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
 
@@ -402,29 +489,39 @@ list `find` warns and a read can no longer `save`.
 
 ## Open questions
 
-1. **Explicit `read` marker vs implicit-by-position.** Is the read-only
-   setting purely positional (recommended — matches the `reading` tier, no
-   new syntax), or should a `read`-marked repository handle make the
-   capability visible at the reference site? Positional covers the
-   semantics; explicit is a readability nicety. Lean positional.
-2. **`read` member: worth a keyword, or fold into `queryHandler`?** A
-   single-`run` read is nearly a bodyless `queryHandler`. `read X: T[] =
-   Customers.run(...)` is a nicer 90%-path one-liner; the cost is a
-   keyword. Lean: ship `read` as sugar; it's the declarative twin of
-   `criterion`/`view`. Confirm.
-3. **Unique-key reconstitution `find`.** A `find bySlug(slug): T?` with a
+1. **`scaffoldPaged` naming.** Its own word (`scaffoldPaged(of: X)`), or
+   folded into `scaffoldQuery(of: X, paged: true)` (the
+   unfoldable-api-derivation leaf)? Lean: a distinct `scaffoldPaged` — the
+   paged-list read is the common case and deserves the short name — but
+   confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
+   a node kind). Cosmetic; either works.
+2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
+   *setting* purely positional (recommended — matches the `reading` tier,
+   no new syntax), or should a marker make the capability visible at the
+   reference site? Positional covers the semantics; explicit is a
+   readability nicety. Lean positional. *(Distinct from the dropped `read`
+   member — this is about how the read-only face is spelled at a call, not
+   a new declaration.)*
+3. **What `scaffoldPaged` returns.** The aggregate's `apiRead` projection
+   (`OrderResponse paged`) by default. When a caller needs a divergent
+   shape, do they (a) unfold and edit the emitted `queryHandler`, (b) pass
+   a `project:`/`view:` override to the macro, or (c) drop to a `view`?
+   Lean: (a) for one-offs, `view` for reused custom shapes; a macro
+   override is a later nicety.
+4. **Unique-key reconstitution `find`.** A `find bySlug(slug): T?` with a
    unique-key `where` is reconstitution, not a list query — stays exempt
    from `loom.repository-find-deprecated`? Lean: yes; the deprecation
    targets list finders (`T[]`) only.
-4. **Does `run` supersede `findAll`?** `findAll(page)` is `run` with no
+5. **Does `run` supersede `findAll`?** `findAll(page)` is `run` with no
    predicate. Keep `findAll` as the readable no-filter spelling, or make it
    `run()` with an empty criterion? Lean: keep `findAll` (reads better;
    already shipped).
-5. **Criterion exposability → route.** Which declared `criterion` /
-   `retrieval` auto-exposes as a `GET` with its params as query params, vs
-   staying internal? Lean: an explicit `exposed`/`from`-style marker (the
-   `criterion` `from <Criterion>` auto-exposure was already sketched in
-   criterion.md's deferred set) rather than exposing every criterion.
+6. **Which criteria does `scaffoldPaged` get pointed at?** The macro is
+   explicit (`with scaffoldPaged(of: InRegion)`) — the author names the
+   criterion/retrieval/aggregate to expose. An `exposed`-style
+   auto-exposure of *every* criterion is rejected (too much surface); the
+   `scaffoldApi` composer may fan `scaffoldPaged` across an aggregate's
+   declared exposable retrievals, but per-criterion opt-in stays the rule.
 
 ## Cross-references
 
