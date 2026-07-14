@@ -15,12 +15,21 @@ import type {
   PageIR,
   SystemIR,
   UiIR,
+  UserIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import { walkBody } from "../_walker/walker-core.js";
+import {
+  AUTH_MODULE_CLAIMS,
+  FORBIDDEN_VIEW,
+  renderCurrentUserDecoder,
+  renderCurrentUserType,
+  renderFelizGate,
+  uiHasPageGate,
+} from "./auth-gate.js";
 import { felizTarget } from "./feliz-target.js";
 import { storeModelField, storeMsgCase } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
@@ -194,6 +203,11 @@ function renderPageView(
   /** Action names whose body is a `match await` async effect — their dispatch
    *  wrapper passes the route `id` to the trigger Msg. */
   asyncEffectActions: ReadonlySet<string> = new Set(),
+  /** UI-gate mode (D-AUTH-OIDC): the app decodes session claims + holds them on
+   *  the Model, so a page carrying `requires` wraps its body in a
+   *  `match model.CurrentUser with Some currentUser when <gate> -> … | _ ->
+   *  forbiddenView` guard (the client mirror of the backend 403). */
+  pageGate = false,
 ): string {
   // A detail page's view takes the route `id` (bound by its `Page` case); the
   // body's `byId(id)` renders through the `renderRouteId` seam to this local.
@@ -227,6 +241,20 @@ function renderPageView(
   ];
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
+  // A page `requires <gate>` (under the UI-gate machinery) wraps the body in a
+  // claims guard: the bound `currentUser` local is tested by the F#-rendered
+  // gate; a failing predicate (or no session) renders `forbiddenView`.
+  if (pageGate && page.requires) {
+    const gate = renderFelizGate(page.requires, "currentUser");
+    const inner = indentBlock(`${preamble}${body}`, 4);
+    return [
+      head,
+      "    match model.CurrentUser with",
+      `    | Some currentUser when ${gate} ->`,
+      inner,
+      "    | _ -> forbiddenView",
+    ].join("\n");
+  }
   return `${head}\n${preamble}${body}`;
 }
 
@@ -509,11 +537,24 @@ function combinedActions(ui: UiIR): PageIR["actions"][number][] {
  *  (`Feliz.Router`); a single-page ui stays byte-for-byte as before.  When any
  *  page issues api reads the file also carries the wire layer (Thoth decoders +
  *  a `Cmd`-based `Api` module + the `Remote`/`View` helpers). */
-function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = false): string {
+function renderAppFs(
+  ui: UiIR,
+  contexts: EnrichedBoundedContextIR[],
+  authUi = false,
+  /** System `user { }` claim shape — present whenever `authUi` is true (the
+   *  gate requires it).  Drives the `CurrentUser` record + decoder emitted when
+   *  a page carries a `requires` UI gate. */
+  user?: UserIR,
+): string {
   const pages = ui.pages;
   if (pages.length === 0) {
     return `module App\n\nopen Feliz\n\n// ui '${ui.name}' declares no pages\n`;
   }
+  // UI-gate mode: an `auth: ui` app (claims available) where at least one page
+  // declares `requires`.  Upgrades the status-only probe to a claims decode +
+  // adds `CurrentUser` to the Model + emits the gated page views.  A gate-free
+  // auth app stays byte-for-byte on the boolean probe.
+  const pageGate = authUi && !!user && uiHasPageGate(ui);
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const workflowsByName = workflowsForUi(contexts);
@@ -578,7 +619,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   // (POST + decode); the auth probe also uses `Http.get`.  The Thoth
   // record/decoder layer is needed for reads AND async effects (the op's
   // `type`-tagged 200 body); the `Remote`/View envelope is reads-only.
-  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi || hasEffects;
+  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi || hasEffects || pageGate;
   const hasWire = hasReads || hasEffects;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
@@ -605,8 +646,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
       s.actions.map((a) => ({ name: storeMsgCase(s.name, a.name), params: a.params, body: [] })),
     ),
   ];
-  const model = renderModel(state, reads, routed, formRecords, authUi);
-  const init = renderInit(state, reads, routed, formRecords, authUi);
+  const model = renderModel(state, reads, routed, formRecords, authUi, pageGate);
+  const init = renderInit(state, reads, routed, formRecords, authUi, pageGate);
   const msg = renderMsg(
     msgActions,
     reads,
@@ -617,6 +658,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     workflowForms,
     authUi,
     asyncEffects,
+    pageGate,
   );
   const update = renderUpdate(
     actions,
@@ -630,6 +672,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     authUi,
     ui.stores,
     asyncEffects,
+    pageGate,
   );
   const wire = hasWire
     ? renderWireTypes(
@@ -665,6 +708,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
             externFunctionNames,
             used,
             asyncEffectActions,
+            pageGate,
           ),
         ),
         "",
@@ -684,9 +728,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
           externFunctionNames,
           used,
           asyncEffectActions,
+          pageGate,
         ),
       ];
-  const views = authUi ? [...rootViews, "", renderAuthGate()] : rootViews;
+  // A gated app defines `forbiddenView` ahead of the page views that render it
+  // (the claims-fallback element).
+  const gatedViews = pageGate ? [FORBIDDEN_VIEW, "", ...rootViews] : rootViews;
+  const views = authUi ? [...gatedViews, "", renderAuthGate()] : gatedViews;
 
   // `open` one line per DISTINCT extern module actually referenced by the page
   // walks (components + functions), so bare `OrderChart {| … |}` /
@@ -713,16 +761,24 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     (routed || hasForms) && "open Feliz.Router",
     "open Elmish",
     "open Elmish.React",
-    // Thoth is needed for decoders (reads + async effects) AND encoders (forms).
-    (hasReads || hasForms || hasEffects) && "open Thoth.Json",
+    // Thoth is needed for decoders (reads + async effects), encoders (forms),
+    // AND the UI-gate claims decode.
+    (hasReads || hasForms || hasEffects || pageGate) && "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
     // Browser.Dom provides `window` for the auth sign-in/out redirects.
     authUi && "open Browser.Dom",
     // Auth session gate — SessionState (gates the Model) + the Auth probe module.
+    // Under a page gate the probe decodes the verified claims into `CurrentUser`
+    // (record + decoder ahead of the claims-variant Auth module); a gate-free
+    // auth app stays on the status-only boolean probe.
     authUi && "",
     authUi && SESSION_TYPE,
+    pageGate && user ? "" : false,
+    pageGate && user ? renderCurrentUserType(user) : false,
+    pageGate && user ? "" : false,
+    pageGate && user ? renderCurrentUserDecoder(user) : false,
     authUi && "",
-    authUi && AUTH_MODULE,
+    authUi && (pageGate ? AUTH_MODULE_CLAIMS : AUTH_MODULE),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
@@ -923,7 +979,7 @@ export function generateFelizForContexts(
     authUi ||
     hasEffects;
   const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
-  out.set("src/App.fs", renderAppFs(ui, contexts, authUi));
+  out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user));
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));

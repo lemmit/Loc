@@ -26,6 +26,7 @@ on:
       - 'src/language/ddd.langium'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
+      - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   pull_request:
     branches: [main]
@@ -38,6 +39,7 @@ on:
       - 'src/language/ddd.langium'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
+      - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   workflow_dispatch:
 
@@ -293,3 +295,59 @@ jobs:
             sleep 1
           done
           SMOKE_URL=http://localhost:4175/ node "$GITHUB_WORKSPACE/scripts/feliz-scaffold-smoke.mjs"
+
+      # Third leg: the UI AUTHORIZATION GATE (D-AUTH-OIDC).  A page carrying
+      # `requires currentUser.role == "admin"` decodes the verified session
+      # claims (`/api/auth/me` → a typed `CurrentUser` record via Thoth) and
+      # wraps the gated view in a `Some currentUser when <gate> -> … | _ ->
+      # forbiddenView` guard — the client mirror of the backend 403.  The smoke
+      # STUBS `/api/auth/me` (Playwright request interception) so BOTH branches
+      # run for real: admin claims → the gated body renders; viewer claims →
+      # forbiddenView.  (The scaffold leg above stays gate-free, so it keeps its
+      # SPA-fallback probe; the claims decode needs a JSON body, hence the stub.)
+      - name: Generate the auth-gate app
+        run: |
+          cat > ci-feliz/authgate.ddd <<'DDD'
+          system GateShop {
+            user { id: string  role: string }
+            api ShopApi from Catalog
+            subdomain Catalog {
+              context Cat {
+                aggregate Product { name: string  price: money }
+                repository Products for Product { }
+              }
+            }
+            storage db { type: postgres }
+            resource catState { for: Cat, kind: state, use: db }
+            ui WebApp {
+              api Shop: ShopApi
+              page Home { route: "/"  body: Heading { "Welcome", level: 1 } }
+              page Admin {
+                route: "/admin"
+                requires currentUser.role == "admin"
+                body: Heading { "Admin Console", level: 1 }
+              }
+            }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 auth: required }
+            deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 auth: ui }
+          }
+          DDD
+          node bin/cli.js generate system ci-feliz/authgate.ddd -o ci-feliz/authgate-out
+      - name: Locate the auth-gate project
+        id: gproj
+        run: echo "dir=$(dirname "$(find ci-feliz/authgate-out -name App.fsproj | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: Fable compile + vite build + runtime smoke (auth gate)
+        working-directory: ${{ steps.gproj.outputs.dir }}
+        run: |
+          dotnet tool restore
+          dotnet fable App.fsproj -o out --extension .js
+          npm install
+          npx vite build
+          npx vite preview --port 4176 --strictPort &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4176/ >/dev/null && break
+            sleep 1
+          done
+          SMOKE_URL=http://localhost:4176/ node "$GITHUB_WORKSPACE/scripts/feliz-authgate-smoke.mjs"

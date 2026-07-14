@@ -1001,7 +1001,7 @@ function wireFieldType(t: TypeIR): string {
 }
 
 /** Thoth decoder expression for a wire field's declared type. */
-function decoderExprFor(t: TypeIR): string {
+export function decoderExprFor(t: TypeIR): string {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
