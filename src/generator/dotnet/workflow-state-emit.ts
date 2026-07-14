@@ -108,7 +108,7 @@ export function renderWorkflowStateEntity(wf: WorkflowIR, ns: string, durable = 
 /** The state row's EF configuration — mirrors the aggregate configuration's
  *  `ToTable` / `HasKey` / per-field `HasConversion` shape, keyed by the
  *  correlation field instead of `Id`. */
-export function renderWorkflowStateConfiguration(
+function renderWorkflowStateConfiguration(
   wf: WorkflowIR,
   ns: string,
   durable = false,

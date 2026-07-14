@@ -58,7 +58,7 @@ export function contextsHaveAudit(contexts: EnrichedBoundedContextIR[]): boolean
  *  Hono `audit_records` Drizzle table / the .NET / Java AuditRecord
  *  column-for-column: snake_case columns, jsonb on the actor / before / after
  *  blobs, indexes on (target_type, target_id) + (correlation_id). */
-export function renderPyAudit(): string {
+function renderPyAudit(): string {
   return lines(
     `"""Per-operation audit runtime — the append-only history model.`,
     ``,
