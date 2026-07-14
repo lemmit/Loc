@@ -57,6 +57,9 @@ async function main() {
   // Fill a flattened value-object sub-field — proves the nested-VO input renders
   // + dispatches (the `contact: Contact` VO flattens to `contactEmail`/`Phone`).
   await page.getByPlaceholder("contactEmail").fill("a@b.com");
+  // Fill a scalar-array field — proves the comma-separated array input dispatches
+  // (`tags: string[]?` → a "tags (comma-separated)" input, encoded to a JSON array).
+  await page.getByPlaceholder("tags (comma-separated)").fill("x, y, z");
   if (!(await create.isEnabled())) {
     throw new Error("create submit should be ENABLED once required fields are filled");
   }

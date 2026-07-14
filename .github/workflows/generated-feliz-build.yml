@@ -78,8 +78,9 @@ jobs:
           # `enum Status` <select>, a foreign-key `Category id?` <select> populated
           # from an implicit `Category.all` read via `View.idOptions`, a value-object
           # `Contact` flattened into `contactEmail`/`contactPhone` inputs re-nested
-          # in the encoder, an OPTIONAL `note` — empty → null, exempt) and a
-          # `Validation`-gated submit the smoke drives (disabled → fill → enabled).
+          # in the encoder, a scalar-array `tags: string[]?` comma-separated input
+          # split into a JSON array, an OPTIONAL `note` — empty → null, exempt) and
+          # a `Validation`-gated submit the smoke drives (disabled → fill → enabled).
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -102,6 +103,7 @@ jobs:
                   status:   Status
                   category: Category id?
                   contact:  Contact
+                  tags:     string[]?
                   operation rename(newName: string) { name := newName }
                   // Union-returning instance op driving a `match await` async
                   // effect on the detail page (M-T6.15).

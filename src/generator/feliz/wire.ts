@@ -192,6 +192,9 @@ export interface FelizFormField {
   /** The JSON key this field encodes to — its own `wireName` for a normal field,
    *  or the VO sub-field name (`street`) inside its `objectKey` group. */
   jsonKey: string;
+  /** True for a scalar-array (`X[]`) field — rendered as a comma-separated text
+   *  input, encoded to a JSON array (the encoder splits/trims/encodes each item). */
+  isArray?: boolean;
   /** The empty-form initial value for this field — `""` for most, but a REQUIRED
    *  enum defaults to its first value (a `<select>` always has a selection, and
    *  it keeps the required-enum form valid from the start, mirroring React). */
@@ -342,6 +345,7 @@ function buildField(
     idLabelField,
     objectKey,
     jsonKey,
+    isArray: base.kind === "array",
     emptyValue,
   };
 }
@@ -388,13 +392,41 @@ function formFieldsFrom(
   });
 }
 
+/** The point-free / lambda encoder for ONE array element of scalar type `base`
+ *  (already peeled), applied to a trimmed string item. */
+function elemEncoderFn(base: TypeIR): string {
+  if (base.kind === "primitive") {
+    switch (base.name) {
+      case "int":
+      case "long":
+        return "(fun s -> Encode.int (int s))";
+      case "decimal":
+      case "money":
+        return "(fun s -> Encode.decimal (decimal s))";
+      case "bool":
+        return '(fun s -> Encode.bool (s = "true"))';
+      default:
+        return "Encode.string";
+    }
+  }
+  return "Encode.string"; // id / enum / string
+}
+
 /** Thoth encoder expression that lifts a string-typed form field `access`
- *  (`form.price`) back to its wire type.  An `optional` field's empty string
- *  encodes to `Encode.nil` (JSON `null`) — the client omitted it — while a
+ *  (`form.price`) back to its wire type.  A scalar-array field splits the
+ *  comma-separated string into a JSON array; an `optional` scalar field's empty
+ *  string encodes to `Encode.nil` (JSON `null`) — the client omitted it — while a
  *  filled value encodes as its base type; a bool is never wrapped (unchecked is
  *  a legitimate `false`, never absent). */
 function encodeExprFor(t: TypeIR, access: string, optional = false): string {
   const base = scalarBase(t);
+  // A scalar array → split the comma-separated input, trim/drop blanks, encode
+  // each element.  An empty input yields `[]` (never null), so it needs no
+  // optional-null wrapping.
+  if (base.kind === "array") {
+    const elemFn = elemEncoderFn(scalarBase(base.element));
+    return `Encode.list (${access}.Split(',') |> Array.toList |> List.map (fun s -> s.Trim()) |> List.filter (fun s -> s <> "") |> List.map ${elemFn})`;
+  }
   const encodeBase = (): string => {
     if (base.kind === "primitive") {
       switch (base.name) {
@@ -428,13 +460,17 @@ function isScalarInput(t: TypeIR): boolean {
   return base.kind === "primitive" || base.kind === "id" || base.kind === "enum";
 }
 
-/** Whether a create-input field is one the form can render — a scalar, OR a
- *  value object we can FLATTEN into its scalar sub-fields (`vosByName` resolves
- *  its definition).  Nested part / collection (`array`) inputs are still dropped
- *  (they need containment / repeatable-row sub-forms — follow-up). */
+/** Whether a create-input field is one the form can render — a scalar, a value
+ *  object we can FLATTEN into its scalar sub-fields (`vosByName`), or a SCALAR
+ *  ARRAY (`X[]`, rendered as a comma-separated text input).  A nested part /
+ *  array-of-VO / array-of-part still needs a repeatable sub-form (follow-up). */
 function isExpandableInput(t: TypeIR, vosByName: ReadonlyMap<string, readonly FieldIR[]>): boolean {
   const base = scalarBase(t);
-  return isScalarInput(t) || (base.kind === "valueobject" && vosByName.has(base.name));
+  return (
+    isScalarInput(t) ||
+    (base.kind === "valueobject" && vosByName.has(base.name)) ||
+    (base.kind === "array" && isScalarInput(base.element))
+  );
 }
 
 /** Build the `FelizForm` for a `CreateForm(of: agg)` from the aggregate's

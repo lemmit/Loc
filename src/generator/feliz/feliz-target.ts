@@ -89,7 +89,10 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`;
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
-  return `Html.input [ ${typeProp}prop.placeholder "${fld.wireName}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
+  // A scalar array renders as a comma-separated text input (the encoder splits
+  // it into a JSON array); the placeholder hints the format.
+  const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
+  return `Html.input [ ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
 }
 
 /** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each

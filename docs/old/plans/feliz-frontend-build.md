@@ -271,16 +271,30 @@ in hand — not before F# output exists.
   decoder (sibling ref UNqualified), since F# is order-sensitive — never fired
   before because no shipped Feliz read had a VO field. Single-record output stays
   byte-identical. All Fable + vite + smoke verified; the showcase grew a
-  `Contact` VO. **Caveat:** one level (scalar VO sub-fields); nested-VO / array
-  (`[]`) / entity-part inputs still need repeatable/sub-form UI (follow-up).
+  `Contact` VO. **Caveat:** one level (scalar VO sub-fields); nested-VO /
+  array-of-VO / entity-part inputs still need repeatable/sub-form UI (follow-up).
+- ✅ **Scalar-array (`X[]`) inputs.** A scalar-array create/op/workflow field
+  renders as a single COMMA-SEPARATED text input (`"tags (comma-separated)"`); the
+  encoder splits it into a JSON array — `Encode.list (form.tags.Split(',') |>
+  Array.toList |> List.map (trim) |> List.filter (drop blanks) |> List.map
+  <elemEncode>)` — encoding each element by its type (`Encode.string` /
+  `Encode.int (int s)` / …). The form field stays a flat `string`, so the entire
+  existing flat pipeline (record / Set-Msg / update-arm / validation) is reused —
+  only the encoder differs; an empty input → `Encode.list []` (never null).
+  Chosen over dynamic add/remove rows (which would make the field a `string list`
+  + need indexed `Add`/`Remove`/`Set` Msgs) as the pragmatic v1. All Fable + vite +
+  smoke verified; the showcase grew `tags: string[]?`. **Caveat:** scalar element
+  types only; array-of-VO / array-of-entity-part + a proper repeatable-row UI are
+  the follow-up.
 - **Wire layer covers the full CRUD write path + workflows + auth, with a
-  complete scalar + value-object form layer.** list + byId reads, create, delete,
-  operation, workflow runs, the auth gate, and typed/validated form inputs across
-  every scalar widget — text / number / checkbox / enum-select / FK-id-select —
-  plus flattened value-object fields, required + optional. Remaining Feliz work is
-  polish: deeper pack coverage, the modal open-state, array (`[]`) / entity-part
-  form inputs (repeatable-row sub-forms), `currentUser.<field>` decode. Enum wire
-  fields decode as their string name (a proper DU decoder is a
+  complete scalar + value-object + scalar-array form layer.** list + byId reads,
+  create, delete, operation, workflow runs, the auth gate, and typed/validated
+  form inputs across every scalar widget — text / number / checkbox / enum-select
+  / FK-id-select — plus flattened value-object fields and comma-separated scalar
+  arrays, required + optional. Remaining Feliz work is polish: deeper pack
+  coverage, the modal open-state, a dynamic-row / array-of-VO / entity-part sub-form
+  UI, `currentUser.<field>` decode. Enum wire fields decode as their string name
+  (a proper DU decoder is a
   follow-up); nested containment/VO records + decoders ARE emitted (transitive off
   `wireShape`).
 
