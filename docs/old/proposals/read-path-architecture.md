@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 3). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 4). No code yet. A
 > vision + grammar proposal.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
@@ -12,14 +12,23 @@
 > **The ergonomic default** (owner steer, rev. 3): the common case — a
 > named, paged, filtered list read — is a **scaffold macro,
 > `scaffoldPaged(of: X)`**, that emits a real (unfoldable) paged
-> `queryHandler` over that primitive. Not a new construct, not a
-> `view`/`retrieval` merge, not a new keyword: the ergonomics live in the
-> macro layer where `scaffold` already lives. rev. 3 **drops the rev. 2
-> `read` keyword** (the scaffold replaces it) and records why the
-> `view`/`retrieval` merge was declined (the shared job is a macro
-> *output*, not a fourth keyword). The heavier read constructs
-> (`queryHandler` hand-written, `view`, `projection`) stay **escape
-> hatches**.
+> `queryHandler` over that primitive. Not a new construct, not a new
+> keyword: the ergonomics live in the macro layer where `scaffold`
+> already lives. rev. 3 **drops the rev. 2 `read` keyword** (the scaffold
+> replaces it).
+>
+> **`view` is deprecated** (owner steer, rev. 4). Once `scaffoldPaged`
+> emits the endpoint and `criterion` owns the filter, `view` has no job
+> left that earns a keyword: its filter → `criterion`, its passthrough
+> shorthand → `scaffoldPaged`, its auto `GET /views/<name>` → the scaffold
+> `route` (killing the parallel `/views` namespace), its custom shape →
+> a `response` DTO, its materialized case → `projection`. Its *one* unique
+> capability — the cross-aggregate `bind`-follow with N+1-avoiding
+> batch-load — **graduates to a general response-projection capability**
+> (a `response` bind may follow an `X id` ref, in any read), so the follow
+> survives without the construct. This is a **deprecate + fold + codemod**
+> on a landed feature (5 backends, UI scaffold, ~14 `loom.view-*` gates),
+> not free.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -29,8 +38,10 @@
 > read builtins (`src/ir/types/loom-ir.ts:1494`, `:3173`), and
 > [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) (the
 > landed `queryHandler` / `route` seam — the orchestration escape hatch).
-> `view` (saved declarative query) and [`projection.md`](./projection.md)
-> (event-folded read model) are the two heavier escape hatches.
+> a hand-written `queryHandler` (custom projection / cross-aggregate
+> follow) and [`projection.md`](./projection.md) (event-folded read model)
+> are the heavier escape hatches. (`view` — rev. 4 deprecates it; its
+> follow capability moves to response projection, see the banner above.)
 
 ---
 
@@ -76,10 +87,12 @@ with scaffoldPaged(of: ActiveInRegion)   # → a real, unfoldable paged queryHan
 
 | Need | Use | Not the default |
 |---|---|---|
-| list / one / filtered read of an aggregate | **read-only repository + `criterion`** | — (this *is* the default) |
-| stitch several reads / diverge the wire shape from the aggregate | `queryHandler` (returns a `response` DTO) | only when a plain read won't do |
-| a saved, named, declarative query with cross-aggregate `bind` | `view` | only when reused / curated |
+| list / one / filtered read of an aggregate | **read-only repository + `criterion`** (via `scaffoldPaged`) | — (this *is* the default) |
+| stitch several reads / diverge the wire shape / follow a cross-aggregate ref | `queryHandler` (returns a `response` DTO whose binds may follow `X id`) | only when a plain read won't do |
 | a denormalised read model folded from foreign events | `projection` (full CQRS) | only for event-sourced read models |
+
+(`view` was a fifth row here through rev. 3; rev. 4 deprecates it — see the
+status banner and § "`view` deprecates".)
 
 This is the Ardalis `IReadRepository<T>` + Specification pattern, mapped
 onto Loom's existing `criterion`/`retrieval`/`reading`-tier machinery.
@@ -151,7 +164,7 @@ reads — instead of the mutating-repository-with-finders auto-derivation.
 | Face | Exposes | Callable from |
 |---|---|---|
 | **write** | `save`, and `getById` for the load→mutate→save cycle | orchestrator tier only — `workflow`, `commandHandler` |
-| **read-only** | `findById`, `run(<criterion \| retrieval>, sort?, page?)`, `findAll(sort?, page?)` | any **read position** — an api read route, a `reading` service, a `queryHandler`, a `view` |
+| **read-only** | `findById`, `run(<criterion \| retrieval>, sort?, page?)`, `findAll(sort?, page?)` | any **read position** — an api read route, a `reading` service, a `queryHandler` |
 
 The read-only face **is** the layer of indirection the original
 complaint asked for. It is not a separate service class; it is a
@@ -174,8 +187,8 @@ tier already does it — no per-call ceremony:
 
 - Inside a `workflow` / `commandHandler`, a repository reference is the
   **write** face (may `save`).
-- Inside an **api read route**, a `reading` service, a `queryHandler`, or
-  a `view`, a repository reference is the **read-only** face. A write
+- Inside an **api read route**, a `reading` service, or a `queryHandler`,
+  a repository reference is the **read-only** face. A write
   builtin there is a validation error (generalise the shipped
   `loom.domain-service-no-repo-write` from the `reading` tier to *every*
   read position → `loom.read-context-repo-write`).
@@ -288,22 +301,24 @@ body — the same "scaffold reads its input to decide" rule the
   decision.
 - Returns the aggregate's `apiRead` projection (`OrderResponse paged`) by
   default — the DTO boundary is scaffolded, not hand-written. When the
-  shape must diverge further, unfold and edit, or reach for `view` /
-  hand-written `queryHandler`.
+  shape must diverge further, unfold and edit the emitted `queryHandler`
+  (its `response` binds may follow cross-aggregate refs — § "`view`
+  deprecates").
 
-### Why a macro, not a merged construct
+### Why a macro, not a new construct
 
-This is the resolution of "is `view` redundant / should `view` and
-`retrieval` merge?" — **no merge.** The shared job (a named, paged,
-filtered read) is a *macro output*, not a fourth read keyword. The
-primitives stay orthogonal and each keeps its one job:
+This is the resolution of "is `view` redundant?" — **yes; it deprecates**
+(§ "`view` deprecates"), and the shared job (a named, paged, filtered read)
+is a *macro output*, not a new read keyword. The primitives stay orthogonal
+and each keeps its one job:
 
 - `criterion` — the filter atom (composes, inlines to SQL).
 - `retrieval` — the *named* filter+sort+loads bundle a handler/macro runs.
 - `queryHandler` — the imperative read the macro *emits* (and the escape
-  hatch when you hand-write one).
-- `view` — the declarative custom-projection + cross-aggregate `bind`-follow
-  read (its genuinely-unique capability; see § escape hatches).
+  hatch when you hand-write one — including the cross-aggregate follow that
+  was `view`'s).
+- `response` — the wire DTO the read returns; its binds may follow `X id`
+  refs (the ex-`view` capability, now general).
 
 `scaffoldPaged` *composes* these; it does not replace any. Naming follows
 the `scaffold<Thing>(of: X)` stdlib convention (named `of:` arg); whether
@@ -318,23 +333,60 @@ Deliberately *not* on the default path; each earns its use:
 
 - **`queryHandler`** (landed, unfoldable-api-derivation) — when a read
   must **orchestrate** (stitch several `run`s / call a `reading` service)
-  or **diverge the wire shape** from the aggregate (return a `response`
-  DTO, hide/rename/combine fields beyond the `apiRead` access filter). It
-  runs the read-only port internally and projects. `loom.query-handler-saves`
-  already keeps it read-only.
-- **`view`** (landed) — a **saved, named, declarative** query with
-  cross-aggregate `bind`-follow (`view X { … from Agg where P bind y =
-  ref.name }`). Use when the shaped query is reused and worth naming
-  declaratively rather than as an imperative handler.
+  or **diverge the wire shape** from the aggregate (a `response` DTO that
+  hides/renames/combines fields, or **follows a cross-aggregate `X id`
+  ref** — the ex-`view` capability, see below). It runs the read-only port
+  internally and projects. `loom.query-handler-saves` already keeps it
+  read-only.
 - **`projection`** (in-flight, projection.md) — a **denormalised read
   model folded from foreign events**, its own table, `GET /projections/*`.
   The *full-CQRS* escape hatch for event-sourced read models and
   cross-aggregate denormalised reads that a query-time `run` can't serve
   efficiently. Opt-in per read model — never forced.
 
-The ladder is legible: **`run(criterion)` for the 90%; `queryHandler`
-when you orchestrate or reshape; `view` when you name it; `projection`
-when you fold events.**
+The ladder is legible: **`scaffoldPaged` / `run(criterion)` for the 90%;
+`queryHandler` when you orchestrate or reshape; `projection` when you fold
+events.**
+
+### `view` deprecates — folded, not kept
+
+`view` was the fourth escape hatch through rev. 3. rev. 4 removes it: with
+`scaffoldPaged` emitting the endpoint and `criterion` owning the filter,
+nothing `view` does earns a keyword. Each capability has a cleaner home:
+
+| `view` did | Folds into |
+|---|---|
+| filter which rows (`where`) | `criterion` |
+| passthrough shorthand (`view X = Agg where P`) | `scaffoldPaged(of: criterion)` |
+| auto endpoint `GET /views/<name>` | the `route` `scaffoldPaged` emits — **removes the parallel `/views` namespace** |
+| custom projection shape (`<View>Row` + `bind`) | a `response` DTO |
+| **cross-aggregate `bind`-follow** (`customerId.name`, batch-loaded, no N+1) | a **response-projection capability** (below) |
+| source = workflow-instance / projection | the read path is source-agnostic — read the projection row / workflow state through the same handler |
+| auto browse UI page | the page scaffold (already separate) |
+| materialized / hot denormalized read | `projection` |
+
+**The one capability to preserve — the follow — graduates to response
+projection.** `view`'s genuinely-unique feature is that
+`bind customerName = customerId.name` auto-generates a batched
+`findManyByIds` (`lower-view.ts:96` `collectIdFollows`) so projecting a
+foreign field doesn't N+1. Killing `view` must **not** demote this to
+"hand-write a `queryHandler` with two `run`s" (that re-introduces the
+footgun). Instead the follow becomes a property of **projecting a
+`response`**: a response bind expression may traverse an `X id` ref, and
+the emitter batch-loads it — available in `scaffoldPaged`, a hand-written
+`queryHandler`, or anywhere a response is projected. The `collectIdFollows`
+/ `auxiliaries` machinery **relocates** from the view lowerer to the
+response-projection path; it is not rewritten.
+
+**Migration.** `view` stays parsing through a deprecation window
+(`loom.view-deprecated`, warning), with `ddd migrate reads` rewriting the
+two shapes: `view X = Agg where P` → `with scaffoldPaged(of: <criterion(P)>)`;
+`view X { fields from Agg … bind … }` → a `response` (the fields+binds) +
+`with scaffoldPaged`/`queryHandler`. The 5-backend view emitters, the
+`/views` routers, the ~14 `loom.view-*` gates, and the view UI scaffold are
+deleted once examples migrate; the follow/batch-load code moves to response
+projection. This is the largest slice of the proposal — deletion of a
+landed feature — so it lands last, behind the primitive + `scaffoldPaged`.
 
 ---
 
@@ -351,8 +403,9 @@ Very little is new — the primitive exists; the proposal *positions* it.
 - `reading` domain-service tier + `loom.domain-service-no-repo-write`
   (`domain-service-checks.ts:129`) — the read-only setting, already
   enforced.
-- `QueryHandler` / `Route` / `View` — the escape hatches, and the
-  `queryHandler` + `route` `scaffoldPaged` emits into.
+- `QueryHandler` / `Route` — the escape hatch + the `queryHandler` +
+  `route` `scaffoldPaged` emits into. (`View` — deprecated, § "`view`
+  deprecates".)
 
 ### NO NEW KEYWORD — the exposed read is a scaffold
 
@@ -395,9 +448,13 @@ Minimal:
   read position is rejected. No IR shape change — the existing `repo-run`
   path already carries inline criteria via `findAllBy<Criterion>`
   (`loom-ir.ts:1494`).
-- `ReadDecl` (if adopted) lowers to the same `QueryHandlerIR` shape with a
-  single-expression body — or its own thin `ReadIR` that reuses the
-  `repo-run` lowering. Reuses, not reinvents.
+- `scaffoldPaged` lowers to nothing new — it *emits* existing nodes
+  (`QueryHandlerIR` + a `query`/`response` payload + `RouteIR`) at macro
+  time, then lowers as ordinary AST. Reuses, not reinvents.
+- The `response` **follow** (ex-`view`): the `collectIdFollows` /
+  `auxiliaries` planner (`lower-view.ts:96`) relocates to the
+  response-projection path so any read that projects a response can follow
+  an `X id` ref. Not a new node — a relocated pass.
 - `ApiIR` read routes derive onto read-only-face calls (a `scaffoldApi` /
   enrich-relocation concern, per unfoldable-api-derivation).
 
@@ -419,9 +476,10 @@ New:
 
 | Code | Rule | Severity |
 |---|---|---|
-| `loom.read-context-repo-write` | a write builtin (`save`/mutation) called from a read position (api read route / `read` / `queryHandler` / `view`) — the generalisation of the shipped `reading`-tier gate | error |
+| `loom.read-context-repo-write` | a write builtin (`save`/mutation) called from a read position (api read route / `queryHandler`) — the generalisation of the shipped `reading`-tier gate | error |
 | `loom.route-targets-write-repository` | a route reaches the mutating repository face | error |
 | `loom.repository-find-deprecated` | a wire-shaped list `find` on a repository (pass a `criterion` to `run` / name a `retrieval`) | warning |
+| `loom.view-deprecated` | a `view` declaration (fold into `scaffoldPaged` + `response`; `ddd migrate reads`) | warning |
 
 `loom.read-context-repo-write` is the load-bearing one — it *is* the
 read-only setting, made structural, extended from the `reading` tier to
@@ -454,19 +512,27 @@ No flag day; each slice independent:
 1. **`run` accepts an inline `criterion`** first-class + documented (the
    lowering path exists; surface + validation + one test per backend).
 2. **The read position gate** — `loom.read-context-repo-write` generalises
-   the `reading`-tier check to api read routes / `queryHandler` / `view` /
-   `read`. Pure validation; no emit change.
+   the `reading`-tier check to api read routes / `queryHandler`. Pure
+   validation; no emit change.
 3. **Read routes bind the read-only handle** — the router receives the
    read subset; `save` becomes unreachable from a read. Wire byte-identical.
 4. **`scaffoldPaged(of: X)` stdlib macro** — the polymorphic scaffold
    (aggregate / criterion / retrieval → paged `queryHandler` + `response`
    + `route`), joining the `scaffoldApi` family. This is the ergonomic
    default; ship it before deprecating the legacy derivation.
-5. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
+5. **Response follow** — relocate the `X id` follow / batch-load
+   (`collectIdFollows`, `auxiliaries`) from the view lowerer to the
+   response-projection path, so it's available before `view` retires.
+6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
+7. **`view` deprecation (last, largest)** — `loom.view-deprecated` warning
+   + `ddd migrate reads` rewrites the two shapes; then delete the 5-backend
+   view emitters, the `/views` routers, the `loom.view-*` gates, and the
+   view UI scaffold. Lands last because it's the biggest deletion and
+   depends on slices 4–5 (the fold targets) existing.
 
-Existing `.ddd` keeps parsing throughout; the visible change is that a
-list `find` warns and a read can no longer `save`.
+Existing `.ddd` keeps parsing throughout; the visible changes are that a
+list `find` and a `view` warn, and a read can no longer `save`.
 
 ---
 
@@ -504,10 +570,11 @@ list `find` warns and a read can no longer `save`.
    a new declaration.)*
 3. **What `scaffoldPaged` returns.** The aggregate's `apiRead` projection
    (`OrderResponse paged`) by default. When a caller needs a divergent
-   shape, do they (a) unfold and edit the emitted `queryHandler`, (b) pass
-   a `project:`/`view:` override to the macro, or (c) drop to a `view`?
-   Lean: (a) for one-offs, `view` for reused custom shapes; a macro
-   override is a later nicety.
+   shape, do they (a) unfold and edit the emitted `queryHandler` (its
+   `response` binds may follow `X id` refs), or (b) pass a `response:`
+   override to the macro naming a declared `response`? Lean: (a) for
+   one-offs, a named `response` + override for reused custom shapes; this
+   is where `view`'s custom-projection job now lives.
 4. **Unique-key reconstitution `find`.** A `find bySlug(slug): T?` with a
    unique-key `where` is reconstitution, not a list query — stays exempt
    from `loom.repository-find-deprecated`? Lean: yes; the deprecation
@@ -536,7 +603,11 @@ list `find` warns and a read can no longer `save`.
 - [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) — the
   `queryHandler` / `route` orchestration escape hatch (landed) and
   `scaffoldApi` unfold path.
-- [`views.md`](../views.md) — the saved-declarative-query escape hatch.
+- [`views.md`](../views.md) — the `view` construct this proposal
+  **deprecates** (§ "`view` deprecates"); its filter → `criterion`, its
+  endpoint → `scaffoldPaged`, its custom projection → `response`, its
+  cross-aggregate follow → response projection, its materialized case →
+  `projection`.
 - [`projection.md`](./projection.md) — the event-folded read-model
   (full-CQRS) escape hatch; deliberately opt-in, not the default.
 - `docs/architecture.md` — the api-derivation table this rewrites:
