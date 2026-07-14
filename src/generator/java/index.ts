@@ -1310,7 +1310,6 @@ function emitAggregate(
       boundedContext: ctx,
       idClass,
       routePrefix,
-      esConstructible: !!esCreateParams,
     }),
     agg.name,
     agg.origin,

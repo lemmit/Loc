@@ -1,4 +1,4 @@
-import { forApiRead } from "../../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forApiRead } from "../../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   EnrichedAggregateIR,
@@ -210,7 +210,7 @@ export function buildJavaOpenApiContract(
       }
 
       // POST /<plural>  (create) → 400, 422
-      if (agg.canonicalCreate != null || isEsConstructible(agg)) {
+      if (emitsRestCreate(agg)) {
         routes.push({ method: "post", path: route, errors: err(errorStatuses("create")) });
         const createInput = agg.createInput ?? [];
         for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);
@@ -503,13 +503,6 @@ function enumNameOf(t: TypeIR | undefined): string | undefined {
   if (t.kind === "optional") return enumNameOf(t.inner);
   if (t.kind === "array") return enumNameOf(t.element);
   return undefined;
-}
-
-/** Event-sourced aggregates are constructible via `create` even when field
- *  constructibility (`hasCreate`) is false (mirrors api.ts's esConstructible —
- *  `persistedAs(eventLog)` with a declared create). */
-function isEsConstructible(agg: EnrichedAggregateIR): boolean {
-  return agg.persistedAs === "eventLog" && (agg.creates?.length ?? 0) > 0;
 }
 
 /** Render the springdoc OpenApiCustomizer @Configuration class.  Returns null

@@ -14,6 +14,7 @@
 // extension shape byte-identical to the other backends) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
+import { emitsRestCreate as sharedEmitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -78,10 +79,14 @@ export interface VanillaApiEmitResult {
  * they are created via their declared `create` event.  An abstract
  * inheritance base is read-only (no `create` action emitted), so it never
  * exposes create.
+ *
+ * The ES / canonical-create core is the shared {@link sharedEmitsRestCreate}
+ * predicate every backend uses — this wrapper only adds the Phoenix-specific
+ * abstract-base guard, so the cross-backend gate can never silently diverge.
  */
 export function emitsRestCreate(agg: AggregateIR): boolean {
   if (isAbstractBase(agg)) return false;
-  return isEventSourced(agg) ? (agg.creates ?? []).length > 0 : agg.canonicalCreate != null;
+  return sharedEmitsRestCreate(agg);
 }
 
 export function emitVanillaApiControllers(
