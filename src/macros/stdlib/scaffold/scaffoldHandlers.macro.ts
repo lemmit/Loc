@@ -15,6 +15,7 @@ import {
   returnStmt,
   writableCreateFields,
 } from "../../api/index.js";
+import { contractRecords } from "./_contracts-shared.js";
 import {
   type HandlerTarget,
   handlerTargets,
@@ -63,7 +64,12 @@ export default defineMacro({
     "aggregate's repository or factory, then the op-call / find / return).",
   expand({ target }) {
     const ctx = target as BoundedContext;
-    return handlerTargets(ctx).map(buildHandler);
+    // Contract records FIRST (readable `unfold` output: the API contract, then
+    // the handlers that realise it), then the handlers.  The records are
+    // additive + inert in PR1 — no handler references them yet, so generation is
+    // byte-identical with vs without them.
+    const handlers = handlerTargets(ctx).map(buildHandler);
+    return [...contractRecords(ctx), ...handlers];
   },
 });
 
