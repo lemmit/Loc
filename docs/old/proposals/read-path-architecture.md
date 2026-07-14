@@ -1,12 +1,18 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 9). No code yet. A
-> vision + grammar proposal. rev. 9 adds the **Paging** section (call-site
-> params, D-ENVELOPE `Paged<T>` result, collections-only — falls out of the
-> keyed/singleton axis) and folds in the state audit: this stacks **on top
-> of** the live **M-T5.10** contract-record track (composes, no conflict —
-> `scaffoldPaged` reuses its `response()` factory; read-path work touching
-> DTO emitters sequences after the open read-rewire PRs merge).
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 10). No code yet. A
+> vision + grammar proposal. rev. 9 added the **Paging** section (call-site
+> params, D-ENVELOPE `Paged<T>` result, collections-only) and folded in the
+> state audit: this stacks **on top of** the live **M-T5.10** contract-record
+> track (composes, no conflict). rev. 10 **generalises `projection`** to a
+> read model assembled from **optional clauses** (`keyed by?` / `from…where?`
+> / `on(e)?` / `bind?`), with keyed-vs-singleton and query-time-vs-folded
+> **derived from clause presence** — unlocking the fold+read-time-join
+> **hybrid** neither `view` nor today's `projection` could express. Singleton
+> = absence of `keyed by` (validator-checked against whole-table aggregation
+> binds); the `from`+`on` and group-by combos are deferred behind gates.
+> **Went through the language-feature-developer workflow**: state audit +
+> design review (GO WITH CHANGES) done; the paper simulation is next.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
 > load-bearing primitive is a **read-only repository queried by
@@ -37,18 +43,18 @@
 > (`projection X keyed by k { … on(e){…} }`). This resolves the naming knot
 > (the survivor *is* a projection — no new word) and fully retires `view`
 > (both forms). The inline anonymous shape (the `<View>Row`) is preserved.
-> rev. 7: the query-time flavor is **parameterized** (params drive `where`,
-> + `sort` decl / `page` call-site, like `retrieval`) — the parameterized
-> read model `view` never was. rev. 8: **keying is a second, orthogonal axis
-> — keyed *collection* vs unkeyed *singleton*.** A keyed projection is one
-> row per key (folded: explicit `keyed by`; query-time: derived from the
-> source id, 1:1); a **singleton** projection is exactly one row — a
-> whole-table read model (dashboard total, running count), which
-> `projection.md` deferred and this makes first-class. Query-time singletons
-> need **aggregation binds** (`count`/`sum`/`avg` — a real add `view`
-> lacked); folded singletons are nearly free (omit `keyed by`, accumulate).
-> The `/views` namespace dies; the follow + `<View>Row` synthesis
-> **relocate** to the query-time projection path.
+> rev. 7: the query-time flavor is **parameterized**. rev. 8: keyed
+> *collection* vs unkeyed *singleton*. **rev. 10 generalises further** (owner
+> steer): the projection body is a set of **optional clauses** —
+> `keyed by?` / `from…where?` / `on(e)?` / `bind?` — and *both* axes are
+> **derived from clause presence**: keyed vs singleton ← `keyed by` present or
+> absent; query-time vs folded (materialized) ← any `on(e)` fold present. This
+> unlocks the **fold + read-time-join hybrid** (materialized base enriched by
+> a bind that follows an `X id` ref) neither `view` nor today's `projection`
+> could express. Singleton is the *absence* of `keyed by`, validator-checked
+> against whole-table aggregation binds; `from`+`on` and group-by are deferred
+> behind gates. See § "`projection` generalises". The `/views` namespace dies;
+> the follow + `<View>Row` synthesis **relocate** to the projection path.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -387,92 +393,106 @@ a query-time *flavor* of `projection` rather than a new construct.
 
 `view` retires **completely** — no recast keyword, no `/views` namespace.
 
-#### `projection` generalises — one read model, two population modes
+#### `projection` generalises — a read model assembled from optional clauses (rev. 10)
 
 A **projection is a derived read model**: a declared inline shape, read-only,
 disposable/rebuildable, **not a source of truth** (`projection.md`'s own
-defining criterion — a query-time view satisfies it exactly as a folded one
-does). *How it is populated* is a flavor the body selects:
+defining criterion). rev. 6–9 modelled it as *two disjoint flavors* (query-time
+vs folded) with keying as a second axis. **rev. 10 generalises**: the body is a
+set of **optional clauses**, and every "mode" fact is **derived from which
+clauses are present** — never stamped (invariant 4; the structure *is* the
+discriminant, like `ExprIR.kind`).
 
-```ddd
-// QUERY-TIME flavor (was view's full form, now PARAMETERIZED) — always-current,
-// computed per request, no extra storage; binds may follow X id refs (app-side join).
-projection OrdersInRegion(region: string) {
-  orderId:      Order id
-  lineCount:    int
-  customerName: string
-  from Order where this.region == region        // params drive the filter (retrieval-style)
-  sort [placedAt desc]                          // sort in the declaration; page is call-site
-  bind orderId = id, lineCount = lines.count, customerName = customerId.name
-}
-
-// FOLDED flavor (today's projection) — materialized at write time, indexed, eventual.
-projection OrderBook keyed by order {
-  order:  Order id
-  status: OrderStatus
-  on(e: OrderPlaced) { order := e.order; status := Placed }
-}
-
-// SINGLETON (unkeyed) — exactly one row; a whole-table read model. Both flavors:
-projection SalesDashboard {                         // query-time: aggregate over the source
-  openOrders: int
-  revenue:    Money
-  from Order where status == Confirmed
-  bind openOrders = count, revenue = sum(total)     // aggregation → one row (view had none)
-}
-projection RevenueTotals {                          // folded: global accumulator, no `keyed by`
-  total:  Money
-  orders: int
-  on(e: OrderPlaced) { total += e.amount; orders += 1 }
+```
+projection <Name>[(params)] [keyed by <k>] {
+  <field>: <Type> ...                // the row shape (always)
+  [ from <Source> where <pred> ]     // PULL — a query source
+  [ sort [ … ] ]                     // ordering (paged reads)
+  [ on(e: <Event>) { <fold> } ]*     // PUSH — event folds
+  [ bind <field> = <expr> ]*         // derive fields; may follow `X id` refs (read-time join)
 }
 ```
 
-- **Distinguisher:** `from <source> where … bind …` (query-time) vs
-  `keyed by <k>` + `on(e){…}` (folded). Both declare the shape inline (the
-  anonymous `<Proj>Row`, preserved from `view`'s `<View>Row`). A body must
-  pick exactly one mode; mixing is a validate error.
-- **Parameters + sort/page (query-time).** A query-time projection is a
-  read, so it **takes parameters** that drive its `where` (fixing `view`'s
-  biggest gap — no params — which forced callers back to repository `find`s),
-  plus `sort` in the declaration and `page` at the call, exactly like
-  `retrieval`. This makes it the parameterized read model `view` never was.
-  It bundles filter + shape by design; `retrieval` (query → *aggregates*,
-  for imperative bodies) stays a distinct, composable thing — the bundling
-  is right for a *named read model*, and the orthogonal `response` +
-  `queryHandler` path remains for shapes reused across queries.
-- **Keying is a second axis — keyed *collection* vs unkeyed *singleton*.**
-  Orthogonal to the population flavor. A **keyed** projection is a
-  collection (one row per key; list + by-key read). An **unkeyed /
-  singleton** projection is exactly *one* row (a whole-table aggregation —
-  a dashboard total, a running count; single-object read, no list, no
-  by-key). `projection.md` deferred keyless projections as "a later shape";
-  this makes them first-class. Both flavors can be either:
-  - *Folded, keyed:* `keyed by <k>` — explicit + required (events route to a
-    row; the schema often holds several foreign ids).
-  - *Folded, singleton:* **no `keyed by`** — the `on(e)` handlers accumulate
-    into one global row (`total += e.amount`). Nearly free — just omit the
-    key.
-  - *Query-time, keyed:* **1:1 with its source**, so keyed by the **source's
-    id, derived not declared** — the free by-id read (`GET …/{id}`), as
-    `view`'s `bind orderId = id` gave.
-  - *Query-time, singleton:* the binds **aggregate** over the source
-    (`count`, `sum`, `avg`) → one row. This is a real capability add —
-    `view` had *no* aggregation — not just "omit the key."
+Derived facts (not declared, not stamped):
 
-  So the key is *declared* (folded) or *derived* (query-time), and its
-  cardinality is *keyed collection* or *singleton*. (Group-by — one row per
-  *group* key, `orders per region` — is the richer follow-on: aggregation +
-  grouping; singleton is the immediate clean case.)
-- **Same identity, different consistency/cost:** query-time is
-  always-current, O(query)/read, no table; folded is eventual, O(1)/read,
-  its own table. The choice is the read-side twin of an aggregate's
-  `state`-vs-`eventLog` — same construct, a population knob.
-- **The existing `loom.view-source-eventsourced-refold` lint becomes an
-  *intra-`projection`* nudge:** "this query-time projection over an ES source
-  refolds the whole stream per request → switch it to a folded projection."
-  Same read model, change the mode.
+- **keyed collection vs singleton** ← `keyed by` **present or absent.**
+  Present → one row per key (list + by-key, pageable). Absent → a **singleton**
+  (exactly one row; single-object read). *(This is the rev.-10 answer to "how is
+  a singleton spelled": not an explicit `singleton` word and not inferred from
+  the binds alone — it's the **absence of a key**, disambiguated by a validator,
+  below.)*
+- **materialized vs query-time** ← any `on(e)` fold → the read model needs a
+  **table** (materialized, eventual, O(1)/read); only `from` → **computed per
+  read** (always-current, O(query)/read, no table).
+- **read-time join** ← any bind that follows an `X id` ref → the batched
+  app-side join (`collectIdFollows`/`auxiliaries`, relocated from `lower-view`),
+  available in **either** mode.
+
+```ddd
+// QUERY-TIME, keyed (was view's full form, now parameterized) — always-current.
+projection OrdersInRegion(region: string) keyed by orderId {
+  orderId: Order id;  lineCount: int;  customerName: string
+  from Order where this.region == region
+  sort [placedAt desc]
+  bind orderId = id, lineCount = lines.count, customerName = customerId.name  // follow = join
+}
+
+// FOLDED, keyed (today's projection) — materialized, event-driven.
+projection OrderBook keyed by order {
+  order: Order id;  status: OrderStatus
+  on(e: OrderPlaced) { order := e.order; status := Placed }
+}
+
+// SINGLETON (no `keyed by`) — one row. Query-time aggregates; folded accumulates.
+projection SalesDashboard { openOrders: int; revenue: Money
+  from Order where status == Confirmed
+  bind openOrders = count, revenue = sum(total) }              // whole-table aggregation
+projection RevenueTotals { total: Money; orders: int
+  on(e: OrderPlaced) { total += e.amount; orders += 1 } }       // global accumulator
+
+// HYBRID (rev. 10's payoff — "folded projection with a query inside"): materialized
+// base ENRICHED by a read-time join. `on(e)` sets stored columns; `bind` derives read-time.
+projection OrderCard keyed by order {
+  order: Order id;  status: OrderStatus;  customerName: string
+  on(e: OrderPlaced) { order := e.order; status := Placed }     // PUSH: stored
+  bind customerName = order.customerId.name                      // PULL: joined at read
+}
+```
+
+**Why generalise (owner steer) rather than two disjoint arms.** The clause set
+composes: `on(e)` sets stored columns, `bind` derives read-time columns
+(joins/computes), `keyed by` names the collection key or its absence makes a
+singleton. This unlocks the **fold + read-time-join hybrid** that neither `view`
+(query-only) nor today's `projection` (fold-only) could express — a real,
+common read model (materialize the cheap authoritative fields, join reference
+data at read). The reviewer costed the *disjoint-template* version; this is more
+expressive and widens the validation surface, so the discipline below is
+load-bearing.
+
+**Discipline that keeps it one coherent construct (not a nullable bag):**
+
+- **Lowering normalises to a validated shape**, deriving `materialized` and
+  `singleton` from clause presence — emitters read a disciplined IR, never a
+  half-nullable optional-bag (the reviewer's inv-4/type-safety caution).
+- **Singleton disambiguation:** no `keyed by` ⇒ singleton, and the validator
+  **requires its binds to be whole-table aggregations** (`sum`/`count`/…) — so
+  "no key" can't silently mean "a keyless list"; a keyed projection's binds must
+  be per-row. Aggregation operators already ship (`lower-expr.ts:2097`); the new
+  part is whole-table (keyless) aggregation.
+- **Exotic combos are deferred behind gates, not left undefined:**
+  - `from` **and** `on(e)` together (query source *and* folds — a
+    seed-then-update pattern) → `loom.projection-query-and-fold-unsupported`.
+  - keyed **and** aggregating binds (group-by — one row per group) →
+    `loom.projection-groupby-unsupported`. Singleton (whole-table) is the clean
+    v1 case.
+- **The `loom.view-source-eventsourced-refold` lint becomes an
+  *intra-`projection`* nudge:** a query-time projection over an ES source
+  refolds per request → add `on(e)` folds (make it materialized).
 - **Exposure** unifies under the projection read surface (the `/views`
-  namespace folds into it); the folded flavor keeps its by-key route.
+  namespace folds into it); keyed projections keep a by-key route.
+
+**v1 ships:** query-time (keyed/singleton), folded (keyed/singleton), and the
+folded+follow hybrid. The `from`+`on` and group-by combos are reserved.
 
 **The two `view` capabilities are preserved by the move:**
 
@@ -713,11 +733,17 @@ No flag day; each slice independent:
    (aggregate / criterion / retrieval → paged `queryHandler` + `response`
    + `route`), joining the `scaffoldApi` family. This is the ergonomic
    default; ship it before deprecating the legacy derivation.
-5. **`projection` query-time flavor** — add the `from … where … bind …`
-   body to `projection` (beside the folded `keyed by … on`), with the
-   relocated `X id` follow / batch-load (`collectIdFollows`, `auxiliaries`)
-   moved from the view lowerer. This is the target `view`'s full form folds
-   into; ship it before the view deprecation.
+5. **Generalise the `projection` body to optional clauses** — add
+   `from … where`, `sort`, `bind`, and `(params)` to the projection grammar
+   beside the existing `keyed by … on`, with lowering **deriving** materialized
+   (any `on`) / singleton (no `keyed by`) and **normalising to a validated IR**
+   (a discriminated shape, not a nullable bag). Relocate the `X id` follow /
+   batch-load (`collectIdFollows`, `auxiliaries`) from the view lowerer. Gate
+   the deferred combos (`loom.projection-query-and-fold-unsupported`,
+   `-groupby-unsupported`). Add the `print-structural.ts` arms for the new body
+   (printer-completeness). This is where `view`'s full form + the hybrid land;
+   ship before the view deprecation. Sequence after the read-rewire PRs
+   (#1909–#1912) merge so the response emission reads the settled contract factory.
 6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
 7. **`view` retirement (last, largest)** — `loom.view-deprecated` warning +
@@ -759,26 +785,21 @@ list `find` and a `view` warn, and a read can no longer `save`.
    paged-list read is the common case and deserves the short name — but
    confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
    a node kind). Cosmetic; either works.
-1a. **Two `projection` bodies under one keyword — coherent?** rev. 6
-   resolves the naming knot (the survivor *is* a `projection`), but at the
-   cost of `projection` carrying two quite different bodies (`from … where …
-   bind …` query-time vs `keyed by … on(e)` folded) and two emitters
-   (repository-query-at-read vs table+fold-at-write). The claim is they are
-   one construct — a *derived, non-authoritative read model* — differing
-   only in population strategy (the read-side twin of aggregate
-   `state`-vs-`eventLog`). **This is the main thing to pressure-test.** If
-   the two bodies feel like two constructs sharing a name, the fallback is a
-   distinct keyword for the query-time flavor (`readModel` / `select`); the
-   folded `projection` is untouched either way.
-1b. **Singleton: inferred or explicit?** A query-time projection collapses
-   to a singleton when its binds *aggregate* (`sum`/`count`) rather than
-   project per-row. Infer singleton-ness from the binds, or require an
-   explicit `singleton` marker so "why is my projection one row" is never a
-   surprise? Lean: explicit `singleton` (or the absence of a per-row key
-   field) — inference from "do any binds aggregate" is subtle. Folded
-   singleton is unambiguous (no `keyed by`). Also open: does a keyed
-   query-time projection with aggregating binds mean **group-by** (one row
-   per key), the richer follow-on feature?
+1a. **~~Two `projection` bodies — coherent?~~ RESOLVED (rev. 10):
+   generalise to optional clauses.** Not two disjoint bodies but one clause
+   set (`keyed by?` / `from…where?` / `on(e)?` / `bind?`) with mode derived
+   from clause presence (owner steer). The reviewer's coherence caution is
+   answered by *lowering to a validated/normalised IR* (a discriminated shape,
+   not a nullable bag) + deferring the exotic combos behind gates. The residual
+   pressure-test: does the fold+follow hybrid emit cleanly on all 5 backends
+   (it's a materialized read + a batched read-time join — both already exist
+   separately; the hybrid composes them).
+1b. **~~Singleton: inferred or explicit?~~ RESOLVED (rev. 10): the *absence
+   of `keyed by`*.** No `singleton` keyword and no inference-from-binds. A
+   keyless projection is a singleton, and the validator **requires its binds to
+   be whole-table aggregations** (so "no key" can't silently mean "keyless
+   list"). Group-by (keyed + aggregating → one row per group) stays **deferred**
+   behind `loom.projection-groupby-unsupported`.
 2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
    *setting* purely positional (recommended — matches the `reading` tier,
    no new syntax), or should a marker make the capability visible at the
