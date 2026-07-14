@@ -50,8 +50,10 @@ describe.each([
       ([p]) => /routes\/.*orders.*\+page\.svelte$/.test(p) || /\/orders\/\+page\.svelte$/.test(p),
     )?.[1];
     expect(listPage, "orders list +page.svelte").toBeDefined();
-    // The each must iterate a narrowed array, not `T[] | undefined`.
-    expect(listPage).toMatch(/\{#each \([\w.]+\.data \?\? \[\]\) as /);
+    // The each must iterate a narrowed array, not `T[] | undefined`.  Since
+    // M-T1.1 the scaffold list wraps the rows in `sortRows(...)`, but the
+    // `(… ?? [])` guard still surrounds it and the bare `.data as` never appears.
+    expect(listPage).toMatch(/\{#each \(.*\?\? \[\]\) as /);
     expect(listPage).not.toMatch(/\{#each [\w.]+\.data as /);
   });
 });

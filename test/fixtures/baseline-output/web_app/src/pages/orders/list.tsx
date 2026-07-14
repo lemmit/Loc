@@ -8,6 +8,8 @@ import { useAllOrders, useByCustomerOrder } from "../../api/order";
 export default function OrderList() {
   const navigate = useNavigate();
   const [byCustomerCustomerId, setByCustomerCustomerId] = useState<string>("");
+  const [sortKey, setSortKey] = useState<string>("");
+  const [sortDir, setSortDir] = useState<string>("");
   const orderByCustomer = useByCustomerOrder({ customerId: byCustomerCustomerId });
   const orderAll = useAllOrders();
   return (
@@ -42,14 +44,14 @@ export default function OrderList() {
               <Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>ID</Table.Th>
-                    <Table.Th>Customer Id</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Placed At</Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>ID{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "customerId") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("customerId"); setSortDir("asc"); } }}>Customer Id{sortKey === "customerId" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "status") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("status"); setSortDir("asc"); } }}>Status{sortKey === "status" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "placedAt") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("placedAt"); setSortDir("asc"); } }}>Placed At{sortKey === "placedAt" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  { orderByCustomer.data.map((row) => (
+                  { [...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; }).map((row) => (
                     <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                       <Table.Td><RouterLink to={`/orders/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                       <Table.Td><Text>{row.customerId}</Text></Table.Td>
@@ -80,14 +82,14 @@ export default function OrderList() {
               <Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>ID</Table.Th>
-                    <Table.Th>Customer Id</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Placed At</Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>ID{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "customerId") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("customerId"); setSortDir("asc"); } }}>Customer Id{sortKey === "customerId" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "status") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("status"); setSortDir("asc"); } }}>Status{sortKey === "status" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
+                    <Table.Th><span style={{ cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "placedAt") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("placedAt"); setSortDir("asc"); } }}>Placed At{sortKey === "placedAt" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</span></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  { orderAll.data.map((row) => (
+                  { [...(orderAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; }).map((row) => (
                     <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                       <Table.Td><RouterLink to={`/orders/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                       <Table.Td><Text>{row.customerId}</Text></Table.Td>
