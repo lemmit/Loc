@@ -75,8 +75,9 @@ describe("scaffold body-builders — AST → printable source", () => {
       'Column("Reference", o => Text(o.reference), sortable: true, field: "reference")',
     );
     expect(src).toContain('Column("Status", o => Text(o.status), sortable: true, field: "status")');
+    // Sort refs + the 1-based `pageNum` page window (M-T1.1), then the style props.
     expect(src).toContain(
-      "rows: rows, sortKey: sortKey, sortDir: sortDir, striped: true, highlight: true, sticky: true",
+      "rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 10, striped: true, highlight: true, sticky: true",
     );
     // per-row testid accessor (anchors e2e row selectors)
     expect(src).toContain('rowTestid: r => "orders-row-" + r.id');
