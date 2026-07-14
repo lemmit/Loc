@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 import { allAggregates } from "../../../src/ir/types/loom-ir.js";
 import {
   buildWireSpec,
@@ -137,7 +138,7 @@ describe("wire-spec — primitive mappings", () => {
     `);
     const inv = allAggregates(loom).find((a) => a.name === "Invoice");
     expect(inv).toBeDefined();
-    const subtotal = inv!.wireShape!.find((f) => f.name === "subtotal");
+    const subtotal = wireFieldsFor(inv!).find((f) => f.name === "subtotal");
     expect(subtotal).toBeDefined();
     expect(subtotal!.type).toEqual({ kind: "primitive", name: "money" });
   });
@@ -152,7 +153,7 @@ describe("wire-spec — primitive mappings", () => {
       }
     `);
     const note = allAggregates(loom).find((a) => a.name === "Note")!;
-    const idRow = note.wireShape!.find((f) => f.name === "id")!;
+    const idRow = wireFieldsFor(note).find((f) => f.name === "id")!;
     expect(jsonPropertyForType(idRow.type)).toEqual({ type: "string", format: "uuid" });
   });
 });

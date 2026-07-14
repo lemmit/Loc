@@ -1,7 +1,11 @@
-import { emitsRestCreate, forApiRead } from "../../../ir/enrich/wire-projection.js";
+import {
+  emitsRestCreate,
+  forApiRead,
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+} from "../../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
-  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnumIR,
   RepositoryIR,
@@ -208,11 +212,11 @@ export function buildJavaOpenApiContract(
       //   - op / workflow request (<Op><Agg>Request, <Wf>Request): params that
       //     are neither optional-typed nor a bare body-bool (→ default false);
       //   - create response (Create<Agg>Response): just `{ id }`.
-      const apiRead = forApiRead(agg.wireShape ?? []);
+      const apiRead = forApiRead(wireFieldsForAggregate(agg));
       for (const w of apiRead) noteEnumRefs(w.type, w.name);
       setRequired(`${agg.name}Response`, requiredWireFields(apiRead));
       for (const part of agg.parts) {
-        const partRead = forApiRead(part.wireShape ?? []);
+        const partRead = forApiRead(wireFieldsForPart(part));
         for (const w of partRead) noteEnumRefs(w.type, w.name);
         setRequired(`${part.name}Response`, requiredWireFields(partRead));
       }

@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 // Tenancy IR lowering — slice 1a.1 of multi-tenancy Phase 1a
 // (docs/old/plans/multi-tenancy-implementation.md).  `tenancy by user.<claim>
 // of <Registry>` lowers to `SystemIR.tenancy: TenancyIR`; the
@@ -64,7 +65,7 @@ describe("tenantOwned — wire / migration sanity", () => {
     const ir = await buildLoomModel(TENANCY_SOURCE);
     const module = ir.systems[0]!.subdomains[0]!;
     const invoice = module.contexts[0]!.aggregates.find((a) => a.name === "Invoice")!;
-    expect(invoice.wireShape.map((f) => f.name)).toContain("tenantId");
+    expect(wireFieldsFor(invoice).map((f) => f.name)).toContain("tenantId");
     // Capability fields flow into migrations automatically (phase ⑨):
     const invoices = schemaFromModule(module).tables.find((t) => t.name === "invoices")!;
     expect(invoices.columns.map((c) => c.name)).toContain("tenant_id");

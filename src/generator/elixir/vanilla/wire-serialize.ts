@@ -28,6 +28,11 @@
 // the aggregate has ref-collection fields).
 // ---------------------------------------------------------------------------
 
+import {
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+  wireFieldsForValueObject,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -168,10 +173,10 @@ export function renderWireSerialize(
 ): WireSerializeResult {
   const headVar = opts.headVar ?? "record";
   const idExpr = opts.idExpr ?? "record.id";
-  const wireShape = (agg as EnrichedAggregateIR).wireShape ?? [];
-  const parts = new Map<string, WireField[]>(agg.parts.map((p) => [p.name, p.wireShape ?? []]));
+  const wireShape = wireFieldsForAggregate(agg);
+  const parts = new Map<string, WireField[]>(agg.parts.map((p) => [p.name, wireFieldsForPart(p)]));
   const vos = new Map<string, WireField[]>(
-    ctx.valueObjects.map((v) => [v.name, v.wireShape ?? []]),
+    ctx.valueObjects.map((v) => [v.name, wireFieldsForValueObject(v)]),
   );
 
   // Derived wire fields are COMPUTED (not stored columns) — every other backend

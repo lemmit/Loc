@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Typed capabilities — Phase 2 (expander splice + equivalence).
 //
 // A `capability { fields + filter + stamp }` applied via `with` produces
@@ -68,7 +69,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     expect(JSON.stringify(stripOrigin(a.contextFilters))).toEqual(
       JSON.stringify(stripOrigin(b.contextFilters)),
     );
-    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(a).map((f) => f.name)).toEqual(wireFieldsFor(b).map((f) => f.name));
   });
 
   it("a fields + stamp capability via `with` == hand-written", async () => {
@@ -99,7 +100,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     expect(JSON.stringify(stripOrigin(a.contextStamps))).toEqual(
       JSON.stringify(stripOrigin(b.contextStamps)),
     );
-    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(a).map((f) => f.name)).toEqual(wireFieldsFor(b).map((f) => f.name));
   });
 
   it("one capability is reused across many aggregates (independent clones)", async () => {
@@ -116,7 +117,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     for (const name of ["Order", "Invoice"]) {
       const agg = findAgg(ir, name);
       expect(agg.contextFilters?.length).toBe(1);
-      expect(agg.wireShape.some((f) => f.name === "isDeleted")).toBe(true);
+      expect(wireFieldsFor(agg).some((f) => f.name === "isDeleted")).toBe(true);
     }
   });
 
@@ -149,7 +150,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     for (const name of ["Order", "Invoice"]) {
       const agg = findAgg(ir, name);
       expect(agg.contextFilters?.length).toBe(1);
-      expect(agg.wireShape.some((f) => f.name === "isDeleted")).toBe(true);
+      expect(wireFieldsFor(agg).some((f) => f.name === "isDeleted")).toBe(true);
     }
   });
 
@@ -179,7 +180,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     const a = findAgg(viaContext, "Order");
     const b = findAgg(viaAggregate, "Order");
     expect(JSON.stringify(a.contextStamps)).toEqual(JSON.stringify(b.contextStamps));
-    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(a).map((f) => f.name)).toEqual(wireFieldsFor(b).map((f) => f.name));
   });
 
   it("an aggregate's own member wins over a context-applied capability member (override-by-name)", async () => {
@@ -197,7 +198,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     const agg = findAgg(ir, "Order");
     // The aggregate's explicit isDeleted suppresses the capability's clone — so
     // exactly one isDeleted field, no duplicate column.
-    expect(agg.wireShape.filter((f) => f.name === "isDeleted").length).toBe(1);
+    expect(wireFieldsFor(agg).filter((f) => f.name === "isDeleted").length).toBe(1);
   });
 
   it("an unknown `with` name that is neither macro nor capability errors", async () => {
@@ -233,7 +234,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     const a = findAgg(viaImplements, "Order");
     const b = findAgg(viaWith, "Order");
     expect(JSON.stringify(a.contextFilters)).toEqual(JSON.stringify(b.contextFilters));
-    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(a).map((f) => f.name)).toEqual(wireFieldsFor(b).map((f) => f.name));
   });
 
   it("typed `implements <Cap>` at context scope applies to every aggregate", async () => {
@@ -253,7 +254,7 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     for (const name of ["Order", "Invoice"]) {
       const agg = findAgg(ir, name);
       expect(agg.contextFilters?.length).toBe(1);
-      expect(agg.wireShape.some((f) => f.name === "isDeleted")).toBe(true);
+      expect(wireFieldsFor(agg).some((f) => f.name === "isDeleted")).toBe(true);
     }
   });
 

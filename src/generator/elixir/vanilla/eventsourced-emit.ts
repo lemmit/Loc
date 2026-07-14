@@ -26,6 +26,7 @@
 // `context-emit.ts` / `api-emit.ts`).
 // ---------------------------------------------------------------------------
 
+import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -125,7 +126,7 @@ function toAppSnake(appModule: string): string {
 /** Field names carried on the in-memory aggregate struct — the canonical
  *  wire shape (id, then declared properties / containments / derived). */
 function structFields(agg: AggregateIR): string[] {
-  return (agg.wireShape ?? []).map((f) => snake(f.name));
+  return wireFieldsForAggregate(agg).map((f) => snake(f.name));
 }
 
 // --- `<Agg>` plain struct ---------------------------------------------------

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 import type { EntityPartIR, LoomModel, ValueObjectIR } from "../../src/ir/types/loom-ir.js";
 import { allAggregates, allContexts } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
@@ -46,24 +47,24 @@ describe("IR invariants — every example", () => {
       it("every aggregate has wireShape with `id` first", async () => {
         const loom = await buildEnriched(example);
         for (const a of allAggregates(loom)) {
-          expect(a.wireShape, `${a.name}.wireShape`).toBeDefined();
-          expect(a.wireShape![0]!.name, `${a.name} first field name`).toBe("id");
-          expect(a.wireShape![0]!.source, `${a.name} first field source`).toBe("id");
+          expect(wireFieldsFor(a), `${a.name}.wireShape`).toBeDefined();
+          expect(wireFieldsFor(a)[0]!.name, `${a.name} first field name`).toBe("id");
+          expect(wireFieldsFor(a)[0]!.source, `${a.name} first field source`).toBe("id");
         }
       });
 
       it("every part has wireShape with `id` first and a parent reference", async () => {
         const loom = await buildEnriched(example);
         for (const p of allParts(loom)) {
-          expect(p.wireShape, `${p.name}.wireShape`).toBeDefined();
-          expect(p.wireShape![0]!.name).toBe("id");
+          expect(wireFieldsFor(p), `${p.name}.wireShape`).toBeDefined();
+          expect(wireFieldsFor(p)[0]!.name).toBe("id");
         }
       });
 
       it("value objects have no `id` and no `containment` in wire shape", async () => {
         const loom = await buildEnriched(example);
         for (const v of allValueObjects(loom)) {
-          for (const f of v.wireShape ?? []) {
+          for (const f of wireFieldsFor(v)) {
             expect(f.source, `${v.name}.${f.name}`).not.toBe("id");
             expect(f.source).not.toBe("containment");
           }

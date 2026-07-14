@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 // Built-in capability prelude (typed-capabilities.md, Phase 3).
 //
 // The `auditable` capability ships with the toolchain (src/macros/prelude.ts) —
@@ -32,7 +33,7 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
       }
     `);
     const agg = findAgg(ir, "Order");
-    expect(agg.wireShape.map((f) => f.name)).toEqual(
+    expect(wireFieldsFor(agg).map((f) => f.name)).toEqual(
       expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
     );
     expect(agg.contextStamps?.length).toBe(2);
@@ -54,7 +55,7 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
       }}}
     `);
     const agg = findAgg(ir, "Order");
-    expect(agg.wireShape.map((f) => f.name)).toEqual(
+    expect(wireFieldsFor(agg).map((f) => f.name)).toEqual(
       expect.arrayContaining(["isDeleted", "deletedAt"]),
     );
     expect(agg.contextFilters?.length).toBe(1);
@@ -76,14 +77,14 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     const tenantId = agg.fields.find((f) => f.name === "tenantId")!;
     expect(tenantId).toBeDefined();
     expect(tenantId.access).toBe("internal");
-    expect(agg.wireShape.map((f) => f.name)).toContain("tenantId");
+    expect(wireFieldsFor(agg).map((f) => f.name)).toContain("tenantId");
     const dataKey = agg.fields.find((f) => f.name === "dataKey")!;
     expect(dataKey).toBeDefined();
     expect(dataKey.access).toBe("internal");
     expect(dataKey.optional).toBe(true);
     // `dataKey` (P2.3) is kept OUT of wireShape entirely — never serialized,
     // unlike `tenantId` which stays present (internal, API-read-excluded).
-    expect(agg.wireShape.map((f) => f.name)).not.toContain("dataKey");
+    expect(wireFieldsFor(agg).map((f) => f.name)).not.toContain("dataKey");
     // Stamp: onCreate { tenantId := currentUser.tenantId  dataKey := currentUser.orgPath }:
     expect(agg.contextStamps?.length).toBe(1);
     const stamp = agg.contextStamps![0]!;
@@ -104,7 +105,7 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     `);
     const agg = findAgg(ir, "Order");
     // The user's definition wins: `archived`, not the built-in audit fields.
-    expect(agg.wireShape.some((f) => f.name === "archived")).toBe(true);
-    expect(agg.wireShape.some((f) => f.name === "createdAt")).toBe(false);
+    expect(wireFieldsFor(agg).some((f) => f.name === "archived")).toBe(true);
+    expect(wireFieldsFor(agg).some((f) => f.name === "createdAt")).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
 import {
   discriminatorValue,
@@ -93,7 +94,7 @@ describe("inheritance predicates — multi-level TPH chain (B11)", () => {
     // Full transitive field merge: grandbase → base → own, in that order.
     expect(dog.fields.map((f) => f.name)).toEqual(["name", "owner", "breed"]);
     // wireShape carries id + every inherited + own field.
-    const wire = (dog as { wireShape: { name: string }[] }).wireShape;
+    const wire = wireFieldsFor(dog);
     expect(wire.map((w) => w.name)).toEqual(["id", "name", "owner", "breed"]);
 
     // The whole hierarchy lives in ONE table at the ROOT — the intermediate

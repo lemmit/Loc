@@ -64,12 +64,7 @@ import {
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
 import { walkStmtExprsDeep } from "../util/walk.js";
-import {
-  buildCreateInput,
-  wireFieldsForAggregate,
-  wireFieldsForPart,
-  wireFieldsForValueObject,
-} from "./wire-projection.js";
+import { buildCreateInput, wireFieldsForAggregate } from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR
@@ -128,34 +123,6 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
     tableRenameIntents: loom.tableRenameIntents,
     traceability: computeTraceability(loom),
   } as EnrichedLoomModel;
-}
-
-/** Read the populated wire shape for an aggregate / part / value-object.
- *
- * Every backend's response-DTO emitter walks this list to stay in
- * sync with peers — `wireShape` is populated by `enrichLoomModel`
- * during the enrichment pass.  Callers used to write
- * `entity.wireShape!` with a non-null assertion at the consumer
- * site, scattering the same precondition across four files.  This
- * helper centralises the assumption.
- *
- * Enriched-only by signature: `EnrichedAggregateIR` /
- * `EnrichedEntityPartIR` / `EnrichedValueObjectIR` make `wireShape`
- * non-optional at the type level, so passing a raw entity is a
- * compile error.  The earlier raw-union overload + `!` non-null
- * cast is gone — every production caller flows enriched IR through.
- *
- * Brand cascade: `PlatformSurface.emitProject` now takes
- * `EnrichedBoundedContextIR[]`, and the per-platform entry points
- * (`generate<Plat>ForContexts`) + per-aggregate helpers
- * (`buildApiModule`, `renderPartResponseSchema`, etc.) thread the
- * enriched brand inward, so every caller of `wireShapeFor` is
- * type-checked at the call site — no `as Enriched...` local casts
- * remain. */
-export function wireShapeFor(
-  entity: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
-): WireField[] {
-  return entity.wireShape;
 }
 
 function enrichSystem(
@@ -1233,7 +1200,7 @@ function monomorphizeGenericInstances(
  *  `WireField` maps to a `FieldIR` one-to-one on `{name, type, optional,
  *  access}` — `source` is wire-shape bookkeeping the payload doesn't need. */
 function synthesizeWirePayload(agg: EnrichedAggregateIR): PayloadIR {
-  const fields: FieldIR[] = agg.wireShape.map((w) => ({
+  const fields: FieldIR[] = wireFieldsForAggregate(agg).map((w) => ({
     name: w.name,
     type: w.type,
     optional: w.optional,
@@ -1270,10 +1237,12 @@ function enrichAggregate(
   const userInspect = agg.derived.find((d) => d.name === "inspect");
   const inspectDerived = userInspect ?? synthesizeInspect(agg, voLookup);
   const derived = userInspect ? agg.derived : [...agg.derived, inspectDerived];
-  // Compute wireShape on the post-synthesis, post-access-resolution
-  // agg so the wire spec is idempotent (second enrichment finds the
-  // synthesized inspect already in `derived` and doesn't double-add,
-  // and `resolveFieldAccess` skips fields that already carry access).
+  // Resolve `derived`/`fields` on the post-synthesis, post-access-resolution
+  // agg so enrichment is idempotent (second enrichment finds the synthesized
+  // inspect already in `derived` and doesn't double-add, and
+  // `resolveFieldAccess` skips fields that already carry access).  The canonical
+  // wire shape is no longer stamped — every consumer recomputes it on demand via
+  // `wireFieldsForAggregate` (see CLAUDE.md "Derive, don't stamp").
   // Stamp routeSlug on every lifecycle action.  New objects (don't
   // mutate shared refs); canonicalCreate/Destroy are re-pointed at the
   // freshly-stamped array entries.
@@ -1290,7 +1259,6 @@ function enrichAggregate(
     canonicalCreate: creates?.find((c) => c.canonical) ?? null,
     canonicalDestroy: destroys?.find((d) => d.canonical) ?? null,
     parts,
-    wireShape: wireFieldsForAggregate(resolved),
     associations: associationsForAggregate(resolved),
     createInput: buildCreateInput(resolved),
     displayDerived: derived.find((d) => d.name === "display"),
@@ -1521,14 +1489,12 @@ function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
 
 function enrichPart(part: EntityPartIR): EnrichedEntityPartIR {
   const fields = part.fields.map(resolveFieldAccess);
-  const resolved: EntityPartIR = { ...part, fields };
-  return { ...resolved, wireShape: wireFieldsForPart(resolved) };
+  return { ...part, fields };
 }
 
 function enrichValueObject(vo: ValueObjectIR): EnrichedValueObjectIR {
   const fields = vo.fields.map(resolveFieldAccess);
-  const resolved: ValueObjectIR = { ...vo, fields };
-  return { ...resolved, wireShape: wireFieldsForValueObject(resolved) };
+  return { ...vo, fields };
 }
 
 /** Resolve a field's access role.  Precedence:

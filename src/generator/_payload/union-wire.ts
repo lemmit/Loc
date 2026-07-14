@@ -15,7 +15,12 @@
 // stays in each backend (which owns its primitive mapping), so this module
 // only resolves *which* fields each variant contributes.
 
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import {
+  forApiRead,
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+  wireFieldsForValueObject,
+} from "../../ir/enrich/wire-projection.js";
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { BoundedContextIR, TypeIR, WireField } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
@@ -52,10 +57,10 @@ export function unionMembers(variants: TypeIR[], ctx: BoundedContextIR): UnionMe
 function recordFields(v: TypeIR, ctx: BoundedContextIR): UnionMemberField[] | null {
   if (v.kind === "entity") {
     const agg = ctx.aggregates.find((a) => a.name === v.name);
-    if (agg) return wireToMembers(agg.wireShape);
+    if (agg) return wireToMembers(wireFieldsForAggregate(agg));
     for (const a of ctx.aggregates) {
       const part = a.parts.find((p) => p.name === v.name);
-      if (part) return wireToMembers(part.wireShape);
+      if (part) return wireToMembers(wireFieldsForPart(part));
     }
     // A payload / event variant (`payload Foo = OrderPlaced | …`).  Named-union
     // variants are not re-expanded here (they reference their own schema in P4+).
@@ -72,7 +77,7 @@ function recordFields(v: TypeIR, ctx: BoundedContextIR): UnionMemberField[] | nu
   }
   if (v.kind === "valueobject") {
     const vo = ctx.valueObjects.find((o) => o.name === v.name);
-    return vo ? wireToMembers(vo.wireShape) : null;
+    return vo ? wireToMembers(wireFieldsForValueObject(vo)) : null;
   }
   return null;
 }

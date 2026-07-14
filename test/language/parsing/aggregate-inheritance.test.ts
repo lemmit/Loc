@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Aggregate-inheritance surface (aggregate-inheritance.md, phase I1).
 // Covers the grammar (`abstract` prefix, `extends <Base>`,
 // `inheritanceUsing(sharedTable | ownTable)` header modifier), the IR
@@ -243,7 +244,7 @@ system Sys {
     const enriched = enrichLoomModel(lowerModel(await parseValid(SRC)));
     const ctx = enriched.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Parties")!;
     const customer = ctx.aggregates.find((a) => a.name === "Customer")!;
-    const names = customer.wireShape!.map((f) => f.name);
+    const names = wireFieldsFor(customer).map((f) => f.name);
     // id first, then inherited base fields, then own.
     expect(names).toEqual(["id", "name", "email", "creditLimit"]);
   });
@@ -262,7 +263,7 @@ system Sys {
     const enriched = enrichLoomModel(lowerModel(await parseValid(SRC2)));
     const ctx = enriched.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Parties")!;
     const customer = ctx.aggregates.find((a) => a.name === "Customer")!;
-    const names = customer.wireShape!.map((f) => f.name);
+    const names = wireFieldsFor(customer).map((f) => f.name);
     expect(names.filter((n) => n === "name")).toHaveLength(1);
     expect(names).toEqual(["id", "name", "tier"]);
   });

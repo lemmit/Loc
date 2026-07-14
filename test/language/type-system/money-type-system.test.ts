@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // `money` primitive — closed arithmetic semantics and
 // (non-)assignability with the existing numeric primitives.
 //
@@ -372,7 +373,7 @@ describe("money — array.sum is money-aware", () => {
     const _total = inv.derived.find((d) => d.name === "total")!;
     // The IR-side wireShape for the derived 'total' field carries the
     // computed type — money preserved through the collection-op.
-    const totalField = inv.wireShape!.find((f) => f.name === "total");
+    const totalField = wireFieldsFor(inv).find((f) => f.name === "total");
     expect(totalField).toBeDefined();
     expect(totalField!.type).toEqual({ kind: "primitive", name: "money" });
   });

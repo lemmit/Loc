@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Hand-written capability declarations produce identical IR to
 // macro-emitted ones.  This is the "macros are sugar" proof: every
 // macro contribution can be replaced by direct source.  If this
@@ -116,7 +117,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     expect(JSON.stringify(stripOrigin(hand.contextFilters))).toEqual(
       JSON.stringify(stripOrigin(cap.contextFilters)),
     );
-    expect(hand.wireShape.map((f) => f.name)).toEqual(cap.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(hand).map((f) => f.name)).toEqual(wireFieldsFor(cap).map((f) => f.name));
   });
 });
 
@@ -204,7 +205,7 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     for (const name of ["Order", "Customer"]) {
       const agg = findAgg(ir, name);
       expect(agg.contextFilters?.length).toBe(1);
-      expect(agg.wireShape.map((f) => f.name)).toEqual(
+      expect(wireFieldsFor(agg).map((f) => f.name)).toEqual(
         expect.arrayContaining(["isDeleted", "deletedAt"]),
       );
       expect((agg.operations ?? []).map((o) => o.name)).toEqual(
@@ -231,7 +232,9 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     const orderD = findAgg(byDefault, "Order");
     const orderE = findAgg(explicit, "Order");
     expect(JSON.stringify(orderD.contextFilters)).toEqual(JSON.stringify(orderE.contextFilters));
-    expect(orderD.wireShape.map((f) => f.name)).toEqual(orderE.wireShape.map((f) => f.name));
+    expect(wireFieldsFor(orderD).map((f) => f.name)).toEqual(
+      wireFieldsFor(orderE).map((f) => f.name),
+    );
     expect((orderD.operations ?? []).map((o) => o.name)).toEqual(
       (orderE.operations ?? []).map((o) => o.name),
     );
@@ -252,7 +255,7 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     for (const name of ["Order", "Customer"]) {
       const agg = findAgg(ir, name);
       expect(agg.contextStamps?.length).toBe(2);
-      expect(agg.wireShape.map((f) => f.name)).toEqual(
+      expect(wireFieldsFor(agg).map((f) => f.name)).toEqual(
         expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
       );
     }

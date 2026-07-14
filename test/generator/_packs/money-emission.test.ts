@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Phase 5 — per-backend money emission verification.  Uses the
 // alignment fixture `examples/money-primitive.ddd` and asserts that
 // each of the four backends emits the documented per-platform shape
@@ -195,7 +196,7 @@ describe("money emission — wire-spec doc", () => {
   it("Invoice's subtotal field is {type: string, format: decimal}", async () => {
     const { jsonPropertyForType } = await import("../../../src/system/wire-spec.js");
     const { inv } = await billingFixture();
-    const subtotal = inv.wireShape!.find((f) => f.name === "subtotal");
+    const subtotal = wireFieldsFor(inv).find((f) => f.name === "subtotal");
     expect(subtotal).toBeDefined();
     expect(jsonPropertyForType(subtotal!.type)).toEqual({
       type: "string",

@@ -16,7 +16,13 @@
 // lands on the record field with no casing seam, and Thoth's `Decode.field
 // "name"` maps the JSON key straight onto it.
 
-import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  forApiRead,
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+  wireFieldsForValueObject,
+} from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -1188,7 +1194,7 @@ function collectRecords(
     for (const vo of c.valueObjects) {
       voWireByName.set(vo.name, {
         name: { kind: "valueobject", name: vo.name },
-        fields: (vo.wireShape ?? []).map((w) => ({
+        fields: wireFieldsForValueObject(vo).map((w) => ({
           name: w.name,
           type: w.type,
           optional: w.optional,
@@ -1208,7 +1214,7 @@ function collectRecords(
       if (part) {
         emit(
           n,
-          forApiRead(part.wireShape ?? []).map((w) => ({
+          forApiRead(wireFieldsForPart(part)).map((w) => ({
             name: w.name,
             type: w.type,
             optional: w.optional,
@@ -1224,7 +1230,11 @@ function collectRecords(
   for (const agg of aggregates) {
     emit(
       agg.name,
-      forApiRead(agg.wireShape).map((w) => ({ name: w.name, type: w.type, optional: w.optional })),
+      forApiRead(wireFieldsForAggregate(agg)).map((w) => ({
+        name: w.name,
+        type: w.type,
+        optional: w.optional,
+      })),
     );
   }
   return out;
