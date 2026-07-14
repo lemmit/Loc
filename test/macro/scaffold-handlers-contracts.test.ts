@@ -1,17 +1,17 @@
-// `scaffoldHandlers` contract layer (M-T5.10, PR1).  Alongside the
-// commandHandler/queryHandler members it already emits, `scaffoldHandlers` now
-// splices the literal `response` / `command` / `query` PayloadDecl records that
-// describe the API contract those handlers realise — so the contract is
-// SOURCE-VISIBLE (`unfold` ejects real `.ddd`).
-//
-// PR1 is additive + INERT: no handler references the records yet, so generation
-// is byte-identical with vs without them.  Three things are pinned here:
+// `scaffoldHandlers` contract layer (M-T5.10).  Alongside the
+// commandHandler/queryHandler members it emits, `scaffoldHandlers` splices the
+// literal `response` / `command` / `query` PayloadDecl records that describe the
+// API contract those handlers realise — so the contract is SOURCE-VISIBLE
+// (`unfold` ejects real `.ddd`) — and the handlers now CONSUME them: a handler
+// takes a single `command`/`query` record param (`cmd.<field>`/`query.<field>`)
+// and a read declares a `<Agg>Response` return.  Three things are pinned here:
 //   1. The records are spliced with the right kinds + fields (the apiRead access
 //      matrix; containment → `<Part>Response[]` + a sibling `<Part>Response`).
 //   2. `apiReadFields` is the AST twin of the IR wire-projection
-//      `forApiRead(wireShape)` (the byte-identity anchor for PR2).
-//   3. The records are inert — the scaffolded form's generated .NET output is
-//      byte-identical to the equivalent hand-written handlers WITHOUT records.
+//      `forApiRead(wireShape)`.
+//   3. The handlers consume the records — the scaffolded form's generated .NET
+//      output is byte-identical to the equivalent hand-written record-param
+//      handlers (the macro adds no behaviour the explicit form can't express).
 
 import { AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
@@ -192,10 +192,11 @@ describe("apiReadFields — AST twin of forApiRead(wireShape) (PR2 byte-identity
   });
 });
 
-describe("scaffoldHandlers contract records are INERT (byte-identical generation)", () => {
-  // The scaffolded form (records + auto-derived handlers) and the equivalent
-  // hand-written explicit handlers (NO records) generate byte-identical .NET —
-  // proving the records the macro adds change no emitted bytes.
+describe("scaffoldHandlers handlers CONSUME the contract records (byte-identical generation)", () => {
+  // The scaffolded form (auto-spliced records + record-param handlers) and the
+  // equivalent HAND-WRITTEN record-param handlers (same records, written out)
+  // generate byte-identical .NET — proving the macro adds no behaviour the
+  // explicit record-param form can't express (the new byte-identity anchor).
   const MACRO = `
     system Shop {
       subdomain Sales {
@@ -222,8 +223,11 @@ describe("scaffoldHandlers contract records are INERT (byte-identical generation
             operation cancel() { status := "cancelled" }
           }
           repository Orders for Order { }
-          queryHandler GetOrder(orderId: Order id): Order {
-            let o = Orders.getById(orderId)
+          response OrderResponse { status: string }
+          query GetOrderQuery { orderId: Order id }
+          command CancelOrderCommand { }
+          queryHandler GetOrder(query: GetOrderQuery): OrderResponse {
+            let o = Orders.getById(query.orderId)
             return o
           }
           commandHandler CancelOrder(orderId: Order id) {
@@ -242,7 +246,7 @@ describe("scaffoldHandlers contract records are INERT (byte-identical generation
     }
   `;
 
-  it("emits byte-identical .NET for the scaffolded vs record-free explicit form", async () => {
+  it("emits byte-identical .NET for the scaffolded vs hand-written record-param form", async () => {
     const macro = await generateSystemFiles(MACRO);
     const explicit = await generateSystemFiles(EXPLICIT);
     const macroKeys = [...macro.keys()].sort();

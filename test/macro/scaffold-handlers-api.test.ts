@@ -65,8 +65,10 @@ const EXPLICIT = `
           operation cancel() { status := "cancelled" }
         }
         repository Orders for Order { }
-        queryHandler GetOrder(orderId: Order id): Order {
-          let o = Orders.getById(orderId)
+        query GetOrderQuery { orderId: Order id }
+        response OrderResponse { status: string }
+        queryHandler GetOrder(query: GetOrderQuery): OrderResponse {
+          let o = Orders.getById(query.orderId)
           return o
         }
         commandHandler CancelOrder(orderId: Order id) {
@@ -110,10 +112,15 @@ describe("scaffoldHandlers + scaffoldApi — expansion (operation + get-by-id)",
       .filter(isQueryHandler)
       .find((h) => h.name === "GetOrder") as QueryHandler;
     expect(q).toBeDefined();
-    expect(q.params.map((p) => p.name)).toEqual(["orderId"]);
+    // A single `query: GetOrderQuery` record param (the id rides in the record,
+    // bound from the route path).
+    expect(q.params.map((p) => p.name)).toEqual(["query"]);
     expect(q.body.map((s) => s.$type)).toEqual(["LetStmt", "ReturnStmt"]);
-    // Return type is the bare aggregate.
+    // Return type is the `<Agg>Response` record.
     expect(q.returnType.base.$type).toBe("NamedType");
+    expect((q.returnType.base as { target: { $refText: string } }).target.$refText).toBe(
+      "OrderResponse",
+    );
   });
 
   it("scaffoldApi splices the get-by-id + operation routes into the api's routes[]", async () => {
@@ -232,10 +239,13 @@ describe("scaffoldHandlers + scaffoldApi — A3.2 create / find source kinds", (
       .filter(isCommandHandler)
       .find((c) => c.name === "CreateOrder") as CommandHandler;
     expect(cmd).toBeDefined();
-    // Params are the aggregate's create-input fields (not the create action's
-    // declared params) so the factory-let sets every non-null field.
-    expect(cmd.params.map((p) => p.name)).toEqual(["code", "status"]);
-    // Body: `let o = Order.create({ code, status })` then `return o.id`.
+    // A single `cmd: CreateOrderCommand` record param carrying the aggregate's
+    // create-input fields; the factory-let reads them as `cmd.<field>`.
+    expect(cmd.params.map((p) => p.name)).toEqual(["cmd"]);
+    expect((cmd.params[0]!.type.base as { target: { $refText: string } }).target.$refText).toBe(
+      "CreateOrderCommand",
+    );
+    // Body: `let o = Order.create({ code: cmd.code, … })` then `return o.id`.
     expect(cmd.body.map((s) => s.$type)).toEqual(["LetStmt", "ReturnStmt"]);
     // Return type `Order id`.
     expect(cmd.returnType?.base.$type).toBe("IdType");
@@ -247,11 +257,18 @@ describe("scaffoldHandlers + scaffoldApi — A3.2 create / find source kinds", (
       .filter(isQueryHandler)
       .find((h) => h.name === "ByStatus") as QueryHandler;
     expect(q).toBeDefined();
-    expect(q.params.map((p) => p.name)).toEqual(["status"]);
+    // A single `query: ByStatusQuery` record param carrying the find's params.
+    expect(q.params.map((p) => p.name)).toEqual(["query"]);
+    expect((q.params[0]!.type.base as { target: { $refText: string } }).target.$refText).toBe(
+      "ByStatusQuery",
+    );
     expect(q.body.map((s) => s.$type)).toEqual(["LetStmt", "ReturnStmt"]);
-    // Return type is the find's declared `Order[]`.
+    // A find over the aggregate declares `<Agg>Response[]` (the wire is already
+    // that shape via transport projection).
     expect(q.returnType.array).toBe(true);
-    expect(q.returnType.base.$type).toBe("NamedType");
+    expect((q.returnType.base as { target: { $refText: string } }).target.$refText).toBe(
+      "OrderResponse",
+    );
   });
 
   it("emits POST /orders (create) + GET /orders/by_status (find) routes", async () => {
