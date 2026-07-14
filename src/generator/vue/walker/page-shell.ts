@@ -717,6 +717,37 @@ function componentPropTsType(
   }
 }
 
+/** A `slot`-typed param (`head: slot` / `head: slot?`). Vue slots are template
+ *  content (`<slot>`), not props, so these are kept OUT of the props interface
+ *  in both the extern and walked-component paths. */
+function isSlotParam(p: ParamIR): boolean {
+  return p.type.kind === "slot" || (p.type.kind === "optional" && p.type.inner.kind === "slot");
+}
+
+/** The TS prop type for a non-slot component param. An `action(T)` param becomes
+ *  a callback prop (`(arg: TResponse) => void`) — the parent wires the handler —
+ *  mirroring the React/Svelte frontends; everything else defers to
+ *  `componentPropTsType`. */
+function paramPropType(
+  p: ParamIR,
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  dtoImports: Map<string, string>,
+): string {
+  const t = p.type;
+  const action =
+    t.kind === "action"
+      ? t
+      : t.kind === "optional" && t.inner.kind === "action"
+        ? t.inner
+        : undefined;
+  if (action) {
+    return action.arg
+      ? `(arg: ${componentPropTsType(action.arg, aggregatesByName, dtoImports)}) => void`
+      : "() => void";
+  }
+  return componentPropTsType(t, aggregatesByName, dtoImports);
+}
+
 // ---------------------------------------------------------------------------
 // Extern components — the UI escape hatch.  A `component <Name>(...) extern
 // from "<path>"` makes Loom own two files and import the user's `.vue`
@@ -738,23 +769,6 @@ export function renderVueExternComponentProps(
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
 ): string {
   const dtoImports = new Map<string, string>();
-  const isSlotParam = (p: ParamIR): boolean =>
-    p.type.kind === "slot" || (p.type.kind === "optional" && p.type.inner.kind === "slot");
-  const propType = (p: ParamIR): string => {
-    const t = p.type;
-    const action =
-      t.kind === "action"
-        ? t
-        : t.kind === "optional" && t.inner.kind === "action"
-          ? t.inner
-          : undefined;
-    if (action) {
-      return action.arg
-        ? `(arg: ${componentPropTsType(action.arg, aggregatesByName, dtoImports)}) => void`
-        : "() => void";
-    }
-    return componentPropTsType(t, aggregatesByName, dtoImports);
-  };
   // Vue slots are template content (`<slot>`), not props — a `slot`
   // param maps to a typed `<Name>Slots` contract (for the user's
   // `defineSlots`), kept OUT of the props interface.
@@ -762,7 +776,7 @@ export function renderVueExternComponentProps(
   const propParams = params.filter((p) => !isSlotParam(p));
   const propLines = propParams.map((p) => {
     const optional = p.type.kind === "optional" && p.type.inner.kind === "action";
-    return `  ${p.name}${optional ? "?:" : ":"} ${propType(p)};`;
+    return `  ${p.name}${optional ? "?:" : ":"} ${paramPropType(p, aggregatesByName, dtoImports)};`;
   });
   const dtoImportLines = [...dtoImports.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -871,11 +885,17 @@ export function renderVueComponentFile(
   const script: string[] = [];
   const vueImports = new Set<string>();
 
-  // Prop typing.
+  // Prop typing. Slot params are template content (`<slot>`), not props, so
+  // they're excluded here (the body's `Slot { }` renders `<slot>`); `action(T)`
+  // params become callback props — matching the extern-component path and the
+  // React/Svelte frontends.
   const dtoImports = new Map<string, string>();
-  const propFields = params.map(
-    (p) => `${p.name}: ${componentPropTsType(p.type, aggregatesByName, dtoImports)};`,
-  );
+  const propFields = params
+    .filter((p) => !isSlotParam(p))
+    .map((p) => {
+      const optional = p.type.kind === "optional" && p.type.inner.kind === "action";
+      return `${p.name}${optional ? "?:" : ":"} ${paramPropType(p, aggregatesByName, dtoImports)};`;
+    });
 
   // `Action(<inst>.<op>)` mutation hoists — the only api a component
   // body reaches (no apiParams in component scope).  Hoist args (when

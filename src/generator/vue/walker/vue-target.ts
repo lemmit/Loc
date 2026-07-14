@@ -350,6 +350,13 @@ export const vueTarget: WalkerTarget = {
     return `<!-- ${text} -->`;
   },
 
+  /** A component body's `Slot { }` → Vue's default `<slot>` (template content
+   *  the parent passes as children), not the JSX `{children}` idiom. Vue slots
+   *  are not props, so no `children` prop is emitted. */
+  renderChildrenSlot(): string {
+    return "<slot />";
+  },
+
   /** Vue mustache interpolation in text/child position. */
   renderInterpolation(jsExpr: string): string {
     return `{{ ${jsExpr} }}`;

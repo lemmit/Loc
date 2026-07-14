@@ -39,12 +39,9 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  Adding a NEW gap here is a reviewed decision; closing one means deleting the
  *  entry. Keep EMPTY-by-default discipline: an entry is debt, not a resting state. */
 const GAPS: Record<string, string> = {
-  // `Console` declares `component Panel(head: slot, onPick: action(Project))`.
-  // The Vue component-props builder (src/generator/vue/walker/page-shell.ts)
-  // throws on the `slot` (and `action`) prop kinds — user-component slot props
-  // are unimplemented on Vue, though React/Svelte/Angular/Feliz all render them.
-  // Parity follow-up (language-feature-developer); not a Vue-can't-express case.
-  "vue:Console": "unsupported prop type kind 'slot' (user-component slot prop)",
+  // EMPTY — every frontend renders the whole showcase UI surface. (Vue's
+  // user-component slot/action props, once a gap here, now render: the slot is
+  // template `<slot>`, the action a callback prop — page-shell.ts / vue-target.ts.)
 };
 
 const FRONTENDS = ["react", "vue", "svelte", "angular", "feliz"] as const;

@@ -149,4 +149,32 @@ describe("user-defined components — Vue", () => {
     const shim = files.get("src/components/Fancy.ts")!;
     expect(shim).toContain('export type { FancyProps, FancySlots } from "./Fancy.props";');
   });
+
+  it("a walked component with slot + action params renders <slot> and a callback prop", async () => {
+    // A NON-extern component with a `slot` param (`Slot { }` in the body) and an
+    // `action(T)` param. Previously threw `unsupported prop type kind 'slot'`;
+    // now mirrors the React/Svelte frontends: the slot is template content, the
+    // action is a callback prop.
+    const files = await vueFiles(`
+      system S {
+        subdomain M { context C { aggregate Order { id: string } } }
+        ui WebApp {
+          component Panel(head: slot, onPick: action(Order)) {
+            body: Stack { Slot { "head" }, Button { "Pick" } }
+          }
+          page Home { route: "/" body: Heading { "home" } }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
+      }`);
+    const comp = files.get("src/components/Panel.vue")!;
+    expect(comp).toBeDefined();
+    // The slot param renders as Vue's default `<slot>` in the template — NOT a
+    // JSX `{children}` and NOT a prop.
+    expect(comp).toContain("<slot />");
+    expect(comp).not.toMatch(/defineProps<\{[^}]*head/s);
+    // The `action(Order)` param becomes a typed callback prop.
+    expect(comp).toContain("onPick: (arg: OrderResponse) => void;");
+    expect(comp).toContain('import type { OrderResponse } from "../api/order";');
+  });
 });
