@@ -254,6 +254,7 @@ jobs:
                 aggregate Product with crudish {
                   name:  string
                   price: money
+                  operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }
                 workflow restock transactional {

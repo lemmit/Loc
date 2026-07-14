@@ -32,8 +32,19 @@ async function main() {
   await page.goto(`${URL}#/products/new`, { waitUntil: "networkidle" });
   await page.getByPlaceholder("name").waitFor({ timeout: 10000 });
 
+  // Detail page — the per-operation `Modal` renders as a `<details>` disclosure
+  // (the operations area is a sibling of the QueryView, so it renders without a
+  // backend).  Expanding the "Rename" summary reveals the wrapped operation form.
+  await page.goto(`${URL}#/products/smoke-id`, { waitUntil: "networkidle" });
+  const summary = page.getByText("Rename", { exact: true });
+  await summary.waitFor({ timeout: 10000 });
+  await summary.click();
+  await page.getByPlaceholder("newName").waitFor({ timeout: 10000 });
+
   if (errors.length > 0) throw new Error(`page errors:\n${errors.join("\n")}`);
-  console.log("SCAFFOLD SMOKE OK — Home + List (toolbar/table/wire) + New all ran");
+  console.log(
+    "SCAFFOLD SMOKE OK — Home + List (toolbar/table/wire) + New + Detail (modal disclosure) all ran",
+  );
 }
 
 try {

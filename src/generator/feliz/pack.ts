@@ -157,9 +157,10 @@ function primitiveIdLink(c: Ctx): string {
   return `Html.a [ prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
 }
 
-/** Modal(trigger, form) — the scaffold detail's action dialog.  v1 renders the
- *  trigger as a labelled button; the modal-wrapped operation's MVU wiring (open
- *  state + submit) is a follow-up, so the button is present but inert. */
+/** Modal(trigger, form) — SUPERSEDED for Feliz by `felizTarget.renderModal`
+ *  (which forks the whole primitive to a native `<details>` disclosure wrapping
+ *  the operation form).  This pack entry is a fallback the fork bypasses; it
+ *  renders just the labelled trigger. */
 function primitiveModal(c: Ctx): string {
   const label = String(c.label ?? "Action");
   return `Html.button [ prop.className "loom-modal-trigger"; prop.text "${label}" ]`;

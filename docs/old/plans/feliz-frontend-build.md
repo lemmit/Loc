@@ -133,10 +133,10 @@ in hand — not before F# output exists.
   List.map` rows), plus `QueryView` (via `View.remoteList`/`remoteOne`) and the
   forms. A scaffold-generated CRUD app (List/New/Detail/Home) Fable-compiles,
   vite-builds, AND runs (headless-Chromium smoke) — the CI gate now covers both
-  the hand-built showcase AND a scaffold app. **Modal** renders its trigger as a
-  present-but-inert button (the modal-wrapped operation's open-state wiring is a
-  follow-up; the operation FORM itself is still wired via `OperationForm`
-  detection). Offside note: containers keep their structural props
+  the hand-built showcase AND a scaffold app. **Modal** renders as a native
+  `<details>` DISCLOSURE (the `<summary>` is the trigger label; the wrapped
+  operation form is revealed on click) — no MVU open-state needed; see the
+  "Modal disclosure" bullet below. Offside note: containers keep their structural props
   (`className`/`children [`) on the opening line + paren-wrap the whole element,
   else a separate-line `prop.children` aligns with the parent's child column and
   F# parses it as a parent-list element (§29-adjacent; see experience §30).
@@ -286,15 +286,28 @@ in hand — not before F# output exists.
   smoke verified; the showcase grew `tags: string[]?`. **Caveat:** scalar element
   types only; array-of-VO / array-of-entity-part + a proper repeatable-row UI are
   the follow-up.
+- ✅ **Modal disclosure.** The scaffold `Modal` (one per public op, wrapping an
+  `OperationForm`) — previously a dead inert button — renders as a native
+  `<details>`/`<summary>` DISCLOSURE: the summary is the trigger label, and the
+  wrapped operation form (rendered through the SAME `renderOperationForm` seam) is
+  revealed on click. No MVU open-state (the browser owns open/close); the op
+  form's Model/Msg/update/Api wiring is collected independently by `index.ts`.
+  Forked via the `renderModal` WalkerTarget seam (like Angular), bypassing the
+  React-specific `emitModal` path. All Fable + vite + smoke verified — the scaffold
+  smoke navigates to the detail page, expands the disclosure, and asserts the
+  revealed input. **`currentUser.<field>` in a body is a CROSS-frontend gap** (the
+  shared walker emits `undefined` for React too), NOT Feliz-specific — out of
+  scope here.
 - **Wire layer covers the full CRUD write path + workflows + auth, with a
-  complete scalar + value-object + scalar-array form layer.** list + byId reads,
-  create, delete, operation, workflow runs, the auth gate, and typed/validated
-  form inputs across every scalar widget — text / number / checkbox / enum-select
-  / FK-id-select — plus flattened value-object fields and comma-separated scalar
-  arrays, required + optional. Remaining Feliz work is polish: deeper pack
-  coverage, the modal open-state, a dynamic-row / array-of-VO / entity-part sub-form
-  UI, `currentUser.<field>` decode. Enum wire fields decode as their string name
-  (a proper DU decoder is a
+  complete scalar + value-object + scalar-array form layer + the modal
+  disclosure.** list + byId reads, create, delete, operation, workflow runs, the
+  auth gate, typed/validated form inputs across every scalar widget — text /
+  number / checkbox / enum-select / FK-id-select — plus flattened value-object
+  fields, comma-separated scalar arrays, and the `<details>` action modal.
+  Remaining Feliz work is refinement: deeper pack coverage, a dynamic-row /
+  array-of-VO / entity-part sub-form UI, client-side action-button gating (needs a
+  F#-flavoured gate-expr — `gate-expr.ts` is JS-only). Enum wire fields decode as
+  their string name (a proper DU decoder is a
   follow-up); nested containment/VO records + decoders ARE emitted (transitive off
   `wireShape`).
 
