@@ -357,6 +357,39 @@ export function walkBodyToHeex(
     ctx.handlers.push({ name: snake(action.name), paramsPattern: "_params", body: bodyLines });
   }
 
+  // Direct store-action handlers (`onClick: Cart.clear`) — a bare store-action
+  // reference used as a handler has no matching page `action`, so the button's
+  // `phx-click="clear"` would dangle without a clause.  Synthesize the clause
+  // (dispatch the store action over its per-page assign) exactly like a page
+  // action whose body is the single store-action call, so it is byte-identical
+  // to the wrapped `action discard() { Cart.clear() }` idiom.  Deduped by event
+  // name so a store action onClicked twice (or one also called from a page
+  // action) emits one clause.
+  const existingHandlers = new Set(ctx.handlers.map((h) => h.name));
+  for (const { store, action } of collectStoreActionRefs(body)) {
+    const name = snake(action);
+    if (existingHandlers.has(name)) continue;
+    existingHandlers.add(name);
+    ctx.usedStores.add(store);
+    const call: StmtIR = {
+      kind: "call",
+      target: "store-action",
+      name: action,
+      args: [],
+      store,
+    };
+    ctx.handlers.push({
+      name,
+      paramsPattern: "_params",
+      body: [
+        `    socket =`,
+        `      socket`,
+        `      ${renderStmt(call, ctx)}`,
+        `    {:noreply, socket}`,
+      ],
+    });
+  }
+
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
 
   return {
@@ -370,6 +403,33 @@ export function walkBodyToHeex(
     idOptionsBindings: [...ctx.idOptionsBindings],
     usedStores: [...ctx.usedStores],
   };
+}
+
+/** Collect the bare store-action handler references (`action-ref` with a
+ *  `storeName`, e.g. `onClick: Cart.clear`) reachable in a page body, deduped
+ *  by `<store>.<action>`.  Used to synthesize their `handle_event` clauses —
+ *  the parallel HEEx walker's analogue of the JSX shell binding a store-action
+ *  local. */
+function collectStoreActionRefs(root: ExprIR | undefined): { store: string; action: string }[] {
+  const out: { store: string; action: string }[] = [];
+  const seen = new Set<string>();
+  const visit = (e: ExprIR | undefined): void => {
+    if (!e || typeof e !== "object") return;
+    if (e.kind === "action-ref" && e.storeName) {
+      const key = `${e.storeName}.${e.actionName}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ store: e.storeName, action: e.actionName });
+      }
+    }
+    // Recurse structurally — visit every ExprIR-typed child field.
+    for (const v of Object.values(e as Record<string, unknown>)) {
+      if (Array.isArray(v)) for (const el of v) visit(el as ExprIR);
+      else if (v && typeof v === "object" && "kind" in (v as object)) visit(v as ExprIR);
+    }
+  };
+  visit(root);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

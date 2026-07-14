@@ -3,9 +3,9 @@
 // NOT a synthesis: one `Model` field per state cell, one `Msg` case per
 // action, one `update` arm per action body.  No gensym.
 
-import type { ActionIR, StateFieldIR } from "../../ir/types/loom-ir.js";
+import type { ActionIR, StateFieldIR, StoreIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
-import { type FsExprCtx, renderFsExpr } from "./fs-expr.js";
+import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
   FelizForm,
@@ -186,17 +186,25 @@ function dispatchMsg(action: string, args: readonly string[]): string {
  *  / `requires` / `emit` / `return`) have no meaning in a frontend action — the
  *  JSX walker throws on them too — so they stay a fail-fast throw (a defensive
  *  invariant, unreachable on valid `.ddd`). */
+/** The Model field an assign/add/remove target resolves to.  Inside a store
+ *  action body the target is a store field (bound as a `let` local at lowering)
+ *  → its namespaced `<Store><Field>`; a page/component target is `<Field>`. */
+function targetModelField(name: string, ctx: FsExprCtx): string {
+  if (ctx.storeScope?.fields.has(name)) return storeModelField(ctx.storeScope.store, name);
+  return upperFirst(name);
+}
+
 function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): UpdateArmPart {
   switch (stmt.kind) {
     case "assign": {
-      const field = upperFirst(stmt.target.segments[0]!);
+      const field = targetModelField(stmt.target.segments[0]!, ctx);
       return {
         line: `      let model = { model with ${field} = ${renderFsExpr(stmt.value, ctx)} }`,
       };
     }
     case "add":
     case "remove": {
-      const field = upperFirst(stmt.target.segments[0]!);
+      const field = targetModelField(stmt.target.segments[0]!, ctx);
       const v = renderFsExpr(stmt.value, ctx);
       // A collection target appends / removes-by-value on the F# list (`@` cons,
       // `List.filter` drop); a scalar target is an arithmetic compound
@@ -229,12 +237,18 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
         // in-scope F# function.  Discard its result (effect-position call).
         return { line: `      ${stmt.name}(${args.join(", ")}) |> ignore` };
       }
-      // `store-action` / `private-operation`: no meaning in the Feliz MVU arm
-      // yet (a store call needs the store subsystem; a private-operation call is
-      // a backend concept).  Fail fast rather than silently dropping it.
+      if (stmt.target === "store-action" && stmt.store) {
+        // `<Store>.<action>(…)` — the store folds into the single Elmish Model,
+        // so a store action is a Msg case; dispatch it (re-entering the update
+        // loop, which re-renders).  Same shape as a sibling-action call.
+        const head = storeMsgCase(stmt.store, stmt.name);
+        return { cmd: `Cmd.ofMsg (${args.length === 0 ? head : `${head} ${args.join(" ")}`})` };
+      }
+      // `private-operation`: a backend concept with no frontend arm.  Fail fast
+      // rather than silently dropping it.
       throw new Error(
         `feliz: unsupported '${stmt.target}' call '${stmt.name}' in the MVU update arm — ` +
-          `the Feliz frontend dispatches sibling actions and ui functions here. ` +
+          `the Feliz frontend dispatches sibling/store actions and ui functions here. ` +
           `Rework the action, or extend the 'call' arm in update-emit.ts.`,
       );
     }
@@ -272,6 +286,7 @@ export function renderUpdate(
   operationForms: readonly FelizOperationForm[] = [],
   workflowForms: readonly FelizWorkflowForm[] = [],
   authUi = false,
+  stores: readonly StoreIR[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -297,18 +312,14 @@ export function renderUpdate(
         ]
       : ["  | UrlChanged segments -> { model with CurrentPage = parseUrl segments }, Cmd.none"]
     : [];
-  const actionArms = actions.map((a) => {
-    const p = a.params[0];
-    const ctx: FsExprCtx = {
-      stateNames,
-      locals: new Set(p ? [p.name] : []),
-    };
-    const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
-    const parts = a.body.map((s) => renderUpdateStmt(s, ctx));
+  // Assemble one `| Msg [param] -> …body… model, <cmd>` arm from a rendered
+  // body.  Shared by page/component actions and store actions (which fold into
+  // the same single-program Model/Msg/update — the store arm just renders under
+  // a `storeScope` so its own fields resolve to their namespaced Model field).
+  const assembleArm = (head: string, body: readonly ActionIR["body"][number][], ctx: FsExprCtx) => {
+    const parts = body.map((s) => renderUpdateStmt(s, ctx));
     const lines = parts.map((pt) => pt.line).filter((l): l is string => l !== undefined);
     const cmds = parts.map((pt) => pt.cmd).filter((c): c is string => c !== undefined);
-    // Batch dispatched cmds (sibling-action calls) into the arm tail; no cmds →
-    // the pure `Cmd.none` (a plain state rebind).
     const cmd =
       cmds.length === 0
         ? "Cmd.none"
@@ -317,6 +328,29 @@ export function renderUpdate(
           : `Cmd.batch [ ${cmds.join("; ")} ]`;
     const bodyLines = lines.length > 0 ? `${lines.join("\n")}\n` : "";
     return `${head}\n${bodyLines}      model, ${cmd}`;
+  };
+  const actionArms = actions.map((a) => {
+    const p = a.params[0];
+    const ctx: FsExprCtx = { stateNames, locals: new Set(p ? [p.name] : []) };
+    const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
+    return assembleArm(head, a.body, ctx);
+  });
+  // Store action arms — one Msg case per `<Store>.<action>`, rendered with a
+  // `storeScope` so the store's own fields (bound as `let` locals at lowering)
+  // resolve to their namespaced Model field (`count` → `model.CartCount`).
+  const storeArms = stores.flatMap((store) => {
+    const fields = new Set(store.state.map((f) => f.name));
+    return store.actions.map((a) => {
+      const p = a.params[0];
+      const ctx: FsExprCtx = {
+        stateNames,
+        locals: new Set(p ? [p.name] : []),
+        storeScope: { store: store.name, fields },
+      };
+      const msg = storeMsgCase(store.name, a.name);
+      const head = p ? `  | ${msg} ${p.name} ->` : `  | ${msg} ->`;
+      return assembleArm(head, a.body, ctx);
+    });
   });
   const readArms = reads.map(
     (r) =>
@@ -383,6 +417,7 @@ export function renderUpdate(
     ...authArms,
     ...routeArms,
     ...actionArms,
+    ...storeArms,
     ...readArms,
     ...mutationArms,
     ...formArms,

@@ -18,8 +18,10 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { felizTarget } from "./feliz-target.js";
+import { storeModelField, storeMsgCase } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
 import {
   msgCase,
@@ -117,6 +119,42 @@ function dispatchWrappers(page: PageIR, used: ReadonlySet<string>): string[] {
     });
 }
 
+/** Emit the store-member local bindings a page's body references (Stage 5).
+ *  Stores fold into the single Elmish Model, so a used store FIELD binds to its
+ *  namespaced Model read (`let count = model.CartCount`) and a used store ACTION
+ *  binds to a dispatcher (`let clear () = dispatch CartClear`) — the same local
+ *  name the body walk computed (`storeMemberLocal`, keyed off the page's
+ *  binding names), so binding and use-site always agree. */
+function storeWrappers(
+  page: PageIR,
+  ui: UiIR,
+  usedStores: ReadonlyMap<string, Set<string>>,
+): string[] {
+  const reserved = new Set(page.state.map((s) => s.name));
+  const storesByName = new Map(ui.stores.map((s) => [s.name, s] as const));
+  const lines: string[] = [];
+  for (const [storeName, members] of usedStores) {
+    const store = storesByName.get(storeName);
+    if (!store) continue;
+    const fieldNames = new Set(store.state.map((f) => f.name));
+    const actionsByName = new Map(store.actions.map((a) => [a.name, a] as const));
+    for (const member of members) {
+      const local = storeMemberLocal(storeName, member, reserved);
+      if (fieldNames.has(member)) {
+        lines.push(`    let ${local} = model.${storeModelField(storeName, member)}`);
+      } else {
+        const p = actionsByName.get(member)?.params[0]?.name;
+        lines.push(
+          p
+            ? `    let ${local} ${p} = dispatch (${storeMsgCase(storeName, member)} ${p})`
+            : `    let ${local} () = dispatch ${storeMsgCase(storeName, member)}`,
+        );
+      }
+    }
+  }
+  return lines;
+}
+
 /** Render one page's view function under `fnName` (`view` for a single-page
  *  ui, `<pageCamel>View` under routing).  Threads the ui's api params +
  *  reachable aggregates so the shared walker's api-hook detection fires on
@@ -167,7 +205,10 @@ function renderPageView(
     for (const c of result.usedUserComponents) used.components.add(c);
     for (const f of result.usedExternFunctions ?? []) used.functions.add(f);
   }
-  const wrappers = dispatchWrappers(page, result.usedActions ?? new Set());
+  const wrappers = [
+    ...dispatchWrappers(page, result.usedActions ?? new Set()),
+    ...storeWrappers(page, ui, result.usedStores ?? new Map()),
+  ];
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
   return `${head}\n${preamble}${body}`;
@@ -479,13 +520,27 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const pageCmd = renderPageCmd(reads); // "" unless byId reads exist
 
   // MVU triple is built from the COMBINED (all-page, deduped) state + actions;
-  // a single-page ui's combined lists are exactly its one page's.
-  const state = combinedState(ui);
+  // a single-page ui's combined lists are exactly its one page's.  Stores fold
+  // into the SAME single-program Model/Msg/update: each store field becomes a
+  // namespaced Model field (`Cart` + `count` → `CartCount`) and each store
+  // action a namespaced Msg case (`CartClear`), so `Cart.count` reads and
+  // `Cart.clear()` dispatches resolve against the one model.
+  const storeStateFields = ui.stores.flatMap((s) =>
+    s.state.map((f) => ({ name: storeModelField(s.name, f.name), type: f.type, init: f.init })),
+  );
+  const state = [...combinedState(ui), ...storeStateFields];
   const actions = combinedActions(ui);
+  // Msg needs a case per store action too (the update arms come from `stores`).
+  const msgActions = [
+    ...actions,
+    ...ui.stores.flatMap((s) =>
+      s.actions.map((a) => ({ name: storeMsgCase(s.name, a.name), params: a.params, body: [] })),
+    ),
+  ];
   const model = renderModel(state, reads, routed, formRecords, authUi);
   const init = renderInit(state, reads, routed, formRecords, authUi);
   const msg = renderMsg(
-    actions,
+    msgActions,
     reads,
     routed,
     mutations,
@@ -504,6 +559,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     operationForms,
     workflowForms,
     authUi,
+    ui.stores,
   );
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
   const api = hasHttp

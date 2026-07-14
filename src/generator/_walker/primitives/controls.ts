@@ -25,6 +25,8 @@ import {
   extendLambdaParams,
   firstPositionalContent,
   propagateChildFlags,
+  recordStoreUse,
+  storeLocalFor,
   stringOrRefArgValue,
   styleAttr,
   testidAttr,
@@ -86,7 +88,18 @@ export function emitButton(
   const onClickAction = actionRefArg(call, "onClick");
   const onClick = lambdaArg(call, "onClick");
   let onClickHandler: string | undefined;
-  if (onClickAction) {
+  if (onClickAction?.storeName) {
+    // A bare STORE action as the handler (`onClick: Cart.clear`) — record the
+    // store use (so the shell binds the store-action local) and reference that
+    // local, exactly as a store-action call from a body does.  Without this the
+    // handler was silently dropped on every frontend (the ref matched neither
+    // `actionRefArg`'s page-action path nor `to:`/lambda).
+    recordStoreUse(ctx, onClickAction.storeName, onClickAction.actionName);
+    const local = storeLocalFor(ctx, onClickAction.storeName, onClickAction.actionName);
+    onClickHandler = ctx.target.renderEventHandler
+      ? ctx.target.renderEventHandler([`${local}();`], undefined)
+      : local;
+  } else if (onClickAction) {
     ctx.usedActions?.add(onClickAction.actionName);
     const handler = actionHandlerName(onClickAction.actionName);
     onClickHandler = ctx.target.renderEventHandler
