@@ -8,7 +8,10 @@
 /** Build the `src/lib/table-sort.ts` module source. */
 export function buildTableSortHelper(): string {
   return `// Client-side row sort for interactive tables (generated — M-T1.1).
-export function sortRows<T>(rows: readonly T[], key: string, dir: string): T[] {
+export function sortRows<T>(rows: readonly T[] | undefined, key: string, dir: string): T[] {
+  if (!rows) {
+    return [];
+  }
   if (!key) {
     return [...rows];
   }

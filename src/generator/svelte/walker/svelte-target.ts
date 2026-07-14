@@ -68,6 +68,30 @@ export const svelteTarget: WalkerTarget = {
     return `${segments.join(".")} = ${valueJs}`;
   },
 
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+
+  /** An `onclick` header driving client-side sort.  Svelte 5 `$state`
+   *  runes are reassigned in place (`sortKey = "name"`) and stay reactive;
+   *  text interpolation is `{ … }`. */
+  renderSortableHeader(spec) {
+    const { header, field, sortKey, sortDir } = spec;
+    const k = sortKey.name;
+    const d = sortDir.name;
+    const q = JSON.stringify(field);
+    const onClick =
+      `() => { if (${k} === ${q}) { ${d} = ${d} === "asc" ? "desc" : "asc"; } ` +
+      `else { ${k} = ${q}; ${d} = "asc"; } }`;
+    const indicator = `{${k} === ${q} ? (${d} === "asc" ? " ↑" : " ↓") : ""}`;
+    return `<span style="cursor: pointer; user-select: none;" onclick={${onClick}}>${header}${indicator}</span>`;
+  },
+
+  /** Sort the rows via the shared `sortRows` helper (`$lib/table-sort`) —
+   *  Svelte's strict `svelte-check` can't index a typed row by a dynamic
+   *  string key inline, so the cast lives in the helper module. */
+  renderSortedRows(rowsExpr, sortKey, sortDir) {
+    return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Identical naming to the TSX target — the svelte api modules

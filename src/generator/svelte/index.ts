@@ -22,6 +22,7 @@ import {
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildSvelteApiModule } from "./api-builder.js";
@@ -202,6 +203,9 @@ export function generateSvelteForContexts(
   out.set("src/lib/api/config.ts", pack.render("api-config", { apiBaseUrl }));
   out.set("src/lib/logger.ts", pack.render("logger", {}));
   out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  // Interactive-table sort helper (M-T1.1) — imported by a page only when it
+  // renders a sortable `Table`; emitted unconditionally (like format.ts).
+  out.set("src/lib/table-sort.ts", buildTableSortHelper());
   out.set("src/lib/forms.svelte.ts", SVELTE_LIB_FORMS);
   out.set("src/lib/toast.svelte.ts", SVELTE_LIB_TOAST);
   // Realtime SSE client + live-event handlers (channels.md Part I):
