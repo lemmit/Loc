@@ -533,6 +533,23 @@ function applySuffixToRecv(
       // call as the unit-ish string placeholder the other void calls use.
       return { recv: callIR, recvType: { kind: "primitive", name: "string" } };
     }
+    // A bare `<Store>.<action>` (no call parens) in handler-arg position
+    // (`onClick: Cart.clear`) is a store-action HANDLER reference — the store
+    // analogue of a page `action-ref` — NOT a field read.  Distinguish it by
+    // whether the member names an action; a field name lowers to a store-field
+    // ref as before.
+    if (store.actions.has(ms.member)) {
+      const paramType = store.actions.get(ms.member)?.paramType;
+      return {
+        recv: {
+          kind: "action-ref",
+          actionName: ms.member,
+          storeName,
+          ...(paramType ? { paramType } : {}),
+        },
+        recvType: { kind: "primitive", name: "string" },
+      };
+    }
     const fieldType = store.fields.get(ms.member) ?? { kind: "primitive", name: "string" };
     return {
       recv: { kind: "ref", name: ms.member, refKind: "store-field", storeName, type: fieldType },

@@ -3222,6 +3222,12 @@ export type ExprIR =
       kind: "action-ref";
       actionName: string;
       paramType?: TypeIR;
+      /** Set when the handler reference is a bare STORE action (`onClick:
+       *  Cart.clear`) rather than a sibling page/component action — the store
+       *  analogue of a page `action-ref`.  Backends bind it through the store
+       *  seam (record the use, reference the shell-bound store-action local)
+       *  instead of the page-action handler.  Absent for a page action. */
+      storeName?: string;
       origin?: OriginRef;
     }
   | {

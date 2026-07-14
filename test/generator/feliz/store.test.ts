@@ -86,3 +86,27 @@ describe("feliz store subsystem (M-T6.15)", () => {
     expect(fs).not.toContain("unsupported");
   });
 });
+
+describe("feliz store-action as a direct onClick handler (M-T6.15)", () => {
+  const DIRECT = `
+system P {
+  subdomain S { context C { } }
+  ui WebApp {
+    store Cart { state { count: int = 0 } action clear() { count := 0 } }
+    page Home {
+      route: "/"
+      body: Stack { Heading { Cart.count, level: 1 }, Button { "Clear", onClick: Cart.clear } }
+    }
+  }
+  deployable api { platform: node contexts: [C] port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
+}`;
+  it("binds the store-action dispatcher and wires the button onClick", async () => {
+    const model = await buildLoomModel(DIRECT);
+    const sys = model.systems[0]!;
+    const web = sys.deployables.find((d) => d.name === "web")!;
+    const fs = generateFelizForContexts([], sys, web).get("src/App.fs")!;
+    expect(fs).toContain("let clear () = dispatch CartClear");
+    expect(fs).toContain("prop.onClick (fun _ -> clear())");
+  });
+});

@@ -137,6 +137,34 @@ describe("store — lowering", () => {
     expect(stmt.store).toBe("Cart");
   });
 
+  it("lowers a bare `onClick: Cart.clear` to a store `action-ref`, not a store-field ref (M-T6.15)", async () => {
+    // Regression: a bare store-action reference in handler position used to be
+    // mis-lowered as a store-FIELD ref (no `()` ⇒ assumed a field), so every
+    // frontend silently dropped the handler.  It must be a store `action-ref`.
+    const ui = (
+      await ir(`
+      ${STORE}
+      page P {
+        route: "/p"
+        body: Button { "Clear", onClick: Cart.clear }
+      }`)
+    ).systems[0]!.uis[0]!;
+    const page = ui.pages.find((p) => p.name === "P")!;
+    let found: Extract<ExprIR, { kind: "action-ref" }> | undefined;
+    const walk = (e: ExprIR | undefined): void => {
+      if (!e || typeof e !== "object") return;
+      if (e.kind === "action-ref" && e.storeName) found = e;
+      for (const v of Object.values(e as Record<string, unknown>)) {
+        if (Array.isArray(v)) for (const el of v) walk(el as ExprIR);
+        else if (v && typeof v === "object" && "kind" in (v as object)) walk(v as ExprIR);
+      }
+    };
+    walk(page.body);
+    expect(found).toBeDefined();
+    expect(found!.actionName).toBe("clear");
+    expect(found!.storeName).toBe("Cart");
+  });
+
   it("resolves dotted store refs from BOTH a page and a component body", async () => {
     const ui = (
       await ir(`

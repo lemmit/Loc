@@ -459,3 +459,39 @@ system Demo {
     expect(codes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
   });
 });
+
+// Direct store-action handler (`onClick: Cart.clear`) — the bare store action
+// as a button handler (M-T6.15).  A store-action `action-ref` has no matching
+// page action, so the HEEx walker must synthesize the `handle_event` clause
+// (dispatching the store action over its per-page assign) or the emitted
+// `phx-click` would dangle without a handler and crash the LiveView on click.
+describe("store/elixir — direct store-action onClick (M-T6.15)", () => {
+  const DIRECT = `
+system Demo {
+  subdomain S { context C { aggregate Order with crudish { customerId: string } repository Orders for Order { } } }
+  api A from S
+  ui Web {
+    api C: A
+    store Cart { state { count: int = 0 } action clear() { count := 0 } }
+    page Home {
+      route: "/"
+      body: Stack {
+        Heading { Cart.count, level: 1 },
+        Button { "Clear", onClick: Cart.clear }
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable app { platform: elixir contexts: [C] dataSources: [st] serves: A ui: Web { C: app } port: 4000 }
+}`;
+
+  it("emits phx-click AND a synthesized handle_event dispatching the store action", async () => {
+    const home = (await gen(DIRECT)).get("app/lib/app_web/live/home_live.ex")!;
+    expect(home).toContain(`phx-click="clear"`);
+    expect(home).toContain(`def handle_event("clear", _params, socket) do`);
+    expect(home).toContain(`|> update(:cart, &Cart.clear/1)`);
+    // the store assign is seeded in mount even though the page only onClicks it
+    expect(home).toContain(`assign(:cart, %Cart{})`);
+  });
+});
