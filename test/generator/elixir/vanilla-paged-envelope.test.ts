@@ -53,14 +53,19 @@ describe("vanilla `paged` wire envelope (§1)", () => {
   it("the repository paged find applies limit/offset + a count and returns the envelope map", async () => {
     const repo = file(await generateSystemFiles(SOURCE), "/orders/order_repository.ex");
 
-    // page/page_size threaded with the shared 1-based defaults.
-    expect(repo).toContain("def recent(page \\\\ 1, page_size \\\\ 20) do");
-    expect(repo).toContain("def in_region(region, page \\\\ 1, page_size \\\\ 20) do");
+    // page/page_size + sort/dir threaded with the shared 1-based defaults.
+    expect(repo).toContain(
+      'def recent(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc") do',
+    );
+    expect(repo).toContain(
+      'def in_region(region, page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc") do',
+    );
 
-    // count query for `total`, then a limit/offset page slice.
+    // count query for `total`, then an order_by + limit/offset page slice (M-T2.6).
     expect(repo).toContain("total = Repo.aggregate(query, :count, :id)");
     expect(repo).toContain("offset = (page - 1) * page_size");
-    expect(repo).toContain("items = query |> limit(^page_size) |> offset(^offset) |> Repo.all()");
+    expect(repo).toContain('dir_atom = if dir == "desc", do: :desc, else: :asc');
+    expect(repo).toContain("|> order_by([record], [{^dir_atom, field(record, ^sort_col)}])");
 
     // the envelope map — canonical wire keys (atom keys serialise to camelCase JSON).
     expect(repo).toContain("items: items");
@@ -94,9 +99,11 @@ describe("vanilla `paged` wire envelope (§1)", () => {
 
   it("the context defdelegate carries the matching page arity so the controller call routes", async () => {
     const context = file(await generateSystemFiles(SOURCE), "/orders.ex");
-    expect(context).toContain("defdelegate recent_order(page \\\\ 1, page_size \\\\ 20), to: ");
     expect(context).toContain(
-      "defdelegate in_region_order(region, page \\\\ 1, page_size \\\\ 20), to: ",
+      'defdelegate recent_order(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc"), to: ',
+    );
+    expect(context).toContain(
+      'defdelegate in_region_order(region, page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc"), to: ',
     );
     // the non-paged find keeps its plain arity.
     expect(context).toContain("defdelegate latest_order(), to: ");

@@ -24,6 +24,7 @@ import {
   ownFieldsOf,
   tableOwnerName,
 } from "../../ir/util/inheritance.js";
+import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
@@ -390,16 +391,26 @@ export function relationalFindMethod(
   // Paged find (P3b): count + limit/offset against the same predicate,
   // returning the shared PagedResult carrier (1-based page).
   if (pagedReturn(find.returnType)) {
-    const sig = ["self", ...params, "page: int", "page_size: int"].join(", ");
+    const sig = ["self", ...params, "page: int", "page_size: int", "sort: str", "dir: str"].join(
+      ", ",
+    );
+    // Server-side sort (M-T2.6): whitelist maps each wire key to its snake
+    // column attr; an unknown key falls back to `id` (stable default order).
+    const sortMap = sortableFields(agg)
+      .map((wf) => `${JSON.stringify(wf)}: ${JSON.stringify(snake(wf))}`)
+      .join(", ");
     return lines(
       `    async def ${snake(find.name)}(${sig}) -> PagedResult[${agg.name}]:`,
       "        offset = (page - 1) * page_size",
+      `        _sort_columns = {${sortMap}}`,
+      `        _sort_attr = getattr(${root}, _sort_columns.get(sort, "id"))`,
+      '        _order = _sort_attr.desc() if dir == "desc" else _sort_attr.asc()',
       `        total = (`,
       `            await self._session.execute(select(func.count()).select_from(${root})${where})`,
       "        ).scalar_one()",
       "        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0",
       `        rows = (`,
-      `            await self._session.execute(select(${root})${where}.limit(page_size).offset(offset))`,
+      `            await self._session.execute(select(${root})${where}.order_by(_order).limit(page_size).offset(offset))`,
       "        ).scalars().all()",
       `        items = ${hydrateListExpr(agg, bulkHydrate)}`,
       findExecutedLine(agg, find.name, "total"),

@@ -64,6 +64,7 @@ import {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
@@ -339,9 +340,18 @@ export function buildRoutesFile(
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       if (paged) {
+        // Server-side pagination + sort controls (M-T2.6).  `sort` is an enum of
+        // the aggregate's whitelisted scalar columns (`id` default + stable
+        // order); `dir` defaults ascending.  An out-of-whitelist `sort` can't be
+        // sent (zod rejects it), so the repo's ORDER BY is injection-safe.
+        const sortEnum = sortableFields(agg)
+          .map((f) => JSON.stringify(f))
+          .join(", ");
         lines.push(
           `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          `  sort: z.enum([${sortEnum}]).default("id"),`,
+          `  dir: z.enum(["asc", "desc"]).default("asc"),`,
         );
       }
       lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
@@ -1390,7 +1400,7 @@ function emitFindRoute(
     // Auto-injected pagination controls follow the domain args; the repo
     // method returns `{ items: <domain>[], page, pageSize, total, totalPages }`
     // and the route maps the page items through `toWire`.
-    const pagedArgs = [...baseArgs, "params.page", "params.pageSize"];
+    const pagedArgs = [...baseArgs, "params.page", "params.pageSize", "params.sort", "params.dir"];
     const argList = (usesUser ? [...pagedArgs, "currentUser"] : pagedArgs).join(", ");
     out.push(`    const result = await repo.${find.name}(${argList});`);
     out.push(

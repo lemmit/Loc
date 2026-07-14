@@ -1080,12 +1080,17 @@ function findRoute(
       "session: SessionDep",
       `page: int = ${PAGED_DEFAULT_PAGE}`,
       `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+      // Server-side sort controls (M-T2.6) — the repo whitelists `sort`.
+      `sort: str = "id"`,
+      `dir: str = "asc"`,
     ].join(", ");
     const callArgs = [
       ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
       ...(usesUser ? ["current_user"] : []),
       "page",
       "pageSize",
+      "sort",
+      "dir",
     ];
     return lines(
       `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,

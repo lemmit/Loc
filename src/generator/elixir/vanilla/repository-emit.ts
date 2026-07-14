@@ -26,6 +26,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -430,7 +431,12 @@ function renderFindFn(
   // serialise (Jason) to the canonical camelCase JSON keys at the controller.
   const paged = pagedReturn(f.returnType);
   const pageArgs = paged
-    ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+    ? [
+        `page \\\\ ${PAGED_DEFAULT_PAGE}`,
+        `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
+        `sort \\\\ "id"`,
+        `dir \\\\ "asc"`,
+      ]
     : [];
   // A principal-filtered aggregate threads the request actor into the find too
   // (the `cap` references `current_user`).  `\\ nil` keeps the workflow callers
@@ -499,7 +505,7 @@ function renderFindFn(
       : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
   const specArgs = [
     ...argNames.map(() => "term()"),
-    ...(paged ? ["pos_integer()", "pos_integer()"] : []),
+    ...(paged ? ["pos_integer()", "pos_integer()", "String.t()", "String.t()"] : []),
     ...(principal ? ["map() | nil"] : []),
   ];
   const spec = `  @spec ${fnName}(${specArgs.join(", ")}) :: ${specTail}`;
@@ -516,12 +522,33 @@ function renderFindFn(
     // Keys are atoms so the controller serialises them to the canonical
     // `items/page/pageSize/total/totalPages` JSON (camelCase) every other
     // backend emits.
+    // Server-side sort (M-T2.6): map the whitelisted wire key to its schema
+    // field atom (unknown → `:id`, the stable default order) and order the page
+    // query with a dynamic `field/2`; `sort_col` can only be a whitelisted atom,
+    // so the dynamic column is injection-safe.
+    const sortArms = sortableFields(agg)
+      .filter((wf) => wf !== "id")
+      .map((wf) => `        "${wf}" -> :${snake(wf)}`)
+      .join("\n");
     return `${spec}
   def ${fnName}(${argList}) do
     query = ${query}
     total = Repo.aggregate(query, :count, :id)
     offset = (page - 1) * page_size
-    items = query |> limit(^page_size) |> offset(^offset) |> Repo.all()${preload}
+
+    sort_col =
+      case sort do
+${sortArms}${sortArms ? "\n" : ""}        _ -> :id
+      end
+
+    dir_atom = if dir == "desc", do: :desc, else: :asc
+
+    items =
+      query
+      |> order_by([record], [{^dir_atom, field(record, ^sort_col)}])
+      |> limit(^page_size)
+      |> offset(^offset)
+      |> Repo.all()${preload}
 
     {:ok,
      %{

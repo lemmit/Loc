@@ -28,6 +28,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
+import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
@@ -426,16 +427,32 @@ export function findQueryMethod(
       eagerContains.length > 0 ||
       associationsOf(agg).length > 0 ||
       valueCollectionsFor(agg).length > 0;
-    const pagedParams = [...baseParams, "page: number", "pageSize: number"];
+    const pagedParams = [
+      ...baseParams,
+      "page: number",
+      "pageSize: number",
+      "sort: string",
+      "dir: string",
+    ];
     const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
     const ret = `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }`;
+    // Server-side sort (M-T2.6): a whitelist maps each accepted `sort` key to
+    // its root-table column; an unknown key falls back to `id` (the stable
+    // default order).  The route's zod enum already rejects out-of-whitelist
+    // keys, so the `?? id` is just belt-and-suspenders.
+    const sortCols = sortableFields(agg)
+      .map((f) => `${JSON.stringify(f)}: schema.${tableName}.${f}`)
+      .join(", ");
     return lines(
       `  async ${find.name}(${pagedAll}): Promise<${ret}> {`,
       `    const offset = (page - 1) * pageSize;`,
+      `    const sortColumns: Record<string, AnyPgColumn> = { ${sortCols} };`,
+      `    const sortColumn = sortColumns[sort] ?? schema.${tableName}.id;`,
+      `    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);`,
       `    const countRows = await this.db.select({ value: count() }).from(schema.${tableName})${whereClause};`,
       `    const total = Number(countRows[0]?.value ?? 0);`,
       `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
-      `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.limit(pageSize).offset(offset);`,
+      `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.orderBy(orderBy).limit(pageSize).offset(offset);`,
       `    if (rootRows.length === 0) {`,
       `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
       `      return { items: [], page, pageSize, total, totalPages };`,

@@ -10,6 +10,7 @@ import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../rende
 import type { JavaRepoCtx } from "./repository.js";
 import {
   declaredFinds,
+  inMemoryPagedSortLines,
   inMemoryRetrievalLines,
   isPagedFind,
   unionFindAsOptionalTwin,
@@ -137,12 +138,13 @@ export function renderJavaDocumentRepositoryImpl(
     const filter =
       ownFilter + promotedFilterClause({ bypassAll: f.bypassAll, bypassCaps: f.bypassCaps }, "x");
     if (isPagedFind(f)) {
-      const sig = [...params, "int page", "int pageSize"].join(", ");
+      const sig = [...params, "int page", "int pageSize", "String sort", "String dir"].join(", ");
       return [
         `    @Override`,
         `    public Paged<${agg.name}> ${f.name}(${sig}) {`,
         `        var all = findAll().stream()${filter}.toList();`,
-        `        var items = all.stream().skip((long) (page - 1) * pageSize).limit(pageSize).toList();`,
+        ...inMemoryPagedSortLines(agg),
+        `        var items = all.stream().sorted(__cmp).skip((long) (page - 1) * pageSize).limit(pageSize).toList();`,
         findExecutedLog(f.name, "all.size()"),
         `        return new Paged<>(items, page, pageSize, all.size(), (all.size() + pageSize - 1) / pageSize);`,
         `    }`,

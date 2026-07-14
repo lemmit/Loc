@@ -127,8 +127,11 @@ export function emitFindQueriesAndHandlers(
         queryName: `${upperFirst(find.name)}Query`,
         queryParams: [
           ...find.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
-          // A paged find's query carries the pagination controls (P3b).
-          ...(pagedReturn(find.returnType) ? ["int Page", "int PageSize"] : []),
+          // A paged find's query carries the pagination + sort controls (P3b /
+          // M-T2.6): `Sort` names a whitelisted column, `Dir` the direction.
+          ...(pagedReturn(find.returnType)
+            ? ["int Page", "int PageSize", "string Sort", "string Dir"]
+            : []),
         ].join(", "),
         returnType: queryReturn,
         extraUsings: pagedUsings,
@@ -170,6 +173,8 @@ function buildFindHandlerBody(
       ...baseArgs,
       "query.Page",
       "query.PageSize",
+      "query.Sort",
+      "query.Dir",
       ...(usesUser ? ["_currentUser.User"] : []),
     ];
     const pagedCall = `${pagedArgs.join(", ")}, cancellationToken`;

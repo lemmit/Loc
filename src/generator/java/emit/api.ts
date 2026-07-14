@@ -222,8 +222,10 @@ export function renderJavaController(
         ...declared,
         `@RequestParam(defaultValue = "1") int page`,
         `@RequestParam(defaultValue = "20") int pageSize`,
+        `@RequestParam(defaultValue = "id") String sort`,
+        `@RequestParam(defaultValue = "asc") String dir`,
       ].join(", ");
-      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+      const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
       return [
         `    @GetMapping("/${snake(f.name)}")`,
         `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,

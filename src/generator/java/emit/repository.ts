@@ -7,6 +7,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import {
@@ -177,6 +178,38 @@ export function isPagedFind(f: FindIR): boolean {
   return f.returnType.kind === "genericInstance" && f.returnType.ctor === "paged";
 }
 
+/** In-memory server-side sort (M-T2.6) for the non-relational paged impls
+ *  (document-store / event-store, which page a materialised `List<Agg>`).
+ *  Emits a typed `Comparator<Agg>` switched on the whitelisted `sort` key —
+ *  `comparingInt`/`comparingLong` for numeric columns, `comparing` for the
+ *  rest, `id.toString()` as the stable default — reversed for `dir == "desc"`.
+ *  Returns the declaration lines; the caller sorts `<listVar>` through `__cmp`.
+ *  Uses record-style accessors (`Agg::field`). */
+export function inMemoryPagedSortLines(agg: EnrichedAggregateIR): string[] {
+  const fields = sortableFields(agg).filter((wf) => wf !== "id");
+  const wireType = (wf: string): TypeIR | undefined =>
+    agg.wireShape.find((f) => f.name === wf)?.type;
+  const arm = (wf: string): string => {
+    const t = wireType(wf);
+    const prim = t?.kind === "primitive" ? t.name : undefined;
+    if (prim === "int")
+      return `            case "${wf}" -> java.util.Comparator.comparingInt(${agg.name}::${wf});`;
+    if (prim === "long")
+      return `            case "${wf}" -> java.util.Comparator.comparingLong(${agg.name}::${wf});`;
+    return `            case "${wf}" -> java.util.Comparator.comparing(${agg.name}::${wf});`;
+  };
+  return [
+    `        String __sortField = java.util.List.of(${sortableFields(agg)
+      .map((wf) => `"${wf}"`)
+      .join(", ")}).contains(sort) ? sort : "id";`,
+    `        java.util.Comparator<${agg.name}> __cmp = switch (__sortField) {`,
+    ...fields.map(arm),
+    `            default -> java.util.Comparator.comparing(o -> o.id().toString());`,
+    `        };`,
+    `        if ("desc".equals(dir)) __cmp = __cmp.reversed();`,
+  ];
+}
+
 /** A union-returning find (`Order or NotFound` / `Order option`) reaches
  *  the repository/service as its OPTIONAL TWIN — a single nullable row;
  *  the controller owns the union translation (absent → 404 / problem,
@@ -200,7 +233,7 @@ function findSignature(find: FindIR, imports: Set<string>): string {
       collectJavaTypeImports(p.type, imports);
       return `${renderJavaType(p.type)} ${p.name}`;
     }),
-    ...(isPagedFind(find) ? ["int page", "int pageSize"] : []),
+    ...(isPagedFind(find) ? ["int page", "int pageSize", "String sort", "String dir"] : []),
   ].join(", ");
   const ret = findReturn(find.returnType, imports);
   return `${ret} ${find.name}(${params})`;
@@ -529,13 +562,23 @@ export function renderJavaRepositoryImpl(
     const findBypass: FilterBypass = { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps };
     if (isPagedFind(f)) {
       imports.add("org.springframework.data.domain.PageRequest");
-      const args = [...f.params.map((p) => p.name), "PageRequest.of(page - 1, pageSize)"].join(
-        ", ",
-      );
+      imports.add("org.springframework.data.domain.Sort");
+      const args = [
+        ...f.params.map((p) => p.name),
+        "PageRequest.of(page - 1, pageSize, __sort)",
+      ].join(", ");
+      // Server-side sort (M-T2.6): whitelist the wire key against the sortable
+      // columns (unknown → `id`, the stable default) so the derived query can't
+      // resolve an invalid / injected property path.
+      const sortWhitelist = sortableFields(agg)
+        .map((wf) => JSON.stringify(wf))
+        .join(", ");
       return [
         `    @Override`,
         `    public ${sig} {`,
         ...wrapBypass(findBypass, [
+          `        String __sortField = java.util.List.of(${sortWhitelist}).contains(sort) ? sort : "id";`,
+          `        Sort __sort = Sort.by("desc".equals(dir) ? Sort.Direction.DESC : Sort.Direction.ASC, __sortField);`,
           `        var result = jpa.${f.name}(${args});`,
           findExecutedLog(f, "result.getTotalElements()"),
           `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,

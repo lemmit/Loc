@@ -211,11 +211,16 @@ function renderContextModule(
     const findLines = customFindsOf(repo).map((f) => {
       const findSnake = snake(f.name);
       const baseArgs = f.params.map((p) => snake(p.name));
-      // A `paged` find carries the same `page`/`page_size` arity (with defaults)
-      // the repository fn declares, so the defdelegate matches and the
-      // controller's paged call routes through.
+      // A `paged` find carries the same `page`/`page_size` + `sort`/`dir` arity
+      // (with defaults) the repository fn declares, so the defdelegate matches
+      // and the controller's paged call routes through (M-T2.6).
       const pageArgs = pagedReturn(f.returnType)
-        ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+        ? [
+            `page \\\\ ${PAGED_DEFAULT_PAGE}`,
+            `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
+            `sort \\\\ "id"`,
+            `dir \\\\ "asc"`,
+          ]
         : [];
       const findArgs = [
         ...baseArgs,

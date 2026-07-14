@@ -172,8 +172,10 @@ export function renderJavaService(
       const args = f.params.map((p) => p.name).join(", ");
       for (const p of f.params) collectWireToDomainImports(p.type, imports);
       if (isPagedFind(f)) {
-        const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
-        const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+        const pagedParams = [params, "int page, int pageSize, String sort, String dir"]
+          .filter(Boolean)
+          .join(", ");
+        const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
         return [
           `    @Transactional(readOnly = true)`,
           `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,

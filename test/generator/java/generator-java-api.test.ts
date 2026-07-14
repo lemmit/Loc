@@ -180,17 +180,21 @@ describe("java generator — paged finds", () => {
       "public record Paged<T>(List<T> items, int page, int pageSize, int total, int totalPages) {",
     );
     const port = f.get(`${ROOT}/features/orders/OrderRepository.java`)!;
-    expect(port).toContain("Paged<Order> recent(int page, int pageSize);");
+    expect(port).toContain("Paged<Order> recent(int page, int pageSize, String sort, String dir);");
     const jpa = f.get(`${ROOT}/features/orders/OrderJpaRepository.java`)!;
     expect(jpa).toContain("Page<Order> recent(Pageable pageable);");
     const impl = f.get(`${ROOT}/features/orders/OrderRepositoryImpl.java`)!;
-    expect(impl).toContain("var result = jpa.recent(PageRequest.of(page - 1, pageSize));");
+    // Server-side sort (M-T2.6): a whitelisted Sort built into the PageRequest.
+    expect(impl).toContain("var result = jpa.recent(PageRequest.of(page - 1, pageSize, __sort));");
+    expect(impl).toContain(
+      'Sort __sort = Sort.by("desc".equals(dir) ? Sort.Direction.DESC : Sort.Direction.ASC, __sortField);',
+    );
     expect(impl).toContain(
       "return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());",
     );
     const ctrl = f.get(`${ROOT}/features/orders/OrdersController.java`)!;
     expect(ctrl).toContain(
-      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {',
+      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {',
     );
   });
 });

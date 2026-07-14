@@ -117,6 +117,9 @@ export function renderFindActions(
         ? [
             `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
             `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+            // Sort controls (M-T2.6) — strings passed through; the repo whitelists.
+            `Map.get(params, "sort", "id")`,
+            `Map.get(params, "dir", "asc")`,
           ]
         : []),
       ...(principal ? ["current_user"] : []),

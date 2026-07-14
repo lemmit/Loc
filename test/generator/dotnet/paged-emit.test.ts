@@ -36,38 +36,46 @@ describe(".NET generator — paged finds (P3b)", () => {
   it("repository method: CountAsync + Skip/Take returning Paged<Agg>, where threaded into both", async () => {
     const repo = (await files()).get("Infrastructure/Repositories/OrderRepository.cs")!;
     expect(repo).toContain(
-      "public async Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken cancellationToken = default)",
+      "public async Task<Paged<Order>> Recent(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)",
     );
     expect(repo).toContain("var offset = (page - 1) * pageSize;");
     expect(repo).toContain("var total = await _db.Orders.CountAsync(cancellationToken);");
+    // Server-side sort (M-T2.6): a wire→CLR whitelist switch + an EF.Property
+    // OrderBy/OrderByDescending page query, then Skip/Take.
     expect(repo).toContain(
-      "var items = await _db.Orders.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);",
+      'var sortColumn = sort switch { "ref" => "Ref", "region" => "Region", _ => "Id" };',
+    );
+    expect(repo).toContain(
+      'var ordered = dir == "desc" ? _db.Orders.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Orders.OrderBy(e => EF.Property<object>(e, sortColumn));',
+    );
+    expect(repo).toContain(
+      "var items = await ordered.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);",
     );
     expect(repo).toContain("return new Paged<Order>(items, page, pageSize, total, totalPages);");
-    // where-clause threaded into both the count and the page query.
+    // where-clause threaded into both the count and the (ordered) page query.
     expect(repo).toContain(
       "await _db.Orders.Where(x => x.Region == region).CountAsync(cancellationToken);",
     );
     expect(repo).toContain(
-      "await _db.Orders.Where(x => x.Region == region).Skip(offset).Take(pageSize).ToListAsync(cancellationToken);",
+      "_db.Orders.Where(x => x.Region == region).OrderBy(e => EF.Property<object>(e, sortColumn))",
     );
   });
 
   it("interface declares the paged method signature", async () => {
     const iface = (await files()).get("Domain/Orders/IOrderRepository.cs")!;
     expect(iface).toContain(
-      "Task<Paged<Order>> Recent(int page, int pageSize, CancellationToken cancellationToken = default);",
+      "Task<Paged<Order>> Recent(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default);",
     );
   });
 
   it("CQRS query + handler map Paged<Order> → Paged<OrderResponse>", async () => {
     const query = (await files()).get("Application/Orders/Queries/RecentQuery.cs")!;
     expect(query).toContain(
-      "public sealed record RecentQuery(int Page, int PageSize) : IQuery<Paged<OrderResponse>>;",
+      "public sealed record RecentQuery(int Page, int PageSize, string Sort, string Dir) : IQuery<Paged<OrderResponse>>;",
     );
     const handler = (await files()).get("Application/Orders/Queries/RecentHandler.cs")!;
     expect(handler).toContain(
-      "var domain = await _repo.Recent(query.Page, query.PageSize, cancellationToken);",
+      "var domain = await _repo.Recent(query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);",
     );
     expect(handler).toContain("return new Paged<OrderResponse>(domain.Items.Select(d =>");
     expect(handler).toContain(
@@ -79,8 +87,10 @@ describe(".NET generator — paged finds (P3b)", () => {
     const ctrl = (await files()).get("Api/OrdersController.cs")!;
     expect(ctrl).toContain("[ProducesResponseType(typeof(Paged<OrderResponse>), 200)]");
     expect(ctrl).toContain(
-      "public async Task<ActionResult<Paged<OrderResponse>>> RecentOrder([FromQuery] int page = 1, [FromQuery] int pageSize = 20)",
+      'public async Task<ActionResult<Paged<OrderResponse>>> RecentOrder([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")',
     );
-    expect(ctrl).toContain("var result = await _mediator.Send(new RecentQuery(page, pageSize));");
+    expect(ctrl).toContain(
+      "var result = await _mediator.Send(new RecentQuery(page, pageSize, sort, dir));",
+    );
   });
 });
