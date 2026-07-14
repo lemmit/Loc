@@ -14,6 +14,7 @@ import type {
   EnumIR,
   FieldIR,
   ParamIR,
+  PayloadIR,
   SystemIR,
   TypeIR,
   ValueObjectIR,
@@ -214,7 +215,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     // Response
     files.set(
       `${schemaDir}/${snake(agg.name)}_response.ex`,
-      renderAggregateResponseSchema(agg, webModule),
+      renderAggregateResponseSchema(agg, webModule, ctx.payloads),
     );
     // List response
     files.set(
@@ -973,15 +974,64 @@ function renderPartResponseSchema(part: EnrichedEntityPartIR, webModule: string)
   );
 }
 
-function renderAggregateResponseSchema(agg: EnrichedAggregateIR, webModule: string): string {
+function renderAggregateResponseSchema(
+  agg: EnrichedAggregateIR,
+  webModule: string,
+  payloads: readonly PayloadIR[] = [],
+): string {
   const moduleName = `${webModule}.Api.Schemas.${agg.name}Response`;
-  const wireFields = forApiRead(wireShapeFor(agg));
-  return renderSchemaModule(
-    moduleName,
-    `${agg.name}Response`,
-    wireFieldsToProps(wireFields),
-    `${webModule}.Api.Schemas`,
-  );
+  // M-T5.10: when a `response <Agg>Response` record is declared, READ its
+  // fields (in declared order) instead of re-deriving from `wireShape`.  The
+  // record omits `id` (grammar-reserved) — re-prepend it exactly as
+  // `forApiRead` surfaces it — and a containment field carries its already-wire
+  // `<Part>Response` name, so its type is peeled back to the part name before
+  // `openApiType` re-appends `Response` (never `<Part>ResponseResponse`).
+  // Byte-identical to the wireShape path for a scaffolded record.
+  const declared = payloads.find((p) => p.kind === "response" && p.name === `${agg.name}Response`);
+  const props = declared
+    ? declaredResponseProps(agg, declared, payloads)
+    : wireFieldsToProps(forApiRead(wireShapeFor(agg)));
+  return renderSchemaModule(moduleName, `${agg.name}Response`, props, `${webModule}.Api.Schemas`);
+}
+
+/** True iff `name` is a declared `response` payload — a containment field's
+ *  already-wire type, which `openApiType` must not re-suffix. */
+function isResponsePayloadName(payloads: readonly PayloadIR[], name: string): boolean {
+  return payloads.some((p) => p.kind === "response" && p.name === name);
+}
+
+/** A containment field's declared type is `<Part>Response` (an entity whose
+ *  name is a declared `response`); `openApiType` appends `Response` to an entity
+ *  ref, so peel the name back to the part so the shared renderer re-appends it —
+ *  yielding `<Part>Response`, not `<Part>ResponseResponse`.  Scalars / VOs /
+ *  enums pass through unchanged (their declared type IS the domain type). */
+function normalizeDeclaredType(t: TypeIR, payloads: readonly PayloadIR[]): TypeIR {
+  if (t.kind === "array") return { ...t, element: normalizeDeclaredType(t.element, payloads) };
+  if (t.kind === "optional") return { ...t, inner: normalizeDeclaredType(t.inner, payloads) };
+  if (t.kind === "entity" && isResponsePayloadName(payloads, t.name)) {
+    return { ...t, name: t.name.replace(/Response$/, "") };
+  }
+  return t;
+}
+
+/** Build the `<Agg>Response` schema props from a DECLARED `response` record:
+ *  the re-prepended id row + each declared field (containment types peeled). */
+function declaredResponseProps(
+  agg: EnrichedAggregateIR,
+  payload: PayloadIR,
+  payloads: readonly PayloadIR[],
+): Array<{ name: string; type: TypeIR; optional: boolean }> {
+  const props: Array<{ name: string; type: TypeIR; optional: boolean }> = [];
+  const idField = forApiRead(wireShapeFor(agg)).find((w) => w.source === "id");
+  if (idField) props.push({ name: idField.name, type: idField.type, optional: idField.optional });
+  for (const f of payload.fields) {
+    props.push({
+      name: f.name,
+      type: normalizeDeclaredType(f.type, payloads),
+      optional: f.optional,
+    });
+  }
+  return props;
 }
 
 /** Create-response schema — `{ id }` only, matching Hono/.NET's
