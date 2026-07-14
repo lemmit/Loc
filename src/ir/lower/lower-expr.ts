@@ -101,7 +101,7 @@ import {
   withLocal,
 } from "./lower-types.js";
 import { originFor } from "./origin.js";
-import { matchRepoRead } from "./repo-read.js";
+import { matchRepoRead, runCriterionMatcher } from "./repo-read.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -287,7 +287,7 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
   // re-recognising the AST.  A repository WRITE does NOT match here (it falls
   // through to the generic method-call and the validator's repo-write gate).
   if (env.serviceRepos) {
-    const read = matchRepoRead(chain, env.serviceRepos);
+    const read = matchRepoRead(chain, env.serviceRepos, runCriterionMatcher(env.ctx));
     if (read) {
       const aggName = read.repo.aggregate?.ref?.name ?? "Unknown";
       const args = read.args.map((a) => lowerExpr(a, env));

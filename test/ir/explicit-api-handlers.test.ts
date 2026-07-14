@@ -260,4 +260,21 @@ describe("explicit api handlers — layering gates", () => {
     const codes = await codesFor(OK_CMD, `route GET "/nope" -> Ordering.NoSuchHandler`);
     expect(codes).toContain("loom.route-handler-unresolved");
   });
+
+  it("loom.read-context-repo-write — a GET route bound to a mutating commandHandler", async () => {
+    // A read-method route (GET/HEAD) may reach the repository's read-only face
+    // only.  Binding it to a writing commandHandler is the transport twin of the
+    // `reading`-tier read-only setting — a read must not save.
+    const codes = await codesFor(OK_CMD, `route GET "/orders/{id}/cancel" -> Ordering.CancelOrder`);
+    expect(codes).toContain("loom.read-context-repo-write");
+    // The same handler reached by a WRITE method (POST) is fine — a write route
+    // may reach the write face.
+    expect(
+      await codesFor(OK_CMD, `route POST "/orders/{id}/cancellations" -> Ordering.CancelOrder`),
+    ).not.toContain("loom.read-context-repo-write");
+    // A GET route to a read-only queryHandler is fine (the legal read binding).
+    expect(await codesFor(OK_QRY, `route GET "/orders/{id}" -> Ordering.GetOrder`)).not.toContain(
+      "loom.read-context-repo-write",
+    );
+  });
 });
