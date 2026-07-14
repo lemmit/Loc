@@ -25,6 +25,7 @@ import {
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
@@ -424,6 +425,9 @@ export function generateVueForContexts(
   }
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
   out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
+  // Interactive-table sort helper (M-T1.1) — imported by a page only when it
+  // renders a sortable `Table`; emitted unconditionally (like format.ts).
+  out.set("src/lib/table-sort.ts", buildTableSortHelper());
   // The reactive()+zod form runtime (vue/ shared source) — the
   // generated pages' field inputs and v-form handlers bind to it.
   out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));

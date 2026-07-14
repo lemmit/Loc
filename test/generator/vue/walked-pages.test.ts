@@ -44,11 +44,16 @@ describe("vue walker — scaffold pages", () => {
     const list = files.get("src/pages/customers/list.vue")!;
     // Script: composable hoisted once, wrapped in reactive() so
     // nested refs (`.data`, `.isLoading`) unwrap in template position.
-    expect(list).toContain(`import { reactive } from "vue";`);
+    // `ref` joins the import for the M-T1.1 client-side sort state.
+    expect(list).toContain(`import { reactive, ref } from "vue";`);
     expect(list).toContain("const customerAll = reactive(useAllCustomers());");
     // Template: pack-owned v-if query arms + v-for rows + mustaches.
     expect(list).toContain('<template v-if="customerAll.isLoading">');
-    expect(list).toContain('v-for="(row) in customerAll.data"');
+    // The scaffold list sorts + paginates client-side, so rows flow through
+    // `sortRows(...)` then a `.slice(...)` page window.
+    expect(list).toContain(
+      'v-for="(row) in (sortRows(customerAll.data, sortKey, sortDir)).slice((pageNum - 1) * 10, pageNum * 10)"',
+    );
     expect(list).toContain("{{ row.name }}");
     expect(list).toContain("{{ shortId(row.id) }}");
     // JS-splicing attributes are single-quoted (the rendered JS

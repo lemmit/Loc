@@ -27,6 +27,7 @@ import {
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyView } from "../_frontend/views-module.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
@@ -125,6 +126,9 @@ export function generateAngularForContexts(
   out.set("src/main.ts", pack.render("main", {}));
   out.set("src/styles.css", pack.render("theme", prepareThemeVM(sys.theme)));
   out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  // Interactive-table sort helper (M-T1.1) — re-exposed as a component member
+  // by any page rendering a sortable Table; emitted unconditionally.
+  out.set("src/lib/table-sort.ts", buildTableSortHelper());
 
   // --- Pages — bodies walk through the SHARED markup walker with
   // `angularTarget`; the angularMaterial pack templates own the markup

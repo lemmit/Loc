@@ -87,6 +87,31 @@ export interface StateRef {
   name: string;
 }
 
+/** The data a target needs to render a sortable `Table` column header
+ *  (M-T1.1 — the `renderSortableHeader` seam). */
+export interface SortableHeaderSpec {
+  /** Already-escaped header content (the column's display label). */
+  header: string;
+  /** Row property this column sorts by (`"name"`, `"id"`, …). */
+  field: string;
+  /** Page-state field holding the active sort column. */
+  sortKey: StateRef;
+  /** Page-state field holding the active direction (`"asc"` / `"desc"`). */
+  sortDir: StateRef;
+}
+
+/** The data a target needs to render a client-side pager control below a
+ *  paged `Table` (M-T1.1 — the `renderPager` seam). */
+export interface PagerSpec {
+  /** Page-state field holding the current 1-based page number. */
+  page: StateRef;
+  /** Fixed rows-per-page window. */
+  pageSize: number;
+  /** Already-rendered expression for the total (pre-slice) row count —
+   *  used to disable "Next" on the last page. */
+  totalExpr: string;
+}
+
 /** A single API call site detected by the walker — the
  *  `Sales.Customer.create.mutate(args)` shape.  Carries the
  *  resolved api-handle / aggregate / op so the target can produce
@@ -669,6 +694,37 @@ export interface WalkerTarget {
    *  until ported.  `renderStmt` is the body-statement renderer the action
    *  bodies reuse (so `:=`/`+=` lower identically to a page action). */
   renderStoreModule?(store: StoreIR): { path: string; content: string };
+
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+  //
+  // A `Table` gains client-side column sort when it carries `sortKey:` /
+  // `sortDir:` state refs and one or more `Column(..., sortable: true)`.  The
+  // shared table primitive (`primitives/table.ts`) delegates the two
+  // framework-shaped pieces here — the clickable header markup and the sorted
+  // rows expression.  Both are OPTIONAL: a target that omits them renders the
+  // plain header + unsorted rows (byte-identical to a table with no sort args),
+  // so the feature degrades gracefully instead of emitting broken framework
+  // syntax on a target that hasn't been ported yet.
+
+  /** Render a sortable column header.  React returns a clickable
+   *  `<span onClick=…>` that toggles `sortDir` when the column is already
+   *  active, else sets `sortKey` to this column and `sortDir` to `"asc"`, plus
+   *  a ↑/↓ indicator when active.  `header` is the already-escaped header
+   *  content; `field` is the row property this column sorts by. */
+  renderSortableHeader?(spec: SortableHeaderSpec): string;
+
+  /** Wrap a `Table`'s already-rendered `rows` expression in a client-side
+   *  sort by the active `sortKey` / `sortDir` state fields.  React returns a
+   *  `[...(rows)].sort((a, b) => …)` chain; omitted → rows render unsorted. */
+  renderSortedRows?(rowsExpr: string, sortKey: StateRef, sortDir: StateRef): string;
+
+  /** Render the client-side pager control emitted below a paged `Table` — a
+   *  "Prev" / "Next" pair around a "Page N" label, wired to the `page` state
+   *  field (writes clamp to `[1, ceil(total/pageSize)]`).  Framework-shaped
+   *  (button markup, disabled-attr syntax, click/state-write idiom), so it's a
+   *  seam; the `.slice(...)` windowing itself is built generically from
+   *  `renderStateRead`.  Omitted → the table renders unpaged (all rows). */
+  renderPager?(spec: PagerSpec): string;
 
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //

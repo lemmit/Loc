@@ -89,6 +89,65 @@ export const tsxTarget: WalkerTarget = {
     return `${setter}(${value})`;
   },
 
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+
+  /** A clickable header that drives client-side sort: clicking an
+   *  inactive column selects it ascending; clicking the active column
+   *  toggles the direction.  A ↑/↓ glyph marks the active column. */
+  renderSortableHeader(spec) {
+    const { header, field, sortKey, sortDir } = spec;
+    const k = sortKey.name;
+    const d = sortDir.name;
+    const setK = `set${k[0]!.toUpperCase()}${k.slice(1)}`;
+    const setD = `set${d[0]!.toUpperCase()}${d.slice(1)}`;
+    const q = JSON.stringify(field);
+    const onClick =
+      `() => { if (${k} === ${q}) { ${setD}(${d} === "asc" ? "desc" : "asc"); } ` +
+      `else { ${setK}(${q}); ${setD}("asc"); } }`;
+    const indicator = `{${k} === ${q} ? (${d} === "asc" ? " ↑" : " ↓") : ""}`;
+    // A real `<button>` (not a `<span onClick>`) so the sort control is
+    // keyboard-focusable and carries an implicit ARIA role — the a11y gates
+    // (svelte-check `--fail-on-warnings`, axe) reject a clickable span.  The
+    // style resets the native button chrome so it still reads as a header.
+    const style = `{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }`;
+    return `<button type="button" style={${style}} onClick={${onClick}}>${header}${indicator}</button>`;
+  },
+
+  /** Sort the rows array by the active `sortKey` column in `sortDir`
+   *  order.  Copies first (`[...]`) so the source array isn't mutated;
+   *  the `as number` casts satisfy the type-checker while relational
+   *  `<` compares strings and numbers correctly at runtime. */
+  renderSortedRows(rowsExpr, sortKey, sortDir) {
+    const k = sortKey.name;
+    const d = sortDir.name;
+    return (
+      `[...(${rowsExpr})].sort((a, b) => { if (!${k}) { return 0; } ` +
+      `const av = (a as Record<string, unknown>)[${k}]; ` +
+      `const bv = (b as Record<string, unknown>)[${k}]; ` +
+      `const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; ` +
+      `return ${d} === "desc" ? -c : c; })`
+    );
+  },
+
+  /** Prev / "Page N of M" / Next pager, wired to the `page` state field.
+   *  Prev disables on page 1; Next disables once the window reaches the
+   *  total.  Inline-styled so it stays pack-agnostic (like the sort header). */
+  renderPager(spec) {
+    const p = spec.page.name;
+    const setP = `set${p[0]!.toUpperCase()}${p.slice(1)}`;
+    const total = spec.totalExpr;
+    const size = spec.pageSize;
+    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const style = `{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }`;
+    return (
+      `<div style={${style}} data-testid="pager">` +
+      `<button type="button" disabled={${p} <= 1} onClick={() => ${setP}(${p} - 1)}>Prev</button>` +
+      `<span>Page {${p}} of {${pages}}</span>` +
+      `<button type="button" disabled={${p} * ${size} >= ${total}} onClick={() => ${setP}(${p} + 1)}>Next</button>` +
+      `</div>`
+    );
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into React-Query naming + import.

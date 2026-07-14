@@ -232,6 +232,7 @@ export function renderSveltePage(
     imports,
     usedParams,
     usesNavigate,
+    usesTableSort,
     usesState,
     usesCurrentUser,
     usesRouteId,
@@ -318,6 +319,9 @@ export function renderSveltePage(
     usesState || usesStateForTitle || derivedResult.usesState || actionResult.usesState;
 
   const packImports = renderSvelteImportLines(imports);
+  // Interactive-table sort helper — imported only when a sortable `Table`
+  // renders on this page (M-T1.1).
+  const tableSortImport = usesTableSort ? `  import { sortRows } from "$lib/table-sort";\n` : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `  import ${name} from "$lib/components/${name}.svelte";\n`)
@@ -396,7 +400,7 @@ export function renderSveltePage(
     : indentJsx(tsx, "");
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
 ${templateScope}`;
@@ -523,6 +527,7 @@ export function renderSvelteComponentFile(
     tsx,
     imports,
     usesState,
+    usesTableSort,
     usesNavigate,
     usesCurrentUser,
     usedUserComponents,
@@ -590,6 +595,7 @@ export function renderSvelteComponentFile(
     { decls: "", templateScope: "", usesNavigate: false },
   );
   const packImports = renderSvelteImportLines(imports);
+  const tableSortImport = usesTableSort ? `  import { sortRows } from "$lib/table-sort";\n` : "";
   const apiHookImports = renderSvelteApiHookImports(usedApiHooks);
   const apiHookDecls = svelteTarget
     .renderApiHoisting(
@@ -664,7 +670,7 @@ export function renderSvelteComponentFile(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;

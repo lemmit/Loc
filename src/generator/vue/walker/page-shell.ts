@@ -31,6 +31,30 @@ import {
 import { idTargetHookVar } from "../../react/form-helpers.js";
 import { vueTarget } from "./vue-target.js";
 
+/** A `state {}` field's `ref(...)` initial value: the declared `= <init>` when
+ *  it's a simple literal (string / number / bool / null / list of literals),
+ *  else the type's zero value.  Init expressions evaluate before any ref
+ *  exists, so they can't reference state/params — literals cover the surface
+ *  (mirrors the Angular/Svelte page-shells honouring `field.init`). */
+function renderVueStateInit(field: StateFieldIR): string {
+  const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
+  return lit ?? vueTarget.defaultInitFor(field.type);
+}
+
+function renderInitLiteral(e: ExprIR): string | undefined {
+  if (e.kind === "literal") {
+    if (e.lit === "string") return JSON.stringify(e.value);
+    if (e.lit === "null") return "null";
+    // int / decimal / bool already carry their JS-literal text.
+    return e.value;
+  }
+  if (e.kind === "list") {
+    const els = e.elements.map(renderInitLiteral);
+    return els.every((x): x is string => x !== undefined) ? `[${els.join(", ")}]` : undefined;
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Vue page shell — assembles a generated `.vue` SFC around a walked
 // page body.  The Vue analogue of `react/walker/page-shell.ts`, v1
@@ -243,7 +267,7 @@ export function renderVuePage(input: VuePageShellInput): string {
   const stateLines: string[] = [];
   if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of page.state) {
-      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
       // The shared input primitives' VM carries the React-style
       // `set<Pascal>` setter name (`@update:model-value` callbacks in
       // the vue packs call it) — provide it as a plain function.
@@ -431,6 +455,11 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "${relPrefix(input)}lib/format";`,
   );
+  // Interactive-table sort helper — imported only when a `Table` on this page
+  // renders sortable columns (M-T1.1).
+  if (result.usesTableSort) {
+    script.push(`import { sortRows } from "${relPrefix(input)}lib/table-sort";`);
+  }
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session
   // user so the `<template>` can `v-if`-guard a `<Forbidden/>` fallback — the
   // client mirror of the backend 403.  The currentUser binding is also needed
@@ -911,7 +940,7 @@ export function renderVueComponentFile(
   const stateLines: string[] = [];
   if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of state) {
-      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
       const pascal = upperFirst(f.name);
       stateLines.push(
         `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
@@ -1078,6 +1107,9 @@ export function renderVueComponentFile(
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
   );
+  if (result.usesTableSort) {
+    script.push(`import { sortRows } from "../lib/table-sort";`);
+  }
   // currentUser binding for a gated `Action(...)` button in the body (the
   // action-level mirror of the page gate; binding-only — a component has no
   // page `requires`).

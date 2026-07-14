@@ -109,6 +109,54 @@ export const vueTarget: WalkerTarget = {
     return `${segments.join(".")} = ${valueJs}`;
   },
 
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+
+  /** A `@click` header driving client-side sort.  Vue writes state
+   *  in-place (`sortKey = 'name'`); the SFC compiler unwraps the ref in
+   *  the inline handler.  Text interpolation is `{{ … }}`. */
+  renderSortableHeader(spec) {
+    const { header, field, sortKey, sortDir } = spec;
+    const k = sortKey.name;
+    const d = sortDir.name;
+    const q = `'${field}'`;
+    const onClick =
+      `${k} === ${q} ? (${d} = ${d} === 'asc' ? 'desc' : 'asc') ` + `: (${k} = ${q}, ${d} = 'asc')`;
+    const indicator = `{{ ${k} === ${q} ? (${d} === 'asc' ? ' ↑' : ' ↓') : '' }}`;
+    // A real `<button>` (not a clickable `<span>`) so the header is keyboard-
+    // focusable + carries an implicit ARIA role (a11y gates reject a span with
+    // `@click`).  The style resets the native button chrome to read as a header.
+    const style =
+      "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
+    return `<button type="button" style="${style}" @click="${onClick}">${header}${indicator}</button>`;
+  },
+
+  /** Sort the rows via the shared `sortRows` helper — Vue's strict template
+   *  can't carry the inline `as`-cast comparator React uses, so the typed
+   *  dynamic-key indexing lives in `src/lib/table-sort.ts` and the `v-for`
+   *  expression just calls it.  Refs auto-unwrap in the template. */
+  renderSortedRows(rowsExpr, sortKey, sortDir) {
+    return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
+  },
+
+  /** Prev / "Page N of M" / Next pager.  `:disabled` + `@click` bindings write
+   *  the ref in place (SFC unwrap); `Math` is on Vue's template global allow-
+   *  list, so the "of M" label computes inline. */
+  renderPager(spec) {
+    const p = spec.page.name;
+    const size = spec.pageSize;
+    const total = spec.totalExpr;
+    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const style =
+      "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
+    return (
+      `<div style="${style}" data-testid="pager">` +
+      `<button type="button" :disabled="${p} <= 1" @click="${p} = ${p} - 1">Prev</button>` +
+      `<span>Page {{ ${p} }} of {{ ${pages} }}</span>` +
+      `<button type="button" :disabled="${p} * ${size} >= ${total}" @click="${p} = ${p} + 1">Next</button>` +
+      `</div>`
+    );
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into vue-query composable naming +

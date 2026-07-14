@@ -50,7 +50,10 @@ describe("find-filter list UI — scaffolded list pages", () => {
       SCAFFOLD_SRC.replace(/find byStatus\(status: string\): Order\[\] where [^\n]*\n/, ""),
     );
     const list = files.get("web/src/pages/orders/list.tsx")!;
-    expect(list).not.toContain("useState");
+    // The list always carries client-side sort state now (M-T1.1) — so `useState`
+    // is present; what a filterless list lacks is the find-filter wiring.
+    expect(list).toContain("const [sortKey, setSortKey] = useState");
+    expect(list).not.toContain("orderByStatus");
     expect(list).not.toContain("filter");
     expect(list).toContain("const orderAll = useAllOrders();");
   });

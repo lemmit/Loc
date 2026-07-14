@@ -3,7 +3,7 @@
 // lambdas rebind their source param to the emitted `row` identifier via
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
-import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { provableStringType } from "../../../util/expr-body-type.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -13,10 +13,12 @@ import {
   escapeJsxText,
   lambdaArg,
   namedArgValue,
+  numericNamed,
   positionalArgs,
   slugify,
   stringNamed,
 } from "../shared/args.js";
+import type { StateRef } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -28,13 +30,92 @@ import {
   walk,
 } from "../walker-core.js";
 
+/** Build a `StateRef` for a page-state field named `name`.  Sort state is
+ *  always string-typed (`sortKey: ""`, `sortDir: "asc"`); mirrors the ad-hoc
+ *  ref the ref-case path in `walker-core.ts` constructs. */
+function stateRefFor(name: string): StateRef {
+  return {
+    field: { name, type: { kind: "primitive", name: "string" } } as StateFieldIR,
+    name,
+  };
+}
+
+/** Read a named arg that must be a bare state-field reference (`sortKey:
+ *  sortKey`).  Returns the referenced name, or undefined when the arg is
+ *  absent or not a plain ref. */
+function refArgName(call: ExprIR & { kind: "call" }, name: string): string | undefined {
+  const v = namedArgValue(call, name);
+  return v && v.kind === "ref" ? v.name : undefined;
+}
+
 export function emitTable(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   depth: number,
 ): string {
   const rowsArg = namedArgValue(call, "rows");
-  const rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  let rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  // The bound rows expression before any sort/slice wrapping.  Sort and slice
+  // both preserve nothing about it except count (sort reorders, slice narrows),
+  // so the pager reads the pre-slice total off this base expression.
+  const boundRowsExpr = rowsExpr;
+
+  // Client-side column sort (M-T1.1).  Active only when the Table carries
+  // `sortKey:`/`sortDir:` state refs AND the target implements the seam; a
+  // target without the seam ignores the args and renders the plain,
+  // unsorted table (byte-identical to a table with no sort args).
+  const sortKeyName = refArgName(call, "sortKey");
+  const sortDirName = refArgName(call, "sortDir");
+  const sortActive =
+    sortKeyName !== undefined &&
+    sortDirName !== undefined &&
+    ctx.target.renderSortedRows !== undefined &&
+    ctx.target.renderSortableHeader !== undefined;
+  const sortKeyRef = sortKeyName !== undefined ? stateRefFor(sortKeyName) : undefined;
+  const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
+  if (sortActive && sortKeyRef && sortDirRef) {
+    ctx.usesState = true;
+    // Signals the page-shell to import the shared `sortRows` helper.  Targets
+    // whose `renderSortedRows` inlines the sort (React) leave the flag unread;
+    // targets that call the helper (Vue/Svelte/Angular — their strict
+    // templates reject the inline `as`-cast comparator) read it to import.
+    ctx.usesTableSort = true;
+    rowsExpr = ctx.target.renderSortedRows!(rowsExpr, sortKeyRef, sortDirRef);
+  }
+
+  // Client-side pagination (M-T1.1).  Active when the Table carries a `page:`
+  // state ref (a 1-based int state field) AND the target implements the
+  // `renderPager` seam.  `pageSize:` is a fixed int-literal window (default 10).
+  // The rows are `.slice`d to the active page's window (built generically from
+  // `renderStateRead`), and a per-target pager control is appended below the
+  // table.  An un-ported target ignores the args → the table renders unpaged.
+  const pageName = refArgName(call, "page");
+  const pageSize = numericNamed(call, "pageSize") ?? 10;
+  const pagedActive =
+    pageName !== undefined && pageSize > 0 && ctx.target.renderPager !== undefined;
+  const pageRef = pageName !== undefined ? stateRefFor(pageName) : undefined;
+  let pagerMarkup: string | undefined;
+  if (pagedActive && pageRef) {
+    ctx.usesState = true;
+    const pageRead = ctx.target.renderStateRead(pageRef, "template");
+    // The (post-sort, pre-slice) rows expression — its `.length` is the pager's
+    // pre-slice total (sort preserves count).  When sort is active this is a
+    // sorted array that's guaranteed non-null (`sortRows(…)` returns `T[]`; the
+    // React inline `[...].sort` too), so no `?? []` guard is added — a redundant
+    // guard on a never-nullish operand is a strict-Angular error (TS2869).
+    const preSliceExpr = rowsExpr;
+    rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
+    const totalBase = sortActive ? preSliceExpr : boundRowsExpr;
+    // Guard a possibly-`undefined` base (an un-sorted bound query result), but
+    // idempotently — don't double-guard a base that already ends in `?? []`.
+    const totalExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
+      ? `(${totalBase}).length`
+      : sortActive
+        ? `(${totalBase}).length`
+        : `((${totalBase}) ?? []).length`;
+    pagerMarkup = ctx.target.renderPager!({ page: pageRef, pageSize, totalExpr });
+  }
+
   // A named-action reference (`onRowClick: add`) binds the hoisted handler
   // the page-shell emits from `page.actions` (named-actions-and-stores.md,
   // Proposal A Stage 1): a single-payload action receives the clicked `row`;
@@ -43,9 +124,10 @@ export function emitTable(
   const onRowClick = lambdaArg(call, "onRowClick");
 
   const positionals = positionalArgs(call);
+  const sortRefs = sortActive && sortKeyRef && sortDirRef ? { sortKeyRef, sortDirRef } : undefined;
   const cols = positionals
     .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
-    .map((c, i) => emitColumn(c, ctx, i, depth + 3));
+    .map((c, i) => emitColumn(c, ctx, i, depth + 3, sortRefs));
 
   const rowVar = "row";
   let onRowClickJs: string | undefined;
@@ -110,7 +192,7 @@ export function emitTable(
   // actually references it (e.g. a view keying on `keyExpr: "idx"`);
   // otherwise emit `(row)` so the generated code carries no unused param.
   const usesIdx = /\bidx\b/.test([keyExpr, rowTestidJs, onRowClickJs].filter(Boolean).join(" "));
-  return renderPrimitive(ctx, "primitive-table", {
+  const tableMarkup = renderPrimitive(ctx, "primitive-table", {
     rowsExpr,
     rowVar,
     keyExpr,
@@ -134,6 +216,10 @@ export function emitTable(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
+  // The pager renders as a sibling below the table (both inside the scaffold's
+  // `Paper`).  Concatenation keeps the table markup untouched for un-paged
+  // tables (byte-identical) and appends the control only when paged.
+  return pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
 }
 
 /** Emit one `Column("Header", <accessor>)` into a
@@ -147,6 +233,7 @@ function emitColumn(
   ctx: WalkContext,
   index: number,
   depth: number,
+  sortRefs?: { sortKeyRef: StateRef; sortDirRef: StateRef },
 ): { header: string; cellJsx: string; key: string } {
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
@@ -179,9 +266,37 @@ function emitColumn(
     }
     propagateChildFlags(ctx, childCtx);
   }
+
+  // A `sortable: true` column with an active sort seam renders a clickable
+  // header driving the page's `sortKey`/`sortDir` state.  The sort field is
+  // the explicit `field:` arg, else the accessor's member (`o => o.name` →
+  // `"name"`); a column whose field can't be resolved stays a plain header.
+  let header = ctx.target.escapeText(headerStr);
+  if (boolNamed(call, "sortable") && sortRefs && ctx.target.renderSortableHeader) {
+    const field = stringNamed(call, "field") ?? sortFieldFromAccessor(accessorArg);
+    if (field) {
+      header = ctx.target.renderSortableHeader({
+        header,
+        field,
+        sortKey: sortRefs.sortKeyRef,
+        sortDir: sortRefs.sortDirRef,
+      });
+    }
+  }
+
   return {
-    header: ctx.target.escapeText(headerStr),
+    header,
     cellJsx,
     key,
   };
+}
+
+/** Infer a column's sort field from a simple accessor lambda `o => o.<field>`.
+ *  Returns undefined for anything more complex (a formatting call, a nested
+ *  chain) — those columns need an explicit `field:` to be sortable. */
+function sortFieldFromAccessor(accessorArg: ExprIR | undefined): string | undefined {
+  if (accessorArg?.kind !== "lambda") return undefined;
+  const body = accessorArg.body;
+  if (body?.kind === "member" && body.receiver.kind === "ref") return body.member;
+  return undefined;
 }
