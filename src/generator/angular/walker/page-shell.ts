@@ -376,6 +376,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     for (const h of usedHelpers) members.push(`  protected readonly ${h} = ${h};`);
   }
 
+  // Interactive-table sort helper (M-T1.1) — a sortable `Table` renders a
+  // `sortRows(…)` call; import it and re-expose as a member so the template
+  // resolves it against the component (same lift as FORMAT_HELPERS).
+  if (result.tsx.includes("sortRows(")) {
+    imports.push(`import { sortRows } from "../../lib/table-sort";`);
+    members.push(`  protected readonly sortRows = sortRows;`);
+  }
+
   // Extern frontend functions the walked body / action bodies call — import
   // each from its conformance shim (`src/lib/<name>.ts` → `../../lib/<name>`
   // from `src/app/pages/`) and re-expose it as a component member so the
