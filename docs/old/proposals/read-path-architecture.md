@@ -1,479 +1,447 @@
-# Read-path architecture — an honest application read layer, and the repository put back in its place
+# Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14). No code yet. This is a
-> vision + grammar proposal, not a plan. It reconciles a coupling the
-> current default read path has that the rest of Loom's design already
-> disowns: an `api` mechanically exposes every aggregate's repository
-> finds as query endpoints, and the generated route handler calls the
-> repository **instance directly** — no application layer, and the
-> aggregate repository doing double duty as the wire-facing query
-> surface.
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 2). No code yet. A
+> vision + grammar proposal.
 >
-> It commits to the **read/write split, one model** direction (not full
-> event-sourced CQRS): reads flow `route → queryHandler | view →
-> repository`, the read side returns **response contracts (DTOs)** not
-> aggregates, and the `repository` narrows to its DDD job —
-> reconstituting whole aggregates by identity for the write side.
+> **rev. 2 reframes the core** (owner steer): the read path's one
+> load-bearing primitive is a **read-only repository queried by
+> `criterion`** — `Repo.run(<criterion>, sort?, page?)` under a
+> **read-only setting** that structurally forbids writes. That single
+> mechanism is *sufficient for almost every read*. The heavier machinery
+> rev. 1 put on the default path (mandatory `queryHandler` + per-read
+> `response` DTO + `find`→`retrieval` migration) demotes to **escape
+> hatches** for the cases that actually need them.
 >
-> Depends on / composes: [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-> (the `commandHandler` / `queryHandler` / `route` seam — **already
-> landed**), [`domain-services.md`](./domain-services.md) (the `reading`
-> tier), [`retrieval.md`](./retrieval.md) (the named query bundle),
-> [`criterion.md`](./criterion.md) (the predicate atom),
-> [`projection.md`](./projection.md) (the event-folded read model — the
-> opt-in *full*-CQRS escape hatch), [`views.md`](../views.md) (saved
-> queries), [`payload-transport-layer.md`](./payload-transport-layer.md)
-> (the contract records the read side returns), and the D-ENVELOPE wire
-> rule (`Paged<T>` / bare value). It introduces **almost no new
-> grammar** — the seam it needs already shipped; the proposal is about
-> making that seam the *default* read path and retiring the
-> auto-repository-to-route derivation.
+> Composes, all already shipped: [`criterion.md`](./criterion.md) (the
+> predicate atom — the query language), [`retrieval.md`](./retrieval.md)
+> (the *named* criterion+sort+loads bundle), [`domain-services.md`](./domain-services.md)
+> (the `reading` tier — **where the read-only setting already lives and
+> is already enforced**), the `repo-run` / `Repo.findAll(<criterion>)`
+> read builtins (`src/ir/types/loom-ir.ts:1494`, `:3173`), and
+> [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) (the
+> landed `queryHandler` / `route` seam — the orchestration escape hatch).
+> `view` (saved declarative query) and [`projection.md`](./projection.md)
+> (event-folded read model) are the two heavier escape hatches.
 
 ---
 
 ## TL;DR
 
-Today the read path is flat and directly coupled. `api SalesApi from
-Sales` names a subdomain; enrichment injects an implicit `find all():
-T[]` on every aggregate's repository (`src/ir/enrich/enrichments.ts:1542`);
-and the generated Hono route handler is literally a repository call:
+The whole read path is one primitive: **a repository, accessed
+read-only, queried by a criterion.**
 
-```ts
-// src/generator/typescript/emit/routes.ts:60  — app wiring
-app.route("/api/orders", ordersRoutes(new OrderRepository(db, events)));
+```ddd
+context Sales {
+  aggregate Customer { region: string; active: bool; ... }
+  repository Customers for Customer { }          // getById / save (write) + the read-only face
 
-// src/generator/typescript/repository-find-builder.ts (route handler body)
-const result = await repo.byCustomer(customerId);    // GET /orders/byCustomer
-const found  = await repo.findById(Ids.OrderId(id)); // GET /orders/:id
-return c.json(repo.toWire(found));
+  criterion ActiveInRegion(region: string) of Customer = this.active && this.region == region
+}
+
+# A read — from a read-only position, so the compiler guarantees it can't mutate:
+read activeEU: Customer[] = Customers.run(ActiveInRegion("EU"), sort: [name asc], page: page)
 ```
 
-Transport → repository → Drizzle. There is no application read layer,
-and the aggregate `repository` is the wire-facing query surface.
+- **`run` takes a `criterion`** (inline composed predicate) or a named
+  `retrieval`; `findAll` is `run` with no predicate. This collapses the
+  "repository-with-40-finders" smell into one generic, specification-driven
+  query — you stop minting a `find byX` method per query.
+- **The read-only setting** is what makes this the *layer of indirection*
+  the api was missing: the api binds to the repository's **read-only
+  face** (a query port that exposes `findById` / `run` / `findAll` and
+  *nothing that writes*), never to the mutating write repository. Reads
+  structurally cannot mutate, and cannot accrete bespoke finders.
+- **That is sufficient for almost everything.** Most reads are "list/one
+  of aggregate X, optionally filtered." The read-only query port covers
+  them. The heavier read constructs are opt-in for the minority that earn
+  them:
 
-The target is one read-path shape, everywhere:
+| Need | Use | Not the default |
+|---|---|---|
+| list / one / filtered read of an aggregate | **read-only repository + `criterion`** | — (this *is* the default) |
+| stitch several reads / diverge the wire shape from the aggregate | `queryHandler` (returns a `response` DTO) | only when a plain read won't do |
+| a saved, named, declarative query with cross-aggregate `bind` | `view` | only when reused / curated |
+| a denormalised read model folded from foreign events | `projection` (full CQRS) | only for event-sourced read models |
 
-```
-route  →  queryHandler | view | projection  →  repository
-(transport)   (application read side,           (domain: by-id
-               returns response DTOs)             aggregate reconstitution)
-```
-
-- **`repository` narrows** to `getById` / `findById` / `save` — whole-aggregate reconstitution for the write side. It is **never bound to a route**.
-- **The read side returns contracts**, not aggregates. `queryHandler` / `view` project to `response` records; the DTO boundary is explicit.
-- **`api` binds routes to handlers**, never derives from repositories. `scaffoldApi(of: X)` keeps the one-liner ergonomics by *synthesising* the query layer as real, unfoldable source.
-- **Reusable shaped queries are `retrieval`s** — the named home for what ad-hoc repository `find`s used to be, consumed by handlers via `Repo.run`.
-
-Nothing here requires event sourcing. `projection` remains the opt-in
-*full*-CQRS read model for the aggregates that want it; this proposal is
-about the default for the other 90%.
+This is the Ardalis `IReadRepository<T>` + Specification pattern, mapped
+onto Loom's existing `criterion`/`retrieval`/`reading`-tier machinery.
+Almost nothing here is new — the proposal is to make the read-only
+query port the **named, enforced, default** shape of a read.
 
 ---
 
 ## The problem, precisely
 
-### The coupling is transitive and auto-derived, not declared
+Today the read path is the *mutating* repository, exposed directly, with
+finders accreting on it:
 
-`ApiIR` stores only `sourceModule` (`src/ir/types/loom-ir.ts:2344`) —
-there is no api→repository edge. The read surface is *recomputed* from
-the subdomain's aggregates + repositories every generate:
+1. `api SalesApi from Sales` names a subdomain; `ApiIR` stores only
+   `sourceModule` (`loom-ir.ts:2344`). The read surface is re-derived
+   from the subdomain's repositories every generate.
+2. Enrichment injects an implicit `find all(): T[]` on every aggregate's
+   repository (`enrichments.ts:1542`).
+3. The generated Hono route handler *is* a repository call, and the
+   repository handed to the router is the **full read/write** object:
 
-1. `api X from Sales` → the subdomain's contexts → their repositories.
-2. Enrichment's `ensureFindAll` (`enrichments.ts:1542`) find-or-creates a
-   `RepositoryIR` per aggregate and prepends an implicit `find all():
-   T[]`, so every aggregate is unconditionally readable.
-3. Each aggregate gets a router constructed with `new
-   <Agg>Repository(db, events)` as its **sole dependency**
-   (`emit/routes.ts:43-63`); the router signature is `repo:
-   <Agg>Repository` (`routes-builder.ts:429`) and each read handler body
-   is `await repo.<find>(...)` then `repo.toWire(...)`.
+```ts
+// src/generator/typescript/emit/routes.ts:60
+app.route("/api/orders", ordersRoutes(new OrderRepository(db, events)));  // full repo — can save()
 
-To know what the api exposes for reads, you run the generators and read
-their output. To interpose *anything* — an authorization projection, a
-DTO that diverges from the aggregate, a cached read — you edit the
-generator. There is no source-level seam on the default read path.
+// route handler body — repository-find-builder.ts
+const result = await repo.byCustomer(customerId);    // a bespoke finder method
+return c.json(repo.toWire(found));
+```
 
-### Two DDD smells, with different fixes
+### Two DDD smells
 
-**Smell 1 — the interface layer reaches into a domain collection.** HTTP
-talks straight to the repository. In layered / hexagonal DDD the
-transport talks to an application service (a use case); the repository is
-a domain-layer port. Loom *already does the right thing* on the write
-side (`commandHandler` / `workflow` orchestrate; the route dispatches to
-them) and on the .NET / Java read side (a Mediator query /
-DI'd service). Only the node/Hono default read path skips the layer.
+- **Smell 1 — the interface layer reaches into the *mutating* domain
+  collection.** The router gets `new OrderRepository(db, events)` — the
+  same object a command uses to `save`. Nothing structural stops a read
+  path from mutating; the split is by convention, not by capability.
+- **Smell 2 — the repository accretes finders.** Every distinct query
+  becomes a `find byX(...)` method on the domain collection, welded to
+  the aggregate's wire shape via `repo.toWire`. This is the classic
+  "repository-with-40-methods."
 
-**Smell 2 — the aggregate repository is overloaded as the query
-surface.** In Evans' DDD a repository reconstitutes *whole aggregates by
-identity* — a write-side concern. Using it to serve arbitrary list /
-projection queries for the UI is the "repository-with-40-finders" smell:
-you load full aggregate trees to render a table, read concerns accrete on
-the domain collection, and the wire shape is welded to the aggregate's
-internal shape (`repo.toWire`). CQRS's insight — reads return purpose-built
-DTOs, decoupled from the write aggregate — is the fix, and it does **not**
-require a second persistence model to get the decoupling.
+The fix for **both** is the same one primitive: expose a **read-only**
+repository face, and express queries as **criteria** passed to a generic
+`run`, not as finder methods. Read-only kills Smell 1 (the api can't
+mutate through a query port). Specification-by-criterion kills Smell 2
+(no per-query method to accrete).
 
-These are separable: Smell 1 is "add the application seam"; Smell 2 is
-"return a contract, not an aggregate, and move ad-hoc finders off the
-repository." This proposal fixes both, because fixing only Smell 1
-(wrap `repo.findAll` in a passthrough handler that still returns the
-aggregate) buys layering with none of the decoupling.
+### The mechanism already half-exists
 
-### Why this isn't already fixed — the landed seam isn't the default
+- `Repo.run(<retrieval>, page?)` (retrieval.md, shipped 5 backends) and
+  `Repo.findAll(<criterion>)` (lowered to a `repo-run` riding a synthetic
+  `findAllBy<Criterion>` retrieval — `loom-ir.ts:1494`, `:3173`) are the
+  read builtins.
+- The **read-only setting is already a shipped, enforced concept**: the
+  `reading` domain-service tier permits `repo-read` calls and rejects
+  writes — `loom.domain-service-no-repo-write` says verbatim *"a domain
+  service may run read-only queries (the 'reading' tier), but persistence
+  writes … belong to the orchestrator"* (`domain-service-checks.ts:129`).
 
-[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) already
-landed the seam: `queryHandler` / `commandHandler` context members,
-`route <M> "<path>" -> Ctx.Handler` api bindings, the `HandlerRef`
-cross-ref, the one-directional layering validators
-(`loom.query-handler-saves`, `loom.command-handler-multi-aggregate`,
-`loom.route-handler-unresolved`, `api-checks.ts:120/136`), and per-backend
-codegen on all five backends. What did **not** land is step 3–4 of that
-proposal: the **`scaffoldApi` stdlib** that would *synthesise* handlers +
-routes from a subdomain. Absent it, `api from` falls back to the legacy
-auto-derivation — routes mechanically bound to repository finds. So the
-honest read path is opt-in and hand-written; the default is the coupled
-one. **This proposal is the missing default.**
+What's missing is making this the **default and only** way the api
+reads — instead of the mutating-repository-with-finders auto-derivation.
 
 ---
 
-## Target architecture
+## Target — the read-only query port
 
-### The three tiers, and what each may touch
+### A repository has two faces
 
-| Tier | Construct | Reads | Returns | Wire-facing? |
-|---|---|---|---|---|
-| **transport** | `route` | — | — (binds a method+path to a handler) | yes |
-| **application read** | `queryHandler`, `view`, `projection` | repositories, `retrieval`s, other query handlers | **`response` contract (DTO)** | no (a route surfaces it) |
-| **domain** | `repository` | its store | **whole aggregate** (by id) | **no — never bound to a route** |
+| Face | Exposes | Callable from |
+|---|---|---|
+| **write** | `save`, and `getById` for the load→mutate→save cycle | orchestrator tier only — `workflow`, `commandHandler` |
+| **read-only** | `findById`, `run(<criterion \| retrieval>, sort?, page?)`, `findAll(sort?, page?)` | any **read position** — an api read route, a `reading` service, a `queryHandler`, a `view` |
 
-The edges are strictly one-directional, matching Loom's pipeline
-discipline and the `pipeline-layering.test.ts` philosophy:
+The read-only face **is** the layer of indirection the original
+complaint asked for. It is not a separate service class; it is a
+capability-narrowed view of the repository. The api binds to it; the
+mutating face is unreachable from a read.
 
 ```
-        route ─────────────► queryHandler / view / projection
-      (transport)                    │
-                                     ▼
-                                repository  (by-id reconstitution)
-                                     │
-                                     ▼
-                                  store
+   api read route ──► repository (read-only face) ──► store
+                          run(criterion), findById, findAll
+                          — no save, structurally
+
+   workflow / commandHandler ──► repository (write face) ──► store
+                          getById → mutate → save
 ```
 
-- A **route** may reference a handler; it must not name a repository or an aggregate.
-- A **queryHandler** may call a repository / `retrieval`; it must return a `response`, never a bare aggregate.
-- A **repository** exposes `getById` / `findById` / `save`; it has no route and no DTO knowledge.
+### The read-only setting
 
-### Where the ad-hoc finders go
+Read-only-ness is conferred by **position**, exactly as the `reading`
+tier already does it — no per-call ceremony:
 
-Today's `repository Orders for Order { find byCustomer(...) }` splits:
+- Inside a `workflow` / `commandHandler`, a repository reference is the
+  **write** face (may `save`).
+- Inside an **api read route**, a `reading` service, a `queryHandler`, or
+  a `view`, a repository reference is the **read-only** face. A write
+  builtin there is a validation error (generalise the shipped
+  `loom.domain-service-no-repo-write` from the `reading` tier to *every*
+  read position → `loom.read-context-repo-write`).
 
-- The **shaped query** — predicate + sort + loads — becomes a
-  [`retrieval`](./retrieval.md): `retrieval OrdersByCustomer(customer:
-  Customer id) of Order { where: ... sort: ... }`. This is exactly what
-  `retrieval` was built for (it already ships on five backends), and it
-  is *domain-layer* (returns `Order[]`).
-- The **wire exposure** becomes a `queryHandler` that runs the retrieval
-  and projects to a DTO:
+This keeps the common case free of markers: you write `Customers.run(...)`
+and the compiler already knows, from where you wrote it, whether that
+repository can save.
+
+> **Open (the one real fork):** should read-only also be spellable
+> **explicitly** — a `read` marker on a repository handle
+> (`read Customers` / `Customers: read Customer`) — for authors who want
+> the capability visible at the reference site, or is implicit-by-position
+> enough? Lean: **implicit-by-position** (matches the shipped `reading`
+> tier; zero new syntax), with an explicit `read` marker as a later
+> nicety if empirical pressure appears. See Open questions.
+
+### `run` takes a criterion — the query language
+
+`run` accepts an **inline composed criterion** (predicate) or a **named
+retrieval**; both already lower through the same `repo-run` /
+`findAllBy<Criterion>` path (`loom-ir.ts:1494`):
 
 ```ddd
-context Ordering {
-  aggregate Order { ... }
-
-  // domain: reconstitution only
-  repository Orders for Order { }          // getById / findById / save — implicit
-
-  // domain: the named query (was `find byCustomer`)
-  retrieval OrdersByCustomer(customer: Customer id) of Order {
-    where: this.customerId == customer
-    sort:  [placedAt desc]
-  }
-
-  // application read side: returns a DTO, not an Order
-  queryHandler ListOrdersByCustomer(q: OrdersByCustomerQuery): OrderResponse paged {
-    return Orders.run(OrdersByCustomer(q.customer), page: q.page)   // project → OrderResponse
-  }
-}
-
-api SalesApi {
-  source: Sales
-  route GET "/orders/by-customer" -> Ordering.ListOrdersByCustomer
-}
+Customers.run(ActiveCustomer && InRegion("EU"), sort: [name asc], page: page)  # inline criterion
+Customers.run(ActiveInRegion("EU"), page: page)                                 # named retrieval (adds sort/loads)
+Customers.findAll(page: page)                                                   # run with no predicate
+Customers.findById(id)                                                          # by-identity reconstitution
 ```
 
-Generated (Hono sketch — the layer is now real):
+- **`page` is call-site only** (retrieval.md's decision, unchanged — it's
+  request state, not part of the rule).
+- Returns the aggregate (`T` / `T[]` / `Paged<T>`). For the common CRUD
+  read, that's the wire shape you want — no separate DTO required. When
+  the wire shape must *diverge* from the aggregate, reach for a
+  `queryHandler` returning a `response` (escape hatch, below).
 
-```ts
-// application/list-orders-by-customer.ts
-export async function listOrdersByCustomer(q: OrdersByCustomerQuery, db: Db): Promise<Paged<OrderResponse>> {
-  const orders = await new OrderRepository(db).run(ordersByCustomer(q.customer), q.page);
-  return paged(orders.items.map(toOrderResponse), orders.total);   // DTO projection is explicit
-}
-// routes: GET /api/orders/by-customer → mediator/dispatch → listOrdersByCustomer
-```
+This is why "sufficient for almost everything": list, one, and filtered
+reads of an aggregate — the overwhelming majority — are exactly
+`run(criterion)` / `findById`, with the read-only setting doing the
+architectural work for free.
 
-The `repository` is still constructed — but *inside the application
-handler*, not handed to the router. The route no longer knows the
-repository exists.
+### The default api read derivation, re-pointed
 
-### The ergonomic default — `scaffoldApi` synthesises the layer
+`api X from Sales` keeps its terseness but its read routes now derive
+onto the **read-only face**:
 
-The whole point of DDD-honest layering is undercut if it triples the
-line count of a CRUD app. So the default stays a one-liner, and the
-layer is *scaffolded* (macro-expanded to real, unfoldable AST — the same
-contract every Loom scaffold has: macro is the tracker, unfold is the
-freeze):
+- `GET /customers` → `Customers.findAll(page)` (the auto-`findAll`
+  becomes a read-only-face call, not a mutating-repo call).
+- `GET /customers/{id}` → `Customers.findById(id)`.
+- A declared `criterion` / `retrieval` marked exposable →
+  `GET /customers?<params>` → `Customers.run(<criterion>(params), page)`.
 
-```ddd
-api SalesApi with scaffoldApi(of: Sales)
-```
+The wire is byte-identical to today for the CRUD case; what changes is
+that the router receives a **read-only handle**, and query surface comes
+from criteria, not accreted finder methods. `scaffoldApi` (unfoldable-api-derivation)
+remains the unfold path when you want the routes as literal source.
 
-`scaffoldApi` (unfoldable-api-derivation steps 3–4) walks the subdomain
-and emits, per aggregate:
+---
 
-- a `response <Agg>Response` contract (fields filtered by the `apiRead`
-  access modifier — the existing `wire-projection.ts` logic, run at
-  scaffold time);
-- one `queryHandler` per readable shape (`ListOrders`, `GetOrderById`,
-  plus one per declared `retrieval`), each projecting to the response;
-- one `route` per handler.
+## When the read-only port isn't enough — the escape hatches
 
-Unfold any leaf to take it over; the rest stays scaffolded. This is the
-UI-scaffold model applied to the read path — "magic where it's obvious,
-source where you need it."
+Deliberately *not* on the default path; each earns its use:
+
+- **`queryHandler`** (landed, unfoldable-api-derivation) — when a read
+  must **orchestrate** (stitch several `run`s / call a `reading` service)
+  or **diverge the wire shape** from the aggregate (return a `response`
+  DTO, hide/rename/combine fields beyond the `apiRead` access filter). It
+  runs the read-only port internally and projects. `loom.query-handler-saves`
+  already keeps it read-only.
+- **`view`** (landed) — a **saved, named, declarative** query with
+  cross-aggregate `bind`-follow (`view X { … from Agg where P bind y =
+  ref.name }`). Use when the shaped query is reused and worth naming
+  declaratively rather than as an imperative handler.
+- **`projection`** (in-flight, projection.md) — a **denormalised read
+  model folded from foreign events**, its own table, `GET /projections/*`.
+  The *full-CQRS* escape hatch for event-sourced read models and
+  cross-aggregate denormalised reads that a query-time `run` can't serve
+  efficiently. Opt-in per read model — never forced.
+
+The ladder is legible: **`run(criterion)` for the 90%; `queryHandler`
+when you orchestrate or reshape; `view` when you name it; `projection`
+when you fold events.**
 
 ---
 
 ## Grammar
 
-The seam is landed; this proposal adds **one** narrowing rule and leans
-on `scaffoldApi`. Marked NEW / EXISTING / CHANGED.
+Very little is new — the primitive exists; the proposal *positions* it.
 
-### EXISTING — leveraged unchanged (already shipped)
+### EXISTING — leveraged unchanged (shipped)
 
-- `QueryHandler` (`ddd.langium:933`), `CommandHandler` (`ddd.langium:929`)
-  — application-layer members, return type required on queries.
-- `Route` / `HandlerRef` (`ddd.langium:505-512`) — transport binding.
-- `Retrieval` (`ddd.langium:~1502`), `Criterion` (`ddd.langium:1477`) —
-  the named query bundle + predicate atom.
-- `View` (`ddd.langium:1443`) — saved query returning a curated shape.
-- `payload | command | query | response | error` (`ddd.langium:875`) —
-  the contract vocabulary the read side returns.
+- `criterion` (`ddd.langium:1477`), `retrieval` (`ddd.langium:~1502`) —
+  the query language.
+- `Repo.run` / `Repo.findAll(<criterion>)` read builtins
+  (`loom-ir.ts:1494`, `:3173`).
+- `reading` domain-service tier + `loom.domain-service-no-repo-write`
+  (`domain-service-checks.ts:129`) — the read-only setting, already
+  enforced.
+- `QueryHandler` / `Route` / `View` — the escape hatches.
 
-### CHANGED — `repository` narrows; `find` deprecates in favour of `retrieval`
+### NEW — a read position for a top-level exposed read (optional sugar)
 
-The `Repository` rule stays, but the wire-facing `find` list is
-**deprecated**. `repository` keeps a body only for the rare custom
-reconstitution (e.g. an aggregate loaded by a natural key that isn't its
-id):
+For a read that isn't inside a handler/service/view but should still be a
+first-class, named, route-exposable read, a thin `read` member (sugar
+over "a `queryHandler` whose body is a single `run`"):
 
 ```langium
-Repository:
-    'repository' name=ID 'for' aggregate=[Aggregate:ID]
-    ('{' finds+=FindDecl* '}')?;     // body now optional; finds deprecated
+// ContextMember += ReadDecl  (soft keyword, like `criterion` / `channel`)
+ReadDecl:
+    'read' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')?
+    ':' returnType=TypeRef
+    '=' query=Expression ;      // an expression in read position: Repo.run(...) / findById / findAll
 ```
 
-- `getById` / `findById` / `save` stay implicit (unchanged).
-- A `find` that is a **pure shaped query** (`where` + optional sort) emits
-  a deprecation diagnostic (`loom.repository-find-deprecated`, warning)
-  pointing at "hoist to a `retrieval`; expose via a `queryHandler`."
-- A codemod (`ddd migrate reads`) rewrites `find X(...) where P` →
-  `retrieval X(...) of <Agg> { where: P }` + a scaffolded `queryHandler`.
+`read` bodies are validated **read-only** (`loom.read-context-repo-write`)
+and route-exposable directly (`route GET "/customers" -> Sales.activeEU`).
+It is the declarative twin of `queryHandler` for the single-`run` case —
+so the 90% path has a one-liner and only the orchestrating/​reshaping
+minority reaches for the full `queryHandler` body. (If review prefers
+*zero* new keywords, drop `read` and let the scaffold emit a
+single-expression `queryHandler`; `read` is ergonomic sugar, not
+load-bearing.)
 
-Deprecation-not-removal keeps existing `.ddd` parsing; the auto-derivation
-that binds a `find` to a route (below) is what actually retires.
+### CHANGED — `run` accepts a criterion; repository finders deprecate
 
-### CHANGED — the api read derivation retires
+- `run`'s argument widens from "named retrieval only" to
+  **`criterion | retrieval`** (the inline-criterion path already lowers;
+  this makes it first-class and documented).
+- A wire-shaped repository `find byX(...)` (a list query as a bespoke
+  method) warns `loom.repository-find-deprecated` → "pass a `criterion`
+  to `run`, or name it a `retrieval`." A `find` returning `T?` by a
+  **unique key** is *reconstitution*, not a list query, and stays legal
+  (see Open questions). Deprecation, not removal — existing `.ddd` parses.
 
-Legacy `api X from Sales` (no `with scaffoldApi`) currently
-auto-unfolds repository finds into routes. Under this proposal `from`
-still parses, but its **read derivation** changes:
+### CHANGED — the api read derivation targets the read-only face
 
-- With `with scaffoldApi(of: X)`: the read layer is scaffolded (handlers
-  + routes + responses). This becomes the recommended default; `ddd new`
-  templates emit it.
-- Bare `api X from Sales` (no `with`, no `route`s): a **transitional**
-  mode — still auto-derives, but now through *synthesised* query handlers
-  (a route never binds a repository directly), and emits
-  `loom.api-implicit-read-derivation` (info) nudging toward
-  `scaffoldApi`. Removed once every in-repo example migrates.
-
-### NOT NEW — no new read keyword
-
-The read side already has three constructs at three altitudes
-(`queryHandler` for orchestrated reads, `view` for saved
-declarative queries, `projection` for event-folded read models). Adding a
-fourth "query service" keyword would be speculative generality — the
-`reading` domain-service tier (`domain-services.md`) already covers the
-"reusable read logic callable from a handler" case. The proposal
-deliberately composes what ships.
+Unchanged surface (`api X from Y`); the derived read routes bind to the
+read-only face and query via criteria (above). The load-bearing rule:
+`loom.route-targets-write-repository` — a route may not reach the
+mutating face.
 
 ---
 
 ## IR
 
-Minimal — the nodes exist. Two changes:
+Minimal:
 
-- **`ApiIR`** stops carrying an implicit read surface. `routes: RouteIR[]`
-  (`loom-ir.ts:2368`) becomes the *only* read surface; the legacy
-  auto-derivation moves into the `scaffoldApi` macro (AST→AST), so no IR
-  node is synthesised for an implicit route. The enrich-phase
-  `ensureFindAll` (`enrichments.ts:1542`) relocates to scaffold time (it
-  becomes "the scaffold emits a `findAll` query handler if the aggregate
-  has none"), per unfoldable-api-derivation § "Auto-`findAll`".
-- **`RepositoryIR.finds`** is retained but marked read-only-legacy; the
-  backends stop emitting a route from a `FindIR` and instead emit the
-  repository method for a `queryHandler` / `retrieval` to consume.
+- The **read-only face** is a resolution/validation fact, not a new node:
+  a `RepoReadCall` (`readKind: "run" | "find" | "findAll" | "named"`,
+  `loom-ir.ts:3173`) in a read position is read-only; a write builtin in a
+  read position is rejected. No IR shape change — the existing `repo-run`
+  path already carries inline criteria via `findAllBy<Criterion>`
+  (`loom-ir.ts:1494`).
+- `ReadDecl` (if adopted) lowers to the same `QueryHandlerIR` shape with a
+  single-expression body — or its own thin `ReadIR` that reuses the
+  `repo-run` lowering. Reuses, not reinvents.
+- `ApiIR` read routes derive onto read-only-face calls (a `scaffoldApi` /
+  enrich-relocation concern, per unfoldable-api-derivation).
 
-`QueryHandlerIR` (`loom-ir.ts:1341`), `RouteIR` (`loom-ir.ts:2368`),
-`RetrievalIR` (`loom-ir.ts:928`) are unchanged.
-
-### `wireShape` retirement rides along
-
-With every wire read returning a declared `response`, the ad-hoc
-`wireShape` projection (`repo.toWire`) loses its last read-path consumer.
-This is exactly the retirement unfoldable-api-derivation § "wireShape
-retires from the IR" specs (Phase 1: DTO emitters read contract
-declarations; Phase 2: union bundles). This proposal makes that
-retirement *the reason the read path is clean* rather than a separate
-cleanup — the response contract **is** the decoupling.
+`wireShape` retirement (unfoldable-api-derivation) is **no longer central**
+to this proposal: a plain `run` read returns the aggregate wire shape,
+which is correct for the CRUD default. The DTO/`response` boundary only
+enters via the `queryHandler` escape hatch, where it's explicit anyway.
 
 ---
 
 ## Validation
 
-Existing (shipped) — reused:
+Shipped, reused:
 
-- `loom.query-handler-saves` — a `queryHandler` must not mutate/save (`api-checks.ts:120`).
-- `loom.route-handler-unresolved` — a route target resolves to a handler.
-- `loom.domain-service-no-repo-write` — the `reading` tier is read-only (`domain-service-checks.ts:129`).
+- `loom.query-handler-saves` (`api-checks.ts:120`) — read escape hatch stays read-only.
+- `loom.domain-service-no-repo-write` (`domain-service-checks.ts:129`) — the `reading` tier's read-only gate.
 
 New:
 
 | Code | Rule | Severity |
 |---|---|---|
-| `loom.query-handler-returns-aggregate` | a `queryHandler` returns a bare aggregate/`T[]` instead of a `response` contract | error |
-| `loom.route-targets-repository` | a `route` binds to a repository find (transport reaching the domain collection) | error |
-| `loom.repository-find-deprecated` | a wire-shaped `find` on a repository (hoist to `retrieval` + `queryHandler`) | warning |
-| `loom.api-implicit-read-derivation` | bare `api X from Y` uses the transitional auto-derivation | info |
+| `loom.read-context-repo-write` | a write builtin (`save`/mutation) called from a read position (api read route / `read` / `queryHandler` / `view`) — the generalisation of the shipped `reading`-tier gate | error |
+| `loom.route-targets-write-repository` | a route reaches the mutating repository face | error |
+| `loom.repository-find-deprecated` | a wire-shaped list `find` on a repository (pass a `criterion` to `run` / name a `retrieval`) | warning |
 
-The load-bearing one is `loom.route-targets-repository` — it is the
-structural statement of the whole proposal (transport may not name the
-domain collection), the read-side twin of the write-side
-`command-handler-multi-aggregate` layering gate.
+`loom.read-context-repo-write` is the load-bearing one — it *is* the
+read-only setting, made structural, extended from the `reading` tier to
+every read position.
 
 ---
 
 ## Per-backend emission
 
-The read layer is uniform because the constructs are portable:
+Uniform, because the primitive is portable and mostly already emitted:
 
-| Backend | Application read tier renders as |
+| Backend | Read-only port renders as |
 |---|---|
-| **Hono / node** | a plain exported `async function` per `queryHandler` in `application/`, dispatched from the route; repository constructed *inside* it; returns the `response` DTO. Replaces today's `repo.<find>` route handler. |
-| **.NET** | *already there* — the `martinothamar/Mediator` `IQueryHandler<TQuery, TRet>` the backend emits today (`dotnet/emit/cqrs.ts`); this proposal points the route at it instead of auto-deriving from finds. Natural first backend. |
-| **Java / Spring** | a `@Service` query method returning the response DTO; the `retrieval` renders as its `Specification<T>` (retrieval.md). |
-| **Python / FastAPI** | a query function in the application package; repository injected; returns the pydantic response model. |
-| **Elixir / Phoenix** | a context function (`Ordering.list_orders_by_customer/1`) returning the response struct; the retrieval is a composable `Ecto.Query`. |
+| **Hono / node** | the router receives a **read-only repository handle** (the read subset — `findById` / `run` / `findAll`), not the full `new OrderRepository(db, events)`; `run(<criterion>)` renders the existing Drizzle predicate + `orderBy`/`limit`/`offset` (retrieval.md path). |
+| **.NET** | the read-only `IReadRepository<T>` / `AsNoTracking` query the `reading` tier already emits (`domain-services.md:137`); `run(<criterion>)` is the Ardalis `Specification<T>` (retrieval.md). |
+| **Java / Spring** | a read-only repository / `Specification<T>` executed via `findAll(spec, Pageable)`. |
+| **Python / FastAPI** | a read-only repository object; `run` → the SQLAlchemy predicate. |
+| **Elixir / Phoenix** | a context read function; `run(<criterion>)` → a composable `Ecto.Query`. |
 
-`view` and `projection` keep their existing read endpoints
-(`GET /views/*`, `GET /projections/*`) — they are *already* DTO-returning
-application read tiers and need no change; they simply become
-first-class citizens of the same three-tier model rather than side doors.
+The `.NET`/`reading`-tier `AsNoTracking` read repository is the existing
+proof this shape emits cleanly; the change is making it the **api's** read
+handle, not only a domain-service dependency.
 
 ---
 
 ## Migration story
 
-No flag day. Staged, each slice independently shippable:
+No flag day; each slice independent:
 
-1. **`scaffoldApi` stdlib lands** (unfoldable-api-derivation steps 3–4) —
-   the ergonomic default exists. New projects use it.
-2. **The transitional derivation reroutes** — bare `api from` synthesises
-   query handlers instead of binding finds to routes. Byte-diff appears
-   only in *how* the read route is wired (via a handler), not in the wire
-   contract; conformance parity holds.
-3. **`wireShape` Phase 1** — DTO emitters read `response` contracts
-   (unfoldable-api-derivation step 5–6).
-4. **`find`→`retrieval` codemod** — `ddd migrate reads` rewrites in-repo
-   examples; the deprecation warning guides hand-written sources.
-5. **Retire `ensureFindAll` from enrichment** — once every example is
-   scaffolded, the enrich-phase injection is gone; `findAll` is a
-   scaffold-time query handler.
+1. **`run` accepts an inline `criterion`** first-class + documented (the
+   lowering path exists; surface + validation + one test per backend).
+2. **The read position gate** — `loom.read-context-repo-write` generalises
+   the `reading`-tier check to api read routes / `queryHandler` / `view` /
+   `read`. Pure validation; no emit change.
+3. **Read routes bind the read-only handle** — the router receives the
+   read subset; `save` becomes unreachable from a read. Wire byte-identical.
+4. **`read` member** (if adopted) + route-exposability.
+5. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
+   `ddd migrate reads` codemod over in-repo examples.
 
-Existing `.ddd` keeps parsing throughout; the only behavioural change a
-user sees is that a `find` on a repository warns and a route can no
-longer target one.
+Existing `.ddd` keeps parsing throughout; the visible change is that a
+list `find` warns and a read can no longer `save`.
 
 ---
 
 ## What this deliberately is NOT
 
-- **Not full event-sourced CQRS.** One persistence model. The read DTO is
-  projected from the *same* aggregate the write side owns, in-process, at
-  query time. `projection` (event-folded read models, separate table)
-  stays the **opt-in** escape hatch for the aggregates that earn it — it
-  is not forced on everyone. (This is the "read/write split, one model"
-  decision, not "full CQRS default.")
-- **Not a new query engine.** `criterion` still inlines into SQL; the
-  repository still owns the store access. The change is *where the query
-  is exposed* and *what shape it returns*, not how it executes.
-- **Not removing repositories.** Repositories are domain-layer DDD
-  citizens and stay. They stop moonlighting as the wire-facing query
-  surface. That is the entire "put back in its place."
+- **Not full event-sourced CQRS by default.** One model. A read returns
+  the aggregate queried by criterion at query time. `projection` (event
+  folded, separate table) stays the opt-in escape hatch.
+- **Not a mandatory DTO layer.** A plain `run` read returns the aggregate
+  wire shape — right for the CRUD majority. The `response` DTO boundary is
+  the `queryHandler` escape hatch, not a tax on every read. *(This is the
+  main rev. 1 → rev. 2 change: rev. 1 forced a DTO + handler per read; the
+  owner steer is that the read-only criterion port is enough for almost
+  everything.)*
+- **Not removing repositories or all finders.** The repository stays; it
+  gains an enforced read-only face and stops accreting list-finders in
+  favour of criteria. Unique-key reconstitution finds stay.
 
 ---
 
 ## Open questions
 
-1. **Does `view` subsume the simple-read `queryHandler`?** A `view` is a
-   declarative saved query returning a curated shape; a passthrough
-   `queryHandler` that just projects `Orders.run(...)` → DTO is nearly a
-   `view`. Lean: keep both — `view` is declarative (no body, `from … where
-   … bind …`), `queryHandler` is imperative (a body that can stitch
-   multiple retrievals / call a `reading` service). The line is the same
-   `criterion`-vs-`service` line. Confirm the scaffold prefers `view` for
-   the pure single-source case and `queryHandler` only when a body is
-   needed.
-2. **Repository custom reconstitution.** Some aggregates load by a natural
-   key (`find bySlug`) that *is* reconstitution, not a query. Keep a
-   narrow `find`-for-reconstitution (returns the aggregate, by a unique
-   key) exempt from the deprecation? Lean: yes — `find` returning `T?`
-   with a unique-key `where` is reconstitution and stays domain-legal; the
-   deprecation targets `find` returning `T[]` (a list query).
-3. **Where the DTO projection lives.** Scaffold-emitted `queryHandler`s
-   project `Order → OrderResponse` with a generated `toResponse`. Is that
-   projector a scaffold-time literal (unfoldable, editable) or a shared
-   helper? Lean: literal in the unfolded form, shared in the macro form —
-   the standard scaffold tracker/freeze contract.
-4. **`reading` domain service vs `queryHandler`.** Both are read-only
-   application-ish tiers. Confirm the layering: a `queryHandler` *may
-   call* a `reading` service (reusable read logic), and a `reading`
-   service returns domain objects (aggregates/values) while a
-   `queryHandler` returns the wire DTO. The projection-to-DTO boundary is
-   what distinguishes them.
-5. **Pagination carrier.** `queryHandler` reads that page must return the
-   D-ENVELOPE `Paged<T>` (`response … paged`), not a bare `T[]`. Confirm
-   the scaffold always emits `paged` for list handlers (it has the
-   information — the retrieval's cardinality).
+1. **Explicit `read` marker vs implicit-by-position.** Is the read-only
+   setting purely positional (recommended — matches the `reading` tier, no
+   new syntax), or should a `read`-marked repository handle make the
+   capability visible at the reference site? Positional covers the
+   semantics; explicit is a readability nicety. Lean positional.
+2. **`read` member: worth a keyword, or fold into `queryHandler`?** A
+   single-`run` read is nearly a bodyless `queryHandler`. `read X: T[] =
+   Customers.run(...)` is a nicer 90%-path one-liner; the cost is a
+   keyword. Lean: ship `read` as sugar; it's the declarative twin of
+   `criterion`/`view`. Confirm.
+3. **Unique-key reconstitution `find`.** A `find bySlug(slug): T?` with a
+   unique-key `where` is reconstitution, not a list query — stays exempt
+   from `loom.repository-find-deprecated`? Lean: yes; the deprecation
+   targets list finders (`T[]`) only.
+4. **Does `run` supersede `findAll`?** `findAll(page)` is `run` with no
+   predicate. Keep `findAll` as the readable no-filter spelling, or make it
+   `run()` with an empty criterion? Lean: keep `findAll` (reads better;
+   already shipped).
+5. **Criterion exposability → route.** Which declared `criterion` /
+   `retrieval` auto-exposes as a `GET` with its params as query params, vs
+   staying internal? Lean: an explicit `exposed`/`from`-style marker (the
+   `criterion` `from <Criterion>` auto-exposure was already sketched in
+   criterion.md's deferred set) rather than exposing every criterion.
 
 ## Cross-references
 
+- [`criterion.md`](./criterion.md) — the predicate atom; the query
+  language `run` consumes. Its deferred `from <Criterion>` auto-exposure
+  is open question 5 here.
+- [`retrieval.md`](./retrieval.md) — the *named* criterion+sort+loads
+  bundle; `run`'s other argument form.
+- [`domain-services.md`](./domain-services.md) — the `reading` tier: where
+  the read-only setting already lives and is already enforced. This
+  proposal generalises that gate to every read position.
 - [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) — the
-  landed `queryHandler` / `route` seam and the `scaffoldApi` / `wireShape`
-  retirement this proposal makes the *default*. This doc is that
-  proposal's read-path half, committed to a persistence decision.
-- [`retrieval.md`](./retrieval.md) — the named query bundle that becomes
-  the home for ad-hoc repository finders.
-- [`domain-services.md`](./domain-services.md) — the `reading` tier a
-  `queryHandler` may call for reusable read logic.
-- [`projection.md`](./projection.md) — the opt-in *full*-CQRS read model;
-  the escape hatch this proposal deliberately does not make mandatory.
-- [`views.md`](../views.md) — saved declarative queries; already a
-  DTO-returning read tier, folded into the same three-tier model.
-- [`payload-transport-layer.md`](./payload-transport-layer.md) — the
-  `response` contract records the read side returns.
-- [`criterion.md`](./criterion.md) / [`criterion-everywhere.md`](./criterion-everywhere.md)
-  — the predicate atom, unchanged; still inlines into SQL.
-- `docs/architecture.md` — the api-derivation table (§ derivation) this
-  proposal rewrites: repository `find` → *no longer a route*; the read
-  route derives from a `queryHandler`.
+  `queryHandler` / `route` orchestration escape hatch (landed) and
+  `scaffoldApi` unfold path.
+- [`views.md`](../views.md) — the saved-declarative-query escape hatch.
+- [`projection.md`](./projection.md) — the event-folded read-model
+  (full-CQRS) escape hatch; deliberately opt-in, not the default.
+- `docs/architecture.md` — the api-derivation table this rewrites:
+  repository `find` → a `criterion`-driven read on the read-only face, not
+  a bespoke route-bound finder.
