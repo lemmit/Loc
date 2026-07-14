@@ -80,6 +80,24 @@ export interface FsExprCtx {
   stateNames: ReadonlySet<string>;
   /** Lambda / action param names in scope — a ref resolves to the bare name. */
   locals: ReadonlySet<string>;
+  /** When rendering a STORE action body, the store's own fields bind as `let`
+   *  locals at lowering (`count := 0` → a bare `count`), so a bare ref to one
+   *  resolves to the namespaced Model field `model.<Store><Field>` (stores
+   *  compose into the single Elmish Model).  Absent for page/component bodies. */
+  storeScope?: { store: string; fields: ReadonlySet<string> };
+}
+
+/** The single-program Elmish Model field a store field folds into
+ *  (`Cart` + `count` → `CartCount`).  Stores share the one `Model`; flat
+ *  namespacing avoids a nested-record type and collisions with page state. */
+export function storeModelField(store: string, field: string): string {
+  return `${upperFirst(store)}${upperFirst(field)}`;
+}
+
+/** The Elmish `Msg` case a store action folds into (`Cart` + `clear` →
+ *  `CartClear`). */
+export function storeMsgCase(store: string, action: string): string {
+  return `${upperFirst(store)}${upperFirst(action)}`;
 }
 
 /** Render a method-call to idiomatic F# for the update/action path.  Frontend
@@ -138,6 +156,16 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
     case "literal":
       return FS_LEAVES.literal(e.lit, e.value);
     case "ref":
+      // A dotted `<Store>.<field>` read (page/component body) — resolved to the
+      // namespaced Model field regardless of scope.
+      if (e.refKind === "store-field" && e.storeName) {
+        return `model.${storeModelField(e.storeName, e.name)}`;
+      }
+      // Inside a store action body the store's own fields are `let` locals; a
+      // bare ref to one resolves to its namespaced Model field.
+      if (ctx.storeScope?.fields.has(e.name)) {
+        return `model.${storeModelField(ctx.storeScope.store, e.name)}`;
+      }
       if (ctx.locals.has(e.name)) return e.name;
       if (ctx.stateNames.has(e.name)) return `model.${upperFirst(e.name)}`;
       return e.name;

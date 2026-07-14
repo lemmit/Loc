@@ -11,7 +11,7 @@ import type { BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
-import { FS_LEAVES, fsString } from "./fs-expr.js";
+import { FS_LEAVES, fsString, storeModelField } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
@@ -131,6 +131,18 @@ export const felizTarget: WalkerTarget = {
   // harmless placeholder is correct.
   renderStateWrite: () => "()",
   renderNestedStateWrite: () => "()",
+
+  // --- Store seam — stores fold into the single Elmish Model (Stage 5) ------
+  // A store field reads from its namespaced Model field; the page-view shell
+  // binds a local (`let <local> = model.<Store><Field>`) that the body walk
+  // references, exactly as it binds `let <action> () = dispatch <Msg>`.
+  renderStoreFieldRead: (ref: { storeName: string; field: string }) =>
+    `model.${storeModelField(ref.storeName, ref.field)}`,
+  // A `<Store>.<action>(args)` call → the shell-bound dispatcher local.
+  renderStoreActionCall: (
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ) => (renderedArgs.length > 0 ? `${ref.local} ${renderedArgs}` : `${ref.local} ()`),
 
   // --- API seam — MVU projection (fable-elmish-frontend.md §2.3/§7.2) -------
   // An Elmish read is NOT a per-component hook: the `<param>.<agg>.all` site

@@ -283,26 +283,12 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       if (dep.platform !== "feliz") continue;
       const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
       for (const uiName of mounted) {
-        // (a) store gate
-        const stores = storesByUi.get(uiName);
-        if (stores && stores.length > 0) {
-          for (const store of stores) {
-            const where = `store '${store.name}'`;
-            diags.push({
-              severity: "error",
-              code: "loom.feliz-store-unsupported",
-              message:
-                `${where} is used by ui '${uiName}', hosted by the Feliz (F#/Fable) deployable ` +
-                `'${dep.name}', but the Feliz frontend has no store subsystem yet — a shared reactive ` +
-                `store needs Elmish Model/Msg composition + a store-scoped read seam, not a single emit ` +
-                `arm.  Host this ui on an SPA frontend (React/Vue/Svelte/Angular) that supports stores, ` +
-                `or move the shared state into the page's own \`state { … }\`.  Tracked in M-T6.15.`,
-              source: where,
-            });
-          }
-        }
+        // Stores now fold into the single-program Elmish Model/Msg/update (each
+        // store field → a namespaced Model field, each store action → a Msg
+        // case), so `loom.feliz-store-unsupported` was lifted once that
+        // subsystem landed — the store reads/actions emit against `model`.
 
-        // (b) async-effect gate — loom.feliz-async-effect-unsupported.  A
+        // async-effect gate — loom.feliz-async-effect-unsupported.  A
         // frontend `match await <op>()` (async-actions-and-effects.md Stage 2)
         // lowers to a `variant-match` statement whose async envelope (await the
         // remote mutation, reify the thrown error into the error variant, then a

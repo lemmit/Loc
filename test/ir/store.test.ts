@@ -306,11 +306,12 @@ system Demo {
     ).not.toContain("loom.store-cross-store-on-liveview-unsupported");
   });
 
-  it("loom.feliz-store-unsupported fires for a store used by a Feliz-hosted ui; React is clean (M-T6.15)", async () => {
-    // The Feliz (F#/Fable) frontend has no store subsystem yet — a store on a
-    // `platform: feliz` deployable's ui is gated at validation rather than
-    // crashing the F# emit.  The identical model on React is clean.
-    expect(await codes(STORE, "feliz")).toContain("loom.feliz-store-unsupported");
+  it("a store on a Feliz-hosted ui is clean — stores fold into the Elmish Model (M-T6.15)", async () => {
+    // Stores now compose into the single-program Feliz MVU (each field → a
+    // namespaced Model field, each action → a Msg case), so the former
+    // `loom.feliz-store-unsupported` gate is gone; a store on `platform: feliz`
+    // validates cleanly, same as React.
+    expect(await codes(STORE, "feliz")).not.toContain("loom.feliz-store-unsupported");
     expect(await codes(STORE, "react")).not.toContain("loom.feliz-store-unsupported");
   });
 
