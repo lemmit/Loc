@@ -244,6 +244,17 @@ export interface WalkerTarget {
    *  `socket.assigns.step` (handler). */
   renderStateRead(ref: StateRef, position: RenderPosition): string;
 
+  /** Render a `currentUser.<claim>` access in a body expression (D-AUTH-OIDC,
+   *  the read-side of the auth gate) — the whole member access, since the
+   *  session user may be loosely / optionally bound.  Optional: a target that
+   *  leaves it undefined falls through to the plain member emit (the JSX
+   *  frontends today, whose session user is a shell-bound `currentUser` local —
+   *  handled there rather than here).  Feliz binds the decoded claims on the
+   *  Model (`model.CurrentUser : CurrentUser option`), so it renders an
+   *  option-match against the pascal-cased record field.  `memberType` is the
+   *  claim's declared type (for the None-branch zero value). */
+  renderCurrentUserAccess?(field: string, memberType: TypeIR): string;
+
   /** Render a write to `state.<field>` from a `state.field := <expr>`
    *  statement encountered inside a block-body lambda.  TSX returns
    *  the React setter call (`setStep(value)`); HEEx returns the

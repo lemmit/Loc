@@ -1312,6 +1312,19 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `${expr.name}(${args})`;
     }
     case "member": {
+      // A `currentUser.<claim>` access — the receiver is the verified session
+      // user (D-AUTH-OIDC).  A target that can resolve the claims (Feliz binds
+      // `model.CurrentUser`) owns the WHOLE access via the seam, since the
+      // session user may be optionally bound; targets that leave the seam
+      // undefined fall through to the plain member emit below.
+      if (
+        expr.receiver.kind === "ref" &&
+        expr.receiver.refKind === "current-user" &&
+        ctx.target.renderCurrentUserAccess
+      ) {
+        ctx.usesCurrentUser = true;
+        return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
+      }
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain
       //, tryDetectApiHook at the top has already
