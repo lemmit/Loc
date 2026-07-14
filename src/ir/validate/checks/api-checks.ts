@@ -144,11 +144,27 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
   }
 }
 
+/** HTTP methods that denote a READ position — a route that only retrieves.
+ *  Loom's `HttpMethod` grammar admits GET|POST|PUT|PATCH|DELETE, so GET is the
+ *  sole read verb.  A read route may reach the repository's read-only face only;
+ *  binding it to a writing handler is the transport-level twin of the
+ *  `reading`-tier `loom.domain-service-no-repo-write` gate
+ *  (read-path-architecture.md, "The read-only setting" →
+ *  `loom.read-context-repo-write`). */
+const READ_ROUTE_METHODS = new Set(["GET"]);
+
 /** Whole-model: every `route` target must resolve to a `commandHandler`,
  *  `queryHandler`, or workflow `handle` member in the named context
  *  (`loom.route-handler-unresolved`).  The route's `target.context` is a real
  *  Langium cross-ref (already resolved), but the `handler` segment is a plain
- *  name the linker doesn't chase, so it's checked here. */
+ *  name the linker doesn't chase, so it's checked here.
+ *
+ *  Also gates `loom.read-context-repo-write` (read-path-architecture.md): a
+ *  READ-method route (GET/HEAD) may not target a handler on the WRITE face — a
+ *  mutating `commandHandler` or a workflow `handle`.  This generalises the
+ *  shipped `reading`-tier read-only setting (`domain-service-no-repo-write`) and
+ *  the `queryHandler` read-only gate (`query-handler-saves`) to the remaining
+ *  read position — the api read route — so a read structurally cannot save. */
 export function validateRoutes(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const c of allContexts(loom)) ctxByName.set(c.name, c);
@@ -183,6 +199,32 @@ export function validateRoutes(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               `named '${route.target.handler}'.`,
             source: `${sys.name}/${api.name}`,
           });
+          continue;
+        }
+        // `loom.read-context-repo-write` — a READ-method route may only reach the
+        // read-only face (a `queryHandler`).  A mutating `commandHandler` or a
+        // workflow `handle` is the WRITE face, so a GET/HEAD bound to one lets a
+        // read save — exactly what the `reading`-tier gate forbids in a service
+        // body, generalised here to the transport edge.
+        if (READ_ROUTE_METHODS.has((route.method ?? "").toUpperCase())) {
+          const cmd = (ctx.commandHandlers ?? []).find((h) => h.name === route.target.handler);
+          const isWorkflowHandle = ctx.workflows.some((w) =>
+            (w.handlers ?? []).some((h) => h.name === route.target.handler),
+          );
+          const writes = (cmd && !cmd.extern && handlerMutates(cmd)) || isWorkflowHandle;
+          if (writes) {
+            const targetKind = isWorkflowHandle ? "workflow handle" : "commandHandler";
+            diags.push({
+              severity: "error",
+              code: "loom.read-context-repo-write",
+              message:
+                `api '${api.name}': route '${label}' is a read (${route.method}) but targets ` +
+                `${targetKind} '${route.target.context}.${route.target.handler}', which writes. A read ` +
+                `position (an api read route, a queryHandler, or a 'reading' service) may not reach the ` +
+                `mutating repository face — bind the read to a queryHandler.`,
+              source: `${sys.name}/${api.name}`,
+            });
+          }
         }
       }
     }
