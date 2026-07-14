@@ -1074,11 +1074,7 @@ export function buildMigrations(
     // + owned-child cascade, plus the FK-column renames the cascade implies.
     // The column renames join the column-rename list; the table renames feed
     // `diffSchema` so a renamed table pairs with its new self.
-    const tableRenamePlan = resolveTableRenames(
-      m,
-      options.tableRenameIntents ?? [],
-      schemaOf,
-    );
+    const tableRenamePlan = resolveTableRenames(m, options.tableRenameIntents ?? [], schemaOf);
     const allRenames = [...renames, ...tableRenamePlan.columnRenames];
     const steps = applyDestructivePolicy(
       diffSchema(baseline, next, allRenames, tableRenamePlan.tableRenames),

@@ -22,19 +22,6 @@ function findAggregate(model: Model, name: string): Aggregate {
   throw new Error(`aggregate ${name} not found`);
 }
 
-function findContext(model: Model, name: string): any {
-  for (const sm of model.members ?? []) {
-    if ((sm as any).$type !== "System") continue;
-    for (const m of (sm as any).members ?? []) {
-      if (m.$type !== "Subdomain") continue;
-      for (const ctx of m.contexts ?? []) {
-        if (ctx.name === name) return ctx;
-      }
-    }
-  }
-  throw new Error(`context ${name} not found`);
-}
-
 describe("auditable stdlib macro", () => {
   it("adds 4 audit fields to the aggregate", async () => {
     const { model, errors } = await parseString(
