@@ -149,6 +149,12 @@ export interface WalkResult {
    *  `useParams` / `route.params` / `$page.params` / the Angular
    *  `ActivatedRoute` snapshot) so the reference resolves. */
   usesRouteId: boolean;
+  /** True when a `Table` emitted a client-side sort via the
+   *  `renderSortedRows` seam that references the shared `sortRows`
+   *  helper (M-T1.1).  The page-shell adds `import { sortRows } from
+   *  "../lib/table-sort"` when set — targets whose `renderSortedRows`
+   *  inlines the sort (React) leave it false. */
+  usesTableSort: boolean;
   /** Names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
    *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
@@ -381,6 +387,7 @@ export function walkBody(
     authUi,
     usedParams: new Set(),
     usesNavigate: false,
+    usesTableSort: false,
     stateNames,
     derivedNames,
     usesState: false,
@@ -421,6 +428,7 @@ export function walkBody(
     imports: ctx.imports,
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
+    usesTableSort: ctx.usesTableSort ?? false,
     usesState: ctx.usesState,
     usesCurrentUser: ctx.usesCurrentUser,
     usesRouterLink: ctx.usesRouterLink,
@@ -538,6 +546,10 @@ export interface Sink {
   imports: ImportMap;
   usedParams: Set<string>;
   usesNavigate: boolean;
+  /** M-T1.1 — set by a `Table` whose `renderSortedRows` seam references the
+   *  shared `sortRows` helper.  Optional so the many `Sink` construction sites
+   *  needn't all initialise it; only the interactive-table path writes it. */
+  usesTableSort?: boolean;
   usesState: boolean;
   /** True when a currentUser-gated action button emitted from this body
    *  (an `Action(<instance>.<op>)` whose op `requires` is client-evaluable).
@@ -920,6 +932,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesNavigate) parent.usesNavigate = true;
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesRouteId) parent.usesRouteId = true;
+  if (child.usesTableSort) parent.usesTableSort = true;
   if (child.usesState) parent.usesState = true;
   if (child.usesCurrentUser) parent.usesCurrentUser = true;
   if (child.usesChildren) parent.usesChildren = true;

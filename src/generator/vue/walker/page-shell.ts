@@ -431,6 +431,11 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "${relPrefix(input)}lib/format";`,
   );
+  // Interactive-table sort helper — imported only when a `Table` on this page
+  // renders sortable columns (M-T1.1).
+  if (result.usesTableSort) {
+    script.push(`import { sortRows } from "${relPrefix(input)}lib/table-sort";`);
+  }
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session
   // user so the `<template>` can `v-if`-guard a `<Forbidden/>` fallback — the
   // client mirror of the backend 403.  The currentUser binding is also needed
@@ -1078,6 +1083,9 @@ export function renderVueComponentFile(
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
   );
+  if (result.usesTableSort) {
+    script.push(`import { sortRows } from "../lib/table-sort";`);
+  }
   // currentUser binding for a gated `Action(...)` button in the body (the
   // action-level mirror of the page gate; binding-only — a component has no
   // page `requires`).

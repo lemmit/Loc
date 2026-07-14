@@ -109,6 +109,30 @@ export const vueTarget: WalkerTarget = {
     return `${segments.join(".")} = ${valueJs}`;
   },
 
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+
+  /** A `@click` header driving client-side sort.  Vue writes state
+   *  in-place (`sortKey = 'name'`); the SFC compiler unwraps the ref in
+   *  the inline handler.  Text interpolation is `{{ … }}`. */
+  renderSortableHeader(spec) {
+    const { header, field, sortKey, sortDir } = spec;
+    const k = sortKey.name;
+    const d = sortDir.name;
+    const q = `'${field}'`;
+    const onClick =
+      `${k} === ${q} ? (${d} = ${d} === 'asc' ? 'desc' : 'asc') ` + `: (${k} = ${q}, ${d} = 'asc')`;
+    const indicator = `{{ ${k} === ${q} ? (${d} === 'asc' ? ' ↑' : ' ↓') : '' }}`;
+    return `<span style="cursor: pointer; user-select: none;" @click="${onClick}">${header}${indicator}</span>`;
+  },
+
+  /** Sort the rows via the shared `sortRows` helper — Vue's strict template
+   *  can't carry the inline `as`-cast comparator React uses, so the typed
+   *  dynamic-key indexing lives in `src/lib/table-sort.ts` and the `v-for`
+   *  expression just calls it.  Refs auto-unwrap in the template. */
+  renderSortedRows(rowsExpr, sortKey, sortDir) {
+    return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into vue-query composable naming +

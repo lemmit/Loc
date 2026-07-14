@@ -70,6 +70,11 @@ export function emitTable(
   const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
   if (sortActive && sortKeyRef && sortDirRef) {
     ctx.usesState = true;
+    // Signals the page-shell to import the shared `sortRows` helper.  Targets
+    // whose `renderSortedRows` inlines the sort (React) leave the flag unread;
+    // targets that call the helper (Vue/Svelte/Angular — their strict
+    // templates reject the inline `as`-cast comparator) read it to import.
+    ctx.usesTableSort = true;
     rowsExpr = ctx.target.renderSortedRows!(rowsExpr, sortKeyRef, sortDirRef);
   }
   // A named-action reference (`onRowClick: add`) binds the hoisted handler
