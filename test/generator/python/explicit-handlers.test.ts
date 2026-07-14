@@ -193,6 +193,101 @@ describe("python — explicit handler body params → single request model", () 
   });
 });
 
+// M-T5.10 handler-param rewrite — a scaffolded handler takes a SINGLE
+// `command`/`query` RECORD param.  The Python handler FLATTENS the record into
+// its fields as flat domain-typed `def` params (byte-identical to the flat-param
+// form), renders the body's `cmd.<field>` as the flat field local, and — for a
+// read — declares `<Agg>Response`, mapped back to the entity and projected via
+// `repo.to_wire(...)` (a collection read comprehends each element).  The router's
+// `<Handler>Body` Pydantic model carries the SAME flat fields, so the wire is
+// unchanged.
+const SCAFFOLD_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering with scaffoldHandlers {
+      valueobject Money { amount: decimal; currency: string }
+      aggregate Order {
+        code: string
+        status: string
+        total: Money
+        create(code: string) { code := code  status := "new"  total := Money { amount: 0, currency: "USD" } }
+        operation reprice(newTotal: Money) { total := newTotal }
+      }
+      repository Orders for Order {
+        find byStatus(status: string): Order[] where this.status == status
+      }
+    }
+  }
+  api SalesApi with scaffoldApi(of: Sales)
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("python — scaffolded handlers consume record params (M-T5.10)", () => {
+  it("create handler flattens the command record into flat def params + reads cmd.<field>", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    const h = fileEndingWith(m, "app/application/create_order.py");
+    // The `cmd: CreateOrderCommand` record is FLATTENED into its fields as flat
+    // domain-typed def params (not a single `cmd` object param).
+    expect(h).toContain(
+      "async def create_order(session: AsyncSession, code: str, status: str, total: Money) -> OrderId:",
+    );
+    // Body reads `cmd.code` / `cmd.status` / `cmd.total` as the flat field locals.
+    expect(h).toContain("o = Order.create(code=code, status=status, total=total)");
+    expect(h).toContain("return o.id");
+    // The aggregate domain class is imported for the `Order.create(...)` factory.
+    expect(h).toContain("from app.domain.order import Order");
+  });
+
+  it("operation handler flattens the command record + reads the VO field local", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    const h = fileEndingWith(m, "app/application/reprice_order.py");
+    // Path-bound id stays a separate flat param; the record field flattens in.
+    expect(h).toContain(
+      "async def reprice_order(session: AsyncSession, order_id: OrderId, new_total: Money) -> None:",
+    );
+    expect(h).toContain("o.reprice(new_total)");
+  });
+
+  it("find handler projects the <Agg>Response collection via to_wire per element", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    const h = fileEndingWith(m, "app/application/by_status.py");
+    // The declared `ByStatusQuery` record flattens to `status`; the `OrderResponse[]`
+    // return normalises to the entity and projects each element via to_wire.
+    expect(h).toContain(
+      "async def by_status(session: AsyncSession, status: str) -> list[dict[str, object]]:",
+    );
+    expect(h).toContain("r = await orders.by_status(status)");
+    expect(h).toContain("return [orders.to_wire(__e) for __e in r]");
+  });
+
+  it("get-by-id handler projects the single <Agg>Response via to_wire", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    const h = fileEndingWith(m, "app/application/get_order.py");
+    expect(h).toContain(
+      "async def get_order(session: AsyncSession, order_id: OrderId) -> dict[str, object]:",
+    );
+    expect(h).toContain("return orders.to_wire(o)");
+  });
+
+  it("the router's <Handler>Body carries the SAME flat fields as the record (wire-invariant)", async () => {
+    const m = await generateSystemFiles(SCAFFOLD_SRC);
+    const ctrl = fileEndingWith(m, "app/http/sales_api_routes.py");
+    // The command record's fields ARE the request body fields (byte-identical to
+    // the flat-param form); Money rides as its wire model MoneyModel.
+    expect(ctrl).toContain("class CreateOrderBody(BaseModel):");
+    expect(ctrl).toContain("    code: str");
+    expect(ctrl).toContain("    status: str");
+    expect(ctrl).toContain("    total: MoneyModel");
+    // Call args flatten in declared order; the VO field coerces to the domain class.
+    expect(ctrl).toContain(
+      "result = await create_order(session, body.code, body.status, Money(body.total.amount, body.total.currency))",
+    );
+  });
+});
+
 // An `extern` handler is bodyless: the generated dispatch delegates to a
 // scaffold-once, user-owned impl the user fills in (extern-handler Phase 1).
 const EXTERN_SRC = `

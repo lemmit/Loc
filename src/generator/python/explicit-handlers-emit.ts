@@ -39,23 +39,49 @@
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
+  ParamIR,
   QueryHandlerIR,
   RouteIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
+import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
-import { snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
-import { renderPyExpr, renderPyType } from "./render-expr.js";
+import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
 import { pyWireToDomain } from "./routes-builder.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
+
+/** A handler's params FLATTENED for the FastAPI `def` signature + request body:
+ *  a `command`/`query` RECORD param (M-T5.10 handler-param rewrite) expands to
+ *  its fields (so the record's fields become the flat `def`/`<Handler>Body`
+ *  fields, byte-identical to the flat-param form); every other param (a
+ *  path-bound id / scalar / value object) passes through.  An extern handler
+ *  keeps its raw params — its scaffold-once impl owns the signature. */
+function flatHandlerParams(h: Handler, ctx: EnrichedBoundedContextIR): ParamIR[] {
+  if (h.extern) return h.params.map((p) => ({ name: p.name, type: p.type }));
+  const out: ParamIR[] = [];
+  for (const p of h.params) {
+    const rec = requestRecordFor(p.type, ctx);
+    if (rec) for (const f of rec.fields) out.push({ name: f.name, type: f.type });
+    else out.push({ name: p.name, type: p.type });
+  }
+  return out;
+}
+
+/** The record-param NAMES of a handler — the body refs whose `.<field>` access
+ *  resolves to the flattened field local rather than attribute access (fed to
+ *  the Python render context as `recordParamNames`). */
+function recordParamNames(h: Handler, ctx: EnrichedBoundedContextIR): Set<string> {
+  return new Set(h.params.filter((p) => requestRecordFor(p.type, ctx)).map((p) => p.name));
+}
 
 // --- Extern handler (bodyless) — scaffold-once user impl module -------------
 // An `extern` handler has no DSL body: the generated `app/application/<snake>.py`
@@ -149,6 +175,25 @@ function renderPyExternImpl(h: Handler, ctx: EnrichedBoundedContextIR): string {
   );
 }
 
+/** Aggregate names a handler body constructs via `<Agg>.create(...)` (a
+ *  `factory-let` — the scaffolded `create` handler's shape).  Their domain
+ *  module must be imported (`from app.domain.<snake> import <Agg>`), mirroring
+ *  the workflow builder's factory-let import derivation. */
+function collectFactoryAggs(
+  stmts: readonly WorkflowStmtIR[],
+  into: Set<string> = new Set(),
+): Set<string> {
+  for (const s of stmts) {
+    if (s.kind === "factory-let") into.add(s.aggName);
+    else if (s.kind === "for-each") collectFactoryAggs(s.body, into);
+    else if (s.kind === "if-let") {
+      collectFactoryAggs(s.thenBody, into);
+      collectFactoryAggs(s.elseBody ?? [], into);
+    }
+  }
+  return into;
+}
+
 /** The repos a handler body references (repo loads + exit-saves), keyed by
  *  repo name → aggregate name.  The handler constructs `<Agg>Repository(...)`
  *  for each and the workflow stmt target names the handle `snake(repoName)`. */
@@ -209,39 +254,58 @@ function renderHandlerModule(
   const fnName = snake(h.name);
   const usesUser = handlerUsesUser(h, ctx);
 
+  // A `command`/`query` RECORD param (M-T5.10 handler-param rewrite) FLATTENS
+  // into its fields — the `def` signature carries the flat domain-typed fields
+  // (byte-identical to the flat-param form) — and the body's `cmd.<field>`
+  // resolves to the flat field local via `recordParamNames` on the render ctx.
+  const records = recordParamNames(h, ctx);
+  const rctx: PyRenderContext = { thisName: "self", recordParamNames: records };
   const params = [
     "session: AsyncSession",
-    ...h.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
+    ...flatHandlerParams(h, ctx).map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
     ...(usesUser ? ["current_user: User"] : []),
   ].join(", ");
 
   const repos = collectRepos(h);
+  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
 
   // C2 (Python sibling of .NET C1/#1830): a handler returning an aggregate/entity
   // projects the domain (SQLAlchemy) instance to its wire shape via the repo's
   // `to_wire(...)` — the same projection the auto-derived read routes use — so the
   // route serialises the contract, not the raw ORM row. Id / scalar / void returns
-  // are unchanged. When projecting, the annotation becomes `dict[str, object]`
-  // (`to_wire`'s return type), NOT the aggregate class (which would need a domain
-  // import the module never made and mismatch the dict it returns).
+  // are unchanged. A scaffolded read DECLARES a `<Agg>Response` return, which
+  // `normalizeHandlerReturn` maps back to the entity so the projection fires (and
+  // a COLLECTION return maps each element). When projecting, the annotation becomes
+  // `dict[str, object]` (or `list[dict[str, object]]`), NOT the aggregate class
+  // (which would need a domain import the module never made).
+  const normRet = normalizeHandlerReturn(h.returnType, ctx);
   let projectRepoHandle: string | undefined;
-  if (h.returnType) {
-    const info = wireTypeInfo(h.returnType, "response");
+  let projectIsCollection = false;
+  if (normRet) {
+    const info = wireTypeInfo(normRet, "response");
     if (info.refKind === "entity") {
+      projectIsCollection = info.isCollection;
       for (const [repo, agg] of repos) {
         if (agg === info.base) {
           projectRepoHandle = snake(repo);
           break;
         }
       }
+      // The return aggregate was never loaded (e.g. a freshly created entity):
+      // construct a repo purely to project it, keyed by its plural name.
+      if (!projectRepoHandle) {
+        projectRepoHandle = snake(plural(info.base));
+        repos.set(plural(info.base), info.base);
+      }
     }
   }
   const ret = projectRepoHandle
-    ? "dict[str, object]"
-    : h.returnType
-      ? renderPyType(h.returnType)
+    ? projectIsCollection
+      ? "list[dict[str, object]]"
+      : "dict[str, object]"
+    : normRet
+      ? renderPyType(normRet)
       : "None";
-  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
   const repoLines = [...repos].map(
     ([repo, agg]) => `    ${snake(repo)} = ${agg}Repository(session, ${dispatcherExpr})`,
   );
@@ -254,7 +318,7 @@ function renderHandlerModule(
   });
   const stmtLines = renderWorkflowStmtChunks(
     h.statements,
-    pyWorkflowStmtTarget({ thisName: "self" }, ctx, usedLets),
+    pyWorkflowStmtTarget(rctx, ctx, usedLets),
     "    ",
   ).flat();
   const saveLines = h.savesAtExit.map(
@@ -262,8 +326,10 @@ function renderHandlerModule(
   );
   const returnExpr = h.returnValue
     ? projectRepoHandle
-      ? `${projectRepoHandle}.to_wire(${renderPyExpr(h.returnValue)})`
-      : renderPyExpr(h.returnValue)
+      ? projectIsCollection
+        ? `[${projectRepoHandle}.to_wire(__e) for __e in ${renderPyExpr(h.returnValue, rctx)}]`
+        : `${projectRepoHandle}.to_wire(${renderPyExpr(h.returnValue, rctx)})`
+      : renderPyExpr(h.returnValue, rctx)
     : null;
   const returnLine = returnExpr ? `    return ${returnExpr}` : null;
 
@@ -303,6 +369,10 @@ function renderHandlerModule(
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    ...[...collectFactoryAggs(h.statements)]
+      .filter((n) => refersTo(n))
+      .sort()
+      .map((n) => `from app.domain.${snake(n)} import ${n}`),
     [...enumNames, ...voNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voNames].sort().join(", ")}`
       : null,
@@ -382,9 +452,15 @@ export function emitPyExplicitRouteRouter(
     // inferred as THE body (fields at top level) and a bare scalar as a query
     // param, so multiple body params must collect into a single model. (Python
     // sibling of the .NET `[FromBody] <Handler>Body` split — B1/#1822.)
+    // A `command`/`query` RECORD param FLATTENS into its fields (the Pydantic
+    // `<Handler>Body` + call args carry the flat fields, byte-identical to the
+    // flat-param form; a record's field binds from the SAME request location an
+    // equivalent flat param would — path if its name is a route `{token}`, else
+    // the body). Then split on the route `{token}`s as before.
     const pathNames = pathParamNames(r.path);
-    const pathParams = h.params.filter((p) => pathNames.has(p.name));
-    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+    const effParams = flatHandlerParams(h, ctx);
+    const pathParams = effParams.filter((p) => pathNames.has(p.name));
+    const bodyParams = effParams.filter((p) => !pathNames.has(p.name));
 
     let bodyModelName: string | undefined;
     if (bodyParams.length > 0) {
@@ -402,11 +478,11 @@ export function emitPyExplicitRouteRouter(
       ...(usesUser ? ["request: Request"] : []),
       "session: SessionDep",
     ].join(", ");
-    // Call args stay in declared param order: path params coerce from the route
+    // Call args stay in flat declared order: path params coerce from the route
     // token, body params read off `body.<snake>` before coercing.
     const callArgs = [
       "session",
-      ...h.params.map((p) =>
+      ...effParams.map((p) =>
         pathNames.has(p.name)
           ? pyWireToDomain(snake(p.name), p.type, ctx)
           : pyWireToDomain(`body.${snake(p.name)}`, p.type, ctx),

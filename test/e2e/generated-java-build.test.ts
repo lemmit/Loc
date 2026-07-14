@@ -167,6 +167,13 @@ const FIXTURES: Array<[string, string]> = [
   // record (cross-package) and emit the `to<Vo>` mapper; `threshold: 0`
   // promotes to `new BigDecimal("0")` rather than a raw `int 0`.
   ["test/e2e/fixtures/java-build/workflow-vo-param.ddd", "wallet_api"],
+  // M-T5.10 handler-param rewrite: `with scaffoldHandlers` synthesises explicit
+  // commandHandler/queryHandlers taking a single `command`/`query` record param.
+  // The Java `@Service handle(...)` FLATTENS the record's fields (byte-identical
+  // to the flat-param form) and `cmd.<field>` reads the flat param; a read
+  // declares `<Agg>Response` but the handler returns the entity (route projects
+  // — single via `<Agg>Response.from(...)`, collection via `.stream().map(...)`).
+  ["test/e2e/fixtures/java-build/scaffold-handlers.ddd", "api"],
   // OIDC turnkey auth (D-AUTH-OIDC): the generated @Primary OidcUserVerifier
   // (Nimbus JWKS + dotted-path claim mapping), the AuthController /auth/*
   // handshake + /auth/me probe, and the BOM-managed nimbus-jose-jwt dep.

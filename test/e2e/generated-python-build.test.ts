@@ -115,6 +115,14 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // frozen User via `object.__setattr__`; the generated middleware + stored
   // `org_path` attribute must stay ruff- + mypy --strict-clean.
   ["test/e2e/fixtures/python-build/tenancy-hierarchy.ddd", "api"],
+  // M-T5.10 handler-param rewrite — SCAFFOLDED explicit handlers: `with
+  // scaffoldHandlers` synthesises a command/query handler per create / operation
+  // / find / get-by-id / destroy, each taking a single `command`/`query` record
+  // param.  The Python handler flattens the record into flat domain-typed `def`
+  // params + `<Handler>Body` fields (`cmd.<field>` → the flat local), and a read
+  // projects `<Agg>Response` via `repo.to_wire(...)` (collection reads
+  // comprehend each element).  Must stay ruff- + mypy --strict-clean.
+  ["test/e2e/fixtures/python-build/scaffold-handlers.ddd", "api"],
   // `--trace` domain instrumentation: precondition_evaluated /
   // value_computed / invariant_evaluated trace lines must stay
   // ruff-/mypy-clean (the domain fixture exercises all three).
