@@ -184,7 +184,7 @@ system Tasks {
     }
   }
   api TrackerApi from Productivity {
-    httpStatus Rejected 409
+    httpStatus Rejected -> 409
   }
   storage primary { type: postgres }
   storage objects { type: s3, config: { bucket: "loom-test" } }

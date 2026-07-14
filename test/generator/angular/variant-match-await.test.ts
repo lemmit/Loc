@@ -17,7 +17,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 const STAGE2 = `
   error Failed { reason: string }
   system Shop {
-    api SalesApi from Sales { httpStatus Failed 422 }
+    api SalesApi from Sales { httpStatus Failed -> 422 }
     subdomain Sales {
       context Ordering {
         aggregate Order {

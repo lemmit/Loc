@@ -1,4 +1,5 @@
 import { descriptorFor } from "../../platform/metadata.js";
+import { defaultErrorStatus, STRUCTURAL_CONFLICT_ERRORS } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { defaultInterfaceFor } from "../../util/source-types.js";
 import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
@@ -174,7 +175,7 @@ function enrichSystem(
       urlStyleBySubdomain.set(a.sourceModule, a.urlStyle);
   }
   // Merge each subdomain's per-error HTTP status overrides from every api that
-  // surfaces it (`httpStatus <Error> <Code>`).  First-declared api wins on a
+  // surfaces it (`httpStatus <Error> -> <Code>`).  First-declared api wins on a
   // conflicting code for the same error (mirrors urlStyle).  Consumed by the
   // route translator as `ctx.errorStatusOverrides` (exception-less.md A1).
   const errorStatusesBySubdomain = new Map<string, Record<string, number>>();
@@ -183,6 +184,25 @@ function enrichSystem(
     for (const [err, code] of Object.entries(a.errorStatuses))
       if (!(err in merged)) merged[err] = code;
     errorStatusesBySubdomain.set(a.sourceModule, merged);
+  }
+  // App-wide fold of the structural-conflict statuses (expressible-builtins.md
+  // §3 / M-T3.4a). Unlike user `error` payloads (per-subdomain), the structural
+  // conflicts (unique / version / when / FK / event-store) surface in
+  // app-GLOBAL exception handlers with no per-context tag, so their status is
+  // resolved once across EVERY api (first-declared api wins on a conflicting
+  // code, mirroring urlStyle / errorStatuses), defaulting to 409. Consumed
+  // uniformly by every backend at both the runtime arm and the OpenAPI
+  // declaration so the two can no longer drift.
+  const structuralErrorStatuses: Record<string, number> = {};
+  for (const name of STRUCTURAL_CONFLICT_ERRORS) {
+    let code = defaultErrorStatus(name);
+    for (const a of sys.apis) {
+      if (name in a.errorStatuses) {
+        code = a.errorStatuses[name];
+        break;
+      }
+    }
+    structuralErrorStatuses[name] = code;
   }
   // First enrich each subdomain's contexts (auto-findAll, wire-shape,
   // routeSlug).
@@ -197,6 +217,7 @@ function enrichSystem(
         rootPayloads,
       ),
       errorStatusOverrides: errorStatusesBySubdomain.get(m.name),
+      structuralErrorStatuses,
     })),
   }));
   // Multi-tenancy Phase 1b (capstone decision 4): derive the registry's
@@ -234,7 +255,14 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, subdomains: subdomainsWithOwner, deployables, needs, resourceInterfaces };
+  return {
+    ...sys,
+    subdomains: subdomainsWithOwner,
+    deployables,
+    needs,
+    resourceInterfaces,
+    structuralErrorStatuses,
+  };
 }
 
 // Resolve the default access interface for every resource from its

@@ -46,7 +46,7 @@ describe("unmapped-error-status warning", () => {
   });
 
   it("is silent once the api maps the error with httpStatus", async () => {
-    expect(await warnings(SYS("{ httpStatus OutOfStock 409 }"))).toEqual([]);
+    expect(await warnings(SYS("{ httpStatus OutOfStock -> 409 }"))).toEqual([]);
   });
 
   it("is silent for a stdlib error (carries a default status)", async () => {

@@ -55,16 +55,27 @@ export type OpErrorKind =
  *  authorization-denied outcome — for the `operation` and `workflow`
  *  kinds; it's inert for every other kind (no kind but those two carries a
  *  guard). */
-export function errorStatuses(kind: OpErrorKind, guarded = false): number[] {
+export function errorStatuses(
+  kind: OpErrorKind,
+  guarded = false,
+  /** Resolver for the structural-conflict built-ins (M-T3.4a) — maps a conflict
+   *  name to its `httpStatus`-overridden status, defaulting to 409. Passed by
+   *  every backend so the destroy FK-restrict declaration (`ReferencedInUse`)
+   *  moves in lockstep with its runtime arm. Omitted ⇒ literal 409 (the
+   *  byte-identical default). */
+  resolve?: (name: string) => number,
+): number[] {
+  const referencedInUse = resolve?.("ReferencedInUse") ?? 409;
   switch (kind) {
     case "create":
       return [400, 422];
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
-    // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT).
+    // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
+    // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
     case "destroy":
-      return [404, 409];
+      return [404, referencedInUse];
     case "operation":
       return guarded ? [400, 403, 404, 422] : [400, 404, 422];
     case "workflow":

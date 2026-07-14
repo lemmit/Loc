@@ -569,7 +569,7 @@ system Shop {
       repository Carts for Cart { }
     }
   }
-  api ShopApi from Sales { httpStatus TooMany 409 }
+  api ShopApi from Sales { httpStatus TooMany -> 409 }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg }
   deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
@@ -628,7 +628,7 @@ system Shop {
       repository Carts for Cart { }
     }
   }
-  api ShopApi from Sales { httpStatus TooMany 409 }
+  api ShopApi from Sales { httpStatus TooMany -> 409 }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg }
   deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }

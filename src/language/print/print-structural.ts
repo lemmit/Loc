@@ -458,7 +458,7 @@ function printApi(node: Api): string {
   const head = `api ${node.name}${printWithClause(node.withClause)}${from}`;
   const items: string[] = [];
   if (node.urlStyle) items.push(`urlStyle: ${node.urlStyle}`);
-  for (const s of node.statuses ?? []) items.push(`httpStatus ${s.error} ${s.code}`);
+  for (const s of node.statuses ?? []) items.push(`httpStatus ${s.error} -> ${s.code}`);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4):
   //   route POST "/orders" -> Ordering.PlaceOrder
   for (const r of node.routes ?? []) {

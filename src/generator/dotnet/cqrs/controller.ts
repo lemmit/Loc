@@ -242,6 +242,9 @@ export function emitController(
       routePrefix,
       emitTrace,
       usingDapper,
+      // Structural-conflict `httpStatus` overrides (M-T3.4a) — drives the
+      // destroy FK-restrict arm + the per-op when/versioned 409 declarations.
+      structuralStatuses: ctx.structuralErrorStatuses,
     }),
   );
 }

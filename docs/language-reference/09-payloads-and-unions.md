@@ -121,7 +121,7 @@ A domain `error` record is **HTTP-blind** — it carries no status code. The api
 | `ValidationError` | 422 | | `TransportFailure` / `UnexpectedStatus` / `DeserializeError` | 502 |
 | `ParseError` | 400 | | *(any other, user-declared)* | 500 |
 
-The RFC-7807 fields are derived from the name: `title` is the prettified name (`NotFound` → `"Not Found"`), `type` is `/errors/<kebab-name>` (`/errors/not-found`), and the error record's own fields become problem extensions. A `httpStatus <Error> <Code>` clause on an `api` overrides the default for that error; a user-declared error with no stdlib match and no `httpStatus` override falls through to 500 and warns (`loom.unmapped-error-status`).
+The RFC-7807 fields are derived from the name: `title` is the prettified name (`NotFound` → `"Not Found"`), `type` is `/errors/<kebab-name>` (`/errors/not-found`), and the error record's own fields become problem extensions. A `httpStatus <Error> -> <Code>` clause on an `api` overrides the default for that error; a user-declared error with no stdlib match and no `httpStatus` override falls through to 500 and warns (`loom.unmapped-error-status`).
 
 For the `find recent(): Order or NotFound` above, the `NotFound` variant translates to a `404` ProblemDetails — the found row becomes the tagged `Order`, absence becomes the error response:
 

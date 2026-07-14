@@ -43,7 +43,12 @@ import {
   singleFieldConstraints,
 } from "../../ir/validate/invariant-classify.js";
 import { lines } from "../../util/code-builder.js";
-import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-defaults.js";
+import {
+  defaultErrorStatus,
+  errorTitle,
+  errorTypeUri,
+  resolveErrorStatus,
+} from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
@@ -155,7 +160,7 @@ export function buildPyRoutesFile(
     "",
     "",
     byIdRoute(agg),
-    agg.canonicalDestroy ? ["", "", destroyRoute(agg)] : null,
+    agg.canonicalDestroy ? ["", "", destroyRoute(agg, conflictResolver(ctx))] : null,
     ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
     // Can-query companions register after the operation routes (static
     // `can_<op>` paths, no collision with `/{id}`).
@@ -269,8 +274,14 @@ export function errorResponsesKwarg(
   kind: OpErrorKind,
   guarded = false,
   extra: number[] = [],
+  /** Structural-conflict status resolver (M-T3.4a) — threaded so the
+   *  `destroy` FK-restrict declaration (`ReferencedInUse`) moves with the
+   *  `httpStatus` override; omitted ⇒ literal 409 (byte-identical default). */
+  resolve?: (name: string) => number,
 ): string {
-  const statuses = [...new Set([...errorStatuses(kind, guarded), ...extra])].sort((a, b) => a - b);
+  const statuses = [...new Set([...errorStatuses(kind, guarded, resolve), ...extra])].sort(
+    (a, b) => a - b,
+  );
   if (statuses.length === 0) return "";
   const entries = statuses.map(
     (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
@@ -281,8 +292,24 @@ export function errorResponsesKwarg(
 /** A versioned aggregate's `update` declares 409 (stale `If-Match` →
  *  optimistic-concurrency conflict), mirroring the Hono / .NET / Phoenix /
  *  Java contract so the conformance error-response dimension compares equal. */
-function versionedConflictStatuses(agg: EnrichedAggregateIR, op: OperationIR): number[] {
-  return op.name === "update" && aggregateIsVersioned(agg) ? [409] : [];
+function versionedConflictStatuses(
+  agg: EnrichedAggregateIR,
+  op: OperationIR,
+  /** Structural-conflict resolver (M-T3.4a) — the stale-`If-Match` 409 is the
+   *  `ConcurrencyConflict` built-in, remappable via `httpStatus`; omitted ⇒
+   *  literal 409. */
+  resolve?: (name: string) => number,
+): number[] {
+  return op.name === "update" && aggregateIsVersioned(agg)
+    ? [resolve?.("ConcurrencyConflict") ?? 409]
+    : [];
+}
+
+/** `resolveErrorStatus` bound to a context's `httpStatus` override map — the
+ *  structural-conflict status resolver every route in the file threads
+ *  (M-T3.4a). With no override every conflict resolves to 409 (byte-identical). */
+function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
+  return (name) => resolveErrorStatus(name, ctx.structuralErrorStatuses);
 }
 
 /** `{id}` path-param annotation carrying the uuid format every backend
@@ -765,7 +792,11 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
   );
 }
 
-function destroyRoute(agg: EnrichedAggregateIR): string {
+function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => number): string {
+  // The cross-aggregate `X id` FK is ON DELETE RESTRICT — a still-referenced
+  // delete raises IntegrityError → the `ReferencedInUse` structural conflict,
+  // remappable via `httpStatus` (M-T3.4a). Default resolves to 409.
+  const referencedInUse = resolve("ReferencedInUse");
   // Audited destroy: snapshot the loaded wire shape, stage the audit row through
   // the repo (same session → commits with the delete), THEN hard-delete.
   // Asymmetry: `before` is the last snapshot, `after` is JSON null (JSON.NULL →
@@ -784,7 +815,7 @@ function destroyRoute(agg: EnrichedAggregateIR): string {
       ]
     : [];
   return lines(
-    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy")})`,
+    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy", false, [], resolve)})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
     auditDestroy
@@ -798,7 +829,7 @@ function destroyRoute(agg: EnrichedAggregateIR): string {
     "        await session.rollback()",
     "        return problem(",
     "            request,",
-    "            409,",
+    `            ${referencedInUse},`,
     `            "Conflict",`,
     `            "${agg.name} is still referenced and cannot be deleted.",`,
     "        )",
@@ -891,6 +922,7 @@ function operationRoute(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
+  const resolve = conflictResolver(ctx);
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -918,7 +950,7 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -957,7 +989,7 @@ function operationRoute(
   if (usesUser) callArgs.push("current_user");
   const vsave = versionedSave(agg);
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",

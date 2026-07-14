@@ -9,12 +9,21 @@
 // so the frontend ACL's `applyServerErrors` consumes it identically.
 // ---------------------------------------------------------------------------
 
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 export function renderVanillaProblemDetailsModule(
   appModule: string,
   hasUniqueKeys = false,
   hasVersioned = false,
+  /** Resolved HTTP status for the `unique (...)` breach (`UniquenessConflict`)
+   *  and the optimistic-/event-store concurrency conflict (`ConcurrencyConflict`)
+   *  — 409 by default, or the api's `httpStatus <Conflict> -> <Code>` override
+   *  (M-T3.4a).  Baked into the emitted responders so the runtime status moves
+   *  in lockstep with the OpenAPI declaration.  Both default to 409, so an
+   *  override-free app stays byte-identical. */
+  uniquenessStatus = 409,
+  concurrencyStatus = 409,
 ): string {
   // Optimistic-concurrency 409 (`versioned` capability, D-VERSIONED).  A stale
   // write raises `Ecto.StaleEntryError`, which the repository rescues into
@@ -39,14 +48,14 @@ export function renderVanillaProblemDetailsModule(
         name: "message",
         valueExpr: `"The resource was modified by another request; reload and retry."`,
       },
-      { name: "status", valueExpr: "409" },
+      { name: "status", valueExpr: `${concurrencyStatus}` },
     ])}
 
     body =
       Jason.encode!(%{
         type: "about:blank",
-        title: "Conflict",
-        status: 409,
+        title: ${JSON.stringify(problemTitle(concurrencyStatus))},
+        status: ${concurrencyStatus},
         detail: "The resource was modified by another request; reload and retry.",
         instance: conn.request_path
       })
@@ -56,7 +65,7 @@ export function renderVanillaProblemDetailsModule(
     conn
     |> put_resp_content_type("application/problem+json")
     |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(409, body)
+    |> send_resp(${concurrencyStatus}, body)
   end`
     : "";
   const log422 = renderPhoenixLogCall("domainError", [
@@ -106,8 +115,8 @@ export function renderVanillaProblemDetailsModule(
     if unique_conflict?(changeset) do
       problem_response(
         conn,
-        409,
-        "Conflict",
+        ${uniquenessStatus},
+        ${JSON.stringify(problemTitle(uniquenessStatus))},
         "A record with these values already exists."
       )
     else

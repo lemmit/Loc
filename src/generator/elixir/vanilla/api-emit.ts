@@ -21,7 +21,9 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -396,6 +398,30 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
     end
   end`;
 
+  // FK-restrict destroy conflict (M-T3.4a) — deleting a still-referenced
+  // aggregate trips a Postgres foreign_key_violation (23503; a cross-aggregate
+  // `X id` FK is ON DELETE RESTRICT), which `Repo.delete/1` raises as
+  // `Ecto.ConstraintError` (type `:foreign_key`).  Previously unhandled → 500,
+  // while the OpenAPI already declared 409 (a runtime/spec drift + cross-backend
+  // divergence — every other backend serves 409).  Reconcile by rescuing that
+  // ConstraintError and serving the resolved `ReferencedInUse` status (409 by
+  // default, or the `httpStatus ReferencedInUse -> <Code>` override).  A non-FK
+  // constraint can't fire on a delete, so any other type reraises (keeps its
+  // 500).  Mirrors the Hono 23503 → 409 arm.
+  const referencedInUseStatus = resolveErrorStatus("ReferencedInUse", ctx.structuralErrorStatuses);
+  const fkRestrictRescue = `
+  rescue
+    fk_error in Ecto.ConstraintError ->
+      if fk_error.type == :foreign_key do
+        ProblemDetails.problem_response(
+          conn,
+          ${referencedInUseStatus},
+          ${JSON.stringify(problemTitle(referencedInUseStatus))},
+          "${aggPascal} is still referenced and cannot be deleted."
+        )
+      else
+        reraise(fk_error, __STACKTRACE__)
+      end`;
   // The CRUD `delete` action is emitted only when the aggregate exposes a REST
   // delete surface (a reachable `destroy` op).  Without it the action, its
   // context `delete_<agg>` call, and the repository `delete/1` it drives were
@@ -432,7 +458,7 @@ ${auditRecordCall({
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
-    end
+    end${fkRestrictRescue}
   end`
       : `  def delete(conn, %{"id" => id}) do
 ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
@@ -444,7 +470,7 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
-    end
+    end${fkRestrictRescue}
   end`;
 
   // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update

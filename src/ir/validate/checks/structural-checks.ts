@@ -5,7 +5,7 @@
 // -------------------------------------------------------------------------
 
 import { allPlatformDescriptors } from "../../../platform/metadata.js";
-import { isStdlibError } from "../../../util/error-defaults.js";
+import { isStdlibError, STRUCTURAL_CONFLICT_ERRORS } from "../../../util/error-defaults.js";
 import { bodyTypeOf } from "../../../util/expr-body-type.js";
 import { plural, snake } from "../../../util/naming.js";
 import { typeKey, variantTag } from "../../stdlib/unions.js";
@@ -657,13 +657,40 @@ export function validateUnmappedErrorStatuses(
           code: "loom.unmapped-error-status",
           message:
             `error '${name}' returned by '${agg.name}.${op.name}' has no stdlib default HTTP ` +
-            `status and no api \`httpStatus ${name} <code>\` mapping, so it defaults to 500. Add ` +
-            `a \`httpStatus ${name} <code>\` line to the api serving this context to set an ` +
+            `status and no api \`httpStatus ${name} -> <code>\` mapping, so it defaults to 500. Add ` +
+            `a \`httpStatus ${name} -> <code>\` line to the api serving this context to set an ` +
             `explicit status.`,
           source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
         });
       }
     }
+  }
+}
+
+/** Guard the structural-conflict built-in names (M-T3.4a / expressible-builtins
+ *  §"Reserved-name cleanup"). `UniquenessConflict` / `ConcurrencyConflict` /
+ *  `Disallowed` / `ReferencedInUse` now carry framework meaning: their status
+ *  flows through the `httpStatus` mapper and defaults to 409. A user-declared
+ *  `error` of the same name would silently inherit that 409 default (and its
+ *  `httpStatus` line would double as a structural-conflict override), so warn —
+ *  the name is reserved. */
+export function validateReservedStructuralErrorNames(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const reserved = new Set<string>(STRUCTURAL_CONFLICT_ERRORS);
+  for (const p of ctx.payloads) {
+    if (p.kind !== "error" || !reserved.has(p.name)) continue;
+    diags.push({
+      severity: "warning",
+      code: "loom.reserved-structural-error-name",
+      message:
+        `error '${p.name}' collides with a built-in structural-conflict name ` +
+        `(M-T3.4a). That name is reserved: its HTTP status defaults to 409 and a ` +
+        `\`httpStatus ${p.name} -> <code>\` line retargets the framework conflict, not ` +
+        `just this payload. Rename the error to avoid the shadow.`,
+      source: `${ctx.name}/error ${p.name}`,
+    });
   }
 }
 

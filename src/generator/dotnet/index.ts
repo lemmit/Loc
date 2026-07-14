@@ -549,6 +549,10 @@ function emitProjectFromContexts(
       usingDapper,
       hasUniqueKeys,
       hasVersioned: hasConcurrency,
+      // App-wide structural-conflict `httpStatus` overrides (M-T3.4a) — the
+      // resolved statuses are identical across every hosted context (folded
+      // app-wide in enrichment), so any context carries the same map.
+      structuralStatuses: contexts[0]?.structuralErrorStatuses,
     }),
   );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
@@ -1202,7 +1206,13 @@ function emitInfrastructure(
   if (ctx.workflows.length > 0 || ctx.projections.length > 0) {
     out.set("Infrastructure/Persistence/PersistencePorts.cs", renderPersistencePortAdapters(ns));
   }
-  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set(
+    "Api/DomainExceptionFilter.cs",
+    renderExceptionFilter(ns, {
+      usesValidators,
+      structuralStatuses: ctx.structuralErrorStatuses,
+    }),
+  );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
   out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));

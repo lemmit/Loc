@@ -51,7 +51,7 @@ import {
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
-import { defaultErrorStatus } from "../../../util/error-defaults.js";
+import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -332,8 +332,16 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
  *  carries the `ProblemDetails` schema MODULE under `application/problem+json`
  *  — matching Hono/.NET so the conformance gate's error-response dimension
  *  compares equal. */
-function errorResponseEntries(kind: OpErrorKind, schemasModule: string, guarded = false): string {
-  return statusResponseEntries(errorStatuses(kind, guarded), schemasModule);
+function errorResponseEntries(
+  kind: OpErrorKind,
+  schemasModule: string,
+  guarded = false,
+  /** Structural-conflict resolver (M-T3.4a) — routes the destroy FK-restrict
+   *  409 (`ReferencedInUse`) through the `httpStatus` mapper so the OpenAPI
+   *  declaration moves with the runtime arm.  Omitted ⇒ literal 409. */
+  resolve?: (name: string) => number,
+): string {
+  return statusResponseEntries(errorStatuses(kind, guarded, resolve), schemasModule);
 }
 
 /** The same ProblemDetails response-map entries for an explicit status list —
@@ -369,6 +377,15 @@ function renderApiSpec(
 ): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   const schemasModule = `${webModule}.Api.Schemas`;
+
+  // Structural-conflict resolver (M-T3.4a) — the app-wide `httpStatus` map is
+  // identical on every hosted context (folded across every api by
+  // `enrichLoomModel`), so read it off any aggregate's context.  Every 409 the
+  // spec declares for a structural conflict (destroy FK-restrict, `when` gate,
+  // versioned stale-write) resolves through this so the declaration moves in
+  // lockstep with the runtime arm.  Absent ⇒ 409 default ⇒ byte-identical.
+  const structuralStatuses = allAggregates[0]?.ctx.structuralErrorStatuses;
+  const resolveConflict = (name: string): number => resolveErrorStatus(name, structuralStatuses);
 
   // Build paths map entries
   const pathEntries: string[] = [];
@@ -560,7 +577,7 @@ function renderApiSpec(
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, false, resolveConflict)}
           }
         }`
             : ""
@@ -602,16 +619,23 @@ function renderApiSpec(
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
             }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
-              // A `when` state gate OR a versioned aggregate's `update` (stale
-              // `If-Match` → optimistic-concurrency conflict) declares 409,
-              // mirroring the Hono / .NET contract.
-              op.when || (op.name === "update" && aggregateIsVersioned(agg))
-                ? `,
-            409 => %OpenApiSpex.Response{
-              description: "Conflict",
-              content: %{"${PROBLEM_JSON}" => %OpenApiSpex.MediaType{schema: ${schemasModule}.ProblemDetails}}
-            }`
-                : ""
+              // A `when` state gate (`Disallowed`) OR a versioned aggregate's
+              // `update` (stale `If-Match` → `ConcurrencyConflict`) declares a
+              // conflict status, mirroring the Hono / .NET contract.  Each
+              // resolves through the `httpStatus` mapper (M-T3.4a): 409 by
+              // default (both collapse to one `409:` line, byte-identical), or a
+              // per-conflict override.
+              statusResponseEntries(
+                [
+                  ...new Set([
+                    ...(op.when ? [resolveConflict("Disallowed")] : []),
+                    ...(op.name === "update" && aggregateIsVersioned(agg)
+                      ? [resolveConflict("ConcurrencyConflict")]
+                      : []),
+                  ]),
+                ].sort((a, b) => a - b),
+                schemasModule,
+              )
             }
           }
         }
