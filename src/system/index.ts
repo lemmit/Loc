@@ -30,6 +30,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
+import { checkMigrationBaseline, type MigrationArtifactIndex } from "./migration-artifacts.js";
 import { buildMigrations } from "./migrations-builder.js";
 import { renderSmap } from "./smap.js";
 import {
@@ -106,6 +107,18 @@ export interface GenerateSystemOptions {
    *  No effect unless `sourcemap` is also true.  See
    *  docs/old/proposals/source-map-and-debugging.md §8. */
   sourceTexts?: ReadonlyMap<string, string>;
+  /** On-disk migration-file inventory used by the baseline-safety guards
+   *  (M-T2.2).  When provided, `generate system` refuses to silently
+   *  re-baseline over an existing migration history, verifies files against
+   *  the snapshot's recorded history, and rejects version-number reuse.
+   *  Omitted by callers with no real output tree (the web playground) — the
+   *  guards are then skipped.  CLI wires `fsMigrationArtifactIndex(outDir,
+   *  loom)`. */
+  existingMigrations?: MigrationArtifactIndex;
+  /** Override for guard (a): permit re-emitting "Initial" even though
+   *  migration files already exist and the snapshot is missing — the CLI
+   *  `--allow-rebaseline` flag. */
+  allowRebaseline?: boolean;
 }
 
 export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
@@ -138,6 +151,8 @@ export function generateSystemsFromLoom(
       emitKubernetes: options.emitKubernetes,
       snapshots,
       allowDestructive: options.allowDestructive,
+      existingMigrations: options.existingMigrations,
+      allowRebaseline: options.allowRebaseline,
       sourcemap: recorder,
       sourceTexts: options.sourceTexts,
     });
@@ -200,6 +215,8 @@ function emitSystem(
     emitKubernetes?: boolean;
     snapshots: SnapshotStore;
     allowDestructive?: boolean;
+    existingMigrations?: MigrationArtifactIndex;
+    allowRebaseline?: boolean;
     sourcemap?: SourceMapRecorder;
     sourceTexts?: ReadonlyMap<string, string>;
   },
@@ -218,6 +235,15 @@ function emitSystem(
     allowDestructive: options.allowDestructive,
     renameIntents: loom.renameIntents,
   });
+  // Baseline-safety guards (M-T2.2): refuse a silent re-baseline when the
+  // snapshot is missing but migration files exist, verify files ↔ recorded
+  // history, and reject version-number reuse.  Skipped when no on-disk
+  // inventory was supplied (web playground / in-memory callers).
+  if (options.existingMigrations) {
+    checkMigrationBaseline(migrations, options.existingMigrations, {
+      allowRebaseline: options.allowRebaseline,
+    });
+  }
   for (const m of migrations) {
     out.set(snapshotRelPath(m.module), serializeSnapshot(m.next));
   }
