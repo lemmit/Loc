@@ -1,5 +1,4 @@
 {{#if hasTabs}}<div{{{testidAttr}}}>
-{{indent}}<!-- TODO(vue-tabs): page setup must declare `const __loomTab = ref({{json defaultValue}})` -->
 {{indent}}<v-tabs v-model="__loomTab">
 {{innerIndent}}{{#each tabs}}<v-tab value={{json this.value}}>{{{this.label}}}</v-tab>{{#unless @last}}
 {{../innerIndent}}{{/unless}}{{/each}}

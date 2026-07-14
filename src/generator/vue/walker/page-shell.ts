@@ -278,6 +278,12 @@ export function renderVuePage(input: VuePageShellInput): string {
       vueImports.add("ref");
     }
   }
+  // Controlled tab state — a `Tabs` on the body v-models `__loomTab` in the
+  // vuetify pack, so declare the ref (defaulting to the first tab's value).
+  if (result.tabsDefault !== undefined) {
+    stateLines.push(`const __loomTab = ref(${JSON.stringify(result.tabsDefault)});`);
+    vueImports.add("ref");
+  }
   const scriptArgs = (rendered: readonly string[]): string =>
     rendered
       .map((a) => {
