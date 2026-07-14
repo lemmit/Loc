@@ -53,9 +53,7 @@ describe("vue walker — scaffold pages", () => {
     expect(list).toContain('<template v-if="customerAll.isLoading">');
     // The scaffold list is server-paged (M-T2.6): rows come straight off the
     // `Paged<T>` envelope's `.items`, no client-side sort/slice math.
-    expect(list).toContain(
-      'v-for="(row) in customerAll.data.items" :key="row.id"',
-    );
+    expect(list).toContain('v-for="(row) in customerAll.data.items" :key="row.id"');
     expect(list).toContain("{{ row.name }}");
     expect(list).toContain("{{ shortId(row.id) }}");
     // JS-splicing attributes are single-quoted (the rendered JS

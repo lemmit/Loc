@@ -74,7 +74,9 @@ describe("vue generator — project shape", () => {
     expect(api).toContain(`from "@tanstack/vue-query"`);
     expect(api).not.toContain("react-query");
     // Same composable surface the vueTarget's buildHookUse expects.
-    expect(api).toContain("export function useAllCustomers(query: MaybeRefOrGetter<AllQueryInput> = () => ({}))");
+    expect(api).toContain(
+      "export function useAllCustomers(query: MaybeRefOrGetter<AllQueryInput> = () => ({}))",
+    );
     expect(api).toContain("export function useCreateCustomer()");
     expect(api).toContain("export function useDeleteCustomer()");
     expect(api).toContain("export const CustomerResponse = z.object({");

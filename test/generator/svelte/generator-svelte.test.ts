@@ -139,9 +139,7 @@ describe("svelte generator — project shape", () => {
     expect(list).toContain("{#if customerAll.isLoading}");
     // Since M-T2.6 the scaffold list is server-paged, so rows come straight off
     // the `Paged<T>` envelope's `.items`; the `(… ?? [])` guard still surrounds it.
-    expect(list).toContain(
-      "{#each (customerAll.data.items ?? []) as row (row.id)}",
-    );
+    expect(list).toContain("{#each (customerAll.data.items ?? []) as row (row.id)}");
     expect(list).toContain('data-testid="customers-list"');
     // Explicit page: runes state + plain-assignment writes + $effect title.
     const welcome = out.get("web/src/routes/(app)/welcome/+page.svelte") ?? "";

@@ -55,7 +55,9 @@ describe("find-filter list UI — scaffolded list pages", () => {
     expect(list).toContain("const [sortKey, setSortKey] = useState");
     expect(list).not.toContain("orderByStatus");
     expect(list).not.toContain("filter");
-    expect(list).toContain("const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });");
+    expect(list).toContain(
+      "const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });",
+    );
   });
 
   it("a paged or non-string-param find is not offered as a filter (v1 eligibility)", async () => {
@@ -79,7 +81,9 @@ describe("find-filter list UI — scaffolded list pages", () => {
     const list = files.get("web/src/pages/orders/list.tsx")!;
     expect(list).not.toContain("useExpensiveOrder");
     expect(list).not.toContain("useRecentOrder");
-    expect(list).toContain("const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });");
+    expect(list).toContain(
+      "const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });",
+    );
   });
 });
 
