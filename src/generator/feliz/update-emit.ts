@@ -180,7 +180,18 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): strin
     case "let":
       return `      let ${stmt.name} = ${renderFsExpr(stmt.expr, ctx)}`;
     default:
-      return `      // TODO feliz update: ${stmt.kind}`;
+      // Fail fast rather than emitting `// TODO feliz update: <kind>`, which
+      // silently drops the statement — an action body carrying a `call`,
+      // `emit`, `variant-match`, `return`, or a guard would compile but do
+      // nothing, losing control flow into a comment.  The MVU update arm
+      // renders `:=` (assign), `+=`/`-=` (add/remove), and `let` bindings;
+      // every other statement kind is genuinely not implemented here.
+      // Tracked in docs/new-plan/T6-backend-parity.md M-T6.15.
+      throw new Error(
+        `feliz: unsupported action statement '${stmt.kind}' in the MVU update arm — ` +
+          `the Feliz frontend renders ':=' / '+=' / '-=' / 'let' here (M-T6.15). ` +
+          `Rework the action, or implement the '${stmt.kind}' arm in update-emit.ts.`,
+      );
   }
 }
 

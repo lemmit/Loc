@@ -113,6 +113,17 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
     case "paren":
       return `(${r(e.inner)})`;
     default:
-      return `(* unsupported fs-expr: ${e.kind} *) ()`;
+      // Fail fast rather than silently substituting `(* unsupported *) ()`
+      // (unit), which compiles but drops the expression's value on the floor —
+      // a silent, wrong-but-compiling F# output.  The Feliz expr path renders
+      // literal/ref/binary/unary/ternary/convert/list/object/member/call/paren;
+      // every other kind (`this`/`id`/`method-call`/`action-ref`/`lambda`/
+      // `new`/`match`) is genuinely not implemented on the F# update/expr path.
+      // Tracked in docs/new-plan/T6-backend-parity.md M-T6.15.
+      throw new Error(
+        `feliz: unsupported expression '${e.kind}' in an F# action/update body — ` +
+          `the Feliz frontend does not render it here yet (M-T6.15). Rework the ` +
+          `expression, or implement the '${e.kind}' arm in fs-expr.ts.`,
+      );
   }
 }
