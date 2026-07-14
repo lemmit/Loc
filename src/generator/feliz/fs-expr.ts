@@ -82,9 +82,56 @@ export interface FsExprCtx {
   locals: ReadonlySet<string>;
 }
 
+/** Render a method-call to idiomatic F# for the update/action path.  Frontend
+ *  page logic reaches a small, well-defined set — collection membership on the
+ *  F# `list` (`List.contains`/`List.isEmpty`) and .NET-string ops that Fable
+ *  maps natively (`.ToUpper()`/`.Contains(..)`/…).  An unrecognised method fails
+ *  fast (mirrors the backends' bounded-intrinsic + error design) rather than
+ *  emitting a `.member(args)` call that would not compile under Fable. */
+function renderFsMethodCall(
+  e: Extract<ExprIR, { kind: "method-call" }>,
+  recv: string,
+  args: string[],
+): string {
+  const a0 = args[0] ?? "";
+  if (e.isCollectionOp || e.receiverType.kind === "array") {
+    switch (e.member) {
+      case "contains":
+        return `(List.contains ${a0} ${recv})`;
+      case "isEmpty":
+        return `(List.isEmpty ${recv})`;
+      case "count":
+        return `(List.length ${recv})`;
+    }
+  }
+  // String receiver (or generic scalar) → .NET string members Fable supports.
+  switch (e.member) {
+    case "toUpper":
+      return `(${recv}.ToUpper())`;
+    case "toLower":
+      return `(${recv}.ToLower())`;
+    case "trim":
+      return `(${recv}.Trim())`;
+    case "contains":
+      return `(${recv}.Contains(${a0}))`;
+    case "startsWith":
+      return `(${recv}.StartsWith(${a0}))`;
+    case "endsWith":
+      return `(${recv}.EndsWith(${a0}))`;
+    case "length":
+      return `(${recv}.Length)`;
+  }
+  throw new Error(
+    `feliz: method '${e.member}' is not implemented on the F# action/update path — ` +
+      `the Feliz frontend renders a bounded set of collection/string methods here. ` +
+      `Add a '${e.member}' arm in fs-expr.ts (renderFsMethodCall) if it is needed.`,
+  );
+}
+
 /** Render an `ExprIR` to F# for a NON-view position (the MVU `update` arm
- *  bodies).  Resolves refs itself; delegates syntax to `FS_LEAVES`.  Covers the
- *  arm set an action body reaches today (`:=`/`+=` values, `let` bindings). */
+ *  bodies).  Resolves refs itself; delegates syntax to `FS_LEAVES`.  Covers
+ *  scalar/collection state writes, `let` bindings, predicate `match`, single-
+ *  expression lambdas, and a bounded collection/string method set. */
 export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
   const r = (x: ExprIR): string => renderFsExpr(x, ctx);
   switch (e.kind) {
@@ -110,19 +157,54 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return `${r(e.receiver)}.${upperFirst(e.member)}`;
     case "call":
       return `${e.name}(${e.args.map(r).join(", ")})`;
+    case "method-call":
+      return renderFsMethodCall(e, r(e.receiver), e.args.map(r));
+    case "match": {
+      // Predicate-arm form only (`match { cond => value }`) — an F#
+      // `if/elif/else` chain.  A value-position match needs a total `else`;
+      // the variant-discriminating form (`match subject { … }`) belongs to the
+      // union/async subsystem and is gated at validation, not reached here.
+      if (e.subject) {
+        throw new Error(
+          "feliz: variant-match expression in an F# action body is not rendered here — " +
+            "it is gated at validation (loom.feliz-async-effect-unsupported).",
+        );
+      }
+      if (e.otherwise === undefined) {
+        throw new Error(
+          "feliz: a `match` in a value position needs an `otherwise` arm to render a total " +
+            "F# if/elif/else expression.",
+        );
+      }
+      const chain = e.arms.map(
+        (a, i) => `${i === 0 ? "if" : "elif"} ${r(a.cond)} then ${r(a.value)}`,
+      );
+      return chain.length === 0
+        ? `(${r(e.otherwise)})`
+        : `(${chain.join(" ")} else ${r(e.otherwise)})`;
+    }
+    case "lambda":
+      // Single-expression form (`x => expr`) → the shared F# lambda leaf.  A
+      // block-body lambda (`x => { … }`) carries statements, not a value, and
+      // has no update-arm rendering — fail fast.
+      if (e.block) {
+        throw new Error(
+          "feliz: block-body lambda (`x => { … }`) is not rendered in an F# action body.",
+        );
+      }
+      return FS_LEAVES.lambda(e.param, e.body ? r(e.body) : undefined);
     case "paren":
       return `(${r(e.inner)})`;
     default:
-      // Fail fast rather than silently substituting `(* unsupported *) ()`
-      // (unit), which compiles but drops the expression's value on the floor —
-      // a silent, wrong-but-compiling F# output.  The Feliz expr path renders
-      // literal/ref/binary/unary/ternary/convert/list/object/member/call/paren;
-      // every other kind (`this`/`id`/`method-call`/`action-ref`/`lambda`/
-      // `new`/`match`) is genuinely not implemented on the F# update/expr path.
-      // Tracked in docs/new-plan/T6-backend-parity.md M-T6.15.
+      // Fail fast rather than silently substituting `(* unsupported *) ()`.
+      // The remaining kinds are backend-only or subsystem-gated in a frontend
+      // value position: `this`/`id` (domain-body receivers), `action-ref` (a
+      // handler reference, bound by the view walker, never a value here), and
+      // `new` (part/VO construction — a domain concern).  Unreachable on valid
+      // frontend `.ddd`; a defensive fail-fast, not a silent drop.
       throw new Error(
         `feliz: unsupported expression '${e.kind}' in an F# action/update body — ` +
-          `the Feliz frontend does not render it here yet (M-T6.15). Rework the ` +
+          `it has no meaning in a frontend value position. Rework the ` +
           `expression, or implement the '${e.kind}' arm in fs-expr.ts.`,
       );
   }

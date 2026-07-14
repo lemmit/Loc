@@ -160,37 +160,101 @@ export function renderMsg(
   return `type Msg =\n${cases.join("\n")}`;
 }
 
-/** Render one action body statement into the `update` arm: a state write
- *  (`:=` / `+=` / `-=`) becomes a `let model = { model with F = … }` rebind. */
-function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): string | undefined {
+/** One rendered fragment of an `update` arm body.  A statement contributes a
+ *  model rebind / side-effect `line`, a trailing `cmd` (an Elmish command — a
+ *  dispatched sibling action, …), or both.  The arm assembler concatenates the
+ *  lines and batches the cmds into the arm's `(model, Cmd)` tail — so a `call`
+ *  to a sibling action issues `Cmd.ofMsg` instead of the hardcoded `Cmd.none`. */
+interface UpdateArmPart {
+  line?: string;
+  cmd?: string;
+}
+
+/** The Elmish `Msg` application form for a dispatched action: `Inc` (nullary)
+ *  or `SetTerm arg` (one param).  Action Msg cases carry 0 or 1 param
+ *  (`renderMsg` / the arm head), so a single rendered arg suffices. */
+function dispatchMsg(action: string, args: readonly string[]): string {
+  const head = msgCase(action);
+  return args.length === 0 ? head : `${head} ${args.join(" ")}`;
+}
+
+/** Render one action-body statement into `update`-arm fragment(s).  Covers the
+ *  same set the reference JSX walker renders in a page event handler
+ *  (walker-core `emitStmt`): state writes (`:=` / `+=` / `-=`, scalar AND
+ *  collection), `let` bindings, bare expression statements, and `call`s to a
+ *  sibling action / a ui function.  Backend-only statement kinds (`precondition`
+ *  / `requires` / `emit` / `return`) have no meaning in a frontend action — the
+ *  JSX walker throws on them too — so they stay a fail-fast throw (a defensive
+ *  invariant, unreachable on valid `.ddd`). */
+function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): UpdateArmPart {
   switch (stmt.kind) {
     case "assign": {
       const field = upperFirst(stmt.target.segments[0]!);
-      return `      let model = { model with ${field} = ${renderFsExpr(stmt.value, ctx)} }`;
+      return {
+        line: `      let model = { model with ${field} = ${renderFsExpr(stmt.value, ctx)} }`,
+      };
     }
     case "add":
     case "remove": {
       const field = upperFirst(stmt.target.segments[0]!);
-      const op = stmt.kind === "add" ? "+" : "-";
       const v = renderFsExpr(stmt.value, ctx);
-      // Scalar compound (`+=`/`-=` on a counter); collection add/remove is a
-      // follow-up (needs list append/filter).
-      return `      let model = { model with ${field} = (model.${field} ${op} ${v}) }`;
+      // A collection target appends / removes-by-value on the F# list (`@` cons,
+      // `List.filter` drop); a scalar target is an arithmetic compound
+      // (`+`/`-`).  `stmt.collection` (set at lowering) is the discriminator —
+      // the JS frontends read the same flag to choose `[...xs, v]` vs `x + v`.
+      const value = stmt.collection
+        ? stmt.kind === "add"
+          ? `(model.${field} @ [ ${v} ])`
+          : `(model.${field} |> List.filter (fun x -> x <> ${v}))`
+        : `(model.${field} ${stmt.kind === "add" ? "+" : "-"} ${v})`;
+      return { line: `      let model = { model with ${field} = ${value} }` };
     }
     case "let":
-      return `      let ${stmt.name} = ${renderFsExpr(stmt.expr, ctx)}`;
+      return { line: `      let ${stmt.name} = ${renderFsExpr(stmt.expr, ctx)}` };
+    case "expression":
+      // Bare expression statement (`name(args)` for effect).  A bare value in a
+      // pure MVU arm must be discarded — `<expr> |> ignore` keeps the arm
+      // well-typed regardless of the expression's result type.
+      return { line: `      ${renderFsExpr(stmt.expr, ctx)} |> ignore` };
+    case "call": {
+      const args = stmt.args.map((a) => renderFsExpr(a, ctx));
+      if (stmt.target === "action") {
+        // Dispatch the sibling action's Msg — every combined action is emitted
+        // as a Model/Msg/update arm, so re-dispatch re-enters the update loop,
+        // matching the JS frontends' direct handler call + re-render.
+        return { cmd: `Cmd.ofMsg (${dispatchMsg(stmt.name, args)})` };
+      }
+      if (stmt.target === "function") {
+        // A call to a ui `function` (typically `extern`) — a fully-qualified or
+        // in-scope F# function.  Discard its result (effect-position call).
+        return { line: `      ${stmt.name}(${args.join(", ")}) |> ignore` };
+      }
+      // `store-action` / `private-operation`: no meaning in the Feliz MVU arm
+      // yet (a store call needs the store subsystem; a private-operation call is
+      // a backend concept).  Fail fast rather than silently dropping it.
+      throw new Error(
+        `feliz: unsupported '${stmt.target}' call '${stmt.name}' in the MVU update arm — ` +
+          `the Feliz frontend dispatches sibling actions and ui functions here. ` +
+          `Rework the action, or extend the 'call' arm in update-emit.ts.`,
+      );
+    }
+    case "variant-match":
+      // `match await <op>()` (async effect) — gated at validation on Feliz
+      // (`loom.feliz-async-effect-unsupported`), so this is a defensive backstop
+      // unreachable on validated `.ddd`.
+      throw new Error(
+        "feliz: `match await` (async effect) is not rendered on the Feliz frontend — " +
+          "it is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
+      );
     default:
-      // Fail fast rather than emitting `// TODO feliz update: <kind>`, which
-      // silently drops the statement — an action body carrying a `call`,
-      // `emit`, `variant-match`, `return`, or a guard would compile but do
-      // nothing, losing control flow into a comment.  The MVU update arm
-      // renders `:=` (assign), `+=`/`-=` (add/remove), and `let` bindings;
-      // every other statement kind is genuinely not implemented here.
-      // Tracked in docs/new-plan/T6-backend-parity.md M-T6.15.
+      // `precondition` / `requires` / `emit` / `return` are backend-only
+      // statement kinds — the reference JSX walker (`emitStmt`) throws on them
+      // too ("no meaning in a page event handler").  Unreachable on valid
+      // frontend `.ddd`; a defensive fail-fast, not a silent drop.
       throw new Error(
         `feliz: unsupported action statement '${stmt.kind}' in the MVU update arm — ` +
-          `the Feliz frontend renders ':=' / '+=' / '-=' / 'let' here (M-T6.15). ` +
-          `Rework the action, or implement the '${stmt.kind}' arm in update-emit.ts.`,
+          `it has no meaning in a frontend action (backend-only). ` +
+          `This is unreachable on valid .ddd; see update-emit.ts.`,
       );
   }
 }
@@ -240,8 +304,19 @@ export function renderUpdate(
       locals: new Set(p ? [p.name] : []),
     };
     const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
-    const body = a.body.map((s) => renderUpdateStmt(s, ctx)).filter(Boolean);
-    return `${head}\n${body.join("\n")}\n      model, Cmd.none`;
+    const parts = a.body.map((s) => renderUpdateStmt(s, ctx));
+    const lines = parts.map((pt) => pt.line).filter((l): l is string => l !== undefined);
+    const cmds = parts.map((pt) => pt.cmd).filter((c): c is string => c !== undefined);
+    // Batch dispatched cmds (sibling-action calls) into the arm tail; no cmds →
+    // the pure `Cmd.none` (a plain state rebind).
+    const cmd =
+      cmds.length === 0
+        ? "Cmd.none"
+        : cmds.length === 1
+          ? cmds[0]
+          : `Cmd.batch [ ${cmds.join("; ")} ]`;
+    const bodyLines = lines.length > 0 ? `${lines.join("\n")}\n` : "";
+    return `${head}\n${bodyLines}      model, ${cmd}`;
   });
   const readArms = reads.map(
     (r) =>
