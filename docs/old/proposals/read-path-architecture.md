@@ -371,12 +371,53 @@ projection.** `view`'s genuinely-unique feature is that
 `findManyByIds` (`lower-view.ts:96` `collectIdFollows`) so projecting a
 foreign field doesn't N+1. Killing `view` must **not** demote this to
 "hand-write a `queryHandler` with two `run`s" (that re-introduces the
-footgun). Instead the follow becomes a property of **projecting a
-`response`**: a response bind expression may traverse an `X id` ref, and
-the emitter batch-loads it — available in `scaffoldPaged`, a hand-written
-`queryHandler`, or anywhere a response is projected. The `collectIdFollows`
-/ `auxiliaries` machinery **relocates** from the view lowerer to the
-response-projection path; it is not rewritten.
+footgun). Instead the follow becomes a property of the **projection
+expression** (the `aggregate → response DTO` map) — a bind may traverse an
+`X id` ref, and the emitter batch-loads it — available in `scaffoldPaged`'s
+generated projector, a hand-written `queryHandler` body, or a named
+projection. The `collectIdFollows` / `auxiliaries` machinery **relocates**
+from the view lowerer to the projection path; it is not rewritten.
+
+#### The follow is an app-side join — which is why it's a projection concern, not a query one
+
+The follow is genuinely a **join**, but *not* a SQL one. `customerId:
+Customer id` is a cross-aggregate reference, and Loom **never SQL-joins
+across aggregate roots** (aggregates are consistency/storage boundaries;
+the `X id` rule links them by id, never by FK). So `customerId.name`
+compiles to an **application-side, batched, aggregate-respecting join** —
+each aggregate loaded through *its own* repository, stitched in memory:
+
+```ts
+const orders       = await orderRepo.run(...);                    // source aggregate
+const customerById = await customerRepo.findManyByIds(            // ONE batch, not N per row
+  orders.map(o => o.customerId));
+return orders.map(o => ({ ..., customerName: customerById.get(o.customerId)!.name }));
+```
+
+This pins *where* the follow belongs, and answers **"should `retrieval`
+hold the `bind`?" — no:**
+
+- A **filter** (`criterion` / `retrieval.where`) is **single-aggregate,
+  pushed to SQL** — you cannot `where customer.tier == Gold` (that needs
+  the join *at filter time*, which Loom doesn't do across aggregates;
+  filtering by a foreign field is a `projection`'s job). So the join
+  **never appears in the query** — only in the projection.
+- `retrieval` is the *query* ("which rows, order, hydration"). Giving it
+  `bind` re-fuses query + projection (that *is* `view`), forces the output
+  shape to be redeclared per query, and adds a **second** cross-aggregate
+  knob next to its existing `loads:` (which fetches for *hydration*, not
+  projection) — two overlapping mechanisms.
+- Keeping query and projection split is the SQL insight done right:
+  `retrieval` = `WHERE`/`ORDER BY` (one table); the projection = `SELECT`
+  (where a join-derived column belongs). Orthogonal ⇒ **N queries × M
+  output shapes without N×M constructs** — the reuse `view` (one shape
+  welded to one query) can't offer.
+
+The follow therefore lives on the **projection**, never on `criterion` or
+`retrieval`. For true SQL-join-level or hot denormalized reads
+(filter-by-foreign-field, cross-aggregate aggregation), the tool is
+`projection` (a materialized read model) — the app-side batched follow
+covers moderate cardinality; `projection` covers the rest.
 
 **Migration.** `view` stays parsing through a deprecation window
 (`loom.view-deprecated`, warning), with `ddd migrate reads` rewriting the
