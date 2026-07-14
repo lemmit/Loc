@@ -9,11 +9,16 @@
 import type {
   AggregateIR,
   CreateInputFieldIR,
+  EntityPartIR,
   ExprIR,
   FieldAccess,
   FieldIR,
+  IdValueType,
   TypeIR,
+  ValueObjectIR,
+  WireField,
 } from "../types/loom-ir.js";
+import { hasTenantOwned, TENANT_OWNED_DATA_KEY_FIELD } from "../util/tenant-stance.js";
 import { satisfiableAtConstruction } from "../validate/invariant-classify.js";
 
 /** Any structure carrying a resolved access role.  Both `WireField`
@@ -255,4 +260,162 @@ export function forUpdateInput<T extends WithAccess>(items: readonly T[]): T[] {
  * concurrency, depending on transport. */
 export function updatePreconditions<T extends WithAccess>(items: readonly T[]): T[] {
   return items.filter((f) => f.access === "token");
+}
+
+// ---------------------------------------------------------------------------
+// Wire-shape derivation — the scaffold-time walk.
+//
+// The canonical ordered field list an aggregate / part / value object takes on
+// the network:
+//
+//   1. `id`              — always first (aggregates / parts only)
+//   2. each `Property`   — declaration order
+//   3. each `Containment` — declaration order, array vs single
+//   4. each `Derived`    — declaration order
+//
+// Value objects skip steps 1 + 3 (no identity, no containment).
+//
+// This is a pure function of facts already on the (fully-lowered, enriched)
+// IR node — `fields` / `contains` / `derived` / `capabilities` — so it is
+// recomputed on demand at each emit site rather than stamped onto the node.
+// See CLAUDE.md "Derive, don't stamp".  Callers pair it with the access-modifier
+// filters above (`forApiRead(wireFieldsFor(ent))`) to project a boundary shape.
+// ---------------------------------------------------------------------------
+
+function idTypeFor(targetName: string, valueType: IdValueType = "guid"): TypeIR {
+  return { kind: "id", targetName, valueType };
+}
+
+function containmentTypeFor(partName: string, collection: boolean): TypeIR {
+  return collection
+    ? { kind: "array", element: { kind: "entity", name: partName } }
+    : { kind: "entity", name: partName };
+}
+
+export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
+  const out: WireField[] = [
+    {
+      name: "id",
+      type: idTypeFor(agg.name, agg.idValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
+  ];
+  for (const f of agg.fields) {
+    // `tenantOwned`'s `dataKey` (multi-tenancy P2.3) is a persistence-only
+    // materialized-path column — `authorization.md §2` calls for it "kept
+    // out of wireShape" entirely, unlike `tenantId` which stays in wireShape
+    // as `internal` (excluded from API reads by `forApiRead`, still visible
+    // in `.loom/wire-spec.json`). The registry's own same-named `dataKey`
+    // (from `tenantRegistry`, `managed`) is unaffected — the two capabilities
+    // are mutually exclusive per aggregate (`classifyTenantStance`).
+    if (f.name === TENANT_OWNED_DATA_KEY_FIELD && hasTenantOwned(agg)) continue;
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
+  }
+  for (const c of agg.contains) {
+    out.push({
+      name: c.name,
+      type: containmentTypeFor(c.partName, c.collection),
+      optional: !!c.optional && !c.collection,
+      source: "containment",
+      access: "editable",
+    });
+  }
+  for (const d of agg.derived) {
+    // `inspect` is the host-language debug-string hook (ToString /
+    // util.inspect.custom / Inspect protocol) — emitted as a getter on
+    // the domain class but kept out of JSON DTOs.  Exposing the
+    // structural form on the wire would leak internal field layout to
+    // every API client.
+    if (d.name === "inspect") continue;
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
+  }
+  return out;
+}
+
+export function wireFieldsForPart(part: EntityPartIR): WireField[] {
+  const out: WireField[] = [
+    {
+      name: "id",
+      type: idTypeFor(part.name, part.parentIdValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
+  ];
+  for (const f of part.fields) {
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
+  }
+  for (const c of part.contains) {
+    out.push({
+      name: c.name,
+      type: containmentTypeFor(c.partName, c.collection),
+      optional: !!c.optional && !c.collection,
+      source: "containment",
+      access: "editable",
+    });
+  }
+  for (const d of part.derived) {
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
+  }
+  return out;
+}
+
+export function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
+  const out: WireField[] = [];
+  for (const f of vo.fields) {
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
+  }
+  for (const d of vo.derived) {
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
+  }
+  return out;
+}
+
+/** Recompute the canonical wire shape for an aggregate / part / value object,
+ *  dispatching on the node's structural discriminator (aggregates carry
+ *  `idValueType`, parts `parentIdValueType`, value objects neither).  A drop-in
+ *  for the retired `wireShapeFor` stamp reader: byte-identical output because it
+ *  runs the SAME walk the enrichment pass ran, over the same enriched fields. */
+export function wireFieldsFor(ent: AggregateIR | EntityPartIR | ValueObjectIR): WireField[] {
+  if ("idValueType" in ent) return wireFieldsForAggregate(ent);
+  if ("parentIdValueType" in ent) return wireFieldsForPart(ent);
+  return wireFieldsForValueObject(ent);
 }

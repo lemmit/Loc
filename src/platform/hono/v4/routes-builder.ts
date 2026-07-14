@@ -12,12 +12,12 @@ import {
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/zod-refine.js";
-import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
 import {
   createInputFields,
   emitsRestCreate,
   forApiRead,
   wireCreateDefault,
+  wireFieldsFor,
 } from "../../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
@@ -1456,7 +1456,7 @@ function emitResponseDtoSchema(
       lines.push(`  ${f.name}: ${zodForResponseField(f.type, f.optional, ctx)},`);
     }
   } else {
-    const fields = forApiRead(wireShapeFor(ent));
+    const fields = forApiRead(wireFieldsFor(ent));
     for (const wf of fields) {
       if (wf.source === "id") {
         lines.push(`  ${wf.name}: z.string(),`);

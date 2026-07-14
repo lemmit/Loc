@@ -60,11 +60,15 @@ import {
   hierarchyRegistry,
   TENANCY_SELF_SCOPE_ORIGIN,
   TENANT_OWNED_CAPABILITY,
-  TENANT_OWNED_DATA_KEY_FIELD,
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
 import { walkStmtExprsDeep } from "../util/walk.js";
-import { buildCreateInput } from "./wire-projection.js";
+import {
+  buildCreateInput,
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+  wireFieldsForValueObject,
+} from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR
@@ -1600,135 +1604,12 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
 // ---------------------------------------------------------------------------
 // Wire-shape derivation.
 //
-// The single source of truth for the canonical JSON shape an
-// aggregate / part / value object takes on the network.  Every wire
-// emitter (Hono routes, Hono `toWire`, .NET DTOs + projection,
-// React Zod schemas) walks this list — order is the contract:
-//
-//   1. `id`              — always first (aggregates / parts only)
-//   2. each `Property`   — declaration order
-//   3. each `Containment` — declaration order, array vs single
-//   4. each `Derived`    — declaration order
-//
-// Value objects skip steps 1 + 3 (no identity, no containment).
+// The canonical wire-shape walk (`wireFieldsForAggregate` / `-Part` /
+// `-ValueObject`) lives in `./wire-projection.ts` alongside the
+// access-modifier filters that consume it, so both the enrichment pass here
+// and the scaffold-time emit sites read the same single source.  See
+// CLAUDE.md "Derive, don't stamp".
 // ---------------------------------------------------------------------------
-
-function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
-  const out: WireField[] = [
-    {
-      name: "id",
-      type: idTypeFor(agg.name, agg.idValueType),
-      optional: false,
-      source: "id",
-      access: "token",
-    },
-  ];
-  for (const f of agg.fields) {
-    // `tenantOwned`'s `dataKey` (multi-tenancy P2.3) is a persistence-only
-    // materialized-path column — `authorization.md §2` calls for it "kept
-    // out of wireShape" entirely, unlike `tenantId` which stays in wireShape
-    // as `internal` (excluded from API reads by `forApiRead`, still visible
-    // in `.loom/wire-spec.json`). The registry's own same-named `dataKey`
-    // (from `tenantRegistry`, `managed`) is unaffected — the two capabilities
-    // are mutually exclusive per aggregate (`classifyTenantStance`).
-    if (f.name === TENANT_OWNED_DATA_KEY_FIELD && hasTenantOwned(agg)) continue;
-    out.push({
-      name: f.name,
-      type: f.type,
-      optional: f.optional,
-      source: "property",
-      access: f.access ?? "editable",
-    });
-  }
-  for (const c of agg.contains) {
-    out.push({
-      name: c.name,
-      type: containmentTypeFor(c.partName, c.collection),
-      optional: !!c.optional && !c.collection,
-      source: "containment",
-      access: "editable",
-    });
-  }
-  for (const d of agg.derived) {
-    // `inspect` is the host-language debug-string hook (ToString /
-    // util.inspect.custom / Inspect protocol) — emitted as a getter on
-    // the domain class but kept out of JSON DTOs.  Exposing the
-    // structural form on the wire would leak internal field layout to
-    // every API client.
-    if (d.name === "inspect") continue;
-    out.push({
-      name: d.name,
-      type: d.type,
-      optional: false,
-      source: "derived",
-      access: "editable",
-    });
-  }
-  return out;
-}
-
-function wireFieldsForPart(part: EntityPartIR): WireField[] {
-  const out: WireField[] = [
-    {
-      name: "id",
-      type: idTypeFor(part.name, part.parentIdValueType),
-      optional: false,
-      source: "id",
-      access: "token",
-    },
-  ];
-  for (const f of part.fields) {
-    out.push({
-      name: f.name,
-      type: f.type,
-      optional: f.optional,
-      source: "property",
-      access: f.access ?? "editable",
-    });
-  }
-  for (const c of part.contains) {
-    out.push({
-      name: c.name,
-      type: containmentTypeFor(c.partName, c.collection),
-      optional: !!c.optional && !c.collection,
-      source: "containment",
-      access: "editable",
-    });
-  }
-  for (const d of part.derived) {
-    out.push({
-      name: d.name,
-      type: d.type,
-      optional: false,
-      source: "derived",
-      access: "editable",
-    });
-  }
-  return out;
-}
-
-function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
-  const out: WireField[] = [];
-  for (const f of vo.fields) {
-    out.push({
-      name: f.name,
-      type: f.type,
-      optional: f.optional,
-      source: "property",
-      access: f.access ?? "editable",
-    });
-  }
-  for (const d of vo.derived) {
-    out.push({
-      name: d.name,
-      type: d.type,
-      optional: false,
-      source: "derived",
-      access: "editable",
-    });
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // Traceability index — derived in one pure pass, exactly
@@ -1883,14 +1764,4 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
     execTestsByTestCase,
     execTests,
   };
-}
-
-function idTypeFor(targetName: string, valueType: IdValueType = "guid"): TypeIR {
-  return { kind: "id", targetName, valueType };
-}
-
-function containmentTypeFor(partName: string, collection: boolean): TypeIR {
-  return collection
-    ? { kind: "array", element: { kind: "entity", name: partName } }
-    : { kind: "entity", name: partName };
 }
