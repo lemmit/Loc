@@ -9,8 +9,8 @@
 > **Product bugs: BUG-003 OPEN** (scalar-return op HTTP divergence — an earlier
 > gate was **reverted** because it broke the shipped op-self-call feature; see
 > below). **BUG-005 FIXED** (union find → success-variant-directly at 200 across
-> all 5 backends). **BUG-004 open** (`resource`-keyword field, low priority,
-> workaround in place). BUG-006 in flight as #1622; BUG-001/002 were test-infra
+> all 5 backends). **BUG-004 FIXED** (M-T5.18 Track C — keyword
+> fields readable via postfix `.`). BUG-006 in flight as #1622; BUG-001/002 were test-infra
 > and fixed here.
 
 
@@ -97,7 +97,14 @@ been removed with the gate and stays removed — it added nothing beyond the
 real fix is to converge the scalar-return HTTP contract across all five backends
 (all-200-with-body or all-204), which is additive feature work, not a gate.
 
-### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **S3**
+### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **FIXED (M-T5.18 Track C)**
+
+> **FIXED.** The second remedy proposed below ("keyword field names must be
+> accessible via postfix") shipped: `CommonSoftKeywords` (which includes
+> `resource`) is now composed into `MemberName`, so `e.resource` /
+> `this.resource` parse. This closed the whole declarable-but-unreadable class,
+> not just `resource`. Regression: `test/language/parsing/keyword-field-member-access.test.ts`
+> + the coverage snapshot in `keyword-identifier-completeness.test.ts`.
 
 Slice S4. A union-returning find (`find locate(name): Project or ProjectNotFound`)
 **requires** its error payload to carry exactly `resource: string` (validator:

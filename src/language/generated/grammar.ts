@@ -6258,88 +6258,11 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "arguments": []
           },
           {
-            "$type": "Keyword",
-            "value": "filter"
-          },
-          {
-            "$type": "Keyword",
-            "value": "stamp"
-          },
-          {
-            "$type": "Keyword",
-            "value": "implements"
-          },
-          {
-            "$type": "Keyword",
-            "value": "write"
-          },
-          {
-            "$type": "Keyword",
-            "value": "migration"
-          },
-          {
-            "$type": "Keyword",
-            "value": "kind"
-          },
-          {
-            "$type": "Keyword",
-            "value": "schema"
-          },
-          {
-            "$type": "Keyword",
-            "value": "tablePrefix"
-          },
-          {
-            "$type": "Keyword",
-            "value": "keyPrefix"
-          },
-          {
-            "$type": "Keyword",
-            "value": "ttl"
-          },
-          {
-            "$type": "Keyword",
-            "value": "every"
-          },
-          {
-            "$type": "Keyword",
-            "value": "retain"
-          },
-          {
-            "$type": "Keyword",
-            "value": "isolationLevel"
-          },
-          {
-            "$type": "Keyword",
-            "value": "readonly"
-          },
-          {
-            "$type": "Keyword",
-            "value": "use"
-          },
-          {
-            "$type": "Keyword",
-            "value": "eventLog"
-          },
-          {
-            "$type": "Keyword",
-            "value": "snapshot"
-          },
-          {
-            "$type": "Keyword",
-            "value": "replica"
-          },
-          {
-            "$type": "Keyword",
-            "value": "objectStore"
-          },
-          {
-            "$type": "Keyword",
-            "value": "queue"
-          },
-          {
-            "$type": "Keyword",
-            "value": "config"
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@169"
+            },
+            "arguments": []
           }
         ]
       },
@@ -15215,36 +15138,11 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "arguments": []
           },
           {
-            "$type": "Keyword",
-            "value": "id"
-          },
-          {
-            "$type": "Keyword",
-            "value": "permissions"
-          },
-          {
-            "$type": "Keyword",
-            "value": "contains"
-          },
-          {
-            "$type": "Keyword",
-            "value": "ui"
-          },
-          {
-            "$type": "Keyword",
-            "value": "api"
-          },
-          {
-            "$type": "Keyword",
-            "value": "migration"
-          },
-          {
-            "$type": "Keyword",
-            "value": "modules"
-          },
-          {
-            "$type": "Keyword",
-            "value": "contexts"
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@169"
+            },
+            "arguments": []
           },
           {
             "$type": "Keyword",
@@ -15252,11 +15150,15 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "workflows"
+            "value": "api"
           },
           {
             "$type": "Keyword",
-            "value": "views"
+            "value": "contains"
+          },
+          {
+            "$type": "Keyword",
+            "value": "contexts"
           },
           {
             "$type": "Keyword",
@@ -15268,79 +15170,27 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "payload"
+            "value": "id"
           },
           {
             "$type": "Keyword",
-            "value": "command"
+            "value": "modules"
           },
           {
             "$type": "Keyword",
-            "value": "query"
+            "value": "permissions"
           },
           {
             "$type": "Keyword",
-            "value": "response"
+            "value": "ui"
           },
           {
             "$type": "Keyword",
-            "value": "error"
+            "value": "views"
           },
           {
             "$type": "Keyword",
-            "value": "paged"
-          },
-          {
-            "$type": "Keyword",
-            "value": "envelope"
-          },
-          {
-            "$type": "Keyword",
-            "value": "option"
-          },
-          {
-            "$type": "Keyword",
-            "value": "or"
-          },
-          {
-            "$type": "Keyword",
-            "value": "by"
-          },
-          {
-            "$type": "Keyword",
-            "value": "handle"
-          },
-          {
-            "$type": "Keyword",
-            "value": "action"
-          },
-          {
-            "$type": "Keyword",
-            "value": "store"
-          },
-          {
-            "$type": "Keyword",
-            "value": "tenancy"
-          },
-          {
-            "$type": "Keyword",
-            "value": "crossTenant"
-          },
-          {
-            "$type": "Keyword",
-            "value": "filter"
-          },
-          {
-            "$type": "Keyword",
-            "value": "stamp"
-          },
-          {
-            "$type": "Keyword",
-            "value": "implements"
-          },
-          {
-            "$type": "Keyword",
-            "value": "write"
+            "value": "workflows"
           }
         ]
       },
@@ -16802,14 +16652,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "$type": "Alternatives",
         "elements": [
           {
-            "$type": "Keyword",
-            "value": "by"
-          },
-          {
-            "$type": "Keyword",
-            "value": "handle"
-          },
-          {
             "$type": "RuleCall",
             "rule": {
               "$ref": "#/rules@244"
@@ -16817,32 +16659,11 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "arguments": []
           },
           {
-            "$type": "Keyword",
-            "value": "id"
-          },
-          {
-            "$type": "Keyword",
-            "value": "permissions"
-          },
-          {
-            "$type": "Keyword",
-            "value": "contains"
-          },
-          {
-            "$type": "Keyword",
-            "value": "ui"
-          },
-          {
-            "$type": "Keyword",
-            "value": "api"
-          },
-          {
-            "$type": "Keyword",
-            "value": "modules"
-          },
-          {
-            "$type": "Keyword",
-            "value": "contexts"
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@169"
+            },
+            "arguments": []
           },
           {
             "$type": "Keyword",
@@ -16850,31 +16671,15 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "workflows"
+            "value": "api"
           },
           {
             "$type": "Keyword",
-            "value": "views"
+            "value": "contains"
           },
           {
             "$type": "Keyword",
-            "value": "filter"
-          },
-          {
-            "$type": "Keyword",
-            "value": "stamp"
-          },
-          {
-            "$type": "Keyword",
-            "value": "implements"
-          },
-          {
-            "$type": "Keyword",
-            "value": "migration"
-          },
-          {
-            "$type": "Keyword",
-            "value": "write"
+            "value": "contexts"
           },
           {
             "$type": "Keyword",
@@ -16890,79 +16695,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "where"
-          },
-          {
-            "$type": "Keyword",
-            "value": "payload"
-          },
-          {
-            "$type": "Keyword",
-            "value": "command"
-          },
-          {
-            "$type": "Keyword",
-            "value": "query"
-          },
-          {
-            "$type": "Keyword",
-            "value": "response"
-          },
-          {
-            "$type": "Keyword",
-            "value": "error"
-          },
-          {
-            "$type": "Keyword",
-            "value": "paged"
-          },
-          {
-            "$type": "Keyword",
-            "value": "envelope"
-          },
-          {
-            "$type": "Keyword",
-            "value": "option"
-          },
-          {
-            "$type": "Keyword",
-            "value": "or"
-          },
-          {
-            "$type": "Keyword",
-            "value": "action"
-          },
-          {
-            "$type": "Keyword",
-            "value": "store"
-          },
-          {
-            "$type": "Keyword",
-            "value": "description"
-          },
-          {
-            "$type": "Keyword",
-            "value": "ogImage"
-          },
-          {
-            "$type": "Keyword",
-            "value": "canonical"
-          },
-          {
-            "$type": "Keyword",
-            "value": "favicon"
-          },
-          {
-            "$type": "Keyword",
-            "value": "title"
-          },
-          {
-            "$type": "Keyword",
-            "value": "body"
-          },
-          {
-            "$type": "Keyword",
-            "value": "state"
+            "value": "id"
           },
           {
             "$type": "Keyword",
@@ -16970,15 +16703,27 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "tenancy"
+            "value": "modules"
           },
           {
             "$type": "Keyword",
-            "value": "crossTenant"
+            "value": "permissions"
           },
           {
             "$type": "Keyword",
-            "value": "parent"
+            "value": "ui"
+          },
+          {
+            "$type": "Keyword",
+            "value": "views"
+          },
+          {
+            "$type": "Keyword",
+            "value": "where"
+          },
+          {
+            "$type": "Keyword",
+            "value": "workflows"
           }
         ]
       },

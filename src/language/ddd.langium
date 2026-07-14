@@ -756,14 +756,11 @@ StateField:
 // aggregate / context member positions; everywhere else they remain
 // admissible identifiers.
 StateFieldName returns string:
-    ID | 'filter' | 'stamp' | 'implements' | 'write' | 'migration'
-    // DataSource clause keys are admitted as soft so user pages can still
-    // declare a state field named `kind`, `schema`, `every`, etc.  Without
-    // this, `state { kind: string }` stopped parsing the moment `'kind'`
-    // appeared as a literal in the `DataSource` rule.
-    | 'kind' | 'schema' | 'tablePrefix' | 'keyPrefix' | 'ttl' | 'every'
-    | 'retain' | 'isolationLevel' | 'readonly' | 'use'
-    | 'eventLog' | 'snapshot' | 'replica' | 'objectStore' | 'queue' | 'config';
+    ID | CommonSoftKeywords
+    // StateFieldName-only extras (structural keywords not in the shared
+    // value core; page/component `state {}` field name).  Composing CommonSoftKeywords here also closes the
+    // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
+;
 
 // ---- menu ---------------------------------------------------------------
 
@@ -1942,41 +1939,12 @@ LValue:
       (call?='(' (args+=Expression (',' args+=Expression)*)? ')')?;
 
 LValueIdent returns string:
-    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api' | 'migration'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-       // Soft-admit the lifecycle keywords so a bare-statement call
-       // target like `ui.products.create({...})` parses (mirrors
-       // MemberName).
-       | 'create' | 'destroy'
-       // Payload-family keywords — soft in l-value position so an assignment
-       // target naming a field `error`, `query`, etc. parses; hard only at
-       // `ContextMember` (`PayloadDecl`).
-       | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords — soft in l-value position; hard only in the
-       // `GenericCtor` postfix-type slot / the `or` union separator.
-       | 'paged' | 'envelope' | 'option' | 'or'
-       // `by` / `handle` soft in l-value position so an assignment target
-       // naming a field `by` / `handle` (`handle := handle`) parses — hard only
-       // in the reactor clause / workflow handle member.
-       | 'by' | 'handle'
-       // `action` soft in l-value position (`ActionType` is the only hard
-       // position).
-       | 'action'
-       // `store` soft in l-value position so an assignment target naming a
-       // field `store` (`store := store`) parses — hard only as the `Store`
-       // UI-member leading keyword.
-       | 'store'
-       // Tenancy keywords soft in l-value position so an assignment target
-       // naming a field `tenancy` / `crossTenant` parses.  Hard only in the
-       // `TenancyDecl` head / `Aggregate` header flag slot.
-       | 'tenancy' | 'crossTenant'
-       // Capability source-surface keywords — soft in l-value position so an
-       // assignment target naming a field `filter` / `stamp` / `implements`
-       // (`filter := s`) parses.  Hard only at aggregate / context member
-       // position.
-       | 'filter' | 'stamp' | 'implements'
-       // Policy verb keyword — soft in l-value position (`read := x`).
-       | 'write';
+    ID | CommonSoftKeywords
+    // LValueIdent-only extras (structural keywords not in the shared
+    // value core; assignment / call statement target).  Composing CommonSoftKeywords here also closes the
+    // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
+    | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules'
+    | 'permissions' | 'ui' | 'views' | 'workflows';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -2132,69 +2100,12 @@ CallArg:
 // resolution / collection-op dispatch lives in the lowering
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
-    // `by` / `handle` admitted after `.` so member access like `e.by`,
-    // `this.handle` keeps parsing (`by`/`handle` are hard only in the reactor
-    // clause / workflow handle member).
-    'by' | 'handle' |
-    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-       | 'filter' | 'stamp' | 'implements' | 'migration'
-       // Policy verb keyword admissible after `.` so a member named
-       // `read` / `write` parses.
-       | 'write'
-       // `create` / `destroy` are hard keywords for the lifecycle
-       // member rules (`Create` / `Destroy`) but must stay admissible
-       // after `.` so the e2e + page surfaces keep parsing —
-       // `Order.create({...})`, `api.products.create(...)`,
-       // `Sales.Customer.create.mutate(...)`.  Magic-identifier
-       // dispatch lives in lowering, not the grammar.
-       | 'create' | 'destroy'
-       // `find` is a hard keyword in `FindDecl` (`find foo(): T ...`) but must
-       // be admissible after `.` so the built-in `Repo.find(<Criterion>)`
-       // criterion lookup (the source of an `if let`) parses as a member call
-       // — the sibling of the plain-ID `findAll`/`run`.
-       | 'find'
-       // `where` is a hard keyword in `FindDecl` (`find foo(): T where ...`)
-       // and `View` (`view X = Y where ...` and the full form's `from Y where`),
-       // but it's also the collection-op name in `arr.where(λ)` — see
-       // `src/util/collection-ops.ts` and the `case "where":` arms in the TS /
-       // Phoenix renderers.  Admit it here so expression-position uses parse.
-       | 'where'
-       // Payload-family keywords admitted after `.` so member access like
-       // `Sales.Customer.all.error` (a generated-hook field) keeps parsing;
-       // hard only at `ContextMember`.
-       | 'payload' | 'command' | 'query' | 'response' | 'error'
-       // Generic-carrier keywords admitted after `.` so member access on a
-       // field named `paged` / `envelope` / `option` / `or` keeps parsing;
-       // hard only in the `GenericCtor` postfix-type slot / the `or` union
-       // separator.
-       | 'paged' | 'envelope' | 'option' | 'or'
-       // `action` admitted after `.` (`ActionType` is the only hard position).
-       | 'action'
-       // `store` admitted after `.` so member access on a field named `store`
-       // parses — hard only as the `Store` UI-member leading keyword.
-       | 'store'
-       // Page-metadata + favicon soft keywords admitted after `.` so member
-       // access on a field named `description` / `title` / `body` / `state` /
-       // etc. parses — e.g. a scaffolded view-list column over a `description`
-       // field (`o => Text { o.description }`).  These are already soft in
-       // `Property.name` / `LooseName`; hard only in the page DSL metadata
-       // slots (`title:` / `body:` / `description:` / the `state { … }` block).
-       | 'description' | 'ogImage' | 'canonical' | 'favicon'
-       | 'title' | 'body' | 'state'
-       // `ignoring` admitted after `.` so member access on a field named
-       // `ignoring` keeps parsing.  Hard only in the `IgnoringClause` read
-       // tail.
-       | 'ignoring'
-       // Tenancy keywords admitted after `.` so member access on a field named
-       // `tenancy` / `crossTenant` keeps parsing (`this.tenancy`).  Hard only
-       // in the `TenancyDecl` head / `Aggregate` header flag slot.
-       | 'tenancy' | 'crossTenant'
-       // `parent` admitted after `.` so a field named `parent` (`parent: Self id?`)
-       // is READABLE — `this.parent`.  Hard only in the `Requirement` hierarchy
-       // clause.  Already soft in `Property.name` / `LooseName`; without this a
-       // `parent` field could be declared but never read.
-       | 'parent';
+    ID | CommonSoftKeywords
+    // MemberName-only extras (structural keywords not in the shared
+    // value core; member access after `.`).  Composing CommonSoftKeywords here also closes the
+    // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
+    | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id'
+    | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows';
 
 // Lambdas accept either a single expression body or a brace-wrapped block of
 // statements.  Block bodies are required for multi-statement event handlers in
