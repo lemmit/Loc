@@ -18,6 +18,7 @@ import {
   type OperationIR,
   operationIsGuarded,
   operationUsesCurrentUser,
+  type PayloadIR,
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
@@ -109,7 +110,12 @@ export function buildPyRoutesFile(
   }
   const models = lines(
     ...parts.map((p) => responseModel(p.name, p, ctx)),
-    responseModel(agg.name, agg, ctx),
+    responseModel(
+      agg.name,
+      agg,
+      ctx,
+      ctx.payloads.find((p) => p.kind === "response" && p.name === `${agg.name}Response`),
+    ),
     // Named array component for list endpoints (`<Agg>ListResponse`,
     // RootModel so FastAPI emits a $ref instead of an inline array) —
     // response-schema parity with the other backends.
@@ -307,12 +313,37 @@ function responseModel(
   name: string,
   ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
+  declared?: PayloadIR,
 ): string {
-  const fields = forApiRead(wireShapeFor(ent));
   // Co-located provenance lineage (provenance.md): each `provenanced` field
   // exposes a trailing `<field>_provenance` carrying the current lineage on
   // the wire (root-only; parts never carry provenanced fields).
   const provFields = ent.fields.filter((f) => f.provenanced);
+  // M-T5.10 (PR4): when the context declares a `response <Agg>Response` record
+  // (spliced by `scaffoldHandlers`), READ that record's fields instead of
+  // re-deriving from `wireShape` — byte-identical for the scaffolded form,
+  // authoritative for a hand-declared divergent one.  The record omits `id`
+  // (grammar-reserved), so the synthetic wire-shape id row is re-prepended;
+  // a containment field is already the sibling `<Part>Response` name and is
+  // rendered directly to avoid a double `Response` suffix.
+  if (declared) {
+    const idWf = forApiRead(wireShapeFor(ent)).find((wf) => wf.source === "id");
+    return lines(
+      `class ${name}Response(BaseModel):`,
+      idWf ? `    ${idWf.name}: ${responsePyType(idWf.type, ctx)}` : [],
+      declared.fields.map((f) => {
+        const t = payloadFieldPyType(f.type, ctx);
+        const optional = f.optional || f.type.kind === "optional";
+        const suffix =
+          optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
+        return `    ${f.name}: ${t}${suffix}`;
+      }),
+      provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
+      "",
+      "",
+    );
+  }
+  const fields = forApiRead(wireShapeFor(ent));
   return lines(
     `class ${name}Response(BaseModel):`,
     fields.map((wf) => {
@@ -335,6 +366,30 @@ function containmentResponseType(t: TypeIR): string {
   if (t.kind === "array" && t.element.kind === "entity") return `list[${t.element.name}Response]`;
   if (t.kind === "entity") return `${t.name}Response | None`;
   return "object";
+}
+
+/** True iff `name` is a declared `response` payload in the context — a
+ *  containment field's already-wire type, which must not be re-suffixed. */
+function isResponsePayloadName(ctx: EnrichedBoundedContextIR, name: string): boolean {
+  return ctx.payloads.some((p) => p.kind === "response" && p.name === name);
+}
+
+/** Pydantic type for a field of a DECLARED `response` payload record (M-T5.10).
+ *  A VO / scalar / enum / id field carries its DOMAIN type, so `responsePyType`
+ *  maps it as the wireShape path does.  A CONTAINMENT field is ALREADY the
+ *  sibling `<Part>Response` name (PR1 rewrote the raw entity part, which context
+ *  scope can't reference) — it must be rendered DIRECTLY (`list[LineResponse]`),
+ *  since running it through `containmentResponseType` would append a second
+ *  `Response` (`list[LineResponseResponse]`). */
+function payloadFieldPyType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
+  if (
+    t.kind === "array" &&
+    t.element.kind === "entity" &&
+    isResponsePayloadName(ctx, t.element.name)
+  )
+    return `list[${t.element.name}]`;
+  if (t.kind === "entity" && isResponsePayloadName(ctx, t.name)) return `${t.name} | None`;
+  return responsePyType(t, ctx);
 }
 
 /** Map each create-input field to a Pydantic `Field(...)` expression carrying
