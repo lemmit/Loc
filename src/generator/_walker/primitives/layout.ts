@@ -253,6 +253,12 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
         : ctx.target.renderComment("missing tab body"),
     };
   });
+  // Record the first tab group's default so the shell can declare the
+  // controlled tab state a v-model target (Vue) needs. Keep the first when a
+  // page has several groups — they share the single `__loomTab` model.
+  if (tabs.length > 0 && ctx.tabsDefault === undefined) {
+    ctx.tabsDefault = tabs[0]?.value ?? "tab-1";
+  }
   return renderPrimitive(ctx, "primitive-tabs", {
     tabs,
     hasTabs: tabs.length > 0,

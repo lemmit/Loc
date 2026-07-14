@@ -155,6 +155,11 @@ export interface WalkResult {
    *  "../lib/table-sort"` when set — targets whose `renderSortedRows`
    *  inlines the sort (React) leave it false. */
   usesTableSort: boolean;
+  /** The default tab value of the first `Tabs` on the body, when any — the
+   *  shell declares the controlled tab state (`const __loomTab = ref(<default>)`)
+   *  for targets that v-model the tab group (Vue/Vuetify). Undefined when the
+   *  body has no `Tabs`; targets with uncontrolled tabs (React) ignore it. */
+  tabsDefault?: string;
   /** Names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
    *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
@@ -196,6 +201,12 @@ export interface WalkResult {
    *  shell to declare `const <localVar> = <hookName>(<idExpr>)` at
    *  function top and import the hook from `<prefix>api/<aggCamel>`. */
   actionMutations: ActionMutationState[];
+  /** Fully-rendered `<script setup>` handler lines a target hoisted out of
+   *  template position (Vue's `DestroyForm`: its `window.confirm(...)` handler
+   *  can't live in a `@click` template expression, so it lands here and the
+   *  page shell emits it after the route-id / mutation declarations it reads).
+   *  Optional — only the hoisting targets write it. */
+  hoistedHandlers?: string[];
   /** True when any walked node emitted a `CodeBlock`
    *  primitive.  The React generator's orchestrator aggregates this
    *  across every page in the deployable and threads the result into
@@ -429,6 +440,7 @@ export function walkBody(
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
     usesTableSort: ctx.usesTableSort ?? false,
+    tabsDefault: ctx.tabsDefault,
     usesState: ctx.usesState,
     usesCurrentUser: ctx.usesCurrentUser,
     usesRouterLink: ctx.usesRouterLink,
@@ -439,6 +451,7 @@ export function walkBody(
     formOfs: ctx.formOfs,
     sink: ctx.sink,
     actionMutations: ctx.actionMutations,
+    hoistedHandlers: ctx.hoistedHandlers,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
     usesFragment: ctx.usesFragment,
@@ -550,6 +563,9 @@ export interface Sink {
    *  shared `sortRows` helper.  Optional so the many `Sink` construction sites
    *  needn't all initialise it; only the interactive-table path writes it. */
   usesTableSort?: boolean;
+  /** Set by `emitTabs` to the first `Tabs`' default value — drives the shell's
+   *  controlled tab-state declaration (Vue). Optional; only the tabs path writes it. */
+  tabsDefault?: string;
   usesState: boolean;
   /** True when a currentUser-gated action button emitted from this body
    *  (an `Action(<instance>.<op>)` whose op `requires` is client-evaluable).
@@ -575,6 +591,9 @@ export interface Sink {
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];
+  /** Rendered `<script setup>` handler lines hoisted out of template position
+   *  (Vue `DestroyForm`); see the `WalkResult` field. Lazily created. */
+  hoistedHandlers?: string[];
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
@@ -933,6 +952,9 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesRouteId) parent.usesRouteId = true;
   if (child.usesTableSort) parent.usesTableSort = true;
+  if (child.tabsDefault !== undefined && parent.tabsDefault === undefined) {
+    parent.tabsDefault = child.tabsDefault;
+  }
   if (child.usesState) parent.usesState = true;
   if (child.usesCurrentUser) parent.usesCurrentUser = true;
   if (child.usesChildren) parent.usesChildren = true;
