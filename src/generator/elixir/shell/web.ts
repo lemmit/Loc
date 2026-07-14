@@ -606,16 +606,17 @@ export function renderAppLayout(
   authEnabled = false,
 ): string {
   if (!hasSidebar) {
-    return `<header class="px-4 sm:px-6 lg:px-8">
+    return `<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium">Skip to content</a>
+<header class="px-4 sm:px-6 lg:px-8">
   <div class="flex items-center justify-between border-b border-zinc-100 py-3 text-sm">
     <div class="flex items-center gap-4">
-      <nav class="flex items-center gap-4 font-semibold leading-6 text-zinc-900">
+      <nav aria-label="Primary navigation" class="flex items-center gap-4 font-semibold leading-6 text-zinc-900">
         <a href="/">Home</a>
       </nav>
     </div>
   </div>
 </header>
-<main class="px-4 py-20 sm:px-6 lg:px-8">
+<main id="main-content" class="px-4 py-20 sm:px-6 lg:px-8">
   <div class="mx-auto max-w-2xl">
     <.flash_group flash={@flash} />
     <%= @inner_content %>
@@ -630,10 +631,11 @@ export function renderAppLayout(
   // reads).  No-auth apps emit no such assign — keep the call byte-identical.
   const currentUserAttr = authEnabled ? " current_user={@current_user}" : "";
   return `<div class="flex min-h-screen">
-  <aside class="w-64 flex-shrink-0 border-r border-zinc-100 bg-zinc-50">
+  <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium">Skip to content</a>
+  <nav aria-label="Primary navigation" class="w-64 flex-shrink-0 border-r border-zinc-100 bg-zinc-50">
     <${appModule}Web.Components.Sidebar.sidebar current_path={@current_path}${currentUserAttr} />
-  </aside>
-  <main class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
+  </nav>
+  <main id="main-content" class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
     <div class="mx-auto max-w-4xl">
       <.flash_group flash={@flash} />
       <%= @inner_content %>
