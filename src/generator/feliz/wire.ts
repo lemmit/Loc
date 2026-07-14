@@ -179,6 +179,14 @@ export interface FelizFormField {
   /** For an `idselect` field, the target record field labelling each option —
    *  its `display` derived field when it has one, else `id`. */
   idLabelField?: string;
+  /** When this field is a FLATTENED value-object sub-field, the wire object key
+   *  it nests under (`address` for a VO field `address: Address` expanded to flat
+   *  `addressStreet`/`addressCity` form fields).  The encoder groups every field
+   *  sharing an `objectKey` into `"<objectKey>", Encode.object [ … ]`. */
+  objectKey?: string;
+  /** The JSON key this field encodes to — its own `wireName` for a normal field,
+   *  or the VO sub-field name (`street`) inside its `objectKey` group. */
+  jsonKey: string;
   /** The empty-form initial value for this field — `""` for most, but a REQUIRED
    *  enum defaults to its first value (a `<select>` always has a selection, and
    *  it keeps the required-enum form valid from the start, mirroring React). */
@@ -292,46 +300,86 @@ function inputKindFor(
   return "text"; // id / unresolved enum (string name) / everything else
 }
 
-/** Build the shared form fields (`Set` Msg + encoder + input kind + required-
- *  ness + enum options) for a form of `formType` from a `{name, type, optional?}`
- *  field/param list.  Reused by create + operation + workflow forms.  A field is
- *  optional when flagged so (a create `FieldIR.optional`) OR its type is
- *  `optional` (an `x?: T` op/workflow param).  `enumsByName` resolves an enum
- *  field's allowed values (→ a `<select>`); empty for the callers that don't
- *  thread it (the field just renders as text, byte-identical to before). */
+/** Build one flat `FelizFormField` — the record field `wireName` (bound to an
+ *  input), encoding to `jsonKey` (inside `objectKey`'s group when set). */
+function buildField(
+  formType: string,
+  wireName: string,
+  jsonKey: string,
+  type: TypeIR,
+  optional: boolean,
+  enumsByName: ReadonlyMap<string, string[]>,
+  idLabels: ReadonlyMap<string, string>,
+  objectKey?: string,
+): FelizFormField {
+  const base = scalarBase(type);
+  const inputKind = inputKindFor(type, enumsByName, idLabels);
+  const enumValues =
+    inputKind === "select" && base.kind === "enum" ? enumsByName.get(base.name) : undefined;
+  const idTarget = inputKind === "idselect" && base.kind === "id" ? base.targetName : undefined;
+  const idLabelField = idTarget ? (idLabels.get(idTarget) ?? "id") : undefined;
+  // A REQUIRED enum defaults to its first value so the select and the string
+  // state agree from the start (and the required guard passes); everything else
+  // — text/number/checkbox, an idselect (its list loads at runtime), a VO
+  // sub-field, and an OPTIONAL enum (empty = null) — is "".
+  const emptyValue =
+    inputKind === "select" && !optional && enumValues && enumValues.length > 0
+      ? enumValues[0]!
+      : "";
+  return {
+    wireName,
+    setMsg: `Set${formType}${upperFirst(wireName)}`,
+    encodeExpr: encodeExprFor(type, `form.${wireName}`, optional),
+    inputKind,
+    required: !optional,
+    enumValues,
+    idTarget,
+    idLabelField,
+    objectKey,
+    jsonKey,
+    emptyValue,
+  };
+}
+
+/** Build the shared form fields for a form of `formType` from a `{name, type,
+ *  optional?}` field/param list.  A value-object field (`address: Address`) is
+ *  FLATTENED into one field per scalar VO sub-field (`addressStreet`,
+ *  `addressCity`) — the form record stays flat/all-string, and the encoder
+ *  re-nests them under the object key (`vosByName` resolves the VO's fields).
+ *  Reused by create + operation + workflow forms. */
 function formFieldsFrom(
   formType: string,
   fields: readonly { name: string; type: TypeIR; optional?: boolean }[],
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizFormField[] {
-  return fields.map((f) => {
-    const optional = f.optional === true || f.type.kind === "optional";
+  return fields.flatMap((f) => {
     const base = scalarBase(f.type);
-    const inputKind = inputKindFor(f.type, enumsByName, idLabels);
-    const enumValues =
-      inputKind === "select" && base.kind === "enum" ? enumsByName.get(base.name) : undefined;
-    const idTarget = inputKind === "idselect" && base.kind === "id" ? base.targetName : undefined;
-    const idLabelField = idTarget ? (idLabels.get(idTarget) ?? "id") : undefined;
-    // A REQUIRED enum defaults to its first value so the select and the string
-    // state agree from the start (and the required guard passes); everything
-    // else — text/number/checkbox, an idselect (its list loads at runtime, so
-    // it starts unselected), and an OPTIONAL enum (empty = null) — is "".
-    const emptyValue =
-      inputKind === "select" && !optional && enumValues && enumValues.length > 0
-        ? enumValues[0]!
-        : "";
-    return {
-      wireName: f.name,
-      setMsg: `Set${formType}${upperFirst(f.name)}`,
-      encodeExpr: encodeExprFor(f.type, `form.${f.name}`, optional),
-      inputKind,
-      required: !optional,
-      enumValues,
-      idTarget,
-      idLabelField,
-      emptyValue,
-    };
+    const voFields = base.kind === "valueobject" ? vosByName.get(base.name) : undefined;
+    if (voFields) {
+      // A VO field: flatten each SCALAR sub-field to `<field><Sub>`.  The VO
+      // field's own optionality relaxes every sub-field (an absent VO → absent
+      // sub-values); nested VO / collection sub-fields are skipped (one level).
+      const voOptional = f.optional === true || f.type.kind === "optional";
+      return voFields
+        .filter((sub) => isScalarInput(sub.type))
+        .map((sub) => {
+          const subOptional = voOptional || sub.optional === true || sub.type.kind === "optional";
+          return buildField(
+            formType,
+            `${f.name}${upperFirst(sub.name)}`,
+            sub.name,
+            sub.type,
+            subOptional,
+            enumsByName,
+            idLabels,
+            f.name,
+          );
+        });
+    }
+    const optional = f.optional === true || f.type.kind === "optional";
+    return [buildField(formType, f.name, f.name, f.type, optional, enumsByName, idLabels)];
   });
 }
 
@@ -369,11 +417,19 @@ function encodeExprFor(t: TypeIR, access: string, optional = false): string {
 }
 
 /** Whether a create-input field is a SCALAR the string form can render (peeling
- *  `optional`) — a nested part / value object / collection needs a sub-form
- *  (follow-up). */
+ *  `optional`) — a nested part / value object / collection needs a sub-form. */
 function isScalarInput(t: TypeIR): boolean {
   const base = scalarBase(t);
   return base.kind === "primitive" || base.kind === "id" || base.kind === "enum";
+}
+
+/** Whether a create-input field is one the form can render — a scalar, OR a
+ *  value object we can FLATTEN into its scalar sub-fields (`vosByName` resolves
+ *  its definition).  Nested part / collection (`array`) inputs are still dropped
+ *  (they need containment / repeatable-row sub-forms — follow-up). */
+function isExpandableInput(t: TypeIR, vosByName: ReadonlyMap<string, readonly FieldIR[]>): boolean {
+  const base = scalarBase(t);
+  return isScalarInput(t) || (base.kind === "valueobject" && vosByName.has(base.name));
 }
 
 /** Build the `FelizForm` for a `CreateForm(of: agg)` from the aggregate's
@@ -384,17 +440,19 @@ export function felizCreateForm(
   agg: AggregateIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizForm {
   const name = agg.name;
   const formType = `${upperFirst(name)}Form`;
   const fields = formFieldsFrom(
     formType,
-    // All SCALAR create inputs — required AND optional (an optional field is
-    // rendered, exempt from the submit guard, and encodes empty → null).  Nested
-    // part / value object / collection inputs still need a sub-form (follow-up).
-    createInputFields(agg).filter((f: FieldIR) => isScalarInput(f.type)),
+    // Scalar create inputs (required + optional) AND value-object fields (each
+    // flattened into its scalar sub-fields).  Nested part / collection (`array`)
+    // inputs still need a sub-form (follow-up).
+    createInputFields(agg).filter((f: FieldIR) => isExpandableInput(f.type, vosByName)),
     enumsByName,
     idLabels,
+    vosByName,
   );
   return {
     aggregate: name,
@@ -423,15 +481,17 @@ export function felizOperationForm(
   op: OperationIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizOperationForm {
   const name = agg.name;
   const opCap = `${upperFirst(op.name)}${upperFirst(name)}`;
   const formType = `${opCap}Form`;
   const fields = formFieldsFrom(
     formType,
-    op.params.filter((p) => isScalarInput(p.type)),
+    op.params.filter((p) => isExpandableInput(p.type, vosByName)),
     enumsByName,
     idLabels,
+    vosByName,
   );
   return {
     aggregate: name,
@@ -477,14 +537,16 @@ export function felizWorkflowForm(
   wf: WorkflowIR,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizWorkflowForm {
   const wfCap = upperFirst(wf.name);
   const formType = `${wfCap}Form`;
   const fields = formFieldsFrom(
     formType,
-    wf.params.filter((p) => isScalarInput(p.type)),
+    wf.params.filter((p) => isExpandableInput(p.type, vosByName)),
     enumsByName,
     idLabels,
+    vosByName,
   );
   return {
     workflow: wf.name,
@@ -641,6 +703,7 @@ export function collectPageForms(
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -650,7 +713,7 @@ export function collectPageForms(
     const agg = aggregatesByName.get(aggName);
     if (!agg || seen.has(aggName)) continue;
     seen.add(aggName);
-    out.push(felizCreateForm(agg, enumsByName, idLabels));
+    out.push(felizCreateForm(agg, enumsByName, idLabels, vosByName));
   }
   return out;
 }
@@ -685,6 +748,7 @@ export function collectPageOperationForms(
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizOperationForm[] {
   if (!page.body) return [];
   const nameSet = new Set(aggregatesByName.keys());
@@ -695,7 +759,7 @@ export function collectPageOperationForms(
     if (!agg) continue;
     const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
     if (!op) continue;
-    const form = felizOperationForm(agg, op, enumsByName, idLabels);
+    const form = felizOperationForm(agg, op, enumsByName, idLabels, vosByName);
     const key = form.formType;
     if (form.fields.length === 0 || seen.has(key)) continue;
     seen.add(key);
@@ -728,6 +792,7 @@ export function collectPageWorkflowForms(
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
+  vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
 ): FelizWorkflowForm[] {
   if (!page.body) return [];
   const nameSet = new Set(workflowsByName.keys());
@@ -736,7 +801,7 @@ export function collectPageWorkflowForms(
   for (const wfName of workflowFormRuns(page.body, nameSet)) {
     const wf = workflowsByName.get(wfName);
     if (!wf) continue;
-    const form = felizWorkflowForm(wf, enumsByName, idLabels);
+    const form = felizWorkflowForm(wf, enumsByName, idLabels, vosByName);
     if (form.fields.length === 0 || seen.has(form.formType)) continue;
     seen.add(form.formType);
     out.push(form);
@@ -900,12 +965,18 @@ export function renderWireTypes(
   const fieldBase = (f: WireRecord["fields"][number]): TypeIR =>
     f.type.kind === "optional" ? f.type.inner : f.type;
 
+  // A record that references another (a value object / entity part field) forms
+  // a mutually-recursive group — F# is order-sensitive, so `type Order = { …
+  // address: Address }` must be declared TOGETHER with `Address` (and the decoder
+  // `order` referencing `Decoders.address` needs `let rec`).  A single record
+  // (the common, scalar-only case) stays a plain `type` / `let`, byte-identical.
+  const rec = records.length > 1;
   const domain = lines(
     "// Domain records — one per aggregate / part / value-object wire shape.",
-    ...records.flatMap((rec) => [
-      `type ${rec.typeName} =`,
+    ...records.flatMap((r, i) => [
+      `${rec && i > 0 ? "and" : "type"} ${r.typeName} =`,
       "  {",
-      ...rec.fields.map((f) => {
+      ...r.fields.map((f) => {
         const base = wireFieldType(fieldBase(f));
         return `    ${f.name}: ${fieldOptional(f) ? `${base} option` : base}`;
       }),
@@ -916,13 +987,17 @@ export function renderWireTypes(
   const decoders = lines(
     "// Thoth.Json decoders — decode order mirrors the wire shape.",
     "module Decoders =",
-    ...records.flatMap((rec, i) => [
+    ...records.flatMap((r, i) => [
       i > 0 ? "" : undefined,
-      `  let ${rec.decoderName} : Decoder<${rec.typeName}> =`,
+      `  ${i === 0 ? (rec ? "let rec" : "let") : "and"} ${r.decoderName} : Decoder<${r.typeName}> =`,
       "    Decode.object (fun get ->",
       "      {",
-      ...rec.fields.map((f) => {
-        const dec = decoderExprFor(fieldBase(f));
+      ...r.fields.map((f) => {
+        // A sibling record's decoder is referenced UNqualified inside the
+        // `let rec … and` group (`Decoders.address` isn't in scope while the
+        // module is being defined); `decoderExprFor` qualifies it for external
+        // callers, so strip the self-module prefix here.
+        const dec = decoderExprFor(fieldBase(f)).replaceAll("Decoders.", "");
         return `        ${f.name} = ${
           fieldOptional(f)
             ? `get.Optional.Field "${f.name}" ${dec}`
@@ -1113,9 +1188,35 @@ export function renderFormTypes(forms: FormRecord[]): string {
   );
 }
 
+/** The `Encode.object` entry lines for a form's fields — a plain `"<jsonKey>",
+ *  <encode>` per scalar field, and one nested `"<objectKey>", Encode.object [ …
+ *  ]` per contiguous run of flattened value-object sub-fields (re-nesting the
+ *  flat `addressStreet`/`addressCity` form fields back under `address`). */
+function encoderEntries(fields: FelizFormField[]): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < fields.length) {
+    const fld = fields[i]!;
+    if (fld.objectKey) {
+      const key = fld.objectKey;
+      out.push(`      "${key}", Encode.object [`);
+      while (i < fields.length && fields[i]!.objectKey === key) {
+        out.push(`        "${fields[i]!.jsonKey}", ${fields[i]!.encodeExpr}`);
+        i++;
+      }
+      out.push("      ]");
+    } else {
+      out.push(`      "${fld.jsonKey}", ${fld.encodeExpr}`);
+      i++;
+    }
+  }
+  return out;
+}
+
 /** Emit the `Encoders` module — one `Encode.object` per form, lifting its
  *  string fields back to their wire types (the write-direction sibling of the
- *  `Decoders`).  Shared by create + operation forms. */
+ *  `Decoders`).  Value-object sub-fields re-nest under their object key.  Shared
+ *  by create + operation forms. */
 export function renderEncoders(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
   return lines(
@@ -1125,7 +1226,7 @@ export function renderEncoders(forms: FormRecord[]): string {
       i > 0 ? "" : undefined,
       `  let ${f.encoderFn} (form: ${f.formType}) : JsonValue =`,
       "    Encode.object [",
-      ...f.fields.map((fld) => `      "${fld.wireName}", ${fld.encodeExpr}`),
+      ...encoderEntries(f.fields),
       "    ]",
     ]),
   );

@@ -11,6 +11,7 @@ import type {
   AggregateIR,
   DeployableIR,
   EnrichedBoundedContextIR,
+  FieldIR,
   PageIR,
   SystemIR,
   UiIR,
@@ -315,6 +316,15 @@ function idLabelsFromContexts(contexts: EnrichedBoundedContextIR[]): Map<string,
   return idLabelsFrom(contexts.flatMap((c) => c.aggregates));
 }
 
+/** Every value object → its fields, across a ui's contexts — so a VO-typed form
+ *  field flattens into per-sub-field inputs.  Built identically here and in the
+ *  seam (from the owning BC) so the flattened field set agrees. */
+function vosFromContexts(contexts: EnrichedBoundedContextIR[]): Map<string, readonly FieldIR[]> {
+  const out = new Map<string, readonly FieldIR[]>();
+  for (const c of contexts) for (const vo of c.valueObjects) out.set(vo.name, vo.fields);
+  return out;
+}
+
 /** The create forms a ui hosts, across ALL its pages (deduped by aggregate) —
  *  `CreateForm(of: X)`. */
 function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[] {
@@ -322,10 +332,11 @@ function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[]
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const enumsByName = enumsFromContexts(contexts);
   const idLabels = idLabelsFromContexts(contexts);
+  const vosByName = vosFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageForms(page, aggregatesByName, enumsByName, idLabels)) {
+    for (const f of collectPageForms(page, aggregatesByName, enumsByName, idLabels, vosByName)) {
       if (seen.has(f.aggregate)) continue;
       seen.add(f.aggregate);
       out.push(f);
@@ -341,10 +352,17 @@ function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fe
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const enumsByName = enumsFromContexts(contexts);
   const idLabels = idLabelsFromContexts(contexts);
+  const vosByName = vosFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizOperationForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageOperationForms(page, aggregatesByName, enumsByName, idLabels)) {
+    for (const f of collectPageOperationForms(
+      page,
+      aggregatesByName,
+      enumsByName,
+      idLabels,
+      vosByName,
+    )) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);
@@ -366,10 +384,17 @@ function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fel
   const workflowsByName = workflowsForUi(contexts);
   const enumsByName = enumsFromContexts(contexts);
   const idLabels = idLabelsFromContexts(contexts);
+  const vosByName = vosFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizWorkflowForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageWorkflowForms(page, workflowsByName, enumsByName, idLabels)) {
+    for (const f of collectPageWorkflowForms(
+      page,
+      workflowsByName,
+      enumsByName,
+      idLabels,
+      vosByName,
+    )) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);

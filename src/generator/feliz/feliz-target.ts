@@ -7,7 +7,7 @@
 // `Msg` (the effect body lives in `update`, not the view).  Expression syntax
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
-import type { BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { BoundedContextIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
@@ -42,6 +42,15 @@ function isStringType(type: TypeIR | undefined): boolean {
 function enumsFromBc(bc: BoundedContextIR | undefined): Map<string, string[]> {
   const m = new Map<string, string[]>();
   if (bc) for (const e of bc.enums) m.set(e.name, e.values);
+  return m;
+}
+
+/** Value-object name → its fields, resolved from a form's owning bounded context
+ *  so a VO-typed field is flattened into per-sub-field inputs.  Empty when the
+ *  BC is absent (the VO field is then dropped — as before nested-VO support). */
+function vosFromBc(bc: BoundedContextIR | undefined): Map<string, readonly FieldIR[]> {
+  const m = new Map<string, readonly FieldIR[]>();
+  if (bc) for (const vo of bc.valueObjects) m.set(vo.name, vo.fields);
   return m;
 }
 
@@ -239,6 +248,7 @@ export const felizTarget: WalkerTarget = {
       agg,
       enumsFromBc(ctx.bcByAggregate.get(aggName)),
       idLabelsFrom(ctx.aggregatesByName.values()),
+      vosFromBc(ctx.bcByAggregate.get(aggName)),
     );
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled =
@@ -269,6 +279,7 @@ export const felizTarget: WalkerTarget = {
       op,
       enumsFromBc(ctx.bcByAggregate.get(ofArg.name)),
       idLabelsFrom(ctx.aggregatesByName.values()),
+      vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
     );
     if (form.fields.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
@@ -294,6 +305,7 @@ export const felizTarget: WalkerTarget = {
       wf,
       enumsFromBc(ctx.bcByWorkflow.get(wfName)),
       idLabelsFrom(ctx.aggregatesByName.values()),
+      vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
     if (form.fields.length === 0) return null;
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));

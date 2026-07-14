@@ -76,9 +76,10 @@ jobs:
           # encoders + Elmish form state (inputs → Set Msgs) + a POST Cmd, with
           # TYPED inputs (a `type: number` price, a `bool` inStock checkbox, an
           # `enum Status` <select>, a foreign-key `Category id?` <select> populated
-          # from an implicit `Category.all` read via `View.idOptions`, an OPTIONAL
-          # `note` — empty → null, exempt) and a `Validation`-gated submit the
-          # smoke drives (disabled → fill/toggle/select → enabled).
+          # from an implicit `Category.all` read via `View.idOptions`, a value-object
+          # `Contact` flattened into `contactEmail`/`contactPhone` inputs re-nested
+          # in the encoder, an OPTIONAL `note` — empty → null, exempt) and a
+          # `Validation`-gated submit the smoke drives (disabled → fill → enabled).
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -86,6 +87,7 @@ jobs:
             subdomain Catalog {
               context Cat {
                 enum Status { active inactive archived }
+                valueobject Contact { email: string?  phone: string? }
                 aggregate Category with crudish {
                   name: string
                   derived display: string = name
@@ -98,6 +100,7 @@ jobs:
                   note:     string?
                   status:   Status
                   category: Category id?
+                  contact:  Contact
                   operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }

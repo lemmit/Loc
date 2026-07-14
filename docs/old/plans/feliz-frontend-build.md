@@ -260,13 +260,27 @@ in hand — not before F# output exists.
   (must pick); an optional FK is exempt. All Fable + vite + smoke verified; the
   showcase grew a `Category` aggregate + an optional `category: Category id?`
   (optional because a required FK's list can't load in the no-backend smoke).
+- ✅ **Nested value-object inputs.** A VO create/op/workflow field (`address:
+  Address`) is FLATTENED into one input per scalar VO sub-field (`addressStreet`/
+  `addressCity`) — the form record stays flat/all-string, and the encoder RE-NESTS
+  them under the object key (`"address", Encode.object [ "street", …; "city", … ]`).
+  Sub-field required-ness/optionality flows through (an optional VO sub-field is
+  exempt + encodes null). This also fixed a dormant **read-record ordering** bug it
+  surfaced: a wire record referencing another (a VO / entity-part field) now emits
+  as a mutually-recursive `type X = {…} and Y = {…}` group + `let rec x … and y …`
+  decoder (sibling ref UNqualified), since F# is order-sensitive — never fired
+  before because no shipped Feliz read had a VO field. Single-record output stays
+  byte-identical. All Fable + vite + smoke verified; the showcase grew a
+  `Contact` VO. **Caveat:** one level (scalar VO sub-fields); nested-VO / array
+  (`[]`) / entity-part inputs still need repeatable/sub-form UI (follow-up).
 - **Wire layer covers the full CRUD write path + workflows + auth, with a
-  complete scalar form layer.** list + byId reads, create, delete, operation,
-  workflow runs, the auth gate, and typed/validated form inputs across every
-  scalar widget — text / number / checkbox / enum-select / FK-id-select, required
-  + optional. Remaining Feliz work is polish: deeper pack coverage, the modal
-  open-state, nested VO / array form inputs (sub-form state), `currentUser.<field>`
-  decode. Enum wire fields decode as their string name (a proper DU decoder is a
+  complete scalar + value-object form layer.** list + byId reads, create, delete,
+  operation, workflow runs, the auth gate, and typed/validated form inputs across
+  every scalar widget — text / number / checkbox / enum-select / FK-id-select —
+  plus flattened value-object fields, required + optional. Remaining Feliz work is
+  polish: deeper pack coverage, the modal open-state, array (`[]`) / entity-part
+  form inputs (repeatable-row sub-forms), `currentUser.<field>` decode. Enum wire
+  fields decode as their string name (a proper DU decoder is a
   follow-up); nested containment/VO records + decoders ARE emitted (transitive off
   `wireShape`).
 
