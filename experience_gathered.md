@@ -2593,3 +2593,39 @@ comma-separated text input the encoder splits. Chose comma-separated.
   sub-form (the dynamic-rows work). The READ side (`string list` record +
   `(Decode.list …)` decoder) already worked — arrays don't reference a sibling
   record, so no §39-style ordering trap. Same prove-it loop as §23–§39.
+
+## 41. Feliz Modal → a native `<details>` disclosure (no MVU state) (2026-07-14)
+
+The scaffold `Modal` (one per public op, wrapping an `OperationForm`) rendered a
+dead inert button. Making it functional WITHOUT per-modal open-state Msgs/arms:
+render it as a native HTML `<details>`/`<summary>` disclosure — the browser owns
+open/close, so no Model field, Msg, or update arm is needed.
+
+- **`renderModal` is the right seam — don't fight `emitModal`.** The shared
+  `emitModal` (registry `tsx`) does React-specific dialog wiring, but it FIRST
+  checks `ctx.target.renderModal?.(...)` and returns the override (Angular uses
+  this to fork). Implementing `felizTarget.renderModal` lets Feliz own the whole
+  primitive: find the `OperationForm` child, render it through the EXISTING
+  `renderOperationForm` seam, wrap trigger+form in `Html.details`. No pack
+  primitive, no `emitModal` React path.
+
+- **The op form's MVU wiring is collected independently of the walk.** Forking
+  the Modal means the walker doesn't auto-walk the `OperationForm` child — but
+  its Model field / Msg / update arm / Api fn come from `index.ts`'s
+  `collectPageOperationForms`, which scans the page body tree (descending into
+  Modal's args) for `OperationForm` calls. So `renderModal` only renders MARKUP;
+  the wiring already exists. Worth confirming before forking a primitive: does the
+  collected state come from the walk (which you're bypassing) or a separate scan?
+
+- **One-line the disclosure — it splices into the Group's children list.** The
+  Modal sits inside a scaffold `Group`; a multi-line `Html.details […\n Html.
+  summary …\n <form>\n]` breaks offside when the parent's child column ≠ the
+  fixed indent. Since the op form is already one line, emit the whole
+  `(Html.details [ …; prop.children [ Html.summary […]; <form> ] ])` on one line,
+  paren-wrapped (§24). `Html.details`/`Html.summary` Fable-compile fine — no
+  keyword dodge (unlike `prop.type'`, §33).
+
+- **A `<details>` is smoke-drivable with zero backend.** The scaffold operations
+  area is a SIBLING of the QueryView, so it renders on the detail route without
+  data; the smoke navigates there, clicks the `<summary>`, and asserts the
+  revealed input — real runtime proof the disclosure toggles. Same loop, §23–§40.

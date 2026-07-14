@@ -7,7 +7,7 @@
 // `Msg` (the effect body lives in `update`, not the view).  Expression syntax
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
-import type { BoundedContextIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { BoundedContextIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
@@ -26,6 +26,22 @@ import {
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** The visible label for a `Modal`'s `trigger: Button("Rename", …)` (its first
+ *  positional string literal), else the modal `title:` literal, else "Action". */
+function modalTriggerLabel(call: ExprIR & { kind: "call" }): string {
+  const names = call.argNames ?? [];
+  const trigIdx = names.indexOf("trigger");
+  const trigger = trigIdx >= 0 ? call.args[trigIdx] : undefined;
+  if (trigger?.kind === "call") {
+    const lit = trigger.args.find((a, i) => !(trigger.argNames ?? [])[i] && a.kind === "literal");
+    if (lit?.kind === "literal" && lit.lit === "string") return String(lit.value);
+  }
+  const titleIdx = names.indexOf("title");
+  const title = titleIdx >= 0 ? call.args[titleIdx] : undefined;
+  if (title?.kind === "literal" && title.lit === "string") return String(title.value);
+  return "Action";
 }
 
 /** True when a value is already an F# `string` — so `Html.text` can take it
@@ -327,6 +343,30 @@ export const felizTarget: WalkerTarget = {
     const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
     const submit = `Html.button [ ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+  },
+
+  // `Modal(trigger: Button(…), OperationForm(<agg>.<op>))` — the scaffold detail's
+  // action dialog.  Rendered as a native `<details>` DISCLOSURE (no MVU open-state
+  // needed): the `<summary>` is the trigger label, and the wrapped operation form
+  // (rendered inline through the SAME `renderOperationForm` seam) is revealed on
+  // click.  The form's Model/Msg/update/Api wiring is collected independently by
+  // index.ts (its `collectPageOperationForms` walks the nested `OperationForm`),
+  // so this only renders markup.  Returns null when there's no OperationForm child
+  // or the op has no renderable form (→ the shared `emitModal` stub/comment path).
+  renderModal(call: ExprIR, ctx): string | null {
+    if (call.kind !== "call") return null;
+    const names = call.argNames ?? [];
+    const formChild = call.args.find(
+      (a, i): a is ExprIR & { kind: "call" } =>
+        !names[i] && a.kind === "call" && a.name === "OperationForm",
+    );
+    if (!formChild) return null;
+    const form = felizTarget.renderOperationForm?.(formChild, ctx, 0);
+    if (!form) return null;
+    const label = modalTriggerLabel(call).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    // ONE line (the op form is one line) so it stays offside-safe spliced into
+    // the enclosing Group's children list; paren-wrapped against sibling absorption.
+    return `(Html.details [ prop.className "loom-modal"; prop.children [ Html.summary [ prop.text "${label}" ]; ${form} ] ])`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),
