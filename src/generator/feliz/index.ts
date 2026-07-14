@@ -33,11 +33,13 @@ import {
   renderUpdate,
 } from "./update-emit.js";
 import {
+  collectPageAsyncEffects,
   collectPageForms,
   collectPageMutations,
   collectPageOperationForms,
   collectPageReads,
   collectPageWorkflowForms,
+  type FelizAsyncEffect,
   type FelizForm,
   type FelizMutation,
   type FelizOperationForm,
@@ -109,10 +111,20 @@ function indentBlock(block: string, n: number): string {
 /** Emit the dispatch wrappers a page's view needs — one `let <action> … =
  *  dispatch <Msg>` per action USED by the body.  The effect body is projected
  *  into `update`; the view handler only dispatches. */
-function dispatchWrappers(page: PageIR, used: ReadonlySet<string>): string[] {
+function dispatchWrappers(
+  page: PageIR,
+  used: ReadonlySet<string>,
+  asyncEffectActions: ReadonlySet<string> = new Set(),
+): string[] {
   return page.actions
     .filter((a) => used.has(a.name))
     .map((a) => {
+      // An async-effect action's body is a `match await` — its trigger Msg
+      // carries the route `id` (the detail-page view fn's `id` param), so the
+      // wrapper dispatches `<Trigger> id` regardless of the action's own arity.
+      if (asyncEffectActions.has(a.name)) {
+        return `    let ${a.name} () = dispatch (${msgCase(a.name)} id)`;
+      }
       const p = a.params[0]?.name;
       return p
         ? `    let ${a.name} ${p} = dispatch (${msgCase(a.name)} ${p})`
@@ -179,6 +191,9 @@ function renderPageView(
   /** Accumulator: names actually USED across the ui's pages, so the App.fs head
    *  can `open` exactly the extern modules referenced (F# unused-open warns). */
   used?: { components: Set<string>; functions: Set<string> },
+  /** Action names whose body is a `match await` async effect — their dispatch
+   *  wrapper passes the route `id` to the trigger Msg. */
+  asyncEffectActions: ReadonlySet<string> = new Set(),
 ): string {
   // A detail page's view takes the route `id` (bound by its `Page` case); the
   // body's `byId(id)` renders through the `renderRouteId` seam to this local.
@@ -207,7 +222,7 @@ function renderPageView(
     for (const f of result.usedExternFunctions ?? []) used.functions.add(f);
   }
   const wrappers = [
-    ...dispatchWrappers(page, result.usedActions ?? new Set()),
+    ...dispatchWrappers(page, result.usedActions ?? new Set(), asyncEffectActions),
     ...storeWrappers(page, ui, result.usedStores ?? new Map()),
   ];
   const body = indentBlock(result.tsx, 4);
@@ -412,6 +427,24 @@ function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fe
   return out;
 }
 
+/** The `match await` async effects a ui hosts, across ALL its pages (deduped by
+ *  action name) — `match await <api>.<Agg>.<op>() { <Agg> b => … else => … }`. */
+function asyncEffectsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizAsyncEffect[] {
+  const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
+  for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
+  const seen = new Set<string>();
+  const out: FelizAsyncEffect[] = [];
+  for (const page of ui.pages) {
+    for (const e of collectPageAsyncEffects(page, aggregatesByName, apiParamNames)) {
+      if (seen.has(e.action)) continue;
+      seen.add(e.action);
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 /** All workflows reachable from a ui's contexts, keyed by name. */
 function workflowsForUi(contexts: EnrichedBoundedContextIR[]): Map<string, WorkflowIR> {
   const out = new Map<string, WorkflowIR>();
@@ -516,6 +549,11 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const forms: FelizForm[] = formsForUi(ui, contexts);
   const operationForms: FelizOperationForm[] = operationFormsForUi(ui, contexts);
   const workflowForms: FelizWorkflowForm[] = workflowFormsForUi(ui, contexts);
+  // `match await` async effects — projected to trigger/result Msg cases + arms
+  // (excluded from the plain-action path below) and a `type`-tagged decode.
+  const asyncEffects: FelizAsyncEffect[] = asyncEffectsForUi(ui, contexts);
+  const asyncEffectActions = new Set(asyncEffects.map((e) => e.action));
+  const hasEffects = asyncEffects.length > 0;
   const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
   // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
   // populate their options — an IMPLICIT list read per target, merged into the
@@ -536,9 +574,12 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   }
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
-  // Http/Api are needed for reads, mutations AND forms (POST); the auth probe
-  // also uses `Http.get`.  The Thoth decoder/Remote/View layer only for reads.
-  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi;
+  // Http/Api are needed for reads, mutations, forms (POST) AND async effects
+  // (POST + decode); the auth probe also uses `Http.get`.  The Thoth
+  // record/decoder layer is needed for reads AND async effects (the op's
+  // `type`-tagged 200 body); the `Remote`/View envelope is reads-only.
+  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi || hasEffects;
+  const hasWire = hasReads || hasEffects;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
   const routed = pages.length > 1 || pages.some(hasRouteParam);
@@ -554,7 +595,9 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     s.state.map((f) => ({ name: storeModelField(s.name, f.name), type: f.type, init: f.init })),
   );
   const state = [...combinedState(ui), ...storeStateFields];
-  const actions = combinedActions(ui);
+  // Async-effect actions project to their own trigger/result Msg cases + update
+  // arms, so they're excluded from the plain action Msg/update path.
+  const actions = combinedActions(ui).filter((a) => !asyncEffectActions.has(a.name));
   // Msg needs a case per store action too (the update arms come from `stores`).
   const msgActions = [
     ...actions,
@@ -573,6 +616,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     operationForms,
     workflowForms,
     authUi,
+    asyncEffects,
   );
   const update = renderUpdate(
     actions,
@@ -585,10 +629,17 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     workflowForms,
     authUi,
     ui.stores,
+    asyncEffects,
   );
-  const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
+  const wire = hasWire
+    ? renderWireTypes(
+        reads,
+        contexts,
+        asyncEffects.map((e) => e.successType),
+      )
+    : { domain: "", decoders: "" };
   const api = hasHttp
-    ? renderApiModule(reads, mutations, forms, operationForms, workflowForms)
+    ? renderApiModule(reads, mutations, forms, operationForms, workflowForms, asyncEffects)
     : "";
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
@@ -613,6 +664,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
             externComponents,
             externFunctionNames,
             used,
+            asyncEffectActions,
           ),
         ),
         "",
@@ -625,12 +677,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
           aggregatesByName,
           workflowsByName,
           rootFn,
-          false,
+          false, // single-page (non-routed) branch: no `:id` route param
           bcByAggregate,
           bcByWorkflow,
           externComponents,
           externFunctionNames,
           used,
+          asyncEffectActions,
         ),
       ];
   const views = authUi ? [...rootViews, "", renderAuthGate()] : rootViews;
@@ -660,8 +713,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     (routed || hasForms) && "open Feliz.Router",
     "open Elmish",
     "open Elmish.React",
-    // Thoth is needed for decoders (reads) AND encoders (create forms).
-    (hasReads || hasForms) && "open Thoth.Json",
+    // Thoth is needed for decoders (reads + async effects) AND encoders (forms).
+    (hasReads || hasForms || hasEffects) && "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
     // Browser.Dom provides `window` for the auth sign-in/out redirects.
     authUi && "open Browser.Dom",
@@ -670,13 +723,14 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     authUi && SESSION_TYPE,
     authUi && "",
     authUi && AUTH_MODULE,
-    // Read wire layer (reads only) — records → Remote → decoders.
-    hasReads && "",
-    hasReads && wire.domain,
+    // Wire layer — domain records + decoders when there are reads OR async
+    // effects; the `Remote` envelope is reads-only (async effects don't use it).
+    hasWire && "",
+    hasWire && wire.domain,
     hasReads && "",
     hasReads && REMOTE_TYPE,
-    hasReads && "",
-    hasReads && wire.decoders,
+    hasWire && "",
+    hasWire && wire.decoders,
     // Create-form state (form record types + empty values) → encoders (write dir)
     // → validation (submit guard: every required field non-empty).
     hasForms && "",
@@ -861,11 +915,13 @@ export function generateFelizForContexts(
     formsForUi(ui, contexts).length > 0 ||
     operationFormsForUi(ui, contexts).length > 0 ||
     workflowFormsForUi(ui, contexts).length > 0;
+  const hasEffects = asyncEffectsForUi(ui, contexts).length > 0;
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||
     mutationsForUi(ui, contexts).length > 0 ||
     anyForm ||
-    authUi;
+    authUi ||
+    hasEffects;
   const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
   out.set("src/App.fs", renderAppFs(ui, contexts, authUi));
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi));

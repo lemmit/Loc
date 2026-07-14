@@ -31,7 +31,15 @@
 // -------------------------------------------------------------------------
 
 import type { EnrichedLoomModel, StmtIR, StoreIR } from "../../types/loom-ir.js";
+import { classifyFelizAsyncEffect } from "../../util/feliz-async-effect.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+
+/** True when a page `route:` carries a `:param` segment (`/projects/:id`) — the
+ *  route binds an `id` the Feliz detail-page view can source an instance-op
+ *  async effect's trigger from.  Mirrors `hasRouteParam` in the Feliz generator. */
+function routeHasParam(route: string | undefined): boolean {
+  return (route ?? "/").split("/").some((s) => s.startsWith(":"));
+}
 
 // View-scoped effect builtins — illegal inside a store action (§3.2).  Mirrors
 // `VIEW_EFFECT_BUILTINS` in ui-checks.ts (a store has no router/socket).
@@ -279,6 +287,13 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
     // feliz` — `hostableFrameworks: {feliz}` — so the deployable platform is the
     // reliable detector; a bare `platform: feliz` resolves `uiFramework` to the
     // frontend default, not `"feliz"`.)  Tracked in T6-backend-parity.md M-T6.15.
+    // Every aggregate name reachable in this system — the shared async-effect
+    // classifier resolves the awaited op's aggregate + success variant against it.
+    const aggregateNames = new Set<string>();
+    for (const sd of sys.subdomains ?? []) {
+      for (const c of sd.contexts ?? [])
+        for (const a of c.aggregates ?? []) aggregateNames.add(a.name);
+    }
     for (const dep of sys.deployables) {
       if (dep.platform !== "feliz") continue;
       const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
@@ -288,38 +303,63 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         // case), so `loom.feliz-store-unsupported` was lifted once that
         // subsystem landed — the store reads/actions emit against `model`.
 
-        // async-effect gate — loom.feliz-async-effect-unsupported.  A
-        // frontend `match await <op>()` (async-actions-and-effects.md Stage 2)
-        // lowers to a `variant-match` statement whose async envelope (await the
-        // remote mutation, reify the thrown error into the error variant, then a
-        // discriminant switch) rides the SPA walker's `renderVariantMatch`
-        // seam — which the Feliz walker does not implement (its `Cmd.OfAsync`
-        // machinery today is form/read/mutation-shaped, not the user-authored
-        // effect form).  Gate it at validation rather than crash the F# emit.
+        // async-effect gate — loom.feliz-async-effect-unsupported.  A frontend
+        // `match await <op>()` (async-actions-and-effects.md Stage 2) lowers to a
+        // `variant-match` statement.  The Feliz MVU renderer now handles the v1
+        // shape (`match await <api>.<Agg>.<op>() { <Agg> b => … else => … }` — a
+        // 0-arg instance op, one aggregate-binding SUCCESS arm + `else`, hosted on
+        // a `:id` detail page) as a trigger→result projection (M-T6.15).  Only the
+        // shapes it does NOT render yet are gated: a genuine multi-variant union, an
+        // op with params, a missing `else`, or a host with no route `id` (a
+        // component, or a page without a `:id` route — the instance op has no id to
+        // POST to).  `classifyFelizAsyncEffect` is the shared arbiter so the gate
+        // and the generator can't drift.
         const ui = sys.uis.find((u) => u.name === uiName);
         if (!ui) continue;
+        const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
         const hosts: {
           where: string;
+          providesRouteId: boolean;
           actions: readonly { name: string; body: readonly StmtIR[] }[];
         }[] = [
-          ...ui.pages.map((p) => ({ where: `page '${p.name}'`, actions: p.actions })),
-          ...ui.components.map((c) => ({ where: `component '${c.name}'`, actions: c.actions })),
+          ...ui.pages.map((p) => ({
+            where: `page '${p.name}'`,
+            providesRouteId: routeHasParam(p.route),
+            actions: p.actions,
+          })),
+          // A component has no route `id` at all — an instance-op async effect
+          // there has no id to source, so it stays gated.
+          ...ui.components.map((c) => ({
+            where: `component '${c.name}'`,
+            providesRouteId: false,
+            actions: c.actions,
+          })),
         ];
         for (const host of hosts) {
           for (const action of host.actions) {
             forEachStmt(action.body, (s) => {
               if (s.kind !== "variant-match") return;
+              const cls = classifyFelizAsyncEffect(s, apiParamNames, aggregateNames);
+              // Supported shape on a route-id host → the renderer emits it; no gate.
+              if (cls.supported && host.providesRouteId) return;
               const where = `${host.where} action '${action.name}'`;
+              const reason = !host.providesRouteId
+                ? "its host provides no route `id` (an instance-op async effect must run on a " +
+                  "`:id` detail page so the trigger can carry the id)"
+                : cls.supported
+                  ? "" // unreachable: supported + providesRouteId returned above
+                  : cls.reason;
               diags.push({
                 severity: "error",
                 code: "loom.feliz-async-effect-unsupported",
                 message:
                   `${where}: \`match await …\` (an async effect) is used on ui '${uiName}', hosted by ` +
-                  `the Feliz (F#/Fable) deployable '${dep.name}', but the Feliz frontend has no async ` +
-                  `effect renderer yet — the SPA walker's variant-match envelope (await → error-reify → ` +
-                  `discriminant switch) has no Feliz equivalent.  Host this ui on an SPA frontend ` +
-                  `(React/Vue/Svelte/Angular), or drive the remote op through a form primitive ` +
-                  `(CreateForm/OperationForm) instead.  Tracked in M-T6.15.`,
+                  `the Feliz (F#/Fable) deployable '${dep.name}', but this shape is not rendered on the ` +
+                  `Feliz frontend yet — ${reason}.  Supported v1: \`match await <api>.<Agg>.<op>() { ` +
+                  `<Agg> b => … else => … }\` (a 0-arg instance op, one aggregate SUCCESS arm + \`else\`, ` +
+                  `on a \`:id\` detail page).  Otherwise host this ui on an SPA frontend ` +
+                  `(React/Vue/Svelte/Angular), or drive the op through a form primitive ` +
+                  `(CreateForm/OperationForm).  Tracked in M-T6.15.`,
                 source: where,
               });
             });
