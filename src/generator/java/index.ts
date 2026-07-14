@@ -1241,6 +1241,7 @@ function emitAggregate(
     basePkg,
     pkgFor("entity", agg.name),
     esCreateParams,
+    ctx.payloads,
   )) {
     place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }
