@@ -3,9 +3,11 @@
 // detection (via emitExpr), navigation, lambda handlers, and aggregate
 // lookups, so they pull the core walk/expr/stmt helpers.
 
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
+import { tryDetectApiHook } from "../api-hook-detector.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -342,6 +344,22 @@ function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undef
   return name && ctx.aggregatesByName.has(name) ? name : undefined;
 }
 
+/** Does the `of:` query return the `Paged<T>` envelope (the paged-by-default
+ *  auto-`findAll`, M-T2.6)?  Resolved from the owning context's repository the
+ *  same way the hook-arg adjuster does — so a hand-written
+ *  `QueryView { of: X.all, data: rows => Table { rows: rows } }` unwraps the
+ *  envelope automatically instead of `.map`-ing over `{items, page, …}`.
+ *  Event-sourced `all` (an unpaged fold) and user finds returning `T[]` return
+ *  false, so they keep bare-array semantics. */
+function queryIsPaged(ofArg: ExprIR, ctx: WalkContext): boolean {
+  const detected = tryDetectApiHook(ofArg, ctx);
+  if (!detected || detected.kind !== "aggregate") return false;
+  const bc = ctx.bcByAggregate.get(detected.aggregateName);
+  const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
+  const find = repo?.finds.find((f) => f.name === detected.operation);
+  return find ? !!pagedReturn(find.returnType) : false;
+}
+
 export function emitQueryView(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -365,14 +383,6 @@ export function emitQueryView(
   const error = namedArgValue(call, "error");
   const empty = namedArgValue(call, "empty");
   const data = namedArgValue(call, "data");
-  // `paged: true` flips QueryView to server-paged semantics (M-T2.6): the
-  // query's `.data` is the `Paged<T>` envelope `{items, page, pageSize, total,
-  // totalPages}`, not a bare array — so the empty/non-empty length checks read
-  // `.data.items.length`, while the `data:` lambda still binds to `.data` (the
-  // envelope) so the body can read both `rows.items` and the page metadata
-  // (`rows.totalPages`) for its pager.  Absent → the array semantics below
-  // (byte-identical to a QueryView with no `paged:` arg).
-  const paged = boolNamed(call, "paged");
   // `single: true` flips QueryView to single-record
   // semantics (byId queries return `T | undefined`, not `T[]`).
   // The `empty` branch fires when `data === undefined` after
@@ -380,6 +390,20 @@ export function emitQueryView(
   // Without the flag, the default collection semantics apply
   // (`data && data.length === 0` / `data && data.length > 0`).
   const single = boolNamed(call, "single");
+  // `paged: true` (scaffold, M-T2.6) flips QueryView to server-paged semantics:
+  // the query's `.data` is the `Paged<T>` envelope `{items, page, pageSize,
+  // total, totalPages}`, and the `data:` lambda binds to `.data` (the envelope)
+  // so the scaffold body reads `rows.items` + the page metadata for its pager.
+  //   AUTO-PAGED (no explicit flag): a hand-written `QueryView { of: X.all,
+  // data: rows => Table { rows: rows } }` still sees a paged `.all` — but the
+  // author wrote it for an array.  Derive paged-ness from the query's
+  // returnType and, when it wasn't opted into explicitly, bind the lambda to
+  // `.data.items` (the ARRAY) so the body keeps bare-array semantics (page 1,
+  // no pager) — byte-identical to the pre-flip behaviour.  Either way the
+  // empty/non-empty length checks read `.items` (`paged` drives the template).
+  const explicitPaged = boolNamed(call, "paged");
+  const autoPaged = !explicitPaged && !single && queryIsPaged(ofArg, ctx);
+  const paged = explicitPaged || autoPaged;
 
   const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
   const errorJsx = error ? walk(error, ctx, depth + 2) : "null";
@@ -398,8 +422,15 @@ export function emitQueryView(
     const childParamTypes = recordAgg
       ? new Map([...(ctx.paramTypes ?? []), [data.param, recordAgg]])
       : ctx.paramTypes;
+    // Auto-paged: unwrap the envelope to its `.items` array so a hand-written
+    // body (`Table { rows: rows }`) maps over records, not `{items, …}`.  The
+    // explicit-paged (scaffold) binding stays the envelope — its Table reads
+    // `rows.items` and the pager reads `rows.totalPages` off it.  The unwrap is
+    // the target's call (the JSX fallback appends `.items`; Feliz already
+    // decodes `all` to a `'T list`, so it ignores `autoPaged`).
     const dataAccess =
-      ctx.target.renderQueryDataAccess?.(queryExpr, single, paged) ?? `${queryExpr}.data`;
+      ctx.target.renderQueryDataAccess?.(queryExpr, single, paged, autoPaged) ??
+      (autoPaged ? `${queryExpr}.data.items` : `${queryExpr}.data`);
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, data.param, dataAccess),

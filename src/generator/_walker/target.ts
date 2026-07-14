@@ -528,8 +528,17 @@ export interface WalkerTarget {
    *  itself owns the `isLoading` / `isError` reads; this seam is only the
    *  data-lambda binding the walker injects.  `single` is set for byId reads
    *  (`T | null` data) so a target can non-null-assert inside the truthy
-   *  guard — Angular's template typechecker won't narrow a `data()` call. */
-  renderQueryDataAccess?(handle: string, single?: boolean, paged?: boolean): string;
+   *  guard — Angular's template typechecker won't narrow a `data()` call.
+   *  `autoPaged` marks a hand-written QueryView over a paged `.all` that
+   *  wasn't opted into `paged:` — the target unwraps to the `.items` array so
+   *  the body keeps bare-array semantics (Feliz already decodes to a list, so
+   *  it ignores the flag). */
+  renderQueryDataAccess?(
+    handle: string,
+    single?: boolean,
+    paged?: boolean,
+    autoPaged?: boolean,
+  ): string;
 
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The

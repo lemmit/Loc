@@ -201,11 +201,19 @@ export const angularTarget: WalkerTarget = {
    *  so an `@for` / `Table of:` always gets an iterable, and for a `single` read
    *  assert non-null inside the template's `@if (…data())` guard (a call result
    *  can't be narrowed). */
-  renderQueryDataAccess(handle: string, single?: boolean, paged?: boolean): string {
+  renderQueryDataAccess(
+    handle: string,
+    single?: boolean,
+    paged?: boolean,
+    autoPaged?: boolean,
+  ): string {
     // A PAGED read's `.data()` is the `Paged<T>` envelope, not an array — the
     // `?? []` array-default is wrong (and untypeable) there.  Non-null-assert the
     // envelope (`.data()!`): the QueryView's data-present `@if` guards it, but
     // Angular's template typechecker can't narrow a signal CALL across the guard.
+    // Auto-paged (hand-written QueryView over `.all`): unwrap to the `.items`
+    // array so the body keeps bare-array semantics.
+    if (autoPaged) return `${handle}.data()!.items`;
     if (paged) return `${handle}.data()!`;
     return single ? `${handle}.data()!` : `(${handle}.data() ?? [])`;
   },
