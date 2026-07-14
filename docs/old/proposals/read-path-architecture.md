@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 5). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 6). No code yet. A
 > vision + grammar proposal.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
@@ -17,23 +17,24 @@
 > already lives. rev. 3 **drops the rev. 2 `read` keyword** (the scaffold
 > replaces it).
 >
-> **`view`: the shorthand deprecates, the full-form projection survives**
-> (owner steer, rev. 5 — sharpening rev. 4's blunter "kill it all"). The
+> **`view` dies; its full form moves into a generalized `projection`**
+> (owner steer, rev. 6 — resolving rev. 5's open naming knot). The
 > *shorthand* (`view X = Agg where P`, returns the aggregate) is redundant
-> with a filtered read and folds into `scaffoldPaged(of: criterion)`. The
-> *full form* (`view X { <fields> from … bind … }`) is **not** redundant:
-> it uniquely pairs an **inline anonymous output shape** (`<View>Row`, never
-> a hand-declared DTO) with **join-capable binds** (`customerId.name`,
-> app-side batched). That pairing survives as a **projection**, decoupled
-> from the query it over-bundles (`from … where` → a reusable
-> `criterion`/`retrieval`). rev. 4's "fold the full form into a *named*
-> `response`" was an overreach — it drops the inline anonymous shape and
-> forces a name; rev. 5 keeps the inline projection (row type inferred) as
-> the default, a named `response` as the reuse opt-in. The `/views`
-> namespace still dies; the follow + `<View>Row` synthesis **relocate** to
-> the projection path (moved, not rewritten). Naming knot (open): the
-> survivor *is* a projection but `projection` is taken (event-folded) — keep
-> `view` recast as "a query-time joined projection," or a fresh word.
+> with a filtered read → `scaffoldPaged(of: criterion)`. The *full form*
+> (`view X { <fields> from … bind … }`) — an inline anonymous shape +
+> join-capable binds — is the *one* irreducible thing, and it **is a
+> projection**: `view` and `projection` are the same read model at two
+> points on one axis (`projection.md`'s own framing — always-current
+> query-time vs materialized event-folded, with a shipped lint nudging
+> between them). So the full form becomes a **query-time flavor of
+> `projection`** (`projection X { <fields> from <source> where … bind … }`,
+> no `keyed by`/`on`), sitting beside the existing folded flavor
+> (`projection X keyed by k { … on(e){…} }`). This resolves the naming knot
+> (the survivor *is* a projection — no new word) and fully retires `view`
+> (both forms). The inline anonymous shape (the `<View>Row`) is preserved —
+> a projection declares its shape inline, exactly as it does today. The
+> `/views` namespace dies; the follow + `<View>Row` synthesis **relocate**
+> to the projection path.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -43,10 +44,11 @@
 > read builtins (`src/ir/types/loom-ir.ts:1494`, `:3173`), and
 > [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) (the
 > landed `queryHandler` / `route` seam — the orchestration escape hatch).
-> a hand-written `queryHandler` (custom projection / cross-aggregate
-> follow) and [`projection.md`](./projection.md) (event-folded read model)
-> are the heavier escape hatches. (`view` — rev. 4 deprecates it; its
-> follow capability moves to response projection, see the banner above.)
+> a hand-written `queryHandler` (arbitrary read logic) and
+> [`projection.md`](./projection.md) (the generalised read-model construct —
+> query-time *or* folded) are the heavier escape hatches. (`view` — rev. 6
+> retires it; its full form is the query-time `projection` flavor, see the
+> banner above.)
 
 ---
 
@@ -93,11 +95,12 @@ with scaffoldPaged(of: ActiveInRegion)   # → a real, unfoldable paged queryHan
 | Need | Use | Not the default |
 |---|---|---|
 | list / one / filtered read of an aggregate | **read-only repository + `criterion`** (via `scaffoldPaged`) | — (this *is* the default) |
-| stitch several reads / diverge the wire shape / follow a cross-aggregate ref | `queryHandler` (returns a `response` DTO whose binds may follow `X id`) | only when a plain read won't do |
-| a denormalised read model folded from foreign events | `projection` (full CQRS) | only for event-sourced read models |
+| stitch several reads / arbitrary read logic | `queryHandler` | only when a plain read won't do |
+| a **custom-shaped read model** (inline shape, projected fields, cross-aggregate follow) | **`projection`** — query-time flavor (always-current) | when the aggregate's own shape won't do |
+| a **materialized denormalised read model** folded from events | **`projection`** — folded flavor (indexed, eventual) | when query-time refold is too costly |
 
-(`view` was a fifth row here through rev. 3; rev. 4 deprecates it — see the
-status banner and § "`view` deprecates".)
+(`view` was a fifth row here through rev. 3; rev. 6 retires it entirely —
+its full form is the query-time `projection` flavor. See § "`view` dies".)
 
 This is the Ardalis `IReadRepository<T>` + Specification pattern, mapped
 onto Loom's existing `criterion`/`retrieval`/`reading`-tier machinery.
@@ -305,25 +308,22 @@ body — the same "scaffold reads its input to decide" rule the
 - `page` is call-site (query params), per retrieval.md's page-is-call-only
   decision.
 - Returns the aggregate's `apiRead` projection (`OrderResponse paged`) by
-  default — the DTO boundary is scaffolded, not hand-written. When the
-  shape must diverge further, unfold and edit the emitted `queryHandler`
-  (its `response` binds may follow cross-aggregate refs — § "`view`
-  deprecates").
+  default — the DTO boundary is scaffolded, not hand-written. When the read
+  needs a *custom* shape (renamed/combined fields, a cross-aggregate
+  follow), that is a `projection` (query-time flavor) — § "`view` dies".
 
 ### Why a macro, not a new construct
 
-This is the resolution of "is `view` redundant?" — **yes; it deprecates**
-(§ "`view` deprecates"), and the shared job (a named, paged, filtered read)
-is a *macro output*, not a new read keyword. The primitives stay orthogonal
-and each keeps its one job:
+The shared job the macro covers (a named, paged, filtered *passthrough*
+read) is a *macro output*, not a new read keyword. The primitives stay
+orthogonal and each keeps its one job:
 
 - `criterion` — the filter atom (composes, inlines to SQL).
 - `retrieval` — the *named* filter+sort+loads bundle a handler/macro runs.
 - `queryHandler` — the imperative read the macro *emits* (and the escape
-  hatch when you hand-write one — including the cross-aggregate follow that
-  was `view`'s).
-- `response` — the wire DTO the read returns; its binds may follow `X id`
-  refs (the ex-`view` capability, now general).
+  hatch when you hand-write arbitrary read logic).
+- `projection` — the custom-shaped read model (query-time or folded); where
+  a divergent shape + cross-aggregate follow lives (ex-`view` full form).
 
 `scaffoldPaged` *composes* these; it does not replace any. Naming follows
 the `scaffold<Thing>(of: X)` stdlib convention (named `of:` arg); whether
@@ -343,86 +343,88 @@ Deliberately *not* on the default path; each earns its use:
   ref** — the ex-`view` capability, see below). It runs the read-only port
   internally and projects. `loom.query-handler-saves` already keeps it
   read-only.
-- **`projection`** (in-flight, projection.md) — a **denormalised read
-  model folded from foreign events**, its own table, `GET /projections/*`.
-  The *full-CQRS* escape hatch for event-sourced read models and
-  cross-aggregate denormalised reads that a query-time `run` can't serve
-  efficiently. Opt-in per read model — never forced.
+- **`projection`** (projection.md, generalised here) — a **derived read
+  model with a custom inline shape**, in two flavors: **query-time**
+  (`from … where … bind …`, was `view`'s full form — always-current,
+  join-capable, no extra storage) and **folded** (`keyed by … on(e){…}` —
+  materialized from events, indexed, eventual). The escape hatch whenever
+  the read needs a shape other than the aggregate's own. Opt-in per read
+  model — never forced.
 
 The ladder is legible: **`scaffoldPaged` / `run(criterion)` for the 90%;
-`queryHandler` when you orchestrate or reshape; `projection` when you fold
-events.**
+`queryHandler` when you orchestrate or reshape; `projection` when you need a
+custom-shaped read model (query-time or folded).**
 
-### `view` — the shorthand deprecates; the full-form's projection survives
+### `view` dies — its full form becomes a `projection` flavor
 
-rev. 4 deprecated `view` wholesale and folded its custom shape into a
-declared `response`. **rev. 5 corrects that overreach**: `view`'s two forms
-are not equally redundant, and folding the full form into a *named*
-`response` loses its inline anonymous return type.
+rev. 4 deprecated `view` and folded its custom shape into a `response`;
+rev. 5 kept the inline shape but left the survivor's *name* open. **rev. 6
+closes it: the surviving thing is a `projection`** — `view` and `projection`
+are the same read model at two points on one axis, so the full form becomes
+a query-time *flavor* of `projection` rather than a new construct.
 
 - **Shorthand** (`view X = Agg where P`, returns the aggregate's wire
-  shape) — genuinely redundant with a filtered read. **Deprecates**,
-  folds into `scaffoldPaged(of: criterion)`.
-- **Full form** (`view X { <fields> from Agg where P bind … }`) — declares
-  its output shape **inline and anonymously** (the view-local `<View>Row`,
-  never a hand-declared DTO), co-located with the join-capable binds. This
-  pairing — *inline anonymous shape + binds that follow `X id` refs* — is
-  the **one irreducible thing** no other construct provides. It **survives
-  as a projection**, decoupled from the query it over-bundles.
+  shape) — redundant with a filtered read. **Dies**, → `scaffoldPaged(of:
+  criterion)`.
+- **Full form** (`view X { <fields> from Agg where P bind … }`) — an inline
+  anonymous shape + join-capable binds — **is a projection**. It moves into
+  `projection` as the **query-time flavor** (below), keeping its inline
+  shape and follow verbatim.
 
-| `view` (full form) bundled | Where it goes |
-|---|---|
-| filter which rows (`from … where`) | `criterion` / `retrieval` (the *query*, decoupled) |
-| auto endpoint `GET /views/<name>` | the `route` `scaffoldPaged` emits — **removes the parallel `/views` namespace** |
-| **inline anonymous output shape** (`<View>Row`) | **preserved** — an inferred projection row type, *not* a forced named `response` |
-| **cross-aggregate `bind`-follow** (`customerId.name`, batched) | **preserved** — a projection capability (below) |
-| source = workflow-instance / projection | the read path is source-agnostic — read the projection row / workflow state through the same read |
-| auto browse UI page | the page scaffold (already separate) |
-| materialized / hot denormalized read | `projection` (the event-folded construct) |
+`view` retires **completely** — no recast keyword, no `/views` namespace.
 
-**The projection decouples from the query and keeps its inline shape.** A
-projection is *shape + binds (+ follow)*, applied to a source the query
-supplies. Attach it inline to a read — the row type is inferred (anonymous,
-exactly like `<View>Row`), the query is a reusable `criterion`/`retrieval`:
+#### `projection` generalises — one read model, two population modes
+
+A **projection is a derived read model**: a declared inline shape, read-only,
+disposable/rebuildable, **not a source of truth** (`projection.md`'s own
+defining criterion — a query-time view satisfies it exactly as a folded one
+does). *How it is populated* is a flavor the body selects:
 
 ```ddd
-scaffoldPaged(of: activeOrders) as {
-  orderId      = id,
-  customerName = customerId.name,     // the follow — app-side batched
-  lineCount    = lines.count
+// QUERY-TIME flavor (was view's full form) — always-current, computed per
+// request, no extra storage; binds may follow X id refs (app-side batched join).
+projection OrderSummary {
+  orderId:      Order id
+  lineCount:    int
+  customerName: string
+  from Order where status != Cancelled
+  bind orderId = id, lineCount = lines.count, customerName = customerId.name
+}
+
+// FOLDED flavor (today's projection) — materialized at write time, indexed, eventual.
+projection OrderBook keyed by order {
+  order:  Order id
+  status: OrderStatus
+  on(e: OrderPlaced) { order := e.order; status := Placed }
 }
 ```
 
-When the shape should be **named and reused**, project into a declared
-`response` instead. Both tiers; the inline form is the default (preserves
-view's one-place ergonomic), the named form is for reuse. One projection
-composes with any query, and vice-versa — the N×M reuse `view` (shape
-welded to query) can't offer.
+- **Distinguisher:** `from <source> where … bind …` (query-time) vs
+  `keyed by <k>` + `on(e){…}` (folded). Both declare the shape inline (the
+  anonymous `<Proj>Row`, preserved from `view`'s `<View>Row`). A body must
+  pick exactly one mode; mixing is a validate error.
+- **Same identity, different consistency/cost:** query-time is
+  always-current, O(query)/read, no table; folded is eventual, O(1)/read,
+  its own table. The choice is the read-side twin of an aggregate's
+  `state`-vs-`eventLog` — same construct, a population knob.
+- **The existing `loom.view-source-eventsourced-refold` lint becomes an
+  *intra-`projection`* nudge:** "this query-time projection over an ES source
+  refolds the whole stream per request → switch it to a folded projection."
+  Same read model, change the mode.
+- **Exposure** unifies under the projection read surface (the `/views`
+  namespace folds into it); the folded flavor keeps its by-key route.
 
-**Naming knot (open).** The surviving thing *is* a projection, but
-`projection` is taken (the event-folded read model). Options: keep the word
-`view` recast precisely as "a query-time joined projection with an inline
-shape" (a far sharper identity than today's vague "saved query"), or a
-fresh word for the inline-projection clause. Deferred — see Open questions.
+**The two `view` capabilities are preserved by the move:**
 
-**Two capabilities to preserve — the follow, and the inline anonymous
-shape.** `view`'s full form uniquely (a) auto-generates a batched
-`findManyByIds` for `bind customerName = customerId.name`
-(`lower-view.ts:96` `collectIdFollows`) so a foreign-field projection
-doesn't N+1, and (b) declares its output shape **inline** (the view-local
-`<View>Row`), never a hand-declared DTO. Both must survive the cut:
-
-- **The follow** becomes a property of the **projection expression** (the
-  `aggregate → row` map) — a bind may traverse an `X id` ref, batch-loaded
-  — available in `scaffoldPaged`'s generated projector, a hand-written
-  `queryHandler` body, or a named projection. `collectIdFollows` /
-  `auxiliaries` **relocates** from the view lowerer to the projection path;
-  not rewritten.
-- **The inline anonymous shape** stays the *default*: an inline projection
-  clause infers its row type (like `<View>Row`), so the common case needs
-  no hand-declared `response`. A named `response` is the opt-in for reuse,
-  never forced. (This is the rev. 4 → rev. 5 correction: rev. 4 wrongly
-  forced the full form into a named `response`.)
+- **The follow** stays a property of the **query-time projection's binds**:
+  a bind may traverse an `X id` ref, batch-loaded. The `collectIdFollows` /
+  `auxiliaries` machinery **relocates** from the view lowerer to the
+  query-time projection path — moved, not rewritten. (The same follow is
+  also available in a hand-written `queryHandler` body's projection.)
+- **The inline anonymous shape** is intrinsic to `projection` already — a
+  projection declares its `<Proj>Row` inline (the folded flavor does today);
+  the query-time flavor does the same. No hand-declared `response` is forced;
+  a named `response` stays the opt-in for a shape reused across reads.
 
 #### The follow is an app-side join — which is why it's a projection concern, not a query one
 
@@ -543,10 +545,11 @@ Minimal:
 - `scaffoldPaged` lowers to nothing new — it *emits* existing nodes
   (`QueryHandlerIR` + a `query`/`response` payload + `RouteIR`) at macro
   time, then lowers as ordinary AST. Reuses, not reinvents.
-- The `response` **follow** (ex-`view`): the `collectIdFollows` /
-  `auxiliaries` planner (`lower-view.ts:96`) relocates to the
-  response-projection path so any read that projects a response can follow
-  an `X id` ref. Not a new node — a relocated pass.
+- The **follow** (ex-`view`): the `collectIdFollows` / `auxiliaries` planner
+  (`lower-view.ts:96`) relocates from the view lowerer to the **query-time
+  `projection`** lowering, so a query-time projection's binds can follow an
+  `X id` ref (batch-loaded). Not a new node — a relocated pass onto the
+  generalised `ProjectionIR`.
 - `ApiIR` read routes derive onto read-only-face calls (a `scaffoldApi` /
   enrich-relocation concern, per unfoldable-api-derivation).
 
@@ -612,17 +615,19 @@ No flag day; each slice independent:
    (aggregate / criterion / retrieval → paged `queryHandler` + `response`
    + `route`), joining the `scaffoldApi` family. This is the ergonomic
    default; ship it before deprecating the legacy derivation.
-5. **Projection clause + follow** — the inline projection surface (`as {
-   field = expr, … }` with inferred row type) and the relocated `X id`
-   follow / batch-load (`collectIdFollows`, `auxiliaries`) moved from the
-   view lowerer, so both are available before `view`'s full form retires.
+5. **`projection` query-time flavor** — add the `from … where … bind …`
+   body to `projection` (beside the folded `keyed by … on`), with the
+   relocated `X id` follow / batch-load (`collectIdFollows`, `auxiliaries`)
+   moved from the view lowerer. This is the target `view`'s full form folds
+   into; ship it before the view deprecation.
 6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
-7. **`view` deprecation (last, largest)** — `loom.view-deprecated` warning
-   + `ddd migrate reads` rewrites the two shapes; then delete the 5-backend
-   view emitters, the `/views` routers, the `loom.view-*` gates, and the
-   view UI scaffold. Lands last because it's the biggest deletion and
-   depends on slices 4–5 (the fold targets) existing.
+7. **`view` retirement (last, largest)** — `loom.view-deprecated` warning +
+   `ddd migrate reads` rewrites the two shapes (shorthand → `scaffoldPaged`;
+   full form → a query-time `projection`); then delete the 5-backend view
+   emitters, the `/views` routers, the `loom.view-*` gates, and the view UI
+   scaffold. Lands last: biggest change, and depends on slices 4–5 (the fold
+   targets — `scaffoldPaged` + the query-time projection flavor) existing.
 
 Existing `.ddd` keeps parsing throughout; the visible changes are that a
 list `find` and a `view` warn, and a read can no longer `save`.
@@ -631,9 +636,11 @@ list `find` and a `view` warn, and a read can no longer `save`.
 
 ## What this deliberately is NOT
 
-- **Not full event-sourced CQRS by default.** One model. A read returns
-  the aggregate queried by criterion at query time. `projection` (event
-  folded, separate table) stays the opt-in escape hatch.
+- **Not full event-sourced CQRS by default.** One write model. The default
+  read returns the aggregate queried by criterion at query time. A custom
+  read model is a `projection` — and even its *folded* (materialized,
+  event-sourced) flavor is opt-in per read model, never forced; the
+  query-time flavor needs no events at all.
 - **Not a mandatory DTO layer.** A plain `run` read returns the aggregate
   wire shape — right for the CRUD majority. The `response` DTO boundary is
   the `queryHandler` escape hatch, not a tax on every read. *(This is the
@@ -654,14 +661,17 @@ list `find` and a `view` warn, and a read can no longer `save`.
    paged-list read is the common case and deserves the short name — but
    confirm against the `scaffold<NodeKind>(of: X)` family (paged-list isn't
    a node kind). Cosmetic; either works.
-1a. **The projection surface + its name.** The surviving full-form-`view`
-   capability — inline anonymous shape + join-capable binds — needs a
-   spelling. Sketch: an inline `as { field = expr, … }` clause on a read
-   (row type inferred), plus a named `response` for reuse. What is the
-   *named*, reusable form called? `projection` is taken (event-folded read
-   model); options are keeping `view` recast as "a query-time joined
-   projection with an inline shape," or a fresh word (`shape` / `select` /
-   `readModel`). Load-bearing for the migration; **the main open item.**
+1a. **Two `projection` bodies under one keyword — coherent?** rev. 6
+   resolves the naming knot (the survivor *is* a `projection`), but at the
+   cost of `projection` carrying two quite different bodies (`from … where …
+   bind …` query-time vs `keyed by … on(e)` folded) and two emitters
+   (repository-query-at-read vs table+fold-at-write). The claim is they are
+   one construct — a *derived, non-authoritative read model* — differing
+   only in population strategy (the read-side twin of aggregate
+   `state`-vs-`eventLog`). **This is the main thing to pressure-test.** If
+   the two bodies feel like two constructs sharing a name, the fallback is a
+   distinct keyword for the query-time flavor (`readModel` / `select`); the
+   folded `projection` is untouched either way.
 2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
    *setting* purely positional (recommended — matches the `reading` tier,
    no new syntax), or should a marker make the capability visible at the
@@ -704,13 +714,16 @@ list `find` and a `view` warn, and a read can no longer `save`.
 - [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) — the
   `queryHandler` / `route` orchestration escape hatch (landed) and
   `scaffoldApi` unfold path.
-- [`views.md`](../views.md) — the `view` construct this proposal
-  **deprecates** (§ "`view` deprecates"); its filter → `criterion`, its
-  endpoint → `scaffoldPaged`, its custom projection → `response`, its
-  cross-aggregate follow → response projection, its materialized case →
-  `projection`.
-- [`projection.md`](./projection.md) — the event-folded read-model
-  (full-CQRS) escape hatch; deliberately opt-in, not the default.
+- [`views.md`](../views.md) — the `view` construct this proposal **retires
+  entirely** (§ "`view` dies"): shorthand → `scaffoldPaged(of: criterion)`;
+  full form → the **query-time flavor of `projection`** (inline shape +
+  join-capable binds, moved verbatim).
+- [`projection.md`](./projection.md) — the read-model construct this
+  proposal **generalises**: it already frames `view` and `projection` as one
+  read model at two consistency points (always-current query-time vs
+  materialized folded) and ships the refold lint between them. rev. 6 makes
+  that literal — `projection` gains the query-time flavor and absorbs
+  `view`'s full form; the folded flavor is unchanged.
 - `docs/architecture.md` — the api-derivation table this rewrites:
   repository `find` → a `criterion`-driven read on the read-only face, not
   a bespoke route-bound finder.
