@@ -11,7 +11,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "against": [],
   "aggregate": [],
@@ -36,8 +37,11 @@
   "area": [],
   "asc": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "audience": [],
   "audited": [],
@@ -53,9 +57,11 @@
   ],
   "body": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "bool": [],
   "broadcast": [],
@@ -64,7 +70,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "cache": [
     "nameRef",
@@ -72,9 +79,11 @@
   ],
   "canonical": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "capability": [],
   "carries": [],
@@ -91,7 +100,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "commandHandler": [],
   "component": [
@@ -100,14 +110,19 @@
   ],
   "config": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
   ],
   "connection": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "contains": [
     "lValue",
@@ -136,13 +151,17 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "daisyui": [],
   "dataSources": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "datetime": [],
   "decimal": [],
@@ -156,14 +175,19 @@
   "derived": [],
   "desc": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "description": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "design": [
     "nameRef",
@@ -192,15 +216,19 @@
   "enum": [],
   "env": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "envelope": [
     "fieldName",
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "ephemeral": [],
   "error": [
@@ -208,11 +236,14 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "event": [],
   "eventLog": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -220,6 +251,8 @@
   "eventSourced": [],
   "every": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -232,9 +265,11 @@
   ],
   "favicon": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "feliz": [],
   "filter": [
@@ -266,7 +301,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "header": [],
   "hosts": [],
@@ -285,8 +321,11 @@
   ],
   "immutable": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "implements": [
     "fieldName",
@@ -303,18 +342,26 @@
   "inheritanceUsing": [],
   "instance": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "int": [],
   "internal": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "invariant": [],
   "isolationLevel": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -327,6 +374,8 @@
   "key": [],
   "keyPrefix": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -334,6 +383,8 @@
   "keyed": [],
   "kind": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -346,13 +397,19 @@
   ],
   "literal": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "loads": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "local": [
     "paramName"
@@ -362,8 +419,11 @@
   "main": [],
   "managed": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "mantine": [],
   "match": [],
@@ -388,8 +448,11 @@
   ],
   "money": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "mui": [],
   "mysql": [],
@@ -401,6 +464,8 @@
   ],
   "objectStore": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -410,9 +475,11 @@
   ],
   "ogImage": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "oidc": [],
   "on": [],
@@ -425,14 +492,16 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "or": [
     "fieldName",
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "ownTable": [],
   "page": [
@@ -444,20 +513,24 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "parent": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "payload": [
     "fieldName",
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "permissions": [
     "lValue",
@@ -489,11 +562,14 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "queryHandler": [],
   "queue": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -505,6 +581,8 @@
   "readUncommitted": [],
   "readonly": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -514,6 +592,8 @@
   "repeatableRead": [],
   "replica": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -524,19 +604,25 @@
   "requires": [],
   "resource": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "response": [
     "fieldName",
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "restApi": [],
   "retain": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -544,8 +630,11 @@
   "retention": [],
   "retrieval": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "return": [],
   "route": [
@@ -555,6 +644,8 @@
   "s3": [],
   "schema": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -562,8 +653,11 @@
   "scopes": [],
   "secret": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "section": [
     "nameRef",
@@ -575,8 +669,11 @@
   "serves": [],
   "service": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "sessions": [],
   "shadcn": [],
@@ -588,6 +685,8 @@
   "slot": [],
   "snapshot": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -595,8 +694,11 @@
   "solution": [],
   "sort": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "spartanNg": [],
   "sqlite": [],
@@ -610,9 +712,11 @@
   ],
   "state": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "static": [
     "nameRef",
@@ -624,7 +728,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "string": [],
   "subdomain": [],
@@ -632,6 +737,8 @@
   "system": [],
   "tablePrefix": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -645,7 +752,8 @@
     "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "test": [],
   "testCase": [],
@@ -655,14 +763,19 @@
   ],
   "title": [
     "fieldName",
+    "lValue",
     "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "token": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "transactional": [
     "paramName"
@@ -672,6 +785,8 @@
   ],
   "ttl": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"
@@ -690,6 +805,8 @@
   ],
   "use": [
     "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
     "paramName",
     "stateField"

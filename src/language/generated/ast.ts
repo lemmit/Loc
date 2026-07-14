@@ -1939,10 +1939,10 @@ export function isLValue(item: unknown): item is LValue {
     return reflection.isInstance(item, LValue.$type);
 }
 
-export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'crossTenant' | 'destroy' | 'envelope' | 'error' | 'filter' | 'handle' | 'id' | 'implements' | 'migration' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'store' | 'tenancy' | 'ui' | 'views' | 'workflows' | 'write' | string;
+export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | CommonSoftKeywords | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'migration' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || item === 'store' || item === 'tenancy' || item === 'crossTenant' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'write' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'id' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MacroArg extends langium.AstNode {
@@ -2121,10 +2121,10 @@ export function isMatchStmt(item: unknown): item is MatchStmt {
     return reflection.isInstance(item, MatchStmt.$type);
 }
 
-export type MemberName = 'action' | 'aggregates' | 'api' | 'body' | 'by' | 'canonical' | 'command' | 'contains' | 'contexts' | 'create' | 'crossTenant' | 'description' | 'destroy' | 'envelope' | 'error' | 'favicon' | 'filter' | 'find' | 'handle' | 'id' | 'ignoring' | 'implements' | 'migration' | 'modules' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'state' | 'store' | 'tenancy' | 'title' | 'ui' | 'views' | 'where' | 'workflows' | 'write' | string;
+export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id' | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows' | CommonSoftKeywords | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'migration' || item === 'write' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'store' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || item === 'ignoring' || item === 'tenancy' || item === 'crossTenant' || item === 'parent' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'find' || item === 'id' || item === 'ignoring' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'where' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MemberSuffix extends langium.AstNode {
@@ -3331,10 +3331,10 @@ export function isStateField(item: unknown): item is StateField {
     return reflection.isInstance(item, StateField.$type);
 }
 
-export type StateFieldName = 'config' | 'eventLog' | 'every' | 'filter' | 'implements' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'migration' | 'objectStore' | 'queue' | 'readonly' | 'replica' | 'retain' | 'schema' | 'snapshot' | 'stamp' | 'tablePrefix' | 'ttl' | 'use' | 'write' | string;
+export type StateFieldName = CommonSoftKeywords | string;
 
 export function isStateFieldName(item: unknown): item is StateFieldName {
-    return item === 'filter' || item === 'stamp' || item === 'implements' || item === 'write' || item === 'migration' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type Statement = AssignOrCallStmt | EmitStmt | ForStmt | IfLetStmt | LetStmt | MatchStmt | PreconditionStmt | RequiresStmt | ReturnStmt;

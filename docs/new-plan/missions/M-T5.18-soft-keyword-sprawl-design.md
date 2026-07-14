@@ -1,6 +1,8 @@
 # M-T5.18 — Soft-keyword sprawl: dedup, gate, and root-cause reduction (design)
 
-> **Status: Tracks B + A LANDED; Track C design-in-progress.**
+> **Status: Tracks B + A + C all LANDED.** (Track C reframed — the prop-bag
+> conversion was rejected as net-negative; it shipped as the principled
+> "readable-wherever-declarable" widening that closes BUG-004. See §"Track C".)
 > Track B shipped as `test/language/parsing/keyword-identifier-completeness.test.ts`
 > (+ `keyword-identifier-coverage.snapshot.json`) — the gate found and drove one
 > real fix on first run (`parent` was declarable as a field but unreadable —
@@ -162,27 +164,42 @@ but absent from `NameRefIdent`+`MemberName`, so a `parent: Category id?` field c
 be declared yet never read (`= parent`, `this.parent` both failed to parse). Fixed
 in the same change; the floor now guards it.
 
-### Track C — root-cause reduction: stop minting config-key keywords
+### Track C — close the declarable-but-unreadable class (BUG-004)
 
-Many entries exist only because a config block spells its keys as literal keyword
-tokens (`'kind' ':'`, `'schema' ':'`, `'every' ':'`, … in `Storage` / `Resource`).
-The grammar already demonstrates the alternative — a validated `key=ID` prop-bag —
-in `ThemeProp`, `RequirementProp`, `MenuMetaEntry`, and comments on it directly:
+> **LANDED — reframed from the original "config-key prop-bag" sketch.** Building
+> it revealed BUG-004 is NOT a config-key problem, and the prop-bag conversion is
+> **net-negative** here, so it was rejected. See below.
 
-> *"Promoting these to grammar-level keywords would pollute the lexer and break user
-> fields named `order` / `label` / `hidden`."* (`PageMenuMeta`)
+**What BUG-004 actually is.** A union-returning find (`find locate(): Project or
+ProjectNotFound`) mandates its absence error carry `resource: string`, but
+`resource` was absent from `MemberName` — so reading `e.resource` in a `match` arm
+**failed to parse**. The field was *write-only*: the framework filled it, domain
+code could never read it. This is the **same class** as the `parent` bug Track B
+surfaced (declarable as a field, but unreadable via `.`). The gate snapshot proved
+it: `resource` was `[fieldName, nameRef, paramName]` — no `memberAccess`.
 
-Converting the keyword-keyed infra blocks (audit: `Storage`, `Resource`, and any
-other `'<key>' ':'` block) to `ConfigEntry: key=ID ':' value` prop-bags, with the
-key set enforced in the validator, means those ~15 keys **never become tokens** — so
-they need zero soft-keyword entries in any of the six lists, and BUG-004
-(`resource`-collision) stops being possible by construction. This is the only track
-that shrinks the *actual keyword set* rather than managing it; it is per-block,
-additive, and can be drained opportunistically.
+**Why the prop-bag conversion was rejected.** The original plan — convert
+`Storage`/`Resource` clause keys to a `key=ID` prop-bag so those keys never become
+tokens — is a bad trade for *these* blocks: their keys are not plain scalars.
+`for:` (`[BoundedContext:ID]`) and `use:` (`[Storage:LooseName]`) are real
+**cross-references** (go-to-def, rename); `kind:`/`type:`/`isolationLevel:` are
+**closed enums** that benefit from parse-time rejection. A prop-bag throws all of
+that away for a smaller token count — the `ThemeProp` pattern fits scalar bags, not
+cross-ref/enum config. (Deferred as a possibility only for the genuinely-scalar
+keys — `schema`/`ttl`/`every`/`retain` — if ever worth it; low priority.)
 
-Trade-off: prop-bags move key-name validation from parse-time to a `loom.*`
-validator check (friendlier diagnostics, slightly later). That is already the
-accepted pattern for `theme` / `requirement`, so it is consistent, not novel.
+**What actually shipped — the principled fix.** *Readable/usable wherever
+declarable.* Composed `CommonSoftKeywords` into the remaining three identifier
+rules (`MemberName`, `LValueIdent`, `StateFieldName`), so all 62 purely-defensive
+keywords are now identifiers in **all six** positions. This closes BUG-004 **and**
+the whole declarable-but-unreadable class in one move, and extends Track A's dedup
+to those three rules (`StateFieldName` collapsed to `ID | CommonSoftKeywords`, no
+extras). It is a **widening** (accepts strictly more — no valid program breaks); the
+gate snapshot was refreshed to the all-six coverage and `langium:generate` reported
+no ambiguity. A focused regression (`keyword-field-member-access.test.ts`) pins the
+concrete BUG-004 shape. The original Track-A vision — `CommonSoftKeywords` in all
+six rules — is thus reached, honestly, by widening rather than by pretending it was
+already true.
 
 ## Plan alignment
 
