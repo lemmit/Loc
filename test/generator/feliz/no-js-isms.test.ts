@@ -161,6 +161,33 @@ system Shop {
 }
 `;
 
+// An auth app that reads `currentUser.<claim>` in a body — the case that used to
+// emit `/* unresolved */ undefined.email`.  Now the read-side of the gate resolves
+// it to a `model.CurrentUser` option-match.
+const CURRENT_USER = `
+system Shop {
+  user { id: string  email: string }
+  api ShopApi from Catalog
+  subdomain Catalog {
+    context Cat {
+      aggregate Product { name: string }
+      repository Products for Product { }
+    }
+  }
+  storage db { type: postgres }
+  resource catState { for: Cat, kind: state, use: db }
+  ui WebApp {
+    api Shop: ShopApi
+    page Home {
+      route: "/"
+      body: Stack { Heading { "Hi", level: 1 }, Text { currentUser.email } }
+    }
+  }
+  deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 auth: required }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 auth: ui }
+}
+`;
+
 describe("feliz output carries no JS-isms", () => {
   it("scaffold app (widest primitive + form spread)", async () => {
     expectNoJsIsms(await appFs(SCAFFOLD), "scaffold");
@@ -168,5 +195,14 @@ describe("feliz output carries no JS-isms", () => {
 
   it("rich explicit-page app (Action / Table row lambda / inline primitives)", async () => {
     expectNoJsIsms(await appFs(RICH), "rich");
+  });
+
+  it("currentUser.<claim> in a body (the read-side auth gap)", async () => {
+    const app = await appFs(CURRENT_USER);
+    expectNoJsIsms(app, "currentUser");
+    // The concrete resolution: an option-match against the decoded claims.
+    expect(app).toContain(
+      '(match model.CurrentUser with Some currentUser -> currentUser.Email | None -> "")',
+    );
   });
 });

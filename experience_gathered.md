@@ -2716,6 +2716,45 @@ emits valid code for this backend."
   click POSTs; viewer → button hidden. Clicking and asserting the POST is the only
   way to prove the trigger→Cmd→Api chain actually runs.
 
+## 44. Feliz: guard the JS-ism class, then close `currentUser`-in-body (2026-07-14)
+
+Two silent gaps (§43's Action, and `currentUser.<field>` in a body) shipped the
+same way: the Feliz view rides the shared JSX walker, so anything the Feliz seams
+don't own falls through and emits JavaScript into F#. The systematic fix is a
+CLASS guard, not another one-off.
+
+- **A grep guard beats a compile leg for the *class*.** `no-js-isms.test.ts`
+  generates broad Feliz apps (full scaffold + rich explicit + an auth app) and
+  asserts the App.fs contains none of the JS-only tokens — `undefined`,
+  `mutateAsync`, `use<Hook>`, `/*` (F# is `(*`), ` => ` (F# is `->`), `${`. It's
+  a fast-suite vitest (no docker), so the whole class fails in seconds instead of
+  one `.ddd` at a time reaching the slow Fable leg. Both prior bugs would have
+  been caught by it (verified: the broken currentUser line trips `undefined` +
+  `/*`).
+
+- **`currentUser.<claim>` in a body was the shared walker's unresolved-ref
+  fallback** (`case "ref"` → `/* unresolved */ undefined`), so `currentUser.email`
+  became `undefined.email`. Fixed with an OPTIONAL `renderCurrentUserAccess?` seam
+  on `WalkerTarget`, invoked from the expression `member` arm when the receiver is
+  a `current-user` ref. Optional is the key: only Feliz implements it, so
+  React/Vue/Svelte/Angular are byte-identical (806 walker/JSX tests unchanged) —
+  their own `undefined` is a pre-existing gap, not a regression I own. Feliz
+  renders an option-match against the decoded claims:
+  `(match model.CurrentUser with Some currentUser -> currentUser.Email | None ->
+  "")`, the None branch's zero value keyed off the claim's `memberType`.
+
+- **The read-side reuses the write-side's claims trigger.** `currentUser` in a
+  body needs `model.CurrentUser` on the Model, so `uiBodyUsesCurrentUser` (an
+  ExprIR scan for a member-on-current-user) joins `pageGate` alongside the page
+  `requires` and gated-action triggers — the same claims machinery, three
+  entry points now.
+
+- **`biome ci .` "Some errors were emitted" ≠ your files are dirty.** It dumps
+  repo-wide `info`-level assist findings (organizeImports) that DON'T fail the
+  run; the real failure was a single format diff in my file. Diagnose by running
+  `biome ci <your-files>` — and beware `cmd | tail; echo $?` reports the PIPE's
+  exit, not biome's. Stash-and-lint pristine main to confirm a failure is yours.
+
 - **A `<details>` is smoke-drivable with zero backend.** The scaffold operations
   area is a SIBLING of the QueryView, so it renders on the detail route without
   data; the smoke navigates there, clicks the `<summary>`, and asserts the

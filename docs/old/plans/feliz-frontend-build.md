@@ -330,19 +330,34 @@ in hand — not before F# output exists.
   POST, clicks the gated Action, and asserts admin → POST fires / viewer → button
   hidden). Also fixed a latent `parseUrl` fallback bug (a param-carrying first page
   produced a partial-application `string -> Page` catch-all).
+- ✅ **`currentUser.<claim>` in a body + a JS-ism class guard.** A body reading
+  `currentUser.email` used to emit `/* unresolved */ undefined.email` (broken F#) —
+  the shared walker's unresolved-ref fallback. Fixed with an OPTIONAL
+  `renderCurrentUserAccess?` `WalkerTarget` seam (only Feliz implements it, so the
+  JSX frontends stay byte-identical); Feliz renders an option-match against the
+  decoded claims (`match model.CurrentUser with Some currentUser -> currentUser.Email
+  | None -> ""`), and `uiBodyUsesCurrentUser` joins the `pageGate` claims trigger.
+  Alongside it, `no-js-isms.test.ts` guards the whole CLASS: it generates broad
+  Feliz apps and asserts the output carries no JS-only tokens (`undefined` /
+  `mutateAsync` / react hooks / `/*` / ` => ` / `${`) — the systematic catch for
+  "primitive rides the shared walker but emits JS into F#" (both this bug and the
+  Action bug would have failed it). Fable-verified.
 - **Wire layer covers the full CRUD write path + workflows + auth (session gate +
-  page authorization gate + action gate), with a complete scalar + value-object +
-  scalar-array form layer + the modal disclosure + one-click actions.** list + byId
+  page authorization gate + action gate + currentUser reads), with a complete
+  scalar + value-object + scalar-array form layer + the modal disclosure + one-click
+  actions.** list + byId
   reads, create, delete, operation, workflow runs, the auth session gate, the
   page-`requires` gate, one-click `Action` buttons + action-button gating,
   typed/validated form inputs across every scalar widget — text / number /
   checkbox / enum-select / FK-id-select — plus flattened value-object fields,
-  comma-separated scalar arrays, and the `<details>` action modal. Remaining Feliz
-  work is refinement: deeper pack coverage, a dynamic-row / array-of-VO /
-  entity-part sub-form UI, and `currentUser.<field>` in a body (a cross-frontend
-  shared-walker gap). Enum wire fields decode as their string name (a proper DU
-  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
-  (transitive off `wireShape`).
+  comma-separated scalar arrays, the `<details>` action modal, and `currentUser`
+  claim reads in a body. Remaining Feliz work is refinement: deeper pack coverage
+  and a dynamic-row / array-of-VO / entity-part sub-form UI. Enum wire fields
+  decode as their string name (a proper DU decoder is a follow-up); nested
+  containment/VO records + decoders ARE emitted (transitive off `wireShape`).
+  (The JSX frontends still emit `undefined` for `currentUser.<field>` in a body —
+  the `renderCurrentUserAccess` seam is optional and only Feliz implements it; a
+  cross-frontend fix is a separate slice.)
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

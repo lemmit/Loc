@@ -164,6 +164,14 @@ export const felizTarget: WalkerTarget = {
 
   // --- State seam — MVU model reads --------------------------------------
   renderStateRead: (ref: StateRef, _pos: RenderPosition) => `model.${upperFirst(ref.name)}`,
+  // `currentUser.<claim>` in a body (D-AUTH-OIDC, the read-side of the gate) →
+  // an option-match against the decoded claims on the Model; the None branch
+  // (no session yet) yields the claim type's zero value so the expression stays
+  // well-typed.  One line (offside-safe inside a Feliz children list).  Emitting
+  // this pulls in the claims machinery (index.ts's `uiBodyUsesCurrentUser` joins
+  // `pageGate`), so `model.CurrentUser` is always in scope here.
+  renderCurrentUserAccess: (field: string, memberType: TypeIR) =>
+    `(match model.CurrentUser with Some currentUser -> currentUser.${upperFirst(field)} | None -> ${fsZeroValue(memberType)})`,
   // The view never writes state directly (effects live in `update`); the
   // shell's emitStmt over action bodies still reaches this, but the Feliz
   // named-handler ignores the emitted body (it dispatches a Msg instead), so a

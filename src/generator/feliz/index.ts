@@ -267,6 +267,24 @@ function renderPageView(
   return `${head}\n${preamble}${body}`;
 }
 
+/** True when an expression tree reads `currentUser.<claim>` — a member access
+ *  whose receiver is a `current-user` ref.  Drives the claims-machinery trigger
+ *  (`model.CurrentUser` must exist for the body seam to render). */
+function exprUsesCurrentUser(e: import("../../ir/types/loom-ir.js").ExprIR): boolean {
+  if (e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
+    return true;
+  }
+  for (const [, v] of Object.entries(e)) {
+    if (Array.isArray(v)) {
+      for (const c of v)
+        if (c && typeof c === "object" && "kind" in c && exprUsesCurrentUser(c)) return true;
+    } else if (v && typeof v === "object" && "kind" in v && exprUsesCurrentUser(v as never)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Derive an F# module reference for an extern component / function from its
  *  `from "<path>"` clause — Fable binds by MODULE, not file path.  Segments
  *  (split on `/` or `.`) are PascalCased and joined with `.`, e.g.
@@ -596,7 +614,10 @@ function renderAppFs(
     const op = aggByNameEnriched.get(act.aggregate)?.operations.find((o) => o.name === act.op);
     return !!op && opActionGate(op) !== null;
   });
-  const pageGate = authUi && !!user && (uiHasPageGate(ui) || hasGatedAction);
+  // A body that reads `currentUser.<claim>` also needs the decoded claims on the
+  // Model (the read-side of the gate) — it joins the same claims-machinery trigger.
+  const bodyUsesCurrentUser = ui.pages.some((p) => p.body && exprUsesCurrentUser(p.body));
+  const pageGate = authUi && !!user && (uiHasPageGate(ui) || hasGatedAction || bodyUsesCurrentUser);
   const workflowsByName = workflowsForUi(contexts);
   // Aggregate/workflow → owning bounded context (form seams resolve enum-typed
   // fields to their `<select>` values from the owning BC's enum declarations).
