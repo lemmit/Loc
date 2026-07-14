@@ -104,6 +104,7 @@ export {
   page,
   pageMenuMeta,
   routeProp,
+  type StateFieldSpec,
   stringLit,
   ternaryExpr,
 } from "./ui-factories.js";

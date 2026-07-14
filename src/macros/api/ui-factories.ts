@@ -261,11 +261,20 @@ export function pageMenuMeta(entries: Record<string, Expression>): PageMenuMeta 
 // Page itself
 // ---------------------------------------------------------------------------
 
-/** A `string`-typed state field initialised to `""` — the shape the scaffolded
- * list filter inputs bind to.  (The scaffolders only need this one shape.) */
-function stringStateField(name: string): StateField {
+/** A typed state field.  `string` fields init to `""` (the shape the scaffolded
+ * list filter/sort inputs bind to); `int` fields init to the given number (the
+ * scaffolded pager's `page` state, M-T1.1).  Callers pass either a bare name
+ * (⇒ `string`-init-`""`) or an explicit `StateFieldSpec`. */
+export interface StateFieldSpec {
+  name: string;
+  type: "string" | "int";
+  /** Initial value: string init for `string` fields, number init for `int`. */
+  init?: string | number;
+}
+
+function typedStateField(spec: StateFieldSpec): StateField {
   const origin = _currentOrigin();
-  const base = _tag(mkPrimitiveType({ $type: "PrimitiveType", name: "string" }), origin);
+  const base = _tag(mkPrimitiveType({ $type: "PrimitiveType", name: spec.type }), origin);
   const type = _tag(
     mkTypeRef({
       $type: "TypeRef",
@@ -278,17 +287,25 @@ function stringStateField(name: string): StateField {
     origin,
   );
   _setContainer(base, type, "base");
-  const init = stringLit("");
-  const field = _tag(mkStateField({ $type: "StateField", name, type, init }), origin);
+  const init =
+    spec.type === "int"
+      ? intLit(typeof spec.init === "number" ? spec.init : 0)
+      : stringLit(typeof spec.init === "string" ? spec.init : "");
+  const field = _tag(mkStateField({ $type: "StateField", name: spec.name, type, init }), origin);
   _setContainer(type, field, "type");
   _setContainer(init, field, "init");
   return field;
 }
 
-/** A `state { … }` block prop carrying the given string state fields. */
-function stateBlock(names: readonly string[]): StateBlock {
+function normalizeStateSpec(s: string | StateFieldSpec): StateFieldSpec {
+  return typeof s === "string" ? { name: s, type: "string" } : s;
+}
+
+/** A `state { … }` block prop carrying the given state fields (bare names ⇒
+ * `string`-init-`""`; specs carry their own type + init). */
+function stateBlock(specs: ReadonlyArray<string | StateFieldSpec>): StateBlock {
   const origin = _currentOrigin();
-  const fields = names.map(stringStateField);
+  const fields = specs.map((s) => typedStateField(normalizeStateSpec(s)));
   const block = _tag(mkStateBlock({ $type: "StateBlock", fields }), origin);
   fields.forEach((f, i) => {
     _setContainer(f, block, "fields", i);
@@ -303,7 +320,7 @@ export function page(opts: {
   route: string;
   body: Expression;
   menu?: Record<string, Expression>;
-  state?: readonly string[];
+  state?: ReadonlyArray<string | StateFieldSpec>;
 }): Page & UiMember {
   const origin = _currentOrigin();
   const props: PageProp[] = [];

@@ -384,6 +384,13 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push(`  protected readonly sortRows = sortRows;`);
   }
 
+  // Interactive-table pager (M-T1.1) — the "Page N of M" label calls `Math.*`,
+  // which Angular templates can't resolve against the global.  Re-expose `Math`
+  // as a member so `Math.ceil(…)` binds to the component (same lift pattern).
+  if (result.tsx.includes("Math.")) {
+    members.push(`  protected readonly Math = Math;`);
+  }
+
   // Extern frontend functions the walked body / action bodies call — import
   // each from its conformance shim (`src/lib/<name>.ts` → `../../lib/<name>`
   // from `src/app/pages/`) and re-expose it as a component member so the

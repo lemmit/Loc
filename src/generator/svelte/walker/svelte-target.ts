@@ -82,7 +82,13 @@ export const svelteTarget: WalkerTarget = {
       `() => { if (${k} === ${q}) { ${d} = ${d} === "asc" ? "desc" : "asc"; } ` +
       `else { ${k} = ${q}; ${d} = "asc"; } }`;
     const indicator = `{${k} === ${q} ? (${d} === "asc" ? " ↑" : " ↓") : ""}`;
-    return `<span style="cursor: pointer; user-select: none;" onclick={${onClick}}>${header}${indicator}</span>`;
+    // A real `<button>` (not a clickable `<span>`) so the header is keyboard-
+    // focusable + has an implicit ARIA role — `svelte-check --fail-on-warnings`
+    // (the generated-svelte-build gate) flags a span with `onclick`.  The style
+    // resets the native button chrome so it still reads as a header.
+    const style =
+      "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
+    return `<button type="button" style="${style}" onclick={${onClick}}>${header}${indicator}</button>`;
   },
 
   /** Sort the rows via the shared `sortRows` helper (`$lib/table-sort`) —
@@ -90,6 +96,25 @@ export const svelteTarget: WalkerTarget = {
    *  string key inline, so the cast lives in the helper module. */
   renderSortedRows(rowsExpr, sortKey, sortDir) {
     return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
+  },
+
+  /** Prev / "Page N of M" / Next pager.  `$state` reassigns in place inside the
+   *  `onclick` arrows; `disabled={…}` and `{ … }` interpolation carry the plain
+   *  JS expressions (`Math` is just a JS global here). */
+  renderPager(spec) {
+    const p = spec.page.name;
+    const size = spec.pageSize;
+    const total = spec.totalExpr;
+    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const style =
+      "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
+    return (
+      `<div style="${style}" data-testid="pager">` +
+      `<button type="button" disabled={${p} <= 1} onclick={() => { ${p} = ${p} - 1; }}>Prev</button>` +
+      `<span>Page {${p}} of {${pages}}</span>` +
+      `<button type="button" disabled={${p} * ${size} >= ${total}} onclick={() => { ${p} = ${p} + 1; }}>Next</button>` +
+      `</div>`
+    );
   },
 
   // --- API binding seam ---------------------------------------------------

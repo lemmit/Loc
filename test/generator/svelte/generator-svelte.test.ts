@@ -135,9 +135,11 @@ describe("svelte generator — project shape", () => {
     expect(list).toContain("const customerAll = useAllCustomers();");
     expect(list).toContain("{#if customerAll.isLoading}");
     // Iterate a narrowed array — `.data` is `T[] | undefined` under svelte-check.
-    // Since M-T1.1 the scaffold list sorts client-side, so the rows expr is
-    // wrapped in `sortRows(...)`; the `(… ?? [])` guard still surrounds it.
-    expect(list).toContain("{#each (sortRows(customerAll.data, sortKey, sortDir) ?? []) as row (row.id)}");
+    // Since M-T1.1 the scaffold list sorts + paginates client-side, so the rows
+    // expr is `sortRows(...).slice(...)`; the `(… ?? [])` guard still surrounds it.
+    expect(list).toContain(
+      "{#each ((sortRows(customerAll.data, sortKey, sortDir)).slice((pageNum - 1) * 10, pageNum * 10) ?? []) as row (row.id)}",
+    );
     expect(list).toContain('data-testid="customers-list"');
     // Explicit page: runes state + plain-assignment writes + $effect title.
     const welcome = out.get("web/src/routes/(app)/welcome/+page.svelte") ?? "";

@@ -49,8 +49,11 @@ describe("vue walker — scaffold pages", () => {
     expect(list).toContain("const customerAll = reactive(useAllCustomers());");
     // Template: pack-owned v-if query arms + v-for rows + mustaches.
     expect(list).toContain('<template v-if="customerAll.isLoading">');
-    // The scaffold list sorts client-side, so rows flow through `sortRows(...)`.
-    expect(list).toContain('v-for="(row) in sortRows(customerAll.data, sortKey, sortDir)"');
+    // The scaffold list sorts + paginates client-side, so rows flow through
+    // `sortRows(...)` then a `.slice(...)` page window.
+    expect(list).toContain(
+      'v-for="(row) in (sortRows(customerAll.data, sortKey, sortDir)).slice((pageNum - 1) * 10, pageNum * 10)"',
+    );
     expect(list).toContain("{{ row.name }}");
     expect(list).toContain("{{ shortId(row.id) }}");
     // JS-splicing attributes are single-quoted (the rendered JS

@@ -96,7 +96,12 @@ export const angularTarget: WalkerTarget = {
     const setDir = `${d}.set(${k}() === ${q} ? (${d}() === 'asc' ? 'desc' : 'asc') : 'asc')`;
     const setKey = `${k}.set(${q})`;
     const indicator = `{{ ${k}() === ${q} ? (${d}() === 'asc' ? ' ↑' : ' ↓') : '' }}`;
-    return `<span style="cursor: pointer; user-select: none;" (click)="${setDir}; ${setKey}">${header}${indicator}</span>`;
+    // A real `<button>` (not a clickable `<span>`) so the header is keyboard-
+    // focusable + carries an implicit ARIA role (a11y gates reject a span with
+    // `(click)`).  The style resets the native button chrome to read as a header.
+    const style =
+      "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
+    return `<button type="button" style="${style}" (click)="${setDir}; ${setKey}">${header}${indicator}</button>`;
   },
 
   /** Sort via the shared `sortRows` helper, which the Angular page-shell
@@ -104,6 +109,26 @@ export const angularTarget: WalkerTarget = {
    *  not free imports).  Signals read with `()`. */
   renderSortedRows(rowsExpr, sortKey, sortDir) {
     return `sortRows(${rowsExpr}, ${sortKey.name}(), ${sortDir.name}())`;
+  },
+
+  /** Prev / "Page N of M" / Next pager.  Signals read as `page()` and write as
+   *  `page.set(…)` inside `(click)`; `[disabled]` binds the bound check.  `Math`
+   *  is re-exposed as a component member by the page-shell (templates can't
+   *  reach the global), so `Math.ceil(…)` resolves. */
+  renderPager(spec) {
+    const p = spec.page.name;
+    const size = spec.pageSize;
+    const total = spec.totalExpr;
+    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const style =
+      "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
+    return (
+      `<div style="${style}" data-testid="pager">` +
+      `<button type="button" [disabled]="${p}() <= 1" (click)="${p}.set(${p}() - 1)">Prev</button>` +
+      `<span>Page {{ ${p}() }} of {{ ${pages} }}</span>` +
+      `<button type="button" [disabled]="${p}() * ${size} >= ${total}" (click)="${p}.set(${p}() + 1)">Next</button>` +
+      `</div>`
+    );
   },
 
   // --- API binding seam ---------------------------------------------------

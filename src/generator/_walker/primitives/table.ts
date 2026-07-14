@@ -13,6 +13,7 @@ import {
   escapeJsxText,
   lambdaArg,
   namedArgValue,
+  numericNamed,
   positionalArgs,
   slugify,
   stringNamed,
@@ -54,6 +55,10 @@ export function emitTable(
 ): string {
   const rowsArg = namedArgValue(call, "rows");
   let rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  // The bound rows expression before any sort/slice wrapping.  Sort and slice
+  // both preserve nothing about it except count (sort reorders, slice narrows),
+  // so the pager reads the pre-slice total off this base expression.
+  const boundRowsExpr = rowsExpr;
 
   // Client-side column sort (M-T1.1).  Active only when the Table carries
   // `sortKey:`/`sortDir:` state refs AND the target implements the seam; a
@@ -77,6 +82,40 @@ export function emitTable(
     ctx.usesTableSort = true;
     rowsExpr = ctx.target.renderSortedRows!(rowsExpr, sortKeyRef, sortDirRef);
   }
+
+  // Client-side pagination (M-T1.1).  Active when the Table carries a `page:`
+  // state ref (a 1-based int state field) AND the target implements the
+  // `renderPager` seam.  `pageSize:` is a fixed int-literal window (default 10).
+  // The rows are `.slice`d to the active page's window (built generically from
+  // `renderStateRead`), and a per-target pager control is appended below the
+  // table.  An un-ported target ignores the args → the table renders unpaged.
+  const pageName = refArgName(call, "page");
+  const pageSize = numericNamed(call, "pageSize") ?? 10;
+  const pagedActive =
+    pageName !== undefined && pageSize > 0 && ctx.target.renderPager !== undefined;
+  const pageRef = pageName !== undefined ? stateRefFor(pageName) : undefined;
+  let pagerMarkup: string | undefined;
+  if (pagedActive && pageRef) {
+    ctx.usesState = true;
+    const pageRead = ctx.target.renderStateRead(pageRef, "template");
+    // The (post-sort, pre-slice) rows expression — its `.length` is the pager's
+    // pre-slice total (sort preserves count).  When sort is active this is a
+    // sorted array that's guaranteed non-null (`sortRows(…)` returns `T[]`; the
+    // React inline `[...].sort` too), so no `?? []` guard is added — a redundant
+    // guard on a never-nullish operand is a strict-Angular error (TS2869).
+    const preSliceExpr = rowsExpr;
+    rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
+    const totalBase = sortActive ? preSliceExpr : boundRowsExpr;
+    // Guard a possibly-`undefined` base (an un-sorted bound query result), but
+    // idempotently — don't double-guard a base that already ends in `?? []`.
+    const totalExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
+      ? `(${totalBase}).length`
+      : sortActive
+        ? `(${totalBase}).length`
+        : `((${totalBase}) ?? []).length`;
+    pagerMarkup = ctx.target.renderPager!({ page: pageRef, pageSize, totalExpr });
+  }
+
   // A named-action reference (`onRowClick: add`) binds the hoisted handler
   // the page-shell emits from `page.actions` (named-actions-and-stores.md,
   // Proposal A Stage 1): a single-payload action receives the clicked `row`;
@@ -153,7 +192,7 @@ export function emitTable(
   // actually references it (e.g. a view keying on `keyExpr: "idx"`);
   // otherwise emit `(row)` so the generated code carries no unused param.
   const usesIdx = /\bidx\b/.test([keyExpr, rowTestidJs, onRowClickJs].filter(Boolean).join(" "));
-  return renderPrimitive(ctx, "primitive-table", {
+  const tableMarkup = renderPrimitive(ctx, "primitive-table", {
     rowsExpr,
     rowVar,
     keyExpr,
@@ -177,6 +216,10 @@ export function emitTable(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
+  // The pager renders as a sibling below the table (both inside the scaffold's
+  // `Paper`).  Concatenation keeps the table markup untouched for un-paged
+  // tables (byte-identical) and appends the control only when paged.
+  return pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
 }
 
 /** Emit one `Column("Header", <accessor>)` into a

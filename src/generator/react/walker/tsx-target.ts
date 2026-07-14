@@ -105,7 +105,12 @@ export const tsxTarget: WalkerTarget = {
       `() => { if (${k} === ${q}) { ${setD}(${d} === "asc" ? "desc" : "asc"); } ` +
       `else { ${setK}(${q}); ${setD}("asc"); } }`;
     const indicator = `{${k} === ${q} ? (${d} === "asc" ? " ↑" : " ↓") : ""}`;
-    return `<span style={{ cursor: "pointer", userSelect: "none" }} onClick={${onClick}}>${header}${indicator}</span>`;
+    // A real `<button>` (not a `<span onClick>`) so the sort control is
+    // keyboard-focusable and carries an implicit ARIA role — the a11y gates
+    // (svelte-check `--fail-on-warnings`, axe) reject a clickable span.  The
+    // style resets the native button chrome so it still reads as a header.
+    const style = `{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }`;
+    return `<button type="button" style={${style}} onClick={${onClick}}>${header}${indicator}</button>`;
   },
 
   /** Sort the rows array by the active `sortKey` column in `sortDir`
@@ -121,6 +126,25 @@ export const tsxTarget: WalkerTarget = {
       `const bv = (b as Record<string, unknown>)[${k}]; ` +
       `const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; ` +
       `return ${d} === "desc" ? -c : c; })`
+    );
+  },
+
+  /** Prev / "Page N of M" / Next pager, wired to the `page` state field.
+   *  Prev disables on page 1; Next disables once the window reaches the
+   *  total.  Inline-styled so it stays pack-agnostic (like the sort header). */
+  renderPager(spec) {
+    const p = spec.page.name;
+    const setP = `set${p[0]!.toUpperCase()}${p.slice(1)}`;
+    const total = spec.totalExpr;
+    const size = spec.pageSize;
+    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const style = `{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }`;
+    return (
+      `<div style={${style}} data-testid="pager">` +
+      `<button type="button" disabled={${p} <= 1} onClick={() => ${setP}(${p} - 1)}>Prev</button>` +
+      `<span>Page {${p}} of {${pages}}</span>` +
+      `<button type="button" disabled={${p} * ${size} >= ${total}} onClick={() => ${setP}(${p} + 1)}>Next</button>` +
+      `</div>`
     );
   },
 

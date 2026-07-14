@@ -1007,6 +1007,12 @@ export function scaffoldList(
       { name: "rows", value: nameRefExpr("rows") },
       { name: "sortKey", value: nameRefExpr("sortKey") },
       { name: "sortDir", value: nameRefExpr("sortDir") },
+      // Client-side pagination (M-T1.1): `pageNum` is 1-based int state (the
+      // field can't be named `page` — reserved keyword); `pageSize` a fixed
+      // window.  The Table slices to the active page and appends a pager below
+      // itself.  Feliz/HEEx ignore these (no `renderPager` seam).
+      { name: "page", value: nameRefExpr("pageNum") },
+      { name: "pageSize", value: intLit(10) },
       { name: "striped", value: boolLit(true) },
       { name: "highlight", value: boolLit(true) },
       { name: "sticky", value: boolLit(true) },

@@ -100,6 +100,18 @@ export interface SortableHeaderSpec {
   sortDir: StateRef;
 }
 
+/** The data a target needs to render a client-side pager control below a
+ *  paged `Table` (M-T1.1 — the `renderPager` seam). */
+export interface PagerSpec {
+  /** Page-state field holding the current 1-based page number. */
+  page: StateRef;
+  /** Fixed rows-per-page window. */
+  pageSize: number;
+  /** Already-rendered expression for the total (pre-slice) row count —
+   *  used to disable "Next" on the last page. */
+  totalExpr: string;
+}
+
 /** A single API call site detected by the walker — the
  *  `Sales.Customer.create.mutate(args)` shape.  Carries the
  *  resolved api-handle / aggregate / op so the target can produce
@@ -705,6 +717,14 @@ export interface WalkerTarget {
    *  sort by the active `sortKey` / `sortDir` state fields.  React returns a
    *  `[...(rows)].sort((a, b) => …)` chain; omitted → rows render unsorted. */
   renderSortedRows?(rowsExpr: string, sortKey: StateRef, sortDir: StateRef): string;
+
+  /** Render the client-side pager control emitted below a paged `Table` — a
+   *  "Prev" / "Next" pair around a "Page N" label, wired to the `page` state
+   *  field (writes clamp to `[1, ceil(total/pageSize)]`).  Framework-shaped
+   *  (button markup, disabled-attr syntax, click/state-write idiom), so it's a
+   *  seam; the `.slice(...)` windowing itself is built generically from
+   *  `renderStateRead`.  Omitted → the table renders unpaged (all rows). */
+  renderPager?(spec: PagerSpec): string;
 
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //
