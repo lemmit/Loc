@@ -1439,14 +1439,30 @@ function emitResponseDtoSchema(
   // forApiRead: `internal`/`secret` fields never reach a read response —
   // toWire projects through the same filter, and the schema must decide
   // visibility identically or the OpenAPI spec drifts from the wire.
-  const fields = forApiRead(wireShapeFor(ent));
-  void ctx;
-  void isAgg;
-  for (const wf of fields) {
-    if (wf.source === "id") {
-      lines.push(`  ${wf.name}: z.string(),`);
-    } else {
-      lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
+  // M-T5.10 (PR3): when the context declares a `response <Agg>Response` record
+  // (spliced by `scaffoldHandlers`), READ that record's fields for the aggregate
+  // root instead of re-deriving from `wireShape` — byte-identical for the
+  // scaffolded form, authoritative for a hand-declared divergent one.  Only the
+  // aggregate root is rewired; part/VO schemas stay on the wireShape path
+  // (emitted as before).  The record omits `id` (grammar-reserved), so the
+  // leading `id: z.string()` is re-prepended, mirroring the synthetic wire-shape
+  // id row `responseRecordParams` / this walk would emit.
+  const declaredResponse = isAgg
+    ? ctx.payloads.find((p) => p.kind === "response" && p.name === name)
+    : undefined;
+  if (declaredResponse) {
+    lines.push(`  id: z.string(),`);
+    for (const f of declaredResponse.fields) {
+      lines.push(`  ${f.name}: ${zodForResponseField(f.type, f.optional, ctx)},`);
+    }
+  } else {
+    const fields = forApiRead(wireShapeFor(ent));
+    for (const wf of fields) {
+      if (wf.source === "id") {
+        lines.push(`  ${wf.name}: z.string(),`);
+      } else {
+        lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
+      }
     }
   }
   // Co-located provenance rides the wire DTO (see repo.toWire); the
@@ -1531,6 +1547,31 @@ export function zodForResponse(t: TypeIR, optional: boolean): string {
   // so an optional `T?` field doesn't emit `.nullish().nullish()`.
   const alreadyNullable = wireTypeInfo(t, "response").isNullable;
   return optional && !alreadyNullable ? `${z}.nullish()` : z;
+}
+
+/** Zod for a field of a DECLARED `response` payload record (M-T5.10 PR3).  A VO /
+ *  scalar / enum / id field carries its DOMAIN type, so `zodForResponse` maps it
+ *  exactly as the wireShape path.  A CONTAINMENT field is ALREADY the sibling
+ *  `<Part>Response` name (context scope can't reference a raw entity part, so PR1
+ *  rewrote it to the part's own response record) — it lowers to an `entity`
+ *  TypeIR whose name is a declared `response` payload, which must be rendered
+ *  DIRECTLY (`z.array(LabelResponse)`); running it through `zodForResponse` would
+ *  append a second `Response` (`z.array(LabelResponseResponse)`). */
+function zodForResponseField(t: TypeIR, optional: boolean, ctx: BoundedContextIR): string {
+  const info = wireTypeInfo(t, "response");
+  if (info.refKind === "entity" && isResponsePayloadName(ctx, info.base)) {
+    let z = info.base;
+    if (info.isCollection) z = `z.array(${z})`;
+    if (info.isNullable || optional) z = `${z}.nullish()`;
+    return z;
+  }
+  return zodForResponse(t, optional);
+}
+
+/** True iff `name` is a declared `response` payload in the context — i.e. a
+ *  containment field's already-wire type, which must not be re-suffixed. */
+function isResponsePayloadName(ctx: BoundedContextIR, name: string): boolean {
+  return ctx.payloads.some((p) => p.kind === "response" && p.name === name);
 }
 
 function zodForResponseInner(t: TypeIR): string {
