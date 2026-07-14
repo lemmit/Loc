@@ -19,6 +19,7 @@ import {
   felizCreateForm,
   felizOperationForm,
   felizWorkflowForm,
+  idLabelsFrom,
   readFieldName,
 } from "./wire.js";
 
@@ -69,6 +70,14 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
     return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children [ ${allOpts.join("; ")} ] ]`;
+  }
+  if (fld.inputKind === "idselect" && fld.idTarget) {
+    // Options load at runtime from the target's `.all` (`View.idOptions` maps the
+    // Remote list to `<option>`s); a leading blank option is the unselected state
+    // (a required FK is guarded, so it must be chosen before submit).
+    const listField = `model.${readFieldName(fld.idTarget)}`;
+    const label = fld.idLabelField ?? "id";
+    return `Html.select [ prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`;
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
   return `Html.input [ ${typeProp}prop.placeholder "${fld.wireName}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
@@ -226,7 +235,11 @@ export const felizTarget: WalkerTarget = {
     const aggName = ofArg?.kind === "ref" ? ofArg.name : undefined;
     const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
     if (!agg || !aggName) return null;
-    const form = felizCreateForm(agg, enumsFromBc(ctx.bcByAggregate.get(aggName)));
+    const form = felizCreateForm(
+      agg,
+      enumsFromBc(ctx.bcByAggregate.get(aggName)),
+      idLabelsFrom(ctx.aggregatesByName.values()),
+    );
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled =
       form.fields.length > 0
@@ -251,7 +264,12 @@ export const felizTarget: WalkerTarget = {
     const agg = ctx.aggregatesByName.get(ofArg.name);
     const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
     if (!agg || !op) return null;
-    const form = felizOperationForm(agg, op, enumsFromBc(ctx.bcByAggregate.get(ofArg.name)));
+    const form = felizOperationForm(
+      agg,
+      op,
+      enumsFromBc(ctx.bcByAggregate.get(ofArg.name)),
+      idLabelsFrom(ctx.aggregatesByName.values()),
+    );
     if (form.fields.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
@@ -272,7 +290,11 @@ export const felizTarget: WalkerTarget = {
     const wfName = runsArg?.kind === "ref" ? runsArg.name : undefined;
     const wf = wfName ? ctx.workflowsByName.get(wfName) : undefined;
     if (!wf || !wfName) return null;
-    const form = felizWorkflowForm(wf, enumsFromBc(ctx.bcByWorkflow.get(wfName)));
+    const form = felizWorkflowForm(
+      wf,
+      enumsFromBc(ctx.bcByWorkflow.get(wfName)),
+      idLabelsFrom(ctx.aggregatesByName.values()),
+    );
     if (form.fields.length === 0) return null;
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
     const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;

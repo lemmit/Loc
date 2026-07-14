@@ -166,6 +166,59 @@ describe("feliz create forms", () => {
     expect(app).not.toContain("form.inStock)");
   });
 
+  // A foreign-key `X id` field → a `<select>` populated from the target's `.all`
+  // (an implicit read wired into the page), each option labelled by the target's
+  // `display` derived field. A `View.idOptions` helper maps the Remote list.
+  it("renders a foreign-key id field as a select populated from the target list", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Sales
+        subdomain Sales {
+          context Cat {
+            aggregate Customer with crudish { name: string  derived display: string = name }
+            repository Customers for Customer { }
+            aggregate Order with crudish { ref: string  customer: Customer id }
+            repository Orders for Order { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Orders {
+            route: "/orders"
+            body: QueryView {
+              of: Shop.Order.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, o => Card { o.ref } } }
+            }
+          }
+          page OrderNew {
+            route: "/orders/new"
+            body: Stack { CreateForm { of: Order } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // The FK field renders a select over the target list, blank-first, labelled
+    // by the target's `display` derived; the option value is the target `id`.
+    expect(app).toContain(
+      'Html.select [ prop.value model.OrderForm.customer; prop.onChange (fun (v: string) -> dispatch (SetOrderFormCustomer v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions model.AllCustomers (fun x -> x.id) (fun x -> x.display)) ]',
+    );
+    // The `View.idOptions` helper is emitted.
+    expect(app).toContain(
+      "  let idOptions (r: Remote<'T list>) (idOf: 'T -> string) (labelOf: 'T -> string) : ReactElement list =",
+    );
+    // The target's `.all` is an IMPLICIT read wired into the MVU loop.
+    expect(app).toContain("AllCustomers: Remote<Customer list>");
+    expect(app).toContain("let allCustomers () : Async<Result<Customer list, string>> =");
+    expect(app).toContain("Cmd.OfAsync.perform Api.allCustomers () AllCustomersLoaded");
+    // A required FK guards the submit (must pick a customer).
+    expect(app).toContain("IsNullOrWhiteSpace form.customer");
+  });
+
   // Optional scalar create-input fields are RENDERED (previously dropped), but
   // encode empty → null and are exempt from the submit guard.
   it("renders optional scalar fields — empty encodes to null, exempt from validation", async () => {

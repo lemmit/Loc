@@ -40,6 +40,8 @@ import {
   type FelizOperationForm,
   type FelizRead,
   type FelizWorkflowForm,
+  felizAllRead,
+  idLabelsFrom,
   renderApiModule,
   renderEncoders,
   renderFormTypes,
@@ -306,16 +308,24 @@ function enumsFromContexts(contexts: EnrichedBoundedContextIR[]): Map<string, st
   return out;
 }
 
+/** Every aggregate → its `idselect` option-label field (`display` derived or
+ *  `id`), across a ui's contexts.  Built identically here (MVU assembly) and in
+ *  the view seam (from `ctx.aggregatesByName`) so a form's field set agrees. */
+function idLabelsFromContexts(contexts: EnrichedBoundedContextIR[]): Map<string, string> {
+  return idLabelsFrom(contexts.flatMap((c) => c.aggregates));
+}
+
 /** The create forms a ui hosts, across ALL its pages (deduped by aggregate) —
  *  `CreateForm(of: X)`. */
 function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[] {
   const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const enumsByName = enumsFromContexts(contexts);
+  const idLabels = idLabelsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageForms(page, aggregatesByName, enumsByName)) {
+    for (const f of collectPageForms(page, aggregatesByName, enumsByName, idLabels)) {
       if (seen.has(f.aggregate)) continue;
       seen.add(f.aggregate);
       out.push(f);
@@ -330,10 +340,11 @@ function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fe
   const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const enumsByName = enumsFromContexts(contexts);
+  const idLabels = idLabelsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizOperationForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageOperationForms(page, aggregatesByName, enumsByName)) {
+    for (const f of collectPageOperationForms(page, aggregatesByName, enumsByName, idLabels)) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);
@@ -354,10 +365,11 @@ function workflowsForUi(contexts: EnrichedBoundedContextIR[]): Map<string, Workf
 function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizWorkflowForm[] {
   const workflowsByName = workflowsForUi(contexts);
   const enumsByName = enumsFromContexts(contexts);
+  const idLabels = idLabelsFromContexts(contexts);
   const seen = new Set<string>();
   const out: FelizWorkflowForm[] = [];
   for (const page of ui.pages) {
-    for (const f of collectPageWorkflowForms(page, workflowsByName, enumsByName)) {
+    for (const f of collectPageWorkflowForms(page, workflowsByName, enumsByName, idLabels)) {
       if (seen.has(f.formType)) continue;
       seen.add(f.formType);
       out.push(f);
@@ -434,12 +446,28 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
   const functionModule = new Map(
     (ui.functions ?? []).map((f) => [f.name, externModuleFromPath(f.externPath)]),
   );
-  const reads: FelizRead[] = readsForUi(ui, contexts);
   const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
   const forms: FelizForm[] = formsForUi(ui, contexts);
   const operationForms: FelizOperationForm[] = operationFormsForUi(ui, contexts);
   const workflowForms: FelizWorkflowForm[] = workflowFormsForUi(ui, contexts);
   const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
+  // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
+  // populate their options — an IMPLICIT list read per target, merged into the
+  // page's read set (deduped against any explicit QueryView `.all` of it) so the
+  // whole Remote/Api/Model/init/update wiring is emitted for free.
+  const fkTargets = new Set<string>();
+  for (const form of formRecords)
+    for (const fld of form.fields) if (fld.idTarget) fkTargets.add(fld.idTarget);
+  const hasIdSelect = fkTargets.size > 0;
+  const reads: FelizRead[] = readsForUi(ui, contexts);
+  const readFields = new Set(reads.map((r) => r.field));
+  for (const target of fkTargets) {
+    const r = felizAllRead(target);
+    if (!readFields.has(r.field)) {
+      readFields.add(r.field);
+      reads.push(r);
+    }
+  }
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
   // Http/Api are needed for reads, mutations AND forms (POST); the auth probe
@@ -581,7 +609,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = fa
     hasHttp && api,
     // View helpers (reads only) — Remote matchers the QueryView renderer calls.
     hasReads && "",
-    hasReads && renderViewModule(reads),
+    hasReads && renderViewModule(reads, hasIdSelect),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
     routed && renderRouting(pages),
