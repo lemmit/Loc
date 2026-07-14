@@ -649,7 +649,9 @@ describe("typescript generator", () => {
     // Repository emits a serializer used by route handlers.
     const repo = files.get("db/repositories/order-repository.ts")!;
     expect(repo).toMatch(/toWire\(root: Order\): unknown/);
-    expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
+    expect(repo).toMatch(
+      /async all\(page: number, pageSize: number, sort: string, dir: string\): Promise<\{ items: Order\[\]; page: number; pageSize: number; total: number; totalPages: number \}>/,
+    );
   });
 
   it("lowers `where` filter expressions to Drizzle operators (not a TODO comment)", async () => {
@@ -699,7 +701,9 @@ describe("typescript generator", () => {
     // The `all()` method now eagerly loads `shipping` via inArray +
     // builds a per-parent map keyed by parentId; hydrate looks up
     // the singular row with `?? null`.
-    expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
+    expect(repo).toMatch(
+      /async all\(page: number, pageSize: number, sort: string, dir: string\): Promise<\{ items: Order\[\]; page: number; pageSize: number; total: number; totalPages: number \}>/,
+    );
     expect(repo).toMatch(
       /const shippingRows = await this\.db\.select\(\)\.from\(schema\.addresses\)\.where\(inArray\(schema\.addresses\.parentId, rootIds\)\)/,
     );

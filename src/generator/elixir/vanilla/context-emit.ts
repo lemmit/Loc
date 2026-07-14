@@ -149,6 +149,17 @@ function renderContextModule(
     // aggregates keep the original parameterless seam (byte-identical).
     const principal = aggregateUsesPrincipalContextFilter(agg);
     const actorArg = principal ? ", current_user \\\\ nil" : "";
+    // The auto-`findAll` is paged-by-default (M-T2.6), so the `list_<agg>s`
+    // defdelegate forwards the repository's `page`/`page_size`/`sort`/`dir`
+    // (+ optional actor) arity.  The plain (unpaged) delegate stays byte-identical.
+    const listRepo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
+    const listAllFind = listRepo?.finds?.find((f) => f.name === "all");
+    const listPaged = listAllFind ? !!pagedReturn(listAllFind.returnType) : false;
+    const listDelegateArgs = listPaged
+      ? `page \\\\ ${PAGED_DEFAULT_PAGE}, page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}, sort \\\\ "id", dir \\\\ "asc"${principal ? ", current_user \\\\ nil" : ""}`
+      : principal
+        ? "current_user \\\\ nil"
+        : "";
     // A principal-referencing lifecycle stamp threads `current_user` into the
     // create/update WRITE seam too (the repository `insert`/`update` reads
     // `current_user.<idKey>` for `createdBy`/`updatedBy`).  The `\\ nil` default
@@ -323,7 +334,7 @@ ${body}
       ? `\n  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete`
       : "";
     return `  # ${aggPascal}
-  defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
+  defdelegate list_${aggSnake}s(${listDelegateArgs}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id${
     agg.writeScopeFilter
       ? `\n  defdelegate get_${aggSnake}_for_write(id${actorArg}), to: ${repoMod}, as: :find_by_id_for_write`

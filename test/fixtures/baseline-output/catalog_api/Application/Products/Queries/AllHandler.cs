@@ -8,10 +8,11 @@ using CatalogApi.Domain.Ids;
 using CatalogApi.Domain.ValueObjects;
 using CatalogApi.Domain.Enums;
 using CatalogApi.Application.Products.Responses;
+using CatalogApi.Domain.Common;
 
 namespace CatalogApi.Application.Products.Queries;
 
-public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<ProductResponse>>
+public sealed class AllHandler : IQueryHandler<AllQuery, Paged<ProductResponse>>
 {
     private readonly IProductRepository _repo;
     public AllHandler(IProductRepository repo)
@@ -19,9 +20,9 @@ public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<ProductRe
         _repo = repo;
     }
 
-    public async ValueTask<IReadOnlyList<ProductResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
+    public async ValueTask<Paged<ProductResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
     {
-        var domain = await _repo.All(cancellationToken);
-        return domain.Select(d => new ProductResponse(d.Id.Value, d.Sku, new MoneyResponse(d.Price.Amount, d.Price.Currency), d.Display)).ToList();
+        var domain = await _repo.All(query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);
+        return new Paged<ProductResponse>(domain.Items.Select(d => new ProductResponse(d.Id.Value, d.Sku, new MoneyResponse(d.Price.Amount, d.Price.Currency), d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
     }
 }

@@ -11,10 +11,10 @@
 {{indent}}<template v-if="{{{queryExpr}}}.data">
 {{branchIndent}}{{{dataJsx}}}
 {{indent}}</template>
-{{else}}{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data.length === 0">
+{{else}}{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data{{#if paged}}.items{{/if}}.length === 0">
 {{branchIndent}}{{{emptyJsx}}}
 {{indent}}</template>
-{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data.length > 0">
+{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data{{#if paged}}.items{{/if}}.length > 0">
 {{branchIndent}}{{{dataJsx}}}
 {{indent}}</template>
 {{/if}}{{closeIndent}}</div>

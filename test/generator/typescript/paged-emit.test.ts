@@ -72,11 +72,14 @@ describe("typescript generator — paged finds (P3b)", () => {
       'export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("WarehousePaged");',
     );
     // Query schema gains 1-based page + pageSize with defaults 1 / 20, plus the
-    // server-side sort controls (M-T2.6): `sort` enum whitelist + `dir`.
+    // server-side sort controls (M-T2.6): `sort`/`dir` are accepted as plain
+    // strings (the scaffold list sends an empty initial sortKey, which an enum
+    // would reject) and whitelisted server-side by the repo's `sortColumns`
+    // map (`sortColumns[sort] ?? id`).
     expect(routes).toContain("page: z.coerce.number().int().min(1).default(1),");
     expect(routes).toContain("pageSize: z.coerce.number().int().min(1).default(20),");
-    expect(routes).toContain('sort: z.enum(["id", "code", "region"]).default("id"),');
-    expect(routes).toContain('dir: z.enum(["asc", "desc"]).default("asc"),');
+    expect(routes).toContain('sort: z.string().default("id"),');
+    expect(routes).toContain('dir: z.string().default("asc"),');
     // Handler passes the controls through and maps page items via toWire.
     expect(routes).toContain(
       "const result = await repo.recent(params.page, params.pageSize, params.sort, params.dir);",

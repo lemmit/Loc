@@ -15,6 +15,11 @@
 // ---------------------------------------------------------------------------
 
 import { emitsRestCreate as sharedEmitsRestCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -229,6 +234,27 @@ function renderController(
   const cuBind = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const listArg = principal ? "current_user" : "";
   const getActor = principal ? ", current_user" : "";
+  // The auto-`findAll` is paged-by-default (M-T2.6): the `index` action parses
+  // `page`/`pageSize`/`sort`/`dir` query controls (via the shared `page_param`
+  // helper find-controller emits — always present now that every non-abstract
+  // controller pages) and returns the `%{items, …}` envelope.  A read-only
+  // abstract-base controller keeps the plain unpaged list (honest gate).
+  const listAllFind = (ctx.repositories ?? [])
+    .find((r) => r.aggregateName === agg.name)
+    ?.finds?.find((f) => f.name === "all");
+  const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
+  const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
+  const indexAction = indexPaged
+    ? `  def index(conn, params) do
+${cuBind}    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
+      json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+    end
+  end`
+    : `  def index(conn, _params) do
+${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
+      json(conn, Enum.map(records, &serialize/1))
+    end
+  end`;
   // Command-load context fn a MUTATION action loads through (authorization
   // Phase 3 P3.1): `get_<agg>_for_write` when the aggregate's write scope is
   // narrower than its read scope, else `get_<agg>` (byte-identical).  Reads
@@ -550,11 +576,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
 
-  def index(conn, _params) do
-${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
-      json(conn, Enum.map(records, &serialize/1))
-    end
-  end
+${indexAction}
 
   def show(conn, %{"id" => id}) do
 ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do

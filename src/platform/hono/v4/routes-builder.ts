@@ -64,7 +64,6 @@ import {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
-import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
@@ -340,18 +339,16 @@ export function buildRoutesFile(
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       if (paged) {
-        // Server-side pagination + sort controls (M-T2.6).  `sort` is an enum of
-        // the aggregate's whitelisted scalar columns (`id` default + stable
-        // order); `dir` defaults ascending.  An out-of-whitelist `sort` can't be
-        // sent (zod rejects it), so the repo's ORDER BY is injection-safe.
-        const sortEnum = sortableFields(agg)
-          .map((f) => JSON.stringify(f))
-          .join(", ");
+        // Server-side pagination + sort controls (M-T2.6).  `sort`/`dir` are
+        // plain strings (the client binds them to its sort state, which starts
+        // empty = unsorted); the repository whitelists the column server-side
+        // (`sortColumns[sort] ?? id`), so an enum boundary is unnecessary — and
+        // would reject the empty initial sort the scaffold list sends.
         lines.push(
           `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
-          `  sort: z.enum([${sortEnum}]).default("id"),`,
-          `  dir: z.enum(["asc", "desc"]).default("asc"),`,
+          `  sort: z.string().default("id"),`,
+          `  dir: z.string().default("asc"),`,
         );
       }
       lines.push(`}).openapi("${upperFirst(find.name)}Query");`);

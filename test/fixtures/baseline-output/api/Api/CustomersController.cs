@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Api.Domain.Common;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -84,10 +85,10 @@ public sealed class CustomersController : ControllerBase
     }
 
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<CustomerResponse>), 200)]
-    public async Task<ActionResult<IReadOnlyList<CustomerResponse>>> AllCustomer()
+    [ProducesResponseType(typeof(Paged<CustomerResponse>), 200)]
+    public async Task<ActionResult<Paged<CustomerResponse>>> AllCustomer([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
     {
-        var result = await _mediator.Send(new AllQuery());
+        var result = await _mediator.Send(new AllQuery(page, pageSize, sort, dir));
         return Ok(result);
     }
 

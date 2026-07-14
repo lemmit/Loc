@@ -365,6 +365,14 @@ export function emitQueryView(
   const error = namedArgValue(call, "error");
   const empty = namedArgValue(call, "empty");
   const data = namedArgValue(call, "data");
+  // `paged: true` flips QueryView to server-paged semantics (M-T2.6): the
+  // query's `.data` is the `Paged<T>` envelope `{items, page, pageSize, total,
+  // totalPages}`, not a bare array — so the empty/non-empty length checks read
+  // `.data.items.length`, while the `data:` lambda still binds to `.data` (the
+  // envelope) so the body can read both `rows.items` and the page metadata
+  // (`rows.totalPages`) for its pager.  Absent → the array semantics below
+  // (byte-identical to a QueryView with no `paged:` arg).
+  const paged = boolNamed(call, "paged");
   // `single: true` flips QueryView to single-record
   // semantics (byId queries return `T | undefined`, not `T[]`).
   // The `empty` branch fires when `data === undefined` after
@@ -390,7 +398,8 @@ export function emitQueryView(
     const childParamTypes = recordAgg
       ? new Map([...(ctx.paramTypes ?? []), [data.param, recordAgg]])
       : ctx.paramTypes;
-    const dataAccess = ctx.target.renderQueryDataAccess?.(queryExpr, single) ?? `${queryExpr}.data`;
+    const dataAccess =
+      ctx.target.renderQueryDataAccess?.(queryExpr, single, paged) ?? `${queryExpr}.data`;
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, data.param, dataAccess),
@@ -404,6 +413,11 @@ export function emitQueryView(
     dataJsx = "null";
   }
 
+  // `paged` drives the pack template's empty / non-empty length checks to read
+  // the envelope's `.items` (`<query>.data.items.length`, or the framework's
+  // signal / `?? []` variant) instead of a bare `<query>.data.length`.  The
+  // `data:` lambda binding stays `<query>.data` (the envelope) in both modes —
+  // a paged body reads `rows.items` / `rows.totalPages` off it.
   return renderPrimitive(ctx, "primitive-query-view", {
     queryExpr,
     loadingJsx,
@@ -411,6 +425,7 @@ export function emitQueryView(
     emptyJsx,
     dataJsx,
     single,
+    paged,
     indent,
     branchIndent,
     closeIndent,

@@ -96,7 +96,11 @@ export function felizAllRead(aggregate: string): FelizRead {
     apiFn: lowerFirst(field),
     aggregate,
     resultType: `${upperFirst(aggregate)} list`,
-    decoderExpr: `(Decode.list Decoders.${lowerFirst(aggregate)})`,
+    // The auto-`findAll` is paged-by-default (M-T2.6): `GET /<aggs>` returns the
+    // `{items, page, …}` wire envelope, so the list read decodes the `items`
+    // field out of it (the Model still holds a plain `'T list` — page 1, no
+    // pager/sort UI, matching the M-T1.1 Feliz "attempt / fail-fast" disposition).
+    decoderExpr: `(Decode.field "items" (Decode.list Decoders.${lowerFirst(aggregate)}))`,
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
     single: false,

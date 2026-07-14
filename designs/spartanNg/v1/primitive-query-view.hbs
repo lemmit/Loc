@@ -11,10 +11,10 @@
 {{indent}}@if ({{{queryExpr}}}.data()) {
 {{branchIndent}}{{{dataJsx}}}
 {{indent}} }
-{{else}}{{indent}}@if (!{{{queryExpr}}}.isLoading() && !{{{queryExpr}}}.isError() && ({{{queryExpr}}}.data() ?? []).length === 0) {
+{{else}}{{indent}}@if (!{{{queryExpr}}}.isLoading() && !{{{queryExpr}}}.isError() && ({{{queryExpr}}}.data(){{#if paged}}?.items{{/if}} ?? []).length === 0) {
 {{branchIndent}}{{{emptyJsx}}}
 {{indent}} }
-{{indent}}@if (({{{queryExpr}}}.data() ?? []).length > 0) {
+{{indent}}@if (({{{queryExpr}}}.data(){{#if paged}}?.items{{/if}} ?? []).length > 0) {
 {{branchIndent}}{{{dataJsx}}}
 {{indent}} }
 {{/if}}{{closeIndent}}</div>

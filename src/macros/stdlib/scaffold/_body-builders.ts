@@ -1001,18 +1001,29 @@ export function scaffoldList(
     })),
   ];
 
-  const makeTable = (): Expression =>
+  // The Table for one QueryView `data:` arm.  `serverPaged` (the `all` list,
+  // M-T2.6) reads the server's page off the `Paged<T>` envelope: rows are
+  // `rows.items`, the pager's page count is `rows.totalPages`, and the sortable
+  // headers + pager write `pageNum`/`sortKey`/`sortDir` state that the query's
+  // `of:` args feed back for a refetch (no client slice/sort).  A filter view
+  // (a user `find … : T[]`, unbounded array) stays CLIENT-paged: `rows` is the
+  // array, sliced/sorted in the browser.
+  const makeTable = (serverPaged: boolean): Expression =>
     callExpr("Table", [
       ...makeCols(),
-      { name: "rows", value: nameRefExpr("rows") },
+      {
+        name: "rows",
+        value: serverPaged ? memberAccess(nameRefExpr("rows"), "items") : nameRefExpr("rows"),
+      },
       { name: "sortKey", value: nameRefExpr("sortKey") },
       { name: "sortDir", value: nameRefExpr("sortDir") },
-      // Client-side pagination (M-T1.1): `pageNum` is 1-based int state (the
-      // field can't be named `page` — reserved keyword); `pageSize` a fixed
-      // window.  The Table slices to the active page and appends a pager below
-      // itself.  Feliz/HEEx ignore these (no `renderPager` seam).
       { name: "page", value: nameRefExpr("pageNum") },
-      { name: "pageSize", value: intLit(10) },
+      ...(serverPaged
+        ? [
+            { name: "serverPaged", value: boolLit(true) },
+            { name: "totalPages", value: memberAccess(nameRefExpr("rows"), "totalPages") },
+          ]
+        : [{ name: "pageSize", value: intLit(10) }]),
       { name: "striped", value: boolLit(true) },
       { name: "highlight", value: boolLit(true) },
       { name: "sticky", value: boolLit(true) },
@@ -1026,20 +1037,35 @@ export function scaffoldList(
     ]);
 
   // One QueryView per query expression — built per call so the filter arms
-  // below never share `ExprIR`/AST nodes.
-  const makeQueryView = (ofExpr: Expression): Expression =>
+  // below never share `ExprIR`/AST nodes.  `paged` marks the server-paged `all`
+  // view (unwrap `.data.items`; the Table reads the envelope).
+  const makeQueryView = (ofExpr: Expression, serverPaged: boolean): Expression =>
     callExpr("QueryView", [
       { name: "of", value: ofExpr },
+      ...(serverPaged ? [{ name: "paged", value: boolLit(true) }] : []),
       { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
       {
         name: "error",
         value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${humanLower}`) }]),
       },
       { name: "empty", value: callExpr("Empty", [{ value: stringLit(`No ${humanLower} yet.`) }]) },
-      { name: "data", value: lambda("rows", callExpr("Paper", [{ value: makeTable() }])) },
+      {
+        name: "data",
+        value: lambda("rows", callExpr("Paper", [{ value: makeTable(serverPaged) }])),
+      },
     ]);
 
-  const allView = (): Expression => makeQueryView(memberAccess(queryRoot(), "all"));
+  // The `all` list is server-paged: the `of:` threads the list's page/sort state
+  // (`pageNum`, fixed pageSize 10, `sortKey`, `sortDir`) as the paged findAll's
+  // query controls, so a page/sort change refetches the matching server page.
+  const allView = (): Expression =>
+    makeQueryView(
+      memberAccess(queryRoot(), "all", {
+        call: true,
+        args: [nameRefExpr("pageNum"), intLit(10), nameRefExpr("sortKey"), nameRefExpr("sortDir")],
+      }),
+      true,
+    );
 
   // Find-filter bar (T3.14): each qualifying `find` gets one text input per
   // param; when every input of a find is non-empty the list switches to that
@@ -1074,6 +1100,7 @@ export function scaffoldList(
             call: true,
             args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p))),
           }),
+          false,
         ),
       })),
       allView(),

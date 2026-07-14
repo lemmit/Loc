@@ -12,7 +12,7 @@ export default function OrderList() {
   const [sortDir, setSortDir] = useState<string>("");
   const [pageNum, setPageNum] = useState<number>(1);
   const orderByCustomer = useByCustomerOrder({ customerId: byCustomerCustomerId });
-  const orderAll = useAllOrders();
+  const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });
   return (
     <Stack data-testid="orders-list">
       <Breadcrumbs>
@@ -62,7 +62,7 @@ export default function OrderList() {
                   )) }
                 </Table.Tbody>
               </Table>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum * 10 >= ([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum >= Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
             </Paper>
           ) }
         </>) : <>
@@ -76,10 +76,10 @@ export default function OrderList() {
           { orderAll.isError && (
             <Alert color="red" variant="light">Couldn't load orders</Alert>
           ) }
-          { orderAll.data && orderAll.data.length === 0 && (
+          { orderAll.data && orderAll.data.items.length === 0 && (
             <Center mih={200}><Text c="dimmed">No orders yet.</Text></Center>
           ) }
-          { orderAll.data && orderAll.data.length > 0 && (
+          { orderAll.data && orderAll.data.items.length > 0 && (
             <Paper p="md">
               <Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
@@ -91,7 +91,7 @@ export default function OrderList() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  { ([...(orderAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).slice((pageNum - 1) * 10, pageNum * 10).map((row) => (
+                  { orderAll.data.items.map((row) => (
                     <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                       <Table.Td><RouterLink to={`/orders/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                       <Table.Td><Text>{row.customerId}</Text></Table.Td>
@@ -101,7 +101,7 @@ export default function OrderList() {
                   )) }
                 </Table.Tbody>
               </Table>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(orderAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum * 10 >= ([...(orderAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, orderAll.data.totalPages)}</span><button type="button" disabled={pageNum >= Math.max(1, orderAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
             </Paper>
           ) }
         </>}

@@ -132,13 +132,15 @@ describe("svelte generator — project shape", () => {
     const out = await files();
     const list = out.get("web/src/routes/(app)/customers/+page.svelte") ?? "";
     // svelte-query handle hoisted in <script>, consumed via {#if}/{#each}.
-    expect(list).toContain("const customerAll = useAllCustomers();");
-    expect(list).toContain("{#if customerAll.isLoading}");
-    // Iterate a narrowed array — `.data` is `T[] | undefined` under svelte-check.
-    // Since M-T1.1 the scaffold list sorts + paginates client-side, so the rows
-    // expr is `sortRows(...).slice(...)`; the `(… ?? [])` guard still surrounds it.
+    // Server-paged (M-T2.6): the hook takes the page window + sort controls.
     expect(list).toContain(
-      "{#each ((sortRows(customerAll.data, sortKey, sortDir)).slice((pageNum - 1) * 10, pageNum * 10) ?? []) as row (row.id)}",
+      "const customerAll = useAllCustomers(() => ({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir }));",
+    );
+    expect(list).toContain("{#if customerAll.isLoading}");
+    // Since M-T2.6 the scaffold list is server-paged, so rows come straight off
+    // the `Paged<T>` envelope's `.items`; the `(… ?? [])` guard still surrounds it.
+    expect(list).toContain(
+      "{#each (customerAll.data.items ?? []) as row (row.id)}",
     );
     expect(list).toContain('data-testid="customers-list"');
     // Explicit page: runes state + plain-assignment writes + $effect title.
@@ -197,7 +199,7 @@ describe("svelte generator — project shape", () => {
     const detail = out.get("web/src/routes/(app)/items/[id]/+page.svelte") ?? "";
     expect(detail).not.toContain("unsupported expr: id");
     expect(detail).toContain('const id = $derived(page.params.id ?? "");');
-    expect(detail).toContain("const itemById = useItemById(() => id);");
+    expect(detail).toContain("const itemById = useItemById(() => (id));");
   });
 
   it("emits the runes form/toast/format lib and no react artifacts", async () => {

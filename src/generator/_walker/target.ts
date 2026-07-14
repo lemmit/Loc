@@ -100,16 +100,16 @@ export interface SortableHeaderSpec {
   sortDir: StateRef;
 }
 
-/** The data a target needs to render a client-side pager control below a
- *  paged `Table` (M-T1.1 — the `renderPager` seam). */
+/** The data a target needs to render a pager control below a paged `Table`
+ *  (M-T1.1 / M-T2.6 — the `renderPager` seam). */
 export interface PagerSpec {
   /** Page-state field holding the current 1-based page number. */
   page: StateRef;
-  /** Fixed rows-per-page window. */
-  pageSize: number;
-  /** Already-rendered expression for the total (pre-slice) row count —
-   *  used to disable "Next" on the last page. */
-  totalExpr: string;
+  /** Already-rendered expression for the total page COUNT — drives the
+   *  "Page N of M" label and disables "Next" on the last page (`page >= M`).
+   *  Client mode passes `Math.max(1, Math.ceil(rows.length / pageSize))`;
+   *  server mode passes the envelope's `totalPages`.  Always ≥ 1. */
+  totalPagesExpr: string;
 }
 
 /** A single API call site detected by the walker — the
@@ -529,7 +529,7 @@ export interface WalkerTarget {
    *  data-lambda binding the walker injects.  `single` is set for byId reads
    *  (`T | null` data) so a target can non-null-assert inside the truthy
    *  guard — Angular's template typechecker won't narrow a `data()` call. */
-  renderQueryDataAccess?(handle: string, single?: boolean): string;
+  renderQueryDataAccess?(handle: string, single?: boolean, paged?: boolean): string;
 
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The

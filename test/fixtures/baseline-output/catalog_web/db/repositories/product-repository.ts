@@ -1,7 +1,8 @@
 // Auto-generated.  Do not edit by hand.
 import type { ProductRepositoryPort } from "../../domain/repository-ports";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { eq, inArray } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { asc, count, desc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Product } from "../../domain/product";
 import { Money } from "../../domain/value-objects";
@@ -67,15 +68,22 @@ export class ProductRepository implements ProductRepositoryPort {
     await this.db.delete(schema.products).where(eq(schema.products.id, id));
   }
 
-  async all(): Promise<Product[]> {
-    const rootRows = await this.db.select().from(schema.products);
+  async all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Product[]; page: number; pageSize: number; total: number; totalPages: number }> {
+    const offset = (page - 1) * pageSize;
+    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.products.id, "sku": schema.products.sku };
+    const sortColumn = sortColumns[sort] ?? schema.products.id;
+    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);
+    const countRows = await this.db.select({ value: count() }).from(schema.products);
+    const total = Number(countRows[0]?.value ?? 0);
+    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
+    const rootRows = await this.db.select().from(schema.products).orderBy(orderBy).limit(pageSize).offset(offset);
     if (rootRows.length === 0) {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: 0 });
-      return [];
+      return { items: [], page, pageSize, total, totalPages };
     }
-    const result = rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
-    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: result.length });
-    return result;
+    const items = rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: items.length });
+    return { items, page, pageSize, total, totalPages };
   }
 
   async bySku(sku: string): Promise<Product | null> {

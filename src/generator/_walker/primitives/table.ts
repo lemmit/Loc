@@ -60,35 +60,44 @@ export function emitTable(
   // so the pager reads the pre-slice total off this base expression.
   const boundRowsExpr = rowsExpr;
 
-  // Client-side column sort (M-T1.1).  Active only when the Table carries
-  // `sortKey:`/`sortDir:` state refs AND the target implements the seam; a
-  // target without the seam ignores the args and renders the plain,
-  // unsorted table (byte-identical to a table with no sort args).
+  // `serverPaged: true` (M-T2.6): the bound rows are ALREADY the server's page
+  // (a `Paged<T>.items` slice, ordered by the server) — the frontend does no
+  // client-side sort/slice; the sortable header + pager instead write page/sort
+  // STATE that the query's `of:` args feed back for a refetch.  `totalPages:` is
+  // the envelope's page count (drives the pager's "of M" + Next-disable).
+  const serverPaged = boolNamed(call, "serverPaged");
+  const totalPagesArg = namedArgValue(call, "totalPages");
+
+  // Column sort (M-T1.1 client / M-T2.6 server).  The clickable sortable
+  // HEADERS render in both modes (they write `sortKey`/`sortDir` state); only
+  // CLIENT mode additionally wraps the rows in a client-side `sortRows`.  A
+  // target without the seam ignores the args and renders a plain table.
   const sortKeyName = refArgName(call, "sortKey");
   const sortDirName = refArgName(call, "sortDir");
   const sortActive =
     sortKeyName !== undefined &&
     sortDirName !== undefined &&
-    ctx.target.renderSortedRows !== undefined &&
     ctx.target.renderSortableHeader !== undefined;
   const sortKeyRef = sortKeyName !== undefined ? stateRefFor(sortKeyName) : undefined;
   const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
   if (sortActive && sortKeyRef && sortDirRef) {
     ctx.usesState = true;
-    // Signals the page-shell to import the shared `sortRows` helper.  Targets
-    // whose `renderSortedRows` inlines the sort (React) leave the flag unread;
-    // targets that call the helper (Vue/Svelte/Angular — their strict
-    // templates reject the inline `as`-cast comparator) read it to import.
-    ctx.usesTableSort = true;
-    rowsExpr = ctx.target.renderSortedRows!(rowsExpr, sortKeyRef, sortDirRef);
+    if (!serverPaged && ctx.target.renderSortedRows !== undefined) {
+      // Signals the page-shell to import the shared `sortRows` helper.  Targets
+      // whose `renderSortedRows` inlines the sort (React) leave the flag unread;
+      // targets that call the helper (Vue/Svelte/Angular — their strict
+      // templates reject the inline `as`-cast comparator) read it to import.
+      ctx.usesTableSort = true;
+      rowsExpr = ctx.target.renderSortedRows(rowsExpr, sortKeyRef, sortDirRef);
+    }
   }
 
-  // Client-side pagination (M-T1.1).  Active when the Table carries a `page:`
-  // state ref (a 1-based int state field) AND the target implements the
-  // `renderPager` seam.  `pageSize:` is a fixed int-literal window (default 10).
-  // The rows are `.slice`d to the active page's window (built generically from
-  // `renderStateRead`), and a per-target pager control is appended below the
-  // table.  An un-ported target ignores the args → the table renders unpaged.
+  // Pagination (M-T1.1 client-`.slice` / M-T2.6 server).  Active when the Table
+  // carries a `page:` state ref AND the target implements `renderPager`.  Client
+  // mode `.slice`s the bound rows to the active window and computes the page
+  // count from their length; server mode leaves the rows (already a page) alone
+  // and reads the count from `totalPages:`.  Either way a per-target pager is
+  // appended below the table; an un-ported target renders unpaged.
   const pageName = refArgName(call, "page");
   const pageSize = numericNamed(call, "pageSize") ?? 10;
   const pagedActive =
@@ -97,23 +106,29 @@ export function emitTable(
   let pagerMarkup: string | undefined;
   if (pagedActive && pageRef) {
     ctx.usesState = true;
-    const pageRead = ctx.target.renderStateRead(pageRef, "template");
-    // The (post-sort, pre-slice) rows expression — its `.length` is the pager's
-    // pre-slice total (sort preserves count).  When sort is active this is a
-    // sorted array that's guaranteed non-null (`sortRows(…)` returns `T[]`; the
-    // React inline `[...].sort` too), so no `?? []` guard is added — a redundant
-    // guard on a never-nullish operand is a strict-Angular error (TS2869).
-    const preSliceExpr = rowsExpr;
-    rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
-    const totalBase = sortActive ? preSliceExpr : boundRowsExpr;
-    // Guard a possibly-`undefined` base (an un-sorted bound query result), but
-    // idempotently — don't double-guard a base that already ends in `?? []`.
-    const totalExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
-      ? `(${totalBase}).length`
-      : sortActive
+    let totalPagesExpr: string;
+    if (serverPaged) {
+      // Server owns the page window; the envelope carries the page count.
+      const tp = totalPagesArg ? emitExpr(totalPagesArg, ctx) : "1";
+      totalPagesExpr = `Math.max(1, ${tp})`;
+    } else {
+      const pageRead = ctx.target.renderStateRead(pageRef, "template");
+      // The (post-sort, pre-slice) rows expression — its `.length` is the pager's
+      // pre-slice total (sort preserves count).  When sort is active this is a
+      // sorted array guaranteed non-null (`sortRows(…)` returns `T[]`; the React
+      // inline `[...].sort` too), so no `?? []` guard is added — a redundant
+      // guard on a never-nullish operand is a strict-Angular error (TS2869).
+      const preSliceExpr = rowsExpr;
+      rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
+      const totalBase = sortActive ? preSliceExpr : boundRowsExpr;
+      const lengthExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
         ? `(${totalBase}).length`
-        : `((${totalBase}) ?? []).length`;
-    pagerMarkup = ctx.target.renderPager!({ page: pageRef, pageSize, totalExpr });
+        : sortActive
+          ? `(${totalBase}).length`
+          : `((${totalBase}) ?? []).length`;
+      totalPagesExpr = `Math.max(1, Math.ceil(${lengthExpr} / ${pageSize}))`;
+    }
+    pagerMarkup = ctx.target.renderPager!({ page: pageRef, totalPagesExpr });
   }
 
   // A named-action reference (`onRowClick: add`) binds the hoisted handler

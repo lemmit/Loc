@@ -456,9 +456,15 @@ system Sys {
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);
     expect(paths.some((p) => p.endsWith("parties/supplier.ex"))).toBe(true);
     // The context façade delegates the per-aggregate reads to each Repository.
+    // The auto `list` is paged-by-default (M-T2.6), so the delegate carries the
+    // page/page_size/sort/dir controls (with defaults).
     const domain = [...files.entries()].find(([p]) => p.endsWith("/parties.ex"))?.[1] ?? "";
-    expect(domain).toMatch(/defdelegate list_customers\(\), to: Api\.Parties\.CustomerRepository/);
-    expect(domain).toMatch(/defdelegate list_suppliers\(\), to: Api\.Parties\.SupplierRepository/);
+    expect(domain).toMatch(
+      /defdelegate list_customers\(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc"\), to: Api\.Parties\.CustomerRepository/,
+    );
+    expect(domain).toMatch(
+      /defdelegate list_suppliers\(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc"\), to: Api\.Parties\.SupplierRepository/,
+    );
   });
 });
 

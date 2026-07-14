@@ -168,7 +168,9 @@ describe("feliz wire layer", () => {
     expect(app).toContain("module Api =");
     expect(app).toContain("let allProducts () : Async<Result<Product list, string>> =");
     expect(app).toContain('let! (status, body) = Http.get "/api/products"');
-    expect(app).toContain("match Decode.fromString (Decode.list Decoders.product) body with");
+    expect(app).toContain(
+      'match Decode.fromString (Decode.field "items" (Decode.list Decoders.product)) body with',
+    );
   });
 
   it("projects the read to the MVU quadruple (Model / init Cmd / Msg / update)", async () => {

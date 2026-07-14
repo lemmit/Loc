@@ -735,13 +735,28 @@ function adjustFindHookArgs(
   ctx: WalkContext,
 ): import("./target.js").TargetHookUse {
   if (detected.kind !== "aggregate") return hookUse;
-  if (STANDARD_AGG_OPS.has(detected.operation)) return hookUse;
   const bc = ctx.bcByAggregate.get(detected.aggregateName);
   const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
   const find = repo?.finds.find((f) => f.name === detected.operation);
+  const isPaged = find ? pagedReturn(find.returnType) : null;
+  // Standard ops (`byId`/`create`/…) pass through — EXCEPT a paged `all`
+  // (paged-by-default, M-T2.6), which takes the same object-shaped query arg a
+  // user find does (`useAll<Plural>({ page, pageSize, sort, dir })`).
+  if (STANDARD_AGG_OPS.has(detected.operation) && !isPaged) return hookUse;
   if (!find || hookUse.argsRendered.length === 0) return hookUse;
   const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
-  if (pagedReturn(find.returnType)) pairs.push("page: 1", "pageSize: 20");
+  if (isPaged) {
+    // The paged controls follow the user params in the call's args (the scaffold
+    // list threads its `pageNum`/`sortKey`/`sortDir` state here); any omitted →
+    // the shared 1-based / default-order defaults.
+    const extra = hookUse.argsRendered.slice(find.params.length);
+    pairs.push(
+      `page: ${extra[0] ?? "1"}`,
+      `pageSize: ${extra[1] ?? "20"}`,
+      `sort: ${extra[2] ?? '"id"'}`,
+      `dir: ${extra[3] ?? '"asc"'}`,
+    );
+  }
   return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`], reactiveQuery: true };
 }
 

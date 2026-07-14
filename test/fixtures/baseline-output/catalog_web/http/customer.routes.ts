@@ -20,6 +20,12 @@ const UpdateCustomerRequest = z.object({
   age: z.coerce.number().int().min(18).max(150),
 }).openapi("UpdateCustomerRequest").refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
+const AllQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(20),
+  sort: z.string().default("id"),
+  dir: z.string().default("asc"),
+}).openapi("AllQuery");
 const ByEmailQuery = z.object({
   email: z.string(),
 }).openapi("ByEmailQuery");
@@ -31,6 +37,7 @@ export const CustomerResponse = z.object({
   display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
+export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("CustomerPaged");
 
 export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   const app = newApp();
@@ -164,13 +171,15 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       path: "/",
       tags: ["customers"],
       operationId: "allCustomer",
+      request: { query: AllQuery },
       responses: {
-        200: { description: "OK", content: { "application/json": { schema: CustomerListResponse } } },
+        200: { description: "OK", content: { "application/json": { schema: CustomerPaged } } },
       },
     }),
     async (c) => {
-      const result = await repo.all();
-      return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof CustomerResponse>[], 200);
+      const params = c.req.valid("query");
+      const result = await repo.all(params.page, params.pageSize, params.sort, params.dir);
+      return c.json({ ...result, items: result.items.map((r) => repo.toWire(r)) } as z.infer<typeof CustomerPaged>, 200);
     },
   );
 

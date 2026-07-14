@@ -1559,10 +1559,19 @@ function ensureFindAll(
       out.push(repo);
     }
     if (!repo.finds.some((f) => f.name === "all")) {
+      // Paged-by-default (M-T2.6, DEBT-28): the implicit `all` returns the
+      // bounded `Paged<T>` envelope, not an unbounded `T[]` — the scaling
+      // failure mode of every generated list endpoint.  Every backend already
+      // emits the paged path (route page/pageSize/sort/dir + repo count +
+      // limit/offset + ORDER BY); the scaffold list consumes it server-side.
       const all: FindIR = {
         name: "all",
         params: [],
-        returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
+        returnType: {
+          kind: "genericInstance",
+          ctor: "paged",
+          arg: { kind: "entity", name: agg.name },
+        },
       };
       repo.finds = [all, ...repo.finds];
     }

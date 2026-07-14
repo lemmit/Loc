@@ -6,7 +6,7 @@
 {{branchIndent}}{{{emptyJsx}}}
 {{indent}}{:else}
 {{branchIndent}}{{{dataJsx}}}
-{{else}}{{indent}}{:else if ({{{queryExpr}}}.data ?? []).length === 0}
+{{else}}{{indent}}{:else if ({{{queryExpr}}}.data{{#if paged}}?.items{{/if}} ?? []).length === 0}
 {{branchIndent}}{{{emptyJsx}}}
 {{indent}}{:else}
 {{branchIndent}}{{{dataJsx}}}

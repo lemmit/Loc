@@ -59,8 +59,9 @@ describe("scaffold body-builders — AST → printable source", () => {
     expect(src).toContain('Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))');
     expect(src).toContain('Heading("Orders", level: 2)');
     expect(src).toContain('Button("New order", to: "/orders/new", testid: "orders-list-create")');
-    // QueryView over <Agg>.all with loading/error/empty/data branches
-    expect(src).toContain("QueryView(of: Order.all");
+    // QueryView over the server-paged <Agg>.all (M-T2.6): the find takes the
+    // page window + sort controls and the view carries `paged: true`.
+    expect(src).toContain("QueryView(of: Order.all(pageNum, 10, sortKey, sortDir), paged: true");
     expect(src).toContain("loading: Skeleton(count: 5)");
     expect(src).toContain('error: Alert("Couldn\'t load orders")');
     expect(src).toContain('empty: Empty("No orders yet.")');
@@ -75,9 +76,11 @@ describe("scaffold body-builders — AST → printable source", () => {
       'Column("Reference", o => Text(o.reference), sortable: true, field: "reference")',
     );
     expect(src).toContain('Column("Status", o => Text(o.status), sortable: true, field: "status")');
-    // Sort refs + the 1-based `pageNum` page window (M-T1.1), then the style props.
+    // Server-paged rows (M-T2.6): the Table consumes the `Paged<T>` envelope's
+    // `.items` + `.totalPages` (no client-side `pageSize` slice) and flags
+    // `serverPaged: true`, then the style props.
     expect(src).toContain(
-      "rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 10, striped: true, highlight: true, sticky: true",
+      "rows: rows.items, sortKey: sortKey, sortDir: sortDir, page: pageNum, serverPaged: true, totalPages: rows.totalPages, striped: true, highlight: true, sticky: true",
     );
     // per-row testid accessor (anchors e2e row selectors)
     expect(src).toContain('rowTestid: r => "orders-row-" + r.id');

@@ -103,16 +103,14 @@ export const svelteTarget: WalkerTarget = {
    *  JS expressions (`Math` is just a JS global here). */
   renderPager(spec) {
     const p = spec.page.name;
-    const size = spec.pageSize;
-    const total = spec.totalExpr;
-    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const pages = spec.totalPagesExpr;
     const style =
       "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
     return (
       `<div style="${style}" data-testid="pager">` +
       `<button type="button" disabled={${p} <= 1} onclick={() => { ${p} = ${p} - 1; }}>Prev</button>` +
       `<span>Page {${p}} of {${pages}}</span>` +
-      `<button type="button" disabled={${p} * ${size} >= ${total}} onclick={() => { ${p} = ${p} + 1; }}>Next</button>` +
+      `<button type="button" disabled={${p} >= ${pages}} onclick={() => { ${p} = ${p} + 1; }}>Next</button>` +
       `</div>`
     );
   },
@@ -178,7 +176,9 @@ export const svelteTarget: WalkerTarget = {
       if (seen.has(varName)) continue;
       seen.add(varName);
       const hookName = u.hookName ?? hookFnName(u.aggregateName, u.operation);
-      const args = (u.argsRendered ?? []).map((a) => `() => ${a}`);
+      // Parenthesise the thunk body so an object-literal query arg (a paged
+      // find's `{ page, pageSize, sort, dir }`) isn't parsed as a block.
+      const args = (u.argsRendered ?? []).map((a) => `() => (${a})`);
       lines.push(`const ${varName} = ${hookName}(${args.join(", ")});`);
     }
     return lines;

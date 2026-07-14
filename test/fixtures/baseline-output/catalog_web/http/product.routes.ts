@@ -23,6 +23,12 @@ const UpdateProductRequest = z.object({
   price: MoneySchema,
 }).openapi("UpdateProductRequest");
 
+const AllQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(20),
+  sort: z.string().default("id"),
+  dir: z.string().default("asc"),
+}).openapi("AllQuery");
 const BySkuQuery = z.object({
   sku: z.string(),
 }).openapi("BySkuQuery");
@@ -33,6 +39,7 @@ export const ProductResponse = z.object({
   display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
+export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("ProductPaged");
 
 export function productRoutes(repo: ProductRepository): OpenAPIHono {
   const app = newApp();
@@ -166,13 +173,15 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       path: "/",
       tags: ["products"],
       operationId: "allProduct",
+      request: { query: AllQuery },
       responses: {
-        200: { description: "OK", content: { "application/json": { schema: ProductListResponse } } },
+        200: { description: "OK", content: { "application/json": { schema: ProductPaged } } },
       },
     }),
     async (c) => {
-      const result = await repo.all();
-      return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ProductResponse>[], 200);
+      const params = c.req.valid("query");
+      const result = await repo.all(params.page, params.pageSize, params.sort, params.dir);
+      return c.json({ ...result, items: result.items.map((r) => repo.toWire(r)) } as z.infer<typeof ProductPaged>, 200);
     },
   );
 
