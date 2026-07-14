@@ -66,11 +66,21 @@ async function main() {
   await page.getByRole("button", { name: "Back home" }).click();
   await page.getByText("Clicks:", { exact: false }).waitFor();
 
+  // 5. `match await` async effect (M-T6.15) — navigate to a detail page (the
+  // route `:id` binds the trigger's id) and click Reserve.  The trigger fires
+  // `Cmd.OfAsync.perform`; with no backend the POST throws → the `Error` arm
+  // runs the `else` body → the page state flips to "unavailable".  Proves the
+  // trigger→Cmd→result MVU projection executes end-to-end at runtime.
+  await page.goto(`${URL}#/products/smoke-id`, { waitUntil: "networkidle" });
+  await page.getByText("Reserve: idle").waitFor({ timeout: 10000 });
+  await page.getByRole("button", { name: "Reserve", exact: true }).click();
+  await page.getByText("Reserve: unavailable").waitFor({ timeout: 10000 });
+
   if (errors.length > 0) {
     throw new Error(`page errors:\n${errors.join("\n")}`);
   }
   console.log(
-    "SMOKE OK — mount + MVU counter + routing + wire layer + form validity guard all ran",
+    "SMOKE OK — mount + MVU counter + routing + wire layer + form validity guard + async effect all ran",
   );
 }
 

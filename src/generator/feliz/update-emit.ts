@@ -8,6 +8,7 @@ import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
+  FelizAsyncEffect,
   FelizForm,
   FelizMutation,
   FelizOperationForm,
@@ -123,6 +124,7 @@ export function renderMsg(
   operationForms: readonly FelizOperationForm[] = [],
   workflowForms: readonly FelizWorkflowForm[] = [],
   authUi = false,
+  asyncEffects: readonly FelizAsyncEffect[] = [],
 ): string {
   const cases = [
     ...(authUi ? ["  | SessionChecked of bool"] : []),
@@ -154,6 +156,12 @@ export function renderMsg(
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
       `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
+    ]),
+    // An async effect (`match await`): a trigger carrying the route id + a
+    // result carrying the decoded `<Succ> option` (success tag → Some, else None).
+    ...asyncEffects.flatMap((e) => [
+      `  | ${e.triggerMsg} of string`,
+      `  | ${e.resultMsg} of Result<${e.successType} option, string>`,
     ]),
   ];
   if (cases.length === 0) return "type Msg = | NoOp";
@@ -253,12 +261,16 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
       );
     }
     case "variant-match":
-      // `match await <op>()` (async effect) — gated at validation on Feliz
-      // (`loom.feliz-async-effect-unsupported`), so this is a defensive backstop
-      // unreachable on validated `.ddd`.
+      // `match await <op>()` (async effect).  A SUPPORTED effect is projected at
+      // the `renderUpdate` level (its own trigger/result Msg cases + arms) and its
+      // action is filtered out of the plain-action path, so its body never reaches
+      // here; an UNSUPPORTED shape is gated at validation
+      // (`loom.feliz-async-effect-unsupported`).  Either way this arm is a
+      // defensive backstop, unreachable on validated `.ddd`.  See M-T6.15.
       throw new Error(
-        "feliz: `match await` (async effect) is not rendered on the Feliz frontend — " +
-          "it is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
+        "feliz: a `match await` (async effect) statement reached the per-statement update " +
+          "renderer — a supported effect is projected at the update level, an unsupported one " +
+          "is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
       );
     default:
       // `precondition` / `requires` / `emit` / `return` are backend-only
@@ -287,6 +299,7 @@ export function renderUpdate(
   workflowForms: readonly FelizWorkflowForm[] = [],
   authUi = false,
   stores: readonly StoreIR[] = [],
+  asyncEffects: readonly FelizAsyncEffect[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -413,11 +426,34 @@ export function renderUpdate(
       `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
     ].join("\n");
   });
+  // An async effect (`match await`) projects to four arms: the trigger fires the
+  // `Cmd.OfAsync.perform` (the api fn is curried `(id) ()`), then the result
+  // reduces the decoded `<Succ> option` — the success arm under `(Ok (Some p))`
+  // (its body rendered with `p` bound), the `else` body under BOTH `(Ok None)`
+  // (the tag didn't match / no success) and `(Error _)` (a thrown / non-2xx).
+  const asyncEffectArms = asyncEffects.flatMap((e) => {
+    const successCtx: FsExprCtx = {
+      stateNames,
+      locals: new Set(e.binding ? [e.binding] : []),
+    };
+    const elseCtx: FsExprCtx = { stateNames, locals: new Set() };
+    return [
+      `  | ${e.triggerMsg} id -> model, Cmd.OfAsync.perform (Api.${e.apiFn} id) () ${e.resultMsg}`,
+      assembleArm(
+        `  | ${e.resultMsg} (Ok (Some ${e.binding ?? "_"})) ->`,
+        e.successBody,
+        successCtx,
+      ),
+      assembleArm(`  | ${e.resultMsg} (Ok None) ->`, e.elseBody, elseCtx),
+      assembleArm(`  | ${e.resultMsg} (Error _) ->`, e.elseBody, elseCtx),
+    ];
+  });
   const arms = [
     ...authArms,
     ...routeArms,
     ...actionArms,
     ...storeArms,
+    ...asyncEffectArms,
     ...readArms,
     ...mutationArms,
     ...formArms,

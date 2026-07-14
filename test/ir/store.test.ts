@@ -343,10 +343,11 @@ system Demo {
     expect(await codes(STORE, "react")).not.toContain("loom.feliz-store-unsupported");
   });
 
-  it("loom.feliz-async-effect-unsupported fires for `match await` on a Feliz-hosted ui; React is clean (M-T6.15)", async () => {
-    // `match await <op>()` (async effect) lowers to a `variant-match` statement
-    // whose async envelope has no Feliz renderer — gated at validation on Feliz.
-    const asyncSystem = (plat: string) => `
+  it("loom.feliz-async-effect-unsupported — the supported v1 shape on a `:id` page is CLEAN; unsupported shapes gate (M-T6.15)", async () => {
+    // The Feliz MVU renderer now handles the v1 `match await` shape (a 0-arg
+    // instance op, one aggregate SUCCESS arm + `else`, on a `:id` detail page) as
+    // a trigger→result projection.  Only the shapes it does NOT render yet gate.
+    const asyncSystem = (plat: string, route: string, arms: string, op = "reserve()") => `
 system Demo {
   subdomain S {
     context C {
@@ -362,13 +363,12 @@ system Demo {
   api A from S
   ui Web {
     api C: A
-    page P {
-      route: "/p"
+    page P${route.includes(":id") ? "(id: Order id)" : ""} {
+      route: "${route}"
       state { draftName: string = "" }
       action reserveNow() {
-        match await C.Order.reserve() {
-          Order o => { draftName := o.customerId }
-          else    => { draftName := "unavailable" }
+        match await C.Order.${op} {
+${arms}
         }
       }
       body: Heading { "P", level: 1 }
@@ -379,13 +379,28 @@ system Demo {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
   deployable web { platform: ${plat} targets: api ui: Web { C: api } port: 3001 }
 }`;
-    const asyncCodes = async (plat: string): Promise<string[]> => {
-      const { model, errors } = await parseString(asyncSystem(plat));
+    const V1_ARMS =
+      '          Order o => { draftName := o.customerId }\n          else    => { draftName := "unavailable" }';
+    const codesOf = async (src: string): Promise<string[]> => {
+      const { model, errors } = await parseString(src);
       if (errors.length) throw new Error(`unexpected errors:\n${errors.join("\n")}`);
       return validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
     };
-    expect(await asyncCodes("feliz")).toContain("loom.feliz-async-effect-unsupported");
-    expect(await asyncCodes("react")).not.toContain("loom.feliz-async-effect-unsupported");
+    const GATE = "loom.feliz-async-effect-unsupported";
+
+    // Supported: the v1 shape on a `:id` detail page, Feliz-hosted → NO gate.
+    expect(await codesOf(asyncSystem("feliz", "/orders/:id", V1_ARMS))).not.toContain(GATE);
+    // React never gates regardless.
+    expect(await codesOf(asyncSystem("react", "/orders/:id", V1_ARMS))).not.toContain(GATE);
+
+    // Gated (no route id): the SAME shape on a non-`:id` page has no id to source.
+    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).toContain(GATE);
+    // Gated (multi-variant union): a second, non-`else` arm.
+    const multiArm =
+      "          Order o        => { draftName := o.customerId }\n" +
+      "          OrderMissing e => { draftName := e.missingRef }\n" +
+      '          else           => { draftName := "x" }';
+    expect(await codesOf(asyncSystem("feliz", "/orders/:id", multiArm))).toContain(GATE);
   });
 
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {

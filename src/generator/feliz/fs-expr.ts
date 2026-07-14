@@ -182,7 +182,14 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
     case "object":
       return FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })));
     case "member":
-      return `${r(e.receiver)}.${upperFirst(e.member)}`;
+      // Record-field access — the receiver is a wire record (an async-effect
+      // success binding `p`, a read row) whose F# fields keep the EXACT lowercase
+      // wire-shape names (`type Project = { name: string }`).  Render the field
+      // VERBATIM — the shared view walker does the same (walker-core `p.name`), so
+      // the MVU update path and the view path land on the same field with no
+      // casing seam.  (`upperFirst` here was a latent bug — no member access
+      // reached this arm until the async-effect renderer landed.)
+      return `${r(e.receiver)}.${e.member}`;
     case "call":
       return `${e.name}(${e.args.map(r).join(", ")})`;
     case "method-call":

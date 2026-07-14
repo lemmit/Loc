@@ -25,9 +25,14 @@ import type {
   FieldIR,
   OperationIR,
   PageIR,
+  StmtIR,
   TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import {
+  classifyFelizAsyncEffect,
+  type FelizAsyncEffectShape,
+} from "../../ir/util/feliz-async-effect.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -810,6 +815,136 @@ export function collectPageWorkflowForms(
 }
 
 // ---------------------------------------------------------------------------
+// Async effects — `match await <api>.<Agg>.<op>()` (async-actions-and-effects.md
+// Stage 2, M-T6.15).  A frontend action whose body is a `match await` over a
+// union-returning aggregate INSTANCE op projects to the MVU as a TRIGGER →
+// RESULT pair: a `<Trigger> of string` Msg (carries the route id) fires
+// `Cmd.OfAsync.perform`, and a `<Trigger>Result of Result<<Succ> option, string>`
+// Msg reduces the outcome — the success arm under `(Ok (Some p))`, the `else`
+// under `(Ok None)` and `(Error _)`.  The api fn POSTs the op route and decodes
+// the `type`-tagged 200 body (success tag → `Some`, anything else → `None`).
+// The supported v1 shape is arbitrated by `classifyFelizAsyncEffect` (shared with
+// the `loom.feliz-async-effect-unsupported` validator gate).
+// ---------------------------------------------------------------------------
+
+export interface FelizAsyncEffect {
+  /** The page action whose body is the `match await` (`reserveNow`). */
+  action: string;
+  /** Trigger `Msg` case, carrying the route id (`ReserveNow`). */
+  triggerMsg: string;
+  /** Result `Msg` case, carrying `Result<<successType> option, string>`
+   *  (`ReserveNowResult`). */
+  resultMsg: string;
+  /** Curried api fn `(id: string) () : Async<Result<<successType> option, string>>`
+   *  (`reserveProjectEffect`). */
+  apiFn: string;
+  /** F# record type of the success outcome (`Project`). */
+  successType: string;
+  /** Thoth decoder for the success record (`Decoders.project`). */
+  successDecoder: string;
+  /** Wire `type` discriminator of the success variant (`Project`) — an entity
+   *  variant tags by its own name. */
+  successTag: string;
+  /** Collection base route (`/api/projects`) — the api fn appends `/<id>/<opPath>`. */
+  route: string;
+  /** The op's URL path segment (`reserve` — `snake(routeSlug ?? name)`). */
+  opPath: string;
+  /** The success arm's binding local (`p`), if the arm binds one. */
+  binding?: string;
+  /** The success arm body (rendered under `(Ok (Some p))`). */
+  successBody: readonly StmtIR[];
+  /** The `else` body (rendered under `(Ok None)` and `(Error _)`). */
+  elseBody: readonly StmtIR[];
+}
+
+/** Build the `FelizAsyncEffect` for a supported `match await` shape on `action`. */
+function felizAsyncEffect(
+  action: string,
+  shape: FelizAsyncEffectShape,
+  op: OperationIR,
+): FelizAsyncEffect {
+  const trigger = upperFirst(action);
+  const succ = shape.successAggregate;
+  return {
+    action,
+    triggerMsg: trigger,
+    resultMsg: `${trigger}Result`,
+    apiFn: `${op.name}${upperFirst(shape.opAggregate)}Effect`,
+    successType: upperFirst(succ),
+    successDecoder: `Decoders.${lowerFirst(succ)}`,
+    successTag: succ, // entity variant → tags by its own name
+    route: `${API_BASE_PATH}/${snake(plural(shape.opAggregate))}`,
+    opPath: snake(op.routeSlug ?? op.name),
+    binding: shape.binding,
+    successBody: shape.successBody,
+    elseBody: shape.elseBody,
+  };
+}
+
+/** True when a page `route:` binds a `:param` — the detail-page `id` an
+ *  instance-op async effect's trigger sources.  Mirrors `hasRouteParam`
+ *  (index.ts) + `routeHasParam` (store-checks.ts). */
+function routeHasParam(route: string | undefined): boolean {
+  return (route ?? "/").split("/").some((s) => s.startsWith(":"));
+}
+
+/** Collect the supported `match await` async effects a page hosts, deduped by
+ *  action name.  Only a `:id` detail page can source the trigger id, so a
+ *  non-detail page yields none (its effects stay gated at validation). */
+export function collectPageAsyncEffects(
+  page: PageIR,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+  apiParamNames: ReadonlySet<string>,
+): FelizAsyncEffect[] {
+  if (!routeHasParam(page.route)) return [];
+  const aggregateNames = new Set(aggregatesByName.keys());
+  const out: FelizAsyncEffect[] = [];
+  const seen = new Set<string>();
+  for (const action of page.actions) {
+    for (const s of action.body) {
+      if (s.kind !== "variant-match") continue;
+      const cls = classifyFelizAsyncEffect(s, apiParamNames, aggregateNames);
+      if (!cls.supported) continue;
+      const agg = aggregatesByName.get(cls.shape.opAggregate);
+      const op = agg?.operations.find((o) => o.name === cls.shape.op && o.visibility === "public");
+      if (!op || seen.has(action.name)) continue;
+      seen.add(action.name);
+      out.push(felizAsyncEffect(action.name, cls.shape, op));
+    }
+  }
+  return out;
+}
+
+/** One async-effect api fn — curried `(id) ()`, POSTs `{}` to
+ *  `/api/<agg>/<id>/<opPath>`, and at 200 decodes the `type`-tagged union: the
+ *  success tag decodes the aggregate record into `Some`, any other tag → `None`
+ *  (the error variant never reaches the client at 200 — it's a non-2xx). */
+function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
+  return [
+    `  let ${e.apiFn} (id: string) () : Async<Result<${e.successType} option, string>> =`,
+    "    async {",
+    "      let! response =",
+    `        Http.request (sprintf "${e.route}/%s/${e.opPath}" id)`,
+    "        |> Http.method POST",
+    '        |> Http.content (BodyContent.Text "{}")',
+    '        |> Http.header (Headers.contentType "application/json")',
+    "        |> Http.send",
+    "      if response.statusCode = 200 then",
+    "        let decoder =",
+    '          Decode.field "type" Decode.string',
+    "          |> Decode.andThen (fun tag ->",
+    `              if tag = "${e.successTag}" then Decode.map Some ${e.successDecoder}`,
+    "              else Decode.succeed None)",
+    "        match Decode.fromString decoder response.responseText with",
+    "        | Ok data -> return Ok data",
+    "        | Error e -> return Error e",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Domain records + Thoth decoders (off wireShape)
 // ---------------------------------------------------------------------------
 
@@ -945,10 +1080,16 @@ function collectRecords(
 export function renderWireTypes(
   reads: FelizRead[],
   contexts: EnrichedBoundedContextIR[],
+  /** Extra aggregate names whose record + decoder must be emitted even though no
+   *  read references them — e.g. an async effect's success aggregate, decoded off
+   *  the op's `type`-tagged 200 body without a `Remote` read. */
+  extraAggregates: readonly string[] = [],
 ): { domain: string; decoders: string } {
   const byName = new Map<string, EnrichedAggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) byName.set(a.name, a);
-  const readAggs = [...new Set(reads.map((r) => r.aggregate))]
+  const wanted = new Set<string>(reads.map((r) => r.aggregate));
+  for (const n of extraAggregates) wanted.add(n);
+  const readAggs = [...wanted]
     .map((n) => byName.get(n))
     .filter((a): a is EnrichedAggregateIR => !!a);
 
@@ -1140,13 +1281,15 @@ export function renderApiModule(
   forms: FelizForm[] = [],
   operationForms: FelizOperationForm[] = [],
   workflowForms: FelizWorkflowForm[] = [],
+  asyncEffects: FelizAsyncEffect[] = [],
 ): string {
   if (
     reads.length === 0 &&
     mutations.length === 0 &&
     forms.length === 0 &&
     operationForms.length === 0 &&
-    workflowForms.length === 0
+    workflowForms.length === 0 &&
+    asyncEffects.length === 0
   ) {
     return "";
   }
@@ -1156,6 +1299,7 @@ export function renderApiModule(
     ...forms.map((f) => renderCreateFn(f)),
     ...operationForms.map((f) => renderOperationFn(f)),
     ...workflowForms.map((f) => renderWorkflowFn(f)),
+    ...asyncEffects.map((e) => renderAsyncEffectFn(e)),
   ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",
