@@ -51,6 +51,13 @@ export interface PyRenderContext {
    *  boundaries (`probability.as_fraction()`), so their internal
    *  spelling must match the public method name. */
   fnPrefix?: string;
+  /** Handler record-param names (M-T5.10 handler-param rewrite): a
+   *  `command`/`query` request RECORD param is FLATTENED into its fields as
+   *  local `def` params, so a `cmd.<field>` member access in the handler body
+   *  must resolve to the flat field local (`<snake(field)>`), NOT attribute
+   *  access on a `cmd` object.  Set only by the explicit-handler emitter; the
+   *  aggregate / workflow render contexts leave it undefined (byte-identical). */
+  recordParamNames?: ReadonlySet<string>;
   /** Read-port handle expressions to PREPEND to a `domain-service` call's
    *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
    *  `reading` service operation takes one read-port parameter per repository
@@ -312,7 +319,20 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
   }
 }
 
-function renderMember(recv: string, e: MemberExpr): string {
+function renderMember(recv: string, e: MemberExpr, ctx: PyRenderContext): string {
+  // Handler record-param field access (M-T5.10 handler-param rewrite): a
+  // `command`/`query` record param is FLATTENED into its fields as local `def`
+  // params, so `cmd.<field>` resolves to the flat field local (`<snake(field)>`),
+  // not attribute access on a `cmd` object (there is no such local).  Only the
+  // explicit-handler emitter installs `recordParamNames`.
+  if (
+    ctx.recordParamNames &&
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "param" &&
+    ctx.recordParamNames.has(e.receiver.name)
+  ) {
+    return snake(e.member);
+  }
   // Variant-`match` binding (variant-match.md): a union result is the tagged
   // dict `{"type": tag, **fields}` (see render-stmt's union return), so a field
   // read off the bound variant is a subscript, not an attribute.  The key is
