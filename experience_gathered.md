@@ -2625,6 +2625,46 @@ open/close, so no Model field, Msg, or update arm is needed.
   paren-wrapped (§24). `Html.details`/`Html.summary` Fable-compile fine — no
   keyword dodge (unlike `prop.type'`, §33).
 
+## 42. Feliz page-`requires` UI gate — the boolean probe wasn't enough (2026-07-14)
+
+The `auth: ui` session gate (§16-era) probed `/api/auth/me` **status-only**
+(`Async<bool>`), so a page `requires currentUser.role == "admin"` was silently
+IGNORED — the gated view rendered unconditionally. Closing it (the client mirror
+of the backend 403, the F# sibling of the shared JS `gate-expr.ts`):
+
+- **The probe already returned claims; only the frontend was throwing them away.**
+  `/auth/me` returns the verified `SessionUser` JSON (React reads `useSession().
+  user`); Feliz's `checkSession` decoded only the HTTP status. The fix is to
+  decode the body into a typed `CurrentUser` record built from `sys.user.fields`
+  — the claim shape is STATICALLY declared (`UserIR.fields`), so F# gets a real
+  record + Thoth decoder, not React's dynamic `Record<string, any>`. Lesson:
+  before adding a backend endpoint, check whether the data is already on the wire
+  and just undecoded.
+
+- **Gate ONLY when a page actually has `requires` — keep the gate-free app
+  byte-identical.** `pageGate = authUi && sys.user && uiHasPageGate(ui)`. Every
+  claims-decode touch point (Model `CurrentUser` field, `SessionChecked of
+  CurrentUser option`, the claims `Auth` module, `forbiddenView`) is behind this
+  flag; an `auth: ui` app with no `requires` stays on the `SessionChecked of
+  bool` status probe. A test pins the no-gate app has zero `CurrentUser`/
+  `forbiddenView`/`currentUserDecoder` leakage.
+
+- **`==` → `=`, `!=` → `<>`, `.contains` → `List.contains item list`, claim →
+  pascal record field.** A tiny closed F# renderer mirroring `gate-expr.ts`'s
+  subset (the gate validator restricts `requires` to currentUser + constants +
+  comparison + membership). `currentUser.role` → `currentUser.Role` because the
+  decoder maps the lowercase JSON key onto the pascal-cased F# record field.
+
+- **The runtime smoke MUST stub `/api/auth/me` — the SPA-fallback trick dies with
+  claims decode.** The gate-free scaffold smoke relies on `vite preview`'s SPA
+  fallback answering `/api/auth/me` with `index.html` (status 200 → `bool` true →
+  Authed). Once the probe DECODES the body, HTML isn't valid claims JSON → decode
+  fails → Anon → sign-in screen, and the gated page never renders. So the gate
+  leg uses Playwright `page.route("**/api/auth/me", …)` to return real claims —
+  and that lets it prove BOTH branches (§34): admin claims → gated body renders;
+  viewer claims → `forbiddenView`. Compile-only would have missed the whole
+  runtime story.
+
 - **A `<details>` is smoke-drivable with zero backend.** The scaffold operations
   area is a SIBLING of the QueryView, so it renders on the detail route without
   data; the smoke navigates there, clicks the `<summary>`, and asserts the

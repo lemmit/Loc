@@ -298,18 +298,33 @@ in hand — not before F# output exists.
   revealed input. **`currentUser.<field>` in a body is a CROSS-frontend gap** (the
   shared walker emits `undefined` for React too), NOT Feliz-specific — out of
   scope here.
-- **Wire layer covers the full CRUD write path + workflows + auth, with a
-  complete scalar + value-object + scalar-array form layer + the modal
-  disclosure.** list + byId reads, create, delete, operation, workflow runs, the
-  auth gate, typed/validated form inputs across every scalar widget — text /
-  number / checkbox / enum-select / FK-id-select — plus flattened value-object
-  fields, comma-separated scalar arrays, and the `<details>` action modal.
-  Remaining Feliz work is refinement: deeper pack coverage, a dynamic-row /
-  array-of-VO / entity-part sub-form UI, client-side action-button gating (needs a
-  F#-flavoured gate-expr — `gate-expr.ts` is JS-only). Enum wire fields decode as
-  their string name (a proper DU decoder is a
-  follow-up); nested containment/VO records + decoders ARE emitted (transitive off
-  `wireShape`).
+- ✅ **Page-`requires` UI authorization gate (D-AUTH-OIDC).** A page carrying
+  `requires <currentUser gate>` now enforces client-side (the read-side mirror of
+  the backend 403). The `auth: ui` probe upgrades from status-only (`Async<bool>`)
+  to a claims decode: `/api/auth/me` → a typed `CurrentUser` record (built from the
+  statically-declared `user { }` shape) + Thoth decoder, held on the Model
+  (`CurrentUser: CurrentUser option`). A gated view wraps its body in
+  `match model.CurrentUser with Some currentUser when <gate> -> … | _ ->
+  forbiddenView`. The gate is rendered by `auth-gate.ts`'s `renderFelizGate` — the
+  F# sibling of the shared `gate-expr.ts` (`==`→`=`, `!=`→`<>`, `.contains`→
+  `List.contains`, claim→pascal record field). Gated ONLY when a page has
+  `requires` (`pageGate = authUi && sys.user && uiHasPageGate`); a gate-free auth
+  app stays byte-for-byte on the boolean probe. Fable + vite + a dedicated
+  headless smoke that STUBS `/api/auth/me` to prove BOTH branches (admin→body,
+  viewer→forbiddenView); new `generated-feliz-build.yml` auth-gate leg.
+- **Wire layer covers the full CRUD write path + workflows + auth (session gate +
+  page authorization gate), with a complete scalar + value-object + scalar-array
+  form layer + the modal disclosure.** list + byId reads, create, delete,
+  operation, workflow runs, the auth session gate, the page-`requires` gate,
+  typed/validated form inputs across every scalar widget — text / number /
+  checkbox / enum-select / FK-id-select — plus flattened value-object fields,
+  comma-separated scalar arrays, and the `<details>` action modal. Remaining Feliz
+  work is refinement: deeper pack coverage, a dynamic-row / array-of-VO /
+  entity-part sub-form UI, action-button gating (the `renderFelizGate` renderer now
+  exists — wiring it into `Action(x.op)` buttons is the remaining step), and
+  `currentUser.<field>` in a body (a cross-frontend shared-walker gap). Enum wire
+  fields decode as their string name (a proper DU decoder is a follow-up); nested
+  containment/VO records + decoders ARE emitted (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

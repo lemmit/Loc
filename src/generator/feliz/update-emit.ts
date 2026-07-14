@@ -31,9 +31,13 @@ export function renderModel(
   routed = false,
   forms: readonly FormRecord[] = [],
   authUi = false,
+  /** UI-gate mode (D-AUTH-OIDC): a page carries `requires`, so the verified
+   *  session claims are decoded + held on the Model for a gated view to test. */
+  pageGate = false,
 ): string {
   const fields = [
     ...(authUi ? ["    Session: SessionState"] : []),
+    ...(pageGate ? ["    CurrentUser: CurrentUser option"] : []),
     ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
@@ -72,10 +76,12 @@ export function renderInit(
   routed = false,
   forms: readonly FormRecord[] = [],
   authUi = false,
+  pageGate = false,
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
     ...(authUi ? ["      Session = Checking"] : []),
+    ...(pageGate ? ["      CurrentUser = None"] : []),
     ...(routed
       ? [
           hasPageCmd
@@ -125,9 +131,12 @@ export function renderMsg(
   workflowForms: readonly FelizWorkflowForm[] = [],
   authUi = false,
   asyncEffects: readonly FelizAsyncEffect[] = [],
+  pageGate = false,
 ): string {
   const cases = [
-    ...(authUi ? ["  | SessionChecked of bool"] : []),
+    // Under a page gate the probe carries the decoded claims (None on 401);
+    // otherwise it's a bare authenticated? boolean.
+    ...(authUi ? [`  | SessionChecked of ${pageGate ? "CurrentUser option" : "bool"}`] : []),
     ...(routed ? ["  | UrlChanged of string list"] : []),
     ...actions.map((a) => {
       const p = a.params[0];
@@ -300,15 +309,24 @@ export function renderUpdate(
   authUi = false,
   stores: readonly StoreIR[] = [],
   asyncEffects: readonly FelizAsyncEffect[] = [],
+  pageGate = false,
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
-  // The auth gate: the session probe resolves to Authed / Anon.
+  // The auth gate: the session probe resolves to Authed / Anon.  Under a page
+  // gate it also stashes the decoded claims (`Some user`) so a gated view can
+  // test them; `None` (401 / decode failure) falls to Anon.
   const authArms = authUi
-    ? [
-        "  | SessionChecked true -> { model with Session = Authed }, Cmd.none\n" +
-          "  | SessionChecked false -> { model with Session = Anon }, Cmd.none",
-      ]
+    ? pageGate
+      ? [
+          "  | SessionChecked (Some user) ->\n" +
+            "      { model with Session = Authed; CurrentUser = Some user }, Cmd.none\n" +
+            "  | SessionChecked None -> { model with Session = Anon }, Cmd.none",
+        ]
+      : [
+          "  | SessionChecked true -> { model with Session = Authed }, Cmd.none\n" +
+            "  | SessionChecked false -> { model with Session = Anon }, Cmd.none",
+        ]
     : [];
   const hasPageCmd = routed && byIdReads.length > 0;
   // On navigation, re-parse the URL.  With byId reads, entering a detail page
