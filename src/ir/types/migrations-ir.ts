@@ -137,6 +137,12 @@ export interface MigrationHistoryEntry {
 export type MigrationStep =
   | { op: "createTable"; table: TableShape }
   | { op: "dropTable"; name: string; schema?: string }
+  // Whole-table rename (M-T2.1 aggregate/table rename) — `from`/`to` are the
+  // bare (unqualified) old + new table names; `schema` is the relation's
+  // Postgres schema (both ends share it — a rename never crosses schemas).
+  // Postgres/Ecto keep every FK constraint pointing at the table valid across
+  // the rename, so no separate FK-retarget step is emitted.  Non-destructive.
+  | { op: "renameTable"; from: string; to: string; schema?: string }
   | { op: "addColumn"; table: string; schema?: string; column: ColumnShape; fk?: FKShape }
   | { op: "dropColumn"; table: string; schema?: string; name: string }
   | {

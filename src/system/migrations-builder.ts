@@ -14,6 +14,7 @@ import type {
   SavingShape,
   SubdomainIR,
   SystemIR,
+  TableRenameIntentIR,
   TypeIR,
   WorkflowIR,
 } from "../ir/types/loom-ir.js";
@@ -576,7 +577,40 @@ export function diffSchema(
   prev: SchemaSnapshot | null,
   next: SchemaSnapshot,
   renames: readonly TableColumnRename[] = [],
+  tableRenames: readonly ResolvedTableRename[] = [],
 ): MigrationStep[] {
+  // Table/aggregate renames (M-T2.1): rewrite a COPY of the baseline so a
+  // renamed table carries its NEW name BEFORE `matchTables` runs — the renamed
+  // relation then pairs with its new self instead of dropping + recreating.
+  // Guarded on the old relation existing (and the new name being free) so a
+  // ledger block that's already been baked into the snapshot, or a rename of a
+  // same-generation add, is a no-op.  The actual `renameTable` DDL is emitted
+  // separately (`tableRenameSteps`) and ordered before `createTable` so a new
+  // table can inline-reference the renamed one under its new name.
+  const tableRenameSteps: MigrationStep[] = [];
+  if (prev && tableRenames.length > 0) {
+    const prevKeys = new Set(prev.tables.map((t) => qkey(t.schema, t.name)));
+    const applied = new Map<string, ResolvedTableRename>(); // old qkey → rename
+    for (const tr of tableRenames) {
+      const fromKey = qkey(tr.schema, tr.from);
+      const toKey = qkey(tr.schema, tr.to);
+      // Old relation must exist; new name must be free (no collision); each old
+      // relation renamed at most once.
+      if (!prevKeys.has(fromKey) || prevKeys.has(toKey) || applied.has(fromKey)) continue;
+      applied.set(fromKey, tr);
+      tableRenameSteps.push({ op: "renameTable", from: tr.from, to: tr.to, schema: tr.schema });
+    }
+    if (applied.size > 0) {
+      prev = {
+        ...prev,
+        tables: prev.tables.map((t) => {
+          const tr = applied.get(qkey(t.schema, t.name));
+          return tr ? { ...t, name: tr.to } : t;
+        }),
+      };
+    }
+  }
+
   // Index the flat rename list by the same schema-qualified key the table
   // match uses, so a rename is looked up against the exact relation it targets.
   const renamesByTable = new Map<string, TableColumnRename[]>();
@@ -617,13 +651,17 @@ export function diffSchema(
 
   // FK-safe global order:
   //   drop indexes/columns (unblocks table drops) → drop tables (child-first)
-  //   → create tables (parent-first) → rename columns (before adds/alters so a
-  //   renamed column exists under its new name for a subsequent type alter)
-  //   → add columns (targets now exist) → alter columns → add indexes.
+  //   → rename tables (so a new table can inline-reference a renamed relation
+  //   under its new name; Postgres keeps FK constraints valid across the
+  //   rename) → create tables (parent-first) → rename columns (before
+  //   adds/alters so a renamed column exists under its new name for a
+  //   subsequent type alter) → add columns (targets now exist) → alter columns
+  //   → add indexes.
   return [
     ...buckets.dropIndex,
     ...buckets.dropColumn,
     ...dropTableSteps,
+    ...tableRenameSteps,
     ...createTableSteps,
     ...buckets.rename,
     ...buckets.addColumn,
@@ -959,6 +997,12 @@ export interface BuildMigrationsOptions {
    *  explicit `renameColumn` instead of the data-losing drop+add.  Empty /
    *  omitted for models with no migration block. */
   renameIntents?: readonly RenameIntentIR[];
+  /** Table/aggregate rename intents (M-T2.1) — `OldName -> NewAggregate`.  Each
+   *  module filters these to its own contexts and folds them into the diff as a
+   *  `renameTable` for the aggregate's root table plus the owned-child cascade,
+   *  so an aggregate rename is a clean set of renames instead of the data-losing
+   *  drop+recreate.  Empty / omitted for models with no table rename. */
+  tableRenameIntents?: readonly TableRenameIntentIR[];
 }
 
 /** One resolved column rename (M-T2.1).  `from`/`to` are already snake-cased
@@ -970,6 +1014,16 @@ export interface TableColumnRename {
   schema?: string;
   from: string;
   to: string;
+}
+
+/** One resolved table rename (M-T2.1) — the bare (unqualified) old + new table
+ *  names and the Postgres schema they share.  `diffSchema` applies it against
+ *  the baseline (only when the old relation actually exists) so a renamed table
+ *  pairs with its new self instead of dropping + recreating. */
+export interface ResolvedTableRename {
+  from: string;
+  to: string;
+  schema?: string;
 }
 
 export function buildMigrations(
@@ -1016,10 +1070,24 @@ export function buildMigrations(
     // rename whose aggregate/context isn't in THIS module is skipped here and
     // picked up on its owning module's iteration.
     const renames = resolveRenames(m, options.renameIntents ?? [], schemaOf);
-    const steps = applyDestructivePolicy(diffSchema(baseline, next, renames), baseline, {
-      allowDestructive,
-      module: m.name,
-    });
+    // Table/aggregate renames (M-T2.1): resolve to a `renameTable` for the root
+    // + owned-child cascade, plus the FK-column renames the cascade implies.
+    // The column renames join the column-rename list; the table renames feed
+    // `diffSchema` so a renamed table pairs with its new self.
+    const tableRenamePlan = resolveTableRenames(
+      m,
+      options.tableRenameIntents ?? [],
+      schemaOf,
+    );
+    const allRenames = [...renames, ...tableRenamePlan.columnRenames];
+    const steps = applyDestructivePolicy(
+      diffSchema(baseline, next, allRenames, tableRenamePlan.tableRenames),
+      baseline,
+      {
+        allowDestructive,
+        module: m.name,
+      },
+    );
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
     const version =
       baseline === null
@@ -1085,6 +1153,95 @@ function resolveRenames(
     });
   }
   return out;
+}
+
+/** Resolve a module's table/aggregate rename intents (M-T2.1) to a `renameTable`
+ *  plan + the FK-column renames the cascade implies.  Filters to intents whose
+ *  NEW aggregate lives in this module, then for each:
+ *
+ *   - the root table  `plural(snake(old))` → `plural(snake(new))`;
+ *   - every OWNED child table — value-collection child tables + association
+ *     join tables, both named `snake(agg)_<field>` — whose stem swaps
+ *     `snake(old)` → `snake(new)`, and their owner FK column `snake(agg)_id`;
+ *   - the owner FK column on each contained part's table (`snake(agg)_id`).
+ *
+ *  Old names are derived by substituting the NEW snake stem back to the OLD one
+ *  on the enriched (new) descriptor, so they can't drift from what the schema
+ *  emitter produced.  Emission is guarded downstream by baseline existence
+ *  (`diffSchema`), so a candidate whose old relation/column never existed
+ *  (a same-generation add, or a nested part FK'd to a sibling not the root) is
+ *  silently dropped — never a rename against a missing object. */
+function resolveTableRenames(
+  module: EnrichedSubdomainIR,
+  intents: readonly TableRenameIntentIR[],
+  schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined,
+): { tableRenames: ResolvedTableRename[]; columnRenames: TableColumnRename[] } {
+  const tableRenames: ResolvedTableRename[] = [];
+  const columnRenames: TableColumnRename[] = [];
+  if (intents.length === 0) return { tableRenames, columnRenames };
+  const ctxByName = new Map<string, EnrichedBoundedContextIR>();
+  for (const ctx of module.contexts) ctxByName.set(ctx.name, ctx);
+  for (const ri of intents) {
+    if (ri.fromAggregate === ri.toAggregate) continue; // no-op (validator flags)
+    const ctx = ctxByName.get(ri.context);
+    if (!ctx) continue; // new aggregate's context is in another module
+    const agg = ctx.aggregates.find((a) => a.name === ri.toAggregate);
+    if (!agg) continue;
+    const schema = schemaOf(agg, ctx);
+    const oldStem = snake(ri.fromAggregate);
+    const newStem = snake(ri.toAggregate);
+    if (oldStem === newStem) continue; // same table name after snake-casing
+
+    // Substitute the NEW snake stem prefix back to the OLD one on a derived
+    // child-table / FK-column name (`snake(agg)_<suffix>`).  Undefined when the
+    // name doesn't embed the aggregate stem (e.g. a self-referential
+    // association's disambiguated `owner_id`), so it isn't cascaded.
+    const subStem = (name: string): string | undefined => {
+      if (name === newStem) return oldStem;
+      if (name.startsWith(`${newStem}_`)) return oldStem + name.slice(newStem.length);
+      return undefined;
+    };
+
+    // Root table — plural, so computed directly (irregular plurals like
+    // `category → categories` don't survive a bare prefix substitution).
+    tableRenames.push({ from: plural(oldStem), to: plural(newStem), schema });
+
+    // Value-object collection child tables owned by the ROOT (`field: VO[]`).
+    // Part-owned collections are named for the part, not the aggregate, so they
+    // are unaffected by the rename — `valueCollectionsFor(agg)` returns only the
+    // root's.
+    for (const vc of valueCollectionsFor(agg)) {
+      const oldTable = subStem(vc.childTable);
+      if (oldTable) tableRenames.push({ from: oldTable, to: vc.childTable, schema });
+      const oldFk = subStem(vc.parentFk);
+      if (oldFk) columnRenames.push({ table: vc.childTable, schema, from: oldFk, to: vc.parentFk });
+    }
+
+    // Association join tables (`Target id[]`) — the join table + its owner FK
+    // both embed the aggregate stem.
+    for (const assoc of agg.associations) {
+      const oldTable = subStem(assoc.joinTable);
+      if (oldTable) tableRenames.push({ from: oldTable, to: assoc.joinTable, schema });
+      const oldFk = subStem(assoc.ownerFk);
+      if (oldFk) {
+        columnRenames.push({ table: assoc.joinTable, schema, from: oldFk, to: assoc.ownerFk });
+      }
+    }
+
+    // Contained parts — the part table keeps its own name, but a root-level
+    // part's owner FK column is `snake(agg)_id`, which the rename moves.  A
+    // nested part FKs its sibling (not the root), so its `snake(agg)_id` column
+    // never existed and the baseline guard drops the candidate.
+    for (const part of agg.parts) {
+      columnRenames.push({
+        table: plural(snake(part.name)),
+        schema,
+        from: `${oldStem}_id`,
+        to: `${newStem}_id`,
+      });
+    }
+  }
+  return { tableRenames, columnRenames };
 }
 
 // ---------------------------------------------------------------------------
@@ -1654,6 +1811,8 @@ function describeMigration(steps: MigrationStep[]): string {
         return `Create${tableToPascal(s.table.name)}`;
       case "dropTable":
         return `Drop${tableToPascal(s.name)}`;
+      case "renameTable":
+        return `Rename${tableToPascal(s.from)}To${tableToPascal(s.to)}`;
       case "addColumn":
         return `Add${columnToPascal(s.column.name)}To${tableToPascal(s.table)}`;
       case "dropColumn":

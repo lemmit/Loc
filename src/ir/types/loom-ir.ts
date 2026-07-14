@@ -1687,7 +1687,7 @@ export interface LoomModel {
    *  consume from a report generator. */
   traceability?: TraceabilityIR;
   /** Schema-evolution rename intents (M-T2.1) — lowered from top-level
-   *  `migration "<name>" { rename Agg.old -> new }` blocks.  Consumed only by
+   *  `migration "<name>" { Agg.old -> new }` blocks.  Consumed only by
    *  the phase-⑨ migration builder (`src/system/migrations-builder.ts`) to
    *  disambiguate the snapshot→model diff into explicit `renameColumn` steps;
    *  no backend reads them for domain-code emission.  Ledger-style: a block
@@ -1695,6 +1695,13 @@ export interface LoomModel {
    *  baked into the baseline snapshot.  Empty when the source declares no
    *  migration block. */
   renameIntents: RenameIntentIR[];
+  /** Table/aggregate rename intents (M-T2.1) — lowered from `OldName ->
+   *  NewAggregate` steps in a `migration` block.  Sibling of `renameIntents`
+   *  (column renames); consumed only by the migration builder, which turns
+   *  each into a `renameTable` step for the aggregate's root table plus the
+   *  owned-child cascade (part / value-collection / association tables and
+   *  their owner FK columns).  Empty when no table renames are declared. */
+  tableRenameIntents: TableRenameIntentIR[];
 }
 
 /** One `rename Agg.old -> new` step lowered from a `migration` block.  Field
@@ -1715,6 +1722,27 @@ export interface RenameIntentIR {
   /** New (post-rename) field name — a live field of `aggregate`. */
   to: string;
   /** Provenance back to the `rename` step's `.ddd` source. */
+  origin?: OriginRef;
+}
+
+/** One `OldName -> NewAggregate` step lowered from a `migration` block — a
+ *  whole-aggregate (table) rename.  `fromAggregate` is the OLD, now-absent
+ *  aggregate name (its old table is `plural(snake(fromAggregate))`);
+ *  `toAggregate` is the live post-rename aggregate name (resolves the owning
+ *  context/module/schema and enumerates the owned child tables to cascade).
+ *  Both are RAW names — the builder snake-cases + pluralises them exactly as
+ *  it does elsewhere. */
+export interface TableRenameIntentIR {
+  /** Block label — the `"<name>"` on the owning `migration` block. */
+  migration: string;
+  /** Old (pre-rename) aggregate name — table `plural(snake(fromAggregate))`. */
+  fromAggregate: string;
+  /** New (post-rename) aggregate name — the live cross-referenced aggregate. */
+  toAggregate: string;
+  /** Owning bounded-context name (of the new aggregate) — for module/schema
+   *  resolution. */
+  context: string;
+  /** Provenance back to the step's `.ddd` source. */
   origin?: OriginRef;
 }
 

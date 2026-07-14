@@ -58,4 +58,30 @@ context C {
     const { errors } = await parseString(MODEL(`migration "noop" { }`));
     expect(errors).toEqual([]);
   });
+
+  it("parses a table/aggregate rename step (`OldName -> NewAggregate`)", async () => {
+    const { model, errors } = await parseString(
+      MODEL(`migration "rename-order" { Legacy -> Order }`),
+    );
+    expect(errors).toEqual([]);
+    const block = model.members.find(isMigration);
+    const step = block?.renames[0];
+    expect(step?.$type).toBe("TableRename");
+    // `fromTable` is a bare (uncross-referenced) old name; `toAggregate` is the
+    // live aggregate cross-reference.
+    expect(step && "fromTable" in step ? step.fromTable : undefined).toBe("Legacy");
+    expect(step && "toAggregate" in step ? step.toAggregate.$refText : undefined).toBe("Order");
+  });
+
+  it("mixes column and table rename steps in one block", async () => {
+    const { model, errors } = await parseString(
+      MODEL(`migration "evolve" {
+  Legacy -> Order
+  Order.qty -> quantity
+}`),
+    );
+    expect(errors).toEqual([]);
+    const block = model.members.find(isMigration);
+    expect(block?.renames.map((r) => r.$type)).toEqual(["TableRename", "ColumnRename"]);
+  });
 });

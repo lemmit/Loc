@@ -1123,7 +1123,11 @@ function printTestStatement(node: TestStatement): string {
 function printMigration(node: import("../generated/ast.js").Migration): string {
   return block(
     `migration ${JSON.stringify(node.name)}`,
-    node.renames.map((r) => `${r.aggregate.$refText}.${r.from} -> ${r.to}`),
+    node.renames.map((r) =>
+      r.$type === "TableRename"
+        ? `${r.fromTable} -> ${r.toAggregate.$refText}`
+        : `${r.aggregate.$refText}.${r.from} -> ${r.to}`,
+    ),
   );
 }
 

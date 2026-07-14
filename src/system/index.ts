@@ -234,6 +234,7 @@ function emitSystem(
   const migrations = buildMigrations(sys, options.snapshots, {
     allowDestructive: options.allowDestructive,
     renameIntents: loom.renameIntents,
+    tableRenameIntents: loom.tableRenameIntents,
   });
   // Baseline-safety guards (M-T2.2): refuse a silent re-baseline when the
   // snapshot is missing but migration files exist, verify files ↔ recorded

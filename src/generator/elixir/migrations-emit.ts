@@ -446,6 +446,10 @@ function renderEctoStep(step: MigrationStep): string[] {
       const prefix = prefixOpt(step.schema);
       return [`drop table(:${step.name}${prefix})`];
     }
+    case "renameTable": {
+      const prefix = prefixOpt(step.schema);
+      return [`rename table(:${step.from}${prefix}), to: table(:${step.to}${prefix})`];
+    }
     case "addColumn": {
       const c = step.column;
       const prefix = prefixOpt(step.schema);

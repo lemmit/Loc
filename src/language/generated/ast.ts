@@ -885,6 +885,25 @@ export function isClaimsMap(item: unknown): item is ClaimsMap {
     return reflection.isInstance(item, ClaimsMap.$type);
 }
 
+export interface ColumnRename extends langium.AstNode {
+    readonly $container: Migration;
+    readonly $type: 'ColumnRename';
+    aggregate: langium.Reference<Aggregate>;
+    from: UserFieldName;
+    to: UserFieldName;
+}
+
+export const ColumnRename = {
+    $type: 'ColumnRename',
+    aggregate: 'aggregate',
+    from: 'from',
+    to: 'to'
+} as const;
+
+export function isColumnRename(item: unknown): item is ColumnRename {
+    return reflection.isInstance(item, ColumnRename.$type);
+}
+
 export interface CommandHandler extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'CommandHandler';
@@ -2845,19 +2864,10 @@ export function isReadLevel(item: unknown): item is ReadLevel {
     return item === 'local' || item === 'deep' || item === 'global';
 }
 
-export interface RenameStep extends langium.AstNode {
-    readonly $container: Migration;
-    readonly $type: 'RenameStep';
-    aggregate: langium.Reference<Aggregate>;
-    from: UserFieldName;
-    to: UserFieldName;
-}
+export type RenameStep = ColumnRename | TableRename;
 
 export const RenameStep = {
-    $type: 'RenameStep',
-    aggregate: 'aggregate',
-    from: 'from',
-    to: 'to'
+    $type: 'RenameStep'
 } as const;
 
 export function isRenameStep(item: unknown): item is RenameStep {
@@ -3463,6 +3473,23 @@ export const SystemMember = {
 
 export function isSystemMember(item: unknown): item is SystemMember {
     return reflection.isInstance(item, SystemMember.$type);
+}
+
+export interface TableRename extends langium.AstNode {
+    readonly $container: Migration;
+    readonly $type: 'TableRename';
+    fromTable: string;
+    toAggregate: langium.Reference<Aggregate>;
+}
+
+export const TableRename = {
+    $type: 'TableRename',
+    fromTable: 'fromTable',
+    toAggregate: 'toAggregate'
+} as const;
+
+export function isTableRename(item: unknown): item is TableRename {
+    return reflection.isInstance(item, TableRename.$type);
 }
 
 export type Targetable = Aggregate | Api | BoundedContext | Deployable | EventDecl | Operation | Repository | Subdomain | ValueObject | View | Workflow;
@@ -4148,6 +4175,7 @@ export type DddAstType = {
     ChannelSource: ChannelSource
     ClaimEntry: ClaimEntry
     ClaimsMap: ClaimsMap
+    ColumnRename: ColumnRename
     CommandHandler: CommandHandler
     Component: Component
     ComponentDecl: ComponentDecl
@@ -4290,6 +4318,7 @@ export type DddAstType = {
     Subdomain: Subdomain
     System: System
     SystemMember: SystemMember
+    TableRename: TableRename
     Targetable: Targetable
     TemplateStr: TemplateStr
     TenancyDecl: TenancyDecl
@@ -4779,6 +4808,22 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: []
+        },
+        ColumnRename: {
+            name: ColumnRename.$type,
+            properties: {
+                aggregate: {
+                    name: ColumnRename.aggregate,
+                    referenceType: Aggregate.$type
+                },
+                from: {
+                    name: ColumnRename.from
+                },
+                to: {
+                    name: ColumnRename.to
+                }
+            },
+            superTypes: [RenameStep.$type]
         },
         CommandHandler: {
             name: CommandHandler.$type,
@@ -6358,16 +6403,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         RenameStep: {
             name: RenameStep.$type,
             properties: {
-                aggregate: {
-                    name: RenameStep.aggregate,
-                    referenceType: Aggregate.$type
-                },
-                from: {
-                    name: RenameStep.from
-                },
-                to: {
-                    name: RenameStep.to
-                }
             },
             superTypes: []
         },
@@ -6858,6 +6893,19 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             properties: {
             },
             superTypes: []
+        },
+        TableRename: {
+            name: TableRename.$type,
+            properties: {
+                fromTable: {
+                    name: TableRename.fromTable
+                },
+                toAggregate: {
+                    name: TableRename.toAggregate,
+                    referenceType: Aggregate.$type
+                }
+            },
+            superTypes: [RenameStep.$type]
         },
         Targetable: {
             name: Targetable.$type,

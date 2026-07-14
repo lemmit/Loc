@@ -10,19 +10,22 @@
 // correct block fail forever.  We only reject the unambiguously-broken shapes:
 //
 //   - `loom.migration-duplicate-name`   — two blocks share a name.
-//   - `loom.rename-to-self`             — `from` == `to` (a no-op rename).
-//   - `loom.rename-duplicate-source`    — one aggregate column renamed twice
-//                                         FROM (ambiguous origin).
+//   - `loom.rename-to-self`             — `from` == `to` (a no-op rename), on a
+//                                         COLUMN or a TABLE/aggregate rename.
+//   - `loom.rename-duplicate-source`    — one aggregate column / one old table
+//                                         renamed twice FROM (ambiguous origin).
 //   - `loom.rename-duplicate-target`    — two renames collide ON one target
-//                                         column (ambiguous destination).
+//                                         column / aggregate (ambiguous dest.).
 //
-// The target aggregate is a real cross-reference (`[Aggregate:ID]`), so an
-// unknown aggregate name is already a Langium linking error — not re-checked
-// here.
+// A column rename's `aggregate` and a table rename's `toAggregate` are real
+// cross-references (`[Aggregate:ID]`), so an unknown live aggregate is already a
+// Langium linking error — not re-checked here.  A table rename's `fromTable` is
+// deliberately NOT a cross-reference (the old aggregate is gone), so it is only
+// checked structurally.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Migration, Model } from "../generated/ast.js";
-import { isMigration } from "../generated/ast.js";
+import { isMigration, isTableRename } from "../generated/ast.js";
 
 export function checkMigrations(model: Model, accept: ValidationAcceptor): void {
   const seenNames = new Set<string>();
@@ -54,7 +57,42 @@ function checkMigration(
   }
 
   for (const step of m.renames) {
-    // A rename is scoped to a specific aggregate; key collisions per aggregate.
+    if (isTableRename(step)) {
+      // Table/aggregate rename (`OldName -> NewAggregate`).  Structural checks
+      // only: `fromTable` is a bare name (the old aggregate is gone), so it
+      // cannot be cross-referenced.
+      const to = step.toAggregate.ref?.name ?? step.toAggregate.$refText;
+      if (step.fromTable === to) {
+        accept(
+          "error",
+          `Table rename '${step.fromTable} -> ${to}' names the same aggregate on both sides — a rename must change the name.`,
+          { node: step, property: "toAggregate", code: "loom.rename-to-self" },
+        );
+        continue;
+      }
+      // A whole-table rename shares the source/target namespace with column
+      // renames only trivially; key it on the aggregate name alone.
+      if (seenSource.has(step.fromTable)) {
+        accept(
+          "error",
+          `Table '${step.fromTable}' is renamed more than once — an aggregate can be renamed FROM only once (ambiguous origin).`,
+          { node: step, property: "fromTable", code: "loom.rename-duplicate-source" },
+        );
+      } else {
+        seenSource.add(step.fromTable);
+      }
+      if (seenTarget.has(to)) {
+        accept(
+          "error",
+          `Two renames target aggregate '${to}' — an aggregate can be renamed TO only once (ambiguous destination).`,
+          { node: step, property: "toAggregate", code: "loom.rename-duplicate-target" },
+        );
+      } else {
+        seenTarget.add(to);
+      }
+      continue;
+    }
+    // A column rename is scoped to a specific aggregate; key collisions per aggregate.
     const agg = step.aggregate.ref?.name ?? step.aggregate.$refText;
     if (step.from === step.to) {
       accept(

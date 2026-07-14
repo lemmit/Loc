@@ -440,6 +440,141 @@ describe("diffSchema — explicit renames (M-T2.1)", () => {
   });
 });
 
+describe("diffSchema — table renames (M-T2.1 aggregate/table rename)", () => {
+  const tbl = (name: string): TableShape => ({
+    name,
+    ownerModule: "Sales",
+    columns: [{ name: "id", type: { kind: "uuid" }, nullable: false }],
+    primaryKey: ["id"],
+    foreignKeys: [],
+    indexes: [],
+  });
+  const snap = (tables: TableShape[]): SchemaSnapshot => ({ schemaVersion: 1, tables });
+
+  it("emits a single renameTable and NO drop/create when a table is renamed", () => {
+    const prev = snap([tbl("orders")]);
+    const next = snap([tbl("purchase_orders")]);
+    const steps = diffSchema(prev, next, [], [{ from: "orders", to: "purchase_orders" }]);
+    expect(steps).toEqual([
+      { op: "renameTable", from: "orders", to: "purchase_orders", schema: undefined },
+    ]);
+    // Without the intent, the same delta is the data-losing drop+create.
+    const naive = diffSchema(prev, next);
+    expect(naive.some((s) => s.op === "dropTable")).toBe(true);
+    expect(naive.some((s) => s.op === "createTable")).toBe(true);
+  });
+
+  it("is a no-op when the old table is absent from the baseline (ledger idempotency)", () => {
+    // Baseline already carries the NEW name — the rename was baked in earlier.
+    const baked = snap([tbl("purchase_orders")]);
+    const steps = diffSchema(baked, baked, [], [{ from: "orders", to: "purchase_orders" }]);
+    expect(steps).toEqual([]);
+  });
+
+  it("skips a rename whose target name already exists (collision guard)", () => {
+    const prev = snap([tbl("orders"), tbl("purchase_orders")]);
+    const next = snap([tbl("orders"), tbl("purchase_orders")]);
+    const steps = diffSchema(prev, next, [], [{ from: "orders", to: "purchase_orders" }]);
+    expect(steps.some((s) => s.op === "renameTable")).toBe(false);
+  });
+
+  it("renders renameTable to Postgres DDL (schema-qualified source, bare target)", () => {
+    const withSchema = (name: string): TableShape => ({ ...tbl(name), schema: "sales" });
+    const steps = diffSchema(
+      snap([withSchema("orders")]),
+      snap([withSchema("purchase_orders")]),
+      [],
+      [{ from: "orders", to: "purchase_orders", schema: "sales" }],
+    );
+    expect(steps.map(renderPgStep)).toEqual([
+      'ALTER TABLE "sales"."orders" RENAME TO "purchase_orders";',
+    ]);
+  });
+});
+
+describe("buildMigrations — table/aggregate rename intent (M-T2.1)", () => {
+  // Same aggregate under its OLD and NEW name; the OLD build supplies the
+  // baseline snapshot (so the on-disk names are exactly what the schema emitter
+  // produced), the NEW build carries the `migration` block.
+  const SRC = (aggName: string) => `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate ${aggName} {
+        total: int
+        tags: Tag id[]
+        charges: Money[]
+        contains lines: Line[]
+        entity Line { sku: string }
+      }
+      aggregate Tag { label: string }
+      valueobject Money {
+        amount: int
+        currency: string
+      }
+      repository Orders for ${aggName} { }
+      repository Tags for Tag { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}`;
+
+  const buildBaselineAndNext = async () => {
+    const oldLoom = await buildLoomModel(SRC("Order"));
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(oldLoom.systems[0]!.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const newLoom = await buildLoomModel(
+      `${SRC("PurchaseOrder")}\nmigration "rename-order" { Order -> PurchaseOrder }`,
+    );
+    return { baseline, newLoom };
+  };
+
+  it("renames the root table + owned child tables and their FK columns — no data-losing drop", async () => {
+    const { baseline, newLoom } = await buildBaselineAndNext();
+    const out = buildMigrations(newLoom.systems[0]!, memorySnapshotStore({ Sales: baseline }), {
+      tableRenameIntents: newLoom.tableRenameIntents,
+    });
+    const steps = out[0]!.steps;
+    const renamedTables = steps
+      .filter((s): s is Extract<MigrationStep, { op: "renameTable" }> => s.op === "renameTable")
+      .map((s) => `${s.from}->${s.to}`)
+      .sort();
+    expect(renamedTables).toEqual([
+      "order_charges->purchase_order_charges", // value-object collection child
+      "order_tags->purchase_order_tags", // association join table
+      "orders->purchase_orders", // aggregate root
+    ]);
+    // The owner FK column on every owned table moves `order_id -> purchase_order_id`.
+    const fkRenames = steps
+      .filter(
+        (s): s is Extract<MigrationStep, { op: "renameColumn" }> =>
+          s.op === "renameColumn" && s.from === "order_id" && s.to === "purchase_order_id",
+      )
+      .map((s) => s.table)
+      .sort();
+    expect(fkRenames).toEqual(["lines", "purchase_order_charges", "purchase_order_tags"]);
+    // The whole point: the rename is NON-destructive — no dropped/created table
+    // or dropped column smuggles data loss past the gate.
+    expect(steps.some((s) => s.op === "dropTable" || s.op === "createTable")).toBe(false);
+    expect(steps.some((s) => s.op === "dropColumn")).toBe(false);
+  });
+
+  it("is inert once the rename is baked into the baseline (ledger idempotency)", async () => {
+    const { newLoom } = await buildBaselineAndNext();
+    // Baseline already reflects the NEW aggregate name.
+    const baked: SchemaSnapshot = {
+      ...schemaFromModule(newLoom.systems[0]!.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const out = buildMigrations(newLoom.systems[0]!, memorySnapshotStore({ Sales: baked }), {
+      tableRenameIntents: newLoom.tableRenameIntents,
+    });
+    expect(out[0]!.steps).toEqual([]);
+  });
+});
+
 describe("buildMigrations — migration-block rename intent (M-T2.1)", () => {
   const RENAME_SRC = `
 system Shop {
