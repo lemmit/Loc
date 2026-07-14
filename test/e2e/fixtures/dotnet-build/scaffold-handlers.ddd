@@ -1,0 +1,41 @@
+// M-T5.10 handler-param rewrite — .NET compile gate for the SCAFFOLDED explicit
+// application/transport layer.  `with scaffoldHandlers` synthesises a
+// commandHandler/queryHandler per create / operation / find / get-by-id /
+// destroy, each taking a single `command`/`query` record param.  On .NET the
+// Mediator record FLATTENS the request record's fields (byte-identical to the
+// flat-param form) and `cmd.<field>` renders as `command.<Field>`; a read
+// declares `<Agg>Response` (mapped back to the entity for the boundary
+// projection).  A Money-typed operation param exercises the value-object arg on
+// the request record.
+system HandlerScaffold {
+  subdomain Sales {
+    context Ordering with scaffoldHandlers {
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+      enum Priority { low  high }
+
+      aggregate Order {
+        code: string
+        status: string
+        priority: Priority
+        total: Money
+        create(code: string) { code := code  status := "new"  priority := Priority.low  total := Money { amount: 0, currency: "USD" } }
+        operation reprice(newTotal: Money) { total := newTotal }
+        operation escalate(level: Priority) { priority := level }
+        operation cancel() { status := "cancelled" }
+        destroy { }
+      }
+      repository Orders for Order {
+        find byStatus(status: string): Order[] where this.status == status
+        find byPriority(level: Priority): Order[] where this.priority == level
+      }
+    }
+  }
+  api SalesApi with scaffoldApi(of: Sales)
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet  contexts: [Ordering]  dataSources: [st]  serves: SalesApi  port: 5001 }
+}

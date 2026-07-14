@@ -287,3 +287,55 @@ describe("dotnet — explicit handler repo-delete (destroy)", () => {
     expect(ctrl).toContain("await _mediator.Send(new DestroyOrderCommand(new OrderId(orderId)));");
   });
 });
+
+// M-T5.10 handler-param rewrite: a scaffolded handler takes a single
+// `command`/`query` RECORD param.  On .NET the Mediator record FLATTENS the
+// record's fields (byte-identical to the flat form) and `cmd.<field>` renders as
+// `command.<Field>`; a read declares `<Agg>Response` but the handler still
+// returns the entity (route projects at the boundary).
+const SCAFFOLD_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering with scaffoldHandlers {
+      aggregate Order {
+        code: string
+        status: string
+        create(code: string) { code := code  status := "new" }
+        operation setNote(note: string) { status := note }
+      }
+      repository Orders for Order {
+        find byStatus(status: string): Order[] where this.status == status
+      }
+    }
+  }
+  api SalesApi with scaffoldApi(of: Sales)
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("dotnet — scaffolded handlers consume command/query record params", () => {
+  it("flattens a command record into the Mediator record + body and reads command.<Field>", async () => {
+    const files = await generateSystemFiles(SCAFFOLD_SRC);
+    // Create: the command record's fields flatten into the Mediator record ctor.
+    const createRec = fileEndingWith(files, "Application/Orders/Commands/CreateOrderCommand.cs");
+    expect(createRec).toContain(
+      "public sealed record CreateOrderCommand(string Code, string Status)",
+    );
+    const createH = fileEndingWith(files, "Application/Orders/Commands/CreateOrderHandler.cs");
+    expect(createH).toContain("Order.Create(code: command.Code, status: command.Status)");
+    // Operation: id stays a path param, the op's params ride the record → command.<Field>.
+    const setNoteH = fileEndingWith(files, "Application/Orders/Commands/SetNoteOrderHandler.cs");
+    expect(setNoteH).toContain("o.SetNote(command.Note)");
+    // getById: query record flattens the id; the handler returns the ENTITY,
+    // the route projects to OrderResponse.
+    const getRec = fileEndingWith(files, "Application/Orders/Queries/GetOrderQuery.cs");
+    expect(getRec).toContain("public sealed record GetOrderQuery(OrderId OrderId) : IQuery<Order>");
+    const ctrl = fileEndingWith(files, "Api/SalesApiRoutesController.cs");
+    expect(ctrl).toContain("[FromBody] CreateOrderBody body");
+    expect(ctrl).toContain("new SetNoteOrderCommand(new OrderId(orderId), body.Note)");
+    // Find over the aggregate projects the array to <Agg>Response.
+    expect(ctrl).toMatch(/\.Select\(__e => new OrderResponse\(/);
+  });
+});

@@ -1864,12 +1864,19 @@ export function renderExprWithCmdParams(
    *  async method; undefined (or returning undefined) leaves a PURE call as the
    *  static `Service.Op(...)` (byte-identical). */
   domainServiceReadingCall?: CsRenderContext["domainServiceReadingCall"],
+  /** Explicit-handler `command`/`query` RECORD params (M-T5.10): the Mediator
+   *  record FLATTENS the request record's fields, so a record-param ref rewrites
+   *  to the bare `command` (not `command.Cmd`) and its `.field` member access
+   *  lands on `command.Field` — byte-identical to the flat-param form. */
+  recordParams?: Set<string>,
 ): string {
-  const rewritten = rewriteExprRefs(e, (r) =>
-    r.refKind === "param" && paramNames.has(r.name)
-      ? { ...r, name: `command.${upperFirst(r.name)}`, refKind: "let" }
-      : undefined,
-  );
+  const rewritten = rewriteExprRefs(e, (r) => {
+    if (r.refKind !== "param") return undefined;
+    if (recordParams?.has(r.name)) return { ...r, name: "command", refKind: "let" };
+    if (paramNames.has(r.name))
+      return { ...r, name: `command.${upperFirst(r.name)}`, refKind: "let" };
+    return undefined;
+  });
   return renderCsExpr(rewritten, { thisName: "this", resourceClasses, domainServiceReadingCall });
 }
 

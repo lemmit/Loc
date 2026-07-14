@@ -25,7 +25,15 @@
 // param rides in one `[FromBody] <Handler>Body` request record (a domain-typed
 // record emitted alongside the controller).  The command/query ctor args keep
 // declared order — path coercions and `body.<Pascal>` reads interleaved.
-// Follow-up: full response-DTO projection for aggregate-returning handlers.
+//
+// Record params (M-T5.10 handler-param rewrite): a `command`/`query` RECORD
+// param (`cmd`/`query`) FLATTENS into its fields — the Mediator record + body
+// carry the flat fields, byte-identical to the flat-param form — and the body's
+// `cmd.<field>` rewrites to `command.<Field>` (the record ref → bare `command`).
+// A path-param id stays a separate flat field.  A read now DECLARES a
+// `<Agg>Response` return; `normalizeHandlerReturn` maps it back to the entity so
+// the Mediator/`Handle` signature stays on the entity and the route projects it
+// (single or `.Select(...).ToList()`) at the boundary.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -39,6 +47,7 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
+import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
@@ -80,13 +89,43 @@ function primaryAgg(h: Handler): string | undefined {
 const repoField = (repoName: string): string =>
   `_${repoName.charAt(0).toLowerCase()}${repoName.slice(1)}`;
 
+/** A handler's params flattened for the Mediator record / request body: a
+ *  `command`/`query` RECORD param expands to its fields (so the record's fields
+ *  become the flat Mediator/`[FromBody]` fields, byte-identical to the flat-param
+ *  form); every other param (a path-bound id / scalar) passes through. */
+function flatHandlerParams(h: Handler, ctx: EnrichedBoundedContextIR): ParamIR[] {
+  const out: ParamIR[] = [];
+  for (const p of h.params) {
+    const rec = requestRecordFor(p.type, ctx);
+    if (rec) for (const f of rec.fields) out.push({ name: f.name, type: f.type });
+    else out.push({ name: p.name, type: p.type });
+  }
+  return out;
+}
+
+/** The record-param NAMES of a handler — the refs that rewrite to the bare
+ *  Mediator `command` (their `.field` access lands on `command.Field`). */
+function recordParamNames(h: Handler, ctx: EnrichedBoundedContextIR): Set<string> {
+  return new Set(h.params.filter((p) => requestRecordFor(p.type, ctx)).map((p) => p.name));
+}
+
+/** A handler's INTERNAL return type — the domain entity it actually produces.
+ *  A scaffolded read declares a `<Agg>Response` return, but the handler body
+ *  still returns the entity and the transport layer projects it; so the Mediator
+ *  record / `Handle` signature type on the entity (`normalizeHandlerReturn` maps
+ *  `OrderResponse` → `Order`).  Passes an id / scalar / void return through. */
+function internalReturnType(h: Handler, ctx: EnrichedBoundedContextIR): TypeIR | undefined {
+  return normalizeHandlerReturn(h.returnType, ctx);
+}
+
 /** The aggregate a handler's return type resolves to, when it returns an
  *  entity (aggregate or part) — used to import the domain namespace so a
  *  `IQuery<Order>` / `ValueTask<Order>` signature resolves. Undefined for an
  *  id / scalar / void return. */
 function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | undefined {
-  if (!h.returnType) return undefined;
-  const info = wireTypeInfo(h.returnType, "response");
+  const ret = internalReturnType(h, ctx);
+  if (!ret) return undefined;
+  const info = wireTypeInfo(ret, "response");
   if (info.refKind !== "entity") return undefined;
   const owning =
     ctx.aggregates.find((a) => a.name === info.base) ??
@@ -103,13 +142,19 @@ function renderRecord(
   kind: "Command" | "Query",
 ): string {
   const recName = `${h.name}${kind}`;
-  const params = h.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`).join(", ");
+  // The Mediator record FLATTENS a request record's fields (byte-identical to
+  // the flat-param form); the internal return types on the entity, not its
+  // `<Agg>Response` contract (the route projects at the boundary).
+  const ret = internalReturnType(h, ctx);
+  const params = flatHandlerParams(h, ctx)
+    .map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`)
+    .join(", ");
   const iface =
     kind === "Command"
-      ? h.returnType
-        ? `ICommand<${renderCsType(h.returnType)}>`
+      ? ret
+        ? `ICommand<${renderCsType(ret)}>`
         : "ICommand"
-      : `IQuery<${renderCsType(h.returnType!)}>`;
+      : `IQuery<${renderCsType(ret!)}>`;
   const folder = kind === "Command" ? "Commands" : "Queries";
   // A record whose return type is an aggregate needs that aggregate's domain
   // namespace so `ICommand<Order>` / `IQuery<Order>` resolves.
@@ -138,7 +183,8 @@ function renderHandlerClass(
 ): string {
   const recName = `${h.name}${kind}`;
   const handlerName = `${h.name}Handler`;
-  const ret = h.returnType ? renderCsType(h.returnType) : "Unit";
+  const retType = internalReturnType(h, ctx);
+  const ret = retType ? renderCsType(retType) : "Unit";
   const iface =
     kind === "Command"
       ? `ICommandHandler<${recName}, ${ret}>`
@@ -159,8 +205,13 @@ function renderHandlerClass(
       ? `    public ${handlerName}() { }`
       : `    public ${handlerName}(${ctorParams})\n    {\n        ${ctorAssigns};\n    }`;
 
-  const paramNames = new Set(h.params.map((p) => p.name));
-  const renderArg = (e: ExprIR): string => renderExprWithCmdParams(e, paramNames);
+  // Flat (non-record) params rewrite to `command.<Pascal>`; a record param
+  // rewrites to the bare `command` (its `.field` access lands on `command.Field`,
+  // matching the flattened Mediator record).
+  const records = recordParamNames(h, ctx);
+  const flatNames = new Set(h.params.filter((p) => !records.has(p.name)).map((p) => p.name));
+  const renderArg = (e: ExprIR): string =>
+    renderExprWithCmdParams(e, flatNames, undefined, undefined, records);
   // Guard every getById load with `?? throw` — a handler body always
   // dereferences its load (op-call target / return projection).
   const stmtLines = renderWorkflowStmtChunks(
@@ -463,9 +514,14 @@ export function emitExplicitRouteController(
     // the rest ride in one `[FromBody]` request record. (Multiple bare complex
     // action params would each be inferred `[FromBody]`, which ASP.NET rejects,
     // and a simple type would silently bind from the query string instead.)
+    // A `command`/`query` record param FLATTENS into its fields (the Mediator
+    // record + `[FromBody]` body carry the flat fields, byte-identical to the
+    // flat-param form); extern handlers keep their raw params (their impl owns
+    // the signature).  Then split on the route `{token}`s as before.
     const pathNames = pathParamNames(r.path);
-    const pathParams = h.params.filter((p) => pathNames.has(p.name));
-    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+    const effParams = h.extern ? h.params : flatHandlerParams(h, ctx);
+    const pathParams = effParams.filter((p) => pathNames.has(p.name));
+    const bodyParams = effParams.filter((p) => !pathNames.has(p.name));
     const pathArg = new Map(pathParams.map((p) => [p.name, pathActionParam(p)]));
 
     const actionParamParts = pathParams.map((p) => pathArg.get(p.name)!.actionParam);
@@ -479,9 +535,9 @@ export function emitExplicitRouteController(
       actionParamParts.push(`[FromBody] ${bodyRecName} body`);
     }
     const actionParams = actionParamParts.join(", ");
-    // Command/query ctor args stay in declared param order: path params coerce
+    // Command/query ctor args stay in flat declared order: path params coerce
     // from the route token, body params read off `body.<Pascal>`.
-    const ctorArgs = h.params
+    const ctorArgs = effParams
       .map((p) =>
         pathNames.has(p.name) ? pathArg.get(p.name)!.commandArg : `body.${upperFirst(p.name)}`,
       )
@@ -489,8 +545,13 @@ export function emitExplicitRouteController(
 
     const rec = `${h.name}${kind}`;
     const attr = HTTP_ATTR[r.method] ?? "HttpGet";
-    // A query always returns; a command returns only with an explicit type.
-    const retType = kind === "Query" ? qry!.returnType : cmd?.returnType;
+    // A query always returns; a command returns only with an explicit type.  A
+    // scaffolded read declares `<Agg>Response` — normalise to the entity the
+    // handler returns so the projection fires on it.
+    const retType = normalizeHandlerReturn(
+      kind === "Query" ? qry!.returnType : cmd?.returnType,
+      ctx,
+    );
     let sendBlock: string;
     if (retType) {
       // An aggregate/entity return is projected to its wire-shape `<Agg>Response`
