@@ -7,6 +7,7 @@ import type {
   EnrichedEntityPartIR,
   FieldIR,
   IdValueType,
+  PayloadIR,
   TypeIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
@@ -466,6 +467,63 @@ export function entityResponseParams(
   ctx: EnrichedBoundedContextIR,
 ): string {
   return responseRecordParams(part, ctx);
+}
+
+/** Build the `<Agg>Response` record's positional params from a DECLARED
+ *  `response <Agg>Response` payload record (M-T5.10) instead of the aggregate's
+ *  `wireShape`.  Byte-identical to `responseRecordParams(agg, ctx)` for a
+ *  scaffolded aggregate whose author record mirrors the apiRead matrix — the
+ *  read-path replacement for the auto-derivation, keyed on the declared record.
+ *
+ *  The payload record carries NO `id` field (grammar-reserved), so the leading
+ *  `Guid Id` is re-prepended here; provenance lineage params are re-appended
+ *  from the aggregate's provenanced fields — both exactly as
+ *  `responseRecordParams` derives them from the synthetic wire-shape id row and
+ *  the same `agg.fields` filter. */
+export function responseParamsFromPayload(
+  agg: EnrichedAggregateIR,
+  payload: PayloadIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const parts: string[] = [];
+  // The DTO leads with `Guid Id` even though the record omits it.
+  parts.push(dtoParam(csIdValueClrType(agg.idValueType), "Id"));
+  for (const f of payload.fields) {
+    parts.push(dtoParam(payloadFieldCsType(f.type, ctx), upperFirst(f.name)));
+  }
+  // Provenance — identical trailing logic to `responseRecordParams`.
+  for (const f of agg.fields.filter((pf) => pf.provenanced)) {
+    parts.push(`ProvLineage? ${upperFirst(f.name)}Provenance`);
+  }
+  return parts.join(", ");
+}
+
+/** C# DTO type for a field of a DECLARED `response` payload record.
+ *
+ *  Fields are of two shapes (M-T5.10 PR1): a value-object / scalar / enum / id
+ *  field carries its DOMAIN type (`total: Money`), so `wireType` maps it to the
+ *  wire form exactly as the wireShape path does; a CONTAINMENT field is ALREADY
+ *  the wire name (`lines: LineResponse[]`) — context scope can't reference a raw
+ *  entity part, so PR1 rewrote it to the sibling `<Part>Response` record, which
+ *  lowers to an `entity` TypeIR whose name is a declared `response` payload.
+ *  That name must be rendered DIRECTLY (peel collection + nullable, re-wrap
+ *  `IReadOnlyList<...>` / `?`); running it through `wireType` would append a
+ *  second `Response` (`LineResponseResponse`). */
+function payloadFieldCsType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
+  const info = wireTypeInfo(t, "response");
+  if (info.refKind === "entity" && isResponsePayloadName(ctx, info.base)) {
+    let s = info.base;
+    if (info.isCollection) s = `IReadOnlyList<${s}>`;
+    if (info.isNullable) s = `${s}?`;
+    return s;
+  }
+  return wireType(t, ctx, "response");
+}
+
+/** True iff `name` is a declared `response` payload in the context — i.e. a
+ *  containment field's already-wire type, which must not be re-suffixed. */
+function isResponsePayloadName(ctx: EnrichedBoundedContextIR, name: string): boolean {
+  return ctx.payloads.some((p) => p.kind === "response" && p.name === name);
 }
 
 function responseRecordParams(
