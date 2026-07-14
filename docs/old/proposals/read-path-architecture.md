@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 7). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 8). No code yet. A
 > vision + grammar proposal.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
@@ -34,10 +34,16 @@
 > (both forms). The inline anonymous shape (the `<View>Row`) is preserved.
 > rev. 7: the query-time flavor is **parameterized** (params drive `where`,
 > + `sort` decl / `page` call-site, like `retrieval`) — the parameterized
-> read model `view` never was — and **keyed by its source aggregate's id**
-> (derived, giving a by-id read), where the folded flavor keeps the explicit
-> `keyed by` for event routing. The `/views` namespace dies; the follow +
-> `<View>Row` synthesis **relocate** to the query-time projection path.
+> read model `view` never was. rev. 8: **keying is a second, orthogonal axis
+> — keyed *collection* vs unkeyed *singleton*.** A keyed projection is one
+> row per key (folded: explicit `keyed by`; query-time: derived from the
+> source id, 1:1); a **singleton** projection is exactly one row — a
+> whole-table read model (dashboard total, running count), which
+> `projection.md` deferred and this makes first-class. Query-time singletons
+> need **aggregation binds** (`count`/`sum`/`avg` — a real add `view`
+> lacked); folded singletons are nearly free (omit `keyed by`, accumulate).
+> The `/views` namespace dies; the follow + `<View>Row` synthesis
+> **relocate** to the query-time projection path.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -401,6 +407,19 @@ projection OrderBook keyed by order {
   status: OrderStatus
   on(e: OrderPlaced) { order := e.order; status := Placed }
 }
+
+// SINGLETON (unkeyed) — exactly one row; a whole-table read model. Both flavors:
+projection SalesDashboard {                         // query-time: aggregate over the source
+  openOrders: int
+  revenue:    Money
+  from Order where status == Confirmed
+  bind openOrders = count, revenue = sum(total)     // aggregation → one row (view had none)
+}
+projection RevenueTotals {                          // folded: global accumulator, no `keyed by`
+  total:  Money
+  orders: int
+  on(e: OrderPlaced) { total += e.amount; orders += 1 }
+}
 ```
 
 - **Distinguisher:** `from <source> where … bind …` (query-time) vs
@@ -416,15 +435,29 @@ projection OrderBook keyed by order {
   for imperative bodies) stays a distinct, composable thing — the bundling
   is right for a *named read model*, and the orthogonal `response` +
   `queryHandler` path remains for shapes reused across queries.
-- **Keying differs by flavor — and both are keyed.** *Folded:* `keyed by`
-  is explicit + required (events must route to a row; the schema often holds
-  several foreign ids). *Query-time:* no events, so no correlation key to
-  declare — but it is **1:1 with its source aggregate**, so each row is
-  **keyed by the source's id, derived not declared**, which is what gives it
-  a by-id read (`GET …/{id}`) for free (as `view`'s `bind orderId = id`
-  did). No `keyed by` clause on the query-time flavor — it would be
-  redundant with the source id. So the key is *declared* (folded) vs
-  *derived from source identity* (query-time).
+- **Keying is a second axis — keyed *collection* vs unkeyed *singleton*.**
+  Orthogonal to the population flavor. A **keyed** projection is a
+  collection (one row per key; list + by-key read). An **unkeyed /
+  singleton** projection is exactly *one* row (a whole-table aggregation —
+  a dashboard total, a running count; single-object read, no list, no
+  by-key). `projection.md` deferred keyless projections as "a later shape";
+  this makes them first-class. Both flavors can be either:
+  - *Folded, keyed:* `keyed by <k>` — explicit + required (events route to a
+    row; the schema often holds several foreign ids).
+  - *Folded, singleton:* **no `keyed by`** — the `on(e)` handlers accumulate
+    into one global row (`total += e.amount`). Nearly free — just omit the
+    key.
+  - *Query-time, keyed:* **1:1 with its source**, so keyed by the **source's
+    id, derived not declared** — the free by-id read (`GET …/{id}`), as
+    `view`'s `bind orderId = id` gave.
+  - *Query-time, singleton:* the binds **aggregate** over the source
+    (`count`, `sum`, `avg`) → one row. This is a real capability add —
+    `view` had *no* aggregation — not just "omit the key."
+
+  So the key is *declared* (folded) or *derived* (query-time), and its
+  cardinality is *keyed collection* or *singleton*. (Group-by — one row per
+  *group* key, `orders per region` — is the richer follow-on: aggregation +
+  grouping; singleton is the immediate clean case.)
 - **Same identity, different consistency/cost:** query-time is
   always-current, O(query)/read, no table; folded is eventual, O(1)/read,
   its own table. The choice is the read-side twin of an aggregate's
@@ -694,6 +727,15 @@ list `find` and a `view` warn, and a read can no longer `save`.
    the two bodies feel like two constructs sharing a name, the fallback is a
    distinct keyword for the query-time flavor (`readModel` / `select`); the
    folded `projection` is untouched either way.
+1b. **Singleton: inferred or explicit?** A query-time projection collapses
+   to a singleton when its binds *aggregate* (`sum`/`count`) rather than
+   project per-row. Infer singleton-ness from the binds, or require an
+   explicit `singleton` marker so "why is my projection one row" is never a
+   surprise? Lean: explicit `singleton` (or the absence of a per-row key
+   field) — inference from "do any binds aggregate" is subtle. Folded
+   singleton is unambiguous (no `keyed by`). Also open: does a keyed
+   query-time projection with aggregating binds mean **group-by** (one row
+   per key), the richer follow-on feature?
 2. **Explicit read-only marker vs implicit-by-position.** Is the read-only
    *setting* purely positional (recommended — matches the `reading` tier,
    no new syntax), or should a marker make the capability visible at the
