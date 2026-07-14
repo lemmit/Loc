@@ -10,7 +10,7 @@
 system FulfillmentSys {
   subdomain Fulfillment {
     context Fulfillment {
-      aggregate Order {
+      aggregate Order with crudish {
         customerId: string
         status: string
         total: int

@@ -99,7 +99,7 @@ import {
 import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
 import { plural, snake } from "../../util/naming.js";
-import { isConstructible } from "../enrich/wire-projection.js";
+import { emitsRestCreate } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -711,13 +711,14 @@ function nameCtxOf(ctx: WalkerExpandContext): PageNameCtx {
   };
 }
 
-/** Drop the scaffolded `<Agg>New` page for a non-constructible aggregate
- *  (no create surface — `!isConstructible`).  The backends emit no POST
- *  route for such an aggregate (`hasCreate`), so a scaffolded create form
- *  would submit to a route that doesn't exist; the matching list "New"
- *  button is suppressed in the list scaffolder.  Removing the page here
- *  (before the origin / expand passes) also drops it from the router and
- *  menu, which derive from `ui.pages` at emit time. */
+/** Drop the scaffolded `<Agg>New` page for an aggregate with no REST create
+ *  surface (`!emitsRestCreate` — no canonical `create`, or no creation event
+ *  for an ES aggregate).  The backends emit no POST route for such an
+ *  aggregate, so a scaffolded create form would submit to a route that
+ *  doesn't exist; the matching list "New" button is suppressed in the list
+ *  scaffolder.  Removing the page here (before the origin / expand passes)
+ *  also drops it from the router and menu, which derive from `ui.pages` at
+ *  emit time. */
 function dropNonConstructibleNewPages(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
@@ -726,17 +727,17 @@ function dropNonConstructibleNewPages(sys: SystemIR): void {
       const kind = classifyPage(page, nameCtx);
       if (kind.kind !== "aggregate-new") return true;
       const agg = ctx.aggregatesByName.get(kind.aggregateName);
-      return !agg || isConstructible(agg);
+      return !agg || emitsRestCreate(agg);
     });
   }
 }
 
-/** Suppress the list "New <agg>" button for a non-constructible aggregate — the
- *  backends emit no POST route, so the create surface must not appear.  The
- *  macro-emitted list body always carries the button, so we strip it here,
- *  where `isConstructible`
- *  (an enriched-IR analysis the macro can't run) is available.  Mirrors
- *  `dropNonConstructibleNewPages`, which drops the matching `New` page. */
+/** Suppress the list "New <agg>" button for an aggregate with no REST create
+ *  surface — the backends emit no POST route, so the create surface must not
+ *  appear.  The macro-emitted list body always carries the button, so we
+ *  strip it here, where the create fact (`emitsRestCreate`) is available.
+ *  Mirrors `dropNonConstructibleNewPages`, which drops the matching `New`
+ *  page. */
 function stripNonConstructibleListCreate(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
@@ -745,7 +746,7 @@ function stripNonConstructibleListCreate(sys: SystemIR): void {
       const kind = classifyPage(page, nameCtx);
       if (kind.kind !== "aggregate-list" || !page.body) continue;
       const agg = ctx.aggregatesByName.get(kind.aggregateName);
-      if (!agg || isConstructible(agg)) continue;
+      if (!agg || emitsRestCreate(agg)) continue;
       page.body = stripCreateButton(page.body, `${pluralSnake(agg.name)}-list-create`);
     }
   }

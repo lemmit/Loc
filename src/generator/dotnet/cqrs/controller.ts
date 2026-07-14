@@ -1,4 +1,4 @@
-import { hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
@@ -140,10 +140,9 @@ export function emitController(
   routePrefix?: string,
   emitTrace?: boolean,
   usingDapper?: boolean,
-  /** Force the POST create action on (event-sourced aggregates are
-   *  constructible via their `create` action even when `hasCreate` — the
-   *  field-set constructibility check — is false).  Defaults to
-   *  `hasCreate(agg)`. */
+  /** Force the POST create action on/off.  Defaults to
+   *  `emitsRestCreate(agg)` — a canonical `create` (explicit / crudish) for a
+   *  state aggregate, or a creation event for an event-sourced one. */
   createActionOverride?: boolean,
   /** Strongly-typed id class for the route id param (default `<Agg>Id`); a TPH
    *  concrete passes its base's `<Base>Id` (the shared inherited key). */
@@ -166,7 +165,7 @@ export function emitController(
     renderController(agg, repo, ns, {
       idClass,
       idClrType: csIdValueClrType(agg.idValueType),
-      createAction: createActionOverride ?? hasCreate(agg),
+      createAction: createActionOverride ?? emitsRestCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
         wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),

@@ -29,6 +29,13 @@ system PySales {
         // Non-principal relational capability filter (W1a) — soft-delete
         // scoping AND-ed into every root read on the python backend.
         filter !this.isDeleted
+        // Explicit canonical create (create-input = name + isDeleted) — the
+        // REST create surface is gated on a declared create, so this keeps the
+        // POST /customers route the create tests exercise.
+        create(name: string, isDeleted: bool) {
+          name := name
+          isDeleted := isDeleted
+        }
         operation rename(newName: string) {
           name := newName
         }

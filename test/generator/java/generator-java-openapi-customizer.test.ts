@@ -25,6 +25,11 @@ system Shop {
         code: string
         status: Status
         total: money
+        create(code: string, status: Status, total: money) {
+          code := code
+          status := status
+          total := total
+        }
         operation confirm() {
           precondition status == pending
           status := confirmed

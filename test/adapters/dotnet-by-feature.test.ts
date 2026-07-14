@@ -164,7 +164,7 @@ const SRC = (layout: string) => `
 system Sys {
   subdomain Sales {
     context Orders {
-      aggregate Order {
+      aggregate Order with crudish {
         name: string
         status: int
         invariant name.length > 0

@@ -28,6 +28,9 @@ const AUDITABLE = `
     subdomain D { context Shop {
       aggregate Order with auditable {
         code: string
+        create(code: string) {
+          code := code
+        }
         operation setCode(next: string) {
           code := next
         }

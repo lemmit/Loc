@@ -14,7 +14,7 @@ const FIXTURE = `
 system Demo {
   subdomain M {
     context Accounts {
-      aggregate Account {
+      aggregate Account with crudish {
         handle: string
         slug: string immutable
         passwordHash: string secret

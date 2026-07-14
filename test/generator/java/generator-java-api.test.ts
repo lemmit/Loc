@@ -20,7 +20,7 @@ system Shop {
         city: string
         zip: string
       }
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         status: Status
         shipTo: Address

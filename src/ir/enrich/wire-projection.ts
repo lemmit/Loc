@@ -211,6 +211,24 @@ export function hasCreate(agg: AggregateIR): boolean {
   return isConstructible(agg);
 }
 
+/** Whether the auto-derived REST layer exposes a **create** endpoint
+ * (`POST /<coll>`) — and the request DTO / create command / factory-call
+ * that ride it — for this aggregate.  Symmetric with the DELETE gate
+ * (`canonicalDestroy != null`): a create endpoint appears only when the
+ * aggregate declares an EXPLICIT canonical `create` member (written by hand
+ * or synthesised by `with crudish`), never merely because the aggregate
+ * happens to be {@link isConstructible}.  An event-sourced aggregate keeps
+ * the creation-event gate — it is created via its declared `create` event.
+ *
+ * This is deliberately distinct from {@link isConstructible} / {@link hasCreate},
+ * which stay the gate for the DOMAIN factory (`Agg.create(...)`) that seeds
+ * and tests call directly even when no REST create is exposed. */
+export function emitsRestCreate(agg: AggregateIR): boolean {
+  return agg.persistedAs === "eventLog"
+    ? (agg.creates?.length ?? 0) > 0
+    : agg.canonicalCreate != null;
+}
+
 /** Fields clients may modify in an **update** request's editable
  * payload.  Excludes:
  *   - `managed`  — server lifecycle.

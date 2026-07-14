@@ -11,6 +11,7 @@
 // branding, breakpoint behaviour) lives in the template.
 // ---------------------------------------------------------------------------
 
+import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
@@ -124,11 +125,17 @@ export function prepareAppShellVM(
   for (const agg of aggregates) {
     const slug = snake(plural(agg.name));
     const cap = upperFirst(agg.name);
+    // The `New` page (scaffold create form) is dropped for a read-only
+    // aggregate with no REST create surface — `dropNonConstructibleNewPages`
+    // removes it from `ui.pages` on exactly `!emitsRestCreate`, so no
+    // `pages/<slug>/new` file is emitted.  Gate its import + route on the same
+    // fact, else App.tsx imports a module that doesn't exist (tsc TS2307).
+    const hasNew = emitsRestCreate(agg);
     imports.push({ specifier: `${cap}List`, from: `./pages/${slug}/list` });
-    imports.push({ specifier: `${cap}New`, from: `./pages/${slug}/new` });
+    if (hasNew) imports.push({ specifier: `${cap}New`, from: `./pages/${slug}/new` });
     imports.push({ specifier: `${cap}Detail`, from: `./pages/${slug}/detail` });
     routes.push({ path: `/${slug}`, elementJsx: `<${cap}List />` });
-    routes.push({ path: `/${slug}/new`, elementJsx: `<${cap}New />` });
+    if (hasNew) routes.push({ path: `/${slug}/new`, elementJsx: `<${cap}New />` });
     routes.push({ path: `/${slug}/:id`, elementJsx: `<${cap}Detail />` });
   }
 

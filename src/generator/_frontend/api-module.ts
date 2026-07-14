@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, emitsRestCreate, forApiRead } from "../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -95,25 +95,32 @@ export function buildApiModule(
   // (`managed`, `token`, `internal`) from the client-supplied payload,
   // keeping `immutable` (settable on create) and `secret` (client
   // provides password hashes / API keys).  Aligns with the Hono and
-  // .NET CreateRequest shapes.
+  // .NET CreateRequest shapes.  Gated on `emitsRestCreate` (symmetric with
+  // the `useDelete` / `canonicalDestroy` gate below): an aggregate with no
+  // REST create surface emits neither the `Create<Agg>Request` schema nor
+  // the `useCreate<Agg>` hook, so we never ship a create hook POSTing to a
+  // route that doesn't exist.
+  const restCreate = emitsRestCreate(agg);
   const requiredFields = createInputFields(agg);
-  lines.push(
-    ...emitObjectWithRefines(
-      `Create${agg.name}Request`,
-      requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
-      agg.invariants,
-      // Only create-input fields can be validated at the wire boundary —
-      // invariants over excluded fields (e.g. a `managed` collection) are
-      // enforced server-side, so they must not refine an absent field.
-      new Set(requiredFields.map((f) => f.name)),
-    ),
-  );
-  lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
-  // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
-  // the schema carries a real transform (a money field somewhere in the
-  // create input), so `z.input` ≠ `z.output`.
-  if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
-    lines.push(...dualTypeAliases(`Create${agg.name}`));
+  if (restCreate) {
+    lines.push(
+      ...emitObjectWithRefines(
+        `Create${agg.name}Request`,
+        requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
+        agg.invariants,
+        // Only create-input fields can be validated at the wire boundary —
+        // invariants over excluded fields (e.g. a `managed` collection) are
+        // enforced server-side, so they must not refine an absent field.
+        new Set(requiredFields.map((f) => f.name)),
+      ),
+    );
+    lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
+    // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
+    // the schema carries a real transform (a money field somewhere in the
+    // create input), so `z.input` ≠ `z.output`.
+    if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
+      lines.push(...dualTypeAliases(`Create${agg.name}`));
+    }
   }
   lines.push("");
 
@@ -257,18 +264,22 @@ export function buildApiModule(
   lines.push(`}`);
   lines.push("");
 
-  // useCreate<Agg>
-  lines.push(`export function useCreate${agg.name}() {`);
-  lines.push(`  const qc = useQueryClient();`);
-  lines.push(`  return useMutation({`);
-  lines.push(`    mutationFn: async (input: Create${agg.name}Request) => {`);
-  lines.push(`      const r = await api.post(\`/${tag}\`, input);`);
-  lines.push(`      return z.object({ id: z.string() }).parse(r);`);
-  lines.push(`    },`);
-  lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
-  lines.push(`  });`);
-  lines.push(`}`);
-  lines.push("");
+  // useCreate<Agg> — gated on the REST create surface (`emitsRestCreate`),
+  // symmetric with `useDelete` below: no canonical create ⇒ no POST route ⇒
+  // no create hook.
+  if (restCreate) {
+    lines.push(`export function useCreate${agg.name}() {`);
+    lines.push(`  const qc = useQueryClient();`);
+    lines.push(`  return useMutation({`);
+    lines.push(`    mutationFn: async (input: Create${agg.name}Request) => {`);
+    lines.push(`      const r = await api.post(\`/${tag}\`, input);`);
+    lines.push(`      return z.object({ id: z.string() }).parse(r);`);
+    lines.push(`    },`);
+    lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+  }
 
   // useDelete<Agg> — canonical hard delete (DELETE /<tag>/{id}).  Gated on
   // the IR lifecycle: emitted only when the aggregate has a canonical

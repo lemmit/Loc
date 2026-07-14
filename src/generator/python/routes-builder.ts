@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead, forCreateInput, hasCreate } from "../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forApiRead, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -194,10 +194,16 @@ export function buildPyRoutesFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    // `User` is imported only when a route that actually threads the request
+    // principal is emitted.  The create/update stamps consume `current_user`,
+    // but the create stamp rides the (now `emitsRestCreate`-gated) create
+    // route and the update stamp rides the operation routes — so a read-only
+    // aggregate (no create surface, no operations) references neither and must
+    // not import `User` (ruff F401 under `--warnings-as-errors`).
     publicOps.some(operationUsesCurrentUser) ||
       emittableFinds(repo).some(findUsesCurrentUser) ||
-      stampUsesUser(agg, "create") ||
-      stampUsesUser(agg, "update")
+      (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
+      (publicOps.length > 0 && stampUsesUser(agg, "update"))
       ? "from app.auth.user import User"
       : null,
     "from app.db.engine import get_session",
@@ -286,10 +292,13 @@ function errorImports(refersTo: (n: string) => boolean): string | null {
   return names.length > 0 ? `from app.domain.errors import ${names.join(", ")}` : null;
 }
 
-/** Same constructibility gate the domain emitter uses — no `create`
- *  factory ⇒ no POST route (parity with Hono's `emitCreate`). */
+/** Whether the REST layer exposes a create surface (POST route + request
+ *  models) — an explicit / crudish canonical `create` (or a creation event
+ *  for an ES aggregate).  Symmetric with the DELETE gate; parity with Hono's
+ *  `emitCreate`.  Distinct from the DOMAIN `create` factory, which stays on
+ *  `isConstructible`. */
 function hasCreateFactory(agg: EnrichedAggregateIR): boolean {
-  return hasCreate(agg);
+  return emitsRestCreate(agg);
 }
 
 // --- DTO models ---------------------------------------------------------------

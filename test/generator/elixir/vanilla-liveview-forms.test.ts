@@ -25,6 +25,11 @@ const SOURCE = `
           email: string
           creditLimit: Money
           invariant email.length > 0
+          create(name: string, email: string, creditLimit: Money) {
+            name := name
+            email := email
+            creditLimit := creditLimit
+          }
           operation adjustCredit(amount: decimal) {
             precondition amount > 0
           }

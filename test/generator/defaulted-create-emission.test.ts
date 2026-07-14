@@ -1,20 +1,29 @@
-// Defaulted aggregate → parameterized create (Stage 4 invariant gate).
+// Defaulted aggregate → parameterized create (canonical-create gate).
 //
-// `Counter` declares no create and has no invariants, so it is constructible
-// (vacuously — `isConstructible`).  Under the invariant gate it gets a
-// NORMAL create parameterized by its create-input fields — there is no
-// parameterless "synthesised" form any more.
-//
-// Stage-4 canonical-create: an explicit `= default` (`count = 0`,
+// A `with crudish` aggregate gets a canonical create parameterized by its
+// create-input fields.  An explicit `= default` (`count = 0`,
 // `label = "untitled"`) makes the field an *optional* create input — the
 // default is applied at the wire boundary when the client omits it, so the
 // field drops out of the request's required-set.  Each backend renders the
 // default in its native slot: Hono zod `.default(…)`, .NET record `= …`,
 // Phoenix Ecto `field ... default: ...`.  The domain factory signature is unchanged —
 // the create input still names every field (see `wireCreateDefault`).
+//
+// REST-create gate (symmetric with DELETE): the auto-derived `POST /<coll>`
+// endpoint + request DTO + create command now require an EXPLICIT canonical
+// `create` (`emitsRestCreate` → `canonicalCreate != null`), NOT mere
+// `isConstructible`.  A bare constructible aggregate (no `create`, no
+// `crudish`) still gets the DOMAIN factory (`Agg.create(...)` that seeds/tests
+// call) but NO REST create surface — this file's fixtures therefore carry
+// `with crudish` so the wire-level default assertions have a create route to
+// land on.
 
 import { describe, expect, it } from "vitest";
-import { hasCreate, isConstructible } from "../../src/ir/enrich/wire-projection.js";
+import {
+  emitsRestCreate,
+  hasCreate,
+  isConstructible,
+} from "../../src/ir/enrich/wire-projection.js";
 import { allAggregates } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel, generateSystemFiles } from "../_helpers/index.js";
 
@@ -22,7 +31,7 @@ const FIXTURE = `
 system Demo {
   subdomain Shop {
     context Catalog {
-      aggregate Counter {
+      aggregate Counter with crudish {
         count: int = 0
         label: string = "untitled"
         operation bump() { count := count + 1 }
@@ -39,18 +48,64 @@ system Demo {
 }
 `;
 
+// A BARE constructible aggregate — no `create`, no `crudish`.  Constructible
+// (vacuous invariant set), so the DOMAIN factory is emitted, but it exposes NO
+// REST create surface under the canonical-create gate.
+const BARE_FIXTURE = `
+system Demo {
+  subdomain Shop {
+    context Catalog {
+      aggregate Counter {
+        count: int = 0
+        label: string = "untitled"
+        operation bump() { count := count + 1 }
+      }
+      repository Counters for Counter { }
+    }
+  }
+  api ShopApi from Shop
+  storage primarySql { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primarySql }
+  deployable honoApi    { platform: node           contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 3000 }
+}
+`;
+
 function findFile(files: Map<string, string>, pattern: RegExp): string | undefined {
   for (const [k, v] of files) if (pattern.test(k)) return v;
   return undefined;
 }
 
 describe("defaulted aggregate — parameterized create (invariant gate)", () => {
-  it("a defaulted aggregate with no invariants is constructible (no declared create)", async () => {
+  it("crudish aggregate has a canonical create + REST create surface", async () => {
     const loom = await buildLoomModel(FIXTURE);
     const counter = allAggregates(loom).find((a) => a.name === "Counter")!;
+    expect(counter.canonicalCreate ?? null).not.toBe(null);
+    expect(isConstructible(counter)).toBe(true);
+    expect(hasCreate(counter)).toBe(true);
+    expect(emitsRestCreate(counter)).toBe(true);
+  });
+
+  it("a bare constructible aggregate keeps the domain factory but exposes NO REST create", async () => {
+    const loom = await buildLoomModel(BARE_FIXTURE);
+    const counter = allAggregates(loom).find((a) => a.name === "Counter")!;
+    // Constructible (no blocking invariant) — the domain `create(...)` factory
+    // seeds/tests call is still emitted…
     expect(counter.canonicalCreate ?? null).toBe(null);
     expect(isConstructible(counter)).toBe(true);
     expect(hasCreate(counter)).toBe(true);
+    // …but the auto-derived REST create endpoint is gated on an explicit
+    // canonical create, so it is suppressed.
+    expect(emitsRestCreate(counter)).toBe(false);
+
+    const files = await generateSystemFiles(BARE_FIXTURE);
+    const routes = findFile(files, /counter\.routes\.ts$/i)!;
+    // No create request schema and no create-route factory call (the only
+    // POST that remains is the `bump` operation endpoint, not a create).
+    expect(routes).not.toMatch(/CreateCounterRequest/);
+    expect(routes).not.toMatch(/Counter\.create\(/);
+    // The domain factory is still emitted for seeds/tests.
+    const domain = findFile(files, /domain\/counter\.ts$/i)!;
+    expect(domain).toMatch(/static create\(/);
   });
 
   it("Hono: defaulted fields become optional create input via zod `.default(…)`", async () => {
@@ -108,6 +163,11 @@ system Flags {
         label: string
         enabled: bool = true
         plain: bool
+        create(label: string, enabled: bool, plain: bool) {
+          label := label
+          enabled := enabled
+          plain := plain
+        }
       }
       repository Toggles for Toggle { }
     }
