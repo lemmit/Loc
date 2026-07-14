@@ -1,6 +1,6 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 6). No code yet. A
+> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 7). No code yet. A
 > vision + grammar proposal.
 >
 > **The core primitive** (owner steer, rev. 2): the read path's one
@@ -27,14 +27,17 @@
 > points on one axis (`projection.md`'s own framing — always-current
 > query-time vs materialized event-folded, with a shipped lint nudging
 > between them). So the full form becomes a **query-time flavor of
-> `projection`** (`projection X { <fields> from <source> where … bind … }`,
-> no `keyed by`/`on`), sitting beside the existing folded flavor
+> `projection`** (`projection X(params) { <fields> from <source> where …
+> bind … }`, no `keyed by`/`on`), sitting beside the existing folded flavor
 > (`projection X keyed by k { … on(e){…} }`). This resolves the naming knot
 > (the survivor *is* a projection — no new word) and fully retires `view`
-> (both forms). The inline anonymous shape (the `<View>Row`) is preserved —
-> a projection declares its shape inline, exactly as it does today. The
-> `/views` namespace dies; the follow + `<View>Row` synthesis **relocate**
-> to the projection path.
+> (both forms). The inline anonymous shape (the `<View>Row`) is preserved.
+> rev. 7: the query-time flavor is **parameterized** (params drive `where`,
+> + `sort` decl / `page` call-site, like `retrieval`) — the parameterized
+> read model `view` never was — and **keyed by its source aggregate's id**
+> (derived, giving a by-id read), where the folded flavor keeps the explicit
+> `keyed by` for event routing. The `/views` namespace dies; the follow +
+> `<View>Row` synthesis **relocate** to the query-time projection path.
 >
 > Composes, all already shipped: [`criterion.md`](./criterion.md) (the
 > predicate atom — the query language), [`retrieval.md`](./retrieval.md)
@@ -381,13 +384,14 @@ defining criterion — a query-time view satisfies it exactly as a folded one
 does). *How it is populated* is a flavor the body selects:
 
 ```ddd
-// QUERY-TIME flavor (was view's full form) — always-current, computed per
-// request, no extra storage; binds may follow X id refs (app-side batched join).
-projection OrderSummary {
+// QUERY-TIME flavor (was view's full form, now PARAMETERIZED) — always-current,
+// computed per request, no extra storage; binds may follow X id refs (app-side join).
+projection OrdersInRegion(region: string) {
   orderId:      Order id
   lineCount:    int
   customerName: string
-  from Order where status != Cancelled
+  from Order where this.region == region        // params drive the filter (retrieval-style)
+  sort [placedAt desc]                          // sort in the declaration; page is call-site
   bind orderId = id, lineCount = lines.count, customerName = customerId.name
 }
 
@@ -403,6 +407,24 @@ projection OrderBook keyed by order {
   `keyed by <k>` + `on(e){…}` (folded). Both declare the shape inline (the
   anonymous `<Proj>Row`, preserved from `view`'s `<View>Row`). A body must
   pick exactly one mode; mixing is a validate error.
+- **Parameters + sort/page (query-time).** A query-time projection is a
+  read, so it **takes parameters** that drive its `where` (fixing `view`'s
+  biggest gap — no params — which forced callers back to repository `find`s),
+  plus `sort` in the declaration and `page` at the call, exactly like
+  `retrieval`. This makes it the parameterized read model `view` never was.
+  It bundles filter + shape by design; `retrieval` (query → *aggregates*,
+  for imperative bodies) stays a distinct, composable thing — the bundling
+  is right for a *named read model*, and the orthogonal `response` +
+  `queryHandler` path remains for shapes reused across queries.
+- **Keying differs by flavor — and both are keyed.** *Folded:* `keyed by`
+  is explicit + required (events must route to a row; the schema often holds
+  several foreign ids). *Query-time:* no events, so no correlation key to
+  declare — but it is **1:1 with its source aggregate**, so each row is
+  **keyed by the source's id, derived not declared**, which is what gives it
+  a by-id read (`GET …/{id}`) for free (as `view`'s `bind orderId = id`
+  did). No `keyed by` clause on the query-time flavor — it would be
+  redundant with the source id. So the key is *declared* (folded) vs
+  *derived from source identity* (query-time).
 - **Same identity, different consistency/cost:** query-time is
   always-current, O(query)/read, no table; folded is eventual, O(1)/read,
   its own table. The choice is the read-side twin of an aggregate's
