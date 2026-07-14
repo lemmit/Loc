@@ -1,6 +1,9 @@
 # M-T5.17 — Surface normalization: aggregate-header modifiers + `httpStatus` clause (design)
 
-> **Status: design-in-progress (draft PR claim).**
+> **Status: Phase 1 LANDED (enum-axis colon modifiers); `httpStatus` DONE (#1918).**
+> The aggregate-header enum-axis modifiers now accept the canonical colon form
+> (accept-both, printer emits colon); the `crossTenant`-hoist + paren-form removal
+> are the Phase 2 cutover. See §"Rollout".
 > Sources: language-surface review 2026-07-14 (finding #1 "aggregate-header modifier
 > zoo" + finding #3 "`httpStatus X N` space-triple"); `src/language/ddd.langium`
 > (`Aggregate` header, `ApiStatus`); [`docs/decisions.md`](../../decisions.md)
@@ -168,23 +171,32 @@ The `AST → .ddd` printers (`src/language/print/print-structural.ts`) and the
 usable strategy. Split the change so only the piece that actually collides needs
 timing:
 
-- **Phase 1 — additive, accept-both (land anytime).** Grammar accepts the new
-  syntax *and* keeps the old paren / space-triple forms parsing. Lowering treats them
-  identically. **Zero fixture re-baseline, conflicts with nothing.** Ships a
-  `loom.deprecated-header-modifier` / `loom.deprecated-httpstatus` info diagnostic +
-  LSP fix-it that rewrites old → new in place. PR volume is irrelevant to this phase.
+- **Phase 1 — additive, accept-both. ✅ LANDED (enum-axis modifiers).** The
+  `Aggregate` grammar now accepts the COLON form (`persistedAs: eventLog`,
+  `shape: document`, `inheritanceUsing: ownTable`) alongside the legacy paren form,
+  which stays accepted — both lower to the same field, so **every existing `.ddd`
+  parses unchanged and no fixture re-baselines**. The structural printer emits the
+  canonical colon form (roundtrip is structural, so the flip is safe); the two
+  canonical examples (`event-sourcing.ddd`, `document.ddd`) are migrated to dogfood
+  it; a parsing test pins colon≡paren AST-equality. **Scoping note:** the
+  `crossTenant`-hoist half (move the flag to lead beside `abstract`) was **deferred
+  to Phase 2** — carrying it in Phase 1 needs the flag assigned in two grammar
+  positions, which trips Langium's `?=` duplicate-assignment warning; it is a low-
+  value change (one `.ddd` fixture actually uses post-name `crossTenant`) best done
+  in the cutover. The `loom.deprecated-*` info diagnostic + LSP fix-it are likewise
+  deferred (optional polish).
 - **Phase 2 — codemod + remove old forms (time this one).** A `scripts/`
   codemod rewrites the whole corpus (`persistedAs(X)` → `persistedAs: X`, hoist
-  `crossTenant`, `httpStatus E N` → `httpStatus E -> N`), then the grammar drops the
-  old alternatives and fixtures re-baseline. This is the only fixture-churning piece,
-  so land it in a gap between the big fixture PRs — **coordinate specifically against
-  #1904 (paged-by-default), #1922 (handler params), #1920 (wireShape)**, not against a
-  headcount. Precedent for the codemod shape: `scripts/migrate-workflows-to-create.mjs`.
+  `crossTenant`), then the grammar drops the paren alternatives + the post-name
+  `crossTenant` position. This is the only fixture-churning piece, so land it in a gap
+  between the big fixture PRs. Precedent for the codemod shape:
+  `scripts/migrate-workflows-to-create.mjs`. (`httpStatus` needs no Phase 2 — #1918
+  already hard-cut it to `->`.)
 
 Migration scope (corpus grep, 2026-07-14): ~27 `persistedAs(`, ~19
 `inheritanceUsing(`, a subset of 68 `shape(` matches (many are doc comments /
-`.shape()` method calls), 2 `crossTenant`, plus the `httpStatus` sites. All pure
-regex rewrites.
+`.shape()` method calls), ~19 post-name `crossTenant` (1 `.ddd` + embedded test
+strings). All pure regex rewrites.
 
 ## Open questions
 
