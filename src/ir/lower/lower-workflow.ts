@@ -83,6 +83,7 @@ import {
   matchFindCall,
   matchRepoCall,
   matchRetrievalRunCall,
+  runCriterionMatcher,
 } from "./repo-read.js";
 
 export function lowerWorkflow(
@@ -661,7 +662,7 @@ function lowerWorkflowStatementInner(
     // repo-run: `Repo.run(<Retrieval>(args), page?)` — binds the
     // retrieval's result array.  Checked before the generic repo-let so
     // `run` doesn't fall through to the find-method path.
-    const runCall = matchRetrievalRunCall(expr, reposByName);
+    const runCall = matchRetrievalRunCall(expr, reposByName, runCriterionMatcher(env.ctx));
     if (runCall) {
       const aggName = runCall.repo.aggregate?.ref?.name ?? "Unknown";
       const repoName = runCall.repo.name;

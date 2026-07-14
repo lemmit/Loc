@@ -22,11 +22,18 @@ guards.
 > `Repo.findAll(<Criterion>, page?)` from workflow bodies is **shipped on every
 > backend** — it desugars to a synthetic `findAllBy<Criterion>` retrieval (the
 > enrich pass materialises it from the context's criteria), so it rides the
-> existing retrieval pipeline.  Ordering / fetch-shaping is expressed by an
+> existing retrieval pipeline.  **`Repo.run` accepts a criterion too**
+> (read-path-architecture.md, "`run` takes a criterion") — `Repo.run(<Criterion>)`
+> / `Repo.run(<Criterion>(args), page?)` is first-class alongside
+> `Repo.run(<Retrieval>)`, riding the identical `findAllBy<Criterion>` desugar as
+> `findAll`.  A declared `retrieval` keeps precedence: a name that is *both* a
+> criterion and a retrieval stays a retrieval, so existing `run(<Retrieval>)`
+> call sites are unchanged.  Ordering / fetch-shaping is expressed by an
 > **anonymous retrieval** — `Repo.run(retrieval { where: <Criterion> sort: […]
 > loads: […] }, page?)` — the call-site twin of a declared `retrieval`; `findAll`
-> stays the bare-criterion shorthand, shaping lives on the (named or anonymous)
-> retrieval.  Its `where:` is a criterion reference in this release.  The
+> and bare-criterion `run` stay the un-shaped spellings, shaping lives on the
+> (named or anonymous) retrieval.  Its `where:` is a criterion reference in this
+> release.  The
 > single-result `Repo.find(<Criterion>)` is **shipped on every backend** as the
 > source of an `if let` workflow statement — `if let x = Repo.find(<Criterion>)
 > { … } else { … }` — which binds the first match (non-null) in the then-branch

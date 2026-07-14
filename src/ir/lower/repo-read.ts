@@ -15,16 +15,47 @@
 // two leaf lowerers import this).  Extracting it is a PURE refactor of the
 // workflow path: the matchers below are byte-for-byte the ones that lived in
 // `lower-workflow.ts`, so workflow lowering output is unchanged.
-import type { Expression, LoadPath, Repository, SortItem } from "../../language/generated/ast.js";
+import type {
+  BoundedContext,
+  Expression,
+  LoadPath,
+  Repository,
+  SortItem,
+} from "../../language/generated/ast.js";
 import {
   isCallSuffix,
+  isCriterion,
   isMemberSuffix,
   isNameRef,
   isObjectLit,
   isPostfixChain,
+  isRetrieval,
   isRetrievalLiteral,
 } from "../../language/generated/ast.js";
 import { isReadMethod } from "../util/repo-methods.js";
+
+/** A predicate that decides whether a bare `run(<Name>)` / `run(<Name>(args))`
+ *  target names a **criterion** (so the read runs `findAllBy<Criterion>`) rather
+ *  than a **retrieval** (read-path-architecture.md, "`run` takes a criterion").
+ *  Retrieval takes precedence: a name that is BOTH a criterion and a retrieval
+ *  stays a retrieval (back-compat — a declared retrieval keeps its existing
+ *  meaning), so `run` only re-routes a name that is a criterion and NOT a
+ *  retrieval. */
+export type CriterionRunPredicate = (name: string) => boolean;
+
+/** Build a {@link CriterionRunPredicate} from the enclosing context's members.
+ *  Undefined ctx (a system-level `test e2e` block) → never a criterion, so
+ *  `run` keeps its retrieval-only meaning there. */
+export function runCriterionMatcher(ctx: BoundedContext | undefined): CriterionRunPredicate {
+  if (!ctx) return () => false;
+  const criteria = new Set<string>();
+  const retrievals = new Set<string>();
+  for (const m of ctx.members) {
+    if (isCriterion(m)) criteria.add(m.name);
+    else if (isRetrieval(m)) retrievals.add(m.name);
+  }
+  return (name) => criteria.has(name) && !retrievals.has(name);
+}
 
 export interface RepoMatch {
   repo: Repository;
@@ -160,10 +191,17 @@ export interface RetrievalRunMatch {
 
 /** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
  *  positional arg is itself a call (the retrieval reference); an optional
- *  named `page:` arg carries an object literal `{ offset?, limit? }`. */
+ *  named `page:` arg carries an object literal `{ offset?, limit? }`.
+ *
+ *  When `isCriterionRun` classifies the bare-name / `Name(args)` target as a
+ *  **criterion** (read-path-architecture.md, "`run` takes a criterion"), the
+ *  match rides the SAME `anon` synthetic-criterion path as `findAll` /
+ *  `run(retrieval { where })` — it desugars to `findAllBy<Criterion>` — so a
+ *  criterion passed to `run` is first-class without a new IR shape. */
 export function matchRetrievalRunCall(
   expr: Expression | undefined,
   reposByName: Map<string, Repository>,
+  isCriterionRun?: CriterionRunPredicate,
 ): RetrievalRunMatch | undefined {
   if (!expr || !isPostfixChain(expr)) return undefined;
   if (expr.suffixes.length !== 1) return undefined;
@@ -210,10 +248,19 @@ export function matchRetrievalRunCall(
       ...readPage(),
     };
   }
-  // Bare `Name` (parameterless retrieval) — still honours a sibling `page:`
-  // arg (`Repo.run(Recent, page: { limit: 20 })`), like the anonymous and
-  // `Name(args)` branches.
+  // Bare `Name` (parameterless retrieval OR criterion) — still honours a
+  // sibling `page:` arg (`Repo.run(Recent, page: { limit: 20 })`), like the
+  // anonymous and `Name(args)` branches.
   if (isNameRef(ref)) {
+    if (isCriterionRun?.(ref.name)) {
+      return {
+        repo,
+        retrievalName: "",
+        retrievalArgs: [],
+        anon: { criterionName: ref.name, criterionArgs: [], sort: [], loads: [] },
+        ...readPage(),
+      };
+    }
     return { repo, retrievalName: ref.name, retrievalArgs: [], ...readPage() };
   }
   // `Name(args)` — a NameRef head + a single CallSuffix.
@@ -222,19 +269,20 @@ export function matchRetrievalRunCall(
   }
   const rs = ref.suffixes[0]!;
   if (!isCallSuffix(rs)) return undefined;
-  const retrievalName = ref.head.name;
-  const retrievalArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
-  // Optional `page:` named arg — an object literal with offset / limit.
-  const pageArg = callArgs.find((a) => a.name === "page");
-  let pageOffset: Expression | undefined;
-  let pageLimit: Expression | undefined;
-  if (pageArg && isObjectLit(pageArg.value)) {
-    for (const f of pageArg.value.fields) {
-      if (f.name === "offset") pageOffset = f.value;
-      else if (f.name === "limit") pageLimit = f.value;
-    }
+  const targetName = ref.head.name;
+  const targetArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
+  // A criterion target (`run(InRegion("EU"))`) rides the synthetic-criterion
+  // path, exactly like `findAll(InRegion("EU"))`.
+  if (isCriterionRun?.(targetName)) {
+    return {
+      repo,
+      retrievalName: "",
+      retrievalArgs: [],
+      anon: { criterionName: targetName, criterionArgs: targetArgs, sort: [], loads: [] },
+      ...readPage(),
+    };
   }
-  return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
+  return { repo, retrievalName: targetName, retrievalArgs: targetArgs, ...readPage() };
 }
 
 /** A criterion reference expression — a bare `Name` (parameterless) or
@@ -287,6 +335,7 @@ export interface RepoReadMatch {
 export function matchRepoRead(
   expr: Expression | undefined,
   reposByName: Map<string, Repository>,
+  isCriterionRun?: CriterionRunPredicate,
 ): RepoReadMatch | undefined {
   const find = matchFindCall(expr, reposByName);
   if (find)
@@ -306,7 +355,7 @@ export function matchRepoRead(
       args: findAll.criterionArgs,
       criterionName: findAll.criterionName,
     };
-  const run = matchRetrievalRunCall(expr, reposByName);
+  const run = matchRetrievalRunCall(expr, reposByName, isCriterionRun);
   if (run)
     return {
       kind: "run",
