@@ -1,0 +1,32 @@
+// M-T1.1 / M-T2.6 acceptance capstone fixture.
+//
+// A single `platform: node` (Hono) backend with one crud aggregate whose
+// auto-`findAll` is now paged-by-default (M-T2.6).  The behavioral runner
+// (`pagination.mjs`) boots this on PGlite, seeds 1000 rows over the real
+// HTTP surface, then drives the paged list endpoint
+// (`?page=&pageSize=&sort=&dir=`) and asserts the server-computed window,
+// envelope counters, and whitelisted ORDER BY — the runtime proof that the
+// paged path threads end-to-end, which the emitted `test e2e` DSL cannot
+// express (it has no loop to seed 1000 rows).
+
+system PagingSystem {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Widget with crudish {
+        name: string
+        rank: int
+        invariant name.length > 0
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  deployable api {
+    platform: node
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    port: 3000
+  }
+}

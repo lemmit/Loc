@@ -5,7 +5,8 @@
   "description": "Headless behavioral test tier: boots generated Hono apps on PGlite (no docker) and runs their emitted `test e2e` (API) + `test` (unit) suites. See README.md.",
   "scripts": {
     "behavioral": "node run.mjs",
-    "behavioral:ui": "node run-ui.mjs"
+    "behavioral:ui": "node run-ui.mjs",
+    "behavioral:pagination": "node pagination.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.4.5",

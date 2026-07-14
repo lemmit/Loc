@@ -75,6 +75,19 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   can't reach hex.pm from Elixir's `:ssl` — set `HEX_MIRROR_URL` or run the
   repo's loopback hex mirror (CLAUDE.md → "Egress proxy wrinkle"); CI runners
   have direct hex.pm access, so no mirror is needed there.
+- **pagination** — the M-T1.1 / M-T2.6 runtime acceptance capstone
+  (`pagination.mjs`, fixture `pagination.ddd`). Boots the generated Hono
+  backend on PGlite (same in-process boot as `run.mjs`), then **seeds 1000
+  rows** over the real HTTP create surface and drives the paged list endpoint
+  (`GET /api/widgets?page=&pageSize=&sort=&dir=`), asserting the
+  server-computed window, envelope counters (`total`/`totalPages`), and
+  whitelisted ORDER BY. This is the seed-and-page property the emitted DSL
+  `test e2e` **cannot** express — it has no loop, so it can't seed a real
+  second page. The fixture seeds `name` in the reverse order of `rank` (name
+  asc == rank desc), so a server that ignored the `sort` field, sorted by the
+  wrong column, or dropped the offset is caught rather than masked by a
+  coincidentally-shared order. Gates in `behavioral-e2e.yml` right after the
+  api/unit tier; run: `node pagination.mjs`.
 
 ## Why
 
