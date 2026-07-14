@@ -375,7 +375,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
       if (!compose) for (const c of m.contexts) looseContexts.push(lowerContext(c));
     } else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
     else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
-    else if (isPayloadDecl(m)) rootPayloads.push(lowerPayload(m));
+    else if (isPayloadDecl(m)) rootPayloads.push(lowerPayload(m, rootEnv));
     else if (isComponent(m)) components.push(lowerComponent(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
     else if (isSolution(m)) solutions.push(lowerSolution(m));
@@ -1015,7 +1015,7 @@ function lowerContext(
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
-    else if (isPayloadDecl(m)) payloads.push(lowerPayload(m));
+    else if (isPayloadDecl(m)) payloads.push(lowerPayload(m, env));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isDomainService(m)) domainServices.push(lowerDomainService(m, env));
@@ -1295,19 +1295,25 @@ function lowerEvent(e: EventDecl): EventIR {
  *    - named union (P4):  `payload Foo = A | B`  → `variants` (each arm lowered
  *      as a type atom), empty `fields`.  The variant set is canonicalized only
  *      for identity/duplicate checks; the lowered list preserves source order. */
-function lowerPayload(p: PayloadDecl): PayloadIR {
+function lowerPayload(p: PayloadDecl, env?: Env): PayloadIR {
   if (p.variants.length > 0) {
     return {
       name: p.name,
       kind: p.kind as PayloadIR["kind"],
       fields: [],
-      variants: p.variants.map((v) => lowerAtom(v)),
+      variants: p.variants.map((v) => lowerAtom(v, env)),
     };
   }
+  // Pass `env` so a field's NamedType reference resolves against the context
+  // (or root) namespace.  Macro-spliced records (M-T5.10 `scaffoldHandlers`
+  // `response`/`command`/`query`) carry refs the Linker skips — a VO field
+  // (`total: Money`) or a sibling `<Part>Response` containment would otherwise
+  // collapse to `string`; the env-name fallback in `lowerBase` recovers the
+  // real `valueObject`/`entity` type (crudish-param precedent).
   return {
     name: p.name,
     kind: p.kind as PayloadIR["kind"],
-    fields: p.fields.map((f) => lowerField(f)),
+    fields: p.fields.map((f) => lowerField(f, env)),
   };
 }
 

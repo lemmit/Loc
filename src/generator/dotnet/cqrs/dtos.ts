@@ -20,6 +20,7 @@ import {
   dtoParam,
   entityExposesProvenance,
   entityResponseParams,
+  responseParamsFromPayload,
   valueObjectsUsedBy,
   wireType,
 } from "../dto-mapping.js";
@@ -53,9 +54,19 @@ export function emitResponseDtos(
       params: entityResponseParams(part, ctx),
     });
   }
+  // M-T5.10: when the context declares a `response <Agg>Response` record
+  // (spliced by `scaffoldHandlers`), READ that record's fields instead of
+  // re-deriving from `wireShape` — byte-identical for the scaffolded form,
+  // authoritative for a hand-declared divergent one.  Non-scaffolded
+  // aggregates have no declared record and keep the wireShape path.
+  const declaredResponse = ctx.payloads.find(
+    (p) => p.kind === "response" && p.name === `${agg.name}Response`,
+  );
   records.push({
     name: `${agg.name}Response`,
-    params: aggregateResponseParams(agg, ctx),
+    params: declaredResponse
+      ? responseParamsFromPayload(agg, declaredResponse, ctx)
+      : aggregateResponseParams(agg, ctx),
   });
   // Create-response (the new id) only when the aggregate exposes a REST
   // create surface (an explicit / crudish canonical create, or an ES
