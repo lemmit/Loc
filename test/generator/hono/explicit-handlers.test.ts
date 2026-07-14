@@ -169,10 +169,78 @@ describe("hono — explicit handler returning a domain aggregate", () => {
     // repo built once for the load and reused for the projection.
     expect(router).toContain("const orders = new OrderRepository(db, events);");
     expect(router).toContain("const o = await orders.getById(orderId);");
-    // the return wraps the domain entity in `toWire`, not a raw `as unknown` cast.
-    expect(router).toContain("return httpCtx.json(orders.toWire(o), 200);");
+    // the return wraps the domain entity in `toWire`, cast to the typed 200
+    // schema (M-T5.10) — not a raw `as unknown`.
+    expect(router).toContain(
+      "return httpCtx.json(orders.toWire(o) as z.infer<typeof OrderResponse>, 200);",
+    );
     expect(router).not.toContain("return httpCtx.json(o as unknown, 200);");
     expect(router).not.toContain("__bad__");
+  });
+});
+
+// M-T5.10: a SINGLE aggregate/entity return types its 200 as that entity's
+// `<Agg>Response`, imported from the aggregate's own routes file (the
+// `http/views.ts` pattern — single-registered there, so the spec keeps one
+// `$ref`).  Collection / id / scalar returns keep `z.unknown()`: their
+// `<expr> as unknown` body cast is deliberately loose, and a typed schema would
+// reject the handler's return value under strict tsc (compile-gated in
+// test/e2e/generated-build.test.ts).
+const TYPED_200_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        code: string
+        status: string
+        operation cancel() { status := "cancelled" }
+      }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order { let o = Orders.getById(orderId)  return o }
+      queryHandler CountOrders(): int { return 0 }
+      commandHandler CancelOrder(orderId: Order id): Order id {
+        let o = Orders.getById(orderId)
+        o.cancel()
+        return o.id
+      }
+      commandHandler Purge(orderId: Order id) { let o = Orders.getById(orderId)  o.cancel() }
+    }
+  }
+  api SalesApi from Sales {
+    route GET  "/orders/{orderId}"        -> Ordering.GetOrder
+    route GET  "/orders/count"            -> Ordering.CountOrders
+    route POST "/orders/{orderId}/cancel" -> Ordering.CancelOrder
+    route POST "/orders/{orderId}/purge"  -> Ordering.Purge
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("hono — explicit handler 200 body typing (M-T5.10)", () => {
+  it("types a single-entity 200 as <Agg>Response (imported) and leaves scalar/id as z.unknown()", async () => {
+    const router = fileEndingWith(
+      await generateSystemFiles(TYPED_200_SRC),
+      "http/salesApi-routes.ts",
+    );
+    // Single-entity return → `<Agg>Response`, imported once from the aggregate
+    // routes file (the views.ts pattern) — not re-declared here.
+    expect(router).toContain(
+      '200: { description: "OK", content: { "application/json": { schema: OrderResponse } } }',
+    );
+    expect(router).toContain('import { OrderResponse } from "./order.routes";');
+    expect(router).not.toContain("const OrderResponse =");
+    expect(router).not.toContain("OrderResponseResponse");
+    // Scalar (int) + id returns keep `z.unknown()` — their `as unknown` body cast
+    // is loose; a typed schema would break the return under strict tsc.
+    expect(router).toContain(
+      '200: { description: "OK", content: { "application/json": { schema: z.unknown() } } }',
+    );
+    expect(router).toContain("return httpCtx.json(0 as unknown, 200);");
+    expect(router).toContain("return httpCtx.json(o.id as unknown, 200);");
+    // The void handler keeps its 204.
+    expect(router).toContain('204: { description: "No content" }');
   });
 });
 

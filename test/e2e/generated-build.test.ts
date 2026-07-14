@@ -142,6 +142,42 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // Explicit-handler 200 typing (M-T5.10): a `commandHandler`/`queryHandler`
+    // returning a domain aggregate types its 200 as `<Agg>Response`, IMPORTED
+    // from the aggregate's own routes file (the `http/views.ts` cross-file
+    // pattern).  System-mode only (explicit routers emit under `generate
+    // system`).  The gate proves that cross-file response-schema import resolves
+    // + type-checks under strict tsc — the previously-untyped `z.unknown()` 200
+    // exercised no such import, so nothing else compiles it.
+    it("system explicit-handler return typing (node) — imported <Agg>Response 200 type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-eh-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/explicit-handler-return.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: the explicit router imports the response schema cross-file.
+        const router = fs.readFileSync(path.join(proj, "http", "salesApi-routes.ts"), "utf8");
+        expect(router).toContain('import { OrderResponse } from "./order.routes";');
+        expect(router).toContain("schema: OrderResponse");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // OIDC turnkey auth (D-AUTH-OIDC, Phase 1): a system with an
     // `auth { oidc { … } }` block emits the generated jose-backed verifier
     // (auth/oidc.ts) + the /auth/* handshake (auth/handshake.ts) + the

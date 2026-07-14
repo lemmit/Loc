@@ -1,0 +1,51 @@
+// Compile-gate fixture for the explicit-handler 200 body typing (M-T5.10).
+// `commandHandler`/`queryHandler` + `route` bind explicit transport routes
+// (system-mode only).  A handler that returns a SINGLE domain aggregate now
+// types its 200 as the aggregate's `<Agg>Response` schema, IMPORTED from the
+// aggregate's own routes file (`./order.routes`) — the `http/views.ts` pattern.
+// This pins that the cross-file response-schema import resolves + type-checks
+// under strict tsc (the previously-untyped `z.unknown()` 200 exercised no such
+// import), AND that an id / scalar return still compiles (keeps `z.unknown()`,
+// whose `<expr> as unknown` body cast a typed schema would reject).
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: int  currency: string }
+      aggregate Order {
+        code: string
+        total: Money
+        contains lines: Line[]
+        entity Line {
+          sku: string
+          qty: int
+        }
+        operation cancel() { code := "x" }
+      }
+      repository Orders for Order { }
+
+      // Single-entity return → `schema: OrderResponse` + `import { OrderResponse }`.
+      queryHandler GetOrder(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        return o
+      }
+      // Scalar return → keeps `z.unknown()` (body is `0 as unknown`).
+      queryHandler CountOrders(): int {
+        return 0
+      }
+      // Id return → keeps `z.unknown()` (body is `o.id as unknown`).
+      commandHandler CancelOrder(orderId: Order id): Order id {
+        let o = Orders.getById(orderId)
+        o.cancel()
+        return o.id
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET  "/orders/{orderId}"        -> Ordering.GetOrder
+    route GET  "/orders/count"            -> Ordering.CountOrders
+    route POST "/orders/{orderId}/cancel" -> Ordering.CancelOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
