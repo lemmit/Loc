@@ -319,8 +319,10 @@ export function buildJavaOpenApiContract(
         }
       }
 
-      // Declared finds — GET /<plural>/<find_snake>.
-      for (const f of declaredFinds(repo)) {
+      // Declared finds — GET /<plural>/<find_snake>.  A synthesized find
+      // (paged-run queryHandler support) is not auto-exposed, so it documents
+      // no path here — the queryHandler's own route carries the OpenAPI entry.
+      for (const f of declaredFinds(repo).filter((f) => !f.synthesized)) {
         const findPath = `${route}/${snake(f.name)}`;
         const spec = ctx ? findUnionSpec(f.returnType, agg.name, ctx) : null;
         if (spec) {

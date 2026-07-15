@@ -89,7 +89,7 @@ const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 // return-type render, so gate a paged queryHandler hosted on such a deployable
 // with an honest diagnostic until its emitter fans out — a reviewed gap rather
 // than a silent codegen crash.
-const PAGED_QH_SUPPORTED = new Set(["node", "python"]);
+const PAGED_QH_SUPPORTED = new Set(["node", "python", "java"]);
 
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));

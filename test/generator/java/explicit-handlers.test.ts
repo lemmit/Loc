@@ -332,3 +332,54 @@ describe("java — extern commandHandler / queryHandler", () => {
     expect(impl).toContain("throw new UnsupportedOperationException(");
   });
 });
+
+// paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
+// Repo.run(<Criterion>(args)); return r }`) → a `@Service` bean over the
+// synthesized paged FIND repo method + a GET action with page/pageSize/sort/dir
+// @RequestParams returning the wire-projected `Paged<Agg>Response` envelope.
+const PAGED_SRC = `
+system S {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { code: string  region: string }
+      repository Orders for Order { }
+      criterion InRegion(rgn: string) of Order = region == rgn
+      queryHandler ListInRegion(rgn: string): Order paged {
+        let r = Orders.run(InRegion(rgn))
+        return r
+      }
+    }
+  }
+  api A from Sales { route GET "/orders/projections/in_region" -> Orders.ListInRegion }
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: java, contexts: [Orders], dataSources: [s], serves: A, port: 5001 }
+}
+`;
+describe("java — paged-run queryHandler over run(criterion)", () => {
+  it("the handler bean delegates to the synthesized paged FIND repo method", async () => {
+    const h = fileEndingWith(await generateSystemFiles(PAGED_SRC), "ListInRegionHandler.java");
+    expect(h).toContain(
+      "public Paged<Order> handle(String rgn, int page, int pageSize, String sort, String dir)",
+    );
+    expect(h).toContain(
+      "return ordersRepository.findAllByInRegion(rgn, page, pageSize, sort, dir);",
+    );
+  });
+
+  it("the controller action exposes page/pageSize/sort/dir and returns the projected envelope", async () => {
+    const ctrl = fileEndingWith(await generateSystemFiles(PAGED_SRC), "ARoutesController.java");
+    expect(ctrl).toContain('@GetMapping("/orders/projections/in_region")');
+    expect(ctrl).toContain('@RequestParam(defaultValue = "1") int page');
+    expect(ctrl).toContain(
+      "var result = listInRegionHandler.handle(rgn, page, pageSize, sort, dir);",
+    );
+    expect(ctrl).toContain("new Paged<>(result.items().stream().map(OrderResponse::from).toList()");
+  });
+
+  it("the aggregate controller does NOT auto-expose the synthesized find", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const key = [...m.keys()].find((k) => k.endsWith("OrderController.java"));
+    if (key) expect(m.get(key)!).not.toContain("in_region");
+  });
+});

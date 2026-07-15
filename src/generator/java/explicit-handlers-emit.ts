@@ -37,6 +37,7 @@
 // v1 scope: full response-DTO projection rides with the contract-scaffold layer.
 // ---------------------------------------------------------------------------
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -246,6 +247,98 @@ function renderExternImpl(
   );
 }
 
+/** Recover the synthesized `repo-run` statement of a paged-run queryHandler
+ *  (`queryHandler H(...): <Agg> paged { let r = Repo.run(<Criterion>(args));
+ *  return r }`) — carrying the repo/aggregate + the paged FIND method name
+ *  (`retrievalName` = `findAllBy<Criterion>`) + the criterion args. */
+function pagedRunStmt(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): Extract<WorkflowStmtIR, { kind: "repo-run" }> {
+  const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+  const run = h.statements.find(
+    (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+      s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+  );
+  if (!run) {
+    throw new Error(
+      `internal: paged queryHandler '${h.name}' in '${ctx.name}' does not match the ` +
+        "supported `let r = Repo.run(<Criterion>(args)); return r` shape. Please file a bug.",
+    );
+  }
+  return run;
+}
+
+/** Render a paged-run queryHandler as a `@Service` bean.  It injects the
+ *  aggregate's `<Agg>Repository` and returns the domain `Paged<Agg>` from the
+ *  synthesized paged FIND method (`findAllBy<Criterion>`); the controller
+ *  projects the page items to `<Agg>Response`.  Reuses the #1904 paged repo
+ *  method (already declared on the wrapper because the synthesized FIND is in
+ *  its `finds`). */
+function renderPagedRunHandlerClass(
+  h: Handler,
+  basePkg: string,
+  appPkg: string,
+  ctx: EnrichedBoundedContextIR,
+  entityPkgOf: (agg: string) => string,
+  repoPkgOf: (agg: string) => string,
+): string {
+  const handlerName = `${h.name}Handler`;
+  const run = pagedRunStmt(h, ctx);
+  const agg = run.aggName;
+  const imports = new Set<string>();
+  const renderCtx = handlerRenderCtx(h, ctx);
+  const critArgs = run.retrievalArgs.map((a) => {
+    collectJavaExprImports(a, imports);
+    return renderJavaExpr(a, renderCtx);
+  });
+  const callArgs = [...critArgs, "page", "pageSize", "sort", "dir"].join(", ");
+  const params = flatHandlerParams(h, ctx)
+    .map((p) => {
+      collectJavaTypeImports(p.type, imports);
+      return `${renderJavaType(p.type)} ${p.name}`;
+    })
+    .join(", ");
+  const sigParams = [params, "int page", "int pageSize", "String sort", "String dir"]
+    .filter(Boolean)
+    .join(", ");
+  const ePkg = entityPkgOf(agg);
+  const rPkg = repoPkgOf(agg);
+  const aggImports = [
+    ePkg !== appPkg ? `import ${ePkg}.${agg};` : null,
+    rPkg !== appPkg ? `import ${rPkg}.${agg}Repository;` : null,
+  ].filter((l): l is string => l !== null);
+  return lines(
+    `package ${appPkg};`,
+    ``,
+    ...[...imports].sort().map((i) => `import ${i};`),
+    imports.size > 0 ? `` : null,
+    `import org.springframework.stereotype.Service;`,
+    `import org.springframework.transaction.annotation.Transactional;`,
+    ``,
+    ...aggImports,
+    `import ${basePkg}.domain.common.Paged;`,
+    `import ${basePkg}.domain.enums.*;`,
+    `import ${basePkg}.domain.ids.*;`,
+    `import ${basePkg}.domain.valueobjects.*;`,
+    ``,
+    `@Service`,
+    `@Transactional(readOnly = true)`,
+    `public class ${handlerName} {`,
+    `    private final ${agg}Repository ${repoField(agg)};`,
+    ``,
+    `    public ${handlerName}(${agg}Repository ${repoField(agg)}) {`,
+    `        this.${repoField(agg)} = ${repoField(agg)};`,
+    `    }`,
+    ``,
+    `    public Paged<${agg}> handle(${sigParams}) {`,
+    `        return ${repoField(agg)}.${run.retrievalName}(${callArgs});`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 /** Render one `commandHandler` / `queryHandler` as a `@Service` bean. */
 function renderHandlerClass(
   h: Handler,
@@ -383,6 +476,15 @@ export function emitExplicitHandlers(
       });
       return;
     }
+    // paged-run queryHandler: a dedicated bean over the synthesized paged FIND
+    // (the generic `paged` carrier can't flow through the workflow spine).
+    if (h.returnType && pagedReturn(h.returnType)) {
+      files.push({
+        name: `${h.name}Handler.java`,
+        content: renderPagedRunHandlerClass(h, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
+      });
+      return;
+    }
     files.push({
       name: `${h.name}Handler.java`,
       content: renderHandlerClass(h, kind, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
@@ -428,6 +530,75 @@ function wireActionParam(
   }
   collectJavaTypeImports(t, imports);
   return { actionParam: `@PathVariable ${renderJavaType(t)} ${p.name}`, callArg: p.name };
+}
+
+/** The `@RequestParam` sibling of `wireActionParam` for a NON-path criterion
+ *  param of a paged-run queryHandler: an id → wire type coerced with
+ *  `new <Agg>Id(...)`; a scalar → the rendered domain type verbatim. */
+function wireQueryParam(
+  p: ParamIR,
+  imports: Set<string>,
+): { actionParam: string; callArg: string } {
+  const t = p.type;
+  if (t.kind === "id") {
+    const wire = javaValueTypeForId(t.valueType);
+    if (wire === "UUID") imports.add("java.util.UUID");
+    return {
+      actionParam: `@RequestParam ${wire} ${p.name}`,
+      callArg: `new ${t.targetName}Id(${p.name})`,
+    };
+  }
+  collectJavaTypeImports(t, imports);
+  return { actionParam: `@RequestParam ${renderJavaType(t)} ${p.name}`, callArg: p.name };
+}
+
+/** Emit the `@GetMapping` action for a paged-run queryHandler route.  Path-bound
+ *  params stay `@PathVariable` (coerced); the rest ride the query string as
+ *  `@RequestParam`, joined by page/pageSize/sort/dir controls (defaulted).  The
+ *  action calls the handler bean (→ domain `Paged<Agg>`) and returns the
+ *  `Paged<Agg>Response` envelope with items projected via `<Agg>Response::from`. */
+function emitPagedRunAction(
+  r: RouteIR,
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+  field: string,
+  imports: Set<string>,
+  responsePkgOf: (agg: string) => string,
+  responsePkgs: Set<string>,
+): string[] {
+  const run = pagedRunStmt(h, ctx);
+  const agg = run.aggName;
+  responsePkgs.add(responsePkgOf(agg));
+  const pathNames = pathParamNames(r.path);
+  const bind = new Map(
+    h.params.map((p) => [
+      p.name,
+      pathNames.has(p.name) ? wireActionParam(p, imports) : wireQueryParam(p, imports),
+    ]),
+  );
+  const actionParams = [
+    ...h.params.map((p) => bind.get(p.name)!.actionParam),
+    `@RequestParam(defaultValue = "1") int page`,
+    `@RequestParam(defaultValue = "20") int pageSize`,
+    `@RequestParam(defaultValue = "id") String sort`,
+    `@RequestParam(defaultValue = "asc") String dir`,
+  ].join(", ");
+  const callArgs = [
+    ...h.params.map((p) => bind.get(p.name)!.callArg),
+    "page",
+    "pageSize",
+    "sort",
+    "dir",
+  ].join(", ");
+  return [
+    `    @GetMapping("${r.path}")`,
+    `    public ResponseEntity<?> ${lowerFirst(h.name)}(${actionParams}) {`,
+    `        var result = ${field}.handle(${callArgs});`,
+    `        return ResponseEntity.ok(new Paged<>(result.items().stream().map(${agg}Response::from).toList(),`,
+    `            result.page(), result.pageSize(), result.total(), result.totalPages()));`,
+    `    }`,
+    ``,
+  ];
 }
 
 /** The wire-shape projection of a handler's return value (C2, the Java sibling
@@ -483,6 +654,9 @@ export function emitExplicitRouteController(
   // Package-private `<Handler>Body` records for routes with body params — one
   // record per route that has any non-path-bound param.
   const bodyRecords: string[] = [];
+  // Set when any route is a paged-run queryHandler — pulls the `Paged<>`
+  // envelope type into the controller header.
+  let usesPaged = false;
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -493,6 +667,15 @@ export function emitExplicitRouteController(
     const handlerName = `${h.name}Handler`;
     const field = lowerFirst(handlerName);
     injected.set(handlerName, field);
+
+    // paged-run queryHandler: a GET whose criterion params ride the query
+    // string alongside page/pageSize/sort/dir; calls the handler bean (→ domain
+    // `Paged<Agg>`) and returns the wire-projected `Paged<Agg>Response`.
+    if (h.returnType && pagedReturn(h.returnType)) {
+      usesPaged = true;
+      actions.push(...emitPagedRunAction(r, h, ctx, field, imports, responsePkgOf, responsePkgs));
+      continue;
+    }
 
     // Split params: those bound by a `{token}` in the route path stay
     // `@PathVariable`s; the rest collect into one `@RequestBody` record.  A bare
@@ -575,6 +758,8 @@ export function emitExplicitRouteController(
         .sort()
         .map((p) => `import ${p}.*;`),
       `import ${basePkg}.domain.ids.*;`,
+      // Paged-run queryHandler routes return the `Paged<>` envelope.
+      usesPaged ? `import ${basePkg}.domain.common.Paged;` : null,
       // Body records reference domain value objects / enums by their wildcard
       // packages (Money, etc.); only pulled in when a route carries body params
       // so the no-body header stays byte-identical to the path-only emitter.

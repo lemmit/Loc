@@ -69,7 +69,7 @@ describe("paged queryHandler — validation", () => {
   }
 
   it("a supported backend accepts a paged queryHandler", async () => {
-    for (const platform of ["node", "python"]) {
+    for (const platform of ["node", "python", "java"]) {
       expect(await errorCodes(platform)).not.toContain(
         "loom.paged-query-handler-unsupported-backend",
       );
@@ -77,7 +77,7 @@ describe("paged queryHandler — validation", () => {
   });
 
   it("a not-yet-supported backend is honestly gated (loom.paged-query-handler-unsupported-backend)", async () => {
-    for (const platform of ["dotnet", "java", "elixir"]) {
+    for (const platform of ["dotnet", "elixir"]) {
       expect(await errorCodes(platform)).toContain("loom.paged-query-handler-unsupported-backend");
     }
   });
