@@ -5,6 +5,7 @@ erDiagram
     guid id PK
     string sku
     Money price
+    int version
   }
   Money {
     decimal amount
@@ -15,6 +16,7 @@ erDiagram
     string customerId
     OrderStatus status
     datetime placedAt
+    int version
   }
   OrderLine {
     Id_Product productId FK
@@ -25,6 +27,7 @@ erDiagram
     string username
     string email
     int age
+    int version
   }
   Product ||--|| Money : "price"
   Order ||--o{ OrderLine : "lines"

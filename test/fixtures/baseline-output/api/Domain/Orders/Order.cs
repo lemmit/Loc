@@ -16,6 +16,7 @@ public sealed class Order
     public string CustomerId { get; private set; } = default!;
     public OrderStatus Status { get; private set; } = default!;
     public DateTime PlacedAt { get; private set; } = default!;
+    public int Version { get; private set; } = default!;
     private readonly List<OrderLine> _lines = new();
     public IReadOnlyList<OrderLine> Lines => _lines.AsReadOnly();
 
@@ -27,9 +28,10 @@ public sealed class Order
         CustomerId = default!;
         Status = default!;
         PlacedAt = default!;
+        Version = default!;
     }
 
-    public string Inspect => "Order(" + "id: " + this.Id.ToString() + ", " + "customerId: " + "'" + this.CustomerId + "'" + ", " + "status: " + this.Status.ToString() + ", " + "placedAt: " + this.PlacedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture) + ", " + "lines: " + "[OrderLine[]]" + ")";
+    public string Inspect => "Order(" + "id: " + this.Id.ToString() + ", " + "customerId: " + "'" + this.CustomerId + "'" + ", " + "status: " + this.Status.ToString() + ", " + "placedAt: " + this.PlacedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture) + ", " + "version: " + this.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + "lines: " + "[OrderLine[]]" + ")";
     public override string ToString() => Inspect;
     private bool IsMutable() => this.Status == OrderStatus.Draft;
     public void AddLine(ProductId productId, int qty)
@@ -76,6 +78,7 @@ public sealed class Order
         public string CustomerId { get; init; } = default!;
         public OrderStatus Status { get; init; } = default!;
         public DateTime PlacedAt { get; init; } = default!;
+        public int Version { get; init; } = default!;
     }
 
     public static Order _Create(State s)
@@ -85,6 +88,7 @@ public sealed class Order
         e.CustomerId = s.CustomerId;
         e.Status = s.Status;
         e.PlacedAt = s.PlacedAt;
+        e.Version = s.Version;
         e.AssertInvariants();
         return e;
     }

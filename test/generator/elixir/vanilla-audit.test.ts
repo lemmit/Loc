@@ -199,7 +199,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     );
     // The audit insert must NOT change the controller-facing return shape — the
     // success branch returns the wire map (the controller `json`s it).
-    expect(settle).toContain("%{id: saved.id, status: saved.status}");
+    expect(settle).toContain("%{id: saved.id, status: saved.status, version: saved.version}");
   });
 
   it("maps the returning audited op's persist-failure to a 422 (validation clause)", async () => {

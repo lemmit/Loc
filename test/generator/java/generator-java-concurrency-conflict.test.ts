@@ -4,8 +4,10 @@
 // adds a think-time CAS: the controller reads the `If-Match` header, the service
 // compares it against the loaded aggregate's version and throws
 // `ObjectOptimisticLockingFailureException` on a mismatch; the RFC 7807 advice
-// maps that to 409 Conflict with a distinct `conflict` catalog event.  A
-// NON-versioned aggregate is byte-identical — gated on `aggregateIsVersioned`.
+// maps that to 409 Conflict with a distinct `conflict` catalog event.  As of
+// default-on versioning (M-T3.4) every non-event-sourced aggregate is
+// `versioned` even without a `with versioned` clause, so the annotation, CAS,
+// and 409 arm all appear by default.
 //
 // Sibling of generator-java-unique-conflict.test.ts (the 23505 → 409 mapping).
 // ---------------------------------------------------------------------------
@@ -91,16 +93,16 @@ describe("java generator — versioned optimistic-concurrency", () => {
     expect(advice).toMatch(/return respond\(problem\(409, "Conflict",[\s\S]*?, 409\);/);
   });
 
-  it("a NON-versioned aggregate emits byte-identical output (no @Version, no CAS)", async () => {
+  it("an aggregate without a `with versioned` clause still gets @Version + CAS — default-on (M-T3.4)", async () => {
     const files = await generateSystemFiles(javaSystem(""));
     const entity = files.get(`${feature}/Customer.java`)!;
     const service = files.get(`${feature}/CustomerService.java`)!;
     const advice = files.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
-    expect(entity).not.toContain("@Version");
-    expect(entity).not.toContain("version");
-    expect(service).not.toContain("ObjectOptimisticLockingFailureException");
-    expect(service).not.toContain("ifMatch");
-    expect(advice).not.toContain("ObjectOptimisticLockingFailureException");
-    expect(advice).not.toContain('"conflict"');
+    expect(entity).toContain("@Version");
+    expect(entity).toContain("int version;");
+    expect(service).toContain("ObjectOptimisticLockingFailureException");
+    expect(service).toContain("ifMatch");
+    expect(advice).toContain("ObjectOptimisticLockingFailureException");
+    expect(advice).toContain('"conflict"');
   });
 });

@@ -126,14 +126,28 @@ const DIVERGENT = `
 `;
 
 describe("M-T5.10 PR6 — Elixir reads the <Agg>Response contract record", () => {
-  it("(a) reads the scaffolded record byte-identically to the wireShape baseline", async () => {
+  it("(a) reads the scaffolded record identically to the wireShape baseline modulo the default-on version token (M-T3.4)", async () => {
     const scaffold = await generateSystemFiles(SCAFFOLD);
     const baseline = await generateSystemFiles(BASELINE);
     const scaffoldOrder = orderResponseSchema(scaffold);
     const baselineOrder = orderResponseSchema(baseline);
-    // Byte-identical read path: containment → array of the LineResponse module
-    // atom (single-suffixed), internal/secret dropped, leading id, derived kept.
-    expect(scaffoldOrder).toBe(baselineOrder);
+    // Default-on versioning (M-T3.4) injects the synthetic `version` token as an
+    // IR-level capability field, so the wireShape-derived BASELINE read schema
+    // carries it.  The scaffold path reads the DECLARED `<Agg>Response` contract
+    // record verbatim (built at the AST layer from `apiReadFields`, before the
+    // capability field is lowered), so it carries only the domain fields.  The
+    // two therefore now differ by EXACTLY `version`; every other field branch —
+    // containment → array of the LineResponse module atom (single-suffixed),
+    // internal/secret dropped, leading id, derived kept — stays byte-identical.
+    const stripVersion = (s: string) =>
+      s
+        .replace(/\n\s*version: %OpenApiSpex\.Schema\{type: :integer\},/, "")
+        .replace(", :version,", ",");
+    expect(stripVersion(baselineOrder)).toBe(scaffoldOrder);
+    // The wireShape baseline carries version; the declared scaffold contract does not.
+    expect(baselineOrder).toContain("version: %OpenApiSpex.Schema{type: :integer}");
+    expect(baselineOrder).toContain(":version");
+    expect(scaffoldOrder).not.toContain("version");
     expect(scaffoldOrder).toContain("items: ApiWeb.Api.Schemas.LineResponse");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toMatch(/\bid: %OpenApiSpex\.Schema\{type: :string, format: :uuid\}/);

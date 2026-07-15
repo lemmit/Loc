@@ -37,6 +37,7 @@ export const ProductResponse = z.object({
   id: z.string(),
   sku: z.string(),
   price: MoneySchema,
+  version: z.number().int(),
   display: z.string(),
 });
 export type ProductResponse = z.infer<typeof ProductResponse>;

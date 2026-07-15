@@ -34,6 +34,14 @@
           },
           "nullable": false,
           "voGroup": "price"
+        },
+        {
+          "name": "version",
+          "type": {
+            "kind": "int"
+          },
+          "nullable": false,
+          "default": "1"
         }
       ],
       "primaryKey": [

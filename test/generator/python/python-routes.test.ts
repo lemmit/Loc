@@ -131,7 +131,11 @@ describe("python routes", () => {
     expect(routes).toContain(
       "found.add_line(body.qty, Money(body.price.amount, body.price.currency))",
     );
-    expect(routes).toContain("await repo.save(found)");
+    // Versioning is default-on (M-T3.4): the update path threads the If-Match
+    // precondition into a guarded save.
+    expect(routes).toContain('_if_match = request.headers.get("if-match", "").strip(chr(34))');
+    expect(routes).toContain("_expected = int(_if_match) if _if_match.isdigit() else None");
+    expect(routes).toContain("await repo.save(found, expected_version=_expected)");
     expect(routes).toContain("return Response(status_code=204)");
   });
 

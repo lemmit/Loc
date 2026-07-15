@@ -12,9 +12,10 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // — a 409 with the distinct `conflict` catalog event, reusing the `versioned`
 // machinery.
 //
-// A plain relational, non-versioned aggregate is byte-identical (no
-// conflict_response/1), so the rider is gated on the aggregate being
-// event-sourced OR versioned.
+// Since versioning is default-on (M-T3.4), a plain relational aggregate is now
+// auto-versioned and ALSO carries `conflict_response/1` (via the shared
+// optimistic-lock → 409 machinery); the rider fires for event-sourced OR
+// versioned aggregates, which is now every non-event-sourced aggregate too.
 //
 // Sibling of vanilla-concurrency-conflict.test.ts (the `versioned`
 // optimistic_lock → 409); this is the event-log-append → 409.
@@ -106,8 +107,11 @@ describe("vanilla elixir generator — event-sourced concurrency rider", () => {
     expect(pd).toContain("send_resp(409, body)");
   });
 
-  it("a plain relational, non-versioned aggregate is byte-identical (no conflict_response/1)", async () => {
+  it("a plain relational aggregate ALSO gets conflict_response/1 — versioning is default-on (M-T3.4)", async () => {
+    // Versioning is now auto-applied to every plain (non-event-sourced)
+    // aggregate, so the `versioned` optimistic-lock → 409 machinery (and its
+    // shared `conflict_response/1`) rides along even without `with versioned`.
     const pd = at(await generateSystemFiles(RELATIONAL), "problem_details.ex");
-    expect(pd).not.toContain("conflict_response");
+    expect(pd).toContain("def conflict_response(conn) do");
   });
 });

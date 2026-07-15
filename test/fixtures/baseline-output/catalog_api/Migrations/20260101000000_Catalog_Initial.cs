@@ -26,6 +26,7 @@ CREATE TABLE ""products"".""products"" (
   ""sku"" TEXT NOT NULL,
   ""price_amount"" DECIMAL NOT NULL,
   ""price_currency"" TEXT NOT NULL,
+  ""version"" INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (""id"")
 );");
         }

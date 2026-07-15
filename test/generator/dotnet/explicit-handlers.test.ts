@@ -180,7 +180,7 @@ describe("dotnet — explicit handler aggregate return → wire-shape Response",
     // The Responses namespace is imported and the domain result projected.
     expect(ctrl).toContain("using Api.Application.Orders.Responses;");
     expect(ctrl).toContain(
-      "return Ok(new OrderResponse(result.Id.Value, result.Code, result.Status));",
+      "return Ok(new OrderResponse(result.Id.Value, result.Code, result.Status, result.Version));",
     );
     // Not the raw domain entity.
     expect(ctrl).not.toContain("return Ok(result);");

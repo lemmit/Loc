@@ -193,6 +193,7 @@ export default function OrderDetail() {
                 <KeyValueRow label="Customer Id" data-testid="orders-detail-customerId"><Text>{orderById.data.customerId}</Text></KeyValueRow>
                 <KeyValueRow label="Status" data-testid="orders-detail-status"><Badge tt="none">{ orderById.data.status }</Badge></KeyValueRow>
                 <KeyValueRow label="Placed At" data-testid="orders-detail-placedAt"><DateTimeValue iso={ orderById.data.placedAt } /></KeyValueRow>
+                <KeyValueRow label="Version" data-testid="orders-detail-version"><Text>{orderById.data.version}</Text></KeyValueRow>
               </Stack>
             </Card>
             <Card withBorder padding="md" data-testid="orders-detail-lines">

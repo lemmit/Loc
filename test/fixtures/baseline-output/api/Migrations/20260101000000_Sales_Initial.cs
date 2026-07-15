@@ -26,6 +26,7 @@ CREATE TABLE ""orders"".""orders"" (
   ""customer_id"" TEXT NOT NULL,
   ""status"" TEXT NOT NULL,
   ""placed_at"" TIMESTAMP WITH TIME ZONE NOT NULL,
+  ""version"" INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (""id"")
 );
 

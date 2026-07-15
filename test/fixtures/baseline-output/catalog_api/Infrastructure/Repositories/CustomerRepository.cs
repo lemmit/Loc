@@ -46,6 +46,13 @@ public sealed class CustomerRepository : ICustomerRepository
         {
             _db.Customers.Add(aggregate);
         }
+        if (entry.State != EntityState.Added && entry.State != EntityState.Detached)
+        {
+            var __version = entry.Property(x => x.Version);
+            var __expected = RequestContext.Current?.ExpectedVersion;
+            if (__expected.HasValue) __version.OriginalValue = __expected.Value;
+            __version.CurrentValue = __version.OriginalValue + 1;
+        }
         await _db.SaveChangesAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Customer", aggregate.Id.Value);
         foreach (var ev in aggregate.PullEvents())
@@ -63,7 +70,7 @@ public sealed class CustomerRepository : ICustomerRepository
     public async Task<Paged<Customer>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)
     {
         var offset = (page - 1) * pageSize;
-        var sortColumn = sort switch { "username" => "Username", "email" => "Email", "age" => "Age", _ => "Id" };
+        var sortColumn = sort switch { "username" => "Username", "email" => "Email", "age" => "Age", "version" => "Version", _ => "Id" };
         var total = await _db.Customers.CountAsync(cancellationToken);
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;
         var ordered = dir == "desc" ? _db.Customers.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Customers.OrderBy(e => EF.Property<object>(e, sortColumn));

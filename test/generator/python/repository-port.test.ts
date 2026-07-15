@@ -39,7 +39,9 @@ describe("python repository ports (audit S7)", () => {
     expect(port).toContain("class OrderRepositoryPort(Protocol):");
     expect(port).toContain("async def find_by_id(self, id: OrderId) -> Order | None: ...");
     expect(port).toContain("async def get_by_id(self, id: OrderId) -> Order: ...");
-    expect(port).toContain("async def save(self, aggregate: Order) -> None: ...");
+    expect(port).toContain(
+      "async def save(self, aggregate: Order, expected_version: int | None = None) -> None: ...",
+    );
     expect(port).toContain("async def delete(self, id: OrderId) -> None: ...");
     expect(port).toContain("async def by_min(self, m: int) -> list[Order]: ...");
   });

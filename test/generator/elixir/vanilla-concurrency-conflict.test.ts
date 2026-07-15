@@ -97,15 +97,22 @@ describe("vanilla — versioned optimistic-concurrency", () => {
     expect(migration).toContain("default: 1");
   });
 
-  it("a NON-versioned aggregate emits byte-identical output (no optimistic lock)", async () => {
+  it("an aggregate WITHOUT `with versioned` still gets the optimistic lock — versioning is default-on (M-T3.4)", async () => {
+    // There is no opt-out: every plain (non-event-sourced) aggregate is
+    // auto-versioned by the macro expander, so the bare-capability source emits
+    // exactly the same optimistic-concurrency machinery as `with versioned`.
     const files = await generateSystemFiles(SOURCE(""));
     const cs = fileEndingWith(files, "customer_changeset.ex");
     const repo = fileEndingWith(files, "customer_repository.ex");
     const pd = fileEndingWith(files, "_web/problem_details.ex");
-    expect(cs).not.toContain("optimistic_lock");
-    expect(cs).not.toContain(":version");
-    expect(repo).not.toContain("expected_version");
-    expect(repo).not.toContain("StaleEntryError");
-    expect(pd).not.toContain("conflict_response");
+    expect(cs).toContain("|> optimistic_lock(:version)");
+    expect(cs).toContain(":version");
+    expect(repo).toContain("expected_version \\\\ nil");
+    expect(repo).toContain("Ecto.StaleEntryError -> {:error, :conflict}");
+    expect(pd).toContain("def conflict_response(conn) do");
+    // …and it is byte-identical to the explicitly `with versioned` emission.
+    const explicit = await generateSystemFiles(SOURCE("with versioned"));
+    expect(cs).toBe(fileEndingWith(explicit, "customer_changeset.ex"));
+    expect(repo).toBe(fileEndingWith(explicit, "customer_repository.ex"));
   });
 });

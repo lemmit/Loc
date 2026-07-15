@@ -10,9 +10,11 @@
 // the ApiExceptionAdvice maps to 409 Conflict with the distinct `conflict`
 // catalog event.
 //
-// A plain relational, non-versioned aggregate is byte-identical (no
-// ObjectOptimisticLockingFailureException arm), so the rider is gated on the
-// aggregate being event-sourced OR versioned.
+// A plain relational aggregate is `versioned` by default (default-on, M-T3.4),
+// so it ALSO carries the ObjectOptimisticLockingFailureException → 409 arm —
+// via its @Version write-time CAS rather than the event-log append.
+// The rider is present whenever the aggregate is event-sourced OR versioned,
+// which now means every non-event-sourced aggregate too.
 //
 // Sibling of generator-java-concurrency-conflict.test.ts (the `versioned`
 // @Version → 409); this is the event-log-append → 409.
@@ -106,9 +108,9 @@ describe("java generator — event-sourced concurrency rider", () => {
     );
   });
 
-  it("a plain relational, non-versioned aggregate is byte-identical (no 409 arm)", async () => {
+  it("a plain relational aggregate also gains the 409 arm — versioned default-on (M-T3.4)", async () => {
     const advice = at(await generateSystemFiles(RELATIONAL), "ApiExceptionAdvice.java");
-    expect(advice).not.toContain("ObjectOptimisticLockingFailureException");
-    expect(advice).not.toContain('CatalogLog.event("conflict"');
+    expect(advice).toContain("ObjectOptimisticLockingFailureException");
+    expect(advice).toContain('CatalogLog.event("conflict"');
   });
 });

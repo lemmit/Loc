@@ -4,7 +4,7 @@ import { ProblemDetails, newApp } from "./problem-details";
 import { Customer } from "../domain/customer";
 import type { CustomerRepository } from "../db/repositories/customer-repository";
 import * as Ids from "../domain/ids";
-import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";
+import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError, ConcurrencyError } from "../domain/errors";
 
 
 const CreateCustomerRequest = z.object({
@@ -34,6 +34,7 @@ export const CustomerResponse = z.object({
   username: z.string(),
   email: z.string(),
   age: z.number().int(),
+  version: z.number().int(),
   display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
@@ -151,6 +152,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
         204: { description: "No content" },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
+        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
@@ -159,8 +161,10 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
       const aggregate = await repo.getById(Ids.CustomerId(id));
+      const ifMatch = c.req.header("if-match");
+      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;
       aggregate.update(body.username, body.email, body.age);
-      await repo.save(aggregate);
+      await repo.save(aggregate, expectedVersion);
       return c.body(null, 204);
     },
   );
@@ -201,6 +205,10 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });
       return problem(404, "Not Found", err.message);
+    }
+    if (err instanceof ConcurrencyError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Customer", message: err.message, status: 409 });
+      return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });

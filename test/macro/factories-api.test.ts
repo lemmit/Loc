@@ -403,6 +403,6 @@ describe("targetFields — Property filter", () => {
       derived display: string = name
       operation rotate() { }
     `);
-    expect(targetFields(agg).map((f) => f.name)).toEqual(["name", "email"]);
+    expect(targetFields(agg).map((f) => f.name)).toEqual(["name", "email", "version"]);
   });
 });

@@ -3,9 +3,10 @@
 // upsert into an optimistic-lock guarded write: an UPDATE conditioned on the
 // client's expected `version` (threaded from the `If-Match` header, think-time
 // CAS), 0 rows affected → `ConcurrencyError` → 409 Conflict with a distinct
-// `conflict` catalog event.  A NON-versioned aggregate is byte-identical (no
-// `version` column in the wire, no guarded write, no 409 arm), so the whole
-// feature is gated on `aggregateIsVersioned`.
+// `conflict` catalog event.  As of M-T3.4 versioning is DEFAULT-ON: every plain
+// (non-event-sourced) aggregate gains this guarded write with no `with
+// versioned` in source, so the feature is present whether or not the capability
+// is spelled out.
 //
 // Sibling of test/system/unique-index.test.ts (the 23505 → 409 mapping); this
 // is the version-token → 409 mapping.
@@ -115,15 +116,17 @@ describe("hono/drizzle generator — versioned optimistic-concurrency", () => {
     expect(updateReq).not.toContain("version");
   });
 
-  it("a NON-versioned aggregate emits byte-identical output (no guarded write)", async () => {
+  it("an aggregate without `with versioned` still gets the guarded write — default-on (M-T3.4)", async () => {
     const files = await generateSystemFiles(nodeSystem(""));
     const repo = fileEndingWith(files, "customer-repository.ts");
     const routes = fileEndingWith(files, "customer.routes.ts");
-    expect(repo).not.toContain("ConcurrencyError");
-    expect(repo).not.toContain("expectedVersion");
-    expect(repo).not.toContain("version");
-    expect(routes).not.toContain("ConcurrencyError");
-    expect(routes).not.toContain("if-match");
-    expect(routes).not.toContain('event: "conflict"');
+    // Versioning is default-on: the guarded write + 409 arm appear without the
+    // capability spelled out in source.
+    expect(repo).toContain("ConcurrencyError");
+    expect(repo).toContain("expectedVersion");
+    expect(repo).toContain("version");
+    expect(routes).toContain("ConcurrencyError");
+    expect(routes).toContain("if-match");
+    expect(routes).toContain('event: "conflict"');
   });
 });

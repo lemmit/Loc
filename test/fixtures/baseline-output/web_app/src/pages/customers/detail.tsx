@@ -93,6 +93,7 @@ export default function CustomerDetail() {
               <KeyValueRow label="Username" data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
               <KeyValueRow label="Email" data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
               <KeyValueRow label="Age" data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
+              <KeyValueRow label="Version" data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
             </Stack>
           </Card>
         ) }

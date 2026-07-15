@@ -32,6 +32,14 @@
             "kind": "int"
           },
           "nullable": false
+        },
+        {
+          "name": "version",
+          "type": {
+            "kind": "int"
+          },
+          "nullable": false,
+          "default": "1"
         }
       ],
       "primaryKey": [

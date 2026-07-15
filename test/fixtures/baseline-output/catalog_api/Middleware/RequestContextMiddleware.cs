@@ -47,6 +47,11 @@ public sealed class RequestContextMiddleware
         // it lands before the response headers are sent.
         ctx.Response.Headers["X-Correlation-Id"] = correlationId;
         var rootFrame = RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow);
+        if (ctx.Request.Headers.TryGetValue("If-Match", out var __ifMatch)
+            && int.TryParse(__ifMatch.ToString().Trim('"'), out var __expectedVersion))
+        {
+            rootFrame.ExpectedVersion = __expectedVersion;
+        }
         using (RequestContext.Enter(rootFrame))
         using (log.BeginScope(new Dictionary<string, object?>
         {

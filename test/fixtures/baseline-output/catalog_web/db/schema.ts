@@ -10,6 +10,7 @@ export const products = productsSchema.table("products", {
   sku: text("sku").notNull(),
   price_amount: numeric("price_amount").notNull(),
   price_currency: text("price_currency").notNull(),
+  version: integer("version").notNull(),
 }, (table) => ({
     productSkuIdx: index("products_sku_idx").on(table.sku),
 }));
@@ -19,6 +20,7 @@ export const customers = customersSchema.table("customers", {
   username: text("username").notNull(),
   email: text("email").notNull(),
   age: integer("age").notNull(),
+  version: integer("version").notNull(),
 }, (table) => ({
     customerEmailIdx: index("customers_email_idx").on(table.email),
 }));

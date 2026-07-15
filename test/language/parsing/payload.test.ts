@@ -77,8 +77,8 @@ system Sys {
     expect(wire).toBeDefined();
     expect(wire.synthesized).toBe(true);
     expect(wire.kind).toBe("payload");
-    // id first, then declared fields — mirrors wireShape ordering.
-    expect(wire.fields.map((f) => f.name)).toEqual(["id", "name", "price"]);
+    // id first, then declared fields, then the default-on version token (M-T3.4).
+    expect(wire.fields.map((f) => f.name)).toEqual(["id", "name", "price", "version"]);
   });
 });
 

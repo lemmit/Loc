@@ -39,7 +39,7 @@ describe("python aggregate emission", () => {
     const files = await build();
     const order = files.get("api/app/domain/order.py")!;
     expect(order).toContain(
-      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, watchers: list[CustomerId], lines: list[OrderLine], _trust_store: bool = False) -> None:",
+      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, watchers: list[CustomerId], version: int, lines: list[OrderLine], _trust_store: bool = False) -> None:",
     );
     // RS-10: the invariant run is gated on the trust marker — repository
     // rehydration (`_rehydrate`) skips it, domain construction asserts.

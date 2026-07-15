@@ -22,6 +22,6 @@ public sealed class ByCustomerHandler : IQueryHandler<ByCustomerQuery, IReadOnly
     public async ValueTask<IReadOnlyList<OrderResponse>> Handle(ByCustomerQuery query, CancellationToken cancellationToken)
     {
         var domain = await _repo.ByCustomer(query.CustomerId, cancellationToken);
-        return domain.Select(d => new OrderResponse(d.Id.Value, d.CustomerId, d.Status, System.Text.RegularExpressions.Regex.Replace(d.PlacedAt.ToUniversalTime().ToString("o"), @"\.?0+Z$", "Z"), d.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList())).ToList();
+        return domain.Select(d => new OrderResponse(d.Id.Value, d.CustomerId, d.Status, System.Text.RegularExpressions.Regex.Replace(d.PlacedAt.ToUniversalTime().ToString("o"), @"\.?0+Z$", "Z"), d.Version, d.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList())).ToList();
     }
 }

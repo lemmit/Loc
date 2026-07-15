@@ -29,6 +29,13 @@ public sealed class RequestContext
     public string Locale { get; init; } = "en";
     public DateTimeOffset StartedAt { get; init; }
 
+    /// <summary>The client's optimistic-concurrency expected version, parsed
+    /// from the request's <c>If-Match</c> header (null when absent).  A
+    /// <c>versioned</c> aggregate's repository save sets EF's original value of
+    /// the version token to this before flushing, so a stale precondition
+    /// yields a zero-row UPDATE (DbUpdateConcurrencyException → 409).</summary>
+    public int? ExpectedVersion { get; set; }
+
     // ---- Frame-local tier — a fresh ScopeId per frame.  The root frame
     // (opened at the boundary) has no parent; each Mediator dispatch opens a
     // child whose ParentId chains to its caller, forming the causality chain.
@@ -67,6 +74,7 @@ public sealed class RequestContext
             CorrelationId = parent.CorrelationId,
             Locale = parent.Locale,
             StartedAt = parent.StartedAt,
+            ExpectedVersion = parent.ExpectedVersion,
             ScopeId = Guid.NewGuid().ToString(),
             ParentId = parent.ScopeId,
         };

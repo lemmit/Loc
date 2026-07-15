@@ -78,8 +78,12 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     // (cast the scalar fields + validate_required + invariant validators), which
     // the root changeset `cast_embed`s.
     expect(schema).toContain("def changeset(struct, attrs) do");
-    expect(schema).toContain("|> cast(attrs, [:reference, :status, :subtotal, :item_count])");
-    expect(schema).toContain("|> validate_required([:reference, :status, :subtotal, :item_count])");
+    expect(schema).toContain(
+      "|> cast(attrs, [:reference, :status, :subtotal, :item_count, :version])",
+    );
+    expect(schema).toContain(
+      "|> validate_required([:reference, :status, :subtotal, :item_count, :version])",
+    );
     // The same invariant-derived validator the relational path emits.
     expect(schema).toContain("validate_number(:item_count, greater_than_or_equal_to: 0)");
     // The root changeset casts attrs INTO the embed + stamps version.
@@ -326,7 +330,7 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(ctx).toContain("case Api.Carts.CartRepository.persist_change(changeset) do");
     expect(ctx).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count, "version" => saved.data.version}}',
     );
     expect(ctx).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -588,7 +592,7 @@ system Shop {
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
     expect(bump).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -599,7 +603,7 @@ system Shop {
     // the aggregate-success projection off the saved embed (no inline in-memory return).
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
   });
 
@@ -650,7 +654,7 @@ system Shop {
     // Post-commit success projects the aggregate wire off the saved embed.
     expect(body).toContain("case tx_result do");
     expect(body).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
     expect(body).toContain("{:error, reason} -> {:error, reason}");
     // Guard precedes the transaction (a denial writes nothing + records no audit).

@@ -41,3 +41,15 @@ export class ExternHandlerError extends Error {
     this.cause = cause;
   }
 }
+/** Optimistic-concurrency conflict — raised by the repository's guarded
+ *  write when a `versioned` aggregate's expected version no longer
+ *  matches the stored row (another request won the race).  The per-router
+ *  catch maps this to HTTP 409 (Conflict), distinct from the `disallowed`
+ *  state-gate 409 — a dashboard can tell "stale write" from "state gate"
+ *  apart via the `conflict` vs `disallowed` log event. */
+export class ConcurrencyError extends Error {
+  constructor(aggregate: string, id: string) {
+    super(`${aggregate} ${id} was modified by another request`);
+    this.name = "ConcurrencyError";
+  }
+}
