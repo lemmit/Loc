@@ -2882,3 +2882,27 @@ not a template opt-in:
   test-ddd artifact — use `scaffold(subdomains:)` in the test/CI ddd so the read
   pulls the wire type in. The CI Fable leg gets the array-of-VO via a `tags: Tag[]`
   on the scaffold case's `Product` (create + update forms both compiled).
+
+## 48. Vue dynamic sub-forms — reactive() means the array just works (2026-07-15)
+
+Vue was the easy cross-frontend leg (Stage 3 of §45–47): it consumes the SHARED
+`emitFormOfAggregate` path (only Angular/Feliz fork `renderCreateForm`), so the
+field-array VM (`rowFields`) already arrives — the work was purely the two packs'
+`field-input-array.hbs` templates, no runtime change.
+
+- **`useLoomForm` is a plain `reactive()` object, so array fields are native.** No
+  `useFieldArray` hoist (React) or MVU Msgs (Feliz): a row is `v-model=
+  "form.values.items[index].sku"`, Add is `@click="…items.push({ … })"`, Remove is
+  `@click="…items.splice(index, 1)"`. Vue reactivity tracks the mutations.
+- **The default-row JSON breaks a double-quoted attribute.** `defaultRowJson` is
+  `{ sku: "", qty: 0 }` — its `""` closes a `@click="…"` early. The Add button MUST
+  use a single-quoted attribute (`@click='…push({ sku: "", qty: 0 })'`). Caught by
+  `vue-tsc`/`vite build`, not by the generator string test — verify the real build.
+- **Per-type row coercion branches on the sub-field VM's `template`.** `rowFields`
+  are full `FormFieldVM`s, so `{{#if (eq template "field-input-int")}}` picks the
+  `Math.trunc(Number(v))` update, `field-input-decimal` the `Number(v)`, else a
+  string `v-model` — mirroring each pack's flat numeric field.
+- **No RHF leak, because the stub-else already existed.** An array-of-VO on Vue
+  rendered the disabled `(arrays not yet supported)` stub (the shared import-add is
+  React-gated), so there was never a broken build to fix — just a stub to replace.
+  The `{{#if rowFields}}…{{else}}<stub>{{/if}}` keeps a SCALAR array on the stub.
