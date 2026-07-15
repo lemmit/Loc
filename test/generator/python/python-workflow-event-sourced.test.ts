@@ -1,7 +1,7 @@
 // Event-sourced workflows on Python/FastAPI (workflow-and-applier.md A2-S5b).
 // An `eventSourced` workflow persists as an append-only `<wf>_events` stream
 // folded through its `apply(...)` blocks — the saga analogue of a
-// `persistedAs(eventLog)` aggregate — instead of a mutable correlation-state
+// `persistedAs: eventLog` aggregate — instead of a mutable correlation-state
 // row.  Its stream lives in the single shared per-context `<ctx>_events` log
 // (discriminated by `stream_type`).  Asserts the `<Wf>State` fold block, the
 // shared event-log schema model, and the fold-load / append-own-events

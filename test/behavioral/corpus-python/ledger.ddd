@@ -1,5 +1,5 @@
 // RST-8 behavioral-tier fixture — EVENT-SOURCED aggregate
-// (`persistedAs(eventLog)`), retargeted from web/src/examples/event-sourcing.ddd
+// (`persistedAs: eventLog`), retargeted from web/src/examples/event-sourcing.ddd
 // to a single `platform: python` (FastAPI) backend. The aggregate's truth is
 // its append-only event stream (`account_events`); the `create`/`operation`
 // bodies `emit`, and the `apply(...)` bodies fold events back into state on
@@ -21,7 +21,7 @@ system LedgerPy {
       event Deposited { account: Account id, amount: int }
       event Withdrawn { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

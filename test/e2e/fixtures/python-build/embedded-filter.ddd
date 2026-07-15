@@ -1,4 +1,4 @@
-// DEBT-02 tail — capability `filter` on a shape(embedded) PYTHON aggregate.
+// DEBT-02 tail — capability `filter` on a shape: embedded PYTHON aggregate.
 // An embedded aggregate's root scalars are real queryable columns, so a
 // capability filter AND-s into every root read exactly like the relational
 // path (`repository-embedded-builder.ts` threads the SAME
@@ -12,7 +12,7 @@
 // Containments still fold to jsonb; the root predicate constrains root rows.
 //
 // Decisive check that the embedded reads + the principal accessor stay ruff-
-// and mypy --strict-clean under the python-build gate.  `shape(document)`
+// and mypy --strict-clean under the python-build gate.  `shape: document`
 // filters stay validator-gated (the blob is one JSONB column — in-app
 // filtering, not built).
 system EmbFilter {
@@ -20,7 +20,7 @@ system EmbFilter {
 
   subdomain Shop {
     context Shop {
-      aggregate Cart shape(embedded) {
+      aggregate Cart shape: embedded {
         tenantId: string
         total: money
         archived: bool

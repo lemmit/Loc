@@ -194,7 +194,7 @@ const INHERITANCE_SRC = `
 system Registry {
   subdomain Core {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
       }
       aggregate Customer extends Party {

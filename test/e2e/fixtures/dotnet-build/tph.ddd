@@ -7,7 +7,7 @@ system PartyDirectory {
   subdomain Registry {
     context Parties {
       // Abstract base — owns the shared table + the `kind` discriminator.
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
         email: string
       }

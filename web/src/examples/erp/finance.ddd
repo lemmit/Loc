@@ -56,10 +56,10 @@ subdomain Finance {
       derived display: string = invoiceRef
     }
 
-    // shape(document) — the whole aggregate (root + contained lines)
+    // shape: document — the whole aggregate (root + contained lines)
     // serialises to one JSONB blob.  Document/embedded aggregates use an
     // explicit canonical `create` (no crudish hard-delete on a blob).
-    aggregate Receipt shape(document) {
+    aggregate Receipt shape: document {
       store: string
       contains lines: ReceiptLine[]
 
@@ -81,9 +81,9 @@ subdomain Finance {
       }
     }
 
-    // shape(embedded) — the root (owner, label) stays queryable columns;
+    // shape: embedded — the root (owner, label) stays queryable columns;
     // the contained TagItem parts fold into a JSONB column.
-    aggregate TagList shape(embedded) {
+    aggregate TagList shape: embedded {
       owner: string
       label: string
       contains tags: TagItem[]
@@ -129,25 +129,25 @@ subdomain Finance {
     // Abstract base, no table of its own; each concrete gets its OWN
     // table (no discriminator).  The polymorphic reader is auto-emitted
     // as the union of the concrete loaders.
-    abstract aggregate Account inheritanceUsing(ownTable) {
+    abstract aggregate Account inheritanceUsing: ownTable {
       name: string
       kind: AccountKind
       invariant name.length > 0
       derived display: string = name
     }
 
-    aggregate CashAccount extends Account inheritanceUsing(ownTable) with crudish {
+    aggregate CashAccount extends Account inheritanceUsing: ownTable with crudish {
       location: string
     }
-    aggregate BankAccount extends Account inheritanceUsing(ownTable) with crudish {
+    aggregate BankAccount extends Account inheritanceUsing: ownTable with crudish {
       iban: string
       bankName: string
     }
 
-    // ── Event sourcing (persistedAs(eventLog)) ───────────────────────
+    // ── Event sourcing (persistedAs: eventLog) ───────────────────────
     // The account's truth is its event stream; the `apply(...)` bodies
     // are the only place state mutates — replaying rebuilds the balance.
-    aggregate GeneralLedgerAccount persistedAs(eventLog) {
+    aggregate GeneralLedgerAccount persistedAs: eventLog {
       code: string
       balance: money
 

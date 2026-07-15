@@ -47,7 +47,7 @@ describe("unique (...) — AST validation", () => {
 
   it("gates `unique` off an event-sourced aggregate (loom.unique-on-event-sourced)", async () => {
     const { errors } = await parseString(
-      wrap(`aggregate Customer persistedAs(eventLog) { email: string  unique (email) }`),
+      wrap(`aggregate Customer persistedAs: eventLog { email: string  unique (email) }`),
     );
     expect(errors.some((e) => /event-sourced aggregate 'Customer' is not supported/.test(e))).toBe(
       true,
@@ -56,7 +56,7 @@ describe("unique (...) — AST validation", () => {
 
   it("gates `unique` off a document-shaped aggregate (loom.unique-on-event-sourced)", async () => {
     const { errors } = await parseString(
-      wrap(`aggregate Customer shape(document) { email: string  unique (email) }`),
+      wrap(`aggregate Customer shape: document { email: string  unique (email) }`),
     );
     expect(
       errors.some((e) => /document-shaped aggregate 'Customer' is not supported/.test(e)),

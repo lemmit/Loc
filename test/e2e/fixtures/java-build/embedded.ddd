@@ -1,7 +1,7 @@
 system EMB {
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         code: string
         contains items: Item[]
         entity Item { sku: string  qty: int }

@@ -479,7 +479,7 @@ describe.skipIf(!ENABLED)(
     // shared Id), the `HasDiscriminator` base config, the derived concrete
     // entities (`: Base`, no own Id) + own-fields-only configs, and the
     // `DbSet<Base>` all compile under /warnaserror.
-    it("system TPH (`inheritanceUsing(sharedTable)`, dotnet) — EF HasDiscriminator hierarchy builds under /warnaserror", () => {
+    it("system TPH (`inheritanceUsing: sharedTable`, dotnet) — EF HasDiscriminator hierarchy builds under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tph-"));
       try {
         execSync(
@@ -524,7 +524,7 @@ describe.skipIf(!ENABLED)(
     }, 600_000);
 
     // Dapper event sourcing (appliers, Dapper edition): a `persistence: dapper`
-    // deployable hosting a `persistedAs(eventLog)` aggregate emits the raw-Npgsql
+    // deployable hosting a `persistedAs: eventLog` aggregate emits the raw-Npgsql
     // event-store repository (read stream → fold, append on save) + the
     // `<agg>_events` table in DbSchema.cs, reusing the persistence-agnostic
     // domain fold + CQRS create chain.  Build under /warnaserror.
@@ -560,7 +560,7 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
-    // Event sourcing (appliers A2.2b): a `persistedAs(eventLog)` aggregate on a
+    // Event sourcing (appliers A2.2b): a `persistedAs: eventLog` aggregate on a
     // dotnet deployable emits the EF `<Agg>EventRecord` entity + config, the
     // `_Apply`/`_FromEvents` fold on the aggregate, the record-and-apply `emit`,
     // the event-store repository (fold on load / append on save), and the

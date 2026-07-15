@@ -21,10 +21,10 @@ describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
     return agg as Aggregate;
   }
 
-  it("parses persistedAs(state) on the header", async () => {
+  it("parses persistedAs: state on the header", async () => {
     const { model, errors } = await parse(`
       context T {
-        aggregate Order persistedAs(state) {
+        aggregate Order persistedAs: state {
           name: string
         }
       }
@@ -33,10 +33,10 @@ describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
     expect(firstAgg(model).persistedAs).toBe("state");
   });
 
-  it("parses persistedAs(eventLog) on the header", async () => {
+  it("parses persistedAs: eventLog on the header", async () => {
     const { model, errors } = await parse(`
       context T {
-        aggregate Order persistedAs(eventLog) {
+        aggregate Order persistedAs: eventLog {
           name: string
         }
       }
@@ -48,7 +48,7 @@ describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
   it("coexists with ids and a with-clause in header order (ids, persistedAs, with)", async () => {
     const { model, errors } = await parse(`
       context T {
-        aggregate Order persistedAs(eventLog) {
+        aggregate Order persistedAs: eventLog {
           name: string
         }
       }
@@ -89,7 +89,7 @@ describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
   it("rejects an unknown truth-kind value", async () => {
     const { errors } = await parse(`
       context T {
-        aggregate Order persistedAs(nonsense) {
+        aggregate Order persistedAs: nonsense {
           name: string
         }
       }

@@ -4,7 +4,7 @@ import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins
 import { parseString } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
-// Hono/Drizzle event-sourcing emission (`persistedAs(eventLog)`, appliers A2).
+// Hono/Drizzle event-sourcing emission (`persistedAs: eventLog`, appliers A2).
 //
 // An event-sourced aggregate persists to the single per-context
 // `<ctx>_events` stream table (its `stream_type` slice; no state table); state
@@ -21,7 +21,7 @@ context Accounts {
   event Deposited { account: Account id, amount: int }
   event Withdrawn { account: Account id, amount: int }
 
-  aggregate Account persistedAs(eventLog) {
+  aggregate Account persistedAs: eventLog {
     owner: string
     balance: int
 
@@ -50,7 +50,7 @@ async function generate(): Promise<Map<string, string>> {
   return generateTypeScript(model, HONO_V4_PINS);
 }
 
-describe("Hono/Drizzle event-sourcing emission (persistedAs(eventLog))", () => {
+describe("Hono/Drizzle event-sourcing emission (persistedAs: eventLog)", () => {
   it("emits the single per-context <ctx>_events stream table (no state table)", async () => {
     const schema = (await generate()).get("db/schema.ts")!;
     // One per-context event log, discriminated by stream_type.

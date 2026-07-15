@@ -27,26 +27,26 @@ function firstAgg(model: Model): Aggregate {
 }
 
 describe("aggregate shape(…) saving shape (D-DOCUMENT-AXIS)", () => {
-  it("parses shape(document) on the header", async () => {
+  it("parses shape: document on the header", async () => {
     const { model, errors } = await parse(`
-      context T { aggregate Cart shape(document) { name: string } }
+      context T { aggregate Cart shape: document { name: string } }
     `);
     expect(errors).toEqual([]);
     expect(firstAgg(model).shape).toBe("document");
   });
 
-  it("parses shape(embedded) and shape(relational)", async () => {
-    const e = await parse(`context T { aggregate Cart shape(embedded) { name: string } }`);
+  it("parses shape: embedded and shape: relational", async () => {
+    const e = await parse(`context T { aggregate Cart shape: embedded { name: string } }`);
     expect(e.errors).toEqual([]);
     expect(firstAgg(e.model).shape).toBe("embedded");
-    const r = await parse(`context T { aggregate Cart shape(relational) { name: string } }`);
+    const r = await parse(`context T { aggregate Cart shape: relational { name: string } }`);
     expect(r.errors).toEqual([]);
     expect(firstAgg(r.model).shape).toBe("relational");
   });
 
   it("coexists with persistedAs in header order (persistedAs, then shape)", async () => {
     const { model, errors } = await parse(`
-      context T { aggregate Cart persistedAs(eventLog) shape(document) { name: string } }
+      context T { aggregate Cart persistedAs: eventLog shape: document { name: string } }
     `);
     expect(errors).toEqual([]);
     expect(firstAgg(model).persistedAs).toBe("eventLog");
@@ -74,7 +74,7 @@ describe("shape threads to the IR (aggregate + dataSource)", () => {
 system Sys {
   subdomain Sales {
     context Shopping {
-      aggregate Cart persistedAs(eventLog) shape(document) { name: string }
+      aggregate Cart persistedAs: eventLog shape: document { name: string }
     }
   }
   storage pg { type: postgres }
@@ -89,7 +89,7 @@ system Sys {
 }
 `;
 
-  it("AggregateIR.savingShape === document for a shape(document) aggregate", async () => {
+  it("AggregateIR.savingShape === document for a shape: document aggregate", async () => {
     const loom = lowerModel(await parseValid(SRC));
     const ctx = loom.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Shopping")!;
     const cart = ctx.aggregates.find((a) => a.name === "Cart")!;

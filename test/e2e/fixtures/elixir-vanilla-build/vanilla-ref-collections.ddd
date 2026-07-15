@@ -14,7 +14,7 @@ system Roster {
         invariant level >= 1
         invariant level <= 100
       }
-      aggregate Trainer shape(embedded) {
+      aggregate Trainer shape: embedded {
         name: string
         derived display: string = name
         party: Pokemon id[]

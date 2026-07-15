@@ -19,7 +19,7 @@ system Sys {
       aggregate Order {
         name: string
       }
-      aggregate Invoice persistedAs(eventLog) {
+      aggregate Invoice persistedAs: eventLog {
         amount: int
       }
     }
@@ -247,7 +247,7 @@ system Sys {
 system Sys {
   subdomain M { context C {
     aggregate A { x: int }
-    aggregate B persistedAs(eventLog) { y: int }
+    aggregate B persistedAs: eventLog { y: int }
     workflow doIt transactional {
       create() { }
     }
@@ -295,10 +295,10 @@ system Sys {
     expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(false);
   });
 
-  it("honours the aggregate header `shape(document)` with no binding override", async () => {
+  it("honours the aggregate header `shape: document` with no binding override", async () => {
     const { sys, ctx } = await build(`
 system Sys {
-  subdomain M { context C { aggregate A shape(document) { x: int } } }
+  subdomain M { context C { aggregate A shape: document { x: int } } }
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
@@ -310,7 +310,7 @@ system Sys {
   it("honours the aggregate header even with no resource binding at all", async () => {
     const { sys, ctx } = await build(`
 system Sys {
-  subdomain M { context C { aggregate A shape(document) { x: int } } }
+  subdomain M { context C { aggregate A shape: document { x: int } } }
   storage pg { type: postgres }
   deployable api { platform: dotnet, contexts: [C], port: 5000 }
 }`);
@@ -319,10 +319,10 @@ system Sys {
     expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
   });
 
-  it("lets the per-projection binding `shape: document` override a shape(relational) header", async () => {
+  it("lets the per-projection binding `shape: document` override a shape: relational header", async () => {
     const { sys, ctx } = await build(`
 system Sys {
-  subdomain M { context C { aggregate A shape(relational) { x: int } } }
+  subdomain M { context C { aggregate A shape: relational { x: int } } }
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg, shape: document }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }
@@ -331,10 +331,10 @@ system Sys {
     expect(isDocumentShaped(a, resolveDataSourceConfig(a, ctx, sys))).toBe(true);
   });
 
-  it("lets the binding `shape: relational` override a shape(document) header", async () => {
+  it("lets the binding `shape: relational` override a shape: document header", async () => {
     const { sys, ctx } = await build(`
 system Sys {
-  subdomain M { context C { aggregate A shape(document) { x: int } } }
+  subdomain M { context C { aggregate A shape: document { x: int } } }
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg, shape: relational }
   deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 5000 }

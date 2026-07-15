@@ -1,4 +1,4 @@
-// DEBT-02 — a capability `filter` on a `shape(embedded)` aggregate (java).
+// DEBT-02 — a capability `filter` on a `shape: embedded` aggregate (java).
 // An embedded aggregate's root entity is a real JPA table: its root scalars
 // (`code`, `isDeleted`) are columns, only the `contains` parts ride a jsonb
 // column.  So a non-principal capability `filter` is a static SQL predicate —
@@ -9,7 +9,7 @@
 system EmbFilter {
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         code: string
         isDeleted: bool
         // soft-delete capability — every read hides a deleted order.

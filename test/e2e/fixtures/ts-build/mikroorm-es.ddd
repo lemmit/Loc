@@ -1,5 +1,5 @@
 // MikroORM event-sourcing fixture (appliers, MikroORM edition): a
-// `persistence: mikroorm` node deployable hosting a `persistedAs(eventLog)`
+// `persistence: mikroorm` node deployable hosting a `persistedAs: eventLog`
 // aggregate.  Exercises the EntityManager event store (read stream → fold,
 // append on save), the `<agg>_events` EntitySchema, and the reused
 // persistence-agnostic domain fold + CQRS create chain.  Generated via
@@ -10,7 +10,7 @@ system Ledger {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

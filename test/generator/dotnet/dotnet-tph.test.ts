@@ -21,7 +21,7 @@ async function emitTph(): Promise<Map<string, string>> {
       system Acme {
         subdomain Registry {
           context Parties {
-            abstract aggregate Party inheritanceUsing(sharedTable) {
+            abstract aggregate Party inheritanceUsing: sharedTable {
               name: string
             }
             aggregate Customer extends Party {

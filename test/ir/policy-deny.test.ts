@@ -150,7 +150,7 @@ describe("policy deny — enrichment composition", () => {
   it("works on a NON-tenant-owned aggregate (deny is not gated on tenantOwned)", async () => {
     const model = await buildLoomModel(
       hierarchy({
-        extra: "aggregate Plan crossTenant with crudish { tier: string }",
+        extra: "crossTenant aggregate Plan with crudish { tier: string }",
         policy: "deny write on Plan",
       }),
     );

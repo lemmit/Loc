@@ -103,7 +103,7 @@ const FIXTURES: Array<[string, string]> = [
   // Resource clients (objectStore / queue / api): S3 / RabbitMQ /
   // HttpClient classes + workflow resource-op call sites.
   ["test/e2e/fixtures/java-build/resources.ddd", "rc_api"],
-  // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
+  // Event sourcing (persistedAs: eventLog): JdbcTemplate stream
   // append + applier fold, no state table / Spring Data interface.
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
   // State-based saga: a broadcast channel + a correlation-row workflow with
@@ -114,14 +114,14 @@ const FIXTURES: Array<[string, string]> = [
   // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
   // + emit→append-own-event dispatch (the saga analogue of event-sourced.ddd).
   ["corpus:eventsourced-workflow", CORPUS_DEPLOYABLE],
-  // shape(document): whole aggregate in one jsonb column via the
+  // shape: document: whole aggregate in one jsonb column via the
   // field-visibility Jackson mapper, version-bumping upserts.
   ["test/e2e/fixtures/java-build/document.ddd", "doc_api"],
   // DEBT-02: a capability `filter` on a document aggregate — applied in-app
   // over the rehydrated aggregate (findById gate + findAll filter; custom finds
   // inherit via findAll().stream()).
   ["test/e2e/fixtures/java-build/document-filter.ddd", "api1"],
-  // shape(embedded): containments fold into jsonb columns via the
+  // shape: embedded: containments fold into jsonb columns via the
   // Hibernate JSON FormatMapper; scalar columns stay queryable.
   ["test/e2e/fixtures/java-build/embedded.ddd", "emb_api"],
   // DEBT-02: a capability `filter` on an embedded aggregate — the root scalars

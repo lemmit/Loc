@@ -20,7 +20,7 @@ context Accounts {
   event Opened { account: Account id, owner: string }
   event Deposited { account: Account id, amount: int }
 
-  aggregate Account persistedAs(eventLog) {
+  aggregate Account persistedAs: eventLog {
     owner: string
     balance: int
 
@@ -51,7 +51,7 @@ function routesFile(files: Map<string, string>): string {
   return files.get(key)!;
 }
 
-describe("Hono/Drizzle event-sourced creation (persistedAs(eventLog) + create)", () => {
+describe("Hono/Drizzle event-sourced creation (persistedAs: eventLog + create)", () => {
   it("renders create(...) as a shell + emit-body factory, not a state writer", async () => {
     const domain = (await generate()).get("domain/account.ts")!;
     // Factory takes the create action's params (owner), news an empty shell,
@@ -85,7 +85,7 @@ describe("Hono/Drizzle event-sourced creation (persistedAs(eventLog) + create)",
     const { errors } = await parseString(`
       context Accounts {
         event Opened { account: Account id, owner: string }
-        aggregate Account persistedAs(eventLog) {
+        aggregate Account persistedAs: eventLog {
           owner: string
           create open(owner: string) { emit Opened { account: id, owner: owner } }
           create reopen(owner: string) { emit Opened { account: id, owner: owner } }
@@ -101,7 +101,7 @@ describe("Hono/Drizzle event-sourced creation (persistedAs(eventLog) + create)",
     const { model } = await parseString(`
       context Accounts {
         event Deposited { account: Account id, amount: int }
-        aggregate Account persistedAs(eventLog) {
+        aggregate Account persistedAs: eventLog {
           balance: int
           operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }
           apply(e: Deposited) { balance := balance + e.amount }

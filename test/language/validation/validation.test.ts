@@ -1348,7 +1348,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context C {
-            aggregate A persistedAs(eventLog) { x: int }
+            aggregate A persistedAs: eventLog { x: int }
           } }
           storage pg { type: postgres }
           resource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
@@ -2738,7 +2738,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate Invoice persistedAs(eventLog) { amount: int }
+          aggregate Invoice persistedAs: eventLog { amount: int }
         } }
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
@@ -2836,7 +2836,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate A persistedAs(eventLog) { x: int }
+          aggregate A persistedAs: eventLog { x: int }
         } }
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
@@ -2909,7 +2909,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C {
           aggregate A { x: int }
-          aggregate B persistedAs(eventLog) { y: int }
+          aggregate B persistedAs: eventLog { y: int }
         } }
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
@@ -2960,7 +2960,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context C {
-          aggregate A persistedAs(eventLog) { x: int }
+          aggregate A persistedAs: eventLog { x: int }
         } }
         storage pg { type: postgres }
         resource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }

@@ -17,7 +17,7 @@ system Billder {
   subdomain Billing {
     context Invoicing {
       aggregate Invoice with tenantOwned { number: string }
-      aggregate Plan crossTenant { code: string }
+      crossTenant aggregate Plan { code: string }
       aggregate Organization { name: string }
       repository Invoices for Invoice { }
       repository Plans for Plan { }

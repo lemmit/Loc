@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java / Spring Boot — the event-sourced concurrency rider.  An event-sourced
-// (`persistedAs(eventLog)`) aggregate appends to the single per-context
+// (`persistedAs: eventLog`) aggregate appends to the single per-context
 // `<ctx>_events` log keyed by a `(stream_type, stream_id, version)` PRIMARY KEY.
 // A concurrent append that loses the version race hits a Postgres unique-violation
 // (SQLSTATE
@@ -30,7 +30,7 @@ system Bank {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

@@ -1,7 +1,7 @@
 system DOC {
   subdomain D {
     context Cms {
-      aggregate Article shape(document) {
+      aggregate Article shape: document {
         title2: string
         viewCount: int
         contains sections: Section[]

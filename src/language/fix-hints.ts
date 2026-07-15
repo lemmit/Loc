@@ -75,7 +75,7 @@ const PROVIDERS: Record<string, FixHintProvider> = {
   },
 
   // An event-sourced / document concrete of a sharedTable (TPH) base is forced
-  // onto its own table → add `inheritanceUsing(ownTable)` to the aggregate
+  // onto its own table → add `inheritanceUsing: ownTable` to the aggregate
   // header (a position-aware `header-end` insert).  Only the absent-clause case
   // is auto-fixed; when the aggregate already declares `inheritanceUsing` it
   // needs a clause-replace (the clause isn't node-addressable), so skip.
@@ -85,8 +85,8 @@ const PROVIDERS: Record<string, FixHintProvider> = {
     if (!target) return undefined;
     return {
       kind: "insert-decl",
-      summary: "Use inheritanceUsing(ownTable).",
-      patch: { op: "insert", target, position: "header-end", source: "inheritanceUsing(ownTable)" },
+      summary: "Use inheritanceUsing: ownTable.",
+      patch: { op: "insert", target, position: "header-end", source: "inheritanceUsing: ownTable" },
     };
   },
 

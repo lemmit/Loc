@@ -131,7 +131,7 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
 
 // ---------------------------------------------------------------------------
 // DEBT-02 Slice A — a PRINCIPAL-referencing (tenancy) capability filter on a
-// `shape(embedded)` aggregate (vanilla Ecto).  The embedded root scalars are
+// `shape: embedded` aggregate (vanilla Ecto).  The embedded root scalars are
 // real columns, so the principal predicate reuses the relational-principal
 // path: `record.tenant_id == ^(current_user && current_user.tenant_id)` threaded
 // through every read, with `current_user` from `conn.assigns` (the Auth plug).
@@ -148,7 +148,7 @@ system EmbTenancy {
   }
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         tenantId: string
         code: string
         filter this.tenantId == currentUser.tenantId
@@ -176,7 +176,7 @@ system EmbTenancy {
 describe("vanilla embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
   it("threads current_user into the embedded repository reads and pins the predicate", async () => {
     const repo = file(await generateSystemFiles(EMBEDDED_SOURCE), "/shop/order_repository.ex");
-    // `shape(embedded)` keeps the bare `list` (M-T2.6 pages only plain
+    // `shape: embedded` keeps the bare `list` (M-T2.6 pages only plain
     // single-table relational aggregates), so no page/pageSize/sort/dir args —
     // just the threaded principal.
     expect(repo).toContain("def list(current_user \\\\ nil) do");

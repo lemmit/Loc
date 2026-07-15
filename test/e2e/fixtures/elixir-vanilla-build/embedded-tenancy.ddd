@@ -1,5 +1,5 @@
 // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: embedded`
 // aggregate, on the VANILLA (plain Ecto) foundation.  An embedded aggregate's
 // root scalars (`tenant_id`, `code`) are real columns; only the `contains
 // items` parts ride an embedded schema.  Previously this combination was GATED
@@ -13,7 +13,7 @@
 // Decisive check that the actor-threaded vanilla reads on an EMBEDDED aggregate
 // compile under `mix compile --warnings-as-errors` (the elixir-vanilla-build
 // gate).  Auth is wired like the relational `vanilla-tenancy.ddd` sibling.
-// (`shape(document)` + principal stays gated — Slice B.)
+// (`shape: document` + principal stays gated — Slice B.)
 system EmbTenancy {
   user {
     id: string
@@ -31,7 +31,7 @@ system EmbTenancy {
 
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         tenantId: string
         code: string
         // Always-on row scoping by the requesting principal's tenant.

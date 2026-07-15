@@ -14,7 +14,7 @@ system Sys {
       aggregate Order { name: string }
     }
     context Ledger {
-      aggregate Entry persistedAs(eventLog) { amount: int }
+      aggregate Entry persistedAs: eventLog { amount: int }
     }
   }
   storage primary { type: postgres }

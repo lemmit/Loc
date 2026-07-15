@@ -1,5 +1,5 @@
 // Event-sourced storage capability validator (appliers A2).  An
-// aggregate's `persistedAs(eventLog)` storage emission is implemented on the
+// aggregate's `persistedAs: eventLog` storage emission is implemented on the
 // Hono (node), .NET (dotnet) and elixir (vanilla) backends: the `<agg>_events`
 // stream table + fold-on-load repository.  Hosting an event-sourced aggregate
 // on a backend that doesn't branch on `persistedAs` would silently fall back
@@ -14,7 +14,7 @@ import { parseString } from "../_helpers/parse.js";
 async function esErrors(source: string): Promise<string[]> {
   const { model } = await parseString(source, { validate: false });
   return validateLoomModel(enrichLoomModel(lowerModel(model)))
-    .filter((d) => d.severity === "error" && d.message.includes("persistedAs(eventLog)"))
+    .filter((d) => d.severity === "error" && d.message.includes("persistedAs: eventLog"))
     .map((d) => d.message);
 }
 
@@ -24,7 +24,7 @@ system Ledger {
   subdomain Core {
     context Accounts {
       event Deposited { account: Account id, amount: int }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         balance: int
         operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }
         apply(e: Deposited) { balance := balance + e.amount }
@@ -40,15 +40,15 @@ system Ledger {
 }
 
 describe("event-sourced storage capability validation", () => {
-  it("accepts persistedAs(eventLog) on a Hono (node) deployable", async () => {
+  it("accepts persistedAs: eventLog on a Hono (node) deployable", async () => {
     expect(await esErrors(sys("node"))).toEqual([]);
   });
 
-  it("accepts persistedAs(eventLog) on a .NET deployable (EF Core event store, A2.2b)", async () => {
+  it("accepts persistedAs: eventLog on a .NET deployable (EF Core event store, A2.2b)", async () => {
     expect(await esErrors(sys("dotnet"))).toEqual([]);
   });
 
-  it("accepts persistedAs(eventLog) on an elixir (vanilla) deployable (ES home)", async () => {
+  it("accepts persistedAs: eventLog on an elixir (vanilla) deployable (ES home)", async () => {
     expect(await esErrors(sys("elixir"))).toEqual([]);
   });
 });

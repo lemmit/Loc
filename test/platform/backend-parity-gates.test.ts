@@ -122,7 +122,7 @@ system Ledger {
   subdomain Core {
     context Accounts {
       event Deposited { account: Account id, amount: int }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         balance: int
         create open() { emit Deposited { account: id, amount: 0 } }
         operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }
@@ -211,7 +211,7 @@ const FEATURES: readonly Feature[] = [
     },
   },
   {
-    name: "event sourcing (`persistedAs(eventLog)`)",
+    name: "event sourcing (`persistedAs: eventLog`)",
     code: "loom.event-sourcing-backend-unsupported",
     ddd: eventSourcingDdd,
     // EVENT_SOURCING_BACKENDS = node/dotnet/python/java/elixir.  The stream lives

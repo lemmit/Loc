@@ -15,7 +15,7 @@ const SRC = `
 system ReadsShop {
   subdomain Core {
     context Catalog {
-      aggregate Product shape(document) {
+      aggregate Product shape: document {
         name: string
         category: string
         price: int
@@ -32,7 +32,7 @@ system ReadsShop {
       event AccountOpened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// DEBT-32 — nested entity parts on a shape(embedded) vanilla (plain Ecto)
+// DEBT-32 — nested entity parts on a shape: embedded vanilla (plain Ecto)
 // aggregate.  `contains lines: Line[]` persists as an Ecto `embeds_many` over a
 // part `embedded_schema` module (the vanilla analogue of Ash's embedded
 // resource), stored inline in the parent's jsonb column.  A containment-mutating
@@ -15,7 +15,7 @@ const SOURCE = `
 system Emb {
   subdomain Core {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         code: string
         contains lines: Line[]
         entity Line { sku: string  qty: int }

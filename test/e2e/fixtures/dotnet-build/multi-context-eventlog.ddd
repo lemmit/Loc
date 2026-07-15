@@ -10,7 +10,7 @@
 system MC {
   subdomain S {
     context Alpha {
-      aggregate Note persistedAs(eventLog) {
+      aggregate Note persistedAs: eventLog {
         text: string
         create make() { emit Wrote { note: id } }
         apply(e: Wrote) { text := "" }
@@ -19,7 +19,7 @@ system MC {
       event Wrote { note: Note id }
     }
     context Beta {
-      aggregate Job persistedAs(eventLog) {
+      aggregate Job persistedAs: eventLog {
         label: string
         create start() { emit Started { job: id } }
         apply(e: Started) { label := "" }

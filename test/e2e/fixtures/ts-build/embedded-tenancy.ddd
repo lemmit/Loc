@@ -1,5 +1,5 @@
 // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: embedded`
 // aggregate, on the Hono/Drizzle (node) backend.  An embedded aggregate's
 // root scalars (`tenantId`, `code`) are real columns; only the `contains`
 // parts ride a jsonb column.  Previously this combination was GATED by
@@ -10,14 +10,14 @@
 //
 // Generated via `generate system` (the user block + auth/middleware.ts are
 // system-level); this gate compiles the emitted embedded repository + the
-// requireCurrentUser import end-to-end.  (`shape(document)` + principal stays
+// requireCurrentUser import end-to-end.  (`shape: document` + principal stays
 // gated — Slice B.)
 system EmbTenancy {
   user { id: string  tenantId: string }
 
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         tenantId: string
         code: string
         // Always-on row scoping: every read of Order is constrained to the

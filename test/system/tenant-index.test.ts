@@ -52,7 +52,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
     const files = await generateSystemFiles(
       tenancySystem(
         `aggregate Invoice with tenantOwned { number: string }
-         aggregate Plan crossTenant { code: string }`,
+         crossTenant aggregate Plan { code: string }`,
       ),
     );
     const sql = sqlOf(files);
@@ -90,7 +90,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
     const files = await generateSystemFiles(
       tenancySystem(
         `aggregate Invoice with tenantOwned { number: string }
-         aggregate Plan crossTenant { code: string }`,
+         crossTenant aggregate Plan { code: string }`,
       ),
     );
     const sql = sqlOf(files);

@@ -1,4 +1,4 @@
-// DEBT-32 — nested entity parts on a `shape(embedded)` vanilla aggregate.
+// DEBT-32 — nested entity parts on a `shape: embedded` vanilla aggregate.
 // `contains lines: Line[]` persists as an Ecto `embeds_many` over a part
 // `embedded_schema` module (`Line`), stored inline in the parent's jsonb column
 // (the same `:map` column the shared migration emits for the embedded shape —
@@ -9,7 +9,7 @@
 system VanillaEmbedParts {
   subdomain Core {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         code: string
         contains lines: Line[]
         entity Line { sku: string  qty: int }

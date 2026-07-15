@@ -738,24 +738,23 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
-  // Header modifiers in grammar order (ddd.langium `Aggregate`):
-  //   [abstract] aggregate <name> [extends <Base>] [crossTenant]
+  // Header modifiers in grammar order (ddd.langium `Aggregate`, M-T5.17 Phase 2):
+  //   [abstract] [crossTenant] aggregate <name> [extends <Base>]
   //   [persistedAs: …] [shape: …] [inheritanceUsing: …] [with …]
   const abstract = node.isAbstract ? "abstract " : "";
   const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
-  // `crossTenant` (multi-tenancy Phase 1a) is the first header flag, before the
-  // enum-axis modifiers — matches the grammar order.
-  const crossTenant = node.crossTenant ? " crossTenant" : "";
-  // Enum-axis modifiers emit the CANONICAL colon form (M-T5.17 finding #1),
+  // `crossTenant` (multi-tenancy Phase 1a) leads beside `abstract` — both
+  // boolean adjectives before `aggregate`.
+  const crossTenant = node.crossTenant ? "crossTenant " : "";
+  // Enum-axis modifiers emit the canonical colon form (M-T5.17 finding #1),
   // matching every other enum-value pick in Loom (`type:`, `kind:`, `platform:`).
-  // The legacy paren form (`persistedAs(…)`) still parses (Phase 1 accept-both).
   const persistedAs = node.persistedAs ? ` persistedAs: ${node.persistedAs}` : "";
   const shape = node.shape ? ` shape: ${node.shape}` : "";
   const inheritanceUsing = node.inheritanceUsing
     ? ` inheritanceUsing: ${node.inheritanceUsing}`
     : "";
   return block(
-    `${abstract}aggregate ${node.name}${ext}${crossTenant}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
+    `${abstract}${crossTenant}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }

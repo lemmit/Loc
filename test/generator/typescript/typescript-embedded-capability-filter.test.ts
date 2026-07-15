@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// DEBT-02 (slice 2) — capability `filter` on a `shape(embedded)` aggregate
+// DEBT-02 (slice 2) — capability `filter` on a `shape: embedded` aggregate
 // (node / Hono+Drizzle).  An embedded aggregate keeps its root scalars as real
 // columns (only containments fold into jsonb), so a capability filter on a root
 // scalar AND-s into the SQL `where` of every root read — the same Drizzle
@@ -14,7 +14,7 @@ const SOURCE = `
 system EmbFilter {
   subdomain Sales {
     context Shop {
-      aggregate Wishlist shape(embedded) {
+      aggregate Wishlist shape: embedded {
         label: string
         archived: bool
         filter !this.archived
@@ -72,7 +72,7 @@ describe("node embedded capability filter (DEBT-02 slice 2)", () => {
 
 // ---------------------------------------------------------------------------
 // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: embedded`
 // aggregate (node).  The embedded root scalars are real columns, so the
 // principal predicate reuses the relational-principal path: every embedded
 // root read AND-s `eq(schema.<agg>.tenantId, requireCurrentUser().tenantId)`,
@@ -86,7 +86,7 @@ system EmbTenancy {
   user { id: string  tenantId: string }
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         tenantId: string
         code: string
         filter this.tenantId == currentUser.tenantId

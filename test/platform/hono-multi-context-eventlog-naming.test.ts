@@ -32,7 +32,7 @@ system MC {
       repository Widgets for Widget { }
     }
     context Beta {
-      aggregate Job persistedAs(eventLog) {
+      aggregate Job persistedAs: eventLog {
         label: string
         create start() { emit Started { job: id } }
         apply(e: Started) { label := "" }

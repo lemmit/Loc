@@ -131,7 +131,7 @@ describe("Hono ERP-bundle generator regressions", () => {
   it("a TPH concrete subtype's repository delete targets the shared base table", async () => {
     const files = await gen(`
       context Crm {
-        abstract aggregate Contact inheritanceUsing(sharedTable) {
+        abstract aggregate Contact inheritanceUsing: sharedTable {
           email: string
         }
         aggregate PersonContact extends Contact with crudish {

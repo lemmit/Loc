@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // .NET / ASP.NET + EF Core — the event-sourced concurrency rider.  An
-// event-sourced (`persistedAs(eventLog)`) aggregate appends event entities to
+// event-sourced (`persistedAs: eventLog`) aggregate appends event entities to
 // an append-only `<agg>_events` table keyed by a `(stream_id, version)`
 // PRIMARY KEY.  A concurrent append that loses the version race hits a Postgres
 // unique-violation (SQLSTATE 23505): EF surfaces it as a DbUpdateException with
@@ -27,7 +27,7 @@ system Bank {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

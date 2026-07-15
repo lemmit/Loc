@@ -1,4 +1,4 @@
-// DEBT-02 — a capability `filter` on a `shape(document)` aggregate (java).
+// DEBT-02 — a capability `filter` on a `shape: document` aggregate (java).
 // The whole aggregate lives in one `data` jsonb column, so the filter is
 // applied in-app over the rehydrated aggregate on every read (the document
 // store already deserialises every row + filters finds via findAll().stream()).
@@ -7,7 +7,7 @@
 system DocFilter {
   subdomain D {
     context Cms {
-      aggregate Article shape(document) {
+      aggregate Article shape: document {
         title: string
         isDeleted: bool
         // soft-delete capability — every read hides a deleted article.

@@ -1,7 +1,7 @@
 // Event-sourced workflows on .NET (workflow-and-applier.md A2-S5b).  An
 // `eventSourced` workflow persists as an append-only `<wf>_events` stream
 // folded through its `apply(...)` blocks — the saga analogue of a
-// `persistedAs(eventLog)` aggregate — instead of a mutable correlation-state
+// `persistedAs: eventLog` aggregate — instead of a mutable correlation-state
 // row.  Asserts the `<Wf>State` fold class, the `<Wf>EventRecord` registration,
 // and the fold-load / append-own-events dispatch handlers.
 

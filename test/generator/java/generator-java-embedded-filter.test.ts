@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// DEBT-02 — capability `filter` on a `shape(embedded)` aggregate (java).
+// DEBT-02 — capability `filter` on a `shape: embedded` aggregate (java).
 // An embedded aggregate's root entity is a real JPA table whose root scalars
 // are columns (only `contains` parts ride a jsonb column), so a NON-principal
 // capability predicate is static SQL — it rides Hibernate's `@SQLRestriction`
@@ -45,7 +45,7 @@ describe("java embedded capability filter (DEBT-02)", () => {
 
 // ---------------------------------------------------------------------------
 // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: embedded`
 // aggregate (java).  A principal predicate can't ride the static
 // @SQLRestriction (no runtime principal), so — exactly like the relational
 // path — the OrderJpaRepository gets scoped findAll/findById @Query overrides

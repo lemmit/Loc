@@ -1,7 +1,7 @@
 import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Aggregate-inheritance surface (aggregate-inheritance.md, phase I1).
 // Covers the grammar (`abstract` prefix, `extends <Base>`,
-// `inheritanceUsing(sharedTable | ownTable)` header modifier), the IR
+// `inheritanceUsing: sharedTable|ownTable` header modifier), the IR
 // threading (`isAbstract` / `extendsAggregate` / `inheritanceUsing`), and
 // the I1 validator rules (extends-non-abstract, modifier placement,
 // abstract has no behaviour / no repository, and the D-ES-TPH forced
@@ -37,7 +37,7 @@ describe("aggregate inheritance — grammar (I1)", () => {
   it("parses an abstract base and a concrete subtype that extends it", async () => {
     const { model, errors } = await parse(`
       context Parties {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
       }
     `);
@@ -49,11 +49,11 @@ describe("aggregate inheritance — grammar (I1)", () => {
     expect(customer.superType?.ref?.name).toBe("Party");
   });
 
-  it("parses inheritanceUsing(ownTable) and coexists with persistedAs / shape", async () => {
+  it("parses inheritanceUsing: ownTable and coexists with persistedAs / shape", async () => {
     const { model, errors } = await parse(`
       context Parties {
-        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
-        aggregate Ledger extends Party persistedAs(eventLog) inheritanceUsing(ownTable) { n: int }
+        abstract aggregate Party inheritanceUsing: ownTable { name: string }
+        aggregate Ledger extends Party persistedAs: eventLog inheritanceUsing: ownTable { n: int }
       }
     `);
     expect(errors.map((e) => e.message)).toEqual([]);
@@ -74,7 +74,7 @@ describe("aggregate inheritance — grammar (I1)", () => {
 
   it("rejects an unknown inheritanceUsing value", async () => {
     const { errors } = await parse(`
-      context T { abstract aggregate Party inheritanceUsing(tpt) { name: string } }
+      context T { abstract aggregate Party inheritanceUsing: tpt { name: string } }
     `);
     expect(errors.length).toBeGreaterThan(0);
   });
@@ -85,7 +85,7 @@ describe("aggregate inheritance — IR threading (I1)", () => {
 system Sys {
   subdomain Sales {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string }
       aggregate Customer extends Party { creditLimit: decimal }
     }
   }
@@ -119,9 +119,9 @@ describe("aggregate inheritance — validator (I1)", () => {
     expect(codes(errors)).toContain("loom.extends-non-abstract");
   });
 
-  it("rejects inheritanceUsing(…) on a plain aggregate (loom.inheritance-modifier-misplaced)", async () => {
+  it("rejects inheritanceUsing: on a plain aggregate (loom.inheritance-modifier-misplaced)", async () => {
     const { errors } = await parse(`
-      context T { aggregate Cart inheritanceUsing(sharedTable) { name: string } }
+      context T { aggregate Cart inheritanceUsing: sharedTable { name: string } }
     `);
     expect(codes(errors)).toContain("loom.inheritance-modifier-misplaced");
   });
@@ -152,18 +152,18 @@ describe("aggregate inheritance — validator (I1)", () => {
   it("forces ownTable for an eventLog concrete of a sharedTable base (loom.es-tph-forced-own-table)", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
-        aggregate Ledger extends Party persistedAs(eventLog) { n: int }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+        aggregate Ledger extends Party persistedAs: eventLog { n: int }
       }
     `);
     expect(codes(errors)).toContain("loom.es-tph-forced-own-table");
   });
 
-  it("accepts the eventLog concrete once it declares inheritanceUsing(ownTable)", async () => {
+  it("accepts the eventLog concrete once it declares inheritanceUsing: ownTable", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
-        aggregate Ledger extends Party persistedAs(eventLog) inheritanceUsing(ownTable) { n: int }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+        aggregate Ledger extends Party persistedAs: eventLog inheritanceUsing: ownTable { n: int }
       }
     `);
     expect(codes(errors)).not.toContain("loom.es-tph-forced-own-table");
@@ -175,9 +175,9 @@ describe("aggregate inheritance — validator (I1)", () => {
     // naming the offending concrete.
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
-        aggregate LegacyVendor extends Party inheritanceUsing(ownTable) { obscure: string }
+        aggregate LegacyVendor extends Party inheritanceUsing: ownTable { obscure: string }
       }
     `);
     expect(codes(errors)).toContain("loom.tph-own-override-unsupported");
@@ -189,8 +189,8 @@ describe("aggregate inheritance — validator (I1)", () => {
     // opt-out must not trip the voluntary-override gate.
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
-        aggregate Ledger extends Party persistedAs(eventLog) inheritanceUsing(ownTable) { n: int }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+        aggregate Ledger extends Party persistedAs: eventLog inheritanceUsing: ownTable { n: int }
       }
     `);
     expect(codes(errors)).not.toContain("loom.tph-own-override-unsupported");
@@ -202,7 +202,7 @@ describe("aggregate inheritance — validator (I1)", () => {
     // repository's parentId-keyed load/save works unchanged.
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party {
           creditLimit: decimal
           contains addresses: Address[]
@@ -216,8 +216,8 @@ describe("aggregate inheritance — validator (I1)", () => {
   it("allows a 'contains' part on an ownTable (TPC) concrete (it has its own table)", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
-        aggregate Customer extends Party inheritanceUsing(ownTable) {
+        abstract aggregate Party inheritanceUsing: ownTable { name: string }
+        aggregate Customer extends Party inheritanceUsing: ownTable {
           creditLimit: decimal
           contains addresses: Address[]
           entity Address { street: string }
@@ -233,8 +233,8 @@ describe("aggregate inheritance — field inheritance into wireShape (I2 foundat
 system Sys {
   subdomain Sales {
     context Parties {
-      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
-      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+      abstract aggregate Party inheritanceUsing: ownTable { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing: ownTable { creditLimit: decimal }
     }
   }
 }
@@ -254,8 +254,8 @@ system Sys {
 system Sys {
   subdomain Sales {
     context Parties {
-      abstract aggregate Party inheritanceUsing(ownTable) { name: string }
-      aggregate Customer extends Party inheritanceUsing(ownTable) { name: string tier: int }
+      abstract aggregate Party inheritanceUsing: ownTable { name: string }
+      aggregate Customer extends Party inheritanceUsing: ownTable { name: string tier: int }
     }
   }
 }
@@ -269,7 +269,7 @@ system Sys {
   });
 
   it("emits no inheritance diagnostic for an ownTable (TPC) hierarchy (IR-validate)", async () => {
-    // SRC declares inheritanceUsing(ownTable) on both base and concrete —
+    // SRC declares inheritanceUsing: ownTable on both base and concrete —
     // TPC emission is wired (each concrete is a standalone table; the base
     // is dropped from the generation view), so validation stays quiet.
     const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(SRC))));
@@ -286,8 +286,8 @@ describe("aggregate inheritance — storage gate + ownTable emission (I2/I3)", (
 system Sys {
   subdomain Parties {
     context Parties {
-      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
-      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+      abstract aggregate Party inheritanceUsing: ownTable { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing: ownTable { creditLimit: decimal }
     }
   }
   storage primary { type: postgres }
@@ -306,8 +306,8 @@ system Sys {
 system Sys {
   subdomain Sales {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
-      aggregate Customer extends Party inheritanceUsing(sharedTable) { creditLimit: decimal }
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+      aggregate Customer extends Party inheritanceUsing: sharedTable { creditLimit: decimal }
     }
   }
 }
@@ -318,7 +318,7 @@ system Sys {
     expect(errors.map((e) => e.source).sort()).toEqual(["Parties/Customer", "Parties/Party"]);
   });
 
-  it("gates an inheritance hierarchy with no inheritanceUsing(…) (sharedTable default) as an error", async () => {
+  it("gates an inheritance hierarchy with no inheritanceUsing: (sharedTable default) as an error", async () => {
     const DEFAULTED = `
 system Sys {
   subdomain Sales {
@@ -381,8 +381,8 @@ system Sys {
   it("rejects a polymorphic 'Base id' reference to an abstract base (loom.polymorphic-id-ref-unsupported)", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
-        aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+        abstract aggregate Party inheritanceUsing: ownTable { name: string }
+        aggregate Customer extends Party inheritanceUsing: ownTable { creditLimit: decimal }
         aggregate Order { buyer: Party id }
       }
     `);
@@ -399,9 +399,9 @@ system Sys {
 system Sys {
   subdomain Parties {
     context Parties {
-      abstract aggregate Party inheritanceUsing(ownTable) { name: string email: string }
-      aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
-      aggregate Supplier extends Party inheritanceUsing(ownTable) { rating: int }
+      abstract aggregate Party inheritanceUsing: ownTable { name: string email: string }
+      aggregate Customer extends Party inheritanceUsing: ownTable { creditLimit: decimal }
+      aggregate Supplier extends Party inheritanceUsing: ownTable { rating: int }
     }
   }
   storage primary { type: postgres }
@@ -474,7 +474,7 @@ describe("aggregate inheritance — sharedTable/TPH emission on Hono (I2)", () =
 system Sys {
   subdomain Parties {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) { name: string email: string }
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string email: string }
       aggregate Customer extends Party { creditLimit: decimal }
       aggregate Supplier extends Party { taxId: string }
     }
@@ -569,7 +569,7 @@ system Sys {
   it("allows a polymorphic 'Party id' ref under TPH (single shared table)", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
         aggregate Order { buyer: Party id }
       }
@@ -596,8 +596,8 @@ system Sys {
   it("rejects a polymorphic 'Party id' ref to an ownTable (TPC) base (ambiguous FK)", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
-        aggregate Customer extends Party inheritanceUsing(ownTable) { creditLimit: decimal }
+        abstract aggregate Party inheritanceUsing: ownTable { name: string }
+        aggregate Customer extends Party inheritanceUsing: ownTable { creditLimit: decimal }
         aggregate Order { buyer: Party id }
       }
     `);
@@ -610,9 +610,9 @@ system Sys {
     // it.  The diagnostic names the offending sibling.
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
-        aggregate LegacyVendor extends Party inheritanceUsing(ownTable) { obscure: string }
+        aggregate LegacyVendor extends Party inheritanceUsing: ownTable { obscure: string }
         aggregate Order { buyer: Party id }
       }
     `);
@@ -625,9 +625,9 @@ system Sys {
   it("allows a polymorphic 'Party id' ref when every concrete is sharedTable", async () => {
     const { errors } = await parse(`
       context T {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
-        aggregate Supplier extends Party inheritanceUsing(sharedTable) { taxId: string }
+        aggregate Supplier extends Party inheritanceUsing: sharedTable { taxId: string }
         aggregate Order { buyer: Party id }
       }
     `);
@@ -640,7 +640,7 @@ system Sys {
 system Sys {
   subdomain Parties {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) { name: string email: string }
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string email: string }
       aggregate Customer extends Party {
         creditLimit: decimal
         contains addresses: Address[]

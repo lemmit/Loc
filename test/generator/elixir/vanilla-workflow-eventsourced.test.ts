@@ -2,7 +2,7 @@
 // Vanilla Elixir — event-sourced workflows (workflow-and-applier.md A2-S5b;
 // elixir-vanilla joined the foundation-aware ES-workflow gate).  An
 // `eventSourced` workflow persists as an append-only `<wf>_events` stream folded
-// through its `apply(...)` blocks — the saga analogue of a `persistedAs(eventLog)`
+// through its `apply(...)` blocks — the saga analogue of a `persistedAs: eventLog`
 // aggregate — instead of a mutable `<wf>_state` Ecto row.  Asserts the `<Wf>State`
 // fold struct, the `<Wf>Fold` / `<Wf>Stream` modules, the absence of a state
 // schema, and the fold-on-load / append-own-events handlers.

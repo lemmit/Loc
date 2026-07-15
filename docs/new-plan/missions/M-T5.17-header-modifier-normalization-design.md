@@ -1,9 +1,9 @@
 # M-T5.17 — Surface normalization: aggregate-header modifiers + `httpStatus` clause (design)
 
-> **Status: Phase 1 LANDED (enum-axis colon modifiers); `httpStatus` DONE (#1918).**
-> The aggregate-header enum-axis modifiers now accept the canonical colon form
-> (accept-both, printer emits colon); the `crossTenant`-hoist + paren-form removal
-> are the Phase 2 cutover. See §"Rollout".
+> **Status: DONE.** Phase 1 (accept-both colon, #1934) + Phase 2 cutover (paren
+> removed, `crossTenant` hoisted, order-independent, corpus codemodded) both
+> landed; `httpStatus` was hard-cut in #1918. The whole finding #1 is resolved.
+> See §"Rollout".
 > Sources: language-surface review 2026-07-14 (finding #1 "aggregate-header modifier
 > zoo" + finding #3 "`httpStatus X N` space-triple"); `src/language/ddd.langium`
 > (`Aggregate` header, `ApiStatus`); [`docs/decisions.md`](../../decisions.md)
@@ -185,13 +185,18 @@ timing:
   value change (one `.ddd` fixture actually uses post-name `crossTenant`) best done
   in the cutover. The `loom.deprecated-*` info diagnostic + LSP fix-it are likewise
   deferred (optional polish).
-- **Phase 2 — codemod + remove old forms (time this one).** A `scripts/`
-  codemod rewrites the whole corpus (`persistedAs(X)` → `persistedAs: X`, hoist
-  `crossTenant`), then the grammar drops the paren alternatives + the post-name
-  `crossTenant` position. This is the only fixture-churning piece, so land it in a gap
-  between the big fixture PRs. Precedent for the codemod shape:
-  `scripts/migrate-workflows-to-create.mjs`. (`httpStatus` needs no Phase 2 — #1918
-  already hard-cut it to `->`.)
+- **Phase 2 — codemod + remove old forms. ✅ LANDED.** Timed to land *after* the two
+  in-flight corpus churners (#1904 paged-by-default, #1933 versioning-default-on)
+  merged, so the codemod swept up their occurrences too and nothing had to rebase. A
+  codemod rewrote the whole corpus — **129 files / 408 edits** (`persistedAs(X)` →
+  `persistedAs: X`, `shape`/`inheritanceUsing` likewise, `aggregate N crossTenant` →
+  `crossTenant aggregate N`) across all `.ddd` + embedded-`.ddd` test strings — then
+  the grammar dropped the paren alternatives + the post-name `crossTenant` position
+  and made the three colon modifiers **order-independent** (interleaving `(…)*`, each
+  led by a distinct keyword — no ambiguity, and the old silent reorder-parse-error is
+  gone). **No fixture re-baseline** — colon and paren lower to the same field, so
+  generated output is byte-identical; only `.ddd` inputs + grammar + printer changed.
+  (`httpStatus` needed no Phase 2 — #1918 already hard-cut it to `->`.)
 
 Migration scope (corpus grep, 2026-07-14): ~27 `persistedAs(`, ~19
 `inheritanceUsing(`, a subset of 68 `shape(` matches (many are doc comments /

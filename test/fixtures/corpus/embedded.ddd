@@ -1,10 +1,10 @@
-// shape(embedded): queryable root row, containments fold into jsonb columns.
+// shape: embedded: queryable root row, containments fold into jsonb columns.
 system EmbSys {
   subdomain Shop {
     context Shop {
       aggregate Tag { label: string }
       repository Tags for Tag {}
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         customer: string
         total: money
         tags: Tag id[]

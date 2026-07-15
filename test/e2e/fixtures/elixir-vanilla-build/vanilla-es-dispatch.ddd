@@ -13,7 +13,7 @@ system Sales {
       event OrderPlaced { order: Order id, at: datetime }
       event Fulfilled { order: Order id }
 
-      aggregate Order persistedAs(eventLog) {
+      aggregate Order persistedAs: eventLog {
         status: string
 
         create place() { emit OrderPlaced { order: id, at: now() } }

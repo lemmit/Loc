@@ -158,7 +158,7 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
     const position = patch.position ?? "after";
     if (position === "header-end") {
       // Insert just before the target declaration's opening `{` (its header) —
-      // for header clauses like `inheritanceUsing(ownTable)`.  The existing
+      // for header clauses like `inheritanceUsing: ownTable`.  The existing
       // space before `{` separates the prior token; a trailing space separates
       // `source` from `{`.
       let brace = start;

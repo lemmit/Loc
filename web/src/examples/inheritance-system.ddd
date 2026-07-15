@@ -2,7 +2,7 @@
 // the older playground examples never touched.  See docs/inheritance.md.
 //
 //   • An `abstract aggregate` base (PaymentMethod) with two concrete
-//     subtypes that `extends` it.  `inheritanceUsing(sharedTable)` maps
+//     subtypes that `extends` it.  `inheritanceUsing: sharedTable` maps
 //     the hierarchy Table-Per-Hierarchy (one `payment_methods` table +
 //     a `kind` discriminator).  TPH is the node/Hono backend's strategy,
 //     so this whole system previews live.  The base owns no table or
@@ -12,7 +12,7 @@
 //     the shared table carries a single identity.
 //
 //   • An event-sourced aggregate (LoyaltyAccount) declared
-//     `persistedAs(eventLog)`: its truth is the stream of emitted events,
+//     `persistedAs: eventLog`: its truth is the stream of emitted events,
 //     folded back into state by the `apply(...)` bodies.  Contrast with
 //     every other example, where the aggregate's current row IS the truth.
 
@@ -34,7 +34,7 @@ system InheritanceSystem {
 
       // --- Inheritance (TPH / sharedTable) -------------------------------
       // The abstract base: shared fields, no table / repository / routes.
-      abstract aggregate PaymentMethod inheritanceUsing(sharedTable) {
+      abstract aggregate PaymentMethod inheritanceUsing: sharedTable {
         holderName: string
         last4: string
         invariant holderName.length > 0
@@ -65,11 +65,11 @@ system InheritanceSystem {
       }
       repository BankAccounts for BankAccount { }
 
-      // --- Event sourcing (persistedAs(eventLog)) ------------------------
+      // --- Event sourcing (persistedAs: eventLog) ------------------------
       // The aggregate is reconstructed by folding its event stream.  Each
       // operation emits an event; the matching `apply(...)` body is the
       // ONLY place state mutates — replaying the events rebuilds `this`.
-      aggregate LoyaltyAccount persistedAs(eventLog) {
+      aggregate LoyaltyAccount persistedAs: eventLog {
         owner: string
         balance: int
 

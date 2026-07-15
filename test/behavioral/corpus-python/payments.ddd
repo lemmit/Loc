@@ -21,7 +21,7 @@ system PaymentsPy {
 
       // Abstract base: shared fields, no table / repository / routes of its
       // own — TPH folds every subtype into one `payment_methods` table.
-      abstract aggregate PaymentMethod inheritanceUsing(sharedTable) {
+      abstract aggregate PaymentMethod inheritanceUsing: sharedTable {
         holderName: string
         last4: string
         invariant holderName.length > 0

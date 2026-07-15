@@ -210,7 +210,7 @@ describe("policy read levels — validation (fail closed)", () => {
   it("non-tenantOwned target → loom.policy-target-not-tenant-owned", async () => {
     const diags = await policyDiags(
       hierarchy({
-        extra: "aggregate Plan crossTenant { tier: string }",
+        extra: "crossTenant aggregate Plan { tier: string }",
         policy: "allow deep on Plan",
       }),
     );

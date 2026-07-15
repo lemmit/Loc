@@ -4,7 +4,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // DEBT-02 Slice B — a PRINCIPAL-referencing (tenancy) capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(document)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: document`
 // aggregate (java).  The whole aggregate lives in one `data` jsonb column, so
 // the filter can't be a SQL predicate — it's applied in-app over the rehydrated
 // aggregate on every read.  The principal can't ride the static @SQLRestriction

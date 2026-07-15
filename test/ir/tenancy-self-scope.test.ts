@@ -32,7 +32,7 @@ const TENANCY_SRC = `
     subdomain Billing {
       context Invoicing {
         aggregate Invoice with tenantOwned { number: string }
-        aggregate Plan crossTenant { code: string }
+        crossTenant aggregate Plan { code: string }
         repository Invoices for Invoice { }
       }
       context Accounts {

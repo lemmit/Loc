@@ -1,8 +1,8 @@
-// daisyui design pack + scaffold + shape(embedded) on the vanilla foundation —
+// daisyui design pack + scaffold + shape: embedded on the vanilla foundation —
 // relocated from the former daisyui-pack fixture (it was already
 // `foundation: vanilla` there; moved here so it survives the ash-build directory
 // deletion).  Exercises `design: daisyui`, scaffolded LiveView pages, a derived
-// field, a value object, and a `shape(embedded)` containment array.
+// field, a value object, and a `shape: embedded` containment array.
 system DaisyuiPack {
   subdomain Sales {
     context Sales {
@@ -25,7 +25,7 @@ system DaisyuiPack {
   }
   subdomain Shopping {
     context Shopping {
-      aggregate Wishlist shape(embedded) {
+      aggregate Wishlist shape: embedded {
         owner: string
         label: string
         derived display: string = label

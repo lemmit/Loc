@@ -2,12 +2,12 @@
 // Java backend — non-relational saving shapes (D-DOCUMENT-AXIS; java's
 // PLATFORM_SAVING_SHAPES now lists relational + embedded + document).
 //
-//   - `shape(document)`: the whole aggregate (parts inline) round-trips
+//   - `shape: document`: the whole aggregate (parts inline) round-trips
 //     ONE jsonb column — plain domain class (no JPA bindings), a
 //     JdbcTemplate repository with a field-visibility Jackson mapper
 //     (package-private fields, transient _domainEvents excluded),
 //     version-bumping upserts, in-memory find folds.
-//   - `shape(embedded)`: the root stays a queryable @Entity (scalar
+//   - `shape: embedded`: the root stays a queryable @Entity (scalar
 //     columns + JPQL finds) but containments fold into jsonb columns
 //     via Hibernate's JSON FormatMapper, swapped for a field-visibility
 //     Jackson mapper (LoomJsonFormatMapperConfig) so the
@@ -30,7 +30,7 @@ import { buildLoomModel } from "../../_helpers/ir.js";
 const DOC = readFileSync("test/e2e/fixtures/java-build/document.ddd", "utf8");
 const EMB = readFileSync("test/e2e/fixtures/java-build/embedded.ddd", "utf8");
 
-describe("java generator — shape(document)", () => {
+describe("java generator — shape: document", () => {
   it("entity is a plain domain class; the impl round-trips one jsonb column", async () => {
     const files = await generateSystemFiles(DOC);
     const root = "doc_api/src/main/java/com/loom/docapi";
@@ -63,7 +63,7 @@ describe("java generator — shape(document)", () => {
   });
 });
 
-describe("java generator — shape(embedded)", () => {
+describe("java generator — shape: embedded", () => {
   it("root stays a queryable @Entity; containments fold into jsonb columns", async () => {
     const files = await generateSystemFiles(EMB);
     const root = "emb_api/src/main/java/com/loom/embapi";

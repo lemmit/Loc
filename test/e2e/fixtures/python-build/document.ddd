@@ -1,4 +1,4 @@
-// shape(document) for the Python backend: the whole aggregate tree
+// shape: document for the Python backend: the whole aggregate tree
 // (root + contained parts) round-trips ONE jsonb column (id, data,
 // version) instead of the normalised table-per-entity tree.  Operations
 // load the blob, mutate the rehydrated domain instance, and re-serialise;
@@ -7,7 +7,7 @@
 system DocSys {
   subdomain Cms {
     context Cms {
-      aggregate Article shape(document) {
+      aggregate Article shape: document {
         title: string
         viewCount: int
         contains sections: Section[]

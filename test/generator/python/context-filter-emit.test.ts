@@ -105,24 +105,24 @@ system Shop {
 });
 
 // ---------------------------------------------------------------------------
-// shape(embedded) capability filters (DEBT-02 tail).  An embedded aggregate's
+// shape: embedded capability filters (DEBT-02 tail).  An embedded aggregate's
 // root scalars are real columns, so the predicate AND-s into the embedded SQL
 // reads exactly like the relational path — `repository-embedded-builder.ts`
 // threads the SAME `contextFilterPredicate`.  Both the non-principal and the
-// principal (`require_current_user()`) cases are wired; only `shape(document)`
+// principal (`require_current_user()`) cases are wired; only `shape: document`
 // stays gated (in-app filtering, not built).
 // ---------------------------------------------------------------------------
 
 const EMBED_REPO = "api/app/db/repositories/cart_repository.py";
 
-describe("python generator — capability filter on shape(embedded)", () => {
+describe("python generator — capability filter on shape: embedded", () => {
   it("AND-s a NON-PRINCIPAL filter into every embedded root read", async () => {
     const repo = (
       await build(`
 system Shop {
   subdomain Sales {
     context Sales {
-      aggregate Cart shape(embedded) {
+      aggregate Cart shape: embedded {
         total: int
         archived: bool
         filter !this.archived
@@ -155,7 +155,7 @@ system Shop {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Sales {
-      aggregate Cart shape(embedded) {
+      aggregate Cart shape: embedded {
         total: int
         tenantId: string
         filter this.tenantId == currentUser.tenantId
@@ -185,7 +185,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Sales {
-      aggregate Cart shape(embedded) {
+      aggregate Cart shape: embedded {
         total: int
         archived: bool
       }

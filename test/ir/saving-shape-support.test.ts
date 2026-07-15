@@ -37,22 +37,22 @@ system Shop {
 }
 
 describe("saving-shape capability validation", () => {
-  it("accepts shape(document) / shape(embedded) on a dotnet deployable", async () => {
+  it("accepts shape: document / shape: embedded on a dotnet deployable", async () => {
     expect(await shapeErrors(sys("dotnet", "document"))).toEqual([]);
     expect(await shapeErrors(sys("dotnet", "embedded"))).toEqual([]);
   });
 
-  it("accepts shape(document) / shape(embedded) on a hono deployable", async () => {
+  it("accepts shape: document / shape: embedded on a hono deployable", async () => {
     expect(await shapeErrors(sys("node", "document"))).toEqual([]);
     expect(await shapeErrors(sys("node", "embedded"))).toEqual([]);
   });
 
-  it("accepts shape(document) on an elixir (vanilla) deployable (DEBT-07)", async () => {
+  it("accepts shape: document on an elixir (vanilla) deployable (DEBT-07)", async () => {
     const src = `
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish { total: int }
+      aggregate Cart shape: document with crudish { total: int }
       repository Carts for Cart { }
     }
   }
@@ -64,7 +64,7 @@ system Shop {
     expect(await shapeErrors(src)).toEqual([]);
   });
 
-  it("accepts shape(embedded) on an elixir (vanilla) deployable (embeds_many)", async () => {
+  it("accepts shape: embedded on an elixir (vanilla) deployable (embeds_many)", async () => {
     expect(await shapeErrors(sys("elixir", "embedded"))).toEqual([]);
   });
 
@@ -74,7 +74,7 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) scalar find/op scope (DEBT-07)", () => {
+describe("vanilla shape: document scalar find/op scope (DEBT-07)", () => {
   async function docScopeErrors(source: string): Promise<string[]> {
     const { model } = await parseString(source, { validate: false });
     return validateLoomModel(enrichLoomModel(lowerModel(model)))
@@ -87,7 +87,7 @@ describe("vanilla shape(document) scalar find/op scope (DEBT-07)", () => {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -108,7 +108,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bump() { total := total + 1 }
       }
@@ -129,7 +129,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { message: string }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bump(): Cart or TooMany {
           precondition total < 10
@@ -153,7 +153,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       valueobject Money { amount: int  currency: string }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         price: Money
         total: int
         function affordable(): bool = price.amount < 100
@@ -180,7 +180,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Order shape(document) with crudish {
+      aggregate Order shape: document with crudish {
         reference: string
         contains lines: OrderLine[]
         entity OrderLine { sku: string  qty: int }
@@ -204,7 +204,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bump() audited { total := total + 1 }
       }
@@ -227,7 +227,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bump() audited: Cart or TooMany {
           precondition total < 10
@@ -250,7 +250,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         derived doubled: int = total * 2
         operation sync() { total := doubled }
@@ -273,7 +273,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -296,7 +296,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error NotFound { }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -317,7 +317,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish { reference: string }
+      aggregate Cart shape: document with crudish { reference: string }
       repository Carts for Cart { }
     }
   }

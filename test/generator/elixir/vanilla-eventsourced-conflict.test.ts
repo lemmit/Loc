@@ -3,7 +3,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto/Phoenix) foundation — the event-sourced concurrency rider.  An
-// event-sourced (`persistedAs(eventLog)`) aggregate appends to an append-only
+// event-sourced (`persistedAs: eventLog`) aggregate appends to an append-only
 // `<agg>_events` table keyed by a `(stream_id, version)` PRIMARY KEY.  A
 // concurrent append that loses the version race raises a Postgrex.Error
 // unique_violation (SQLSTATE 23505) inside the append transaction; the
@@ -28,7 +28,7 @@ system Bank {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

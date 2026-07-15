@@ -86,7 +86,7 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     expect(repo).not.toContain("as CustomerDoc");
   });
 
-  // shape(embedded): queryable root columns + containment folded into a
+  // shape: embedded: queryable root columns + containment folded into a
   // jsonb column.  Unlike document, finds are REAL SQL on the root.
   it("embedded: root columns + one jsonb containment column, no part table", () => {
     const schema = files.get("db/schema.ts")!;
