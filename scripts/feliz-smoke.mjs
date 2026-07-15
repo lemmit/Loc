@@ -28,8 +28,10 @@ async function main() {
   await page.getByText("Clicks: 2").waitFor();
 
   // 3. Routing — navigate to the Products page (Feliz.Router hash route).
+  // Target the page HEADING specifically: the app-shell navbar also carries a
+  // "Products" link, so a bare getByText would match two elements.
   await page.getByRole("button", { name: "Browse products" }).click();
-  await page.getByText("Products", { exact: false }).waitFor();
+  await page.getByRole("heading", { name: "Products" }).waitFor();
   // The wire layer ran: with no backend the QueryView settles on error/empty.
   await page
     .getByText(/Failed to load|No products yet\./)
