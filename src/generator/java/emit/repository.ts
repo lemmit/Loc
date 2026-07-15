@@ -1,3 +1,4 @@
+import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   FindIR,
@@ -6,7 +7,6 @@ import type {
   SortTermIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { lines } from "../../../util/code-builder.js";
