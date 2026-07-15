@@ -16,6 +16,7 @@ import {
   configSchemaFor,
   supportsSurfaceKind,
 } from "../../../util/source-types.js";
+import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -79,6 +80,36 @@ import { validateE2ETest } from "./test-checks.js";
 // those (phoenixLiveView) would silently emit no guard — reject it loudly
 // so the limitation is visible rather than a no-op.
 const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
+
+// paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is only
+// emitted on the node (Hono) backend today — the .NET/Java/Python/Elixir
+// explicit-handler emitters would crash on the `paged` generic carrier (as Hono
+// did before #1904's paged-find machinery was wired here).  Gate a paged
+// queryHandler hosted on any non-node backend deployable with an honest
+// diagnostic until the per-backend emission fans out, so the feature is
+// Hono-scoped rather than a silent codegen crash.
+export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    // Only backend platforms emit application-layer handlers; node is the one
+    // that supports paged queryHandlers.  Frontends / non-backend platforms are
+    // skipped (they host no handlers).
+    if (!platformOwnsBackend(d.platform) || d.platform === "node") continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const h of c.queryHandlers ?? []) {
+        if (!pagedReturn(h.returnType)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.paged-query-handler-unsupported-backend",
+          message: `queryHandler '${h.name}' returns a \`paged\` envelope, which is currently only emitted on the node (Hono) backend; deployable '${d.name}' (platform '${d.platform}') can't generate it yet.`,
+          source: `${c.name}/${h.name}`,
+        });
+      }
+    }
+  }
+}
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {

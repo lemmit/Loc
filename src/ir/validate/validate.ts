@@ -59,6 +59,7 @@ import {
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validateNodeStampSupport,
+  validatePagedQueryHandlerBackend,
   validatePermissions,
   validateProvenancedStorage,
   validatePythonStampSupport,
@@ -154,6 +155,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
+    validatePagedQueryHandlerBackend(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);

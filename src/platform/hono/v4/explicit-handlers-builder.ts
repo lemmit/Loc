@@ -42,6 +42,11 @@
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -50,6 +55,7 @@ import type {
   RouteIR,
   TypeIR,
   ValueObjectIR,
+  WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
@@ -130,6 +136,105 @@ function returnEntity(
   return owning ? { agg: owning.name, isCollection: info.isCollection } : undefined;
 }
 
+/** Emit the `app.openapi(...)` block for a paged-run queryHandler (`queryHandler
+ *  H(...): <Agg> paged { let r = Repo.run(<Criterion>(args)); return r }`).  A
+ *  paged read is a GET: the handler's own params become QUERY params (path
+ *  tokens stay path params) joined by the `page`/`pageSize`/`sort`/`dir`
+ *  pagination controls; the body calls the synthesized paged FIND repo method
+ *  (`findAllBy<Criterion>`) and returns the envelope with items wire-projected.
+ *  The 200 body schema stays `z.unknown()` (the wire object is plain JSON), so
+ *  no cross-file `<Agg>Paged` DTO reference / duplicate `.openapi` registration
+ *  is introduced. */
+function emitPagedRunHandler(
+  apiName: string,
+  route: RouteIR,
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): string[] {
+  const pathNames = new Set([...route.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
+  const method = route.method.toLowerCase();
+  // The returned value is a `let`-ref bound to a `Repo.run(<Criterion>)`
+  // (synthCriterion) statement — the shape enrich synthesized the paged FIND
+  // for.  Locate it to recover the repo/aggregate + the paged find method name
+  // (`retrievalName` = `findAllBy<Criterion>`) + the criterion args.
+  const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+  const run = h.statements.find(
+    (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+      s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+  );
+  if (!run) {
+    throw new Error(
+      `internal: paged queryHandler '${h.name}' in '${ctx.name}' does not match the ` +
+        "supported `let r = Repo.run(<Criterion>(args)); return r` shape. Please file a bug.",
+    );
+  }
+  // Path-bound params (`{token}`) stay path params; the rest ride the query
+  // string (a paged read is a GET — no body), joined by the pagination controls.
+  const pathParams = h.params.filter((p) => pathNames.has(p.name));
+  const queryParams = h.params.filter((p) => !pathNames.has(p.name));
+  const out: string[] = [];
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "${method}",`);
+  out.push(`    path: "${route.path}",`);
+  out.push(`    tags: ["${apiName}"],`);
+  out.push(`    operationId: "${lowerFirst(ctx.name)}${h.name}",`);
+  const reqParts: string[] = [];
+  if (pathParams.length > 0) {
+    reqParts.push(
+      `params: z.object({ ${pathParams.map((p) => `${p.name}: ${pathParamZod(p.type)}`).join(", ")} })`,
+    );
+  }
+  const queryFields = [
+    ...queryParams.map((p) => `${p.name}: ${zodFor(p.type, "query")}`),
+    `page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE})`,
+    `pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE})`,
+    `sort: z.string().default("id")`,
+    `dir: z.string().default("asc")`,
+  ];
+  reqParts.push(`query: z.object({ ${queryFields.join(", ")} })`);
+  out.push(`    request: { ${reqParts.join(", ")} },`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: z.unknown() } } },`,
+  );
+  out.push(
+    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (httpCtx) => {`);
+  if (pathParams.length > 0) out.push(`    const params = httpCtx.req.valid("param");`);
+  out.push(`    const query = httpCtx.req.valid("query");`);
+  const paramExprs = new Map<string, string>();
+  for (const p of pathParams) {
+    out.push(`    const ${p.name} = ${wireToDomainExpr(`params.${p.name}`, p.type, ctx)};`);
+    paramExprs.set(p.name, p.name);
+  }
+  for (const p of queryParams) {
+    out.push(`    const ${p.name} = ${wireToDomainExpr(`query.${p.name}`, p.type, ctx)};`);
+    paramExprs.set(p.name, p.name);
+  }
+  const repoVar = lowerFirst(run.repoName);
+  out.push(`    const ${repoVar} = new ${run.aggName}Repository(db, events);`);
+  // Criterion args (handler params passed to the criterion) + the pagination
+  // controls → the paged FIND method call.
+  const critArgs = run.retrievalArgs.map((a) => renderExprWithParams(a, paramExprs, "this"));
+  const callArgs = [...critArgs, "query.page", "query.pageSize", "query.sort", "query.dir"].join(
+    ", ",
+  );
+  out.push(`    const result = await ${repoVar}.${run.retrievalName}(${callArgs});`);
+  out.push(
+    `    return httpCtx.json({ ...result, items: result.items.map((__e) => ${repoVar}.toWire(__e)) }, 200);`,
+  );
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
 /** Emit one `app.openapi(createRoute({...}), async (httpCtx) => {...})` block
  *  for a route → handler binding.  Returns lines at router-body indent base
  *  (`app.openapi(` at column 0; the file builder wraps them +2). */
@@ -139,6 +244,17 @@ function emitRouteHandler(
   h: Handler,
   ctx: EnrichedBoundedContextIR,
 ): string[] {
+  // paged-run queryHandler: `queryHandler H(...): <Agg> paged { let r =
+  // Repo.run(<Criterion>(args)); return r }`.  Handled before the generic path
+  // (whose `returnEntity` → `wireTypeInfo` can't render a `paged` generic
+  // carrier).  Reuses the #1904 paged FIND repo-method (synthesized onto the
+  // aggregate's repository by enrich): the route exposes page/pageSize/sort/dir
+  // + the handler's own params, calls `repo.findAllBy<Criterion>(...)`, and
+  // returns the `{items,page,pageSize,total,totalPages}` envelope with items
+  // wire-projected via `repo.toWire`.
+  if (!h.extern && h.returnType && pagedReturn(h.returnType)) {
+    return emitPagedRunHandler(apiName, route, h, ctx);
+  }
   const pathNames = new Set([...route.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
   const method = route.method.toLowerCase();
   // Classify each handler param: a path-bound id/scalar (name in a `{token}`),

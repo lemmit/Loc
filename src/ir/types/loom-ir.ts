@@ -825,6 +825,13 @@ export interface FindIR {
    *  (fully-resolved IR) — the per-backend filter identity (e.g. the EF
    *  `HasQueryFilter` name) is derived in the emitter. */
   bypassCaps?: string[];
+  /** Compiler-synthesized find — NOT author-declared and NOT auto-exposed as
+   *  its own HTTP route.  Set by enrich when a paged `queryHandler` over
+   *  `Repo.run(<Criterion>)` (paged-run) needs the #1904 paged FIND repo-method
+   *  emitted for it to call; the exposure is the queryHandler's own route, so
+   *  the aggregate router skips this find (route + query schema + paged DTO).
+   *  The repository builder still emits the method. */
+  synthesized?: boolean;
 }
 
 export interface RepositoryIR {
