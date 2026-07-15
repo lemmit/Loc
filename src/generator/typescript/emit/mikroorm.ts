@@ -43,6 +43,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
@@ -466,6 +467,40 @@ export function renderMikroRepository(
       })()
     : `    await em.upsert(${row}, ${saveProjection});`;
 
+  // Versioned optimistic-concurrency save (M-T3.4, default-on) — the MikroORM
+  // analogue of the drizzle guarded write (repository-save-builder.ts).  No
+  // existing row → `em.insert` seeding `version: 1`.  Existing row → a guarded
+  // `em.nativeUpdate` whose WHERE pins `version = expected` and whose SET bumps
+  // it; zero affected rows means another request won the race in between →
+  // `ConcurrencyError` (mapped to 409 by the shared onError arm).  `expected` is
+  // the caller's `expectedVersion` (threaded from the route's `If-Match`) falling
+  // back to the just-loaded `aggregate.version`.
+  const versioned = aggregateIsVersioned(agg);
+  const nonVersionEntries = agg.fields
+    .filter((f) => f.name !== "version")
+    .flatMap((f) => projectFieldEntries(f, "aggregate", ctx));
+  const insertProjection = projectionObject("aggregate", [
+    { fieldName: "id", expr: "aggregate.id as string" },
+    ...nonVersionEntries,
+    { fieldName: "version", expr: "1" },
+  ]);
+  const updateData = projectionObject("aggregate", [
+    ...nonVersionEntries,
+    { fieldName: "version", expr: "expected + 1" },
+  ]);
+  const insertValues = audited ? `stampInsert(${insertProjection})` : insertProjection;
+  const updateSet = audited ? `stampUpdate(${updateData})` : updateData;
+  const versionedSaveLines = [
+    `    const expected = expectedVersion ?? aggregate.version;`,
+    `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
+    `    if (existing === null) {`,
+    `      await em.insert(${row}, ${insertValues});`,
+    `    } else {`,
+    `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, ${updateSet});`,
+    `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+    `    }`,
+  ];
+
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
@@ -629,9 +664,11 @@ export function renderMikroRepository(
     `    return rows.map((row) => ${hydrate("row")});`,
     `  }`,
     "",
-    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    versioned
+      ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+      : `  async save(aggregate: ${agg.name}): Promise<void> {`,
     `    const em = this.em.fork();`,
-    upsertCall,
+    ...(versioned ? versionedSaveLines : [upsertCall]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -679,11 +716,11 @@ export function renderMikroRepository(
       // Persist-time audit stamping helper — pulled in only when this
       // aggregate's `save()` stamps (audited).  Stamps the audit columns from
       // the ambient request principal at the upsert (db/audit-stamp.ts).
-      audited && `import { stampInsert } from "../audit-stamp";`,
+      audited && `import { stampInsert${versioned ? ", stampUpdate" : ""} } from "../audit-stamp";`,
       `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
-      `import { AggregateNotFoundError } from "../../domain/errors";`,
+      `import { AggregateNotFoundError${versioned ? ", ConcurrencyError" : ""} } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
       `import { requestLog } from "../../obs/als";`,
       "",
