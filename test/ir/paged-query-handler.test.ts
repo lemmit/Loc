@@ -68,12 +68,16 @@ describe("paged queryHandler — validation", () => {
       .map((d) => d.code ?? "");
   }
 
-  it("node (Hono) accepts a paged queryHandler", async () => {
-    expect(await errorCodes("node")).not.toContain("loom.paged-query-handler-unsupported-backend");
+  it("a supported backend accepts a paged queryHandler", async () => {
+    for (const platform of ["node", "python"]) {
+      expect(await errorCodes(platform)).not.toContain(
+        "loom.paged-query-handler-unsupported-backend",
+      );
+    }
   });
 
-  it("a non-node backend is honestly gated (loom.paged-query-handler-unsupported-backend)", async () => {
-    for (const platform of ["dotnet", "java", "python", "elixir"]) {
+  it("a not-yet-supported backend is honestly gated (loom.paged-query-handler-unsupported-backend)", async () => {
+    for (const platform of ["dotnet", "java", "elixir"]) {
       expect(await errorCodes(platform)).toContain("loom.paged-query-handler-unsupported-backend");
     }
   });
