@@ -1815,9 +1815,22 @@ export function fieldErrorFn(formType: string, wireName: string): string {
  *  any list read exists, `remoteOne` when any byId read exists, and `idOptions`
  *  when any `idselect` form field exists (it maps a target's loaded `Remote<'T
  *  list>` to `<option>`s for a foreign-key select). */
-export function renderViewModule(reads: FelizRead[], hasIdSelect = false): string {
+export function renderViewModule(
+  reads: FelizRead[],
+  hasIdSelect = false,
+  hasFieldErrors = false,
+): string {
   const hasList = reads.some((r) => !r.single);
   const hasSingle = reads.some((r) => r.single);
+  // The per-field form-error matcher — factored here beside the Remote matchers
+  // (the codebase's convention for repeated view logic) instead of inlined at
+  // every input.  Shows the message only for a touched field, else nothing.
+  const fieldError = [
+    "  let fieldError (touched: Set<string>) (name: string) (err: string option) : ReactElement =",
+    "    match (Set.contains name touched, err) with",
+    '    | true, Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ]',
+    "    | _ -> Html.none",
+  ];
   const idOptions = [
     "  let idOptions (r: Remote<'T list>) (idOf: 'T -> string) (labelOf: 'T -> string) : ReactElement list =",
     "    match r with",
@@ -1847,5 +1860,7 @@ export function renderViewModule(reads: FelizRead[], hasIdSelect = false): strin
     ...(hasSingle ? one : []),
     (hasList || hasSingle) && hasIdSelect ? "" : undefined,
     ...(hasIdSelect ? idOptions : []),
+    (hasList || hasSingle || hasIdSelect) && hasFieldErrors ? "" : undefined,
+    ...(hasFieldErrors ? fieldError : []),
   );
 }

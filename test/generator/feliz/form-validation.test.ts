@@ -55,13 +55,17 @@ describe("feliz per-field form validation", () => {
     );
   });
 
-  it("renders the inline error under a required field, gated on touched", async () => {
+  it("renders the inline error via the View.fieldError helper, gated on touched", async () => {
     const app = await appFs();
     // The input marks the field touched on blur.
     expect(app).toContain('prop.onBlur (fun _ -> dispatch (TouchProductForm "name"))');
-    // The error only shows once the field is in the touched set.
+    // The repeated touched+error matching is factored into a `View.fieldError`
+    // helper (beside View.remoteList) — not inlined at every input.
     expect(app).toContain(
-      '(match (if Set.contains "name" model.ProductFormTouched then Validation.productFormNameError model.ProductForm else None) with Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ] | None -> Html.none)',
+      "  let fieldError (touched: Set<string>) (name: string) (err: string option) : ReactElement =",
+    );
+    expect(app).toContain(
+      '(View.fieldError model.ProductFormTouched "name" (Validation.productFormNameError model.ProductForm))',
     );
   });
 

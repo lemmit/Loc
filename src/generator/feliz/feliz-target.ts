@@ -106,10 +106,10 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     : "";
   const wrap = (input: string): string => {
     if (!validated) return input;
-    // Show the error only for a touched field (`Set.contains` its name); an
-    // untouched field stays quiet.  ONE line (offside-safe in the form's list).
-    const gate = `(if Set.contains "${fld.wireName}" model.${formTouchedField(formField)} then Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField} else None)`;
-    const errEl = `(match ${gate} with Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ] | None -> Html.none)`;
+    // The touched-gated message goes through the `View.fieldError` helper (the
+    // codebase's convention for repeated view logic, beside `View.remoteList`)
+    // rather than an inlined match at every input.
+    const errEl = `(View.fieldError model.${formTouchedField(formField)} "${fld.wireName}" (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField}))`;
     return `Html.div [ prop.className "form-control"; prop.children [ ${input}; ${errEl} ] ]`;
   };
   if (fld.inputKind === "select") {
