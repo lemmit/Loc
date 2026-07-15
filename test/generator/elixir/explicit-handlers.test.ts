@@ -309,3 +309,52 @@ describe("elixir — extern commandHandler / queryHandler", () => {
     expect(impl).toContain("raise ");
   });
 });
+
+// paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
+// Repo.run(<Criterion>(args)); return r }`) → the api routes controller action
+// calls the aggregate context's synthesized paged FIND function directly
+// (`<find>_<agg>`), coercing page/pageSize with the shared `page_param/3`, and
+// renders the `{items,…}` envelope with items serialised.  No `run/1` handler
+// module is emitted for it, and the aggregate controller does not auto-expose it.
+const PAGED_SRC = `
+system S {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { code: string  region: string }
+      repository Orders for Order { }
+      criterion InRegion(rgn: string) of Order = region == rgn
+      queryHandler ListInRegion(rgn: string): Order paged {
+        let r = Orders.run(InRegion(rgn))
+        return r
+      }
+    }
+  }
+  api A from Sales { route GET "/orders/projections/in_region" -> Orders.ListInRegion }
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: elixir, contexts: [Orders], dataSources: [s], serves: A, port: 5001 }
+}
+`;
+describe("elixir — paged-run queryHandler over run(criterion)", () => {
+  it("the routes controller action calls the synthesized paged FIND and renders the envelope", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const ctrl = fileEndingWith(m, "lib/d_web/controllers/a_routes_controller.ex");
+    expect(ctrl).toContain("def list_in_region(conn, params) do");
+    expect(ctrl).toContain("D.Orders.find_all_by_in_region_order(");
+    expect(ctrl).toContain('page_param(params, "page", 1)');
+    expect(ctrl).toContain("json(conn, %{result | items: Enum.map(result.items, &serialize/1)})");
+    expect(ctrl).toContain("defp page_param(params, key, default) do");
+  });
+
+  it("emits no run/1 handler module for the paged queryHandler", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    expect([...m.keys()].some((k) => k.endsWith("handlers/list_in_region.ex"))).toBe(false);
+  });
+
+  it("registers only the queryHandler route (synthesized find not auto-exposed)", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const router = fileEndingWith(m, "lib/d_web/router.ex");
+    expect(router).toContain('get "/orders/projections/in_region"');
+    expect(router).not.toContain("find_all_by_in_region");
+  });
+});
