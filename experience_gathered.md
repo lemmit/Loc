@@ -2906,3 +2906,22 @@ field-array VM (`rowFields`) already arrives — the work was purely the two pac
   rendered the disabled `(arrays not yet supported)` stub (the shared import-add is
   React-gated), so there was never a broken build to fix — just a stub to replace.
   The `{{#if rowFields}}…{{else}}<stub>{{/if}}` keeps a SCALAR array on the stub.
+
+## 49. Svelte dynamic sub-forms — Svelte-5 $state, and the {#each}/{{#each}} brace split (2026-07-15)
+
+Stage 3b, the Svelte sibling of §48 (Vue). Same shape (shared `emitFormOfAggregate`
+path → the `rowFields` VM already arrives, template-only, two packs) with two
+Svelte-specific notes:
+
+- **`form.values` is a Svelte-5 `$state` rune, so array mutation is reactive.** A
+  row `bind:value`s `form.values.items[index].<sub>`; Add is `onclick={() =>
+  form.values.items.push({ … })}`, Remove `…splice(index, 1)`. No hoist, no Msg.
+- **Single-brace `{#each}` (Svelte) and double-brace `{{#each rowFields}}`
+  (Handlebars) coexist cleanly** in one `.hbs` — Handlebars ignores single braces,
+  so the Svelte block passes through verbatim while the pack iterates `rowFields`.
+  And Svelte's `{…}` expression bindings mean the default-row JSON's `""` needs NO
+  attribute-quote gymnastics (unlike Vue's `@click='…'`, §48).
+- **`svelte-check` needs `svelte-kit sync` first.** A bare `svelte-check` errors
+  `Cannot read file .svelte-kit/tsconfig.json`; the generated project's check only
+  works after `svelte-kit sync` regenerates it (CI does this) — `vite build` alone
+  isn't the full type gate, so run the sync + check pair when verifying locally.

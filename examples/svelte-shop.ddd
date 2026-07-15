@@ -10,9 +10,12 @@ system SvelteShop {
 
             enum OrderStatus { Draft, Confirmed, Cancelled }
 
+            valueobject ContactTag { label: string  weight: int }
+
             aggregate Customer with crudish {
                 name: string
                 email: string
+                tags: ContactTag[]
                 invariant name.length > 0
                 derived display: string = name
             }
