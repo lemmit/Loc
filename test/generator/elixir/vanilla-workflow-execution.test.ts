@@ -66,7 +66,7 @@ describe("vanilla — Slice 5c workflow execution", () => {
     const files = await generateSystemFiles(SOURCE);
     const ctx = files.get([...files.keys()].find((k) => k.endsWith("lib/api/tracker.ex"))!)!;
     // The CRUD defdelegates remain:
-    expect(ctx).toContain("defdelegate update_task(record, attrs)");
+    expect(ctx).toContain("defdelegate update_task(record, attrs, expected_version \\\\ nil)");
     // The named-op function for `markDone` (no CRUD collision) renders the
     // BODY (`done := true`) and persists the assigned column, rather than
     // casting params.

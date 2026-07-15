@@ -46,6 +46,13 @@ public sealed class CustomerRepository : ICustomerRepository
         {
             _db.Customers.Add(aggregate);
         }
+        if (entry.State != EntityState.Added && entry.State != EntityState.Detached)
+        {
+            var __version = entry.Property(x => x.Version);
+            var __expected = RequestContext.Current?.ExpectedVersion;
+            if (__expected.HasValue) __version.OriginalValue = __expected.Value;
+            __version.CurrentValue = __version.OriginalValue + 1;
+        }
         await _db.SaveChangesAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Customer", aggregate.Id.Value);
         foreach (var ev in aggregate.PullEvents())

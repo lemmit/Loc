@@ -74,6 +74,31 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
     expect(repo).toContain("ON CONFLICT (id) DO UPDATE SET"); // upsert
     expect(repo).toContain("WHERE (customer = @customer)"); // find → SQL
     expect(repo).not.toContain("AppDbContext"); // no EF
+    // Optimistic concurrency (versioned default-on): the guarded upsert seeds
+    // version 1 on INSERT, bumps version = version + 1 on conflict, and CASes
+    // the conflict branch on the expected version (client `If-Match`, else the
+    // loaded aggregate's own version, read ambiently exactly as the EF path).
+    expect(repo).toContain(
+      "var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
+    );
+    expect(repo).toContain(
+      "VALUES (@id, @customer, @status, @total::jsonb, @note, 1) ON CONFLICT (id) DO UPDATE SET customer = excluded.customer, status = excluded.status, total = excluded.total, note = excluded.note, version = orders.version + 1 WHERE orders.version = @ExpectedVersion",
+    );
+    // Zero affected rows ⇒ the CAS failed (stale write / stale precondition) ⇒
+    // throw the persistence-neutral conflict exception (→ 409).
+    expect(repo).toContain(
+      'if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");',
+    );
+    // The persistence-neutral exception is emitted into Domain.Common (Dapper
+    // only — EF keys its 409 arm on DbUpdateConcurrencyException).
+    expect(files.get("api/Domain/Common/DomainException.cs")!).toContain(
+      "public sealed class ConcurrencyConflictException : Exception",
+    );
+    // The exception filter maps it to the same 409 (status + Problem shape) the
+    // EF arm produces — only the caught type differs.
+    const filter = files.get("api/Api/DomainExceptionFilter.cs")!;
+    expect(filter).toContain("if (context.Exception is ConcurrencyConflictException)");
+    expect(filter).not.toContain("DbUpdateConcurrencyException"); // no EF type on the dapper path
     // schema DDL + Npgsql/Dapper deps + connection wiring.
     expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")).toContain(
       "CREATE TABLE IF NOT EXISTS orders",
@@ -88,6 +113,15 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
     expect(errors).toEqual([]);
     expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(true);
     expect(files.has("api/Infrastructure/Persistence/DbSchema.cs")).toBe(false);
+    // The persistence-neutral ConcurrencyConflictException is Dapper-only — the
+    // EF path keys its 409 arm on DbUpdateConcurrencyException, so Domain.Common
+    // stays byte-identical (no new exception class).
+    expect(files.get("api/Domain/Common/DomainException.cs")!).not.toContain(
+      "ConcurrencyConflictException",
+    );
+    expect(files.get("api/Api/DomainExceptionFilter.cs")!).toContain(
+      "DbUpdateConcurrencyException",
+    );
   });
 
   // Event sourcing (appliers, Dapper edition): a `persistence: dapper` deployable
@@ -334,7 +368,7 @@ system D {
     );
     // criterion `where: NameIs(n)` → inline SQL with this-prop → column.
     expect(repo).toContain(
-      'var sql = "SELECT id, name, active FROM customers WHERE (name = @n) ORDER BY name ASC";',
+      'var sql = "SELECT id, name, active, version FROM customers WHERE (name = @n) ORDER BY name ASC";',
     );
     expect(repo).toContain("var p = new DynamicParameters();");
     expect(repo).toContain('p.Add("n", n);');

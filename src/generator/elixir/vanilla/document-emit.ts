@@ -50,6 +50,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { isDocumentShaped, resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import {
   type SingleFieldPattern,
   singleFieldConstraints,
@@ -300,6 +301,7 @@ export function renderDocRepository(
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const changesetMod = `${aggModule}Changeset`;
+  const versioned = aggregateIsVersioned(agg);
 
   // Custom finds (DEBT-07).  A document row keeps every field inside the opaque
   // jsonb `data` blob, so a find can't push its predicate into an Ecto `where`
@@ -335,16 +337,35 @@ defmodule ${repoMod} do
     |> Repo.insert()
   end
 
-  @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
+  @spec update(${aggModule}.t(), map()${versioned ? ", integer() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
+  def update(%${aggModule}{} = record, attrs${versioned ? ", expected_version \\\\ nil" : ""}) when is_map(attrs) do
     # cast_embed(:data, on_replace: :update) casts the incoming (possibly
     # partial) attrs ONTO the existing embedded document, so unspecified fields
     # keep their stored values (the merge-on-update semantics the old manual
     # Map.merge gave) and validate_required still sees the retained values.
+${
+  versioned
+    ? `    # Optimistic concurrency (default-on \`versioned\`): override the loaded
+    # struct's \`:version\` with the client's expected value (the If-Match the
+    # controller parsed), stamp it as the changeset's current version, then
+    # \`optimistic_lock\` guards the UPDATE on that value and bumps it by one.
+    # A stale write matches no row → \`Ecto.StaleEntryError\`, rescued into
+    # \`{:error, :conflict}\` (→ 409).  Absent → the loaded row's own version
+    # (write-time CAS).
+    record = %{record | version: expected_version || record.version}
+
     record
+    |> ${changesetMod}.document_changeset(attrs, record.version)
+    |> Ecto.Changeset.optimistic_lock(:version)
+    |> Repo.update()
+  rescue
+    Ecto.StaleEntryError -> {:error, :conflict}
+  end`
+    : `    record
     |> ${changesetMod}.document_changeset(attrs, record.version + 1)
     |> Repo.update()
-  end
+  end`
+}
 
   @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def delete(%${aggModule}{} = record) do

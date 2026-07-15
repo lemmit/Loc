@@ -194,7 +194,7 @@ describe("java OpenApiCustomizer — required-field sets", () => {
   it("marks a response's non-optional fields required (id always present)", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new RequiredSet("OrderResponse", List.of("code", "id", "status", "total"))',
+      'new RequiredSet("OrderResponse", List.of("code", "id", "status", "total", "version"))',
     );
     expect(c).toContain("private static void applyRequired(OpenAPI openApi) {");
     expect(c).toContain("schema.setRequired(List.copyOf(r.fields()));");

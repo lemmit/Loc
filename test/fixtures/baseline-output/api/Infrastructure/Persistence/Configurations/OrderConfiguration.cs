@@ -18,6 +18,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(x => x.CustomerId).HasColumnName("customer_id");
         builder.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
         builder.Property(x => x.PlacedAt).HasColumnName("placed_at");
+        builder.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();
         // Ignore the public read-accessor and tell EF to map the
         // private backing field instead.
         builder.Ignore(x => x.Lines);

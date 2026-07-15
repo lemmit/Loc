@@ -61,7 +61,7 @@ describe("filter / stamp / implements as ordinary identifiers", () => {
       props(agg)
         .map((p) => p.name)
         .sort(),
-    ).toEqual(["filter", "implements", "stamp"]);
+    ).toEqual(["filter", "implements", "stamp", "version"]);
   });
 });
 

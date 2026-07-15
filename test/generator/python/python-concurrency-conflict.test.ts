@@ -107,14 +107,21 @@ describe("python generator — versioned optimistic-concurrency", () => {
     expect(routes).toContain("version: int");
   });
 
-  it("a NON-versioned aggregate emits byte-identical output (no guarded upsert)", async () => {
+  it("an aggregate WITHOUT `with versioned` gets the same guarded upsert — versioning is default-on (M-T3.4)", async () => {
+    // There is no opt-out: every plain (non-event-sourced) aggregate is auto-
+    // versioned, so a source with no `with versioned` clause emits the identical
+    // guarded upsert + ConcurrencyError → 409 wiring.
     const files = await generateSystemFiles(pySystem(""));
     const repo = fileEndingWith(files, "customer_repository.py");
     const problem = fileEndingWith(files, "problem.py");
-    expect(repo).not.toContain("ConcurrencyError");
-    expect(repo).not.toContain("expected_version");
-    expect(repo).not.toContain("version");
-    expect(problem).not.toContain("ConcurrencyError");
-    expect(problem).not.toContain('"conflict"');
+    expect(repo).toContain(
+      "async def save(self, aggregate: Customer, expected_version: int | None = None) -> None:",
+    );
+    expect(repo).toContain("where=CustomerRow.version == _expected");
+    expect(repo).toContain(
+      'raise ConcurrencyError(f"Customer {aggregate.id} was modified concurrently")',
+    );
+    expect(problem).toContain("@app.exception_handler(ConcurrencyError)");
+    expect(problem).toContain('log("warn", "conflict", message=str(err), status=409)');
   });
 });

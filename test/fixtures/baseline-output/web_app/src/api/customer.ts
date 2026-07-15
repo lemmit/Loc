@@ -36,6 +36,7 @@ export const CustomerResponse = z.object({
   username: z.string(),
   email: z.string(),
   age: z.number().int(),
+  version: z.number().int(),
   display: z.string(),
 });
 export type CustomerResponse = z.infer<typeof CustomerResponse>;

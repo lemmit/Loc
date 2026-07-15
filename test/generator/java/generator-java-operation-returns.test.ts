@@ -72,7 +72,7 @@ describe("java generator — exception-less operation returns", () => {
 
   it("service threads the union through: capture, save, publish, return", async () => {
     const svc = (await files()).get(`${ROOT}/features/orders/OrderService.java`)!;
-    expect(svc).toContain("    public stringOrNotFound accept(OrderId id) {");
+    expect(svc).toContain("    public stringOrNotFound accept(OrderId id, Integer ifMatch) {");
     expect(svc).toContain("        var result = aggregate.accept();");
     expect(svc).toContain("        repository.save(aggregate);");
     expect(svc).toContain("        return result;");
@@ -80,7 +80,9 @@ describe("java generator — exception-less operation returns", () => {
 
   it("controller switches the union: error → ProblemDetail at status, success → 200 wire DTO", async () => {
     const c = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
-    expect(c).toContain("public ResponseEntity<?> rejectOrder(@PathVariable UUID id) {");
+    expect(c).toContain(
+      'public ResponseEntity<?> rejectOrder(@PathVariable UUID id, @RequestHeader(value = "If-Match", required = false) Integer ifMatch) {',
+    );
     expect(c).toContain("return switch (result) {");
     expect(c).toContain(
       "ResponseEntity.ok((stringOrNotFoundResponse) new stringOrNotFoundResponse_string(v.value()));",

@@ -75,7 +75,7 @@ describe("schemaFromModule", () => {
   it("places id first, then declared fields in source order", async () => {
     const { module } = await loadShop();
     const orders = schemaFromModule(module).tables.find((t) => t.name === "orders")!;
-    expect(orders.columns.map((c) => c.name)).toEqual(["id", "customer", "total"]);
+    expect(orders.columns.map((c) => c.name)).toEqual(["id", "customer", "total", "version"]);
     expect(orders.primaryKey).toEqual(["id"]);
   });
 
@@ -902,7 +902,7 @@ describe("schemaFromModule — document shape", () => {
   it("leaves relational siblings untouched", async () => {
     const module = await loadDoc();
     const customers = schemaFromModule(module).tables.find((t) => t.name === "customers")!;
-    expect(customers.columns.map((c) => c.name)).toEqual(["id", "name"]);
+    expect(customers.columns.map((c) => c.name)).toEqual(["id", "name", "version"]);
   });
 });
 
@@ -933,7 +933,13 @@ system Shop {
     expect(snap.tables.map((t) => t.name)).toEqual(["carts", "customers"]);
     const carts = snap.tables.find((t) => t.name === "carts")!;
     // Root stays columns; the containment folds into a JSONB `lines` column.
-    expect(carts.columns.map((c) => c.name)).toEqual(["id", "customer", "total", "lines"]);
+    expect(carts.columns.map((c) => c.name)).toEqual([
+      "id",
+      "customer",
+      "total",
+      "version",
+      "lines",
+    ]);
     expect(carts.columns.find((c) => c.name === "lines")!.type).toEqual({ kind: "json" });
     expect(carts.columns.find((c) => c.name === "total")!.type).toEqual({ kind: "int" });
     // The `Customer id` reference stays a queryable FK column (unlike document).

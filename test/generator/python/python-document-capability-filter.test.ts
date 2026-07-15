@@ -37,7 +37,7 @@ describe("python shape(document) capability filter", () => {
   it("gates find_by_id by the in-app predicate (hidden → not-found)", async () => {
     const r = await repo();
     expect(r).toContain("current_user = require_current_user()");
-    expect(r).toContain("rec = _article_from_doc(row.data)");
+    expect(r).toContain("rec = _article_from_doc(row.data, row.version)");
     expect(r).toContain(
       "if not ((not rec.archived) and (rec.tenant_id == current_user.tenant_id)):",
     );
@@ -46,7 +46,7 @@ describe("python shape(document) capability filter", () => {
 
   it("filters all() over the rehydrated documents", async () => {
     expect(await repo()).toContain(
-      "return [x for x in (_article_from_doc(r.data) for r in rows) " +
+      "return [x for x in (_article_from_doc(r.data, r.version) for r in rows) " +
         "if ((not x.archived) and (x.tenant_id == current_user.tenant_id))]",
     );
   });
@@ -56,7 +56,7 @@ describe("python shape(document) capability filter", () => {
     // The id-restricted SQL read still rehydrates + filters in-app.
     expect(r).toContain("select(ArticleRow).where(ArticleRow.id.in_(list(ids)))");
     expect(r).toContain(
-      "return [x for x in (_article_from_doc(r.data) for r in rows) " +
+      "return [x for x in (_article_from_doc(r.data, r.version) for r in rows) " +
         "if ((not x.archived) and (x.tenant_id == current_user.tenant_id))]",
     );
   });
@@ -65,7 +65,7 @@ describe("python shape(document) capability filter", () => {
     const r = await repo();
     // Custom find reads a RAW load (not the already-filtered all()) and AND-s
     // the capability predicate with its own where, so bypass can drop a conjunct.
-    expect(r).toContain("items = [_article_from_doc(r.data) for r in rows]");
+    expect(r).toContain("items = [_article_from_doc(r.data, r.version) for r in rows]");
     expect(r).toContain(
       "result = [x for x in items if ((not x.archived) and " +
         "(x.tenant_id == current_user.tenant_id)) and (x.view_count >= min)]",

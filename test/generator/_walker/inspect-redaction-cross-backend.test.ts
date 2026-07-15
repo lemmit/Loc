@@ -210,10 +210,11 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
 
     // Expected sequence: aggregate id, then declared fields in source
     // order, with the inlined VO's fields nested between `contact: `
-    // and the next aggregate-level slot.  Labels are the declared field
-    // names (NOT host-cased) on every backend, since the inspect literal
-    // is built from the IR field name.
-    const expected = ["id", "fullName", "ssn", "contact", "email", "phone"];
+    // and the next aggregate-level slot, then the default-on `version`
+    // token (M-T3.4 — every non-event-sourced aggregate is versioned).
+    // Labels are the declared field names (NOT host-cased) on every
+    // backend, since the inspect literal is built from the IR field name.
+    const expected = ["id", "fullName", "ssn", "contact", "email", "phone", "version"];
     expect(tsLabels).toEqual(expected);
     expect(csLabels).toEqual(expected);
     expect(exLabels).toEqual(expected);

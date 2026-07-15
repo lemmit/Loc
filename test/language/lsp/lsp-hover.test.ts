@@ -21,7 +21,8 @@ describe("DddHoverProvider", () => {
           }
         }`,
       index: 0,
-      hover: /aggregate Order[\s\S]*1 propert/,
+      // 2 properties: the declared `customerId` + the default-on `version` token (M-T3.4).
+      hover: /aggregate Order[\s\S]*2 propert/,
     });
   });
 

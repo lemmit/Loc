@@ -24,6 +24,12 @@ export function sortableFields(agg: AggregateIR): string[] {
   const out: string[] = [];
   for (const f of wireFieldsForAggregate(agg)) {
     if (f.source !== "id" && f.source !== "property") continue;
+    // The default-on `version` token (M-T3.4) is a scalar `property` column, but
+    // it is optimistic-concurrency infrastructure — not a meaningful user sort
+    // dimension — so it stays off the whitelist (like `id`, `version` rides the
+    // read wire without becoming a `?sort=` option).  `id` is source `"id"`, so
+    // this only drops the token property; declared token fields are none today.
+    if (f.source === "property" && f.access === "token") continue;
     if (f.type.kind === "primitive" || f.type.kind === "enum") out.push(f.name);
   }
   // `id` is always sortable and the stable default; guarantee it leads even if a

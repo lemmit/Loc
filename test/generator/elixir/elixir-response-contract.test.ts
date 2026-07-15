@@ -126,14 +126,24 @@ const DIVERGENT = `
 `;
 
 describe("M-T5.10 PR6 — Elixir reads the <Agg>Response contract record", () => {
-  it("(a) reads the scaffolded record byte-identically to the wireShape baseline", async () => {
+  it("(a) reads the scaffolded record byte-identically to the wireShape baseline (default-on version token, M-T3.4)", async () => {
     const scaffold = await generateSystemFiles(SCAFFOLD);
     const baseline = await generateSystemFiles(BASELINE);
     const scaffoldOrder = orderResponseSchema(scaffold);
     const baselineOrder = orderResponseSchema(baseline);
-    // Byte-identical read path: containment → array of the LineResponse module
-    // atom (single-suffixed), internal/secret dropped, leading id, derived kept.
-    expect(scaffoldOrder).toBe(baselineOrder);
+    // Default-on versioning (M-T3.4) injects the synthetic `version` token as an
+    // IR-level capability field, so the wireShape-derived BASELINE read schema
+    // carries it.  `apiReadFields` re-derives the SAME token for the DECLARED
+    // `<Agg>Response` contract record (at the AST layer, before the capability
+    // field is lowered), so the scaffold path carries it too — the two stay
+    // byte-identical across every field branch: version, containment → array of
+    // the LineResponse module atom (single-suffixed), internal/secret dropped,
+    // leading id, derived kept.
+    expect(baselineOrder).toBe(scaffoldOrder);
+    // Both carry the version token.
+    expect(baselineOrder).toContain("version: %OpenApiSpex.Schema{type: :integer}");
+    expect(baselineOrder).toContain(":version");
+    expect(scaffoldOrder).toContain("version: %OpenApiSpex.Schema{type: :integer}");
     expect(scaffoldOrder).toContain("items: ApiWeb.Api.Schemas.LineResponse");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toMatch(/\bid: %OpenApiSpex\.Schema\{type: :string, format: :uuid\}/);

@@ -97,7 +97,19 @@ describe("scaffoldHandlers — contract records (M-T5.10 PR1)", () => {
     // Wire order: properties, then containments, then derived.  Kept: editable
     // (code/status), immutable (slug), managed (at), token (ver), containment
     // (lines), derived (label).  Dropped: internal (note), secret (apiKey), no id.
-    expect(fieldNames(resp!)).toEqual(["code", "status", "slug", "at", "ver", "lines", "label"]);
+    // Default-on `versioned` (M-T3.4): the read contract carries the `version`
+    // token in its wire-shape slot (after declared properties, before the
+    // `lines` containment), mirroring `forApiRead(wireShape)`.
+    expect(fieldNames(resp!)).toEqual([
+      "code",
+      "status",
+      "slug",
+      "at",
+      "ver",
+      "version",
+      "lines",
+      "label",
+    ]);
     expect(fieldNames(resp!)).not.toContain("note");
     expect(fieldNames(resp!)).not.toContain("apiKey");
     expect(fieldNames(resp!)).not.toContain("id");
@@ -223,7 +235,10 @@ describe("scaffoldHandlers handlers CONSUME the contract records (byte-identical
             operation cancel() { status := "cancelled" }
           }
           repository Orders for Order { }
-          response OrderResponse { status: string }
+          // Default-on versioning (M-T3.4) puts version on the read wire, so the
+          // hand-written record mirrors what scaffoldHandlers auto-splices (and
+          // what the .NET read projection supplies as d.Version).
+          response OrderResponse { status: string  version: int }
           query GetOrderQuery { orderId: Order id }
           command CancelOrderCommand { }
           queryHandler GetOrder(query: GetOrderQuery): OrderResponse {

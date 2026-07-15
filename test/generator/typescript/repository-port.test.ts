@@ -42,7 +42,7 @@ describe("repository ports (audit S7)", () => {
     expect(port).toContain("findById(id: Ids.OrderId): Promise<Order | null>;");
     expect(port).toContain("getById(id: Ids.OrderId): Promise<Order>;");
     expect(port).toContain("findManyByIds(ids: Ids.OrderId[]): Promise<Order[]>;");
-    expect(port).toContain("save(aggregate: Order): Promise<void>;");
+    expect(port).toContain("save(aggregate: Order, expectedVersion?: number): Promise<void>;");
     expect(port).toContain("delete(id: Ids.OrderId): Promise<void>;");
     expect(port).toContain("byMin(m: number): Promise<Order[]>;");
   });

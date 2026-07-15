@@ -2,11 +2,11 @@
 import type { CustomerRepositoryPort } from "../../domain/repository-ports";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Customer } from "../../domain/customer";
 import * as Ids from "../../domain/ids";
-import { AggregateNotFoundError } from "../../domain/errors";
+import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";
 import type { DomainEventDispatcher } from "../../domain/events";
 import { requestLog } from "../../obs/als";
 
@@ -31,7 +31,7 @@ export class CustomerRepository implements CustomerRepositoryPort {
         return null;
       }
       const root = rootRows[0]!;
-      const loaded = Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age });
+      const loaded = Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age, version: root.version });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Customer", id: id as string, found: true });
       return loaded;
     });
@@ -47,13 +47,19 @@ export class CustomerRepository implements CustomerRepositoryPort {
     if (ids.length === 0) return [];
     const rootRows = await this.db.select().from(schema.customers).where(inArray(schema.customers.id, ids));
     if (rootRows.length === 0) return [];
-    return rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    return rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age, version: root.version }));
   }
 
-  async save(aggregate: Customer): Promise<void> {
+  async save(aggregate: Customer, expectedVersion?: number): Promise<void> {
     await this.db.transaction(async (tx) => {
-      const rootRow = { id: aggregate.id as string, username: aggregate.username, email: aggregate.email, age: aggregate.age };
-      await tx.insert(schema.customers).values(rootRow).onConflictDoUpdate({ target: schema.customers.id, set: rootRow });
+      const expected = expectedVersion ?? aggregate.version;
+      const existingRow = await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.id, aggregate.id));
+      if (existingRow.length === 0) {
+        await tx.insert(schema.customers).values({ id: aggregate.id as string, username: aggregate.username, email: aggregate.email, age: aggregate.age, version: 1 });
+      } else {
+        const updated = await tx.update(schema.customers).set({ id: aggregate.id as string, username: aggregate.username, email: aggregate.email, age: aggregate.age, version: expected + 1 }).where(and(eq(schema.customers.id, aggregate.id), eq(schema.customers.version, expected))).returning({ id: schema.customers.id });
+        if (updated.length === 0) throw new ConcurrencyError("Customer", aggregate.id as string);
+      }
     });
     requestLog().debug({ event: "repository_save", aggregate: "Customer", id: aggregate.id as string });
 
@@ -80,7 +86,7 @@ export class CustomerRepository implements CustomerRepositoryPort {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: 0 });
       return { items: [], page, pageSize, total, totalPages };
     }
-    const items = rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    const items = rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age, version: root.version }));
     requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: items.length });
     return { items, page, pageSize, total, totalPages };
   }
@@ -91,13 +97,13 @@ export class CustomerRepository implements CustomerRepositoryPort {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 0 });
       return null;
     }
-    const result = Customer._rehydrate({ id: Ids.CustomerId(rootRows[0]!.id), username: rootRows[0]!.username, email: rootRows[0]!.email, age: rootRows[0]!.age });
+    const result = Customer._rehydrate({ id: Ids.CustomerId(rootRows[0]!.id), username: rootRows[0]!.username, email: rootRows[0]!.email, age: rootRows[0]!.age, version: rootRows[0]!.version });
     requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 1 });
     return result;
   }
 
   toWire(root: Customer): unknown {
-    return { id: root.id as string, username: root.username, email: root.email, age: root.age, display: root.display };
+    return { id: root.id as string, username: root.username, email: root.email, age: root.age, version: root.version, display: root.display };
   }
 
 }

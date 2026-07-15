@@ -47,8 +47,8 @@ system Shop {
 `;
     const files = await generateSystemFiles(source);
     const cs = csFor(files, "order");
-    expect(cs).toContain("@all_fields [:label, :created_at]");
-    expect(cs).toContain("@required_fields [:label, :created_at]");
+    expect(cs).toContain("@all_fields [:label, :created_at, :version]");
+    expect(cs).toContain("@required_fields [:label, :created_at, :version]");
     expect(cs).toContain("|> cast(attrs, @all_fields)");
   });
 
@@ -79,8 +79,9 @@ system Shop {
 `;
     const files = await generateSystemFiles(source);
     const cs = csFor(files, "order");
-    // Excluded from the cast allow-list…
-    expect(cs).toContain("@all_fields [:label]");
+    // Excluded from the cast allow-list… (only the auto `:version` token joins
+    // the plain `:label`, since versioning is default-on — M-T3.4).
+    expect(cs).toContain("@all_fields [:label, :version]");
     expect(cs).not.toMatch(/@all_fields \[[^\]]*:created_at/);
     expect(cs).not.toMatch(/@required_fields \[[^\]]*:created_at/);
     // …and from every per-action cast: a stamp target is server-owned, so

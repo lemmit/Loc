@@ -4,7 +4,30 @@
 // templates — pure string concatenation.
 // ---------------------------------------------------------------------------
 
-export function renderCommon(ns: string): string {
+export function renderCommon(ns: string, opts: { concurrencyException?: boolean } = {}): string {
+  // Optimistic-concurrency conflict exception — the persistence-neutral
+  // sibling of EF's `DbUpdateConcurrencyException`.  The Dapper adapter's
+  // version-CAS `SaveAsync` throws it when a guarded upsert affects zero rows
+  // (stale write / stale `If-Match`); DomainExceptionFilter's Dapper arm maps
+  // it to HTTP 409, exactly like the EF arm maps `DbUpdateConcurrencyException`.
+  // Emitted ONLY on the Dapper path (EF has no need for it, so its output stays
+  // byte-identical) — the `Microsoft.EntityFrameworkCore` type is unreferenced
+  // under `persistence: dapper`, so the mapper needs a non-EF exception to key
+  // the 409 arm on.
+  const concurrencyException = opts.concurrencyException
+    ? `/// <summary>Optimistic-concurrency failure — a <c>versioned</c> aggregate's
+/// guarded Dapper upsert affected zero rows because the row was modified since
+/// it was read (write-time CAS) or the client's <c>If-Match</c> expected
+/// version no longer matched (think-time CAS).  DomainExceptionFilter maps this
+/// to HTTP 409 — the persistence-neutral analogue of EF's
+/// <c>DbUpdateConcurrencyException</c>.</summary>
+public sealed class ConcurrencyConflictException : Exception
+{
+    public ConcurrencyConflictException(string message) : base(message) { }
+}
+
+`
+    : "";
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
@@ -21,7 +44,7 @@ public sealed class DomainException : Exception
     public DomainException(string message) : base(message) { }
 }
 
-/// <summary>State-gate failure — an operation's 'when' predicate (the
+${concurrencyException}/// <summary>State-gate failure — an operation's 'when' predicate (the
 /// canCommand gate) evaluated false against the loaded aggregate.
 /// DomainExceptionFilter maps this to HTTP 409.</summary>
 public sealed class DisallowedException : Exception

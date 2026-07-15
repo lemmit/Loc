@@ -69,7 +69,7 @@ describe("dotnet — exception-less operation returns (A3)", () => {
     // success variant → 200 wrapped in the App wire DTO (cast to the base).
     expect(c).toMatch(/case \S+\.OrderOrNotFound_Order v:/);
     expect(c).toMatch(
-      /return Ok\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Id, v\.Code\)\);/,
+      /return Ok\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Id, v\.Code, v\.Version\)\);/,
     );
     expect(c).toMatch(/\[ProducesResponseType\(typeof\(\S+\.OrderOrNotFound\), 200\)\]/);
   });

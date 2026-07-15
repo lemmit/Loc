@@ -9,9 +9,10 @@
 // `ConcurrencyError`, which the router's `onError` maps to 409 Conflict with
 // the distinct `conflict` catalog event — reusing the `versioned` machinery.
 //
-// A plain relational, non-versioned aggregate is byte-identical (no
-// ConcurrencyError anywhere), so the whole rider is gated on the aggregate
-// being event-sourced OR versioned.
+// The event-sourced path is unchanged by M-T3.4 (its (stream_id, version)
+// stream IS its concurrency control).  A plain relational sibling, however, is
+// now versioned by default (M-T3.4) and so also carries the ConcurrencyError /
+// 409 arm — versioning is default-on for every non-event-sourced aggregate.
 //
 // Sibling of typescript-concurrency-conflict.test.ts (the `versioned` guarded
 // write → 409); this is the event-log-append → 409.
@@ -56,7 +57,8 @@ const esSystem = (platform: string) => `
   }
 `;
 
-// A plain relational, non-versioned aggregate — the byte-identical negative.
+// A plain relational aggregate — versioned by default (M-T3.4), so it now also
+// carries the ConcurrencyError / 409 machinery.
 const relationalSystem = `
   system Shop {
     subdomain Sales {
@@ -116,16 +118,16 @@ describe("hono/drizzle generator — event-sourced concurrency rider", () => {
     expect(errors).toContain("export class ConcurrencyError extends Error {");
   });
 
-  it("a plain relational, non-versioned aggregate is byte-identical (no 409 arm)", async () => {
+  it("a plain relational sibling is versioned by default and carries the 409 arm — default-on (M-T3.4)", async () => {
     const files = await generateSystemFiles(relationalSystem);
     const repo = fileEndingWith(files, "customer-repository.ts");
     const routes = fileEndingWith(files, "customer.routes.ts");
-    expect(repo).not.toContain("ConcurrencyError");
-    expect(routes).not.toContain("ConcurrencyError");
-    expect(routes).not.toContain('event: "conflict"');
-    // No ConcurrencyError class is emitted for a concurrency-free project.
+    expect(repo).toContain("ConcurrencyError");
+    expect(routes).toContain("ConcurrencyError");
+    expect(routes).toContain('event: "conflict"');
+    // The ConcurrencyError class is emitted since the project is now versioned.
     expect([...files.keys()].some((p) => p.endsWith("domain/errors.ts"))).toBe(true);
     const errors = fileEndingWith(files, "domain/errors.ts");
-    expect(errors).not.toContain("ConcurrencyError");
+    expect(errors).toContain("ConcurrencyError");
   });
 });

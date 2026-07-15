@@ -80,6 +80,13 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            _log.LogWarning("{Event} message={Message} status={Status}", "conflict", "The resource was modified by another request; reload and retry.", 409);
+            context.Result = Problem(context, 409, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is DomainException de)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);

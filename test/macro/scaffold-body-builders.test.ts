@@ -459,6 +459,8 @@ describe("scalarColumnsForAggregate — resolves columns from the aggregate AST"
       { name: "active", kind: { tag: "bool" } },
       { name: "status", kind: { tag: "enum" } },
       { name: "note", kind: { tag: "text" } },
+      // default-on optimistic-concurrency token (M-T3.4)
+      { name: "version", kind: { tag: "numeric" } },
     ]);
   });
 });

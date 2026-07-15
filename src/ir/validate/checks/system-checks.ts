@@ -49,6 +49,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../util/versioned-capability.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 import { validateE2ETest } from "./test-checks.js";
@@ -1966,7 +1967,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         const stampFields = new Set(
           (a.contextStamps ?? []).flatMap((r) => r.assignments.map((x) => x.field)),
         );
+        // The default-on `version` token (M-T3.4) is supported: the MikroORM
+        // save emits a guarded `nativeUpdate` version-CAS on it, so it is NOT an
+        // unfillable server-managed field — skip it before the managed gate.
+        const aggVersioned = aggregateIsVersioned(a);
         for (const f of a.fields) {
+          if (aggVersioned && f.name === "version" && f.access === "token") continue;
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
           else if (f.access && MANAGED_ACCESS.has(f.access) && !stampFields.has(f.name))
             reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);

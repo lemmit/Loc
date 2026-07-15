@@ -48,8 +48,8 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     const cs = files.get(csKey!)!;
     expect(cs).toContain("import Ecto.Changeset");
     expect(cs).toContain("alias Api.Tracker.Task");
-    expect(cs).toContain("@all_fields [:title, :done]");
-    expect(cs).toContain("@required_fields [:title, :done]");
+    expect(cs).toContain("@all_fields [:title, :done, :version]");
+    expect(cs).toContain("@required_fields [:title, :done, :version]");
     expect(cs).toContain("def base_changeset");
     expect(cs).toContain("|> cast(attrs, @all_fields)");
     expect(cs).toContain("|> validate_required(@required_fields)");
@@ -74,7 +74,9 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
       [...files.keys()].find((k) => k.endsWith("/tracker/task_repository.ex"))!,
     )!;
     expect(repo).toContain("def insert(attrs)");
-    expect(repo).toContain("def update(%Api.Tracker.Task{} = record, attrs)");
+    expect(repo).toContain(
+      "def update(%Api.Tracker.Task{} = record, attrs, expected_version \\\\ nil)",
+    );
     expect(repo).toContain("def delete(%Api.Tracker.Task{} = record)");
     expect(repo).toContain("Api.Tracker.TaskChangeset.base_changeset");
     expect(repo).toContain("|> Repo.insert()");
@@ -87,7 +89,7 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     const files = await generateSystemFiles(VANILLA_SOURCE);
     const ctx = files.get([...files.keys()].find((k) => k.endsWith("lib/api/tracker.ex"))!)!;
     expect(ctx).toContain("defdelegate create_task(attrs)");
-    expect(ctx).toContain("defdelegate update_task(record, attrs)");
+    expect(ctx).toContain("defdelegate update_task(record, attrs, expected_version \\\\ nil)");
     expect(ctx).toContain("defdelegate delete_task(record)");
     expect(ctx).toContain("as: :insert");
     expect(ctx).toContain("as: :update");
@@ -104,7 +106,7 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     expect(ctl).toContain('def delete(conn, %{"id" => id})');
     // Write-path returns:
     expect(ctl).toContain("Tracker.create_task(params)");
-    expect(ctl).toContain("Tracker.update_task(record, attrs)");
+    expect(ctl).toContain("Tracker.update_task(record, attrs, expected_version)");
     expect(ctl).toContain("Tracker.delete_task(record)");
     // Status codes:
     expect(ctl).toContain("put_status(201)");

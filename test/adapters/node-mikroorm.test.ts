@@ -76,7 +76,11 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
     const repo = files.get("api/db/repositories/order-repository.ts")!;
     expect(repo).toContain('import { EntityManager } from "@mikro-orm/postgresql"');
     expect(repo).toContain("this.em.fork()"); // idiomatic isolated unit-of-work
-    expect(repo).toContain("await em.upsert(OrderRow,");
+    // Versioning is default-on (M-T3.4): the save is the guarded optimistic-
+    // concurrency write (findOne → insert / version-CAS nativeUpdate), not a
+    // blind upsert.
+    expect(repo).toContain("await em.nativeUpdate(OrderRow,");
+    expect(repo).toContain('throw new ConcurrencyError("Order",');
     expect(repo).toContain("Order._rehydrate({"); // shared hydration seam (RS-10: trusts the store)
     expect(repo).not.toContain("drizzle");
     // package.json + index wiring.
@@ -291,21 +295,26 @@ describe("mikroorm — persist-time audit stamping", () => {
     expect(helper).toContain("createdBy: ctx.actorId");
   });
 
-  it("the mikro save() wraps the upsert in stampInsert + excludes create-only fields", async () => {
+  it("the mikro versioned save wraps insert in stampInsert and the CAS update in stampUpdate (M-T3.4)", async () => {
     const { files } = await emit(AUDIT_SRC);
     const repo = files.get("api/db/repositories/order-repository.ts")!;
-    expect(repo).toContain('import { stampInsert } from "../audit-stamp";');
-    // stampInsert wraps the upsert payload; createdAt/createdBy (create-only:
-    // on `create` but not `update`) are excluded from the conflict UPDATE.
+    expect(repo).toContain('import { stampInsert, stampUpdate } from "../audit-stamp";');
+    // Default-on versioning turns the blind upsert into a guarded write: the
+    // create branch stamps + seeds version 1; the update branch is a version-CAS
+    // `nativeUpdate` whose `stampUpdate` only touches updatedAt/updatedBy, so the
+    // create-only createdAt/createdBy stay at their loaded values (immutable).
+    expect(repo).toMatch(/await em\.insert\(OrderRow, stampInsert\([\s\S]*?version: 1 \}\)\);/);
     expect(repo).toMatch(
-      /await em\.upsert\(OrderRow, stampInsert\([\s\S]*?\), \{ onConflictExcludeFields: \["createdAt", "createdBy"\] \}\);/,
+      /await em\.nativeUpdate\(OrderRow, \{ id: aggregate\.id as string, version: expected \}, stampUpdate\([\s\S]*?version: expected \+ 1 \}\)\);/,
     );
   });
 
-  it("a non-audited mikro aggregate keeps the byte-identical bare upsert", async () => {
+  it("a non-audited versioned mikro aggregate emits the guarded save without stamping (M-T3.4)", async () => {
     const { files } = await emit(sys("mikroorm"));
     const repo = files.get("api/db/repositories/order-repository.ts")!;
-    expect(repo).toContain("await em.upsert(OrderRow,");
+    expect(repo).toContain("await em.insert(OrderRow,");
+    expect(repo).toContain("await em.nativeUpdate(OrderRow,");
+    expect(repo).toContain('throw new ConcurrencyError("Order",');
     expect(repo).not.toContain("stampInsert");
     expect(repo).not.toContain("onConflictExcludeFields");
   });

@@ -23,6 +23,6 @@ public sealed class AllHandler : IQueryHandler<AllQuery, Paged<ProductResponse>>
     public async ValueTask<Paged<ProductResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
     {
         var domain = await _repo.All(query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);
-        return new Paged<ProductResponse>(domain.Items.Select(d => new ProductResponse(d.Id.Value, d.Sku, new MoneyResponse(d.Price.Amount, d.Price.Currency), d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
+        return new Paged<ProductResponse>(domain.Items.Select(d => new ProductResponse(d.Id.Value, d.Sku, new MoneyResponse(d.Price.Amount, d.Price.Currency), d.Version, d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
     }
 }

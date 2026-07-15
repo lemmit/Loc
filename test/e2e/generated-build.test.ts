@@ -202,9 +202,17 @@ describe.skipIf(!ENABLED)(
         expect(fs.readFileSync(path.join(proj, "domain", "order.ts"), "utf8")).not.toContain(
           "_stampOnCreate",
         );
-        expect(
-          fs.readFileSync(path.join(proj, "db", "repositories", "order-repository.ts"), "utf8"),
-        ).toContain("stampInsert(rootRow)");
+        // Default-on versioning (M-T3.4) turns the audited save into the guarded
+        // write: the create branch stamps via `stampInsert({... version: 1})` and
+        // the version-CAS update branch via `stampUpdate({... version: expected + 1})`.
+        {
+          const repoSrc = fs.readFileSync(
+            path.join(proj, "db", "repositories", "order-repository.ts"),
+            "utf8",
+          );
+          expect(repoSrc).toContain("stampInsert({");
+          expect(repoSrc).toContain("stampUpdate({");
+        }
         execSync(`npm install --silent --no-audit --no-fund`, {
           cwd: proj,
           stdio: "inherit",

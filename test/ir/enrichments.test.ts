@@ -33,10 +33,18 @@ describe("enrichment — wireShape", () => {
       "id",
       "property",
       "property",
+      "property", // version — default-on optimistic concurrency (M-T3.4)
       "containment",
       "derived",
     ]);
-    expect(shape.map((f) => f.name)).toEqual(["id", "customerId", "total", "lines", "lineCount"]);
+    expect(shape.map((f) => f.name)).toEqual([
+      "id",
+      "customerId",
+      "total",
+      "version",
+      "lines",
+      "lineCount",
+    ]);
   });
 
   it("gives a contained part a wireShape whose first field is its id", async () => {

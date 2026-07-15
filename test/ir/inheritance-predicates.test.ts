@@ -92,10 +92,10 @@ describe("inheritance predicates — multi-level TPH chain (B11)", () => {
     const dog = byName("Dog");
 
     // Full transitive field merge: grandbase → base → own, in that order.
-    expect(dog.fields.map((f) => f.name)).toEqual(["name", "owner", "breed"]);
-    // wireShape carries id + every inherited + own field.
+    expect(dog.fields.map((f) => f.name)).toEqual(["name", "owner", "breed", "version"]);
+    // wireShape carries id + every inherited + own field (+ default-on version).
     const wire = wireFieldsFor(dog);
-    expect(wire.map((w) => w.name)).toEqual(["id", "name", "owner", "breed"]);
+    expect(wire.map((w) => w.name)).toEqual(["id", "name", "owner", "breed", "version"]);
 
     // The whole hierarchy lives in ONE table at the ROOT — the intermediate
     // abstract Pet owns none, and the concrete resolves to the root.

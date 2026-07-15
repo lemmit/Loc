@@ -3,9 +3,11 @@
 // audit / softDelete capability stamps).  node-persist-time-auditing relocated
 // stamping out of the domain method + handler into the drizzle persistence
 // layer: a per-project `db/audit-stamp.ts` helper exposes `stampInsert` /
-// `stampUpdate`, and the aggregate's `save()` wraps the upsert
-// (`.values(stampInsert(rootRow))` on the insert branch, `set: stampUpdate(
-// rootRow)` on the conflict branch).  The principal comes from the ambient
+// `stampUpdate`, and the aggregate's `save()` wraps the write
+// (`.values(stampInsert(...))` on the insert branch, `.set(stampUpdate(...))`
+// on the update branch).  M-T3.4 — versioning is default-on, so the save is a
+// guarded insert/update (not `.onConflictDoUpdate`); the stamps wrap each
+// branch's row object all the same.  The principal comes from the ambient
 // request context (`requestContext().actorId`); the domain entity is pure (no
 // `_stampOn*`) and the route handler never stamps.  Principal-referencing
 // stamps on a deployable WITHOUT auth and stamps on an event-sourced aggregate
@@ -139,12 +141,19 @@ describe("Hono (node) generator — lifecycle stamps", () => {
     expect(helper).toContain("const { createdAt: _createdAt, ...rest } = row;");
   });
 
-  it("the save() upsert stamps via stampInsert (values) + stampUpdate (set)", async () => {
+  it("the save() guarded write stamps via stampInsert (values) + stampUpdate (set) — default-on (M-T3.4)", async () => {
     const repo = find(await build(SRC), /repositories\/order-repository\.ts$/);
     expect(repo).toContain('import { stampInsert, stampUpdate } from "../audit-stamp";');
+    // Insert branch: the seeded row (version: 1) is wrapped by stampInsert.
     expect(repo).toMatch(
-      /\.values\(stampInsert\(rootRow\)\)\.onConflictDoUpdate\(\{ target: schema\.orders\.id, set: stampUpdate\(rootRow\) \}\)/,
+      /\.values\(stampInsert\(\{ id: aggregate\.id as string,[\s\S]*?version: 1 \}\)\)/,
     );
+    // Update branch: the version-bumped row (version: expected + 1) is wrapped
+    // by stampUpdate, and the write is guarded on the expected version.
+    expect(repo).toMatch(
+      /\.set\(stampUpdate\(\{ id: aggregate\.id as string,[\s\S]*?version: expected \+ 1 \}\)\)/,
+    );
+    expect(repo).toContain("eq(schema.orders.version, expected)");
   });
 
   it("neither the create route nor the update route stamps", async () => {

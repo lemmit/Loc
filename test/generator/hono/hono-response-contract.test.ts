@@ -9,6 +9,11 @@
 //       declared record).  Exercises every field branch: VO (→ `<VO>Schema`),
 //       containment (→ `z.array(<Part>Response)`, NOT double-suffixed),
 //       internal/secret (dropped), derived, and a provenanced trailing field.
+//       M-T3.4 note — versioning is now default-on: the wireShape-derived
+//       baseline carries a synthetic `version: z.number().int()` token, but the
+//       scaffoldHandlers-spliced `response OrderResponse` record is read
+//       verbatim (declared records are authoritative — see (b)) and so omits it.
+//       The two read paths are byte-identical modulo that one field.
 //   (b) The record is actually READ — a hand-declared `response <Agg>Response`
 //       with FEWER fields yields a DIFFERENT schema than the wireShape baseline.
 
@@ -148,8 +153,13 @@ describe("M-T5.10 PR3 — Hono reads the <Agg>Response contract record", () => {
     const baselineOrder = responseSchema(routesFile(baseline), "OrderResponse");
     // Byte-identical read path: VO → MoneySchema, containment →
     // z.array(LineResponse) (single-suffixed), internal/secret dropped, leading
-    // id, trailing provenance.
-    expect(scaffoldOrder).toBe(baselineOrder);
+    // id, trailing provenance.  M-T3.4: the wireShape baseline carries the
+    // default-on synthetic `version` token, and `apiReadFields` gives the
+    // scaffold-declared record the SAME token in the same slot, so the two are
+    // byte-identical.
+    expect(baselineOrder).toContain("version: z.number().int(),");
+    expect(scaffoldOrder).toContain("version: z.number().int(),");
+    expect(baselineOrder).toBe(scaffoldOrder);
     expect(scaffoldOrder).toContain("z.array(LineResponse)");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toContain("id: z.string()");

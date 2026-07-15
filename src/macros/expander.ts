@@ -259,6 +259,44 @@ function expandHost(
       }
     }
   }
+  // Versioning is default-on infrastructure (expressible-builtins §1, M-T3.4):
+  // every aggregate is optimistically versioned by default, exactly the way it
+  // carries a system `id` — so a lost-update bug cannot be introduced by
+  // *forgetting* to opt in.  Applied here, AFTER any explicit `with versioned`
+  // / context-level application, so it stays idempotent (the `versioned` tag is
+  // already present → skip).  Runs last so a subtype's auto-`version` and its
+  // base's inherited `version` dedupe by name in `mergedFieldsFor`.  This is a
+  // per-aggregate splice reached during the walk — a context-level contract
+  // macro (`scaffoldHandlers`) that runs BEFORE the aggregate is visited will
+  // not see `version` in members, so `apiReadFields` re-derives it explicitly
+  // for the read contract (the same default-on rule, keyed on `persistedAs`).
+  if (kind === "aggregate") applyDefaultVersioning(host as Aggregate, doc, inv, buildRef);
+}
+
+/** Make an aggregate optimistically versioned by default (M-T3.4).  Splices the
+ * built-in `versioned` capability (`version: int token = 1`) unless the
+ * aggregate is already versioned or is event-sourced.
+ *
+ * Skips:
+ *   - **event-sourced** aggregates (`persistedAs(eventLog)`) — the append-only
+ *     `(stream_id, version)` stream IS their optimistic-concurrency control, so
+ *     a redundant state-table `version` column would be wrong (there is no
+ *     state table to carry it).
+ *   - aggregates that **already** carry `versioned` (explicit `with versioned`
+ *     or a context-level application already ran) — the `CAPABILITIES_TAG`
+ *     records it, so re-applying would splice a second `version` field. */
+function applyDefaultVersioning(
+  agg: Aggregate,
+  doc: LangiumDocument,
+  inv: Inventory,
+  buildRef: BuildRef,
+): void {
+  if ((agg as { persistedAs?: string }).persistedAs === "eventLog") return;
+  const already = (agg as { [CAPABILITIES_TAG]?: string[] })[CAPABILITIES_TAG] ?? [];
+  if (already.includes("versioned")) return;
+  const cap = inv.Capability.get("versioned");
+  if (!cap) return; // the prelude always provides it; stay defensive
+  expandCapability(cap, agg, "aggregate", agg, doc, buildRef);
 }
 
 function expandOneCall(

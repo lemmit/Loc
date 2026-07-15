@@ -98,17 +98,24 @@ describe(".NET generator — versioned optimistic-concurrency", () => {
     expect(concurrencyArm).toContain('"conflict"');
   });
 
-  it("a NON-versioned aggregate emits byte-identical output (no concurrency token)", async () => {
+  // Versioning is default-on (M-T3.4): a plain aggregate with no `with versioned`
+  // clause gets the same optimistic-concurrency token wiring as the explicit one.
+  // (The old "byte-identical, no concurrency token" opt-out premise no longer
+  // exists — there is no way to turn versioning off on a relational aggregate.)
+  it("a plain aggregate is versioned by default (concurrency token present)", async () => {
     const files = await generateSystemFiles(dotnetSystem(""));
     const cfg = files.get(
       "api/Infrastructure/Persistence/Configurations/CustomerConfiguration.cs",
     )!;
     const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
     const filter = files.get("api/Api/DomainExceptionFilter.cs")!;
-    expect(cfg).not.toContain("IsConcurrencyToken");
-    expect(cfg).not.toContain("Version");
-    expect(repo).not.toContain("ExpectedVersion");
-    expect(repo).not.toContain("OriginalValue");
-    expect(filter).not.toContain("DbUpdateConcurrencyException");
+    expect(cfg).toContain(
+      'builder.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();',
+    );
+    expect(repo).toContain("var __expected = RequestContext.Current?.ExpectedVersion;");
+    expect(repo).toContain("if (__expected.HasValue) __version.OriginalValue = __expected.Value;");
+    expect(filter).toContain(
+      "if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)",
+    );
   });
 });

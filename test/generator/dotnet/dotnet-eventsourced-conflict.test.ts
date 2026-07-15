@@ -105,9 +105,15 @@ describe(".NET generator — event-sourced concurrency rider", () => {
     expect(filter).toContain('409, "Conflict"');
   });
 
-  it("a plain relational, non-versioned aggregate is byte-identical (no 409 arm)", async () => {
+  // Versioning is default-on (M-T3.4): a plain relational aggregate is versioned
+  // even without `with versioned`, so it too gets the DbUpdateConcurrencyException
+  // → 409 `conflict` arm (via the IsConcurrencyToken machinery rather than the
+  // event-log-append race, but the same filter arm). The event-sourced aggregate
+  // above is unchanged — its (stream_id, version) stream is its concurrency
+  // control. There is no non-versioned relational opt-out to be byte-identical.
+  it("a plain relational aggregate is versioned by default (has the 409 arm)", async () => {
     const filter = at(await generateSystemFiles(RELATIONAL), "Api/DomainExceptionFilter.cs");
-    expect(filter).not.toContain("DbUpdateConcurrencyException");
-    expect(filter).not.toContain('"conflict"');
+    expect(filter).toContain("DbUpdateConcurrencyException");
+    expect(filter).toContain('"conflict"');
   });
 });

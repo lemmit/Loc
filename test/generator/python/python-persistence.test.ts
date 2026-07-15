@@ -133,9 +133,15 @@ describe("python repository emission", () => {
   it("save upserts the root, diff-syncs parts and join tables, drains events", async () => {
     const files = await build();
     const repo = files.get("api/app/db/repositories/order_repository.py")!;
+    // Versioning is default-on (M-T3.4): the upsert is the guarded form —
+    // bump `version`, gate on the expected value, RETURNING id for the CAS check.
+    expect(repo).toContain("insert(OrderRow)");
+    expect(repo).toContain(".values(**root)");
     expect(repo).toContain(
-      'insert(OrderRow).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)',
+      'set_={"status": root["status"], "placed_at": root["placed_at"], "unit_budget": root["unit_budget"], "version": OrderRow.version + 1},',
     );
+    expect(repo).toContain("where=OrderRow.version == _expected,");
+    expect(repo).toContain(".returning(OrderRow.id)");
     expect(repo).toContain("lines_stale = [__id for __id in lines_existing");
     expect(repo).toContain("delete(OrderLineRow).where(OrderLineRow.id.in_(lines_stale))");
     // Set semantics: the join row is just its (owner, target) PK — no ordinal.

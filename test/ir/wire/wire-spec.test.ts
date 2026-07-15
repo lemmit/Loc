@@ -53,11 +53,16 @@ system Coll {
     const spec = buildWireSpec(loom.systems[0]!);
     // Both survive, context-qualified — neither clobbers the other.
     expect(Object.keys(spec.aggregates).sort()).toEqual(["Billing.Order", "Sales.Order"]);
-    expect(Object.keys(spec.aggregates["Sales.Order"]!.properties).sort()).toEqual(["id", "total"]);
+    expect(Object.keys(spec.aggregates["Sales.Order"]!.properties).sort()).toEqual([
+      "id",
+      "total",
+      "version",
+    ]);
     expect(Object.keys(spec.aggregates["Billing.Order"]!.properties).sort()).toEqual([
       "amount",
       "id",
       "note",
+      "version",
     ]);
   });
 

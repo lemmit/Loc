@@ -70,7 +70,8 @@ describe("python per-operation audit runtime", () => {
     // cancel() is a void op → before BEFORE the call, after AFTER save.
     const beforeAt = f.indexOf("__before = repo.to_wire(found)");
     const callAt = f.indexOf("found.cancel(", beforeAt);
-    const saveAt = f.indexOf("await repo.save(found)", callAt);
+    // Versioning is default-on (M-T3.4): the guarded save carries expected_version.
+    const saveAt = f.indexOf("await repo.save(found, expected_version=_expected)", callAt);
     const afterAt = f.indexOf("__after = repo.to_wire(found)", saveAt);
     const recordAt = f.indexOf("await repo.record_audit(", afterAt);
     expect(beforeAt).toBeGreaterThan(-1);

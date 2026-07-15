@@ -77,7 +77,11 @@ describe("python generator — lifecycle stamps", () => {
     const files = await generateSystemFiles(AUDITABLE);
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain("    found._stamp_on_update(current_user)");
-    expect(routes).toMatch(/found\._stamp_on_update\(current_user\)\n\s*await repo\.save\(found\)/);
+    // Versioning is default-on (M-T3.4): the update path threads the If-Match
+    // precondition between the stamp and the guarded save.
+    expect(routes).toMatch(
+      /found\._stamp_on_update\(current_user\)\n\s*_if_match = request\.headers\.get\("if-match", ""\)\.strip\(chr\(34\)\)\n\s*_expected = int\(_if_match\) if _if_match\.isdigit\(\) else None\n\s*await repo\.save\(found, expected_version=_expected\)/,
+    );
   });
 
   it("a CLAIM-valued principal stamp assigns the claim off the threaded principal", async () => {

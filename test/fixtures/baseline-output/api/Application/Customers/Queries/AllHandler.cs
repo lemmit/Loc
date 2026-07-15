@@ -23,6 +23,6 @@ public sealed class AllHandler : IQueryHandler<AllQuery, Paged<CustomerResponse>
     public async ValueTask<Paged<CustomerResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
     {
         var domain = await _repo.All(query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);
-        return new Paged<CustomerResponse>(domain.Items.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age, d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
+        return new Paged<CustomerResponse>(domain.Items.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age, d.Version, d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
     }
 }

@@ -5,6 +5,7 @@ export interface ActiveOrdersRowText {
   customerId: string;
   status: string;
   placedAt: string;
+  version: string;
 }
 
 export class ActiveOrdersViewPage {
@@ -29,7 +30,8 @@ export class ActiveOrdersViewPage {
       const c_0 = (await cells.nth(0).innerText()).trim();
       const c_1 = (await cells.nth(1).innerText()).trim();
       const c_2 = (await cells.nth(2).innerText()).trim();
-      out.push({ customerId: c_0, status: c_1, placedAt: c_2 });
+      const c_3 = (await cells.nth(3).innerText()).trim();
+      out.push({ customerId: c_0, status: c_1, placedAt: c_2, version: c_3 });
     }
     return out;
   }

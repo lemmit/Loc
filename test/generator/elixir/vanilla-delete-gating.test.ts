@@ -53,13 +53,15 @@ describe("vanilla — CRUD delete seam gated on a reachable destroy", () => {
     expect(repo).not.toContain("Repo.delete(record)");
     // The read/write surface it SHOULD keep is intact.
     expect(repo).toContain("def insert(attrs)");
-    expect(repo).toContain("def update(%Api.Teams.Squad{} = record, attrs)");
+    expect(repo).toContain(
+      "def update(%Api.Teams.Squad{} = record, attrs, expected_version \\\\ nil)",
+    );
     expect(repo).toContain("def persist_change(");
 
     // Context: no `delete_squad` defdelegate (and no orphaned `as: :delete`).
     expect(ctx).not.toContain("delete_squad");
     expect(ctx).not.toContain("as: :delete");
-    expect(ctx).toContain("defdelegate update_squad(record, attrs)");
+    expect(ctx).toContain("defdelegate update_squad(record, attrs, expected_version \\\\ nil)");
 
     // Controller: no dead `delete` action.
     expect(ctl).not.toContain("def delete(conn");

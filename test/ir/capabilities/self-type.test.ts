@@ -91,9 +91,11 @@ describe("capability membership (AggregateIR.capabilities)", () => {
         aggregate Plain { subject: string }
       }}}
     `);
-    expect(findAgg(ir, "Order").capabilities).toEqual(["auditable", "trashable"]);
-    expect(findAgg(ir, "Doc").capabilities).toEqual(["trashable"]);
-    expect(findAgg(ir, "Plain").capabilities).toBeUndefined();
+    // Versioning is default-on (M-T3.4): every aggregate also carries the
+    // auto-applied `versioned` capability, sorted into the membership list.
+    expect(findAgg(ir, "Order").capabilities).toEqual(["auditable", "trashable", "versioned"]);
+    expect(findAgg(ir, "Doc").capabilities).toEqual(["trashable", "versioned"]);
+    expect(findAgg(ir, "Plain").capabilities).toEqual(["versioned"]);
   });
 
   it("context-level `with <Cap>` records membership on every aggregate", async () => {
@@ -106,7 +108,7 @@ describe("capability membership (AggregateIR.capabilities)", () => {
         }
       }}
     `);
-    expect(findAgg(ir, "Order").capabilities).toEqual(["trashable"]);
-    expect(findAgg(ir, "Invoice").capabilities).toEqual(["trashable"]);
+    expect(findAgg(ir, "Order").capabilities).toEqual(["trashable", "versioned"]);
+    expect(findAgg(ir, "Invoice").capabilities).toEqual(["trashable", "versioned"]);
   });
 });

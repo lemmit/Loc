@@ -2,12 +2,12 @@
 import type { ProductRepositoryPort } from "../../domain/repository-ports";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Product } from "../../domain/product";
 import { Money } from "../../domain/value-objects";
 import * as Ids from "../../domain/ids";
-import { AggregateNotFoundError } from "../../domain/errors";
+import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";
 import type { DomainEventDispatcher } from "../../domain/events";
 import { requestLog } from "../../obs/als";
 
@@ -32,7 +32,7 @@ export class ProductRepository implements ProductRepositoryPort {
         return null;
       }
       const root = rootRows[0]!;
-      const loaded = Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) });
+      const loaded = Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency), version: root.version });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Product", id: id as string, found: true });
       return loaded;
     });
@@ -48,13 +48,19 @@ export class ProductRepository implements ProductRepositoryPort {
     if (ids.length === 0) return [];
     const rootRows = await this.db.select().from(schema.products).where(inArray(schema.products.id, ids));
     if (rootRows.length === 0) return [];
-    return rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    return rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency), version: root.version }));
   }
 
-  async save(aggregate: Product): Promise<void> {
+  async save(aggregate: Product, expectedVersion?: number): Promise<void> {
     await this.db.transaction(async (tx) => {
-      const rootRow = { id: aggregate.id as string, sku: aggregate.sku, price_amount: String(aggregate.price.amount), price_currency: aggregate.price.currency };
-      await tx.insert(schema.products).values(rootRow).onConflictDoUpdate({ target: schema.products.id, set: rootRow });
+      const expected = expectedVersion ?? aggregate.version;
+      const existingRow = await tx.select({ id: schema.products.id }).from(schema.products).where(eq(schema.products.id, aggregate.id));
+      if (existingRow.length === 0) {
+        await tx.insert(schema.products).values({ id: aggregate.id as string, sku: aggregate.sku, price_amount: String(aggregate.price.amount), price_currency: aggregate.price.currency, version: 1 });
+      } else {
+        const updated = await tx.update(schema.products).set({ id: aggregate.id as string, sku: aggregate.sku, price_amount: String(aggregate.price.amount), price_currency: aggregate.price.currency, version: expected + 1 }).where(and(eq(schema.products.id, aggregate.id), eq(schema.products.version, expected))).returning({ id: schema.products.id });
+        if (updated.length === 0) throw new ConcurrencyError("Product", aggregate.id as string);
+      }
     });
     requestLog().debug({ event: "repository_save", aggregate: "Product", id: aggregate.id as string });
 
@@ -81,7 +87,7 @@ export class ProductRepository implements ProductRepositoryPort {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: 0 });
       return { items: [], page, pageSize, total, totalPages };
     }
-    const items = rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    const items = rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency), version: root.version }));
     requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: items.length });
     return { items, page, pageSize, total, totalPages };
   }
@@ -92,13 +98,13 @@ export class ProductRepository implements ProductRepositoryPort {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 0 });
       return null;
     }
-    const result = Product._rehydrate({ id: Ids.ProductId(rootRows[0]!.id), sku: rootRows[0]!.sku, price: new Money(Number(rootRows[0]!.price_amount), rootRows[0]!.price_currency) });
+    const result = Product._rehydrate({ id: Ids.ProductId(rootRows[0]!.id), sku: rootRows[0]!.sku, price: new Money(Number(rootRows[0]!.price_amount), rootRows[0]!.price_currency), version: rootRows[0]!.version });
     requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 1 });
     return result;
   }
 
   toWire(root: Product): unknown {
-    return { id: root.id as string, sku: root.sku, price: { amount: root.price.amount, currency: root.price.currency }, display: root.display };
+    return { id: root.id as string, sku: root.sku, price: { amount: root.price.amount, currency: root.price.currency }, version: root.version, display: root.display };
   }
 
 }

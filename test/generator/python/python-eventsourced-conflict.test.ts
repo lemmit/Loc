@@ -8,9 +8,10 @@
 // ConcurrencyError, which the app's exception handler maps to 409 Conflict
 // with the distinct `conflict` catalog event.
 //
-// A plain relational, non-versioned aggregate is byte-identical (no
-// ConcurrencyError), so the rider is gated on the aggregate being
-// event-sourced OR versioned.
+// A plain relational aggregate is now auto-versioned (default-on, M-T3.4), so it
+// gets its OWN ConcurrencyError — via the guarded relational write, not this
+// event-log-append rider.  The rider path here is the event-sourced one; the
+// versioned-write path is covered by python-concurrency-conflict.test.ts.
 //
 // Sibling of python-concurrency-conflict.test.ts (the `versioned` guarded
 // write → 409); this is the event-log-append → 409.
@@ -109,13 +110,24 @@ describe("python generator — event-sourced concurrency rider", () => {
     expect(errors).toContain("class ConcurrencyError(Exception):");
   });
 
-  it("a plain relational, non-versioned aggregate is byte-identical (no handler)", async () => {
+  it("a plain relational aggregate gets ConcurrencyError via the versioned-write path, NOT this event-log rider — versioning is default-on (M-T3.4)", async () => {
+    // With versioning default-on, the plain relational aggregate is auto-
+    // versioned and gets its own ConcurrencyError through the guarded upsert.
+    // But it must NOT take the event-log-append rider (the IntegrityError/23505
+    // catch) — that path is event-sourced-only.
     const files = await generateSystemFiles(RELATIONAL);
     const repo = at(files, "repositories/customer_repository.py");
     const problem = at(files, "app/http/problem.py");
     const errors = at(files, "app/domain/errors.py");
-    expect(repo).not.toContain("ConcurrencyError");
-    expect(problem).not.toContain("ConcurrencyError");
-    expect(errors).not.toContain("ConcurrencyError");
+    // ConcurrencyError IS present — via the guarded relational write.
+    expect(repo).toContain(
+      'raise ConcurrencyError(f"Customer {aggregate.id} was modified concurrently")',
+    );
+    expect(repo).toContain("where=CustomerRow.version == _expected");
+    expect(problem).toContain("@app.exception_handler(ConcurrencyError)");
+    expect(errors).toContain("class ConcurrencyError(Exception):");
+    // But NOT the event-log-append rider (IntegrityError / 23505 catch).
+    expect(repo).not.toContain("except IntegrityError as err:");
+    expect(repo).not.toContain('== "23505"');
   });
 });

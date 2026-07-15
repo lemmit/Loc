@@ -78,8 +78,12 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     // (cast the scalar fields + validate_required + invariant validators), which
     // the root changeset `cast_embed`s.
     expect(schema).toContain("def changeset(struct, attrs) do");
-    expect(schema).toContain("|> cast(attrs, [:reference, :status, :subtotal, :item_count])");
-    expect(schema).toContain("|> validate_required([:reference, :status, :subtotal, :item_count])");
+    expect(schema).toContain(
+      "|> cast(attrs, [:reference, :status, :subtotal, :item_count, :version])",
+    );
+    expect(schema).toContain(
+      "|> validate_required([:reference, :status, :subtotal, :item_count, :version])",
+    );
     // The same invariant-derived validator the relational path emits.
     expect(schema).toContain("validate_number(:item_count, greater_than_or_equal_to: 0)");
     // The root changeset casts attrs INTO the embed + stamps version.
@@ -97,11 +101,18 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     // Insert: cast attrs into a fresh embed, version 1.
     expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, 1)");
     expect(repo).toContain("%Api.Carts.Cart{}");
-    // Update: cast_embed(on_replace: :update) merges onto the existing embed,
-    // bumps version — no manual Map.merge.
+    // Update: cast_embed(on_replace: :update) merges onto the existing embed;
+    // default-on versioning (M-T3.4) guards the write with `optimistic_lock`
+    // over the client's expected version (stamped as the changeset's current
+    // version), bumping it by one — a stale write raises StaleEntryError →
+    // {:error, :conflict}.  No manual Map.merge.
     expect(repo).toContain(
-      "|> Api.Carts.CartChangeset.document_changeset(attrs, record.version + 1)",
+      "def update(%Api.Carts.Cart{} = record, attrs, expected_version \\\\ nil)",
     );
+    expect(repo).toContain("record = %{record | version: expected_version || record.version}");
+    expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, record.version)");
+    expect(repo).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
+    expect(repo).toContain("Ecto.StaleEntryError -> {:error, :conflict}");
     expect(repo).not.toContain("Map.merge(record.data");
     // Same fn names as the relational repo (so context defdelegates are unchanged).
     expect(repo).toContain("def list do");
@@ -326,7 +337,7 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(ctx).toContain("case Api.Carts.CartRepository.persist_change(changeset) do");
     expect(ctx).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count, "version" => saved.data.version}}',
     );
     expect(ctx).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -588,7 +599,7 @@ system Shop {
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
     expect(bump).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -599,7 +610,7 @@ system Shop {
     // the aggregate-success projection off the saved embed (no inline in-memory return).
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
   });
 
@@ -650,7 +661,7 @@ system Shop {
     // Post-commit success projects the aggregate wire off the saved embed.
     expect(body).toContain("case tx_result do");
     expect(body).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
     );
     expect(body).toContain("{:error, reason} -> {:error, reason}");
     // Guard precedes the transaction (a denial writes nothing + records no audit).

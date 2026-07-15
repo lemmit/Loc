@@ -13,6 +13,7 @@ classDiagram
     +Id~Product~ id
     +string sku
     +Money price
+    +int version
     +string /display
     +string /inspect
     +update(sku, price)
@@ -41,6 +42,7 @@ classDiagram
     +string customerId
     +OrderStatus status
     +datetime placedAt
+    +int version
     +string /inspect
     +isMutable() bool
     +addLine(productId, qty)
@@ -70,6 +72,7 @@ classDiagram
     +string username
     +string email
     +int age
+    +int version
     +string /display
     +string /inspect
     +update(username, email, age)

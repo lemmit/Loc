@@ -51,6 +51,7 @@ export const OrderResponse = z.object({
   customerId: z.string(),
   status: OrderStatusSchema,
   placedAt: z.string(),
+  version: z.number().int(),
   lines: z.array(OrderLineResponse),
 });
 export type OrderResponse = z.infer<typeof OrderResponse>;

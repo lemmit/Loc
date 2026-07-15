@@ -4,7 +4,7 @@ import { ProblemDetails, newApp } from "./problem-details";
 import { Product } from "../domain/product";
 import type { ProductRepository } from "../db/repositories/product-repository";
 import * as Ids from "../domain/ids";
-import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";
+import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError, ConcurrencyError } from "../domain/errors";
 import { Money } from "../domain/value-objects";
 
 const MoneySchema = z.object({
@@ -36,6 +36,7 @@ export const ProductResponse = z.object({
   id: z.string(),
   sku: z.string(),
   price: MoneySchema,
+  version: z.number().int(),
   display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
@@ -153,6 +154,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
         204: { description: "No content" },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
+        409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
@@ -161,8 +163,10 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Product", op: "update", id });
       const aggregate = await repo.getById(Ids.ProductId(id));
+      const ifMatch = c.req.header("if-match");
+      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;
       aggregate.update(body.sku, new Money(body.price.amount, body.price.currency));
-      await repo.save(aggregate);
+      await repo.save(aggregate, expectedVersion);
       return c.body(null, 204);
     },
   );
@@ -203,6 +207,10 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Product", status: 404 });
       return problem(404, "Not Found", err.message);
+    }
+    if (err instanceof ConcurrencyError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Product", message: err.message, status: 409 });
+      return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });

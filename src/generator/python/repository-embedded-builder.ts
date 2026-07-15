@@ -6,6 +6,7 @@ import type {
   RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
@@ -166,7 +167,9 @@ export function buildPyEmbeddedRepositoryFile(
     authUserImport(findUser, aggUsesPrincipalContextFilter(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
-    "from app.domain.errors import AggregateNotFoundError",
+    aggregateIsVersioned(agg)
+      ? "from app.domain.errors import AggregateNotFoundError, ConcurrencyError"
+      : "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
       ? "from app.domain.events import DomainEvent, DomainEventDispatcher"
       : "from app.domain.events import DomainEventDispatcher",
@@ -239,17 +242,52 @@ function saveMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): st
         : `(None if aggregate.${snake(c.name)} is None else ${toDoc}(aggregate.${snake(c.name)}))`,
     ]);
   }
+  const versioned = aggregateIsVersioned(agg);
   const out: string[] = [
-    `    async def save(self, aggregate: ${agg.name}) -> None:`,
+    versioned
+      ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
+      : `    async def save(self, aggregate: ${agg.name}) -> None:`,
     "        root = {",
     ...pairs.map(([k, v]) => `            "${k}": ${v},`),
     "        }",
-    "        await self._session.execute(",
-    `            insert(${row}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
-    "        )",
+  ];
+  if (versioned) {
+    // Guarded upsert (optimistic concurrency, default-on `versioned`): an
+    // INSERT-conflict only overwrites when the stored `version` still equals
+    // the caller's expected value, bumping it by one; a stale write matches no
+    // row, so `RETURNING id` comes back empty → ConcurrencyError → 409.  A fresh
+    // INSERT never conflicts, so create/seed writes are unaffected.
+    const setEntries = pairs
+      .map(([k]) => k)
+      .filter((k) => k !== "id" && k !== "version")
+      .map((k) => `"${k}": root[${JSON.stringify(k)}]`);
+    setEntries.push(`"version": ${row}.version + 1`);
+    out.push(
+      "        _expected = aggregate.version if expected_version is None else expected_version",
+      "        _guarded = await self._session.execute(",
+      `            insert(${row})`,
+      "            .values(**root)",
+      "            .on_conflict_do_update(",
+      '                index_elements=["id"],',
+      `                set_={${setEntries.join(", ")}},`,
+      `                where=${row}.version == _expected,`,
+      "            )",
+      `            .returning(${row}.id)`,
+      "        )",
+      "        if _guarded.first() is None:",
+      `            raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
+    );
+  } else {
+    out.push(
+      "        await self._session.execute(",
+      `            insert(${row}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
+      "        )",
+    );
+  }
+  out.push(
     "        await self._session.flush()",
     `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(aggregate.id))`,
-  ];
+  );
   if (ctx.events.length > 0) {
     out.push("        for event in aggregate.pull_events():");
     out.push("            await self._events.dispatch(event)");
