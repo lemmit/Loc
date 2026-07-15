@@ -1,1 +1,10 @@
-<TextInput label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={{expr errorExpr}} />
+{{#if rowFields}}<Stack gap="xs">
+          <Text fw={500} size="sm">{{label}}</Text>
+          { {{path}}Fields.map((field, index) => (
+            <Group key={field.id} align="flex-end" wrap="nowrap">
+{{#each rowFields}}              <TextInput label="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
+{{/each}}              <Button variant="subtle" color="red" size="xs" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+            </Group>
+          )) }
+          <Button variant="light" size="xs" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+        </Stack>{{else}}<TextInput label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={{expr errorExpr}} />{{/if}}

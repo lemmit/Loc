@@ -124,6 +124,50 @@ export function prepareFormFieldVM(
   }
 
   if (inner.kind === "array") {
+    // An array of a value-object → a dynamic-row field-array: one repeatable
+    // group per element, each carrying the value-object's sub-fields.  The row
+    // sub-fields carry BARE sub-paths (`sku`) so a `useFieldArray`-style template
+    // splices the runtime index (`items.${index}.sku`).  A scalar array (or an
+    // element we can't resolve) leaves `rowFields` undefined → the pack's
+    // disabled stub, byte-identical to before.
+    const el = inner.element;
+    if (el.kind === "valueobject") {
+      const vo = ctx.valueObjects.find((v) => v.name === el.name);
+      if (vo) {
+        // Row sub-fields carry a BARE sub-path (`sku`, not `items.sku`) so a
+        // dynamic-row template splices the runtime index; numeric sub-fields
+        // flag `valueAsNumber` so their register coerces the string input.
+        const NUMERIC = new Set(["field-input-int", "field-input-decimal", "field-input-money"]);
+        const rowFields = vo.fields.map((vf) => {
+          const vm = prepareFormFieldVM(
+            vf.name,
+            vf.type,
+            ctx,
+            `${testId}-${vf.name}`,
+            aggregatesByName,
+          );
+          return NUMERIC.has(vm.template) ? { ...vm, valueAsNumber: true } : vm;
+        });
+        // A fresh-row default for `append(...)` — zero value per sub-field kind.
+        const defaultRowJson = `{ ${rowFields
+          .map(
+            (f) =>
+              `${f.path}: ${f.valueAsNumber ? "0" : f.template === "field-input-bool" ? "false" : '""'}`,
+          )
+          .join(", ")} }`;
+        return {
+          template: "field-input-array",
+          path,
+          label,
+          testId,
+          errorExpr,
+          rowFields,
+          elementLabel: humanize(el.name),
+          arrayPascal: leaf.charAt(0).toUpperCase() + leaf.slice(1),
+          defaultRowJson,
+        };
+      }
+    }
     return { template: "field-input-array", path, label, testId, errorExpr };
   }
 
