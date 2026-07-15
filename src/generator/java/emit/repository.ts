@@ -6,6 +6,7 @@ import type {
   SortTermIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { lines } from "../../../util/code-builder.js";
@@ -188,7 +189,7 @@ export function isPagedFind(f: FindIR): boolean {
 export function inMemoryPagedSortLines(agg: EnrichedAggregateIR): string[] {
   const fields = sortableFields(agg).filter((wf) => wf !== "id");
   const wireType = (wf: string): TypeIR | undefined =>
-    agg.wireShape.find((f) => f.name === wf)?.type;
+    wireFieldsForAggregate(agg).find((f) => f.name === wf)?.type;
   const arm = (wf: string): string => {
     const t = wireType(wf);
     const prim = t?.kind === "primitive" ? t.name : undefined;
