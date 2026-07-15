@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// `shape(document)` persistence on the vanilla (plain Ecto) foundation —
+// `shape: document` persistence on the vanilla (plain Ecto) foundation —
 // DEBT-07.  The whole aggregate persists as ONE jsonb `data` blob in an
 // `(id, data, version)` table.  Writes validate the domain fields through a
 // SCHEMALESS changeset (cast + validate_required + invariant validators — the
@@ -16,7 +16,7 @@ system Carting {
     context Carts {
       valueobject Money { amount: int  currency: string }
       enum CartStatus { open, checkedOut }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
         status: CartStatus
         subtotal: Money
@@ -39,9 +39,9 @@ system Carting {
 }
 `;
 
-// Same aggregate without shape(document) — asserts the document path is gated
+// Same aggregate without shape: document — asserts the document path is gated
 // off (relational columns + Map.from_struct serialize stay byte-identical).
-const RELATIONAL = DOC.replace(" shape(document)", "");
+const RELATIONAL = DOC.replace(" shape: document", "");
 
 function file(files: Map<string, string>, suffix: string): string {
   const key = [...files.keys()].find((k) => k.endsWith(suffix));
@@ -49,7 +49,7 @@ function file(files: Map<string, string>, suffix: string): string {
   return files.get(key!)!;
 }
 
-describe("vanilla shape(document) persistence (DEBT-07)", () => {
+describe("vanilla shape: document persistence (DEBT-07)", () => {
   it("emits an (id, data, version) schema, not flattened columns", async () => {
     const schema = file(await generateSystemFiles(DOC), "/carts/cart.ex");
     // Route A: the blob is a TYPED `embeds_one :data, <Agg>.Data` embedded schema
@@ -175,7 +175,7 @@ system Carting {
   subdomain Sales {
     context Carts {
       enum CartStatus { open, checkedOut }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
         status: CartStatus
         itemCount: int
@@ -208,7 +208,7 @@ system Carting {
 }
 `;
 
-describe("vanilla shape(document) scalar finds + named ops (Route A slice 2 — struct mode)", () => {
+describe("vanilla shape: document scalar finds + named ops (Route A slice 2 — struct mode)", () => {
   it("emits in-memory custom finds that read the rehydrated embed struct", async () => {
     const repo = file(await generateSystemFiles(DOC_OPS), "/carts/cart_repository.ex");
     // A list find returns every match; the predicate reads the rehydrated
@@ -266,7 +266,7 @@ system Carting {
     context Carts {
       valueobject Money { amount: int  currency: string }
       error AlreadyClosed { message: string }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         subtotal: Money
         itemCount: int
         function isCheap(): bool = subtotal.amount < 100
@@ -298,7 +298,7 @@ system Carting {
 }
 `;
 
-describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () => {
+describe("vanilla shape: document non-scalar residual (DEBT-07 follow-up)", () => {
   it("emits document functions over the rehydrated embed struct + value-object-subfield reads", async () => {
     const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
     // Route A slice 2: a pure function on a document aggregate takes the
@@ -351,7 +351,7 @@ const DOC_CONTAIN = `
 system Ordering {
   subdomain Sales {
     context Orders {
-      aggregate Order shape(document) with crudish {
+      aggregate Order shape: document with crudish {
         reference: string
         contains lines: OrderLine[]
         entity OrderLine { sku: string  qty: int }
@@ -372,7 +372,7 @@ system Ordering {
 }
 `;
 
-describe("vanilla shape(document) containments (Route A slice 4)", () => {
+describe("vanilla shape: document containments (Route A slice 4)", () => {
   it("folds the part into the <Agg>.Data embed as embeds_many + cast_embed", async () => {
     const schema = file(await generateSystemFiles(DOC_CONTAIN), "/orders/order.ex");
     expect(schema).toContain("embeds_many :lines, Api.Orders.OrderLine");
@@ -412,13 +412,13 @@ describe("vanilla shape(document) containments (Route A slice 4)", () => {
 // Paged custom finds (Route A slice 4c) — the document find fn builds the
 // %{items, page, pageSize, total, totalPages} wire envelope IN MEMORY.
 // ---------------------------------------------------------------------------
-describe("vanilla shape(document) paged finds (Route A slice 4c)", () => {
+describe("vanilla shape: document paged finds (Route A slice 4c)", () => {
   const DOC_PAGED = `
 system Shop {
   subdomain Sales {
     context Shop {
       enum Status { open, closed }
-      aggregate Ticket shape(document) with crudish {
+      aggregate Ticket shape: document with crudish {
         title: string
         status: Status
       }
@@ -455,13 +455,13 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) union finds (Route A slice 4d)", () => {
+describe("vanilla shape: document union finds (Route A slice 4d)", () => {
   const DOC_UNION = `
 system Shop {
   subdomain Sales {
     context Shop {
       error NotFound { }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -502,12 +502,12 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) audited named ops (Route A slice 4e)", () => {
+describe("vanilla shape: document audited named ops (Route A slice 4e)", () => {
   const DOC_AUDIT = `
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation touch() audited { total := total + 1 }
         operation bump(by: int) audited {
@@ -555,13 +555,13 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) returning ops persist their mutation (#1774)", () => {
+describe("vanilla shape: document returning ops persist their mutation (#1774)", () => {
   const DOC_RET = `
 system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bumpFall(): Cart or TooMany {
           precondition total < 10
@@ -623,13 +623,13 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) audited RETURNING ops (Route A slice 4f)", () => {
+describe("vanilla shape: document audited RETURNING ops (Route A slice 4f)", () => {
   const DOC_AUDIT_RET = `
 system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { }
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         total: int
         operation bump() audited: Cart or TooMany {
           precondition total < 10
@@ -680,7 +680,7 @@ system S {
   subdomain O {
     context O {
       error NotFound { resource: string }
-      aggregate Note shape(document) with crudish {
+      aggregate Note shape: document with crudish {
         title: string
         count: int
         // Guarded NAMED (mutating scalar) op.
@@ -715,7 +715,7 @@ system S {
 }
 `;
 
-describe("vanilla shape(document) op guards deny 403/422 (not raise → 500)", () => {
+describe("vanilla shape: document op guards deny 403/422 (not raise → 500)", () => {
   it("a guarded NAMED document op hoists guards into a `with ensure(...)` chain before the re-embed", async () => {
     const ctx = file(await generateSystemFiles(DOC_GUARDS), "lib/api/o.ex");
     const fn = ctx.slice(ctx.indexOf("def bump_note(%"));

@@ -40,7 +40,7 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // TPH (shared kind-discriminated table) + TPC (per-concrete tables)
   // hierarchies with polymorphic base readers.
   ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
-  // persistedAs(eventLog): append-only stream + appliers fold.
+  // persistedAs: eventLog: append-only stream + appliers fold.
   ["test/e2e/fixtures/python-build/eventlog.ddd", "api"],
   // Multi-context event log: ES streams in the SECOND context, so the merged
   // context name differs from the owner — the `<Ctx>EventRow` model, its repo
@@ -83,16 +83,16 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
   // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
-  // shape(document): one jsonb (id, data, version) blob + in-memory finds.
+  // shape: document: one jsonb (id, data, version) blob + in-memory finds.
   ["test/e2e/fixtures/python-build/document.ddd", "api"],
-  // shape(document) + capability filter (DEBT-02 tail complete): non-principal
+  // shape: document + capability filter (DEBT-02 tail complete): non-principal
   // AND principal (`require_current_user()`) predicates evaluated IN-APP over the
   // rehydrated docs (list-comprehension filter), ruff + mypy --strict clean.
   ["test/e2e/fixtures/python-build/document-tenancy.ddd", "api"],
-  // shape(embedded): queryable root row + one jsonb column per containment
+  // shape: embedded: queryable root row + one jsonb column per containment
   // / ref-collection; SQL finds over root columns.
   ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
-  // shape(embedded) + capability filter (DEBT-02 tail): non-principal AND
+  // shape: embedded + capability filter (DEBT-02 tail): non-principal AND
   // principal (`require_current_user()`) predicates AND-ed into the embedded
   // root reads, ruff + mypy --strict clean.
   ["test/e2e/fixtures/python-build/embedded-filter.ddd", "api"],

@@ -6,7 +6,7 @@ import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Python backend — shape(document) (F2a).  A document aggregate persists
+// Python backend — shape: document (F2a).  A document aggregate persists
 // as ONE jsonb column (id, data, version); the repo serialises the
 // domain getters to a dict and rebuilds through `_rehydrate`, finds run
 // in-memory over the rehydrated documents.  Verified live (create →
@@ -26,7 +26,7 @@ async function build() {
   return generateSystems(model).files;
 }
 
-describe("python shape(document)", () => {
+describe("python shape: document", () => {
   it("schema is the document triple (id, data jsonb, version)", async () => {
     const files = await build();
     const schema = files.get("api/app/db/schema.py")!;

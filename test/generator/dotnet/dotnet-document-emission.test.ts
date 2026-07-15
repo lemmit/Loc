@@ -138,7 +138,7 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     expect(customer).not.toContain("ToSnapshot");
   });
 
-  // shape(embedded): queryable root row + contained parts folded into a
+  // shape: embedded: queryable root row + contained parts folded into a
   // JSONB column via EF owned-types `.ToJson()`.  Unlike `document`, the
   // entity/repository/DbSet are the NORMAL relational ones — only the EF
   // configuration changes, so finds stay real SQL.

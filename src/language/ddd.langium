@@ -937,46 +937,47 @@ ValueObjectMember:
 // the aggregate-inheritance surface.  An `abstract` base can never be
 // instantiated, has no repository, and emits no table of its own; `extends
 // <Base>` may only target an `abstract` aggregate.  `inheritanceUsing(…)` is a
-// header paren modifier — all aggregate config lives on the header, alongside
+// header colon modifier — all aggregate config lives on the header, alongside
 // `persistedAs(…)` / `shape(…)`.
 Aggregate:
     // `crossTenant` is a header flag mirroring `isAbstract` — declares
     // shared-reference data that opts out of the tenant filter under a
-    // `tenancy by` system.  Positioned before the paren modifiers and the
+    // `tenancy by` system.  Positioned before the colon modifiers and the
     // with-clause: `aggregate Plan crossTenant { … }`,
     // `aggregate Invoice crossTenant with x { … }`.
     //
     // The aggregate id is always a `guid` — Loom mints it.
-    // M-T5.17 (finding #1): the enum-axis modifiers accept a COLON clause
-    // (`persistedAs: eventLog`) — matching every other enum-value pick in Loom
-    // (`type:`, `kind:`, `platform:`) — as well as the legacy PAREN form
-    // (`persistedAs(eventLog)`), which stays accepted for back-compat (Phase 1
-    // accept-both; a later phase migrates the corpus + drops the paren form).
-    // The printer emits the new colon spelling.  (The `crossTenant`-hoist half
-    // of the mission — moving the flag to lead beside `abstract` — is deferred
-    // to the Phase 2 cutover to avoid a duplicate-assignment on the flag.)
-    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? (crossTenant?='crossTenant')?
-        ('persistedAs' (':' persistedAs=TruthKind ','? | '(' persistedAs=TruthKind ')'))?
-        ('shape' (':' shape=SavingShape ','? | '(' shape=SavingShape ')'))?
-        ('inheritanceUsing' (':' inheritanceUsing=InheritanceLayout ','? | '(' inheritanceUsing=InheritanceLayout ')'))?
+    // M-T5.17 (finding #1) — Phase 2 cutover: the enum-axis modifiers are COLON
+    // clauses (`persistedAs: eventLog`), matching every other enum-value pick in
+    // Loom (`type:`, `kind:`, `platform:`).  The legacy paren form was removed
+    // (corpus codemodded).  The three are ORDER-INDEPENDENT (a distinct keyword
+    // leads each, so the interleaving `(…)*` group is unambiguous), which also
+    // kills the old silent reorder-is-a-parse-error papercut.  `crossTenant`
+    // leads beside `abstract` (both boolean adjectives before `aggregate`).
+    (isAbstract?='abstract')? (crossTenant?='crossTenant')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])?
+        (
+            ('persistedAs' ':' persistedAs=TruthKind ','?)
+          | ('shape' ':' shape=SavingShape ','?)
+          | ('inheritanceUsing' ':' inheritanceUsing=InheritanceLayout ','?)
+        )*
         withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
-// Inheritance table layout — a header paren modifier on aggregates
+// Inheritance table layout — a header colon modifier on aggregates
 // participating in inheritance.
 //   - `sharedTable` — TPH: one table for the whole hierarchy + a `kind`
 //     discriminator column.  `Party id` refs target the single base table.
 //   - `ownTable`    — TPC: one table per concrete; no base table.  Bare
 //     `Party id` refs to such a base are forbidden (FK target ambiguous).
 // Only valid on an `abstract` base or an `extends` subtype.  A
-// `persistedAs(eventLog)` or `shape(document)` concrete of a `sharedTable`
+// `persistedAs: eventLog` or `shape: document` concrete of a `sharedTable`
 // base is forced to `ownTable` — a validator error, so the author writes the
 // forced modifier explicitly.
 InheritanceLayout returns string:
     'sharedTable' | 'ownTable';
 
-// The aggregate's primary truth kind, a header paren modifier (replaces the
+// The aggregate's primary truth kind, a header colon modifier (replaces the
 // former body `persistenceStrategy:` clause).  Values align to the
 // `dataSource` `kind` set so the IR→binding mapping is an identity.  Default
 // (absent) is `state`.
@@ -984,8 +985,8 @@ TruthKind returns string:
     'eventLog' | 'state';
 
 // Saving shape of the materialised read model / snapshot — how the
-// aggregate's hierarchy is physically laid out.  Header paren modifier on the
-// aggregate (`shape(document)`); colon entry on the `dataSource` binding
+// aggregate's hierarchy is physically laid out.  Header colon modifier on the
+// aggregate (`shape: document`); colon entry on the `dataSource` binding
 // (`shape: document`).  Three points on the relational↔document spectrum
 // (default absent = `relational`):
 //   - `relational` — table-per-entity (root columns + child tables + join tables)
@@ -1683,7 +1684,7 @@ Destroy:
     '}';
 
 // Applier — the event-fold body of an event-sourced aggregate
-// (`persistedAs(eventLog)`).  `apply(e: OrderPlaced) { … }` binds the
+// (`persistedAs: eventLog`).  `apply(e: OrderPlaced) { … }` binds the
 // emitted event instance to `param` and mutates `this` to fold it into
 // state.  Under the event-log discipline the command bodies
 // (`operation`/`create`) may only `emit`; the actual state transition

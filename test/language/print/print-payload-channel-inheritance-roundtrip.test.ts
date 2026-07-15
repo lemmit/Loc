@@ -12,7 +12,7 @@ import { parseRawResult } from "../../_helpers/index.js";
 // identical.  Printing a top-level `system` recurses through every nested
 // printer, so these gate:
 //   - aggregate inheritance header modifiers (`abstract`, `extends`,
-//     `inheritanceUsing(…)`)
+//     `inheritanceUsing:`)
 //   - the D-REALIZATION-AXES `platform: <plat> { … }` block (`directoryLayout`)
 //   - the payload family (`payload` / `command` / `query` / `response` / `error`)
 //   - `channel` (context member) and `channelSource` (system member)
@@ -53,14 +53,14 @@ function expectRoundTrips(src: string): void {
 }
 
 describe("print-structural round-trip — payload / channel / inheritance / axes", () => {
-  it("aggregate inheritance: abstract + extends + inheritanceUsing(ownTable)", () => {
+  it("aggregate inheritance: abstract + extends + inheritanceUsing: ownTable", () => {
     expectRoundTrips(`system S {
   subdomain D {
     context C {
-      abstract aggregate Account inheritanceUsing(ownTable) {
+      abstract aggregate Account inheritanceUsing: ownTable {
         owner: string
       }
-      aggregate CheckingAccount extends Account inheritanceUsing(ownTable) with crudish {
+      aggregate CheckingAccount extends Account inheritanceUsing: ownTable with crudish {
         overdraftLimit: int
       }
     }
@@ -69,11 +69,11 @@ describe("print-structural round-trip — payload / channel / inheritance / axes
 `);
   });
 
-  it("aggregate inheritance: inheritanceUsing(sharedTable)", () => {
+  it("aggregate inheritance: inheritanceUsing: sharedTable", () => {
     expectRoundTrips(`system S {
   subdomain D {
     context C {
-      abstract aggregate PaymentMethod inheritanceUsing(sharedTable) {
+      abstract aggregate PaymentMethod inheritanceUsing: sharedTable {
         label: string
       }
       aggregate CreditCard extends PaymentMethod with crudish {

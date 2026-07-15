@@ -95,7 +95,7 @@ deployable webApp {
 // in-browser); open the generated tree to read the EF configurations.
 // Finance/Billing on .NET (EF Core + money/json primitives + storage
 // shapes).  The event-sourced Finance/Ledger context is hosted on the
-// Hono coreApi above, where `persistedAs(eventLog)` emission is supported.
+// Hono coreApi above, where `persistedAs: eventLog` emission is supported.
 deployable financeApi {
   platform: dotnet
   contexts: [Billing]

@@ -93,11 +93,11 @@ describe("tenancy by — SystemMember grammar", () => {
 });
 
 describe("crossTenant — aggregate header flag grammar", () => {
-  it("parses on a plain aggregate header (`aggregate Plan crossTenant { … }`)", async () => {
+  it("parses on a plain aggregate header (`crossTenant aggregate Plan { … }`)", async () => {
     const { model, errors } = await parseString(`
       system D {
         subdomain M { context C {
-          aggregate Plan crossTenant { code: string }
+          crossTenant aggregate Plan { code: string }
           repository Plans for Plan { }
         }}
       }
@@ -111,7 +111,7 @@ describe("crossTenant — aggregate header flag grammar", () => {
     const { model, errors } = await parseString(`
       system D {
         subdomain M { context C {
-          aggregate Invoice crossTenant with auditable { number: string }
+          crossTenant aggregate Invoice with auditable { number: string }
           repository Invoices for Invoice { }
         }}
       }
@@ -144,7 +144,7 @@ describe("tenancy surface — structural printer roundtrip", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Catalog {
-            aggregate Plan crossTenant { code: string }
+            crossTenant aggregate Plan { code: string }
             aggregate Organization { name: string }
             repository Plans for Plan { }
             repository Organizations for Organization { }
@@ -156,7 +156,7 @@ describe("tenancy surface — structural printer roundtrip", () => {
     expect(errors).toEqual([]);
     const printed = printStructural(systemOf(model));
     expect(printed).toContain("tenancy by user.tenantId of Organization");
-    expect(printed).toContain("aggregate Plan crossTenant {");
+    expect(printed).toContain("crossTenant aggregate Plan {");
     // Roundtrip: the printed source re-parses to the same declared facts.
     const reparsed = await parseString(printed);
     expect(reparsed.errors).toEqual([]);

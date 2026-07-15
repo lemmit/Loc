@@ -21,7 +21,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(relational) with crudish {
+      aggregate Cart shape: relational with crudish {
         total: int
         derived doubled: int = total * 2
         derived quad: int = doubled * 2

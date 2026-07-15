@@ -22,7 +22,7 @@ const TPH = `
 system Parties {
   subdomain Registry {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
         email: string
       }
@@ -53,7 +53,7 @@ const TPC = `
 system Assets {
   subdomain Registry {
     context Assets {
-      abstract aggregate Asset inheritanceUsing(ownTable) { label: string }
+      abstract aggregate Asset inheritanceUsing: ownTable { label: string }
       aggregate Machine extends Asset { serial: string }
       aggregate Vehicle extends Asset { plate: string }
       repository Machines for Machine { }

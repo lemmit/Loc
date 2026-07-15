@@ -40,7 +40,7 @@ async function esErrors(source: string): Promise<string[]> {
  *  is spliced into the aggregate body so each test can perturb one
  *  thing (an applier, a bad statement, …). */
 function counter(opts: { persistedAs?: string; command?: string; appliers?: string }): string {
-  const header = opts.persistedAs ? ` persistedAs(${opts.persistedAs})` : "";
+  const header = opts.persistedAs ? ` persistedAs: ${opts.persistedAs}` : "";
   const command =
     opts.command ??
     `operation bump(by: int) {

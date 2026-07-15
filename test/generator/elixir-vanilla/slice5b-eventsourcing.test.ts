@@ -10,7 +10,7 @@ import { parseString } from "../../_helpers/parse.js";
 // event sourcing on the elixir vanilla foundation (D-VANILLA-ES-HOME).
 //
 // Two halves:
-//   1. the gate — `persistedAs(eventLog)` is accepted on `foundation: vanilla`
+//   1. the gate — `persistedAs: eventLog` is accepted on `foundation: vanilla`
 //      (the only elixir foundation since Ash was removed);
 //   2. the emit — in-memory struct + event-log Ecto schema + fold +
 //      event-store repository + emit/append/fold command runners + ES
@@ -20,7 +20,7 @@ import { parseString } from "../../_helpers/parse.js";
 const AGG = `
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
         create open(owner: string) { emit Opened { account: id, owner: owner } }
@@ -60,7 +60,7 @@ async function diagnostics() {
 const ES_GATE = "loom.event-sourcing-backend-unsupported";
 
 describe("vanilla — Slice P4.1 event-sourcing gate", () => {
-  it("accepts persistedAs(eventLog) on foundation: vanilla", async () => {
+  it("accepts persistedAs: eventLog on foundation: vanilla", async () => {
     const diags = await diagnostics();
     expect(diags.find((d) => d.code === ES_GATE)).toBeUndefined();
   });
@@ -162,7 +162,7 @@ system L {
   subdomain Core {
     context Accounts {
       event Opened { account: Account id, owner: string }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         currentBalance: int
         create open(owner: string) { emit Opened { account: id, owner: owner } }

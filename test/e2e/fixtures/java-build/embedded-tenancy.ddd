@@ -1,5 +1,5 @@
 // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: embedded`
 // aggregate, on the JAVA (Spring Boot + JPA/Hibernate) backend.  An embedded
 // aggregate's root scalars (`tenantId`, `code`) are real JPA columns; only the
 // `contains` parts ride a jsonb column.  Previously this combination was GATED
@@ -12,13 +12,13 @@
 // `auth: required` emits the CurrentUserAccessor the SpEL resolves the request
 // principal through.  Decisive check that the generated Spring Data @Query +
 // SpEL on an EMBEDDED aggregate compile under `gradle testClasses bootJar`
-// (the java-build gate).  (`shape(document)` + principal stays gated — Slice B.)
+// (the java-build gate).  (`shape: document` + principal stays gated — Slice B.)
 system EmbTenancy {
   user { id: guid  tenantId: string }
 
   subdomain D {
     context Shop {
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         tenantId: string
         code: string
         // Always-on row scoping by the requesting principal's tenant.

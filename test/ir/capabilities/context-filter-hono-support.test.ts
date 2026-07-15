@@ -3,7 +3,7 @@
 // backend (DEBT-01 — rendered against the ambient `requireCurrentUser()`
 // accessor, the analogue of EF Core `HasQueryFilter`).  Still gated with
 // loom.context-filter-unsupported:
-//   1. non-relational shapes (shape(document) / shape(embedded)) carrying a
+//   1. non-relational shapes (shape: document / shape: embedded) carrying a
 //      principal filter on the elixir backend (handled below per case);
 //   2. any capability filter (principal or not) on a non-relational shape on
 //      python (no in-app filtering path there yet).
@@ -242,10 +242,10 @@ describe("python capability-filter support guard (W1a)", () => {
   // `require_current_user().<claim>` against the ambient ContextVar accessor
   // and AND-s into every root read (no read-method parameter — the SQLAlchemy
   // analogue of node's `requireCurrentUser()` weave).  DEBT-02 tail then wired
-  // the `shape(embedded)` case (both non-principal and principal): an embedded
+  // the `shape: embedded` case (both non-principal and principal): an embedded
   // aggregate's root scalars are real columns, so `contextFilterPredicate` AND-s
   // into the embedded SQL reads exactly like the relational path.  DEBT-02 tail
-  // is now COMPLETE: `shape(document)` is wired too — the blob is one JSONB
+  // is now COMPLETE: `shape: document` is wired too — the blob is one JSONB
   // column, so the predicate is evaluated IN-APP over the rehydrated instance
   // (`documentCapabilityBody` → a list-comprehension filter), mirroring node.  A
   // principal filter still requires `auth: required` (no principal otherwise).

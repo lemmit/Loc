@@ -1,8 +1,8 @@
-// shape(document): whole aggregate tree round-trips one jsonb column.
+// shape: document: whole aggregate tree round-trips one jsonb column.
 system DocSys {
   subdomain Cms {
     context Cms {
-      aggregate Article shape(document) {
+      aggregate Article shape: document {
         title: string
         viewCount: int
         contains sections: Section[]

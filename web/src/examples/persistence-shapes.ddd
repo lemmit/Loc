@@ -5,14 +5,14 @@
 // annotated with the one persistence feature it demonstrates.
 //
 //   • Table-Per-Concrete inheritance — an `abstract aggregate` base with
-//     `inheritanceUsing(ownTable)`; each concrete gets its OWN table (no
+//     `inheritanceUsing: ownTable`; each concrete gets its OWN table (no
 //     base table, no discriminator).  TPC works on every backend.  The
 //     polymorphic reader (`AccountRepository.findAll()`) is auto-emitted
 //     as the union of the concrete loaders.  `Account id` refs are
 //     rejected under TPC (ambiguous FK), so the concretes stand alone.
-//   • shape(document) — the whole aggregate persists as one opaque JSONB
+//   • shape: document — the whole aggregate persists as one opaque JSONB
 //     blob (id, data, version), Marten-style.
-//   • shape(embedded) — a queryable root row + contained parts folded
+//   • shape: embedded — a queryable root row + contained parts folded
 //     into a JSONB column.
 //   • `money` primitive — precise decimal with closed arithmetic
 //     (money ± money, money × decimal), distinct from a Money value object.
@@ -31,7 +31,7 @@ system PersistenceShapes {
 
       // --- TPC inheritance (ownTable) ------------------------------------
       // Abstract base: shared fields, no table / repository of its own.
-      abstract aggregate Account inheritanceUsing(ownTable) {
+      abstract aggregate Account inheritanceUsing: ownTable {
         owner: string
         kind: AccountKind
         invariant owner.length > 0
@@ -40,10 +40,10 @@ system PersistenceShapes {
 
       // Each concrete is its own table; both inherit owner / kind and add
       // their own columns.  `with crudish` gives them create/update/destroy.
-      aggregate CheckingAccount extends Account inheritanceUsing(ownTable) with crudish {
+      aggregate CheckingAccount extends Account inheritanceUsing: ownTable with crudish {
         overdraftLimit: money
       }
-      aggregate SavingsAccount extends Account inheritanceUsing(ownTable) with crudish {
+      aggregate SavingsAccount extends Account inheritanceUsing: ownTable with crudish {
         interestRate: decimal
       }
 
@@ -71,11 +71,11 @@ system PersistenceShapes {
       }
       repository Invoices for Invoice { }
 
-      // --- shape(document) -----------------------------------------------
+      // --- shape: document -----------------------------------------------
       // The whole aggregate (root + contained items) serialises to one
       // JSONB blob.  Document/embedded aggregates use an explicit
       // canonical create (no crudish hard-delete on a blob).
-      aggregate Receipt shape(document) {
+      aggregate Receipt shape: document {
         store: string
         contains lines: ReceiptLine[]
 
@@ -97,10 +97,10 @@ system PersistenceShapes {
       }
       repository Receipts for Receipt { }
 
-      // --- shape(embedded) -----------------------------------------------
+      // --- shape: embedded -----------------------------------------------
       // The root (owner, label) stays queryable columns; the contained
       // TagItem parts fold into a JSONB column.
-      aggregate TagList shape(embedded) {
+      aggregate TagList shape: embedded {
         owner: string
         label: string
         contains tags: TagItem[]

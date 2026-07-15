@@ -3,7 +3,7 @@
 // joined EVENT_SOURCING_WORKFLOW_BACKENDS).  An `eventSourced` workflow persists
 // in the single per-context `<ctx>_events` log (its `stream_type = "<Wf>"` rows)
 // folded through its `apply(...)` blocks — the saga analogue of a
-// `persistedAs(eventLog)` aggregate — instead of a
+// `persistedAs: eventLog` aggregate — instead of a
 // mutable JPA correlation-state entity.  Asserts the `<Wf>State` fold class, the
 // absence of a JPA state entity/table, and the fold-load / append-own-events
 // dispatch handlers (JdbcTemplate-backed stream IO).

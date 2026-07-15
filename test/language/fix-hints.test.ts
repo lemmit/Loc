@@ -93,10 +93,10 @@ describe("fix-hints", () => {
     expect(re.errors).toEqual([]); // the reserved-derived error is gone
   });
 
-  it("es-tph-forced-own-table: header-end inserts inheritanceUsing(ownTable)", async () => {
+  it("es-tph-forced-own-table: header-end inserts inheritanceUsing: ownTable", async () => {
     const TPH = `context Sales {
-  abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
-  aggregate Customer extends Party persistedAs(eventLog) { credit: int }
+  abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+  aggregate Customer extends Party persistedAs: eventLog { credit: int }
 }`;
     const { doc, model, diagnostics } = await parseString(TPH);
     const report = buildValidateReport({
@@ -111,12 +111,12 @@ describe("fix-hints", () => {
       op: "insert",
       target: "aggregate Sales.Customer",
       position: "header-end",
-      source: "inheritanceUsing(ownTable)",
+      source: "inheritanceUsing: ownTable",
     });
 
     const applied = await applyPatches(TPH, [hint?.fixHint?.patch as ModelPatch]);
     expect(applied.ok).toBe(true);
-    expect(applied.text).toContain("persistedAs(eventLog) inheritanceUsing(ownTable) {");
+    expect(applied.text).toContain("persistedAs: eventLog inheritanceUsing: ownTable {");
     // The es-tph diagnostic clears and the result parses (remaining errors, if
     // any, are orthogonal backend-support constraints, not this fix).
     const { diagnostics: after } = await parseString(applied.text);

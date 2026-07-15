@@ -1,5 +1,5 @@
 // DEBT-02 Slice B — principal-referencing (tenancy) capability filter on a
-// `shape(document)` aggregate, on the JAVA (Spring Boot + JPA/Hibernate)
+// `shape: document` aggregate, on the JAVA (Spring Boot + JPA/Hibernate)
 // backend.  The whole aggregate lives in one `data` jsonb column, so the filter
 // can't be a SQL predicate — it's applied in-app over the rehydrated aggregate
 // on every read.  The principal reference can't ride the static @SQLRestriction
@@ -17,7 +17,7 @@ system JavaDocTenancy {
 
   subdomain Core {
     context Ledger {
-      aggregate Account shape(document) {
+      aggregate Account shape: document {
         tenantId: string
         balance: int
         // Always-on row scoping by the requesting principal's tenant.

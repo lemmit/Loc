@@ -6,7 +6,7 @@ system PyParties {
   subdomain Registry {
     context Parties {
       // TPH — the whole hierarchy in the shared `parties` table.
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
         email: string
       }
@@ -23,7 +23,7 @@ system PyParties {
       }
 
       // TPC — each concrete is its own table.
-      abstract aggregate Asset inheritanceUsing(ownTable) {
+      abstract aggregate Asset inheritanceUsing: ownTable {
         label: string
       }
 

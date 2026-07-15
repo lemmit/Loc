@@ -87,7 +87,7 @@ describe("loom.unknown-member — undefined field access", () => {
   });
 
   it("does not flag a field inherited from an abstract base (`extends`)", async () => {
-    const e = await errs(`abstract aggregate Contact inheritanceUsing(sharedTable) {
+    const e = await errs(`abstract aggregate Contact inheritanceUsing: sharedTable {
         displayName: string
         email: string
         derived display: string = displayName
@@ -100,7 +100,7 @@ describe("loom.unknown-member — undefined field access", () => {
   });
 
   it("still flags a genuine typo on an inheriting subtype", async () => {
-    const e = await errs(`abstract aggregate Contact inheritanceUsing(sharedTable) {
+    const e = await errs(`abstract aggregate Contact inheritanceUsing: sharedTable {
         displayName: string
         email: string
         derived display: string = displayName

@@ -139,7 +139,7 @@ describe("python generator — lifecycle stamps", () => {
         user { id: guid  name: string }
         subdomain D { context Shop {
           event OrderPlaced { order: Order id, code: string }
-          aggregate Order persistedAs(eventLog) {
+          aggregate Order persistedAs: eventLog {
             stamp onUpdate { code := "x" }
             code: string
             create place(code: string) {

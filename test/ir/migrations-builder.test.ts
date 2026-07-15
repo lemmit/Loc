@@ -852,7 +852,7 @@ function withModifiedTable(
 }
 
 // ---------------------------------------------------------------------------
-// Document shape (D-DOCUMENT-AXIS, shape(document)) — a document
+// Document shape (D-DOCUMENT-AXIS, shape: document) — a document
 // aggregate collapses to one `(id, data jsonb, version)` table; its parts
 // fold into `data` (no part table) and reference collections become id
 // arrays in `data` (no join table).
@@ -862,7 +862,7 @@ const DOC_SOURCE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart shape(document) {
+      aggregate Cart shape: document {
         customer: Customer id
         total: int
         contains lines: CartLine[]
@@ -883,7 +883,7 @@ describe("schemaFromModule — document shape", () => {
     return loom.systems[0]!.subdomains[0]!;
   }
 
-  it("collapses a shape(document) aggregate to (id, data, version) with no part table", async () => {
+  it("collapses a shape: document aggregate to (id, data, version) with no part table", async () => {
     const module = await loadDoc();
     const snap = schemaFromModule(module);
     // Cart is a document → one `carts` table, no `cart_lines` part table.
@@ -911,7 +911,7 @@ describe("schemaFromModule — embedded shape", () => {
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart shape(embedded) {
+      aggregate Cart shape: embedded {
         customer: Customer id
         total: int
         contains lines: CartLine[]
@@ -948,12 +948,12 @@ system Shop {
 });
 
 describe("buildMigrations — per-projection binding override", () => {
-  it("honours a `resource shape: document` even when the aggregate header is shape(relational)", async () => {
+  it("honours a `resource shape: document` even when the aggregate header is shape: relational", async () => {
     const loom = await buildLoomModel(`
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart shape(relational) { total: int }
+      aggregate Cart shape: relational { total: int }
       repository Carts for Cart { }
     }
   }
@@ -966,7 +966,7 @@ system Shop {
     const migs = buildMigrations(sys, memorySnapshotStore());
     const sales = migs.find((mi) => mi.module === "Sales")!;
     const carts = sales.next.tables.find((t) => t.name === "carts")!;
-    // Binding override wins → document shape despite shape(relational) header.
+    // Binding override wins → document shape despite shape: relational header.
     expect(carts.columns.map((c) => c.name)).toEqual(["id", "data", "version"]);
   });
 });

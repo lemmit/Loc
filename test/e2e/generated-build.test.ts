@@ -401,14 +401,14 @@ describe.skipIf(!ENABLED)(
     }, 300_000);
 
     // DEBT-02 Slice A: a PRINCIPAL-referencing capability filter on a
-    // `shape(embedded)` aggregate.  The embedded aggregate's root scalars are
+    // `shape: embedded` aggregate.  The embedded aggregate's root scalars are
     // real columns, so it reuses the relational-principal path — the embedded
     // repository weaves `requireCurrentUser().tenantId` into every embedded
     // root read and imports `requireCurrentUser` from `../../auth/middleware`.
     // Previously gated by `loom.context-filter-unsupported`.  Generated via
     // `generate system` (the user block + auth/middleware.ts are system-level);
     // this gate compiles the emitted embedded repository + the import.
-    it("system embedded tenancy filter (principal filter on shape(embedded)) — generated project type-checks", () => {
+    it("system embedded tenancy filter (principal filter on shape: embedded) — generated project type-checks", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-embtenancy-"));
       try {
         execSync(
@@ -440,7 +440,7 @@ describe.skipIf(!ENABLED)(
     }, 300_000);
 
     // DEBT-02 Slice B: a PRINCIPAL-referencing capability filter on a
-    // `shape(document)` aggregate.  The whole aggregate is one jsonb column, so
+    // `shape: document` aggregate.  The whole aggregate is one jsonb column, so
     // the principal can't be a static SQL predicate — each in-app document read
     // binds `const currentUser = requireCurrentUser();` (fail-closed) and AND-s
     // the principal predicate over the rehydrated aggregate, importing
@@ -448,7 +448,7 @@ describe.skipIf(!ENABLED)(
     // `loom.context-filter-unsupported`.  Generated via `generate system` (the
     // user block + auth/middleware.ts are system-level); this gate compiles the
     // emitted document repository + the import.
-    it("system document tenancy filter (principal filter on shape(document)) — generated project type-checks", () => {
+    it("system document tenancy filter (principal filter on shape: document) — generated project type-checks", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-doctenancy-"));
       try {
         execSync(
@@ -509,7 +509,7 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
-    // Event sourcing (appliers A2): a `persistedAs(eventLog)` aggregate emits
+    // Event sourcing (appliers A2): a `persistedAs: eventLog` aggregate emits
     // the `<agg>_events` stream table, the `_apply`/`_fromEvents` fold, the
     // record-and-fold `emit`, the shell-+emit-body `create` factory, and the
     // append/fold repository.  Generated via `generate system` (the ES storage
@@ -665,7 +665,7 @@ describe.skipIf(!ENABLED)(
     }, 300_000);
 
     // MikroORM event sourcing (appliers, MikroORM edition): a `persistence:
-    // mikroorm` deployable hosting a `persistedAs(eventLog)` aggregate emits the
+    // mikroorm` deployable hosting a `persistedAs: eventLog` aggregate emits the
     // EntityManager event store (read stream → fold, append on save) + the
     // `<agg>_events` EntitySchema, reusing the persistence-agnostic domain fold
     // + CQRS create chain.  Type-checks under tsc.

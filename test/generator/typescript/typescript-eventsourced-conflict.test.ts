@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Hono / Drizzle backend — the event-sourced concurrency rider.  An
-// event-sourced (`persistedAs(eventLog)`) aggregate appends to the single
+// event-sourced (`persistedAs: eventLog`) aggregate appends to the single
 // per-context `<ctx>_events` table keyed by a `(stream_type, stream_id,
 // version)` PRIMARY KEY.  Two
 // concurrent `save`s that both read `max(version)=N` and both insert
@@ -28,7 +28,7 @@ const esSystem = (platform: string) => `
         event Opened { account: Account id, owner: string }
         event Deposited { account: Account id, amount: int }
 
-        aggregate Account persistedAs(eventLog) {
+        aggregate Account persistedAs: eventLog {
           owner: string
           balance: int
 

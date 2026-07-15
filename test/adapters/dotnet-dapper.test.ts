@@ -125,14 +125,14 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
   });
 
   // Event sourcing (appliers, Dapper edition): a `persistence: dapper` deployable
-  // accepts a `persistedAs(eventLog)` aggregate and emits the raw-Npgsql event
+  // accepts a `persistedAs: eventLog` aggregate and emits the raw-Npgsql event
   // store + the `<agg>_events` DbSchema table, reusing the domain fold + CQRS.
   const esSys = `
 system D {
   subdomain S {
     context O {
       event Opened { account: Account id, owner: string }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         create open(owner: string) { emit Opened { account: id, owner: owner } }
         apply(e: Opened) { owner := e.owner }
@@ -145,7 +145,7 @@ system D {
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  port: 8080 }
 }`;
 
-  it("accepts persistedAs(eventLog) and emits the Dapper event store", async () => {
+  it("accepts persistedAs: eventLog and emits the Dapper event store", async () => {
     const { files, errors } = await emit(esSys);
     expect(errors).toEqual([]);
     const repo = files.get("api/Infrastructure/Repositories/AccountRepository.cs")!;
@@ -257,12 +257,12 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
       errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
     ).toBe(true);
   });
-  it("rejects a non-relational saving shape (shape(document))", async () => {
+  it("rejects a non-relational saving shape (shape: document)", async () => {
     const src = `
       system D {
         api A from S
         subdomain S { context O {
-          aggregate Cart shape(document) with crudish { customer: string }
+          aggregate Cart shape: document with crudish { customer: string }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }

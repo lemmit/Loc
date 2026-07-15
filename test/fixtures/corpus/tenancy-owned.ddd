@@ -15,7 +15,7 @@ system TenantOwned {
         number: string
         amountDue: int
       }
-      aggregate Plan crossTenant with crudish {
+      crossTenant aggregate Plan with crudish {
         code: string
         monthlyPrice: int
       }

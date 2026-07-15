@@ -6,7 +6,7 @@ import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Python backend — shape(embedded) (F2b).  The root stays a normal
+// Python backend — shape: embedded (F2b).  The root stays a normal
 // queryable row (`id` + flattened scalar / `X id` columns), so finds run
 // as real SQL; each containment folds into one jsonb column and reference
 // collections (`X id[]`) fold into a jsonb id-array column — no part /
@@ -28,7 +28,7 @@ async function build() {
   return generateSystems(model).files;
 }
 
-describe("python shape(embedded)", () => {
+describe("python shape: embedded", () => {
   it("root row keeps scalar / id columns and folds containments + ref collections into jsonb", async () => {
     const files = await build();
     const schema = files.get("api/app/db/schema.py")!;

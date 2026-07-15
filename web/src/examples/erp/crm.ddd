@@ -17,7 +17,7 @@ subdomain Crm {
     // Each backend auto-emits a polymorphic reader that unions the
     // concrete loaders, and `Contact id` refs resolve against the one
     // shared identity.
-    abstract aggregate Contact inheritanceUsing(sharedTable) {
+    abstract aggregate Contact inheritanceUsing: sharedTable {
       displayName: string
       email: string
       invariant displayName.length > 0

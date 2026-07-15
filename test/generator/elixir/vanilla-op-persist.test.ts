@@ -20,7 +20,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(relational) with crudish {
+      aggregate Cart shape: relational with crudish {
         total: int
         operation inc() { total := total + 1 }
       }

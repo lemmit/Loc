@@ -98,7 +98,7 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
   });
 
   // Event sourcing (appliers, MikroORM edition): a `persistence: mikroorm`
-  // deployable accepts a `persistedAs(eventLog)` aggregate and emits the
+  // deployable accepts a `persistedAs: eventLog` aggregate and emits the
   // EntityManager event store over the single per-context `<ctx>_events`
   // EntitySchema (discriminated by `stream_type`), reusing the domain fold + CQRS.
   const esSys = `
@@ -106,7 +106,7 @@ system D {
   subdomain S {
     context O {
       event Opened { account: Account id, owner: string }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         create open(owner: string) { emit Opened { account: id, owner: owner } }
         apply(e: Opened) { owner := e.owner }
@@ -119,7 +119,7 @@ system D {
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  port: 8080 }
 }`;
 
-  it("accepts persistedAs(eventLog) and emits the MikroORM event store", async () => {
+  it("accepts persistedAs: eventLog and emits the MikroORM event store", async () => {
     const { files, errors } = await emit(esSys);
     expect(errors).toEqual([]);
     const entities = files.get("api/db/entities.ts")!;
@@ -219,12 +219,12 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   };
 
   it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
-  it("rejects a non-relational saving shape (shape(document))", async () => {
+  it("rejects a non-relational saving shape (shape: document)", async () => {
     const src = `
       system M {
         api A from S
         subdomain S { context O {
-          aggregate Cart shape(document) with crudish { customer: string }
+          aggregate Cart shape: document with crudish { customer: string }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }

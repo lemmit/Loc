@@ -132,11 +132,11 @@ describe("applyPatches", () => {
         op: "insert",
         target: "aggregate Sales.Order",
         position: "header-end",
-        source: "persistedAs(state)",
+        source: "persistedAs: state",
       },
     ]);
     expect(r.ok).toBe(true);
-    expect(r.text).toContain("aggregate Order persistedAs(state) {");
+    expect(r.text).toContain("aggregate Order persistedAs: state {");
     const { errors } = await parseString(r.text);
     expect(errors).toEqual([]);
   });

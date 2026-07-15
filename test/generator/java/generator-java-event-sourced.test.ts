@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Java backend — event sourcing (`persistedAs(eventLog)`, appliers A2;
+// Java backend — event sourcing (`persistedAs: eventLog`, appliers A2;
 // java joined EVENT_SOURCING_BACKENDS).  No state table and no Spring
 // Data interface: the entity is a plain domain class (no JPA bindings)
 // folded from the stream via `_fromEvents` / `_apply`; the repository

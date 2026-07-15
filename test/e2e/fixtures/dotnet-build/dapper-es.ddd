@@ -1,5 +1,5 @@
 // Dapper event-sourcing fixture (appliers, Dapper edition): a
-// `persistence: dapper` dotnet deployable hosting a `persistedAs(eventLog)`
+// `persistence: dapper` dotnet deployable hosting a `persistedAs: eventLog`
 // aggregate.  Exercises the raw-Npgsql event store (read stream → fold,
 // append on save), the self-applied `<agg>_events` DbSchema, and the
 // reused persistence-agnostic domain fold + CQRS create chain.
@@ -9,7 +9,7 @@ system Ledger {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

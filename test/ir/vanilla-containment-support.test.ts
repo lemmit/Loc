@@ -1,6 +1,6 @@
 // Vanilla (plain Ecto) containment gate.  Nested entity parts now persist on a
 // vanilla aggregate two ways:
-//   * `shape(embedded)` — each part is an Ecto `embedded_schema` the root
+//   * `shape: embedded` — each part is an Ecto `embedded_schema` the root
 //     `embeds_many`s (inline jsonb column); a containment-mutating op
 //     (`items += Item{…}`) appends + `put_embed`s (DEBT-32).
 //   * RELATIONAL (default shape, §11c) — each part is a child TABLE the root
@@ -9,7 +9,7 @@
 //     (`items += Item{…}`) are now wired: the op persist tail `put_assoc`s the
 //     mutated part-struct list (`on_replace: :delete` rewrites the child rows),
 //     so `loom.vanilla-containment-mutation-unsupported` is retired.
-//   * `shape(document)` (Route A) — each part folds into the `<Agg>.Data` embed
+//   * `shape: document` (Route A) — each part folds into the `<Agg>.Data` embed
 //     as `embeds_many`/`embeds_one` (same as embedded), the changeset `cast_embed`s
 //     it, and the wireShape serializer projects it through `serialize_<part>/1`.
 //     Boot-verified round-trip; the document containment gate is retired.
@@ -65,7 +65,7 @@ system Shop {
 }
 
 describe("vanilla containment support gate", () => {
-  it("accepts an entity containment on a shape(embedded) vanilla aggregate (DEBT-32 — embeds_many)", async () => {
+  it("accepts an entity containment on a shape: embedded vanilla aggregate (DEBT-32 — embeds_many)", async () => {
     expect(
       await containmentErrors(sys("elixir", { contains: true, shape: "embedded", mutates: true })),
     ).toEqual([]);
@@ -89,7 +89,7 @@ describe("vanilla containment support gate", () => {
     expect(await containmentErrors(source)).toEqual([]);
   });
 
-  it("accepts an entity containment on a shape(document) vanilla aggregate (Route A — embeds_many)", async () => {
+  it("accepts an entity containment on a shape: document vanilla aggregate (Route A — embeds_many)", async () => {
     expect(await containmentErrors(sys("elixir", { contains: true, shape: "document" }))).toEqual(
       [],
     );

@@ -41,9 +41,9 @@
 //                    transactional goods-receipt workflow
 //    Crm ........... abstract aggregate + `extends` (TPH/sharedTable),
 //                    polymorphic reader, pipeline stages, derived match
-//    Finance ....... `money`/`json` primitives, shape(document)+shape(embedded),
+//    Finance ....... `money`/`json` primitives, shape: document+shape: embedded,
 //                    TPC inheritance (ownTable) — Billing on .NET; the
-//                    event-sourced ledger (persistedAs(eventLog) + apply)
+//                    event-sourced ledger (persistedAs: eventLog + apply)
 //                    runs on the Hono backend (event-sourcing is Hono-only)
 //    People (HR) ... auth `user{}` + `currentUser`, subdomain permissions,
 //                    capabilities (audit/softDelete + a hand-written tenant

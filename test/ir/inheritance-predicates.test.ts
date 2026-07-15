@@ -30,7 +30,7 @@ describe("inheritance predicates — TPH (sharedTable)", () => {
   it("derives base/concrete/table-owner/discriminator identically", async () => {
     const { pool, byName } = await poolFor(`
       context Reg {
-        abstract aggregate Party inheritanceUsing(sharedTable) { name: string }
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
         aggregate Vendor extends Party { rating: int }
       }
@@ -59,7 +59,7 @@ describe("inheritance predicates — TPC (ownTable)", () => {
   it("recognises a per-concrete (table-per-class) hierarchy", async () => {
     const { pool, byName } = await poolFor(`
       context Reg {
-        abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+        abstract aggregate Party inheritanceUsing: ownTable { name: string }
         aggregate Customer extends Party { creditLimit: decimal }
       }
     `);

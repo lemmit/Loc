@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Python / FastAPI + SQLAlchemy — the event-sourced concurrency rider.  An
-// event-sourced (`persistedAs(eventLog)`) aggregate appends to an append-only
+// event-sourced (`persistedAs: eventLog`) aggregate appends to an append-only
 // `<agg>_events` table keyed by a `(stream_id, version)` PRIMARY KEY.  A
 // concurrent append that loses the version race hits a Postgres unique-
 // violation (SQLSTATE 23505), which SQLAlchemy wraps in IntegrityError; the
@@ -27,7 +27,7 @@ system Bank {
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

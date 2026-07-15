@@ -1,4 +1,4 @@
-// `shape(document)` persistence on the vanilla foundation (DEBT-07).  The whole
+// `shape: document` persistence on the vanilla foundation (DEBT-07).  The whole
 // aggregate persists as ONE jsonb `data` blob in an `(id, data, version)` table
 // (the canonical document table the migrations-builder already emits) instead
 // of flattened columns.  The write path validates the domain fields through a
@@ -21,7 +21,7 @@ system Carting {
       enum CartStatus { open, checkedOut }
       error AlreadyClosed { message: string }
 
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
         status: CartStatus
         subtotal: Money

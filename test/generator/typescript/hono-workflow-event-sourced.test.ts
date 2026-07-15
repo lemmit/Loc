@@ -1,7 +1,7 @@
 // Event-sourced workflows on Hono (workflow-and-applier.md A2-S5b).  An
 // `eventSourced` workflow persists to the single per-context `<ctx>_events`
 // stream (its `stream_type` slice), folded through its `apply(...)` blocks —
-// the saga analogue of a `persistedAs(eventLog)` aggregate — instead of a
+// the saga analogue of a `persistedAs: eventLog` aggregate — instead of a
 // mutable correlation-state row.  Asserts the shared stream table, the fold
 // helpers, and the fold-load / append-own-events dispatch seam.
 

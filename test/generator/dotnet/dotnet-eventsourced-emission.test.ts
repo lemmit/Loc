@@ -3,7 +3,7 @@ import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { parseString } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
-// .NET (EF Core) event-sourcing emission (`persistedAs(eventLog)`, A2.2b).
+// .NET (EF Core) event-sourcing emission (`persistedAs: eventLog`, A2.2b).
 //
 // The .NET counterpart of the Hono event store: an event-sourced aggregate
 // persists to an append-only `<agg>_events` table (an EF `<Agg>EventRecord`
@@ -20,7 +20,7 @@ context Accounts {
   event Deposited { account: Account id, amount: int }
   event Withdrawn { account: Account id, amount: int }
 
-  aggregate Account persistedAs(eventLog) {
+  aggregate Account persistedAs: eventLog {
     owner: string
     balance: int
 
@@ -52,7 +52,7 @@ async function generate(): Promise<Map<string, string>> {
   return generateDotnet(model);
 }
 
-describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
+describe(".NET event-sourcing emission (persistedAs: eventLog)", () => {
   it("emits the shared EventRecord POCO + per-context event-log config (no normalised entity config)", async () => {
     const files = await generate();
     const keys = [...files.keys()];

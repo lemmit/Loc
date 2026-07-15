@@ -1,5 +1,5 @@
 // DEBT-02 Slice B — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(document)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: document`
 // aggregate, on the Hono/Drizzle (node) backend.  A document aggregate stores
 // every field in one `data` jsonb column, so the predicate can't be a SQL
 // column clause — it's applied in-app over the rehydrated aggregate on every
@@ -17,7 +17,7 @@ system DocTenancy {
 
   subdomain D {
     context Shop {
-      aggregate Order shape(document) {
+      aggregate Order shape: document {
         tenantId: string
         code: string
         // Always-on row scoping: every read of Order is constrained to the

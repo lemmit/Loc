@@ -218,7 +218,7 @@ describe("Hono (node) generator — lifecycle stamps", () => {
         context Shop {
           stamp onCreate { createdAt := now() }
           event OrderPlaced { code: string }
-          aggregate Order persistedAs(eventLog) {
+          aggregate Order persistedAs: eventLog {
             code: string
             createdAt: datetime
             create place(code: string) {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// DEBT-02 — capability `filter` on a `shape(document)` aggregate (java).
+// DEBT-02 — capability `filter` on a `shape: document` aggregate (java).
 // The whole aggregate lives in one `data` jsonb column, so the filter can't be
 // a SQL predicate — it's applied in-app over the rehydrated aggregate.  Gating
 // findById + filtering findAll covers the custom finds too, since they all read

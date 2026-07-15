@@ -149,7 +149,7 @@ describe("policy write scope — Elixir (plain Ecto/Phoenix)", () => {
       system Inh {
         subdomain S {
           context Parties {
-            abstract aggregate Party inheritanceUsing(sharedTable) {
+            abstract aggregate Party inheritanceUsing: sharedTable {
               name: string
             }
             aggregate Customer extends Party { email: string }

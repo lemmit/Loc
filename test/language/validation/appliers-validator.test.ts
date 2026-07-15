@@ -14,7 +14,7 @@ import { parseString } from "../../_helpers/parse.js";
  *  toggles event-sourcing; `command` / `appliers` are spliced into the
  *  aggregate body so each case perturbs one thing. */
 function ctx(opts: { eventSourced?: boolean; command?: string; appliers?: string }): string {
-  const header = opts.eventSourced ? " persistedAs(eventLog)" : "";
+  const header = opts.eventSourced ? " persistedAs: eventLog" : "";
   const command = opts.command ?? `operation bump(by: int) { emit Bumped { counter: id, by: by } }`;
   const appliers = opts.appliers ?? "";
   return `

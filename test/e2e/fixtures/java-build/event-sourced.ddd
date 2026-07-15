@@ -5,7 +5,7 @@ system ES {
       event Deposited { account: Account id, amount: int }
       event Withdrawn { account: Account id, amount: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 

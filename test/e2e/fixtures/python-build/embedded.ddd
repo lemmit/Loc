@@ -1,4 +1,4 @@
-// shape(embedded) for the Python backend: the root stays a normal
+// shape: embedded for the Python backend: the root stays a normal
 // queryable row — `id` plus its flattened scalar / `X id` columns,
 // exactly like the relational root — but each containment folds into one
 // jsonb column and reference collections (`X id[]`) fold into a jsonb
@@ -11,7 +11,7 @@ system EmbSys {
       aggregate Tag { label: string }
       repository Tags for Tag {}
 
-      aggregate Order shape(embedded) {
+      aggregate Order shape: embedded {
         customer: string
         total: money
         tags: Tag id[]

@@ -87,7 +87,7 @@ const DOC = `
 system DocAudit {
   subdomain Sales {
     context Carts {
-      aggregate Cart shape(document) with crudish {
+      aggregate Cart shape: document with crudish {
         reference: string
         create(reference: string) audited {
           reference := reference

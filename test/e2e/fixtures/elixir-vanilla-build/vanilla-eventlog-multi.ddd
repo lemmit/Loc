@@ -1,5 +1,5 @@
 // Per-context event-log collapse (event-log-architecture.md) on
-// `foundation: vanilla`.  TWO `persistedAs(eventLog)` aggregates in ONE context
+// `foundation: vanilla`.  TWO `persistedAs: eventLog` aggregates in ONE context
 // share the single `<ctx>_events` table, discriminated by `stream_type`.  This
 // fixture exists to prove the collapse compiles: two `<Agg>EventLog` Ecto
 // schemas mapping the SAME `banking_events` table, each repository filtering +
@@ -16,7 +16,7 @@ system Banking {
       event LedgerOpened { ledger: Ledger id, name: string }
       event Posted { ledger: Ledger id, delta: int }
 
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
 
@@ -49,7 +49,7 @@ system Banking {
         }
       }
 
-      aggregate Ledger persistedAs(eventLog) {
+      aggregate Ledger persistedAs: eventLog {
         name: string
         total: int
 

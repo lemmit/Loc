@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// DEBT-02 (slice 1) — capability `filter` on a `shape(document)` aggregate
+// DEBT-02 (slice 1) — capability `filter` on a `shape: document` aggregate
 // (node / Hono+Drizzle).  A document aggregate stores every field in the `data`
 // jsonb column, so the filter can't be a SQL column predicate — it's applied
 // in-app over the rehydrated aggregate (the read already deserialises every
@@ -15,7 +15,7 @@ const SOURCE = `
 system DocFilter {
   subdomain Sales {
     context Shop {
-      aggregate Cart shape(document) {
+      aggregate Cart shape: document {
         label: string
         isDeleted: bool
         filter !this.isDeleted
@@ -76,7 +76,7 @@ describe("node document capability filter (DEBT-02 slice 1)", () => {
 
 // ---------------------------------------------------------------------------
 // DEBT-02 Slice B — a PRINCIPAL-referencing capability filter
-// (`filter this.tenantId == currentUser.tenantId`) on a `shape(document)`
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape: document`
 // node aggregate.  The principal can't be a static predicate, so each in-app
 // document read binds `const currentUser = requireCurrentUser();` (fail-closed
 // — throws when unauthenticated) and AND-s the principal predicate over the
@@ -88,7 +88,7 @@ system DocTenancy {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Shop {
-      aggregate Order shape(document) {
+      aggregate Order shape: document {
         tenantId: string
         code: string
         filter this.tenantId == currentUser.tenantId

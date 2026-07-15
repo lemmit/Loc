@@ -6,7 +6,7 @@ import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Python backend — capability `filter` on a shape(document) aggregate
+// Python backend — capability `filter` on a shape: document aggregate
 // (DEBT-02 tail).  The jsonb blob isn't per-field queryable, so the predicate
 // is evaluated IN-APP over the REHYDRATED domain instance (a list-comprehension
 // filter), the SQLAlchemy analogue of node's `documentCapabilityBody`
@@ -29,7 +29,7 @@ async function repo(): Promise<string> {
   return generateSystems(model).files.get("api/app/db/repositories/article_repository.py")!;
 }
 
-describe("python shape(document) capability filter", () => {
+describe("python shape: document capability filter", () => {
   it("imports the ambient principal accessor (not a read-method param)", async () => {
     expect(await repo()).toContain("from app.auth.user import require_current_user");
   });

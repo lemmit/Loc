@@ -1,5 +1,5 @@
 // A `view` sourced from an event-sourced thing (an `eventSourced` workflow or a
-// `persistedAs(eventLog)` aggregate) re-folds the whole event stream in memory
+// `persistedAs: eventLog` aggregate) re-folds the whole event stream in memory
 // on every request — a projection recomputed per call.  The validator surfaces
 // this as a WARNING (`loom.view-source-eventsourced-refold`), NOT a gate: the
 // view stays valid and emits; the lint just nudges toward a projection.
@@ -48,7 +48,7 @@ describe("event-sourced view source — refold lint", () => {
         subdomain M { context C {
           enum OrderStatus { Placed, Shipped }
           event OrderPlaced { order: Order id }
-          aggregate Order persistedAs(eventLog) {
+          aggregate Order persistedAs: eventLog {
             status: OrderStatus
             create place() { emit OrderPlaced { order: id } }
             apply(e: OrderPlaced) { status := Placed }

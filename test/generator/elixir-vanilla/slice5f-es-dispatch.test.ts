@@ -15,7 +15,7 @@ system Sales {
     context Orders {
       event OrderPlaced { order: Order id, at: datetime }
       event Fulfilled { order: Order id }
-      aggregate Order persistedAs(eventLog) {
+      aggregate Order persistedAs: eventLog {
         status: string
         create place() { emit OrderPlaced { order: id, at: now() } }
         operation fulfill() { emit Fulfilled { order: id } }
@@ -47,7 +47,7 @@ system L {
   subdomain Core {
     context Accounts {
       event Opened { account: Account id }
-      aggregate Account persistedAs(eventLog) {
+      aggregate Account persistedAs: eventLog {
         owner: string
         create open() { emit Opened { account: id } }
         apply(e: Opened) { owner := "" }

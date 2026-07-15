@@ -2,7 +2,7 @@
 system Parties {
   subdomain Registry {
     context Parties {
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
         email: string
       }
@@ -11,7 +11,7 @@ system Parties {
         operation raiseLimit(by: int) { creditLimit := creditLimit + by }
       }
       aggregate Vendor extends Party { rating: int }
-      abstract aggregate Asset inheritanceUsing(ownTable) { label: string }
+      abstract aggregate Asset inheritanceUsing: ownTable { label: string }
       aggregate Machine extends Asset { serial: string }
       aggregate Vehicle extends Asset { plate: string }
       repository Customers for Customer {

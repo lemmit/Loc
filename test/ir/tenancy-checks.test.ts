@@ -147,7 +147,7 @@ describe("stance markers without a tenancy declaration", () => {
       system Plain {
         subdomain M {
           context C {
-            aggregate Plan crossTenant { code: string }
+            crossTenant aggregate Plan { code: string }
             repository Plans for Plan { }
           }
         }
@@ -170,7 +170,7 @@ describe("loom.tenancy-conflicting-stance", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Invoicing {
-            aggregate Invoice crossTenant with tenantOwned { number: string }
+            crossTenant aggregate Invoice with tenantOwned { number: string }
             aggregate Organization { name: string }
             repository Invoices for Invoice { }
             repository Organizations for Organization { }
@@ -195,7 +195,7 @@ describe("loom.tenancy-registry-marked", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Accounts {
-            aggregate Organization crossTenant { name: string }
+            crossTenant aggregate Organization { name: string }
             repository Organizations for Organization { }
           }
         }
@@ -240,7 +240,7 @@ describe("the plan §1 worked example", () => {
       tenancy by user.tenantId of Organization
       subdomain Billing {
         context Catalog {
-          aggregate Plan crossTenant { code: string  monthlyPrice: decimal }
+          crossTenant aggregate Plan { code: string  monthlyPrice: decimal }
           repository Plans for Plan { }
         }
         context Invoicing {
@@ -298,7 +298,7 @@ describe("loom.tenant-owned-claim-type (1b-tail)", () => {
   });
 
   it("does not fire for a registry-only system with a guid claim (same-typed self-scope)", async () => {
-    const diags = await tenancyDiags(sys("guid", `aggregate Plan crossTenant { code: string }`));
+    const diags = await tenancyDiags(sys("guid", `crossTenant aggregate Plan { code: string }`));
     expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
   });
 

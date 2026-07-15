@@ -1,4 +1,4 @@
-// DEBT-02 tail (complete) — capability `filter` on a shape(document) PYTHON
+// DEBT-02 tail (complete) — capability `filter` on a shape: document PYTHON
 // aggregate.  A document aggregate persists as ONE jsonb (id, data, version)
 // blob, which isn't per-field queryable, so the capability predicate is
 // evaluated IN-APP over the REHYDRATED domain instance (a list-comprehension
@@ -21,7 +21,7 @@ system DocTenancy {
 
   subdomain Cms {
     context Cms {
-      aggregate Article shape(document) {
+      aggregate Article shape: document {
         tenantId: string
         title: string
         viewCount: int

@@ -26,7 +26,7 @@ system ByFeatureNet {
     context Parties {
       event Deposited { ledger: Ledger id, amount: int }
 
-      abstract aggregate Party inheritanceUsing(sharedTable) {
+      abstract aggregate Party inheritanceUsing: sharedTable {
         name: string
         email: string
       }
@@ -47,7 +47,7 @@ system ByFeatureNet {
         bio: string
         tagIds: Tag id[]
       }
-      aggregate Ledger persistedAs(eventLog) {
+      aggregate Ledger persistedAs: eventLog {
         balance: int
         create open() {
           emit Deposited { ledger: id, amount: 0 }
