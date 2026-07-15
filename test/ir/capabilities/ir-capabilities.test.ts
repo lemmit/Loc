@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Verifies macro-contributed capabilities propagate through lowering
 // onto AggregateIR.contextFilters / contextStamps.  Replaces the
 // previous `ir-flags.test.ts` which asserted against the old
@@ -148,7 +149,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     `);
     const agg = findAgg(ir, "Order");
     expect(agg.contextStamps?.length).toBe(2);
-    expect(agg.wireShape.map((f) => f.name)).toEqual(
+    expect(wireFieldsFor(agg).map((f) => f.name)).toEqual(
       expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
     );
   });
@@ -171,7 +172,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
       `);
       const agg = findAgg(ir, "Order");
       for (const name of ["createdBy", "updatedBy"]) {
-        const wf = agg.wireShape.find((f) => f.name === name)!;
+        const wf = wireFieldsFor(agg).find((f) => f.name === name)!;
         expect(wf, `${name} present in wireShape`).toBeDefined();
         expect(wf.type, `${name} is a plain ${idType} scalar, not a UserId strong-id`).toEqual({
           kind: "primitive",

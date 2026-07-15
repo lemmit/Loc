@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 // Display + inspect — reserved-name derived fields and the
 // `string(aggregate)` lowering path.
 //
@@ -184,7 +185,7 @@ describe("auto-injected `derived inspect`", () => {
       }
     `);
     const u = allAggregates(loom).find((a) => a.name === "User")!;
-    const wireNames = u.wireShape!.map((f) => f.name);
+    const wireNames = wireFieldsFor(u).map((f) => f.name);
     expect(wireNames).not.toContain("inspect");
   });
 

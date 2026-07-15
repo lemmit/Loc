@@ -1,3 +1,4 @@
+import { wireFieldsFor } from "../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
@@ -111,7 +112,8 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
     }
   }
 
-  const shapeOf = (n: { wireShape: WireField[] }) => n.wireShape;
+  const shapeOf = (n: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR) =>
+    wireFieldsFor(n);
   const collidedAgg = collidingNames(aggs, shapeOf);
   const collidedPart = collidingNames(parts, shapeOf);
   const collidedVo = collidingNames(vos, shapeOf);
@@ -132,19 +134,19 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
 
   for (const e of aggs) {
     doc.aggregates[keyOf(collidedAgg, e.ctx, e.name)] = objectSchemaFromWireShape(
-      e.node.wireShape,
+      wireFieldsFor(e.node),
       refIn(e.ctx),
     );
   }
   for (const e of parts) {
     doc.parts[keyOf(collidedPart, e.ctx, e.name)] = objectSchemaFromWireShape(
-      e.node.wireShape,
+      wireFieldsFor(e.node),
       refIn(e.ctx),
     );
   }
   for (const e of vos) {
     doc.valueObjects[keyOf(collidedVo, e.ctx, e.name)] = objectSchemaFromWireShape(
-      e.node.wireShape,
+      wireFieldsFor(e.node),
       refIn(e.ctx),
     );
   }

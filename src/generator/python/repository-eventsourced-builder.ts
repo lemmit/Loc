@@ -1,3 +1,4 @@
+import { wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -293,7 +294,7 @@ function toWireStub(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): st
   // The wire shape of an eventLog aggregate: id + properties + derived
   // (no containments — eventLog v1 gates parts off at the validator).
   const pairs: string[] = [`"id": root.id`];
-  for (const wf of agg.wireShape) {
+  for (const wf of wireFieldsForAggregate(agg)) {
     if (wf.source === "id" || wf.source === "containment") continue;
     const access = `root.${snake(wf.name)}`;
     const inner = wf.type.kind === "optional" ? wf.type.inner : wf.type;

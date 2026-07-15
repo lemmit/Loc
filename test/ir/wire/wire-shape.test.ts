@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
+import { wireFieldsFor } from "../../../src/ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EntityPartIR,
@@ -45,14 +46,14 @@ describe("enrichLoomModel — wire-shape derivation", () => {
     ]) {
       const loom = await buildEnrichedModel(example);
       for (const a of allAggregates(loom)) {
-        expect(a.wireShape, `${example}: ${a.name}`).toBeDefined();
-        expect(a.wireShape!.length).toBeGreaterThan(0);
+        expect(wireFieldsFor(a), `${example}: ${a.name}`).toBeDefined();
+        expect(wireFieldsFor(a).length).toBeGreaterThan(0);
       }
       for (const p of allParts(loom)) {
-        expect(p.wireShape, `${example}: part ${p.name}`).toBeDefined();
+        expect(wireFieldsFor(p), `${example}: part ${p.name}`).toBeDefined();
       }
       for (const v of allValueObjects(loom)) {
-        expect(v.wireShape, `${example}: vo ${v.name}`).toBeDefined();
+        expect(wireFieldsFor(v), `${example}: vo ${v.name}`).toBeDefined();
       }
     }
   });
@@ -60,18 +61,18 @@ describe("enrichLoomModel — wire-shape derivation", () => {
   it("places `id` first in every aggregate / part shape", async () => {
     const loom = await buildEnrichedModel("examples/sales.ddd");
     for (const a of allAggregates(loom)) {
-      expect(a.wireShape![0]!.source, `${a.name} first field`).toBe("id");
-      expect(a.wireShape![0]!.name).toBe("id");
+      expect(wireFieldsFor(a)[0]!.source, `${a.name} first field`).toBe("id");
+      expect(wireFieldsFor(a)[0]!.name).toBe("id");
     }
     for (const p of allParts(loom)) {
-      expect(p.wireShape![0]!.source, `part ${p.name} first field`).toBe("id");
+      expect(wireFieldsFor(p)[0]!.source, `part ${p.name} first field`).toBe("id");
     }
   });
 
   it("orders fields: id → properties → containments → derived", async () => {
     const loom = await buildEnrichedModel("examples/sales.ddd");
     const order = allAggregates(loom).find((a) => a.name === "Order")!;
-    const sourceOrder = order.wireShape!.map((f) => f.source);
+    const sourceOrder = wireFieldsFor(order).map((f) => f.source);
     // Each source category appears in a contiguous block; once we
     // leave a category we never return to it.
     const expected: WireField["source"][] = ["id", "property", "containment", "derived"];
@@ -87,7 +88,7 @@ describe("enrichLoomModel — wire-shape derivation", () => {
     const vos = allValueObjects(loom);
     expect(vos.length).toBeGreaterThan(0);
     for (const vo of vos) {
-      for (const f of vo.wireShape!) {
+      for (const f of wireFieldsFor(vo)) {
         expect(f.source).not.toBe("id");
         expect(f.source).not.toBe("containment");
       }

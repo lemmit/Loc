@@ -1,4 +1,11 @@
-import { emitsRestCreate, forApiRead, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import {
+  emitsRestCreate,
+  forApiRead,
+  forCreateInput,
+  wireFieldsFor,
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -102,12 +109,12 @@ export function renderDtoFiles(
     );
   }
   referencedValueObjects(
-    (agg.wireShape ?? []).map((w) => w.type),
+    wireFieldsForAggregate(agg).map((w) => w.type),
     voNames,
   );
   for (const part of agg.parts) {
     referencedValueObjects(
-      (part.wireShape ?? []).map((w) => w.type),
+      wireFieldsForPart(part).map((w) => w.type),
       voNames,
     );
   }
@@ -280,7 +287,7 @@ function wireRecord(
   if (declared) {
     // The record omits `id` (grammar-reserved) — re-prepend it exactly as the
     // wireShape id row derives, so the leading component/mapper match.
-    const idW = forApiRead(entity.wireShape ?? []).find((w) => w.source === "id");
+    const idW = forApiRead(wireFieldsFor(entity)).find((w) => w.source === "id");
     if (idW) {
       const t = wireFieldType(idW);
       collectWireImports(t, imports);
@@ -292,7 +299,7 @@ function wireRecord(
       args.push(payloadFieldToWire(f, declared.payloads));
     }
   } else {
-    const shape = forApiRead(entity.wireShape ?? []);
+    const shape = forApiRead(wireFieldsFor(entity));
     for (const w of shape) {
       const t = wireFieldType(w);
       collectWireImports(t, imports);

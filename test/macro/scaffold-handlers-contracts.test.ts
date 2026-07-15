@@ -16,7 +16,7 @@
 import { AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
-import { forApiRead } from "../../src/ir/enrich/wire-projection.js";
+import { forApiRead, wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
 import {
@@ -185,7 +185,7 @@ describe("apiReadFields — AST twin of forApiRead(wireShape) (PR2 byte-identity
     const irAgg = allContexts(enriched)
       .flatMap((c) => c.aggregates)
       .find((a) => a.name === "Order")!;
-    const wireNames = forApiRead(irAgg.wireShape!)
+    const wireNames = forApiRead(wireFieldsFor(irAgg))
       .filter((w) => w.source !== "id")
       .map((w) => w.name);
     expect(astNames).toEqual(wireNames);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 import type { RawLoomModel } from "../../src/ir/types/loom-ir.js";
 import { allAggregates, allContexts } from "../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../_helpers/index.js";
@@ -26,8 +27,8 @@ describe("enrichment — wireShape", () => {
   it("orders fields id → declared properties → containments → derived", async () => {
     const loom = await buildLoomModel(SRC);
     const order = allAggregates(loom).find((a) => a.name === "Order")!;
-    expect(order.wireShape, "Order.wireShape").toBeDefined();
-    const shape = order.wireShape!;
+    expect(wireFieldsFor(order), "Order.wireShape").toBeDefined();
+    const shape = wireFieldsFor(order);
     expect(shape.map((f) => f.source)).toEqual([
       "id",
       "property",
@@ -42,8 +43,8 @@ describe("enrichment — wireShape", () => {
     const loom = await buildLoomModel(SRC);
     const order = allAggregates(loom).find((a) => a.name === "Order")!;
     const line = order.parts.find((p) => p.name === "OrderLine")!;
-    expect(line.wireShape![0]!.source).toBe("id");
-    expect(line.wireShape![0]!.name).toBe("id");
+    expect(wireFieldsFor(line)[0]!.source).toBe("id");
+    expect(wireFieldsFor(line)[0]!.name).toBe("id");
   });
 
   it("a value object's wireShape carries neither an id nor a containment", async () => {
@@ -51,7 +52,7 @@ describe("enrichment — wireShape", () => {
     const money = allContexts(loom)
       .flatMap((c) => c.valueObjects)
       .find((v) => v.name === "Money")!;
-    for (const f of money.wireShape ?? []) {
+    for (const f of wireFieldsFor(money)) {
       expect(f.source).not.toBe("id");
       expect(f.source).not.toBe("containment");
     }

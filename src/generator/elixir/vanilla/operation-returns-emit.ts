@@ -12,6 +12,7 @@
 // backend emits these un-gated (`validateOperationReturnsUnimplemented`).
 // ---------------------------------------------------------------------------
 
+import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -61,7 +62,7 @@ export interface OpFragment {
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
  *  success body matches what `GET /<plural>/:id` returns for the same aggregate. */
 function wireFieldsOf(agg: AggregateIR): string[] {
-  return (agg.wireShape ?? []).map((f) => snake(f.name));
+  return wireFieldsForAggregate(agg).map((f) => snake(f.name));
 }
 
 /** The `Ecto.Changeset` put bodies that persist the columns an operation body

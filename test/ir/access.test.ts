@@ -2,6 +2,7 @@ import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { wireFieldsFor } from "../../src/ir/enrich/wire-projection.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { AggregateIR } from "../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
@@ -132,7 +133,7 @@ describe("field access — wireShape projection", () => {
 `);
     const { model } = await parseModel(src);
     const agg = aggregateFrom(model, "Post");
-    const byName = Object.fromEntries((agg.wireShape ?? []).map((w) => [w.name, w]));
+    const byName = Object.fromEntries(wireFieldsFor(agg).map((w) => [w.name, w]));
     expect(byName.id.access).toBe("token");
     expect(byName.label.access).toBe("editable");
     expect(byName.createdAt.access).toBe("managed");

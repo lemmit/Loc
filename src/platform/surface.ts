@@ -215,9 +215,9 @@ export interface PlatformSurface extends PlatformDescriptor {
    * Contexts are typed as `EnrichedBoundedContextIR[]` because the
    * system orchestrator (`src/system/index.ts`) only ever invokes
    * `emitProject` after `enrichLoomModel` has run.  Threading the brand
-   * through the surface lets each platform's `wireShapeFor` callers see
-   * enriched aggregates / parts at compile time, without local
-   * `as Enriched...` casts. */
+   * through the surface lets each platform see enriched aggregates /
+   * parts (associations / createInput populated) at compile time,
+   * without local `as Enriched...` casts. */
   emitProject(args: {
     contexts: EnrichedBoundedContextIR[];
     deployable: DeployableIR;

@@ -464,11 +464,6 @@ export interface EntityPartIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
-  /** Canonical JSON-on-the-wire field list.  Populated by
-   * `enrichLoomModel` after lowering; lowering itself leaves it
-   * undefined so an unenriched IR is a type error to consume.
-   * See `src/ir/enrich/enrichments.ts`. */
-  wireShape?: WireField[];
 }
 
 /** One field in an aggregate / part / value object's canonical
@@ -530,9 +525,6 @@ export interface AggregateIR {
   canonicalDestroy?: OperationIR | null;
   parts: EntityPartIR[];
   tests: TestIR[];
-  /** Canonical JSON-on-the-wire field list.  Populated by
-   * `enrichLoomModel`. */
-  wireShape?: WireField[];
   /** Reified create-input contract — the client-suppliable field set with
    * per-field required-ness.  Populated by `enrichLoomModel`
    * (`buildCreateInput`); the single source backends consume instead of
@@ -745,9 +737,6 @@ export interface ValueObjectIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
-  /** Canonical wire-shape — no id, no containment, just declared
-   * fields + derived. */
-  wireShape?: WireField[];
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -1288,10 +1277,11 @@ export interface WorkflowIR {
    *  only when `correlationField` is present (a correlation-bearing,
    *  state-table-backed workflow): the correlation field as the `id`-shaped
    *  `token` row, then the remaining `stateFields` as `property` rows, in
-   *  declaration order.  This is the workflow-instance analogue of
-   *  `AggregateIR.wireShape` — the read-only "instance" API + scaffold
-   *  pages (workflow-instance-visibility.md) consume it the way the
-   *  aggregate read surface consumes `wireShape`.  Carried for both
+   *  declaration order.  This is the workflow-instance analogue of an
+   *  aggregate's canonical wire shape (`wireFieldsForAggregate`) — the
+   *  read-only "instance" API + scaffold pages
+   *  (workflow-instance-visibility.md) consume it the way the aggregate
+   *  read surface consumes that wire shape.  Carried for both
    *  state-table-backed sagas and `eventSourced` workflows (the instance shape
    *  is identical — only the read body differs: a `<wf>_state` row select vs a
    *  fold of the per-correlation `<wf>_events` stream).  Absent only for
@@ -1759,7 +1749,7 @@ export interface TableRenameIntentIR {
 // Branded phase types — distinguish the IR shape at two pipeline points.
 //
 //   `RawLoomModel`      — the structural output of `lowerModel`.  Optional
-//                         derivation fields (`wireShape`, `associations`,
+//                         derivation fields (`associations`, `createInput`,
 //                         `traceability`, …) are absent.
 //   `EnrichedLoomModel` — the output of `enrichLoomModel`.  Every derived
 //                         field is populated; downstream consumers can
@@ -1771,12 +1761,14 @@ export interface TableRenameIntentIR {
 // generator entry point.  See PR #517 for the canary failure mode this
 // shape prevents.
 //
-// `EnrichedAggregateIR` / `EnrichedEntityPartIR` / `EnrichedValueObjectIR`
-// are required-field overlays that mirror the structural types.  An
-// `EnrichedLoomModel` walks down to these via the matching enriched
-// context / module / system shells so a generator that takes an
-// `EnrichedLoomModel` and reads `agg.wireShape` sees a `readonly
-// WireField[]`, no `| undefined`.
+// `EnrichedAggregateIR` is a required-field overlay that mirrors the
+// structural type — its enrich-derived members (`associations`,
+// `createInput`, enriched `parts`) are non-optional, so a generator that
+// takes an `EnrichedLoomModel` dereferences them without nullability
+// defense.  (`EnrichedEntityPartIR` / `EnrichedValueObjectIR` carry no
+// enrich-time members of their own — the canonical wire shape is
+// recomputed on demand via `wireFieldsForPart` / `wireFieldsForValueObject`
+// — so they alias their base types.)
 // ---------------------------------------------------------------------------
 
 export type RawLoomModel = LoomModel & { readonly __phase?: "raw" };
@@ -1791,8 +1783,6 @@ export type EnrichedLoomModel = Omit<LoomModel, "systems" | "contexts" | "rootVa
 };
 
 export type EnrichedAggregateIR = AggregateIR & {
-  /** Always populated by `enrichLoomModel`. */
-  wireShape: WireField[];
   /** Always populated by `enrichLoomModel` (empty when none derived). */
   associations: AssociationIR[];
   /** Always populated by `enrichLoomModel` (empty when the aggregate has
@@ -1801,13 +1791,13 @@ export type EnrichedAggregateIR = AggregateIR & {
   parts: EnrichedEntityPartIR[];
 };
 
-export type EnrichedEntityPartIR = EntityPartIR & {
-  wireShape: WireField[];
-};
+// Parts / value objects carry no enrich-time derivation of their own (the
+// canonical wire shape is recomputed on demand via `wireFieldsForPart` /
+// `wireFieldsForValueObject`), so the enriched brand is their base type — kept
+// as a named alias so consumers keep expressing "post-enrichment" intent.
+export type EnrichedEntityPartIR = EntityPartIR;
 
-export type EnrichedValueObjectIR = ValueObjectIR & {
-  wireShape: WireField[];
-};
+export type EnrichedValueObjectIR = ValueObjectIR;
 
 /** A channel-routed event subscription — the enrich-time join of a workflow
  *  consumer (`on(e: Event)` reactor or event-triggered `create(e: Event) by`)
