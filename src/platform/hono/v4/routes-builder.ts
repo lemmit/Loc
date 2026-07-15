@@ -329,6 +329,10 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
+      // A synthesized find (paged-run queryHandler support) is never
+      // auto-exposed by the aggregate router — the queryHandler's own route is
+      // the exposure — so it emits no query schema / DTO / route here.
+      if (find.synthesized) continue;
       // Only emit a Query schema when the find takes parameters or is paged —
       // a paged find adds `page` / `pageSize` query controls (P3b).  An empty
       // `<Find>Query = z.object({})` would be dead code otherwise.
@@ -389,6 +393,7 @@ export function buildRoutesFile(
   {
     const pagedSeen = new Set<string>();
     for (const find of repo?.finds ?? []) {
+      if (find.synthesized) continue;
       const paged = pagedReturn(find.returnType);
       if (!paged || pagedSeen.has(paged.name)) continue;
       pagedSeen.add(paged.name);
@@ -556,7 +561,7 @@ export function buildRoutesFile(
   // (`GET /`, no conflict) and is emitted with the rest below.
   if (repo) {
     for (const find of repo.finds) {
-      if (find.name === "all") continue;
+      if (find.name === "all" || find.synthesized) continue;
       lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
       lines.push("");
     }

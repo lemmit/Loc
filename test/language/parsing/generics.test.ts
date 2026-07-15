@@ -95,6 +95,19 @@ describe("generics — position restriction (P3b)", () => {
     expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
   });
 
+  it("allows a carrier as a queryHandler return (paged read exposed through the read-only port)", async () => {
+    const { diagnostics } = await parseString(`context C {
+      aggregate Order { region: string }
+      repository Orders for Order { }
+      criterion InRegion(rgn: string) of Order = region == rgn
+      queryHandler ListInRegion(rgn: string): Order paged {
+        let r = Orders.run(InRegion(rgn))
+        return r
+      }
+    }`);
+    expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
+  });
+
   it("rejects a carrier as a stored aggregate/value-object field (loom.generic-position)", async () => {
     const { diagnostics } = await parseString(
       `context C { valueobject V { items: string paged } }`,

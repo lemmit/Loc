@@ -2,7 +2,12 @@ import { descriptorFor } from "../../platform/metadata.js";
 import { defaultErrorStatus, STRUCTURAL_CONFLICT_ERRORS } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { defaultInterfaceFor } from "../../util/source-types.js";
-import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
+import {
+  forEachGenericInstance,
+  genericInstanceName,
+  genericShape,
+  pagedReturn,
+} from "../stdlib/generics.js";
 import { forEachUnion, unionInstanceName } from "../stdlib/unions.js";
 import type {
   AggregateIR,
@@ -10,6 +15,7 @@ import type {
   BoundedContextIR,
   ChannelIR,
   CodeRefKind,
+  CommandHandlerIR,
   ContextStampIR,
   CriterionIR,
   DataSourceKind,
@@ -38,6 +44,7 @@ import type {
   OperationIR,
   PayloadIR,
   ProjectionIR,
+  QueryHandlerIR,
   RawLoomModel,
   RepositoryIR,
   RetrievalIR,
@@ -665,7 +672,17 @@ export function enrichContext(
     return { ...a, fields: merged, idValueType };
   });
   const aggregates = withInheritance.map((a) => enrichAggregate(a, valueObjects, urlStyle));
-  const repositories = ensureFindAll(aggregates, ctx.repositories);
+  // paged-run (paged-queryHandler): a paged `queryHandler` over
+  // `Repo.run(<Criterion>)` needs the #1904 paged FIND repo-method synthesized
+  // onto its aggregate's repository so the Hono handler can call it.  Layered
+  // on top of the auto-`findAll` repositories; the synthesized find is flagged
+  // so the aggregate router does NOT auto-expose it (the queryHandler's own
+  // route is the exposure).
+  const repositories = synthesizePagedQueryHandlerFinds(
+    ensureFindAll(aggregates, ctx.repositories),
+    ctx.queryHandlers,
+    ctx.criteria,
+  );
   // P2 (payload-transport-layer.md): give every concrete aggregate's wire
   // shape a named, referenceable `<Agg>Wire` payload.  Purely additive IR
   // surface — backends keep consuming `wireShape` directly, so emission is
@@ -722,6 +739,8 @@ export function enrichContext(
     workflows,
     ctx.criteria,
     ctx.domainServices,
+    ctx.queryHandlers,
+    ctx.commandHandlers,
   );
   const projections = ctx.projections.map(enrichProjection);
   return {
@@ -776,6 +795,8 @@ function synthesizeFindAllRetrievals(
   workflows: WorkflowIR[],
   criteria: CriterionIR[] | undefined,
   domainServices: DomainServiceIR[] | undefined,
+  queryHandlers?: QueryHandlerIR[],
+  commandHandlers?: CommandHandlerIR[],
 ): RetrievalIR[] {
   const base = existing ?? [];
   const crits = criteria ?? [];
@@ -843,6 +864,97 @@ function synthesizeFindAllRetrievals(
         collectRepoReadCriteria(stmt, materialise);
       }
     }
+  }
+  // Explicit application-layer handlers (`queryHandler` / `commandHandler`) run
+  // the SAME workflow-statement bodies, so a `Repo.run(<Criterion>)` /
+  // `Repo.findAll(<Criterion>)` inside one materialises its `findAllBy<Criterion>`
+  // retrieval exactly like a workflow — without this the criterion is dropped
+  // and the read hits the whole-table `findAll` (or references a missing
+  // `runFindAllBy...` method).  Underpins the paged-run queryHandler.
+  for (const h of [...(queryHandlers ?? []), ...(commandHandlers ?? [])]) {
+    for (const st of flattenHandlerStmts(h.statements)) {
+      if (st.kind === "repo-run" && st.synthCriterion) {
+        materialise({
+          name: st.synthCriterion.name,
+          retrievalName: st.retrievalName,
+          sort: st.synthSort,
+          loadPlan: st.synthLoadPlan,
+        });
+      } else if (st.kind === "if-let" && st.synthCriterion.name) {
+        materialise({ name: st.synthCriterion.name, retrievalName: st.retrievalName });
+      }
+    }
+  }
+  return out;
+}
+
+/** Walk a flat handler statement body (`queryHandler` / `commandHandler`),
+ *  descending into `for-each` / `if-let` bodies — the handler-body twin of
+ *  `allWorkflowStmts` (handlers carry a flat `WorkflowStmtIR[]`, not the
+ *  create/handle/subscribe roots a workflow does). */
+function flattenHandlerStmts(statements: WorkflowStmtIR[]): WorkflowStmtIR[] {
+  const out: WorkflowStmtIR[] = [];
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      out.push(st);
+      if (st.kind === "for-each") walk(st.body);
+      else if (st.kind === "if-let") {
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
+      }
+    }
+  };
+  walk(statements);
+  return out;
+}
+
+/** paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged { let r =
+ *  Repo.run(<Criterion>(args)); return r }` needs the #1904 paged FIND repo
+ *  method emitted so the Hono handler can call it (COUNT + LIMIT/OFFSET + the
+ *  `{items,page,pageSize,total,totalPages}` envelope).  Synthesize a paged
+ *  `FindIR` named `findAllBy<Criterion>` onto the target aggregate's repository
+ *  — `filter` = the criterion body, `returnType` = the handler's `<Agg> paged`,
+ *  `criterionRef` = the criterion reified against its own params — flagged
+ *  `synthesized` so the aggregate router skips its route / query-schema / DTO
+ *  (the queryHandler owns the HTTP exposure).  Deduped by find name per repo. */
+function synthesizePagedQueryHandlerFinds(
+  repositories: RepositoryIR[],
+  queryHandlers: QueryHandlerIR[] | undefined,
+  criteria: CriterionIR[] | undefined,
+): RepositoryIR[] {
+  const handlers = (queryHandlers ?? []).filter((h) => pagedReturn(h.returnType));
+  if (handlers.length === 0) return repositories;
+  const crits = criteria ?? [];
+  const out = repositories.map((r) => ({ ...r, finds: [...r.finds] }));
+  for (const h of handlers) {
+    // The returned value must be a plain `let`-ref bound to a
+    // `Repo.run(<Criterion>)` (synthCriterion) statement — the only paged-run
+    // body shape v1 emits.  Any other shape is left un-synthesized (the Hono
+    // emitter declines the paged branch and the non-Hono gate rejects it).
+    const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+    const run = flattenHandlerStmts(h.statements).find(
+      (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+        s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+    );
+    if (!run?.synthCriterion) continue;
+    const crit = crits.find((c) => c.name === run.synthCriterion!.name);
+    if (!crit) continue;
+    const repo = out.find((r) => r.aggregateName === run.aggName);
+    if (!repo) continue;
+    if (repo.finds.some((f) => f.name === run.retrievalName)) continue;
+    repo.finds.push({
+      name: run.retrievalName,
+      params: crit.params,
+      returnType: h.returnType,
+      filter: crit.body,
+      criterionRef: {
+        name: crit.name,
+        args: crit.params.map(
+          (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
+        ),
+      },
+      synthesized: true,
+    });
   }
   return out;
 }

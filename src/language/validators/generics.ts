@@ -28,6 +28,7 @@ import {
   isFindDecl,
   isPayloadDecl,
   isProperty,
+  isQueryHandler,
   isSelfType,
   isSlotType,
   isTypeRef,
@@ -73,6 +74,14 @@ function checkTypeRefPosition(t: TypeRef, accept: ValidationAcceptor): void {
   // A find's return type: the TypeRef sits directly on the FindDecl (its
   // params are wrapped in `Parameter` nodes, so they don't match here).
   if (isFindDecl(container)) return;
+  // A queryHandler's return type: the TypeRef sits directly on the QueryHandler
+  // (`queryHandler X(...): <T> paged`).  A paged read exposed through the
+  // application layer is the durable read-path vehicle (read-path-architecture.md,
+  // "The ergonomic default") — the criterion runs through the read-only port and
+  // the handler returns the `Paged<T>` envelope, so `paged`/`envelope` are legal
+  // here exactly as on a find return.  Params are wrapped in `Parameter` nodes,
+  // so a param carrier still doesn't match.
+  if (isQueryHandler(container)) return;
   // A payload field: a `Property` whose owner is a `PayloadDecl`.
   if (isProperty(container) && isPayloadDecl(container.$container)) return;
   accept(
