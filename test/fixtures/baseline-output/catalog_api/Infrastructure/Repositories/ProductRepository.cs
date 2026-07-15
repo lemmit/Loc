@@ -70,7 +70,7 @@ public sealed class ProductRepository : IProductRepository
     public async Task<Paged<Product>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)
     {
         var offset = (page - 1) * pageSize;
-        var sortColumn = sort switch { "sku" => "Sku", "version" => "Version", _ => "Id" };
+        var sortColumn = sort switch { "sku" => "Sku", _ => "Id" };
         var total = await _db.Products.CountAsync(cancellationToken);
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;
         var ordered = dir == "desc" ? _db.Products.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Products.OrderBy(e => EF.Property<object>(e, sortColumn));

@@ -75,7 +75,7 @@ export class CustomerRepository implements CustomerRepositoryPort {
 
   async all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Customer[]; page: number; pageSize: number; total: number; totalPages: number }> {
     const offset = (page - 1) * pageSize;
-    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.customers.id, "username": schema.customers.username, "email": schema.customers.email, "age": schema.customers.age, "version": schema.customers.version };
+    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.customers.id, "username": schema.customers.username, "email": schema.customers.email, "age": schema.customers.age };
     const sortColumn = sortColumns[sort] ?? schema.customers.id;
     const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);
     const countRows = await this.db.select({ value: count() }).from(schema.customers);

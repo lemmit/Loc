@@ -70,7 +70,7 @@ public sealed class OrderRepository : IOrderRepository
     public async Task<Paged<Order>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)
     {
         var offset = (page - 1) * pageSize;
-        var sortColumn = sort switch { "customerId" => "CustomerId", "status" => "Status", "placedAt" => "PlacedAt", "version" => "Version", _ => "Id" };
+        var sortColumn = sort switch { "customerId" => "CustomerId", "status" => "Status", "placedAt" => "PlacedAt", _ => "Id" };
         var total = await _db.Orders.CountAsync(cancellationToken);
         var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;
         var ordered = dir == "desc" ? _db.Orders.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Orders.OrderBy(e => EF.Property<object>(e, sortColumn));

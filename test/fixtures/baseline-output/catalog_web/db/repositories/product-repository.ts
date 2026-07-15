@@ -76,7 +76,7 @@ export class ProductRepository implements ProductRepositoryPort {
 
   async all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Product[]; page: number; pageSize: number; total: number; totalPages: number }> {
     const offset = (page - 1) * pageSize;
-    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.products.id, "sku": schema.products.sku, "version": schema.products.version };
+    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.products.id, "sku": schema.products.sku };
     const sortColumn = sortColumns[sort] ?? schema.products.id;
     const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);
     const countRows = await this.db.select({ value: count() }).from(schema.products);
