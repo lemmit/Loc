@@ -117,16 +117,14 @@ export const angularTarget: WalkerTarget = {
    *  reach the global), so `Math.ceil(…)` resolves. */
   renderPager(spec) {
     const p = spec.page.name;
-    const size = spec.pageSize;
-    const total = spec.totalExpr;
-    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const pages = spec.totalPagesExpr;
     const style =
       "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
     return (
       `<div style="${style}" data-testid="pager">` +
       `<button type="button" [disabled]="${p}() <= 1" (click)="${p}.set(${p}() - 1)">Prev</button>` +
       `<span>Page {{ ${p}() }} of {{ ${pages} }}</span>` +
-      `<button type="button" [disabled]="${p}() * ${size} >= ${total}" (click)="${p}.set(${p}() + 1)">Next</button>` +
+      `<button type="button" [disabled]="${p}() >= ${pages}" (click)="${p}.set(${p}() + 1)">Next</button>` +
       `</div>`
     );
   },
@@ -203,7 +201,20 @@ export const angularTarget: WalkerTarget = {
    *  so an `@for` / `Table of:` always gets an iterable, and for a `single` read
    *  assert non-null inside the template's `@if (…data())` guard (a call result
    *  can't be narrowed). */
-  renderQueryDataAccess(handle: string, single?: boolean): string {
+  renderQueryDataAccess(
+    handle: string,
+    single?: boolean,
+    paged?: boolean,
+    autoPaged?: boolean,
+  ): string {
+    // A PAGED read's `.data()` is the `Paged<T>` envelope, not an array — the
+    // `?? []` array-default is wrong (and untypeable) there.  Non-null-assert the
+    // envelope (`.data()!`): the QueryView's data-present `@if` guards it, but
+    // Angular's template typechecker can't narrow a signal CALL across the guard.
+    // Auto-paged (hand-written QueryView over `.all`): unwrap to the `.items`
+    // array so the body keeps bare-array semantics.
+    if (autoPaged) return `${handle}.data()!.items`;
+    if (paged) return `${handle}.data()!`;
     return single ? `${handle}.data()!` : `(${handle}.data() ?? [])`;
   },
 

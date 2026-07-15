@@ -20,6 +20,14 @@ export const UpdateProductRequest = z.object({
 });
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;
 
+export const AllQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(20),
+  sort: z.string().default("id"),
+  dir: z.string().default("asc"),
+});
+export type AllQuery = z.infer<typeof AllQuery>;
+export type AllQueryInput = z.input<typeof AllQuery>;
 export const BySkuQuery = z.object({
   sku: z.string(),
 });
@@ -34,13 +42,17 @@ export const ProductResponse = z.object({
 export type ProductResponse = z.infer<typeof ProductResponse>;
 export const ProductListResponse = z.array(ProductResponse);
 export type ProductListResponse = z.infer<typeof ProductListResponse>;
+export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
+export type ProductPaged = z.infer<typeof ProductPaged>;
 
-export function useAllProducts() {
+export function useAllProducts(query: AllQueryInput = {}) {
+  const q = AllQuery.parse(query);
   return useQuery({
-    queryKey: ["products"],
+    queryKey: ["products", "list", q],
     queryFn: async () => {
-      const r = await api.get(`/products`);
-      return ProductListResponse.parse(r);
+      const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
+      const r = await api.get(`/products${qs ? "?" + qs : ""}`);
+      return ProductPaged.parse(r);
     },
   });
 }

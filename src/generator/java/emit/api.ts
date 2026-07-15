@@ -15,7 +15,7 @@ import {
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
-import { declaredFinds, isPagedFind } from "./repository.js";
+import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 
 // ---------------------------------------------------------------------------
@@ -222,8 +222,10 @@ export function renderJavaController(
         ...declared,
         `@RequestParam(defaultValue = "1") int page`,
         `@RequestParam(defaultValue = "20") int pageSize`,
+        `@RequestParam(defaultValue = "id") String sort`,
+        `@RequestParam(defaultValue = "asc") String dir`,
       ].join(", ");
-      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+      const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
       return [
         `    @GetMapping("/${snake(f.name)}")`,
         `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
@@ -272,6 +274,7 @@ export function renderJavaController(
         ``,
       ]
     : [];
+  const pagedAutoAll = isPagedAutoAll(repo);
   const body = [
     ...createRoute,
     `    @GetMapping("/{id}")`,
@@ -281,11 +284,26 @@ export function renderJavaController(
     `    }`,
     ``,
     ...opRoutes,
-    `    @GetMapping`,
-    `    public List<${agg.name}Response> all${agg.name}() {`,
-    `        return service.all${agg.name}();`,
-    `    }`,
-    ``,
+    // Auto-findAll (M-T2.6): paged for a plain relational aggregate — the
+    // `<Agg>Paged` envelope + page/pageSize/sort/dir controls, matching every
+    // other backend.  A non-paged findAll (document/embedded/inheritance) keeps
+    // the bare-array `List<<Agg>Response>`.
+    ...(pagedAutoAll
+      ? [
+          `    @GetMapping`,
+          `    public ${agg.name}Paged all${agg.name}(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {`,
+          `        var result = service.all${agg.name}(page, pageSize, sort, dir);`,
+          `        return new ${agg.name}Paged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());`,
+          `    }`,
+          ``,
+        ]
+      : [
+          `    @GetMapping`,
+          `    public List<${agg.name}Response> all${agg.name}() {`,
+          `        return service.all${agg.name}();`,
+          `    }`,
+          ``,
+        ]),
     ...findRoutes,
     ...destroyRoutes,
   ];

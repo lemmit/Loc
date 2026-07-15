@@ -123,7 +123,7 @@ describe("vanilla — custom find functions on the repository module", () => {
     expect(customer).not.toMatch(/def all\(/);
   });
 
-  it("a repository with NO custom finds emits NO Ecto.Query import (byte-shape regression)", async () => {
+  it("a repository with NO custom finds still imports Ecto.Query for the paged list", async () => {
     const files = await generateSystemFiles(`
       system Tasks {
         subdomain Productivity {
@@ -145,7 +145,9 @@ describe("vanilla — custom find functions on the repository module", () => {
       }
     `);
     const task = files.get([...files.keys()].find((k) => k.endsWith("/task_repository.ex"))!)!;
-    expect(task).not.toContain("import Ecto.Query");
+    // Paged-by-default: even a find-free repo's `list` uses from/order_by/limit/
+    // offset, so the Ecto.Query import is always present now.
+    expect(task).toContain("import Ecto.Query");
     // Regression: an empty findBlock must NOT collapse the persist_change
     // `end` into the module's `end` (the `endend` mix-compile bug from CI).
     expect(task).not.toContain("endend");

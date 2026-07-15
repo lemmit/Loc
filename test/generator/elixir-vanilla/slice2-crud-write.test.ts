@@ -128,7 +128,7 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     const ctl = files.get(
       [...files.keys()].find((k) => k.endsWith("/controllers/task_controller.ex"))!,
     )!;
-    expect(ctl).toContain("def index(conn, _params)");
+    expect(ctl).toContain("def index(conn, params)");
     expect(ctl).toContain('def show(conn, %{"id" => id})');
   });
 });

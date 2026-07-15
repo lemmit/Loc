@@ -60,11 +60,16 @@ public sealed class OrderRepository : IOrderRepository
         _db.Orders.Remove(aggregate);
         await _db.SaveChangesAsync(cancellationToken);
     }
-    public async Task<List<Order>> All(CancellationToken cancellationToken = default)
+    public async Task<Paged<Order>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)
     {
-        var result = await _db.Orders.ToListAsync(cancellationToken);
-        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "all", result.Count);
-        return result;
+        var offset = (page - 1) * pageSize;
+        var sortColumn = sort switch { "customerId" => "CustomerId", "status" => "Status", "placedAt" => "PlacedAt", _ => "Id" };
+        var total = await _db.Orders.CountAsync(cancellationToken);
+        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;
+        var ordered = dir == "desc" ? _db.Orders.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Orders.OrderBy(e => EF.Property<object>(e, sortColumn));
+        var items = await ordered.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
+        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "all", items.Count);
+        return new Paged<Order>(items, page, pageSize, total, totalPages);
     }
     public async Task<List<Order>> ByCustomer(string customerId, CancellationToken cancellationToken = default)
     {

@@ -72,7 +72,7 @@ describe("angular generator — CreateForm `X id` field renders a Select", () =>
     expect(page).toContain(
       '<mat-select formControlName="customerId" data-testid="orders-new-input-customerId">',
     );
-    expect(page).toContain("@for (__o of customerAll.data() ?? []; track __o.id) {");
+    expect(page).toContain("@for (__o of customerAll.data()?.items ?? []; track __o.id) {");
     expect(page).toContain(
       `<mat-option [value]="__o.id" [attr.data-testid]="'orders-new-input-customerId-option-' + __o.id">{{ __o.display }}</mat-option>`,
     );
@@ -89,7 +89,7 @@ describe("angular generator — CreateForm `X id` field renders a Select", () =>
   it("primeng: renders a <p-select> driven by the useAll<X> options + item template testid", async () => {
     const page = await formPage("primeng");
     expect(page).toContain(
-      '<p-select [options]="customerAll.data() ?? []" optionLabel="display" optionValue="id" styleClass="loom-input" formControlName="customerId" data-testid="orders-new-input-customerId">',
+      '<p-select [options]="customerAll.data()?.items ?? []" optionLabel="display" optionValue="id" styleClass="loom-input" formControlName="customerId" data-testid="orders-new-input-customerId">',
     );
     expect(page).toContain(
       `<span [attr.data-testid]="'orders-new-input-customerId-option-' + __o.id">{{ __o.display }}</span>`,
@@ -104,7 +104,7 @@ describe("angular generator — CreateForm `X id` field renders a Select", () =>
     expect(page).toContain(
       '<select class="loom-input" formControlName="customerId" data-testid="orders-new-input-customerId">',
     );
-    expect(page).toContain("@for (__o of customerAll.data() ?? []; track __o.id) {");
+    expect(page).toContain("@for (__o of customerAll.data()?.items ?? []; track __o.id) {");
     expect(page).toContain(
       `<option [value]="__o.id" [attr.data-testid]="'orders-new-input-customerId-option-' + __o.id">{{ __o.display }}</option>`,
     );

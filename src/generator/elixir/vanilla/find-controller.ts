@@ -22,6 +22,7 @@ import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/erro
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
+import { isAbstractBase } from "./inheritance-emit.js";
 
 /** Non-`all` custom finds an aggregate's repository declares — the ones that
  *  earn an HTTP `GET /<plural>/<find>` endpoint (`all` is the
@@ -117,6 +118,9 @@ export function renderFindActions(
         ? [
             `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
             `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+            // Sort controls (M-T2.6) — strings passed through; the repo whitelists.
+            `Map.get(params, "sort", "id")`,
+            `Map.get(params, "dir", "asc")`,
           ]
         : []),
       ...(principal ? ["current_user"] : []),
@@ -177,8 +181,15 @@ ${cuLine}    with {:ok, records} <- ${call} do
   });
   // A `page_param/3` coercion helper — once per controller — backs every paged
   // find's `page`/`pageSize` query reads (Phoenix delivers params as strings; a
-  // missing/blank/non-integer param falls back to the shared default).
-  const hasPaged = httpFindsOf(ctx, agg).some((f) => pagedReturn(f.returnType));
+  // missing/blank/non-integer param falls back to the shared default).  The
+  // auto-`findAll` `index` is paged-by-default now (M-T2.6), so the helper is
+  // required on every non-abstract controller even without an explicit paged find.
+  const indexAllFind = (ctx.repositories ?? [])
+    .find((r) => r.aggregateName === agg.name)
+    ?.finds?.find((f) => f.name === "all");
+  const indexPaged =
+    !isAbstractBase(agg) && !!(indexAllFind && pagedReturn(indexAllFind.returnType));
+  const hasPaged = indexPaged || httpFindsOf(ctx, agg).some((f) => pagedReturn(f.returnType));
   const pageParamHelper = hasPaged
     ? `
   defp page_param(params, key, default) do

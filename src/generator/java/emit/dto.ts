@@ -90,6 +90,10 @@ export function renderDtoFiles(
    *  `response <Agg>Response` is present it drives the aggregate response DTO
    *  (read-path replacement for the `wireShape` derivation). */
   payloads: readonly PayloadIR[] = [],
+  /** M-T2.6: the aggregate's implicit findAll is paged (plain relational) — emit
+   *  a concrete `<Agg>Paged` envelope record the controller returns, so springdoc
+   *  names + shapes the OpenAPI schema `<Agg>Paged` (matching every backend). */
+  pagedAutoAll = false,
 ): DtoFile[] {
   const out: DtoFile[] = [];
   const entityImport = entityPkg !== pkg ? `import ${entityPkg}.${agg.name};` : undefined;
@@ -205,6 +209,31 @@ export function renderDtoFiles(
       declaredRootResponse ? { payload: declaredRootResponse, payloads } : undefined,
     ),
   );
+
+  // --- paged envelope (`<Agg>Paged`) ------------------------------------------------
+  // A concrete record (not the generic `Paged<T>`) so springdoc names the
+  // OpenAPI component `<Agg>Paged` and marks its record components required —
+  // matching the Hono/.NET/Phoenix/Python paged schema exactly.
+  if (pagedAutoAll) {
+    out.push({
+      name: `${agg.name}Paged.java`,
+      category: "response-dto",
+      content: recordFile(
+        pkg,
+        basePkg,
+        `${agg.name}Paged`,
+        [
+          `List<${agg.name}Response> items`,
+          "int page",
+          "int pageSize",
+          "int total",
+          "int totalPages",
+        ],
+        [],
+        new Set<string>(["java.util.List"]),
+      ),
+    });
+  }
 
   // --- create response (`{ id }`) ---------------------------------------------------
   if (emitsRestCreate(agg)) {

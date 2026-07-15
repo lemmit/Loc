@@ -26,6 +26,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -251,7 +252,16 @@ function renderRepository(
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
   // `from(...)` reads) OR a reference collection (id-list resolution).  Omit it
   // otherwise to keep plain repositories byte-identical to before.
-  const ectoImport = finds.length > 0 || capEff || refColls ? `\n  import Ecto.Query` : "";
+  // The auto-`findAll` is paged-by-default (M-T2.6): its IR return type is the
+  // `paged` wire envelope, so `list` mirrors an explicit `find … paged` — it
+  // threads `page`/`page_size`/`sort`/`dir`, applies `limit`/`offset` + a
+  // whitelisted `order_by`, and returns `%{items, page, pageSize, total,
+  // totalPages}` instead of a bare list.  (The base-reader polymorphic `list`
+  // stays unpaged — an honest gate; see renderBaseReader.)
+  const allFind = repo?.finds?.find((f) => f.name === "all");
+  const listPaged = allFind ? !!pagedReturn(allFind.returnType) : false;
+  const ectoImport =
+    finds.length > 0 || capEff || refColls || listPaged ? `\n  import Ecto.Query` : "";
   // The threaded actor parameter (principal filters only).
   const actorParam = principal ? "current_user \\\\ nil" : "";
   const listHead = principal ? `def list(${actorParam}) do` : "def list do";
@@ -266,6 +276,56 @@ function renderRepository(
     (capEff
       ? `from(record in ${aggModule}, where: ${capEff}) |> Repo.all()`
       : `Repo.all(${aggModule})`) + preload;
+  // The paged `list` block (whole spec + def).  The plain block is byte-identical
+  // to before the flip; only a paged auto-findAll takes the envelope path.
+  const listQuery = capEff
+    ? `from(record in ${aggModule}, where: ${capEff})`
+    : `from(record in ${aggModule})`;
+  const listSortArms = sortableFields(agg)
+    .filter((wf) => wf !== "id")
+    .map((wf) => `        "${wf}" -> :${snake(wf)}`)
+    .join("\n");
+  const listPagedArgs = [
+    `page \\\\ ${PAGED_DEFAULT_PAGE}`,
+    `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
+    `sort \\\\ "id"`,
+    `dir \\\\ "asc"`,
+    ...(principal ? ["current_user \\\\ nil"] : []),
+  ].join(", ");
+  const listBlock = listPaged
+    ? `  @spec list(pos_integer(), pos_integer(), String.t(), String.t()${principal ? ", map() | nil" : ""}) :: {:ok, map()} | {:error, term()}
+  def list(${listPagedArgs}) do
+    query = ${listQuery}
+    total = Repo.aggregate(query, :count, :id)
+    offset = (page - 1) * page_size
+
+    sort_col =
+      case sort do
+${listSortArms}${listSortArms ? "\n" : ""}        _ -> :id
+      end
+
+    dir_atom = if dir == "desc", do: :desc, else: :asc
+
+    items =
+      query
+      |> order_by([record], [{^dir_atom, field(record, ^sort_col)}])
+      |> limit(^page_size)
+      |> offset(^offset)
+      |> Repo.all()${preload}
+
+    {:ok,
+     %{
+       items: items,
+       page: page,
+       pageSize: page_size,
+       total: total,
+       totalPages: if(page_size > 0, do: ceil(total / page_size), else: 0)
+     }}
+  end`
+    : `  ${listSpec}
+  ${listHead}
+    {:ok, ${listBody}}
+  end`;
   const findByIdHead = principal
     ? `def find_by_id(id, ${actorParam}) when is_binary(id) do`
     : "def find_by_id(id) when is_binary(id) do";
@@ -333,10 +393,7 @@ defmodule ${repoMod} do
   @moduledoc false${ectoImport}
   alias ${appModule}.Repo
 
-  ${listSpec}
-  ${listHead}
-    {:ok, ${listBody}}
-  end
+${listBlock}
 
   ${findByIdSpec}
   ${findByIdHead}
@@ -430,7 +487,12 @@ function renderFindFn(
   // serialise (Jason) to the canonical camelCase JSON keys at the controller.
   const paged = pagedReturn(f.returnType);
   const pageArgs = paged
-    ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+    ? [
+        `page \\\\ ${PAGED_DEFAULT_PAGE}`,
+        `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
+        `sort \\\\ "id"`,
+        `dir \\\\ "asc"`,
+      ]
     : [];
   // A principal-filtered aggregate threads the request actor into the find too
   // (the `cap` references `current_user`).  `\\ nil` keeps the workflow callers
@@ -499,7 +561,7 @@ function renderFindFn(
       : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
   const specArgs = [
     ...argNames.map(() => "term()"),
-    ...(paged ? ["pos_integer()", "pos_integer()"] : []),
+    ...(paged ? ["pos_integer()", "pos_integer()", "String.t()", "String.t()"] : []),
     ...(principal ? ["map() | nil"] : []),
   ];
   const spec = `  @spec ${fnName}(${specArgs.join(", ")}) :: ${specTail}`;
@@ -516,12 +578,33 @@ function renderFindFn(
     // Keys are atoms so the controller serialises them to the canonical
     // `items/page/pageSize/total/totalPages` JSON (camelCase) every other
     // backend emits.
+    // Server-side sort (M-T2.6): map the whitelisted wire key to its schema
+    // field atom (unknown → `:id`, the stable default order) and order the page
+    // query with a dynamic `field/2`; `sort_col` can only be a whitelisted atom,
+    // so the dynamic column is injection-safe.
+    const sortArms = sortableFields(agg)
+      .filter((wf) => wf !== "id")
+      .map((wf) => `        "${wf}" -> :${snake(wf)}`)
+      .join("\n");
     return `${spec}
   def ${fnName}(${argList}) do
     query = ${query}
     total = Repo.aggregate(query, :count, :id)
     offset = (page - 1) * page_size
-    items = query |> limit(^page_size) |> offset(^offset) |> Repo.all()${preload}
+
+    sort_col =
+      case sort do
+${sortArms}${sortArms ? "\n" : ""}        _ -> :id
+      end
+
+    dir_atom = if dir == "desc", do: :desc, else: :asc
+
+    items =
+      query
+      |> order_by([record], [{^dir_atom, field(record, ^sort_col)}])
+      |> limit(^page_size)
+      |> offset(^offset)
+      |> Repo.all()${preload}
 
     {:ok,
      %{

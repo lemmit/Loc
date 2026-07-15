@@ -57,7 +57,7 @@ describe("Table client-side sort (React)", () => {
     expect(content).toContain('{sortKey === "name" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}');
     // The rows expression (QueryView binds `rows` to the hook's `.data`) is
     // wrapped in a client-side sort.
-    expect(content).toMatch(/\[\.\.\.\(customerAll\.data\)\]\.sort\(\(a, b\) =>/);
+    expect(content).toMatch(/\[\.\.\.\(customerAll\.data\.items\)\]\.sort\(\(a, b\) =>/);
     expect(content).toContain("(a as Record<string, unknown>)[sortKey]");
     // The sort state is declared via useState.
     expect(content).toMatch(/const \[sortKey, setSortKey\] = useState/);

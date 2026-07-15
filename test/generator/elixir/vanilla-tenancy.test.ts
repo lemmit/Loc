@@ -68,7 +68,9 @@ function file(files: Map<string, string>, suffix: string): string {
 describe("vanilla tenancy — principal filter threaded + pinned", () => {
   it("threads current_user into repository list/find_by_id/find and pins the predicate", async () => {
     const repo = file(await gen(), "/ledger/account_repository.ex");
-    expect(repo).toContain("def list(current_user \\\\ nil) do");
+    expect(repo).toContain(
+      'def list(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc", current_user \\\\ nil) do',
+    );
     expect(repo).toContain(`where: record.tenant_id == ${PIN}`);
     expect(repo).toContain("def find_by_id(id, current_user \\\\ nil) when is_binary(id) do");
     expect(repo).toContain(`where: record.id == ^id and (record.tenant_id == ${PIN})`);
@@ -79,7 +81,9 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
 
   it("carries the actor through the context defdelegates", async () => {
     const ctx = file(await gen(), "/lib/api/ledger.ex");
-    expect(ctx).toContain("defdelegate list_accounts(current_user \\\\ nil)");
+    expect(ctx).toContain(
+      'defdelegate list_accounts(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc", current_user \\\\ nil)',
+    );
     expect(ctx).toContain("defdelegate get_account(id, current_user \\\\ nil)");
     expect(ctx).toContain("defdelegate by_min_balance_account(min, current_user \\\\ nil)");
   });
@@ -87,7 +91,9 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
   it("extracts conn.assigns.current_user in the controller and passes it to reads", async () => {
     const ctrl = file(await gen(), "/controllers/account_controller.ex");
     expect(ctrl).toContain("current_user = Map.get(conn.assigns, :current_user)");
-    expect(ctrl).toContain("Ledger.list_accounts(current_user)");
+    expect(ctrl).toContain(
+      'Ledger.list_accounts(page_param(params, "page", 1), page_param(params, "pageSize", 20), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"), current_user)',
+    );
     expect(ctrl).toContain("Ledger.get_account(id, current_user)");
   });
 
@@ -170,6 +176,9 @@ system EmbTenancy {
 describe("vanilla embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
   it("threads current_user into the embedded repository reads and pins the predicate", async () => {
     const repo = file(await generateSystemFiles(EMBEDDED_SOURCE), "/shop/order_repository.ex");
+    // `shape(embedded)` keeps the bare `list` (M-T2.6 pages only plain
+    // single-table relational aggregates), so no page/pageSize/sort/dir args —
+    // just the threaded principal.
     expect(repo).toContain("def list(current_user \\\\ nil) do");
     expect(repo).toContain(`where: record.tenant_id == ${PIN}`);
     expect(repo).toContain(`where: record.id == ^id and (record.tenant_id == ${PIN})`);

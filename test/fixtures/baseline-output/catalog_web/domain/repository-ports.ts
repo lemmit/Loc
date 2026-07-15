@@ -10,7 +10,7 @@ export interface ProductRepositoryPort {
   findManyByIds(ids: Ids.ProductId[]): Promise<Product[]>;
   save(aggregate: Product): Promise<void>;
   delete(id: Ids.ProductId): Promise<void>;
-  all(): Promise<Product[]>;
+  all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Product[]; page: number; pageSize: number; total: number; totalPages: number }>;
   bySku(sku: string): Promise<Product | null>;
 }
 
@@ -20,6 +20,6 @@ export interface CustomerRepositoryPort {
   findManyByIds(ids: Ids.CustomerId[]): Promise<Customer[]>;
   save(aggregate: Customer): Promise<void>;
   delete(id: Ids.CustomerId): Promise<void>;
-  all(): Promise<Customer[]>;
+  all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Customer[]; page: number; pageSize: number; total: number; totalPages: number }>;
   byEmail(email: string): Promise<Customer | null>;
 }

@@ -511,6 +511,22 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
+    // Schema-name parity for the paged carrier (M-T2.6): the generic
+    // Paged<XResponse> return would otherwise get Swashbuckle's default
+    // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
+    // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
+    // that canonical name so the OpenAPI schema set matches cross-backend
+    // (conformance-parity).  Every other type keeps its short type name.
+    c.CustomSchemaIds(t =>
+    {
+        if (t.IsGenericType && t.GetGenericTypeDefinition().Name.StartsWith("Paged", StringComparison.Ordinal))
+        {
+            var inner = t.GetGenericArguments()[0].Name;
+            var stem = inner.EndsWith("Response", StringComparison.Ordinal) ? inner.Substring(0, inner.Length - "Response".Length) : inner;
+            return stem + "Paged";
+        }
+        return t.Name;
+    });
 });
 
 var app = builder.Build();

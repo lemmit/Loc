@@ -116,6 +116,7 @@ import {
   renderProvLineageRecord,
 } from "./emit/provenance.js";
 import {
+  isPagedAutoAll,
   type JavaRepoCtx,
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
@@ -1250,6 +1251,7 @@ function emitAggregate(
     pkgFor("entity", agg.name),
     esCreateParams,
     ctx.payloads,
+    isPagedAutoAll(repo),
   )) {
     place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }

@@ -8,6 +8,7 @@ import type {
   RetrievalIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -49,7 +50,9 @@ export function renderRepositoryInterface(
   const anyFindIsPaged = finds.some((f) => pagedReturn(f.returnType));
   const findLines = finds.map((f) => {
     const usesUser = findUsesCurrentUser(f);
-    const pageExtra = pagedReturn(f.returnType) ? ["int page", "int pageSize"] : [];
+    const pageExtra = pagedReturn(f.returnType)
+      ? ["int page", "int pageSize", "string sort", "string dir"]
+      : [];
     return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, pageExtra)});`;
   });
   // `Run<Name>Async(args, page?, cancellationToken)` per context retrieval (retrieval.md).
@@ -228,13 +231,25 @@ export function renderRepositoryImpl(
     // `where` threaded into both), returning the domain `Paged<Agg>`
     // envelope (1-based).  The query handler maps items to response DTOs.
     if (pagedReturn(f.returnType)) {
+      // Server-side sort (M-T2.6): map each whitelisted wire key to its CLR
+      // (PascalCase) property and order via `EF.Property<object>` (translates to
+      // `ORDER BY` server-side).  An unknown key falls through to `Id` (the
+      // stable default order); the query record's binding can't inject SQL.
+      const sortArms = sortableFields(agg)
+        .filter((wf) => wf !== "id")
+        .map((wf) => `"${wf}" => "${upperFirst(wf)}"`)
+        .join(", ");
+      const orderExpr = (asc: boolean): string =>
+        `_db.${setName}${ignore}${filter}.${asc ? "OrderBy" : "OrderByDescending"}(e => EF.Property<object>(e, sortColumn))`;
       return [
-        `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize"])})`,
+        `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize", "string sort", "string dir"])})`,
         "    {",
         "        var offset = (page - 1) * pageSize;",
+        `        var sortColumn = sort switch { ${sortArms}${sortArms ? ", " : ""}_ => "Id" };`,
         `        var total = await _db.${setName}${ignore}${filter}.CountAsync(cancellationToken);`,
         "        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;",
-        `        var items = await _db.${setName}${ignore}${filter}.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);`,
+        `        var ordered = dir == "desc" ? ${orderExpr(false)} : ${orderExpr(true)};`,
+        `        var items = await ordered.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);`,
         `        ${renderDotnetLogCall("findExecuted", [
           { name: "aggregate", valueExpr: `"${agg.name}"` },
           { name: "find", valueExpr: `"${f.name}"` },

@@ -518,6 +518,11 @@ export interface WalkEnv {
    *  walks the accessor body with `o → "row"`; refs to `o` resolve
    *  to the JS identifier `row`.  Outer scope is unaffected. */
   lambdaParams: ReadonlyMap<string, string>;
+  /** Lambda-param names bound to a PAGED query result on a target that
+   *  decodes the envelope straight to a list (Feliz).  The scaffold's
+   *  `rows.items` unwrap is a no-op on such a binding, so the member walk
+   *  strips the `.items`.  Empty/absent on every JSX target (envelope kept). */
+  pagedListBindings?: ReadonlySet<string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
@@ -735,13 +740,28 @@ function adjustFindHookArgs(
   ctx: WalkContext,
 ): import("./target.js").TargetHookUse {
   if (detected.kind !== "aggregate") return hookUse;
-  if (STANDARD_AGG_OPS.has(detected.operation)) return hookUse;
   const bc = ctx.bcByAggregate.get(detected.aggregateName);
   const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
   const find = repo?.finds.find((f) => f.name === detected.operation);
+  const isPaged = find ? pagedReturn(find.returnType) : null;
+  // Standard ops (`byId`/`create`/…) pass through — EXCEPT a paged `all`
+  // (paged-by-default, M-T2.6), which takes the same object-shaped query arg a
+  // user find does (`useAll<Plural>({ page, pageSize, sort, dir })`).
+  if (STANDARD_AGG_OPS.has(detected.operation) && !isPaged) return hookUse;
   if (!find || hookUse.argsRendered.length === 0) return hookUse;
   const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
-  if (pagedReturn(find.returnType)) pairs.push("page: 1", "pageSize: 20");
+  if (isPaged) {
+    // The paged controls follow the user params in the call's args (the scaffold
+    // list threads its `pageNum`/`sortKey`/`sortDir` state here); any omitted →
+    // the shared 1-based / default-order defaults.
+    const extra = hookUse.argsRendered.slice(find.params.length);
+    pairs.push(
+      `page: ${extra[0] ?? "1"}`,
+      `pageSize: ${extra[1] ?? "20"}`,
+      `sort: ${extra[2] ?? '"id"'}`,
+      `dir: ${extra[3] ?? '"asc"'}`,
+    );
+  }
   return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`], reactiveQuery: true };
 }
 
@@ -1331,6 +1351,19 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       ) {
         ctx.usesCurrentUser = true;
         return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
+      }
+      // Feliz decodes a paged `.all` straight to a `'T list` (no envelope),
+      // so the scaffold's `rows.items` unwrap is a no-op there — strip the
+      // `.items` on a paged-list binding rather than emit `list.items` (which
+      // doesn't type-check under Fable).  Every JSX target keeps the envelope,
+      // so the flag is off and the access renders verbatim.
+      if (
+        ctx.target.pagedDataIsList &&
+        expr.member === "items" &&
+        expr.receiver.kind === "ref" &&
+        ctx.pagedListBindings?.has(expr.receiver.name)
+      ) {
+        return emitExpr(expr.receiver, ctx);
       }
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain

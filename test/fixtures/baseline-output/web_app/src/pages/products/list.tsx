@@ -10,7 +10,7 @@ export default function ProductList() {
   const [sortKey, setSortKey] = useState<string>("");
   const [sortDir, setSortDir] = useState<string>("");
   const [pageNum, setPageNum] = useState<number>(1);
-  const productAll = useAllProducts();
+  const productAll = useAllProducts({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });
   return (
     <Stack data-testid="products-list">
       <Breadcrumbs>
@@ -32,10 +32,10 @@ export default function ProductList() {
         { productAll.isError && (
           <Alert color="red" variant="light">Couldn't load products</Alert>
         ) }
-        { productAll.data && productAll.data.length === 0 && (
+        { productAll.data && productAll.data.items.length === 0 && (
           <Center mih={200}><Text c="dimmed">No products yet.</Text></Center>
         ) }
-        { productAll.data && productAll.data.length > 0 && (
+        { productAll.data && productAll.data.items.length > 0 && (
           <Paper p="md">
             <Table striped highlightOnHover stickyHeader>
               <Table.Thead>
@@ -45,7 +45,7 @@ export default function ProductList() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                { ([...(productAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).slice((pageNum - 1) * 10, pageNum * 10).map((row) => (
+                { productAll.data.items.map((row) => (
                   <Table.Tr key={ row.id } data-testid={ ("products-row-" + row.id) }>
                     <Table.Td><RouterLink to={`/products/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                     <Table.Td><Text>{row.sku}</Text></Table.Td>
@@ -53,7 +53,7 @@ export default function ProductList() {
                 )) }
               </Table.Tbody>
             </Table>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(productAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum * 10 >= ([...(productAll.data)].sort((a, b) => { if (!sortKey) { return 0; } const av = (a as Record<string, unknown>)[sortKey]; const bv = (b as Record<string, unknown>)[sortKey]; const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, productAll.data.totalPages)}</span><button type="button" disabled={pageNum >= Math.max(1, productAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
           </Paper>
         ) }
       </>

@@ -18,6 +18,14 @@ export const UpdateCustomerRequest = z.object({
 }).refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequest>;
 
+export const AllQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(20),
+  sort: z.string().default("id"),
+  dir: z.string().default("asc"),
+});
+export type AllQuery = z.infer<typeof AllQuery>;
+export type AllQueryInput = z.input<typeof AllQuery>;
 export const ByEmailQuery = z.object({
   email: z.string(),
 });
@@ -33,13 +41,17 @@ export const CustomerResponse = z.object({
 export type CustomerResponse = z.infer<typeof CustomerResponse>;
 export const CustomerListResponse = z.array(CustomerResponse);
 export type CustomerListResponse = z.infer<typeof CustomerListResponse>;
+export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
+export type CustomerPaged = z.infer<typeof CustomerPaged>;
 
-export function useAllCustomers() {
+export function useAllCustomers(query: AllQueryInput = {}) {
+  const q = AllQuery.parse(query);
   return useQuery({
-    queryKey: ["customers"],
+    queryKey: ["customers", "list", q],
     queryFn: async () => {
-      const r = await api.get(`/customers`);
-      return CustomerListResponse.parse(r);
+      const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
+      const r = await api.get(`/customers${qs ? "?" + qs : ""}`);
+      return CustomerPaged.parse(r);
     },
   });
 }

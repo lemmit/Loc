@@ -61,9 +61,13 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     expect(repoKey).toBeDefined();
     const repo = files.get(repoKey)!;
     expect(repo).toContain("alias Api.Repo");
-    expect(repo).toContain("def list");
+    expect(repo).toContain(
+      'def list(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc")',
+    );
     expect(repo).toContain("def find_by_id(id)");
-    expect(repo).toContain("{:ok, Repo.all(");
+    // Paged-by-default: list reads a page from Repo and wraps it in the envelope.
+    expect(repo).toContain("|> Repo.all()");
+    expect(repo).toContain("totalPages: if(page_size > 0, do: ceil(total / page_size), else: 0)");
     expect(repo).toContain("{:error, :not_found}");
     expect(repo).not.toContain("Ash.read");
   });
@@ -73,7 +77,9 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     const ctxKey = [...files.keys()].find((k) => k.endsWith("lib/api/tracker.ex"))!;
     expect(ctxKey).toBeDefined();
     const ctx = files.get(ctxKey)!;
-    expect(ctx).toContain("defdelegate list_tasks()");
+    expect(ctx).toContain(
+      'defdelegate list_tasks(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc")',
+    );
     expect(ctx).toContain("defdelegate get_task(id)");
     expect(ctx).toContain("Api.Tracker.TaskRepository");
     expect(ctx).not.toContain("use Ash.Domain");
@@ -84,9 +90,11 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     const ctlKey = [...files.keys()].find((k) => k.endsWith("/controllers/task_controller.ex"))!;
     expect(ctlKey).toBeDefined();
     const ctl = files.get(ctlKey)!;
-    expect(ctl).toContain("def index(conn, _params)");
+    expect(ctl).toContain("def index(conn, params)");
     expect(ctl).toContain('def show(conn, %{"id" => id})');
-    expect(ctl).toContain("with {:ok, records} <- Tracker.list_tasks()");
+    expect(ctl).toContain(
+      'with {:ok, result} <- Tracker.list_tasks(page_param(params, "page", 1), page_param(params, "pageSize", 20), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))',
+    );
     expect(ctl).toContain("case Tracker.get_task(id) do");
     expect(ctl).toContain("{:ok, record}");
     expect(ctl).toContain("{:error, :not_found}");

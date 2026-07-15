@@ -17,7 +17,12 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
-import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
+import {
+  declaredFinds,
+  isPagedAutoAll,
+  isPagedFind,
+  unionFindAsOptionalTwin,
+} from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
@@ -159,11 +164,25 @@ export function renderJavaService(
     `        return repository.findById(id).map(${agg.name}Response::from).orElse(null);`,
     `    }`,
     ``,
-    `    @Transactional(readOnly = true)`,
-    `    public List<${agg.name}Response> all${agg.name}() {`,
-    `        return repository.findAll().stream().map(${agg.name}Response::from).toList();`,
-    `    }`,
-    ``,
+    ...(isPagedAutoAll(repo)
+      ? [
+          // Paged relational findAll (M-T2.6): delegate to the repository's
+          // bounded `findAllPaged` and map each page item to its response DTO.
+          `    @Transactional(readOnly = true)`,
+          `    public Paged<${agg.name}Response> all${agg.name}(int page, int pageSize, String sort, String dir) {`,
+          `        var result = repository.findAllPaged(page, pageSize, sort, dir);`,
+          `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+          `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+          `    }`,
+          ``,
+        ]
+      : [
+          `    @Transactional(readOnly = true)`,
+          `    public List<${agg.name}Response> all${agg.name}() {`,
+          `        return repository.findAll().stream().map(${agg.name}Response::from).toList();`,
+          `    }`,
+          ``,
+        ]),
   ];
   const findLines = declaredFinds(repo)
     .map((f) => unionFindAsOptionalTwin(f, agg.name))
@@ -172,8 +191,10 @@ export function renderJavaService(
       const args = f.params.map((p) => p.name).join(", ");
       for (const p of f.params) collectWireToDomainImports(p.type, imports);
       if (isPagedFind(f)) {
-        const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
-        const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+        const pagedParams = [params, "int page, int pageSize, String sort, String dir"]
+          .filter(Boolean)
+          .join(", ");
+        const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
         return [
           `    @Transactional(readOnly = true)`,
           `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
@@ -426,7 +447,9 @@ export function renderJavaService(
     anyAudited ? `import ${ctx.basePkg}.config.RequestContext;` : null,
     anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecord;` : null,
     anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecordRepository;` : null,
-    declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    declaredFinds(repo).some(isPagedFind) || isPagedAutoAll(repo)
+      ? `import ${ctx.basePkg}.domain.common.Paged;`
+      : null,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.valueobjects.*;`,

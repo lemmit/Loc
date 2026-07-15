@@ -928,23 +928,12 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
 
     public void Apply(OpenApiDocument swaggerDoc, DocumentFilterContext context)
     {
-        // Add the named wrapper component for each element schema present.
-        foreach (var (element, wrapper) in Wrappers)
-        {
-            if (swaggerDoc.Components.Schemas.ContainsKey(element) && !swaggerDoc.Components.Schemas.ContainsKey(wrapper))
-            {
-                swaggerDoc.Components.Schemas[wrapper] = new OpenApiSchema
-                {
-                    Type = "array",
-                    Items = new OpenApiSchema
-                    {
-                        Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
-                    }
-                };
-            }
-        }
-
-        // Retarget inline array responses to the named wrapper $ref.
+        // Retarget inline array responses to the named wrapper $ref, adding the
+        // wrapper component ONLY when an endpoint actually returns that array.
+        // A paged-by-default findAll (M-T2.6) returns <Agg>Paged, not a bare
+        // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
+        // Hono / Phoenix backends omit it too (an unreferenced wrapper never
+        // enters their spec), so adding it unconditionally would drift parity.
         foreach (var path in swaggerDoc.Paths.Values)
         foreach (var operation in path.Operations.Values)
         foreach (var response in operation.Responses.Values)
@@ -957,6 +946,17 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
                 {
                     if (element == elementId)
                     {
+                        if (!swaggerDoc.Components.Schemas.ContainsKey(wrapper))
+                        {
+                            swaggerDoc.Components.Schemas[wrapper] = new OpenApiSchema
+                            {
+                                Type = "array",
+                                Items = new OpenApiSchema
+                                {
+                                    Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
+                                }
+                            };
+                        }
                         media.Schema = new OpenApiSchema
                         {
                             Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = wrapper }
@@ -1010,6 +1010,19 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
     {
         var type = context.Type;
         if (schema.Properties is null || schema.Properties.Count == 0) return;
+
+        // Paged carrier (M-T2.6): the generic Paged<T> record's members
+        // (items/page/pageSize/total/totalPages) are all non-optional, but
+        // Swashbuckle's non-nullable detection can't read nullability off an
+        // OPEN generic parameter, so it leaves the required set empty — while
+        // Hono/Phoenix/Java/Python mark every envelope field required.  Mark
+        // all of them required to restore cross-backend parity (conformance).
+        if (type.IsGenericType
+            && type.GetGenericTypeDefinition().Name.StartsWith("Paged", StringComparison.Ordinal))
+        {
+            foreach (var key in schema.Properties.Keys) schema.Required.Add(key);
+            return;
+        }
 
         // Positional records expose their declared fields via the primary
         // constructor.  Pick the longest constructor (the primary one for a

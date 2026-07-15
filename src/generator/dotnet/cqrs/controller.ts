@@ -219,13 +219,20 @@ export function emitController(
                   : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
               return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
             }),
-            // Paged finds auto-gain 1-based page/pageSize query params with
-            // defaults (P3b), mirroring the Hono/React contract.
-            ...(paged ? ["[FromQuery] int page = 1", "[FromQuery] int pageSize = 20"] : []),
+            // Paged finds auto-gain 1-based page/pageSize + sort/dir query
+            // params with defaults (P3b / M-T2.6), mirroring the Hono contract.
+            ...(paged
+              ? [
+                  "[FromQuery] int page = 1",
+                  "[FromQuery] int pageSize = 20",
+                  '[FromQuery] string sort = "id"',
+                  '[FromQuery] string dir = "asc"',
+                ]
+              : []),
           ].join(", "),
           queryConstructorArgs: [
             ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
-            ...(paged ? ["page", "pageSize"] : []),
+            ...(paged ? ["page", "pageSize", "sort", "dir"] : []),
           ].join(", "),
           returnShape: (paged
             ? "paged"

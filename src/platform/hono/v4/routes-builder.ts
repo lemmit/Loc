@@ -339,9 +339,16 @@ export function buildRoutesFile(
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       if (paged) {
+        // Server-side pagination + sort controls (M-T2.6).  `sort`/`dir` are
+        // plain strings (the client binds them to its sort state, which starts
+        // empty = unsorted); the repository whitelists the column server-side
+        // (`sortColumns[sort] ?? id`), so an enum boundary is unnecessary — and
+        // would reject the empty initial sort the scaffold list sends.
         lines.push(
           `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          `  sort: z.string().default("id"),`,
+          `  dir: z.string().default("asc"),`,
         );
       }
       lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
@@ -386,7 +393,11 @@ export function buildRoutesFile(
       if (!paged || pagedSeen.has(paged.name)) continue;
       pagedSeen.add(paged.name);
       lines.push(
-        `export const ${paged.name} = z.object({ items: z.array(${zodForResponse(paged.arg, false)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("${paged.name}");`,
+        // The pagination counters are integers on every other backend's
+        // OpenAPI (.NET/Java/Python/Phoenix emit `integer`), so mark them
+        // `z.number().int()` here too — a bare `z.number()` emits `number` and
+        // drifts the conformance-parity property-type check (M-T2.6).
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponse(paged.arg, false)}), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() }).openapi("${paged.name}");`,
       );
     }
   }
@@ -1390,7 +1401,7 @@ function emitFindRoute(
     // Auto-injected pagination controls follow the domain args; the repo
     // method returns `{ items: <domain>[], page, pageSize, total, totalPages }`
     // and the route maps the page items through `toWire`.
-    const pagedArgs = [...baseArgs, "params.page", "params.pageSize"];
+    const pagedArgs = [...baseArgs, "params.page", "params.pageSize", "params.sort", "params.dir"];
     const argList = (usesUser ? [...pagedArgs, "currentUser"] : pagedArgs).join(", ");
     out.push(`    const result = await repo.${find.name}(${argList});`);
     out.push(

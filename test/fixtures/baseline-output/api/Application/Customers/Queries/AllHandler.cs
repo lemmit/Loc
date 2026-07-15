@@ -8,10 +8,11 @@ using Api.Domain.Ids;
 using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
 using Api.Application.Customers.Responses;
+using Api.Domain.Common;
 
 namespace Api.Application.Customers.Queries;
 
-public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<CustomerResponse>>
+public sealed class AllHandler : IQueryHandler<AllQuery, Paged<CustomerResponse>>
 {
     private readonly ICustomerRepository _repo;
     public AllHandler(ICustomerRepository repo)
@@ -19,9 +20,9 @@ public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<CustomerR
         _repo = repo;
     }
 
-    public async ValueTask<IReadOnlyList<CustomerResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
+    public async ValueTask<Paged<CustomerResponse>> Handle(AllQuery query, CancellationToken cancellationToken)
     {
-        var domain = await _repo.All(cancellationToken);
-        return domain.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age, d.Display)).ToList();
+        var domain = await _repo.All(query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);
+        return new Paged<CustomerResponse>(domain.Items.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age, d.Display)).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
     }
 }

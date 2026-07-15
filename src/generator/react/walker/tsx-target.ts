@@ -135,15 +135,13 @@ export const tsxTarget: WalkerTarget = {
   renderPager(spec) {
     const p = spec.page.name;
     const setP = `set${p[0]!.toUpperCase()}${p.slice(1)}`;
-    const total = spec.totalExpr;
-    const size = spec.pageSize;
-    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const pages = spec.totalPagesExpr;
     const style = `{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }`;
     return (
       `<div style={${style}} data-testid="pager">` +
       `<button type="button" disabled={${p} <= 1} onClick={() => ${setP}(${p} - 1)}>Prev</button>` +
       `<span>Page {${p}} of {${pages}}</span>` +
-      `<button type="button" disabled={${p} * ${size} >= ${total}} onClick={() => ${setP}(${p} + 1)}>Next</button>` +
+      `<button type="button" disabled={${p} >= ${pages}} onClick={() => ${setP}(${p} + 1)}>Next</button>` +
       `</div>`
     );
   },

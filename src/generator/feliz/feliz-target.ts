@@ -256,6 +256,10 @@ export const felizTarget: WalkerTarget = {
   // (`| Loaded <binding> -> …`), so a read handle's data dereferences to that
   // binding directly (no `.data` — the arm already unwrapped the `Remote`).
   renderQueryDataAccess: (handle) => lowerFirst(handle),
+  // The Elmish decoder pulls `items` out of the paged envelope, so the Model
+  // holds a `'T list` — the scaffold's `rows.items` unwrap is a no-op here and
+  // the member walk strips it (Feliz M-T1.1 "list, page 1, no pager").
+  pagedDataIsList: true,
 
   // --- Control-flow seams — QueryView's loading/error/empty/data + Table's
   // per-row `For` exercise these in a parseable, Fable-verifiable position. --

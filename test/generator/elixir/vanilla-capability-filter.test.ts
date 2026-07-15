@@ -59,10 +59,8 @@ function file(files: Map<string, string>, suffix: string): string {
 describe("vanilla capability filter — AND-ed into every read", () => {
   it("scopes list/0 and find_by_id/1 in the repository", async () => {
     const repo = file(await gen(), "/shop/order_repository.ex");
-    // list/0 becomes a `from(... where: cap) |> Repo.all()`.
-    expect(repo).toContain(
-      "from(record in Api.Shop.Order, where: not record.archived) |> Repo.all()",
-    );
+    // Paged-by-default: list's base query carries the capability `where`.
+    expect(repo).toContain("query = from(record in Api.Shop.Order, where: not record.archived)");
     // find_by_id/1 can't carry a `where` on Repo.get, so it becomes Repo.one.
     expect(repo).toContain(
       "Repo.one(from(record in Api.Shop.Order, where: record.id == ^id and (not record.archived)))",
@@ -92,7 +90,8 @@ describe("vanilla capability filter — AND-ed into every read", () => {
   it("leaves a filter-free aggregate's reads unscoped (byte-identical)", async () => {
     const noFilter = SOURCE.replace("        filter !this.archived\n", "");
     const repo = file(await generateSystemFiles(noFilter), "/shop/order_repository.ex");
-    expect(repo).toContain("{:ok, Repo.all(Api.Shop.Order)}");
+    // Paged-by-default: the base query is unscoped (no `where`).
+    expect(repo).toContain("query = from(record in Api.Shop.Order)");
     expect(repo).toContain("case Repo.get(Api.Shop.Order, id) do");
   });
 });

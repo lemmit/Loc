@@ -98,7 +98,7 @@ describe("vanilla relational entity parts (§11c)", () => {
   it("the repository preloads the containment on every read (so the wire shape materialises)", async () => {
     const repo = file(await generateSystemFiles(SOURCE), "/catalog/project_repository.ex");
     // list + find_by_id both preload :pipelines.
-    expect(repo).toContain("Repo.all(Api.Catalog.Project) |> Repo.preload([:pipelines])");
+    expect(repo).toContain("|> Repo.all() |> Repo.preload([:pipelines])");
     expect(repo).toContain("record -> {:ok, record |> Repo.preload([:pipelines])}");
     // update preloads the existing assoc before cast_assoc.
     expect(repo).toContain("record |> Repo.preload([:pipelines])");

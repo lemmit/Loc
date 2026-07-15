@@ -49,7 +49,9 @@ describe("Table client-side sort (Vue)", () => {
     // {{ }} indicator.
     expect(content).toContain(`{{ sortKey === 'name' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '' }}`);
     // v-for over the shared helper (no inline dynamic-index — strict vue-tsc).
-    expect(content).toMatch(/v-for="\(row\) in sortRows\(customerAll\.data, sortKey, sortDir\)"/);
+    expect(content).toMatch(
+      /v-for="\(row\) in sortRows\(customerAll\.data\.items, sortKey, sortDir\)"/,
+    );
     // Helper imported.
     expect(content).toContain(`import { sortRows } from "../lib/table-sort";`);
     // Helper module emitted.

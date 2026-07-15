@@ -25,8 +25,8 @@ Sources: [aggregate-inheritance](../old/proposals/aggregate-inheritance.md) §mi
 ## M-T2.5 — Brownfield adoption (existing database) — `open` · **XL** · P3 (proposal needed)
 Nothing introspects an existing schema; Loom is greenfield-only. A future `ddd adopt` that introspects Postgres into a baseline snapshot (+ partial `.ddd` skeleton) would open the largest user segment. Write the proposal; don't start code before T2.1–T2.3 land.
 
-## M-T2.6 — Bound the implicit `find all()` (DEBT-28) — `open` · **M** · P2 ⚠ coordinated
-The auto-`findAll` is unbounded — the scaling failure mode of every generated list endpoint. Flip implicit findAll to paged-by-default (breaking change; one coordinated PR + fixture re-baseline + frontend consumption via M-T1.1), or gate with a max-rows guard as an interim.
+## M-T2.6 — Bound the implicit `find all()` (DEBT-28) — `done` · **M** · P2 ⚠ coordinated
+The auto-`findAll` is unbounded — the scaling failure mode of every generated list endpoint. **Done:** flipped implicit findAll to paged-by-default in one coordinated PR with M-T1.1 slice 9. `ensureFindAll` (`src/ir/enrich/enrichments.ts`) now synthesises `paged<T>` (envelope `{items, page, pageSize, total, totalPages}`) instead of `T[]`, unconditional; the paged route (`?page=&pageSize=&sort=&dir=`) with whitelisted ORDER BY (`src/ir/util/sortable-fields.ts`, id default) threads through all five backends (Hono/node, .NET, Java, Python, Elixir/Phoenix — the Elixir auto-`findAll` gained a real paged `list` + context/controller `page_param/3` threading). Full fixture re-baseline (`test/fixtures/baseline-output/**`) + a 1000-row runtime acceptance capstone (`test/behavioral/pagination.mjs`, gated in `behavioral-e2e.yml`) prove the window/counters/ORDER BY end-to-end.
 Sources: [pagination-design-note](../old/proposals/pagination-design-note.md) DEBT-28.
 
 ## M-T2.7 — Seeding tail — `partial` · **M** · P3

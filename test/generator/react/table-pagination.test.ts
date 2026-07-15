@@ -12,7 +12,7 @@ const SCAFFOLD = `
   subdomain Sales {
     context Orders {
       aggregate Customer { name: string }
-      repository Customers for Customer { }
+      repository Customers for Customer { find recent(): Customer }
     }
   }
   api SalesApi from Sales
@@ -41,7 +41,7 @@ async function genPage(body: string, state = `state { pageNum: int = 1 }`) {
 describe("Table client-side pagination (React)", () => {
   it("a paged Table slices rows to the page window + emits a pager", async () => {
     const content = await genPage(
-      `QueryView { of: Sales.Customer.all, data: rows => Table(
+      `QueryView { of: Sales.Customer.recent, data: rows => Table(
         Column("Name", o => o.name),
         rows: rows, page: pageNum, pageSize: 25) }`,
     );
@@ -54,14 +54,16 @@ describe("Table client-side pagination (React)", () => {
     expect(content).toContain("onClick={() => setPageNum(pageNum + 1)}");
     // "Page N of M" label + last-page disable off the total row count.
     expect(content).toContain("Page {pageNum} of {Math.max(1, Math.ceil(");
-    expect(content).toContain("disabled={pageNum * 25 >= ((customerAll.data) ?? []).length}");
+    expect(content).toContain(
+      "disabled={pageNum >= Math.max(1, Math.ceil(((customerRecent.data) ?? []).length / 25))}",
+    );
     // The page state is declared via useState<number>.
     expect(content).toMatch(/const \[pageNum, setPageNum\] = useState<number>\(1\)/);
   });
 
   it("pageSize defaults to 10 when omitted", async () => {
     const content = await genPage(
-      `QueryView { of: Sales.Customer.all, data: rows => Table(
+      `QueryView { of: Sales.Customer.recent, data: rows => Table(
         Column("Name", o => o.name),
         rows: rows, page: pageNum) }`,
     );
@@ -70,7 +72,7 @@ describe("Table client-side pagination (React)", () => {
 
   it("sort + pagination compose — the window slices the sorted rows", async () => {
     const content = await genPage(
-      `QueryView { of: Sales.Customer.all, data: rows => Table(
+      `QueryView { of: Sales.Customer.recent, data: rows => Table(
         Column("Name", o => o.name, sortable: true),
         rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 10) }`,
       `state { sortKey: string = ""  sortDir: string = "asc"  pageNum: int = 1 }`,
@@ -81,7 +83,7 @@ describe("Table client-side pagination (React)", () => {
 
   it("a Table without page: is unaffected (no slice, no pager)", async () => {
     const content = await genPage(
-      `QueryView { of: Sales.Customer.all, data: rows => Table(
+      `QueryView { of: Sales.Customer.recent, data: rows => Table(
         Column("Name", o => o.name),
         rows: rows) }`,
       `state { }`,

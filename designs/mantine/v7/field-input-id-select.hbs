@@ -2,6 +2,6 @@
           control={control}
           name="{{path}}"
           render={({ field, fieldState }) => (
-            <Select label="{{label}}" data-testid="{{testId}}" placeholder="Select…" searchable data={({{{hookVar}}}.data ?? []).map((__o) => ({ value: __o.id, label: __o.{{displayField}} }))} renderOption={({ option }) => <div data-testid={`{{testId}}-option-${option.value}`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
+            <Select label="{{label}}" data-testid="{{testId}}" placeholder="Select…" searchable data={({{{hookVar}}}.data?.items ?? []).map((__o) => ({ value: __o.id, label: __o.{{displayField}} }))} renderOption={({ option }) => <div data-testid={`{{testId}}-option-${option.value}`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
           )}
         />

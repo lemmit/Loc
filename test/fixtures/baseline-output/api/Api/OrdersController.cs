@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Api.Domain.Common;
 using System.Globalization;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
@@ -117,10 +118,10 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), 200)]
-    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> AllOrder()
+    [ProducesResponseType(typeof(Paged<OrderResponse>), 200)]
+    public async Task<ActionResult<Paged<OrderResponse>>> AllOrder([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
     {
-        var result = await _mediator.Send(new AllQuery());
+        var result = await _mediator.Send(new AllQuery(page, pageSize, sort, dir));
         return Ok(result);
     }
 

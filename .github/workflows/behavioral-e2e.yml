@@ -85,3 +85,12 @@ jobs:
       - name: Run behavioral tier (api + unit gate)
         working-directory: test/behavioral
         run: node run.mjs
+
+      # M-T1.1 / M-T2.6 runtime acceptance capstone: seed 1000 rows over the
+      # real HTTP create surface, then assert the paged list endpoint's
+      # server-computed window, envelope counters, and whitelisted ORDER BY.
+      # The seed-and-page property the emitted DSL `test e2e` cannot express
+      # (no loop to seed a real second page).
+      - name: Run paged-list acceptance (1000-row seed)
+        working-directory: test/behavioral
+        run: node pagination.mjs

@@ -69,7 +69,7 @@ describe("Svelte variant-`match await` (MVU Stage 2)", () => {
     // The handler is async so it can `await` (walker-core default renderNamedHandler).
     expect(page).toContain("const submit = async () =>");
     // The mutation is hoisted off the route id (svelte-query accessor thunk) and awaited.
-    expect(page).toContain('const orderPlaceOrder = usePlaceOrderOrder(() => id ?? "");');
+    expect(page).toContain('const orderPlaceOrder = usePlaceOrderOrder(() => (id ?? ""));');
     expect(page).toContain("result = await orderPlaceOrder.mutateAsync({});");
     // A caught ApiError is reified into the error variant (its `type` re-stamped
     // to the statically-known error tag — the backend overwrote it with the URI).

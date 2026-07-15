@@ -1,7 +1,8 @@
 // Auto-generated.  Do not edit by hand.
 import type { CustomerRepositoryPort } from "../../domain/repository-ports";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { eq, inArray } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { asc, count, desc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Customer } from "../../domain/customer";
 import * as Ids from "../../domain/ids";
@@ -66,15 +67,22 @@ export class CustomerRepository implements CustomerRepositoryPort {
     await this.db.delete(schema.customers).where(eq(schema.customers.id, id));
   }
 
-  async all(): Promise<Customer[]> {
-    const rootRows = await this.db.select().from(schema.customers);
+  async all(page: number, pageSize: number, sort: string, dir: string): Promise<{ items: Customer[]; page: number; pageSize: number; total: number; totalPages: number }> {
+    const offset = (page - 1) * pageSize;
+    const sortColumns: Record<string, AnyPgColumn> = { "id": schema.customers.id, "username": schema.customers.username, "email": schema.customers.email, "age": schema.customers.age };
+    const sortColumn = sortColumns[sort] ?? schema.customers.id;
+    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);
+    const countRows = await this.db.select({ value: count() }).from(schema.customers);
+    const total = Number(countRows[0]?.value ?? 0);
+    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
+    const rootRows = await this.db.select().from(schema.customers).orderBy(orderBy).limit(pageSize).offset(offset);
     if (rootRows.length === 0) {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: 0 });
-      return [];
+      return { items: [], page, pageSize, total, totalPages };
     }
-    const result = rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
-    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: result.length });
-    return result;
+    const items = rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: items.length });
+    return { items, page, pageSize, total, totalPages };
   }
 
   async byEmail(email: string): Promise<Customer | null> {

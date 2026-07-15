@@ -144,16 +144,14 @@ export const vueTarget: WalkerTarget = {
    *  list, so the "of M" label computes inline. */
   renderPager(spec) {
     const p = spec.page.name;
-    const size = spec.pageSize;
-    const total = spec.totalExpr;
-    const pages = `Math.max(1, Math.ceil(${total} / ${size}))`;
+    const pages = spec.totalPagesExpr;
     const style =
       "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
     return (
       `<div style="${style}" data-testid="pager">` +
       `<button type="button" :disabled="${p} <= 1" @click="${p} = ${p} - 1">Prev</button>` +
       `<span>Page {{ ${p} }} of {{ ${pages} }}</span>` +
-      `<button type="button" :disabled="${p} * ${size} >= ${total}" @click="${p} = ${p} + 1">Next</button>` +
+      `<button type="button" :disabled="${p} >= ${pages}" @click="${p} = ${p} + 1">Next</button>` +
       `</div>`
     );
   },

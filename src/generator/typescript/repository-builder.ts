@@ -66,7 +66,14 @@ export function buildRepositoryFile(
   const drizzleOps = new Set<string>(["eq", "and", "inArray"]);
   // A paged find runs a `count()` aggregate for its total (P3b).  Added as a
   // candidate; the import narrower below keeps it only if `count(` is emitted.
-  if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) drizzleOps.add("count");
+  // A paged find runs a `count()` for the total and an `asc`/`desc` ORDER BY
+  // for the server-side sort (M-T2.6).  Seed all three; the body-scan narrower
+  // below drops any that don't actually appear in the emitted method.
+  if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) {
+    drizzleOps.add("count");
+    drizzleOps.add("asc");
+    drizzleOps.add("desc");
+  }
   const viewFilters = ctx.views
     .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name && v.filter)
     .map((v) => v.filter!);
@@ -267,6 +274,9 @@ export function buildRepositoryFile(
     // Domain-side repository PORT this concrete implements (audit S7).
     repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    // A paged find's server-side ORDER BY types its sort-column whitelist as
+    // `Record<string, AnyPgColumn>` (M-T2.6).
+    /\bAnyPgColumn\b/.test(bodyScan) && `import type { AnyPgColumn } from "drizzle-orm/pg-core";`,
     usedDrizzleOps.length > 0 && `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,

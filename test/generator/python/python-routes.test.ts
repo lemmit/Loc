@@ -138,9 +138,9 @@ describe("python routes", () => {
   it("all + byId routes project through to_wire with parity operationIds", async () => {
     const files = await build("domain.ddd");
     const routes = files.get("api/app/http/order_routes.py")!;
-    expect(routes).toContain(
-      '@router.get("", response_model=OrderListResponse, operation_id="allOrder")',
-    );
+    // The implicit findAll is paged (M-T2.6) for this plain relational
+    // aggregate — the list GET carries the `OrderPaged` envelope.
+    expect(routes).toContain('@router.get("", response_model=OrderPaged, operation_id="allOrder")');
     expect(routes).toContain(
       '@router.get("/{id}", response_model=OrderResponse, operation_id="getOrderById", responses={404: {"model": ProblemDetails, "description": "Not Found"}})',
     );

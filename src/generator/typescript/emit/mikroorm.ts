@@ -30,6 +30,7 @@
 // runtime-throwing stub (mirrors the .NET Dapper v1 path).
 // ---------------------------------------------------------------------------
 
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -41,6 +42,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
@@ -469,6 +471,7 @@ export function renderMikroRepository(
 
   const findMethods = (repo?.finds ?? []).map((f) => {
     const name = lowerFirst(f.name);
+    const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
     const ret = isList ? `${agg.name}[]` : `${agg.name} | null`;
     const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
@@ -477,8 +480,42 @@ export function renderMikroRepository(
       filter = f.filter ? whereToMikroFilter(f.filter) : "{}";
     } catch {
       return lines(
-        `  async ${name}(${params}): Promise<${ret}> {`,
+        `  async ${name}(${paged ? `${params}${params ? ", " : ""}page: number, pageSize: number, sort: string, dir: string` : params}): Promise<${paged ? `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }` : ret}> {`,
         `    throw new Error("mikroorm v1: this find's predicate is not yet supported");`,
+        `  }`,
+      );
+    }
+    // Paged return (`find x(): <Agg> paged`; the auto-`findAll` after M-T2.6):
+    // trailing `page`/`pageSize`/`sort`/`dir` controls → a `em.count` +
+    // `em.find` with `limit`/`offset`/`orderBy`, wrapped in the paged envelope.
+    // Server-side sort is whitelisted to scalar root columns (`sortableFields`);
+    // an unknown key falls back to `id` (the stable default order — the route's
+    // zod enum already rejects out-of-whitelist keys).  MikroORM aggregates are
+    // flat, so no child bulk-load — the page rows hydrate the same way the
+    // array branch does.
+    if (paged) {
+      const pagedParams = [
+        ...f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`),
+        "page: number",
+        "pageSize: number",
+        "sort: string",
+        "dir: string",
+      ].join(", ");
+      const sortable = sortableFields(agg)
+        .map((s) => JSON.stringify(s))
+        .join(", ");
+      return lines(
+        `  async ${name}(${pagedParams}): Promise<{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }> {`,
+        `    const em = this.em.fork();`,
+        `    const sortable = new Set<string>([${sortable}]);`,
+        `    const sortField = sortable.has(sort) ? sort : "id";`,
+        `    const orderBy: Record<string, "asc" | "desc"> = { [sortField]: dir === "desc" ? "desc" : "asc" };`,
+        `    const total = await em.count(${row}, ${filter});`,
+        `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+        `    const rows = await em.find(${row}, ${filter}, { limit: pageSize, offset: (page - 1) * pageSize, orderBy });`,
+        dbg(f.name, "rows.length"),
+        `    const items = rows.map((row) => ${hydrate("row")});`,
+        `    return { items, page, pageSize, total, totalPages };`,
         `  }`,
       );
     }

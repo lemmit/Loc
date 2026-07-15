@@ -1,4 +1,4 @@
-<v-select label="{{label}}" data-testid="{{testId}}" placeholder="Select…" :items="({{{hookVar}}}.data ?? []).map((__o) => ({ value: __o.id, title: __o.{{displayField}} }))" v-model="form.values.{{path}}" :error-messages='form.errors["{{path}}"]'>
+<v-select label="{{label}}" data-testid="{{testId}}" placeholder="Select…" :items="({{{hookVar}}}.data?.items ?? []).map((__o) => ({ value: __o.id, title: __o.{{displayField}} }))" v-model="form.values.{{path}}" :error-messages='form.errors["{{path}}"]'>
           <template #item="{ props: __props, item }">
             <v-list-item v-bind="__props" :data-testid="`{{testId}}-option-${item.value}`" />
           </template>

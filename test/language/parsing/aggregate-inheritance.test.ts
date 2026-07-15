@@ -456,6 +456,10 @@ system Sys {
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);
     expect(paths.some((p) => p.endsWith("parties/supplier.ex"))).toBe(true);
     // The context façade delegates the per-aggregate reads to each Repository.
+    // Inheritance concretes keep the bare `list` (M-T2.6 pages only plain
+    // single-table relational aggregates — the polymorphic `find all <Base>`
+    // reader concatenates each subtype's list, which a per-subtype page can't
+    // compose), so the façade delegate carries no page/sort controls.
     const domain = [...files.entries()].find(([p]) => p.endsWith("/parties.ex"))?.[1] ?? "";
     expect(domain).toMatch(/defdelegate list_customers\(\), to: Api\.Parties\.CustomerRepository/);
     expect(domain).toMatch(/defdelegate list_suppliers\(\), to: Api\.Parties\.SupplierRepository/);

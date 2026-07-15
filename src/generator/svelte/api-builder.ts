@@ -96,21 +96,34 @@ export function buildSvelteApiModule(
 
   if (repo) {
     for (const find of repo.finds) {
-      if (find.name === "all") continue;
+      // A PAGED `all` (paged-by-default findAll, M-T2.6) still needs its
+      // page/pageSize/sort/dir query schema — skip only a NON-paged `all`.
+      if (find.name === "all" && !pagedReturn(find.returnType)) continue;
       lines.push(`export const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
+      // A paged find gains 1-based page/pageSize + server-side sort/dir controls;
+      // sort/dir are plain strings (the repository whitelists the column).
       if (pagedReturn(find.returnType)) {
         lines.push(
           `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          `  sort: z.string().default("id"),`,
+          `  dir: z.string().default("asc"),`,
         );
       }
       lines.push(`});`);
       lines.push(
         `export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`,
       );
+      // z.input ≠ z.output for a defaulted schema: controls are optional going
+      // in, required coming out — expose the input shape for the hook signature.
+      if (pagedReturn(find.returnType)) {
+        lines.push(
+          `export type ${upperFirst(find.name)}QueryInput = z.input<typeof ${upperFirst(find.name)}Query>;`,
+        );
+      }
     }
   }
   lines.push("");
@@ -128,7 +141,9 @@ export function buildSvelteApiModule(
       if (!paged || pagedSeen.has(paged.name)) continue;
       pagedSeen.add(paged.name);
       lines.push(
-        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });`,
+        // Integer pagination counters — match the backend wire contract
+        // (every backend's OpenAPI types these `integer`).
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });`,
       );
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
@@ -160,15 +175,41 @@ export function buildSvelteApiModule(
   const tag = snake(plural(agg.name));
   const aggKey = `["${tag}"]`;
 
-  lines.push(`export function useAll${plural(agg.name)}() {`);
-  lines.push(`  return createQuery(() => ({`);
-  lines.push(`    queryKey: ${aggKey},`);
-  lines.push(`    queryFn: async () => {`);
-  lines.push(`      const r = await api.get(\`/${tag}\`);`);
-  lines.push(`      return ${agg.name}ListResponse.parse(r);`);
-  lines.push(`    },`);
-  lines.push(`  }));`);
-  lines.push(`}`);
+  // useAll<Agg> — paged-by-default (M-T2.6): a paged `all` returns the
+  // `<Agg>Paged` envelope and accepts a page/pageSize/sort/dir query getter
+  // (svelte-query re-reads the options thunk reactively, so the query rides its
+  // values); a user-declared non-paged `find all(): T[]` keeps the no-arg array.
+  const allFind = repo?.finds.find((f) => f.name === "all");
+  const allPaged = allFind ? pagedReturn(allFind.returnType) : null;
+  if (allPaged) {
+    lines.push(
+      `export function useAll${plural(agg.name)}(query: () => AllQueryInput = () => ({})) {`,
+    );
+    lines.push(`  return createQuery(() => {`);
+    lines.push(`    const q = AllQuery.parse(query());`);
+    lines.push(`    return {`);
+    lines.push(`      queryKey: ["${tag}", "list", q],`);
+    lines.push(`      queryFn: async () => {`);
+    lines.push(
+      `        const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();`,
+    );
+    lines.push(`        const r = await api.get(\`/${tag}\${qs ? "?" + qs : ""}\`);`);
+    lines.push(`        return ${allPaged.name}.parse(r);`);
+    lines.push(`      },`);
+    lines.push(`    };`);
+    lines.push(`  });`);
+    lines.push(`}`);
+  } else {
+    lines.push(`export function useAll${plural(agg.name)}() {`);
+    lines.push(`  return createQuery(() => ({`);
+    lines.push(`    queryKey: ${aggKey},`);
+    lines.push(`    queryFn: async () => {`);
+    lines.push(`      const r = await api.get(\`/${tag}\`);`);
+    lines.push(`      return ${agg.name}ListResponse.parse(r);`);
+    lines.push(`    },`);
+    lines.push(`  }));`);
+    lines.push(`}`);
+  }
   lines.push("");
 
   lines.push(`export function use${agg.name}ById(id: () => string | undefined) {`);

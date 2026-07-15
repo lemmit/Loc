@@ -658,6 +658,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   let dataVar = "rows";
   let assignName = "items";
   let isSingle = false;
+  let isPaged = false;
 
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -667,6 +668,8 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       ofExpr = renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "single") {
       isSingle = arg.kind === "literal" && arg.value === "true";
+    } else if (name === "paged") {
+      isPaged = arg.kind === "literal" && arg.value === "true";
     } else if (name === "loading") {
       loadingHeex = renderChild(arg, ctx);
     } else if (name === "error") {
@@ -734,14 +737,18 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
 
   // List query: check for nil (loading), error, empty, then render data.
   // The Table primitive already iterates @items internally via rows={@items},
-  // so no Elixir for-loop is needed here.
+  // so no Elixir for-loop is needed here.  When the auto-`findAll` is paged
+  // (M-T2.6) the assign is the `%{items, page, …}` envelope, so the emptiness
+  // guard unwraps `.items` (the pager/sort UI itself stays HEEx-pinned per the
+  // M-T1.1 heex-parity reason — this is only the envelope-unwrap the flip forces).
+  const emptyTarget = isPaged ? `@${assignName}.items` : `@${assignName}`;
   return [
     `<%= cond do %>`,
     `  <% is_nil(@${assignName}) -> %>`,
     `    ${loadingHeex}`,
     `  <% @${assignName} == :error -> %>`,
     `    ${errorHeex}`,
-    `  <% Enum.empty?(@${assignName}) -> %>`,
+    `  <% Enum.empty?(${emptyTarget}) -> %>`,
     `    ${emptyHeex}`,
     `  <% true -> %>`,
     `    ${dataHeex}`,

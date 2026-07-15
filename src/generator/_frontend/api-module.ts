@@ -70,11 +70,16 @@ export function buildApiModule(
   // re-renders and passes fresh args every render — no wrapper needed).
   const isVueQuery = queryPackage === "@tanstack/vue-query";
   const hasParamFind = !!repo?.finds.some((f) => f.name !== "all");
+  // A paged `all` (paged-by-default findAll, M-T2.6) also takes a
+  // `MaybeRefOrGetter` query in the Vue hook, so it needs the same vue imports
+  // even when there's no other parameterised find.
+  const hasVueGetterHook =
+    hasParamFind || !!repo?.finds.some((f) => f.name === "all" && pagedReturn(f.returnType));
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery, useMutation, useQueryClient } from "${queryPackage}";`);
-  if (isVueQuery && hasParamFind) {
+  if (isVueQuery && hasVueGetterHook) {
     lines.push(`import { type MaybeRefOrGetter, computed, toValue } from "vue";`);
   }
   lines.push(`import { api } from "./client";`);
@@ -151,20 +156,27 @@ export function buildApiModule(
   }
   lines.push("");
 
-  // Find queries (other than `all`, which has no params).
+  // Find queries.  `all` has no user params, but a PAGED `all` (paged-by-default
+  // findAll, M-T2.6) still needs its page/pageSize/sort/dir query schema — so
+  // skip only a NON-paged `all` (the legacy unbounded shape).
   if (repo) {
     for (const find of repo.finds) {
-      if (find.name === "all") continue;
+      if (find.name === "all" && !pagedReturn(find.returnType)) continue;
       lines.push(`export const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
-      // A paged find gains 1-based `page` / `pageSize` controls (P3b),
-      // mirroring the backend route's query schema.
+      // A paged find gains 1-based `page`/`pageSize` + server-side `sort`/`dir`
+      // controls (P3b / M-T2.6).  `sort`/`dir` are plain strings (bound directly
+      // to the list's `sortKey`/`sortDir` state, which starts empty = unsorted);
+      // the repository whitelists the column server-side (unknown → `id`), so the
+      // boundary needs no enum — an enum here would reject the empty initial sort.
       if (pagedReturn(find.returnType)) {
         lines.push(
           `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          `  sort: z.string().default("id"),`,
+          `  dir: z.string().default("asc"),`,
         );
       }
       lines.push(`});`);
@@ -203,7 +215,10 @@ export function buildApiModule(
       if (!paged || pagedSeen.has(paged.name)) continue;
       pagedSeen.add(paged.name);
       lines.push(
-        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });`,
+        // Integer pagination counters — match the backend wire contract
+        // (every backend's OpenAPI types these `integer`; see the Hono
+        // routes-builder paged schema).
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });`,
       );
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
@@ -243,16 +258,55 @@ export function buildApiModule(
   const aggKey = `["${tag}"]`;
   const detailKey = `["${tag}", id]`;
 
-  // useAll<Agg>
-  lines.push(`export function useAll${plural(agg.name)}() {`);
-  lines.push(`  return useQuery({`);
-  lines.push(`    queryKey: ${aggKey},`);
-  lines.push(`    queryFn: async () => {`);
-  lines.push(`      const r = await api.get(\`/${tag}\`);`);
-  lines.push(`      return ${agg.name}ListResponse.parse(r);`);
-  lines.push(`    },`);
-  lines.push(`  });`);
-  lines.push(`}`);
+  // useAll<Agg> — paged-by-default (M-T2.6): the implicit `all` returns the
+  // `<Agg>Paged` envelope and accepts page/pageSize/sort/dir query controls, so
+  // the hook takes an (optional-with-defaults) query object whose values ride
+  // the query key (distinct pages/sorts cache separately) + the URL query
+  // string.  A user-declared `find all(): T[]` (non-paged) keeps the legacy
+  // no-arg array shape.
+  const allFind = repo?.finds.find((f) => f.name === "all");
+  const allPaged = allFind ? pagedReturn(allFind.returnType) : null;
+  if (allPaged) {
+    if (isVueQuery) {
+      lines.push(
+        `export function useAll${plural(agg.name)}(query: MaybeRefOrGetter<AllQueryInput> = () => ({})) {`,
+        `  const q = computed(() => AllQuery.parse(toValue(query)));`,
+        `  return useQuery({`,
+        `    queryKey: ["${tag}", "list", q],`,
+        `    queryFn: async () => {`,
+        `      const qs = new URLSearchParams(Object.entries(q.value).map(([k, v]) => [k, String(v)])).toString();`,
+        `      const r = await api.get(\`/${tag}\${qs ? "?" + qs : ""}\`);`,
+        `      return ${allPaged.name}.parse(r);`,
+        `    },`,
+        `  });`,
+        `}`,
+      );
+    } else {
+      lines.push(
+        `export function useAll${plural(agg.name)}(query: AllQueryInput = {}) {`,
+        `  const q = AllQuery.parse(query);`,
+        `  return useQuery({`,
+        `    queryKey: ["${tag}", "list", q],`,
+        `    queryFn: async () => {`,
+        `      const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();`,
+        `      const r = await api.get(\`/${tag}\${qs ? "?" + qs : ""}\`);`,
+        `      return ${allPaged.name}.parse(r);`,
+        `    },`,
+        `  });`,
+        `}`,
+      );
+    }
+  } else {
+    lines.push(`export function useAll${plural(agg.name)}() {`);
+    lines.push(`  return useQuery({`);
+    lines.push(`    queryKey: ${aggKey},`);
+    lines.push(`    queryFn: async () => {`);
+    lines.push(`      const r = await api.get(\`/${tag}\`);`);
+    lines.push(`      return ${agg.name}ListResponse.parse(r);`);
+    lines.push(`    },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+  }
   lines.push("");
 
   // use<Agg>ById

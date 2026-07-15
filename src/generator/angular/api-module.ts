@@ -1,4 +1,9 @@
 import { createInputFields, forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
 import { unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
@@ -135,6 +140,13 @@ export function buildAngularApiModule(
   // `DELETE /<tag>/{id}` route + `useDelete<Agg>` factory the `DestroyForm`
   // renderer hoists.  Plain aggregates' modules stay delete-free.
   const hasDelete = !!agg.canonicalDestroy;
+
+  // Paged-by-default findAll (M-T2.6): a paged `all` returns the `<Agg>Paged`
+  // envelope and accepts a page/pageSize/sort/dir query getter.  A user-declared
+  // non-paged `find all(): T[]` keeps the legacy no-arg array shape.
+  const allFind = repo?.finds.find((f) => f.name === "all");
+  const allPaged = allFind ? pagedReturn(allFind.returnType) : null;
+  const pagedName = `${single}Paged`;
 
   const fields = forApiRead(wireFieldsFor(agg));
   const createFields = createInputFields(agg);
@@ -296,13 +308,45 @@ export function buildAngularApiModule(
     ...opRequests,
     ...opUnionTypes,
     ...findQueryInterfaces,
+    // Paged-by-default findAll envelope + query input (M-T2.6).
+    ...(allPaged
+      ? [
+          `export interface ${pagedName} {`,
+          `  items: ${responseName}[];`,
+          "  page: number;",
+          "  pageSize: number;",
+          "  total: number;",
+          "  totalPages: number;",
+          "}",
+          "",
+          "export interface AllQuery {",
+          "  page?: number;",
+          "  pageSize?: number;",
+          "  sort?: string;",
+          "  dir?: string;",
+          "}",
+          "",
+        ]
+      : []),
     `@Injectable({ providedIn: "root" })`,
     `export class ${serviceName} {`,
     "  private readonly http = inject(HttpClient);",
     "",
-    `  findAll() {`,
-    `    return this.http.get<${responseName}[]>(\`\${API_BASE_URL}/${tag}\`);`,
-    "  }",
+    ...(allPaged
+      ? [
+          `  findAll(query: AllQuery = {}) {`,
+          `    const q = { page: ${PAGED_DEFAULT_PAGE}, pageSize: ${PAGED_DEFAULT_PAGE_SIZE}, sort: "id", dir: "asc", ...query };`,
+          "    const qs = new URLSearchParams(",
+          "      Object.entries(q).map(([k, v]) => [k, String(v)]),",
+          "    ).toString();",
+          `    return this.http.get<${pagedName}>(\`\${API_BASE_URL}/${tag}\${qs ? "?" + qs : ""}\`);`,
+          "  }",
+        ]
+      : [
+          `  findAll() {`,
+          `    return this.http.get<${responseName}[]>(\`\${API_BASE_URL}/${tag}\`);`,
+          "  }",
+        ]),
     "",
     `  findById(id: string) {`,
     `    return this.http.get<${responseName}>(\`\${API_BASE_URL}/${tag}/\${id}\`);`,
@@ -328,13 +372,25 @@ export function buildAngularApiModule(
     " *  keyed by the collection tag, dedupes concurrent reads and is invalidated",
     " *  by the matching mutations.  `data` (a `T[] | undefined` signal — defaulted",
     " *  to `[]` at the read site) / `isLoading` / `isError` are read via `()`. */",
-    `export function ${allFn}() {`,
-    `  const service = inject(${serviceName});`,
-    `  return injectQuery(() => ({`,
-    `    queryKey: ["${tag}"] as const,`,
-    `    queryFn: () => firstValueFrom(service.findAll()),`,
-    `  }));`,
-    "}",
+    ...(allPaged
+      ? [
+          `export function ${allFn}(query: () => AllQuery = () => ({})) {`,
+          `  const service = inject(${serviceName});`,
+          `  return injectQuery(() => ({`,
+          `    queryKey: ["${tag}", "list", query()] as const,`,
+          `    queryFn: () => firstValueFrom(service.findAll(query())),`,
+          `  }));`,
+          "}",
+        ]
+      : [
+          `export function ${allFn}() {`,
+          `  const service = inject(${serviceName});`,
+          `  return injectQuery(() => ({`,
+          `    queryKey: ["${tag}"] as const,`,
+          `    queryFn: () => firstValueFrom(service.findAll()),`,
+          `  }));`,
+          "}",
+        ]),
     "",
     "/** `findById` query — the single-record sibling.  `enabled: !!id` keeps the",
     " *  query idle (no request) when the route param is absent; the record is",

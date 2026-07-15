@@ -27,6 +27,14 @@ export const UpdateOrderRequest = z.object({
 });
 export type UpdateOrderRequest = z.infer<typeof UpdateOrderRequest>;
 
+export const AllQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(20),
+  sort: z.string().default("id"),
+  dir: z.string().default("asc"),
+});
+export type AllQuery = z.infer<typeof AllQuery>;
+export type AllQueryInput = z.input<typeof AllQuery>;
 export const ByCustomerQuery = z.object({
   customerId: z.string(),
 });
@@ -48,13 +56,17 @@ export const OrderResponse = z.object({
 export type OrderResponse = z.infer<typeof OrderResponse>;
 export const OrderListResponse = z.array(OrderResponse);
 export type OrderListResponse = z.infer<typeof OrderListResponse>;
+export const OrderPaged = z.object({ items: z.array(OrderResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
+export type OrderPaged = z.infer<typeof OrderPaged>;
 
-export function useAllOrders() {
+export function useAllOrders(query: AllQueryInput = {}) {
+  const q = AllQuery.parse(query);
   return useQuery({
-    queryKey: ["orders"],
+    queryKey: ["orders", "list", q],
     queryFn: async () => {
-      const r = await api.get(`/orders`);
-      return OrderListResponse.parse(r);
+      const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
+      const r = await api.get(`/orders${qs ? "?" + qs : ""}`);
+      return OrderPaged.parse(r);
     },
   });
 }

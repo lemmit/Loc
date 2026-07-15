@@ -48,6 +48,19 @@ export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
 }
 
+/** Whether the aggregate's implicit `all` is the paged `Paged<T>` findAll
+ *  (M-T2.6) rather than a bare `T[]`.  Macro-time mirror of the enrichment
+ *  exclusion in `ensureFindAll` (src/ir/enrich/enrichments.ts): only a plain
+ *  single-table relational aggregate pages; event-sourced, `shape(document)` /
+ *  `shape(embedded)`, and inheritance-subtype (`extends`) aggregates keep the
+ *  unbounded `T[]` (their read path can't be a plain SQL `LIMIT/OFFSET` page),
+ *  so their scaffold list stays CLIENT-paged. */
+function aggregateHasPagedFindAll(agg: Aggregate): boolean {
+  return (
+    agg.persistedAs !== "eventLog" && (agg.shape ?? "relational") === "relational" && !agg.superType
+  );
+}
+
 export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
   const pluralSnake = snake(plural(agg.name));
   const aggName = agg.name;
@@ -61,7 +74,11 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       // The full Breadcrumbs/Toolbar/QueryView/Table tree, emitted directly as
       // unfoldable source (no IR-phase sentinel expansion).  The find-filter
       // inputs bind to page state named by `filterStateFields`.
-      body: scaffoldList(aggName, scalarColumnsForAggregate(agg), { apiHandle, filters }),
+      body: scaffoldList(aggName, scalarColumnsForAggregate(agg), {
+        apiHandle,
+        filters,
+        paged: aggregateHasPagedFindAll(agg),
+      }),
       // Filter-bar state + the interactive-table sort/page state (M-T1.1):
       // `sortKey`/`sortDir` (string-init "", unsorted) drive column sort;
       // `pageNum` (1-based int) drives the client-side pager.  Consumed on the

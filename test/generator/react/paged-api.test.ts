@@ -34,7 +34,7 @@ describe("react api-builder — paged finds (P3b)", () => {
   it("emits a <Agg>Paged response schema reusing the carrier's response", async () => {
     const api = await apiModule();
     expect(api).toContain(
-      "export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });",
+      "export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });",
     );
     expect(api).toContain("export type WarehousePaged = z.infer<typeof WarehousePaged>;");
   });

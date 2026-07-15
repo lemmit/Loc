@@ -60,11 +60,16 @@ public sealed class ProductRepository : IProductRepository
         _db.Products.Remove(aggregate);
         await _db.SaveChangesAsync(cancellationToken);
     }
-    public async Task<List<Product>> All(CancellationToken cancellationToken = default)
+    public async Task<Paged<Product>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default)
     {
-        var result = await _db.Products.ToListAsync(cancellationToken);
-        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "all", result.Count);
-        return result;
+        var offset = (page - 1) * pageSize;
+        var sortColumn = sort switch { "sku" => "Sku", _ => "Id" };
+        var total = await _db.Products.CountAsync(cancellationToken);
+        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;
+        var ordered = dir == "desc" ? _db.Products.OrderByDescending(e => EF.Property<object>(e, sortColumn)) : _db.Products.OrderBy(e => EF.Property<object>(e, sortColumn));
+        var items = await ordered.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
+        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "all", items.Count);
+        return new Paged<Product>(items, page, pageSize, total, totalPages);
     }
     public async Task<Product?> BySku(string sku, CancellationToken cancellationToken = default)
     {

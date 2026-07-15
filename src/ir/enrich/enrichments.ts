@@ -1559,10 +1559,42 @@ function ensureFindAll(
       out.push(repo);
     }
     if (!repo.finds.some((f) => f.name === "all")) {
+      // Paged-by-default (M-T2.6, DEBT-28): the implicit `all` returns the
+      // bounded `Paged<T>` envelope, not an unbounded `T[]` — the scaling
+      // failure mode of every generated list endpoint.  Every backend already
+      // emits the paged path (route page/pageSize/sort/dir + repo count +
+      // limit/offset + ORDER BY); the scaffold list consumes it server-side.
+      //
+      // EXCEPTION — the implicit `all` stays an unbounded `T[]` for the
+      // aggregate shapes whose read path can't be a plain SQL `LIMIT/OFFSET`
+      // page over one queryable table, so the paged route/repo emission doesn't
+      // apply.  DEBT-28 targets the unbounded *relational* findAll; bounding the
+      // exotic shapes is a separate projection concern (tracked as follow-up):
+      //   - `persistedAs(eventLog)` — `all` folds every event stream, not a
+      //     `LIMIT/OFFSET` query.
+      //   - `shape(document)` — the whole aggregate is one opaque JSONB blob
+      //     loaded by id and rehydrated in memory; there's no queryable column
+      //     to page/ORDER BY server-side.
+      //   - `shape(embedded)` — parts fold into JSONB; backends' support for
+      //     paging its queryable root diverges, so keep it uniform (bare) across
+      //     every backend rather than paged on some and not others.
+      //   - inheritance subtypes (`extends` a base) — the polymorphic
+      //     `find all <Base>` reader concatenates each subtype's `all()`; a
+      //     union of subtype tables can't be page-sliced correctly before the
+      //     merge, so the subtypes stay bare so the base reader composes.
+      // Keeping these an unbounded `T[]` keeps the IR honest against what the
+      // emitters actually produce (a paged flag no controller honoured would be
+      // a lie — e.g. an unused `page_param/3` that fails `--warnings-as-errors`).
+      const paged =
+        agg.persistedAs !== "eventLog" &&
+        (agg.savingShape ?? "relational") === "relational" &&
+        !agg.extendsAggregate;
       const all: FindIR = {
         name: "all",
         params: [],
-        returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
+        returnType: paged
+          ? { kind: "genericInstance", ctor: "paged", arg: { kind: "entity", name: agg.name } }
+          : { kind: "array", element: { kind: "entity", name: agg.name } },
       };
       repo.finds = [all, ...repo.finds];
     }
