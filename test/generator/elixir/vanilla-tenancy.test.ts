@@ -176,9 +176,10 @@ system EmbTenancy {
 describe("vanilla embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
   it("threads current_user into the embedded repository reads and pins the predicate", async () => {
     const repo = file(await generateSystemFiles(EMBEDDED_SOURCE), "/shop/order_repository.ex");
-    expect(repo).toContain(
-      'def list(page \\\\ 1, page_size \\\\ 20, sort \\\\ "id", dir \\\\ "asc", current_user \\\\ nil) do',
-    );
+    // `shape(embedded)` keeps the bare `list` (M-T2.6 pages only plain
+    // single-table relational aggregates), so no page/pageSize/sort/dir args —
+    // just the threaded principal.
+    expect(repo).toContain("def list(current_user \\\\ nil) do");
     expect(repo).toContain(`where: record.tenant_id == ${PIN}`);
     expect(repo).toContain(`where: record.id == ^id and (record.tenant_id == ${PIN})`);
     // The custom find carries the actor too.

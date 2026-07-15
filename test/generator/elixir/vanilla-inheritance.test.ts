@@ -100,7 +100,10 @@ describe("vanilla aggregate inheritance — TPH (sharedTable)", () => {
   it("a concrete repository filters every read by kind and stamps kind on insert", async () => {
     const repo = file(await generateSystemFiles(TPH), "/parties/customer_repository.ex");
     // list + find_by_id scope to this subtype's rows on the shared table.
-    expect(repo).toMatch(/def list\(page \\\\ 1[\s\S]*where: record\.kind == "Customer"/);
+    // An inheritance subtype keeps the bare `list` (M-T2.6 excludes polymorphic
+    // hierarchies from the paged findAll — the `find all <Base>` reader
+    // concatenates each subtype's list, which a per-subtype page can't compose).
+    expect(repo).toMatch(/def list do[\s\S]*where: record\.kind == "Customer"/);
     expect(repo).toMatch(/def find_by_id\(id\)[\s\S]*record\.kind == "Customer"/);
     // insert stamps the discriminator so the shared-table row is routable back.
     expect(repo).toContain('Ecto.Changeset.put_change(:kind, "Customer")');

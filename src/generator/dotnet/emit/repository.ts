@@ -667,30 +667,6 @@ export function renderDocumentRepositoryImpl(
       .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
       .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
-    // Paged-by-default findAll (M-T2.6): the document column carries no
-    // queryable per-field shape, so the page is sliced in memory over the
-    // rehydrated documents (count + Skip/Take).  Ordering falls back to the
-    // stable `Id` key with `dir` — a JSONB blob can't cheaply sort by an
-    // arbitrary wire column, so `sort` is accepted (route parity) but not honored.
-    if (pagedReturn(f.returnType)) {
-      return [
-        `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize", "string sort", "string dir"])})`,
-        "    {",
-        "        _ = sort;",
-        `        var __all = (await _db.${setName}.ToListAsync(cancellationToken)).Select(__d => ${deser})${filter}.ToList();`,
-        "        var total = __all.Count;",
-        "        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;",
-        `        var __ordered = dir == "desc" ? __all.OrderByDescending(x => x.Id.Value) : __all.OrderBy(x => x.Id.Value);`,
-        "        var items = __ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();",
-        `        ${renderDotnetLogCall("findExecuted", [
-          { name: "aggregate", valueExpr: `"${agg.name}"` },
-          { name: "find", valueExpr: `"${f.name}"` },
-          { name: "rows", valueExpr: "items.Count" },
-        ])}`,
-        `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
-        "    }",
-      ];
-    }
     const isArray = f.returnType.kind === "array";
     const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
     return [

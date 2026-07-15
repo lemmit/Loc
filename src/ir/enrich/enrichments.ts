@@ -1565,16 +1565,30 @@ function ensureFindAll(
       // emits the paged path (route page/pageSize/sort/dir + repo count +
       // limit/offset + ORDER BY); the scaffold list consumes it server-side.
       //
-      // EXCEPTION — event-sourced aggregates (`persistedAs(eventLog)`): their
-      // `all` is a fold over every event stream, not a SQL `LIMIT/OFFSET`
-      // query, so the paged route/repo emission doesn't apply (the ES
-      // read-path emitters emit an unpaged list on every backend).  DEBT-28
-      // targets the unbounded *SQL* findAll; a bounded ES read model is a
-      // separate projection concern.  Keeping the ES `all` an unbounded `T[]`
-      // keeps the IR honest against what the ES emitters actually produce
-      // (otherwise the paged flag would be a lie the controllers ignore —
-      // e.g. an unused `page_param/3` helper that fails `--warnings-as-errors`).
-      const paged = agg.persistedAs !== "eventLog";
+      // EXCEPTION — the implicit `all` stays an unbounded `T[]` for the
+      // aggregate shapes whose read path can't be a plain SQL `LIMIT/OFFSET`
+      // page over one queryable table, so the paged route/repo emission doesn't
+      // apply.  DEBT-28 targets the unbounded *relational* findAll; bounding the
+      // exotic shapes is a separate projection concern (tracked as follow-up):
+      //   - `persistedAs(eventLog)` — `all` folds every event stream, not a
+      //     `LIMIT/OFFSET` query.
+      //   - `shape(document)` — the whole aggregate is one opaque JSONB blob
+      //     loaded by id and rehydrated in memory; there's no queryable column
+      //     to page/ORDER BY server-side.
+      //   - `shape(embedded)` — parts fold into JSONB; backends' support for
+      //     paging its queryable root diverges, so keep it uniform (bare) across
+      //     every backend rather than paged on some and not others.
+      //   - inheritance subtypes (`extends` a base) — the polymorphic
+      //     `find all <Base>` reader concatenates each subtype's `all()`; a
+      //     union of subtype tables can't be page-sliced correctly before the
+      //     merge, so the subtypes stay bare so the base reader composes.
+      // Keeping these an unbounded `T[]` keeps the IR honest against what the
+      // emitters actually produce (a paged flag no controller honoured would be
+      // a lie — e.g. an unused `page_param/3` that fails `--warnings-as-errors`).
+      const paged =
+        agg.persistedAs !== "eventLog" &&
+        (agg.savingShape ?? "relational") === "relational" &&
+        !agg.extendsAggregate;
       const all: FindIR = {
         name: "all",
         params: [],

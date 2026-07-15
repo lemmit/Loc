@@ -953,8 +953,15 @@ export function filterStateFields(filters: readonly FilterFind[]): Array<{ name:
 export function scaffoldList(
   aggName: string,
   columns: readonly ScaffoldColumn[],
-  opts: { apiHandle?: string; filters?: readonly FilterFind[] } = {},
+  opts: { apiHandle?: string; filters?: readonly FilterFind[]; paged?: boolean } = {},
 ): Expression {
+  // Whether the aggregate's implicit `all` is the paged `Paged<T>` findAll
+  // (M-T2.6).  Mirrors the enrichment-side exclusion in
+  // `ensureFindAll` (src/ir/enrich/enrichments.ts) — a plain single-table
+  // relational aggregate pages; document/embedded/event-sourced/inheritance
+  // shapes keep the bare `T[]` and a CLIENT-paged list.  Defaults to paged so
+  // relational callers that don't classify stay server-paged.
+  const serverPagedAll = opts.paged ?? true;
   const slug = snake(plural(aggName));
   const humanPlural = humanize(plural(aggName));
   const humanLower = humanPlural.toLowerCase();
@@ -1059,13 +1066,22 @@ export function scaffoldList(
   // (`pageNum`, fixed pageSize 10, `sortKey`, `sortDir`) as the paged findAll's
   // query controls, so a page/sort change refetches the matching server page.
   const allView = (): Expression =>
-    makeQueryView(
-      memberAccess(queryRoot(), "all", {
-        call: true,
-        args: [nameRefExpr("pageNum"), intLit(10), nameRefExpr("sortKey"), nameRefExpr("sortDir")],
-      }),
-      true,
-    );
+    serverPagedAll
+      ? makeQueryView(
+          memberAccess(queryRoot(), "all", {
+            call: true,
+            args: [
+              nameRefExpr("pageNum"),
+              intLit(10),
+              nameRefExpr("sortKey"),
+              nameRefExpr("sortDir"),
+            ],
+          }),
+          true,
+        )
+      : // A non-paged `all` (document/embedded/eventLog/inheritance shape) is a
+        // bare `T[]` — call it with no args and CLIENT-slice/sort in the browser.
+        makeQueryView(memberAccess(queryRoot(), "all", { call: true, args: [] }), false);
 
   // Find-filter bar (T3.14): each qualifying `find` gets one text input per
   // param; when every input of a find is non-empty the list switches to that
