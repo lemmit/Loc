@@ -1,5 +1,14 @@
-<Field.Root invalid={!!( {{errorExpr}} )}>
+{{#if rowFields}}<VStack align="stretch" gap={2}>
+          <Text fontWeight="medium">{{label}}</Text>
+          { {{path}}Fields.map((field, index) => (
+            <HStack key={field.id} align="flex-end">
+{{#each rowFields}}              <Input placeholder="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
+{{/each}}              <Button colorPalette="red" size="sm" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+            </HStack>
+          )) }
+          <Button size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+        </VStack>{{else}}<Field.Root invalid={!!( {{errorExpr}} )}>
           <Field.Label>{{label}}</Field.Label>
           <Input {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
           <Field.ErrorText>{ {{errorExpr}} }</Field.ErrorText>
-        </Field.Root>
+        </Field.Root>{{/if}}

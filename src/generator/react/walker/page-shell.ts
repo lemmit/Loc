@@ -650,7 +650,8 @@ function renderFormOpWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } = state;
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr, fieldArrays } =
+    state;
   const opPascal = upperFirst(op.name);
   const tplCtx = {
     aggregateName: agg.name,
@@ -662,6 +663,7 @@ function renderFormOpWiring(
     humanOp: humanize(op.name),
     slug: snake(plural(agg.name)),
     srcImportPrefix,
+    fieldArrays,
     idTargets: idTargets.map((t) => ({
       name: t.name,
       nameCamel: lowerFirst(t.name),
@@ -713,13 +715,14 @@ function renderFormRunsWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
+  const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs, fieldArrays } = state;
   const wfPascal = upperFirst(workflow.name);
   const tplCtx = {
     workflowName: workflow.name,
     workflowPascal: wfPascal,
     humanWorkflow: humanize(workflow.name),
     srcImportPrefix,
+    fieldArrays,
     idTargets: idTargets.map((t) => ({
       name: t.name,
       nameCamel: lowerFirst(t.name),

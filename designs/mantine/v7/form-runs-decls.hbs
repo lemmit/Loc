@@ -3,4 +3,5 @@
 {{/each}}  const {{#if useController}}{ register, handleSubmit, setError, control, formState: { errors } }{{else}}{ register, handleSubmit, setError, formState: { errors } }{{/if}} = useForm<{{workflowPascal}}Request>({
     resolver: zodResolver({{workflowPascal}}Request),
     defaultValues: {{{defaultValuesTs}}},
-  });
+  });{{#each fieldArrays}}
+  const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control, name: "{{this.name}}" });{{/each}}

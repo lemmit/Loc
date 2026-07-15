@@ -375,6 +375,22 @@
         "named": [
           "Input"
         ]
+      },
+      {
+        "from": "@/components/ui/button",
+        "named": [
+          "Button"
+        ]
+      },
+      {
+        "from": "@/components/ui/form",
+        "named": [
+          "FormControl",
+          "FormField",
+          "FormItem",
+          "FormLabel",
+          "FormMessage"
+        ]
       }
     ],
     "field-input-valueobject": [],

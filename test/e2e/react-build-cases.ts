@@ -33,4 +33,9 @@ export const reactBuildExamples = [
   { ddd: "web/src/examples/loom-landing.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/action-showcase.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/store-showcase.ddd", reactDir: "web_app" },
+  // Dynamic array-of-value-object form rows (RHF useFieldArray) on both the
+  // scaffolded New (`CreateForm`) and Detail (update `OperationForm`) pages —
+  // guards the row templates + the op-form `fieldArrays` hoist across every
+  // pack.
+  { ddd: "web/src/examples/subform-showcase.ddd", reactDir: "web_app" },
 ] as const;
