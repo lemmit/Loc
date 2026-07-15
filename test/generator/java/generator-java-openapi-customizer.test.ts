@@ -84,10 +84,17 @@ describe("java OpenApiCustomizer — list/view array wrappers", () => {
     expect(c).toContain('new Wrapper("OrderListResponse", "OrderResponse")');
   });
 
-  it("retargets the auto-findAll GET to its named list wrapper", async () => {
+  it("emits the paged auto-findAll GET with no list wrapper (springdoc derives <Agg>Paged)", async () => {
     const c = await customizer();
-    // GET /<plural> → array wrapper, no error responses.
-    expect(c).toContain('new Route("get", "/api/orders", "OrderListResponse", new int[] {}, null)');
+    // GET /<plural> is paged (M-T2.6): the controller returns the concrete
+    // `OrderPaged` record, so no list wrapper is registered on the route (that
+    // would force the bare array) — springdoc derives the envelope schema +
+    // page/pageSize/sort/dir params natively.  The required set is pinned so the
+    // parity gate sees all five envelope fields required.
+    expect(c).toContain('new Route("get", "/api/orders", null, new int[] {}, null)');
+    expect(c).toContain(
+      'new RequiredSet("OrderPaged", List.of("items", "page", "pageSize", "total", "totalPages"))',
+    );
   });
 
   it("retargets a `T[]` find + a shorthand view to the list wrapper", async () => {

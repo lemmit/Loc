@@ -179,6 +179,17 @@ export function isPagedFind(f: FindIR): boolean {
   return f.returnType.kind === "genericInstance" && f.returnType.ctor === "paged";
 }
 
+/** True when the implicit `all` findAll returns the `paged` wire (M-T2.6) — the
+ *  plain single-table relational case.  Document / embedded / event-sourced /
+ *  inheritance-subtype aggregates keep the bare `List` findAll (excluded by the
+ *  enrichment predicate), so this is false for them.  Drives the paged relational
+ *  `all<Agg>` surface (repository `findAllPaged` + the `Paged`/​`<Agg>Paged`
+ *  service/controller shapes). */
+export function isPagedAutoAll(repo: RepositoryIR | undefined): boolean {
+  const all = (repo?.finds ?? []).find(isAutoAllFind);
+  return all ? isPagedFind(all) : false;
+}
+
 /** In-memory server-side sort (M-T2.6) for the non-relational paged impls
  *  (document-store / event-store, which page a materialised `List<Agg>`).
  *  Emits a typed `Comparator<Agg>` switched on the whitelisted `sort` key —
@@ -279,7 +290,8 @@ export function renderJavaRepositoryInterface(
       `    List<${agg.name}> run${upperFirst(r.name)}(${pagedParams});`,
     ];
   });
-  const anyPaged = declaredFinds(repo).some(isPagedFind);
+  const pagedAll = isPagedAutoAll(repo);
+  const anyPaged = declaredFinds(repo).some(isPagedFind) || pagedAll;
   return lines(
     `package ${ctx.domainPkg};`,
     ``,
@@ -300,6 +312,12 @@ export function renderJavaRepositoryInterface(
     ``,
     `    List<${agg.name}> findAll();`,
     ``,
+    // Paged relational findAll (M-T2.6) — a bounded page over the single table,
+    // server-side sorted.  The plain `List findAll()` above stays for the
+    // internal retrieval / in-memory readers.
+    pagedAll
+      ? `    Paged<${agg.name}> findAllPaged(int page, int pageSize, String sort, String dir);\n`
+      : null,
     `    void delete(${agg.name} aggregate);`,
     findLines.length > 0 ? `` : null,
     ...findLines,
@@ -425,9 +443,27 @@ export function renderJavaSpringDataRepository(
       ``,
     );
   }
+  // Paged relational findAll (M-T2.6): a `Page<Agg> findAllPaged(Pageable)` the
+  // impl drives with a `PageRequest` (page/size/sort).  Declared as an explicit
+  // @Query so a principal (tenancy) `filter` is AND-ed in — Spring derives the
+  // count query from it; a non-principal aggregate gets the bare `select e`,
+  // still subject to the entity's static @SQLRestriction.
+  const pagedAllLines: string[] = [];
+  if (isPagedAutoAll(repo)) {
+    imports.add("org.springframework.data.domain.Page");
+    imports.add("org.springframework.data.domain.Pageable");
+    imports.add("org.springframework.data.jpa.repository.Query");
+    const where = principalClause ? ` where ${principalClause}` : "";
+    pagedAllLines.push(
+      `    @Query("select e from ${agg.name} e${where}")`,
+      `    Page<${agg.name}> findAllPaged(Pageable pageable);`,
+      ``,
+    );
+  }
   const allMethodLines = [
     ...principalOverrides,
     ...writeOverride,
+    ...pagedAllLines,
     ...methodLines,
     ...retrievalLines,
   ];
@@ -610,6 +646,16 @@ export function renderJavaRepositoryImpl(
   // to disableFilter/enableFilter).
   if (needsEntityManager) imports.add("jakarta.persistence.EntityManager");
   if (needsEntityManager) imports.add("jakarta.persistence.PersistenceContext");
+  const pagedAll = isPagedAutoAll(repo);
+  const pagedAllSortWhitelist = pagedAll
+    ? sortableFields(agg)
+        .map((wf) => JSON.stringify(wf))
+        .join(", ")
+    : "";
+  if (pagedAll) {
+    imports.add("org.springframework.data.domain.PageRequest");
+    imports.add("org.springframework.data.domain.Sort");
+  }
   const ctorParams = [`${agg.name}JpaRepository jpa`];
   const ctorAssigns = [`        this.jpa = jpa;`];
   if (injectAccessor) {
@@ -631,7 +677,7 @@ export function renderJavaRepositoryImpl(
     ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
-    finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    finds.some(isPagedFind) || pagedAll ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     anyReified && ctx.criteriaPkg && ctx.criteriaPkg !== ctx.infraPkg
       ? `import ${ctx.criteriaPkg}.${agg.name}Criteria;`
       : null,
@@ -726,6 +772,22 @@ export function renderJavaRepositoryImpl(
     `        return jpa.findAll();`,
     `    }`,
     ``,
+    // Paged relational findAll (M-T2.6) — whitelist the wire sort key (unknown →
+    // `id`, the stable default), build the `PageRequest`, and wrap the Spring
+    // `Page` in the cross-backend `Paged<>` envelope.
+    ...(pagedAll
+      ? [
+          `    @Override`,
+          `    public Paged<${agg.name}> findAllPaged(int page, int pageSize, String sort, String dir) {`,
+          `        String __sortField = java.util.List.of(${pagedAllSortWhitelist}).contains(sort) ? sort : "id";`,
+          `        Sort __sort = Sort.by("desc".equals(dir) ? Sort.Direction.DESC : Sort.Direction.ASC, __sortField);`,
+          `        var result = jpa.findAllPaged(PageRequest.of(page - 1, pageSize, __sort));`,
+          `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "all", "rows", result.getTotalElements());`,
+          `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
+          `    }`,
+          ``,
+        ]
+      : []),
     `    @Override`,
     `    public void delete(${agg.name} aggregate) {`,
     `        jpa.delete(aggregate);`,

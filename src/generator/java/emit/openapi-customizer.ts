@@ -28,7 +28,7 @@ import { lines } from "../../../util/code-builder.js";
 import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
-import { declaredFinds, isPagedFind } from "./repository.js";
+import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 
 // ---------------------------------------------------------------------------
@@ -260,10 +260,19 @@ export function buildJavaOpenApiContract(
         });
       }
 
-      // GET /<plural> (auto-findAll) → array of <Agg>ListResponse
+      // GET /<plural> (auto-findAll).  Paged (M-T2.6) for a plain relational
+      // aggregate: the controller returns the concrete `<Agg>Paged` record, so
+      // springdoc derives the envelope schema + the page/pageSize/sort/dir query
+      // params natively — no list wrapper (that would force the bare array).  A
+      // non-paged findAll keeps the `<Agg>ListResponse` array wrapper.
       const listWrapper = `${agg.name}ListResponse`;
-      wrappers.set(listWrapper, `${agg.name}Response`);
-      routes.push({ method: "get", path: route, listWrapper, errors: [] });
+      if (isPagedAutoAll(repo)) {
+        setRequired(`${agg.name}Paged`, ["items", "page", "pageSize", "total", "totalPages"]);
+        routes.push({ method: "get", path: route, errors: [] });
+      } else {
+        wrappers.set(listWrapper, `${agg.name}Response`);
+        routes.push({ method: "get", path: route, listWrapper, errors: [] });
+      }
 
       // Operations — POST /<plural>/{id}/<op> (+ optional GET can_<op>).
       for (const op of agg.operations) {
