@@ -23,6 +23,9 @@ import {
   felizCreateForm,
   felizOperationForm,
   felizWorkflowForm,
+  fieldErrorFn,
+  formTouchedField,
+  formTouchMsg,
   idLabelsFrom,
   readFieldName,
 } from "./wire.js";
@@ -90,15 +93,34 @@ function vosFromBc(bc: BoundedContextIR | undefined): Map<string, readonly Field
 function renderFormInput(formField: string, fld: FelizFormField): string {
   const value = `model.${formField}.${fld.wireName}`;
   if (fld.inputKind === "checkbox") {
+    // A bool checkbox is always a legitimate value (checked/unchecked) — no
+    // required-ness, so no touched onBlur / inline error.
     return `Html.input [ prop.className "checkbox"; prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
   }
+  // Message-bearing fields (required, non-checkbox) get a touched onBlur + an
+  // inline error below the input — the Elmish mirror of react-hook-form's
+  // per-field `errors.<f>.message`, shown once the field has been blurred.
+  const validated = fld.required;
+  const onBlur = validated
+    ? `; prop.onBlur (fun _ -> dispatch (${formTouchMsg(formField)} "${fld.wireName}"))`
+    : "";
+  const wrap = (input: string): string => {
+    if (!validated) return input;
+    // Show the error only for a touched field (`Set.contains` its name); an
+    // untouched field stays quiet.  ONE line (offside-safe in the form's list).
+    const gate = `(if Set.contains "${fld.wireName}" model.${formTouchedField(formField)} then Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField} else None)`;
+    const errEl = `(match ${gate} with Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ] | None -> Html.none)`;
+    return `Html.div [ prop.className "form-control"; prop.children [ ${input}; ${errEl} ] ]`;
+  };
   if (fld.inputKind === "select") {
     const opts = (fld.enumValues ?? []).map(
       (v) => `Html.option [ prop.value "${v}"; prop.text "${v}" ]`,
     );
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
-    return `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children [ ${allOpts.join("; ")} ] ]`;
+    return wrap(
+      `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children [ ${allOpts.join("; ")} ] ]`,
+    );
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
     // Options load at runtime from the target's `.all` (`View.idOptions` maps the
@@ -106,13 +128,17 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     // (a required FK is guarded, so it must be chosen before submit).
     const listField = `model.${readFieldName(fld.idTarget)}`;
     const label = fld.idLabelField ?? "id";
-    return `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`;
+    return wrap(
+      `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
+    );
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
   // A scalar array renders as a comma-separated text input (the encoder splits
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
-  return `Html.input [ prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
+  return wrap(
+    `Html.input [ prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur} ]`,
+  );
 }
 
 /** One dynamic-row sub-field input — the row-scoped sibling of `renderFormInput`.

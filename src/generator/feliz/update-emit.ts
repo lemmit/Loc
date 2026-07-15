@@ -18,6 +18,7 @@ import type {
   FelizWorkflowForm,
   FormRecord,
 } from "./wire.js";
+import { formHasFieldErrors, formTouchedField, formTouchMsg } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -77,7 +78,12 @@ export function renderModel(
     ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
-    ...forms.map((f) => `    ${f.formField}: ${f.formType}`),
+    ...forms.flatMap((f) => [
+      `    ${f.formField}: ${f.formType}`,
+      // The set of field names the user has blurred — gates each inline error so
+      // an untouched field stays quiet (react-hook-form's onTouched behaviour).
+      ...(formHasFieldErrors(f) ? [`    ${formTouchedField(f.formField)}: Set<string>`] : []),
+    ]),
   ];
   if (fields.length === 0) return "type Model = { Unit: unit }";
   return `type Model =\n  {\n${fields.join("\n")}\n  }`;
@@ -131,7 +137,10 @@ export function renderInit(
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
-    ...forms.map((f) => `      ${f.formField} = ${f.emptyBinding}`),
+    ...forms.flatMap((f) => [
+      `      ${f.formField} = ${f.emptyBinding}`,
+      ...(formHasFieldErrors(f) ? [`      ${formTouchedField(f.formField)} = Set.empty`] : []),
+    ]),
   ];
   // List reads fire eagerly; byId reads fire on page entry via `pageCmd page`.
   const cmds = reads
@@ -187,6 +196,7 @@ export function renderMsg(
     // A create form: one `Set` per field + a `Submit` trigger + a `Created` result.
     ...forms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
       `  | ${f.resultMsg} of Result<${f.resultType}, string>`,
@@ -195,6 +205,7 @@ export function renderMsg(
     // route id) + a `Done` result (the op returns 204 → `unit`).
     ...operationForms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg} of string`,
       `  | ${f.doneMsg} of Result<unit, string>`,
@@ -202,6 +213,7 @@ export function renderMsg(
     // A workflow form: `Set` per param + a PARAMLESS `Submit` + a `Done` result.
     ...workflowForms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
@@ -445,6 +457,17 @@ export function renderUpdate(
       `  | ${m.resultCase} (Error _) -> model, Cmd.none`
     );
   });
+  // A `Touch<Form> field` arm — records a blurred field name in the touched set
+  // so its inline error becomes visible (shared by create / operation / workflow
+  // forms; empty for a form with no message-bearing fields).
+  const touchArm = (f: FormRecord): string[] =>
+    formHasFieldErrors(f)
+      ? [
+          `  | ${formTouchMsg(f.formType)} field -> { model with ${formTouchedField(
+            f.formField,
+          )} = Set.add field model.${formTouchedField(f.formField)} }, Cmd.none`,
+        ]
+      : [];
   // A create form: per-field setters (functional record update), a submit that
   // fires the POST `Cmd`, and a `Created` result that resets the form + navigates.
   const formArms = forms.map((f) => {
@@ -455,6 +478,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...touchArm(f),
       ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.resultMsg}`,
       `  | ${f.resultMsg} (Ok _) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
@@ -472,6 +496,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...touchArm(f),
       ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} id -> model, Cmd.OfAsync.perform (Api.${f.apiFn} id) model.${f.formField} ${f.doneMsg}`,
       `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
@@ -488,6 +513,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...touchArm(f),
       ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.doneMsg}`,
       `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,

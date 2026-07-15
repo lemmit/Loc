@@ -1752,22 +1752,61 @@ export function renderValidation(forms: FormRecord[]): string {
   if (withFields.length === 0) return "";
   return lines(
     "// Client-side validation — required text/number fields must be non-empty.",
+    "// Alongside the whole-form <form>Valid guard (drives the submit button's",
+    "// disabled state), a per-field <form><Field>Error : 'Form -> string option",
+    "// feeds the inline message the view shows once a field is touched (blurred)",
+    "// — the Elmish analogue of react-hook-form's per-field `errors.<f>.message`.",
     "module Validation =",
     ...withFields.flatMap((f, i) => {
-      const required = f.fields.filter((fld) => fld.required && fld.inputKind !== "checkbox");
+      const required = requiredValidatedFields(f);
       const body =
         required.length > 0
           ? required
               .map((fld) => `not (System.String.IsNullOrWhiteSpace form.${fld.wireName})`)
               .join(" && ")
           : "true"; // nothing required (all optional / bool) → always submittable
+      const errorFns = required.flatMap((fld) => [
+        "",
+        `  let ${fieldErrorFn(f.formType, fld.wireName)} (form: ${f.formType}) : string option =`,
+        `    if System.String.IsNullOrWhiteSpace form.${fld.wireName} then Some "Required" else None`,
+      ]);
       return [
         i > 0 ? "" : undefined,
         `  let ${f.validFn} (form: ${f.formType}) : bool =`,
         `    ${body}`,
+        ...errorFns,
       ];
     }),
   );
+}
+
+/** A form's REQUIRED, message-bearing fields — the ones that carry an inline
+ *  error + a touched onBlur (required, non-checkbox: an unchecked box is a
+ *  legitimate `false`, never "unfilled").  Shared by the validation emitter, the
+ *  Model/Msg/update touched wiring, and the view seam so all three agree. */
+export function requiredValidatedFields(f: FormRecord): FelizFormField[] {
+  return f.fields.filter((fld) => fld.required && fld.inputKind !== "checkbox");
+}
+
+/** True when a form has any field that shows an inline error — the gate for
+ *  emitting its `<form>Touched` Model field + `Touch<form>` Msg. */
+export function formHasFieldErrors(f: FormRecord): boolean {
+  return requiredValidatedFields(f).length > 0;
+}
+
+/** The `Touch<Form>` Msg case (adds a blurred field's name to the touched set). */
+export function formTouchMsg(formType: string): string {
+  return `Touch${formType}`;
+}
+
+/** The `<Form>Touched: Set<string>` Model field holding the blurred field names. */
+export function formTouchedField(formField: string): string {
+  return `${formField}Touched`;
+}
+
+/** The `Validation.<form><Field>Error` fn name for a field's inline message. */
+export function fieldErrorFn(formType: string, wireName: string): string {
+  return `${lowerFirst(formType)}${upperFirst(wireName)}Error`;
 }
 
 /** The `View` helper module — the `Remote<'T>` → element matchers the QueryView
