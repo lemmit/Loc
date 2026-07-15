@@ -365,6 +365,7 @@
       {
         "from": "@/components/ui",
         "named": [
+          "Button",
           "Input",
           "Label"
         ]

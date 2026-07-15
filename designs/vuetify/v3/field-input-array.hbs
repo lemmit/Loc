@@ -1,2 +1,11 @@
+{{#if rowFields}}
+<div class="d-flex flex-column ga-2">
+<div class="text-subtitle-2">{{label}}</div>
+<div v-for="(row, index) in form.values.{{path}}" :key="index" class="d-flex ga-2 align-end">
+{{#each rowFields}}{{#if (eq template "field-input-int")}}<v-text-field label="{{label}}" type="number" step="1" density="compact" :model-value="form.values.{{../path}}[index].{{path}}" @update:model-value="(v) => form.values.{{../path}}[index].{{path}} = Math.trunc(Number(v)) || 0" />{{else}}{{#if (eq template "field-input-decimal")}}<v-text-field label="{{label}}" type="number" step="0.01" density="compact" :model-value="form.values.{{../path}}[index].{{path}}" @update:model-value="(v) => form.values.{{../path}}[index].{{path}} = Number(v) || 0" />{{else}}<v-text-field label="{{label}}" density="compact" v-model="form.values.{{../path}}[index].{{path}}" />{{/if}}{{/if}}{{/each}}<v-btn size="small" color="error" variant="text" @click="form.values.{{path}}.splice(index, 1)">Remove</v-btn>
+</div>
+<v-btn size="small" variant="tonal" @click='form.values.{{path}}.push({{{defaultRowJson}}})'>Add {{elementLabel}}</v-btn>
+</div>
+{{else}}
 <v-text-field label="{{label}}" v-model="form.values.{{path}}" data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled :error-messages='form.errors["{{path}}"]' />
-
+{{/if}}
