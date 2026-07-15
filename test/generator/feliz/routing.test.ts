@@ -103,6 +103,20 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain("      | Products -> productsView model dispatch");
   });
 
+  it("wraps the router in a persistent daisyUI navbar over the top-level pages", async () => {
+    const app = await appFs(MULTI);
+    // A persistent shell: the navbar sits above the route-swapping router.
+    expect(app).toContain('Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"');
+    expect(app).toContain('Html.ul [ prop.className "menu menu-horizontal px-1"');
+    // One menu item per top-level (static-route) page — the brand + both pages.
+    expect(app).toContain('prop.href "#/"; prop.text "Home"');
+    expect(app).toContain('prop.href "#/products"; prop.text "Products"');
+    // The brand is the humanised ui name.
+    expect(app).toContain(
+      'prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "Web App"',
+    );
+  });
+
   it("cross-page nav renders Router.navigate + fsproj pulls Feliz.Router", async () => {
     const app = await appFs(MULTI);
     // Button(to: "/products") → Router.navigate("products").
