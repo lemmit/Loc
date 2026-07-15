@@ -275,7 +275,15 @@ function emitProjectFromContexts(
   const hasSubscriptions = contexts.some(
     (c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0,
   );
-  emitCommon(ns, out);
+  // Persistence-neutral `ConcurrencyConflictException` — only the Dapper
+  // adapter needs it (its version-CAS `SaveAsync` throws it; the EF path keys
+  // its 409 arm on `DbUpdateConcurrencyException` instead), so gate the emit on
+  // `persistence: dapper` AND some in-scope aggregate needing concurrency so the
+  // default EF output stays byte-identical.
+  const emitsConcurrencyException =
+    system?.deployable.persistence === "dapper" &&
+    aggregatesNeedConcurrency(contexts.flatMap((c) => c.aggregates));
+  emitCommon(ns, out, { concurrencyException: emitsConcurrencyException });
   emitDispatcher(ns, out, hasSubscriptions);
   out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns, hasSubscriptions));
   // Adapter dispatch context — built once per system-mode emit so

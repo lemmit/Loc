@@ -32,6 +32,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
@@ -310,6 +311,44 @@ export function renderDapperRepository(
         `        var ${createLocal(snake(a.field))} = ${renderCsExpr(a.value, { thisName: "aggregate" })};`,
     ),
   ];
+
+  // Optimistic concurrency (`versioned`, default-on): the guarded upsert seeds
+  // `version = 1` on INSERT and, on ON CONFLICT, bumps `version = version + 1`
+  // ONLY when the row's current version matches the expected version (the
+  // client's `If-Match`, or the loaded aggregate's own version) — a CAS in the
+  // conflict branch's `WHERE`.  A stale row / stale precondition makes the
+  // UPDATE match zero rows, so `ExecuteAsync` returns 0 and we throw
+  // `ConcurrencyConflictException` (→ 409 via DomainExceptionFilter's Dapper
+  // arm) — the persistence-neutral mirror of EF's `IsConcurrencyToken()` +
+  // `DbUpdateConcurrencyException`.  The expected version is read from the
+  // ambient RequestContext (populated from `If-Match` by
+  // RequestContextMiddleware — persistence-independent), EXACTLY as the EF
+  // repository threads it, so the port signature `SaveAsync(agg, ct)` is
+  // unchanged.  A non-versioned aggregate keeps the blind upsert below
+  // (byte-identical).
+  const versioned = aggregateIsVersioned(agg);
+  const versionCol = "version";
+  const upsertSetNoVersion = cols
+    .filter((c) => c.col !== "id" && c.col !== versionCol && !onCreateCols.has(c.col))
+    .map((c) => `${c.col} = excluded.${c.col}`)
+    .join(", ");
+  const versionedInsertVals = cols
+    .map((c) => (c.col === versionCol ? "1" : `@${c.col}${c.cast}`))
+    .join(", ");
+  const versionedSetClause = upsertSetNoVersion
+    ? `${upsertSetNoVersion}, ${versionCol} = ${table}.${versionCol} + 1`
+    : `${versionCol} = ${table}.${versionCol} + 1`;
+  const saveUpsertLines = versioned
+    ? [
+        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+        "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
+        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${versionedInsertVals}) ON CONFLICT (id) DO UPDATE SET ${versionedSetClause} WHERE ${table}.${versionCol} = @ExpectedVersion", new { ${saveParams}, ExpectedVersion = __expected }, cancellationToken: cancellationToken));`,
+        `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
+      ]
+    : [
+        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
+      ];
 
   // Non-principal capability filters (`filter !this.isDeleted`) AND into
   // every read (GetById / FindManyByIds / finds / retrievals) — Dapper has
@@ -605,8 +644,7 @@ export function renderDapperRepository(
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       ...stampLines,
-      "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
+      ...saveUpsertLines,
       ...assocSaveLines,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",

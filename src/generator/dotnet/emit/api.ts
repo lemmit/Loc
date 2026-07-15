@@ -616,10 +616,19 @@ export function renderExceptionFilter(
   // CAS).  Emitted only when some in-scope aggregate is `versioned`, and only on
   // the EF path — the `Microsoft.EntityFrameworkCore` type would be a CS0246
   // under `persistence: dapper` (which has no EF concurrency token anyway).
-  const concurrencyConflictArm =
-    hasVersioned && !usingDapper
-      ? `
-        if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+  // The Dapper adapter has no EF concurrency token, so its version-CAS
+  // `SaveAsync` throws the persistence-neutral `ConcurrencyConflictException`
+  // (emitted into Domain.Common on the Dapper path) when the guarded upsert
+  // affects zero rows.  Same 409 mapping (status + log + Problem shape) as the
+  // EF arm — only the caught exception type differs.  The EF arm keys on
+  // `Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException`, which would be
+  // a CS0246 under `persistence: dapper`.
+  const concurrencyExceptionType = usingDapper
+    ? "ConcurrencyConflictException"
+    : "Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException";
+  const concurrencyConflictArm = hasVersioned
+    ? `
+        if (context.Exception is ${concurrencyExceptionType})
         {
             ${renderDotnetLogCall("conflict", [
               {
@@ -632,7 +641,7 @@ export function renderExceptionFilter(
             context.ExceptionHandled = true;
             return;
         }`
-      : "";
+    : "";
   return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
