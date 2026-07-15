@@ -253,9 +253,11 @@ jobs:
             api ShopApi from Catalog
             subdomain Catalog {
               context Cat {
+                valueobject Tag { label: string  weight: int }
                 aggregate Product with crudish {
                   name:  string
                   price: money
+                  tags:  Tag[]
                   operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }

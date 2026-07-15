@@ -16,7 +16,9 @@ import { FS_LEAVES, fsString, storeModelField } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
+  type FelizFieldArray,
   type FelizFormField,
+  type FelizRowField,
   felizAction,
   felizCreateForm,
   felizOperationForm,
@@ -111,6 +113,42 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
   return `Html.input [ prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`;
+}
+
+/** One dynamic-row sub-field input — the row-scoped sibling of `renderFormInput`.
+ *  Bound to `row.<wireName>` (the `List.mapi` lambda binds `row` + the index `i`)
+ *  and dispatching the INDEXED setter `<setMsg> (i, v)`.  One line (offside-safe
+ *  inside the row's Feliz children list). */
+function renderRowInput(fld: FelizRowField): string {
+  const value = `row.${fld.wireName}`;
+  const set = (v: string): string => `dispatch (${fld.setMsg} (i, ${v}))`;
+  if (fld.inputKind === "checkbox") {
+    return `Html.input [ prop.className "checkbox"; prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> ${set('if v then "true" else "false"')}) ]`;
+  }
+  if (fld.inputKind === "select") {
+    const opts = (fld.enumValues ?? []).map(
+      (v) => `Html.option [ prop.value "${v}"; prop.text "${v}" ]`,
+    );
+    const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
+    return `Html.select [ prop.className "select select-bordered"; prop.value ${value}; prop.onChange (fun (v: string) -> ${set("v")}); prop.children [ ${allOpts.join("; ")} ] ]`;
+  }
+  const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
+  return `Html.input [ prop.className "input input-bordered"; ${typeProp}prop.placeholder "${fld.wireName}"; prop.value ${value}; prop.onChange (fun (v: string) -> ${set("v")}) ]`;
+}
+
+/** A dynamic-row form field (`items: LineItem[]`) → a repeatable sub-form: a
+ *  labelled group whose rows come from `model.<form>.<field> |> List.mapi`, each
+ *  row a line of sub-field inputs + a Remove button, followed by an Add button.
+ *  One line (offside-safe): `[ label; yield! (rows); addBtn ]` — F# allows an
+ *  implicit yield alongside the `yield!` splice. */
+function renderFieldArray(formField: string, fa: FelizFieldArray): string {
+  const rowInputs = fa.rowFields.map(renderRowInput);
+  const remove = `Html.button [ prop.className "btn btn-sm btn-error"; prop.onClick (fun _ -> dispatch (${fa.removeMsg} i)); prop.text "Remove" ]`;
+  const row = `Html.div [ prop.className "flex gap-2 items-end"; prop.children [ ${[...rowInputs, remove].join("; ")} ] ]`;
+  const rows = `model.${formField}.${fa.fieldName} |> List.mapi (fun i row -> ${row})`;
+  const label = `Html.label [ prop.className "font-semibold"; prop.text "${fa.label}" ]`;
+  const add = `Html.button [ prop.className "btn btn-sm"; prop.onClick (fun _ -> dispatch ${fa.addMsg}); prop.text "Add ${fa.elementLabel}" ]`;
+  return `Html.div [ prop.className "flex flex-col gap-2"; prop.children [ ${label}; yield! (${rows}); ${add} ] ]`;
 }
 
 /** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
@@ -333,12 +371,13 @@ export const felizTarget: WalkerTarget = {
       vosFromBc(ctx.bcByAggregate.get(aggName)),
     );
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
     const disabled =
       form.fields.length > 0
         ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
         : "";
     const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `OperationForm(of: <Agg>, op: <op>)` → one `Html.input` per op param + a
@@ -363,12 +402,18 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
     );
-    if (form.fields.length === 0) return null;
+    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
-    const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
+    const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
+    // The submit guard reads `Validation.<validFn>`, only emitted when the form
+    // has flat fields; an array-only form has no required-field guard.
+    const disabled =
+      form.fields.length > 0
+        ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
+        : "";
     const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `WorkflowForm(runs: <wf>)` → one `Html.input` per workflow param + a
@@ -389,11 +434,15 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
-    if (form.fields.length === 0) return null;
+    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
     const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
-    const disabled = `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `;
+    const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
+    const disabled =
+      form.fields.length > 0
+        ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
+        : "";
     const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `Modal(trigger: Button(…), OperationForm(<agg>.<op>))` — the scaffold detail's
