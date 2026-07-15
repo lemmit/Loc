@@ -4,6 +4,7 @@ import {
   wireCreateDefault,
   wireFieldsFor,
 } from "../../../ir/enrich/wire-projection.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -222,6 +223,19 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
       `${schemaDir}/${snake(agg.name)}_list_response.ex`,
       renderAggregateListResponseSchema(agg, webModule),
     );
+    // Paged envelope schema (M-T2.6) — emitted when this aggregate's implicit
+    // `findAll` (or an explicit find) returns the `paged` wire, so the list
+    // endpoint's 200 references `<Agg>Paged` (an object envelope) instead of
+    // the bare-array `<Agg>ListResponse`.  Only reaches the served spec when a
+    // path references it (OpenApiSpex.resolve_schema_modules), matching the
+    // Hono/.NET add-when-used behavior.
+    const pagedName = pagedFindName(ctx, agg);
+    if (pagedName) {
+      files.set(
+        `${schemaDir}/${snake(pagedName)}.ex`,
+        renderAggregatePagedResponseSchema(agg, pagedName, webModule),
+      );
+    }
     // Create request
     files.set(
       `${schemaDir}/create_${snake(agg.name)}_request.ex`,
@@ -534,16 +548,29 @@ function renderApiSpec(
           }
         }`
       : "";
+    // The implicit findAll is paged (M-T2.6) for plain single-table relational
+    // aggregates: the list 200 carries the `<Agg>Paged` envelope and the
+    // endpoint accepts `page`/`pageSize`/`sort`/`dir` query controls — matching
+    // the Hono/.NET/Java/Python paged list.  A non-paged findAll (document /
+    // embedded / inheritance subtype) keeps the bare-array `<Agg>ListResponse`.
+    const listPagedName = pagedFindName(ctx, agg);
+    const listRespRef = listPagedName ? `${schemasModule}.${listPagedName}` : listRespMod;
+    const listQueryParams = listPagedName
+      ? `
+          parameters: [
+${pagingQueryParams()}
+          ],`
+      : "";
     pathEntries.push(
       `      "/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
           operationId: "${camelId(opList(agg.name))}",
-          tags: ["${aggSlug}"],
+          tags: ["${aggSlug}"],${listQueryParams}
           responses: %{
             200 => %OpenApiSpex.Response{
               description: "OK",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespMod}}}
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespRef}}}
             }
           }
         }${createPost}
@@ -673,12 +700,20 @@ function renderApiSpec(
       for (const find of repo.finds) {
         if (find.name === "all") continue;
         const findSnake = snake(find.name);
+        // A paged explicit find (`find x(): T paged`) shares the `<Agg>Paged`
+        // envelope and gains the page/pageSize/sort/dir controls, mirroring the
+        // paged auto-findAll above (and the Hono/.NET/Java/Python emitters).
+        const findPaged = pagedReturn(find.returnType);
         const isArrayReturn = find.returnType.kind === "array";
-        const findRespMod = isArrayReturn ? listRespMod : respMod;
+        const findRespMod = findPaged
+          ? `${schemasModule}.${findPaged.name}`
+          : isArrayReturn
+            ? listRespMod
+            : respMod;
         const findKind: OpErrorKind =
           find.returnType.kind === "optional"
             ? "findOptional"
-            : isArrayReturn
+            : isArrayReturn || findPaged
               ? "findList"
               : "findSingle";
         // Union finds (`Agg or NotFound` / `Agg option`) translate absence to
@@ -696,16 +731,20 @@ function renderApiSpec(
         // so Phoenix must too (name + type + required), or the parity gate's
         // query-param dimension diffs `phoenix=[]`.  Required mirrors Hono's
         // `zodFor`: a nullable param is optional, everything else required.
-        const queryParams = find.params
-          .map(
-            (p) =>
-              `            %OpenApiSpex.Parameter{name: :${p.name}, in: :query, required: ${
-                wireTypeInfo(p.type, "request").isNullable ? "false" : "true"
-              }, schema: ${openApiType(p.type, schemasModule)}}`,
-          )
-          .join(",\n");
+        const queryParamLines = find.params.map(
+          (p) =>
+            `            %OpenApiSpex.Parameter{name: :${p.name}, in: :query, required: ${
+              wireTypeInfo(p.type, "request").isNullable ? "false" : "true"
+            }, schema: ${openApiType(p.type, schemasModule)}}`,
+        );
+        // Paged finds append the shared page/pageSize/sort/dir controls after
+        // the declared params.
+        if (findPaged) queryParamLines.push(pagingQueryParams());
+        const queryParams = queryParamLines.join(",\n");
         const queryParamsBlock =
-          find.params.length > 0 ? `\n          parameters: [\n${queryParams}\n          ],` : "";
+          queryParamLines.length > 0
+            ? `\n          parameters: [\n${queryParams}\n          ],`
+            : "";
         pathEntries.push(
           `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
@@ -1113,6 +1152,69 @@ defmodule ${moduleName} do
     title: "${agg.name}ListResponse",
     type: :array,
     items: %OpenApiSpex.Reference{"$ref": "#/components/schemas/${agg.name}Response"}
+  })
+end
+`;
+}
+
+/** The `<Agg>Paged` schema name if any of this aggregate's repository finds
+ *  (the implicit `all` included) returns the `paged` wire, else null.  Every
+ *  paged find over one aggregate shares the same `<Agg>Paged` envelope, so one
+ *  schema module covers them all. */
+function pagedFindName(ctx: EnrichedBoundedContextIR, agg: EnrichedAggregateIR): string | null {
+  const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  for (const find of repo?.finds ?? []) {
+    const paged = pagedReturn(find.returnType);
+    if (paged) return paged.name;
+  }
+  return null;
+}
+
+/** The four shared paging query controls (`page`/`pageSize`/`sort`/`dir`) as
+ *  OpenApiSpex parameter literals — the Phoenix analogue of the Hono
+ *  `AllQuery` schema.  All optional (defaulted server-side); the parity
+ *  normalizer compares name + type + required only. */
+function pagingQueryParams(): string {
+  return [
+    "            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer}}",
+    "            %OpenApiSpex.Parameter{name: :pageSize, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer}}",
+    "            %OpenApiSpex.Parameter{name: :sort, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :string}}",
+    "            %OpenApiSpex.Parameter{name: :dir, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :string}}",
+  ].join(",\n");
+}
+
+/** The `<Agg>Paged` envelope schema (M-T2.6) — an object of
+ *  `{ items: <Agg>Response[], page, pageSize, total, totalPages }` with all
+ *  five fields required.  Mirrors the Hono zod / .NET `Paged<T>` / Python
+ *  `PagedResult` shapes so the conformance-parity property-type + required
+ *  sets agree cross-backend (the integer counters carry no `format`, which the
+ *  parity normalizer already folds away). */
+function renderAggregatePagedResponseSchema(
+  agg: AggregateIR,
+  pagedName: string,
+  webModule: string,
+): string {
+  const moduleName = `${webModule}.Api.Schemas.${pagedName}`;
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc "OpenApiSpex schema for #{__MODULE__}."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "${pagedName}",
+    type: :object,
+    properties: %{
+      items: %OpenApiSpex.Schema{
+        type: :array,
+        items: %OpenApiSpex.Reference{"$ref": "#/components/schemas/${agg.name}Response"}
+      },
+      page: %OpenApiSpex.Schema{type: :integer},
+      pageSize: %OpenApiSpex.Schema{type: :integer},
+      total: %OpenApiSpex.Schema{type: :integer},
+      totalPages: %OpenApiSpex.Schema{type: :integer}
+    },
+    required: [:items, :page, :pageSize, :total, :totalPages]
   })
 end
 `;
