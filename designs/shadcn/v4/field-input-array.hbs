@@ -1,12 +1,22 @@
-<FormField
+{{#if rowFields}}<div className="space-y-2">
+          <div className="text-sm font-medium">{{label}}</div>
+          { {{path}}Fields.map((field, index) => (
+            <div key={field.id} className="flex items-end gap-2">
+{{#each rowFields}}              <Input placeholder="{{label}}" {...form.register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
+{{/each}}              <Button type="button" variant="ghost" size="sm" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+            </div>
+          )) }
+          <Button type="button" variant="outline" size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+        </div>{{else}}<FormField
           control={form.control}
           name="{{path}}"
-          render={({ field: _field }) => (
+          render={() => (
             <FormItem>
               <FormLabel>{{label}}</FormLabel>
               <FormControl>
                 <Input data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
               </FormControl>
+              <FormMessage />
             </FormItem>
           )}
-        />
+        />{{/if}}

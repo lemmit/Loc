@@ -1,0 +1,63 @@
+// Sub-form showcase — exercises dynamic array-of-value-object form rows
+// end-to-end so the React build matrix tsc-validates them across every
+// design pack (mantine / shadcn / mui / chakra).
+//
+// An `X[]` field whose element is a `valueobject` (`items: LineItem[]`)
+// renders as a repeatable RHF `useFieldArray` row group — one text/number
+// input per element sub-field, plus Add / Remove controls — instead of the
+// disabled "arrays not yet supported" stub.  The scaffold gives List / New /
+// Detail, so BOTH form legs get built:
+//
+//   - the New page's `CreateForm`   → `form-of-decls` hoist,
+//   - the Detail page's update modal (`OperationForm`) → `form-op-module`
+//     hoist — the leg whose missing `useFieldArray` hoist made an
+//     otherwise-valid page fail to compile until `fieldArrays` was threaded
+//     through the op-form path.
+//
+// Pack-neutral: the matrix injects `design: <pack>` per shard.
+
+system SubformShowcase {
+
+  subdomain Sales {
+    context Ordering {
+      valueobject LineItem {
+        sku: string
+        qty: int
+      }
+      aggregate Order with crudish {
+        reference: string
+        items: LineItem[]
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api ShopApi from Sales
+
+  ui WebApp with scaffold(aggregates: [Order]) {
+    api Shop: ShopApi
+
+    page Home {
+      route: "/"
+      body: Heading { "Sub-form showcase", level: 1 }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource orderState { for: Ordering, kind: state, use: primary }
+
+  deployable api {
+    platform: node
+    contexts: [Ordering]
+    dataSources: [orderState]
+    serves: ShopApi
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: WebApp { Shop: api }
+    port: 3001
+  }
+}

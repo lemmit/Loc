@@ -1,1 +1,10 @@
-<TextField label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={!!( {{errorExpr}} )} helperText={ {{errorExpr}} } />
+{{#if rowFields}}<Stack spacing={1}>
+          <Typography variant="subtitle2">{{label}}</Typography>
+          { {{path}}Fields.map((field, index) => (
+            <Stack key={field.id} direction="row" spacing={1} alignItems="flex-end">
+{{#each rowFields}}              <TextField label="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
+{{/each}}              <Button color="error" size="small" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+            </Stack>
+          )) }
+          <Button size="small" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+        </Stack>{{else}}<TextField label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={!!( {{errorExpr}} )} helperText={ {{errorExpr}} } />{{/if}}

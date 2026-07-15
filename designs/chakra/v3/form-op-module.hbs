@@ -4,7 +4,8 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
 {{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
     resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
-  });
+  });{{#each fieldArrays}}
+  const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control, name: "{{this.name}}" });{{/each}}
   return (
     <>
       <Button colorPalette="brand" variant="{{#if triggerPrimary}}solid{{else}}outline{{/if}}" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>

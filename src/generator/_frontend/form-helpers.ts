@@ -63,7 +63,12 @@ export function needsController(
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);
       return !!vo && vo.fields.some((f) => probe(f.type));
     }
-    if (inner.kind === "array") return probe(inner.element);
+    // An array field never needs `Controller` — an object array renders through
+    // `useFieldArray` + `register` (dynamic rows), a scalar array through the
+    // stub / comma input.  (It DOES need `control` for the useFieldArray hook,
+    // but that's forced separately in `prepareFieldsAndImports`, without the
+    // Controller import.)
+    if (inner.kind === "array") return false;
     return false;
   };
   return fields.some((f) => probe(f.type));

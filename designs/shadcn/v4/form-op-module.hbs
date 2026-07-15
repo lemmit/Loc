@@ -4,7 +4,8 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
 {{/each}}  const form = useForm<{{opPascal}}{{aggregateName}}Request>({
     resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
-  });
+  });{{#each fieldArrays}}
+  const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control: form.control, name: "{{this.name}}" });{{/each}}
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>

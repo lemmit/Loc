@@ -10,7 +10,8 @@ function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPasc
 {{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
     resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
-  });
+  });{{#each fieldArrays}}
+  const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control, name: "{{this.name}}" });{{/each}}
   return (
     <form
       data-testid="{{slug}}-op-{{opName}}-form"

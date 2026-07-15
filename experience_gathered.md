@@ -2799,6 +2799,41 @@ dynamic rows CROSS-frontend, starting with a reference:
   CI examples only (none has an object array yet) → no CI landmine until the
   object-array example lands alongside the other packs.
 
+## 46. The row template lives in THREE form legs — the op-form hoist was the silent one (2026-07-15)
+
+Rolling the array-of-VO rows out to the remaining React packs (shadcn/mui/chakra)
+surfaced a bug the mantine reference (§45) had merged **latent**: the row markup
+(`itemsFields.map(...)`) is emitted per-field wherever a form renders, but the
+matching `useFieldArray` module hoist is emitted by the pack's **decls** template
+— and there are THREE of them, one per form kind:
+
+- create form → `form-of-decls.hbs`  (§45 wired this one)
+- operation-form modal → `form-op-module.hbs`  (**missed**)
+- workflow form → `form-runs-decls.hbs`  (**missed**)
+
+A `crudish` aggregate's scaffolded Detail page hosts the Update **op** form, so an
+editable object array there rendered `itemsFields`/`appendItems` with no hoist →
+`TS2304: Cannot find name 'itemsFields'`. It slipped because the create form
+(New page) was the only leg with CI/test coverage — the reference example had no
+editable array on a detail page.
+
+- **The hoist is a per-form-template concern, not a shared-VM one.** `fieldArrays`
+  already rode `FormStateBase`; the gap was purely that `renderFormOpWiring` /
+  `renderFormRunsWiring` didn't spread it into their `tplCtx`, and the two
+  templates lacked the `{{#each fieldArrays}}` block. Fix = thread the field +
+  add the block to all 8 pack files (6 destructure `control`, shadcn passes
+  `control: form.control`). Whitespace-controlled after `});` so empty arrays stay
+  byte-identical (full fast suite unchanged).
+
+- **Derive the coverage gap from the template topology, not the happy path.** The
+  lesson from §45's "no CI landmine" note was too optimistic: the moment ANY pack
+  renders rows, the row template is live in every form leg, and an untested leg
+  rots. The fix is a dedicated react-only build example (`subform-showcase.ddd`,
+  scaffolded so BOTH New and Detail forms build) in `reactBuildExamples` + the
+  nightly matrix, plus a generator test that asserts the op-form hoist directly.
+  A template path with no example that exercises it is a latent `tsc` failure
+  waiting for the first real user.
+
 - **Verify with a real `tsc --noEmit`, not just the unit test.** The mantine
   reference generate → `npm install` → `tsc` clean in `node:20`; a shadcn variant
   (stub + unused import) also clean. The unit test pins the emitted rows; the

@@ -23,6 +23,7 @@ import loomLandingSource from "./loom-landing.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
 import storeShowcaseSource from "./store-showcase.ddd?raw";
+import subformShowcaseSource from "./subform-showcase.ddd?raw";
 import svelteStoreShowcaseSource from "./svelte-store-showcase.ddd?raw";
 import multifileMainSource from "./multifile-main.ddd?raw";
 import multifileSharedMoneySource from "./shared/money.ddd?raw";
@@ -172,6 +173,13 @@ export const examples: LoomExample[] = [
     source: storeShowcaseSource,
     blurb:
       "A `store Cart { state … action … }` shared client-side container — pages/components read it by dotted name (`Cart.lines`) and call its actions (`Cart.clear()`); lowers to a Zustand module on React.",
+  },
+  {
+    id: "subform-showcase",
+    label: "Sub-form showcase (dynamic array-of-VO rows)",
+    source: subformShowcaseSource,
+    blurb:
+      "An aggregate with an `items: LineItem[]` value-object array — the scaffolded New and edit forms render repeatable RHF `useFieldArray` rows (one input per element sub-field, plus Add / Remove) across every React design pack.",
   },
   {
     id: "svelte-store-showcase",

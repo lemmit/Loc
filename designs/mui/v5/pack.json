@@ -485,7 +485,10 @@
       {
         "from": "@mui/material",
         "named": [
-          "TextField"
+          "TextField",
+          "Stack",
+          "Button",
+          "Typography"
         ]
       }
     ],

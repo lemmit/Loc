@@ -36,6 +36,7 @@ const examples = [
   "web/src/examples/storybook-components.ddd",
   "web/src/examples/action-showcase.ddd",
   "web/src/examples/store-showcase.ddd",
+  "web/src/examples/subform-showcase.ddd",
   "web/src/examples/svelte-store-showcase.ddd",
   "web/src/examples/storefront-system.ddd",
   "web/src/examples/storefront-dotnet.ddd",

@@ -453,7 +453,11 @@
         "from": "@chakra-ui/react",
         "named": [
           "Field",
-          "Input"
+          "Input",
+          "VStack",
+          "HStack",
+          "Button",
+          "Text"
         ]
       }
     ],

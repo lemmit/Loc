@@ -495,9 +495,13 @@
         "from": "@chakra-ui/react",
         "named": [
           "FormControl",
-          "FormErrorMessage",
           "FormLabel",
-          "Input"
+          "FormErrorMessage",
+          "Input",
+          "VStack",
+          "HStack",
+          "Button",
+          "Text"
         ]
       }
     ],
