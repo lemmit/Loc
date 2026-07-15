@@ -3,13 +3,12 @@ import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
+  type AngularFieldArraySpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
-  collectIdTargets,
-  controlInit,
-  fieldInput,
   formButton,
+  partitionAngularFields,
 } from "./form-fields.js";
 import { angularSink } from "./walker/sink.js";
 
@@ -37,6 +36,9 @@ export interface AngularWorkflowFormSpec {
   /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
    *  fields (empty when no field renders as a reference Select). */
   idTargets: AngularIdTargetSpec[];
+  /** Dynamic-row (`X[]` of value-object) fields — page-shell adds a `FormArray`
+   *  control + the add/remove methods per entry. */
+  fieldArrays?: AngularFieldArraySpec[];
 }
 
 export function renderAngularWorkflowForm(
@@ -76,10 +78,10 @@ export function renderAngularWorkflowForm(
   addNg(ctx, importFrom, mutationFn, requestType);
   ctx.usesNavigate = true; // hoists inject(Router) for the redirect
 
-  const fields = workflow.params;
+  const parts = partitionAngularFields(workflow.params, bc, ns, ctx);
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
-  const fieldMarkup = fields.map((f) => fieldInput(f.name, f.type, bc, ns, ctx));
+  const fieldMarkup = parts.flatMarkup;
   const submit = formButton(ctx, {
     type: "submit",
     emphasis: "primary",
@@ -89,7 +91,7 @@ export function renderAngularWorkflowForm(
 
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-submit`);
-  for (const f of fields) ctx.collectedTestids.add(`${ns}-input-${f.name}`);
+  for (const name of parts.flatNames) ctx.collectedTestids.add(`${ns}-input-${name}`);
 
   const spec: AngularWorkflowFormSpec = {
     formVar,
@@ -98,14 +100,15 @@ export function renderAngularWorkflowForm(
     requestType,
     importFrom,
     submitMethod,
-    controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
-    idTargets: collectIdTargets(fields, bc, ctx),
+    controls: parts.flatControls,
+    idTargets: parts.idTargets,
+    fieldArrays: parts.fieldArrays,
   };
   angularSink(ctx).workflowForms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
-    ...[...fieldMarkup, submit].map((m) => `${inner}${m}`),
+    ...[...fieldMarkup, ...parts.arrayMarkup, submit].map((m) => `${inner}${m}`),
     `${close}</form>`,
   ].join("\n");
 }

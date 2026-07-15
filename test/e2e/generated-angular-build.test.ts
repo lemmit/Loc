@@ -75,8 +75,10 @@ const SCAFFOLD: Case = {
             name: string
             email: string
           }
+          valueobject LineItem { sku: string  qty: int }
           aggregate Order with crudish {
             total: int
+            items: LineItem[]
           }
         }
       }

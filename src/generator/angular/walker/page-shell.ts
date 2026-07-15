@@ -21,9 +21,36 @@ import {
   type WalkContext,
   type WalkResult,
 } from "../../_walker/walker-core.js";
+import {
+  type AngularFieldArraySpec,
+  fieldArrayControlDecl,
+  fieldArrayMembers,
+} from "../form-fields.js";
 import { storeClassName, storeFileSlug } from "../store-builder.js";
 import { angularTarget } from "./angular-target.js";
 import { angularSink } from "./sink.js";
+
+/** The `new FormGroup({ … })` control body for a form spec — flat
+ *  `FormControl`s plus any `FormArray` declarations for dynamic-row fields. */
+function formGroupBody(form: {
+  controls: { name: string; init: string }[];
+  fieldArrays?: AngularFieldArraySpec[];
+}): string {
+  const flat = form.controls.map(
+    (c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`,
+  );
+  const arrays = (form.fieldArrays ?? []).map((fa) => fieldArrayControlDecl(fa));
+  return [...flat, ...arrays].join(", ");
+}
+
+/** The getter + add/remove member lines a form's dynamic-row fields contribute
+ *  (empty when the form has none). */
+function formArrayMemberLines(
+  formVar: string,
+  fieldArrays: AngularFieldArraySpec[] | undefined,
+): string[] {
+  return (fieldArrays ?? []).flatMap((fa) => fieldArrayMembers(formVar, fa));
+}
 
 // ---------------------------------------------------------------------------
 // Angular page shell — assembles a generated standalone component around a
@@ -498,10 +525,8 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   const angularForms = sink.forms;
   for (const form of angularForms) {
     members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
-    const controls = form.controls
-      .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
-      .join(", ");
-    members.push(`  readonly ${form.formVar} = new FormGroup({ ${controls} });`);
+    members.push(`  readonly ${form.formVar} = new FormGroup({ ${formGroupBody(form)} });`);
+    members.push(...formArrayMemberLines(form.formVar, form.fieldArrays));
     members.push(
       [
         `  async ${form.submitMethod}(): Promise<void> {`,
@@ -522,10 +547,8 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   const angularWorkflowForms = sink.workflowForms;
   for (const form of angularWorkflowForms) {
     members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
-    const controls = form.controls
-      .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
-      .join(", ");
-    members.push(`  readonly ${form.formVar} = new FormGroup({ ${controls} });`);
+    members.push(`  readonly ${form.formVar} = new FormGroup({ ${formGroupBody(form)} });`);
+    members.push(...formArrayMemberLines(form.formVar, form.fieldArrays));
     members.push(
       [
         `  async ${form.submitMethod}(): Promise<void> {`,
@@ -554,11 +577,9 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     ]);
     for (const f of angularOpForms) {
       members.push(`  readonly ${f.mutationVar} = ${f.mutationFn}();`);
-      const controls = f.controls
-        .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
-        .join(", ");
-      const group = controls ? `{ ${controls} }` : "{}";
-      members.push(`  readonly ${f.formVar} = new FormGroup(${group});`);
+      const opBody = formGroupBody(f);
+      members.push(`  readonly ${f.formVar} = new FormGroup(${opBody ? `{ ${opBody} }` : "{}"});`);
+      members.push(...formArrayMemberLines(f.formVar, f.fieldArrays));
       // The id expression is a template-scope ref (`id` / `order.id`); class
       // fields read against `this` (`this.id` / `this.order.id`).
       const idExpr = prefixWholeWordsWithThis(f.idExpr, idFields);
@@ -638,10 +659,8 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       members.push(`  readonly ${m.openSig} = signal(false);`);
       members.push(`  readonly ${m.idSig} = signal("");`);
       members.push(`  readonly ${m.mutationVar} = ${m.mutationFn}();`);
-      const controls = m.controls
-        .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
-        .join(", ");
-      members.push(`  readonly ${m.formVar} = new FormGroup({ ${controls} });`);
+      members.push(`  readonly ${m.formVar} = new FormGroup({ ${formGroupBody(m)} });`);
+      members.push(...formArrayMemberLines(m.formVar, m.fieldArrays));
       members.push(
         [
           `  async ${m.submitMethod}(): Promise<void> {`,

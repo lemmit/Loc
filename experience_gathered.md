@@ -2925,3 +2925,33 @@ Svelte-specific notes:
   `Cannot read file .svelte-kit/tsconfig.json`; the generated project's check only
   works after `svelte-kit sync` regenerates it (CI does this) — `vite build` alone
   isn't the full type gate, so run the sync + check pair when verifying locally.
+
+## 50. Angular dynamic sub-forms — a FormArray fork, but reuse the field inputs (2026-07-15)
+
+Stage 3c, the last frontend. Unlike Vue/Svelte (§48/§49, shared reactive path),
+Angular FORKS every form builder (`renderAngularCreateForm`/operation/modal/
+workflow) into typed Reactive Forms, so array-of-VO needed a real `FormArray` —
+the biggest of the three. The leverage that kept it small:
+
+- **Reuse `fieldInput` for the row sub-fields.** A row's `<input
+  formControlName="sku">` resolves against the enclosing `[formGroupName]=
+  "$index"`, so the EXISTING per-style field renderer (mat-form-field / pInputText
+  / plain) works verbatim inside the `@for` — no per-pack row markup. Only the
+  `formArrayName` wrapper + `@for (__row of itemsArray.controls; track $index)` +
+  add/remove buttons are new. All three packs `ng build` clean off one code path.
+- **One `partitionAngularFields` helper, four builders.** Create/operation/modal/
+  workflow all did `fields.map(fieldInput)` + `controls: fields.map(controlInit)`;
+  factoring the flat/array split into a shared helper wired all four uniformly and
+  — critically — kept the flat-field output byte-identical (the Material branch is
+  frozen by tests) because a field set with no object array returns the same
+  flat markup/controls as before.
+- **The FormArray import must register at WALK time, not member-emit time.** The
+  page-shell emits the `FormGroup` members AFTER the walk finishes, so a
+  `fieldArrayControlDecl` that tried to `addNg(FormArray)` there would be too late
+  (imports already serialized). Register `FormArray`/`FormGroup` in the builder
+  (walk time) where the field split happens; the decl string is import-free.
+- **Preserve each site's empty-FormGroup shape.** The op-form site special-cases
+  zero controls to `new FormGroup({})` (not `{  }`); the shared `formGroupBody`
+  had to keep that guard or the paramless-op byte gate flips. Angular's node 22+
+  requirement also bites: `ng build` needs `node:22`, not the `node:20` the
+  React/Vue/Svelte tsc/vite gates use.

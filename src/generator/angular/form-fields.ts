@@ -1,5 +1,5 @@
-import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { humanize, lowerFirst, plural } from "../../util/naming.js";
+import type { AggregateIR, BoundedContextIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { humanize, lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { unwrapOpt } from "../_frontend/form-helpers.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 
@@ -273,4 +273,158 @@ export function fieldInput(
     return `<mat-form-field class="loom-field"><mat-label>${label}</mat-label><input matInput${inputType} formControlName=${cn}${testid}></mat-form-field>`;
   }
   return `<label class="loom-field"><span class="loom-label">${label}</span><input class="loom-input"${inputType} formControlName=${cn}${testid} /></label>`;
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic sub-form rows — an `X[]`-of-value-object input renders as a
+// `FormArray` of nested `FormGroup`s (one per row).  The row sub-field inputs
+// REUSE `fieldInput` (its `formControlName="<sub>"` resolves against the
+// enclosing `[formGroupName]="$index"`), so every pack style gets row rendering
+// for free; only the FormArray wrapper + add/remove methods are new.
+// ---------------------------------------------------------------------------
+
+/** A dynamic-row form field — the `FormArray` sibling of an
+ *  `AngularFormControlSpec`.  The page-shell declares `<fieldName>: new
+ *  FormArray<FormGroup>([])` in the form group and emits the getter + add/remove
+ *  methods; the markup (`fieldArrayInput`) hosts the `@for` row loop. */
+export interface AngularFieldArraySpec {
+  /** Form-group control name holding the array (`items`). */
+  fieldName: string;
+  /** The per-row `FormControl` specs (one per value-object sub-field). */
+  rowControls: AngularFormControlSpec[];
+  /** Humanised singular label for the Add button (`Line Item`). */
+  elementLabel: string;
+  /** Component method that pushes a fresh row (`addItems`). */
+  addMethod: string;
+  /** Component method that removes a row by index (`removeItems`). */
+  removeMethod: string;
+  /** Typed getter returning the `FormArray` (`itemsArray`). */
+  getter: string;
+}
+
+/** The value-object element fields of an `X[]`-of-value-object input, or null
+ *  when the field isn't an array whose element is a resolvable value object.
+ *  Only SCALAR-ish sub-fields (anything `fieldInput` can render as a single
+ *  control — primitives, enums, `X id`) are kept; a nested VO / array inside the
+ *  row element is dropped (v1, mirrors the other frontends). */
+export function arrayVoFields(t: TypeIR, bc: BoundedContextIR): FieldIR[] | null {
+  const inner = unwrapOpt(t);
+  if (inner.kind !== "array") return null;
+  const el = unwrapOpt(inner.element);
+  if (el.kind !== "valueobject") return null;
+  const vo = bc.valueObjects.find((v) => v.name === el.name);
+  if (!vo) return null;
+  const scalar = vo.fields.filter((f) => {
+    const ft = unwrapOpt(f.type);
+    return ft.kind === "primitive" || ft.kind === "enum" || ft.kind === "id";
+  });
+  return scalar.length > 0 ? scalar : null;
+}
+
+/** Build the `AngularFieldArraySpec` for an array-of-value-object field. */
+export function fieldArraySpec(
+  name: string,
+  voFields: FieldIR[],
+  elementName: string,
+): AngularFieldArraySpec {
+  const pascal = upperFirst(name);
+  return {
+    fieldName: name,
+    rowControls: voFields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    elementLabel: humanize(elementName),
+    addMethod: `add${pascal}`,
+    removeMethod: `remove${pascal}`,
+    getter: `${name}Array`,
+  };
+}
+
+/** The `FormArray` control declaration for the form group (`items: new
+ *  FormArray<FormGroup>([])`).  The `FormArray` import is registered by the
+ *  form builder (walk time), not here (member emission runs after the walk). */
+export function fieldArrayControlDecl(spec: AngularFieldArraySpec): string {
+  return `${spec.fieldName}: new FormArray<FormGroup>([])`;
+}
+
+/** The class members a field array contributes: a typed getter plus the
+ *  add-row / remove-row methods the template buttons call. */
+export function fieldArrayMembers(formVar: string, spec: AngularFieldArraySpec): string[] {
+  const rowGroup = spec.rowControls
+    .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+    .join(", ");
+  return [
+    `  get ${spec.getter}(): FormArray { return this.${formVar}.get(${JSON.stringify(spec.fieldName)}) as FormArray; }`,
+    `  ${spec.addMethod}(): void { this.${spec.getter}.push(new FormGroup({ ${rowGroup} })); }`,
+    `  ${spec.removeMethod}(i: number): void { this.${spec.getter}.removeAt(i); }`,
+  ];
+}
+
+/** The dynamic-row markup: a `formArrayName` block whose `@for` walks the array
+ *  controls, each row a `[formGroupName]="$index"` group of reused `fieldInput`
+ *  sub-field inputs + a Remove button, followed by an Add button. */
+export function fieldArrayInput(
+  spec: AngularFieldArraySpec,
+  voFields: FieldIR[],
+  label: string,
+  bc: BoundedContextIR,
+  ns: string,
+  ctx: WalkContext,
+): string {
+  const rowNs = `${ns}-${spec.fieldName}-row`;
+  const rowInputs = voFields.map((f) => fieldInput(f.name, f.type, bc, rowNs, ctx)).join("");
+  const remove = formButton(ctx, {
+    type: "button",
+    emphasis: "warn",
+    label: "Remove",
+    attrs: ` (click)="${spec.removeMethod}($index)"`,
+  });
+  const add = formButton(ctx, {
+    type: "button",
+    emphasis: "secondary",
+    label: `Add ${spec.elementLabel}`,
+    attrs: ` (click)="${spec.addMethod}()"`,
+  });
+  return `<div class="loom-field" formArrayName=${JSON.stringify(spec.fieldName)}><span class="loom-label">${label}</span>@for (__row of ${spec.getter}.controls; track $index) {<div class="loom-row" [formGroupName]="$index">${rowInputs}${remove}</div>}${add}</div>`;
+}
+
+/** Split a form's input fields into the flat `FormControl` fields (rendered +
+ *  spec'd as before) and the array-of-value-object `FormArray` fields (row
+ *  markup + add/remove spec).  Shared by every Angular form builder (create /
+ *  operation / modal / workflow) so the fork is uniform; when a field set has no
+ *  object array, `flatMarkup`/`flatControls` are byte-identical to the previous
+ *  all-flat output. */
+export function partitionAngularFields(
+  fields: readonly { name: string; type: TypeIR }[],
+  bc: BoundedContextIR,
+  ns: string,
+  ctx: WalkContext,
+): {
+  flatControls: AngularFormControlSpec[];
+  flatMarkup: string[];
+  flatNames: string[];
+  idTargets: AngularIdTargetSpec[];
+  fieldArrays: AngularFieldArraySpec[];
+  arrayMarkup: string[];
+} {
+  const flat = fields.filter((f) => arrayVoFields(f.type, bc) === null);
+  const arrays = fields.filter((f) => arrayVoFields(f.type, bc) !== null);
+  const fieldArrays: AngularFieldArraySpec[] = [];
+  const arrayMarkup: string[] = [];
+  for (const f of arrays) {
+    const voFields = arrayVoFields(f.type, bc)!;
+    const arr = unwrapOpt(f.type);
+    const el = arr.kind === "array" ? unwrapOpt(arr.element) : arr;
+    const elementName = el.kind === "valueobject" ? el.name : f.name;
+    const spec = fieldArraySpec(f.name, voFields, elementName);
+    fieldArrays.push(spec);
+    arrayMarkup.push(fieldArrayInput(spec, voFields, humanize(f.name), bc, ns, ctx));
+  }
+  if (fieldArrays.length > 0) addNg(ctx, "@angular/forms", "FormArray", "FormGroup");
+  return {
+    flatControls: flat.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx)),
+    flatNames: flat.map((f) => f.name),
+    idTargets: collectIdTargets(flat, bc, ctx),
+    fieldArrays,
+    arrayMarkup,
+  };
 }
