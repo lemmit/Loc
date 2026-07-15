@@ -31,7 +31,12 @@ import { isAbstractBase } from "./inheritance-emit.js";
  *  to avoid an import cycle. */
 export function httpFindsOf(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
   const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
-  return (repo?.finds ?? []).filter((f) => f.name !== "all");
+  // A synthesized find (paged-run queryHandler support) is never auto-exposed by
+  // the aggregate controller — the queryHandler's own route is the exposure — so
+  // it drives no HTTP find action / route / OpenAPI path.  Its context defdelegate
+  // + repository method (via `customFindsOf`) still emit, so the paged queryHandler
+  // route can call it.
+  return (repo?.finds ?? []).filter((f) => f.name !== "all" && !f.synthesized);
 }
 
 /** True when the aggregate has any union-returning find (→ the controller needs

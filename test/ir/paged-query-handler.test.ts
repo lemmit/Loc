@@ -68,13 +68,16 @@ describe("paged queryHandler — validation", () => {
       .map((d) => d.code ?? "");
   }
 
-  it("node (Hono) accepts a paged queryHandler", async () => {
-    expect(await errorCodes("node")).not.toContain("loom.paged-query-handler-unsupported-backend");
-  });
-
-  it("a non-node backend is honestly gated (loom.paged-query-handler-unsupported-backend)", async () => {
-    for (const platform of ["dotnet", "java", "python", "elixir"]) {
-      expect(await errorCodes(platform)).toContain("loom.paged-query-handler-unsupported-backend");
+  // Every backend platform now emits the paged-run queryHandler (node/Hono,
+  // Python/FastAPI, Java/Spring, .NET/Mediator, Elixir/Phoenix), so none is
+  // gated.  The `validatePagedQueryHandlerBackend` guard stays as a forward
+  // defence: a hypothetical future backend not in `PAGED_QH_SUPPORTED` would be
+  // gated until its emitter fans out.
+  it("every backend platform accepts a paged queryHandler", async () => {
+    for (const platform of ["node", "python", "java", "dotnet", "elixir"]) {
+      expect(await errorCodes(platform)).not.toContain(
+        "loom.paged-query-handler-unsupported-backend",
+      );
     }
   });
 });

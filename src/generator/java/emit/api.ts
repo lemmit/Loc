@@ -73,7 +73,9 @@ export function renderJavaController(
   // on the controller itself (unlike operation params, which travel inside
   // generated request records that collect their own imports) — so pull in
   // the non-java.lang types their rendered spellings reference.
-  for (const f of declaredFinds(repo)) {
+  // A synthesized find (paged-run queryHandler support) is never auto-exposed
+  // by the aggregate controller — the queryHandler's own route is the exposure.
+  for (const f of declaredFinds(repo).filter((f) => !f.synthesized)) {
     for (const p of f.params) {
       const rendered = renderJavaType(p.type);
       if (rendered.includes("BigDecimal")) imports.add("java.math.BigDecimal");
@@ -171,84 +173,86 @@ export function renderJavaController(
       ];
     });
 
-  const findRoutes = declaredFinds(repo).flatMap((f) => {
-    const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
-    const params = declared.join(", ");
-    const args = f.params.map((p) => p.name).join(", ");
-    // Union find (`Order or NotFound` / `Order option`): the service returns
-    // the success variant's `<Agg>Response` (or null).  Per exception-less.md
-    // §4 the 200 body is that success variant DIRECTLY — never a tagged union
-    // component (an error variant belongs at its status, not in a 200 schema) —
-    // so found → 200 `<Agg>Response`, absent → bare 404 (`none`) or an RFC-7807
-    // ProblemDetail at the error's mapped status (with the `resource` extension
-    // when declared).  Wire-identical to `<Agg>?` / `<Agg> option`.
-    const spec = ctx.boundedContext
-      ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
-      : null;
-    if (spec) {
-      const absent =
-        spec.absent.kind === "none"
-          ? [`            return ResponseEntity.notFound().build();`]
-          : (() => {
-              const tag = spec.absent.tag;
-              const status =
-                ctx.boundedContext?.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
-              return [
-                `            var problem = ProblemDetail.forStatus(${status});`,
-                `            problem.setTitle(${JSON.stringify(errorTitle(tag))});`,
-                `            problem.setType(URI.create(${JSON.stringify(errorTypeUri(tag))}));`,
-                `            problem.setDetail(${JSON.stringify(errorTitle(tag))});`,
-                ...(spec.absent.hasResource
-                  ? [`            problem.setProperty("resource", "${agg.name}");`]
-                  : []),
-                `            return ResponseEntity.status(${status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
-              ];
-            })();
-      if (spec.absent.kind !== "none") anyUnionProblem = true;
+  const findRoutes = declaredFinds(repo)
+    .filter((f) => !f.synthesized)
+    .flatMap((f) => {
+      const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
+      const params = declared.join(", ");
+      const args = f.params.map((p) => p.name).join(", ");
+      // Union find (`Order or NotFound` / `Order option`): the service returns
+      // the success variant's `<Agg>Response` (or null).  Per exception-less.md
+      // §4 the 200 body is that success variant DIRECTLY — never a tagged union
+      // component (an error variant belongs at its status, not in a 200 schema) —
+      // so found → 200 `<Agg>Response`, absent → bare 404 (`none`) or an RFC-7807
+      // ProblemDetail at the error's mapped status (with the `resource` extension
+      // when declared).  Wire-identical to `<Agg>?` / `<Agg> option`.
+      const spec = ctx.boundedContext
+        ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
+        : null;
+      if (spec) {
+        const absent =
+          spec.absent.kind === "none"
+            ? [`            return ResponseEntity.notFound().build();`]
+            : (() => {
+                const tag = spec.absent.tag;
+                const status =
+                  ctx.boundedContext?.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+                return [
+                  `            var problem = ProblemDetail.forStatus(${status});`,
+                  `            problem.setTitle(${JSON.stringify(errorTitle(tag))});`,
+                  `            problem.setType(URI.create(${JSON.stringify(errorTypeUri(tag))}));`,
+                  `            problem.setDetail(${JSON.stringify(errorTitle(tag))});`,
+                  ...(spec.absent.hasResource
+                    ? [`            problem.setProperty("resource", "${agg.name}");`]
+                    : []),
+                  `            return ResponseEntity.status(${status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
+                ];
+              })();
+        if (spec.absent.kind !== "none") anyUnionProblem = true;
+        return [
+          `    @GetMapping("/${snake(f.name)}")`,
+          `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
+          `        var r = service.${f.name}(${args});`,
+          `        if (r == null) {`,
+          ...absent,
+          `        }`,
+          `        return ResponseEntity.ok(r);`,
+          `    }`,
+          ``,
+        ];
+      }
+      if (isPagedFind(f)) {
+        const pagedParams = [
+          ...declared,
+          `@RequestParam(defaultValue = "1") int page`,
+          `@RequestParam(defaultValue = "20") int pageSize`,
+          `@RequestParam(defaultValue = "id") String sort`,
+          `@RequestParam(defaultValue = "asc") String dir`,
+        ].join(", ");
+        const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
+        return [
+          `    @GetMapping("/${snake(f.name)}")`,
+          `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
+          `        return service.${f.name}(${pagedArgs});`,
+          `    }`,
+          ``,
+        ];
+      }
+      const single = f.returnType.kind !== "array";
+      const retType = single ? `ResponseEntity<${agg.name}Response>` : `List<${agg.name}Response>`;
       return [
         `    @GetMapping("/${snake(f.name)}")`,
-        `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
-        `        var r = service.${f.name}(${args});`,
-        `        if (r == null) {`,
-        ...absent,
-        `        }`,
-        `        return ResponseEntity.ok(r);`,
+        `    public ${retType} ${f.name}${agg.name}(${params}) {`,
+        single
+          ? `        var response = service.${f.name}(${args});`
+          : `        return service.${f.name}(${args});`,
+        single
+          ? `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`
+          : null,
         `    }`,
         ``,
-      ];
-    }
-    if (isPagedFind(f)) {
-      const pagedParams = [
-        ...declared,
-        `@RequestParam(defaultValue = "1") int page`,
-        `@RequestParam(defaultValue = "20") int pageSize`,
-        `@RequestParam(defaultValue = "id") String sort`,
-        `@RequestParam(defaultValue = "asc") String dir`,
-      ].join(", ");
-      const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
-      return [
-        `    @GetMapping("/${snake(f.name)}")`,
-        `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
-        `        return service.${f.name}(${pagedArgs});`,
-        `    }`,
-        ``,
-      ];
-    }
-    const single = f.returnType.kind !== "array";
-    const retType = single ? `ResponseEntity<${agg.name}Response>` : `List<${agg.name}Response>`;
-    return [
-      `    @GetMapping("/${snake(f.name)}")`,
-      `    public ${retType} ${f.name}${agg.name}(${params}) {`,
-      single
-        ? `        var response = service.${f.name}(${args});`
-        : `        return service.${f.name}(${args});`,
-      single
-        ? `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`
-        : null,
-      `    }`,
-      ``,
-    ].filter((l): l is string => l !== null);
-  });
+      ].filter((l): l is string => l !== null);
+    });
 
   const destroyRoutes =
     (agg.destroys?.length ?? 0) > 0

@@ -36,6 +36,11 @@
 // raw SQLAlchemy row.  Id / scalar / void returns are unchanged.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -241,6 +246,103 @@ function handlerUsesUser(h: Handler, ctx: EnrichedBoundedContextIR): boolean {
   return walk(h.statements);
 }
 
+/** Recover the synthesized `repo-run` statement of a paged-run queryHandler
+ *  (`queryHandler H(...): <Agg> paged { let r = Repo.run(<Criterion>(args));
+ *  return r }`) — the shape enrich synthesized the paged FIND for.  Returns the
+ *  statement (carrying the repo/aggregate + paged find method name
+ *  `retrievalName` = `findAllBy<Criterion>` + the criterion args), or throws if
+ *  the handler doesn't match the supported shape. */
+function pagedRunStmt(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): Extract<WorkflowStmtIR, { kind: "repo-run" }> {
+  const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+  const run = h.statements.find(
+    (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+      s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+  );
+  if (!run) {
+    throw new Error(
+      `internal: paged queryHandler '${h.name}' in '${ctx.name}' does not match the ` +
+        "supported `let r = Repo.run(<Criterion>(args)); return r` shape. Please file a bug.",
+    );
+  }
+  return run;
+}
+
+/** Render the handler module for a paged-run queryHandler.  The `async def`
+ *  constructs the aggregate's repository, calls the synthesized paged FIND
+ *  method (`find_all_by_<criterion>`) with the criterion args + page/pageSize/
+ *  sort/dir, and returns the `{items,page,pageSize,total,totalPages}` envelope
+ *  with items wire-projected via the repo's `to_wire(...)`.  Reuses the #1904
+ *  paged-find repo method (already emitted onto the repository because the
+ *  synthesized FIND is in its `finds`). */
+function renderPagedRunHandlerModule(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+  hasDispatch: boolean,
+): string {
+  const fnName = snake(h.name);
+  const run = pagedRunStmt(h, ctx);
+  const repoVar = snake(run.repoName);
+  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
+  const rctx: PyRenderContext = { thisName: "self", recordParamNames: new Set() };
+  const critArgs = run.retrievalArgs.map((a) => renderPyExpr(a, rctx));
+  const callArgs = [...critArgs, "page", "page_size", "sort", "dir"].join(", ");
+  const sigParams = [
+    "session: AsyncSession",
+    ...h.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
+    "page: int",
+    "page_size: int",
+    "sort: str",
+    "dir: str",
+  ].join(", ");
+  const def = lines(
+    `async def ${fnName}(${sigParams}) -> dict[str, object]:`,
+    `    ${repoVar} = ${run.aggName}Repository(session, ${dispatcherExpr})`,
+    `    result = await ${repoVar}.${snake(run.retrievalName)}(${callArgs})`,
+    "    return {",
+    `        "items": [${repoVar}.to_wire(__e) for __e in result.items],`,
+    '        "page": result.page,',
+    '        "pageSize": result.page_size,',
+    '        "total": result.total,',
+    '        "totalPages": result.total_pages,',
+    "    }",
+  );
+  // Import scan: blank string literals, then whole-word references.
+  const scan = def.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
+  const idNames = ctx.aggregates
+    .map((a) => `${a.name}Id`)
+    .filter((n, i, arr) => refersTo(n) && arr.indexOf(n) === i)
+    .sort();
+  const enumNames = ctx.enums
+    .map((e) => e.name)
+    .filter(refersTo)
+    .sort();
+  const voNames = ctx.valueObjects
+    .map((v) => v.name)
+    .filter(refersTo)
+    .sort();
+  return lines(
+    `"""${h.name} application handler.  Auto-generated."""`,
+    "",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "",
+    `from app.db.repositories.${snake(run.aggName)}_repository import ${run.aggName}Repository`,
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
+    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
+    idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    [...enumNames, ...voNames].length > 0
+      ? `from app.domain.value_objects import ${[...enumNames, ...voNames].sort().join(", ")}`
+      : null,
+    "",
+    "",
+    def,
+    "",
+  );
+}
+
 /** Render the handler `async def` body: repo construction, the WorkflowStmtIR
  *  sequence, exit-saves, then `return <returnValue>`. */
 function renderHandlerModule(
@@ -251,6 +353,11 @@ function renderHandlerModule(
   // Extern handler: no DSL body — the dispatch delegates to the scaffold-once
   // user impl module (emitted separately in `emitPyExplicitHandlers`).
   if (h.extern) return renderPyExternDispatch(h, ctx);
+  // paged-run queryHandler: a `paged` carrier return can't flow through the
+  // generic `wireTypeInfo` projection below, so it takes a dedicated module.
+  if (h.returnType && pagedReturn(h.returnType)) {
+    return renderPagedRunHandlerModule(h, ctx, hasDispatch);
+  }
   const fnName = snake(h.name);
   const usesUser = handlerUsesUser(h, ctx);
 
@@ -418,6 +525,47 @@ function pathParamNames(path: string): Set<string> {
   return names;
 }
 
+/** Emit the path-op for a paged-run queryHandler route.  A paged read is a GET:
+ *  path-bound params (`{token}`) stay URL path params (coerced), the rest ride
+ *  the query string, joined by page/pageSize/sort/dir controls (defaulted).
+ *  The op calls the paged handler module — which constructs the repo, runs the
+ *  synthesized paged FIND, and returns the wire envelope — and returns it. */
+function emitPagedRunRoute(r: RouteIR, h: Handler, ctx: EnrichedBoundedContextIR): string {
+  const pathNames = pathParamNames(r.path);
+  const pathParams = h.params.filter((p) => pathNames.has(p.name));
+  const queryParams = h.params.filter((p) => !pathNames.has(p.name));
+  const method = r.method.toLowerCase();
+  const path = snakePath(r.path);
+  const opId = camelName(h.name);
+  const routeName = `${snake(h.name)}_route`;
+  // Non-default params first (Python signature order): path + criterion query
+  // params + session, then the defaulted pagination controls.
+  const sig = [
+    ...pathParams.map((p) => `${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
+    ...queryParams.map((p) => `${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
+    "session: SessionDep",
+    `page: int = ${PAGED_DEFAULT_PAGE}`,
+    `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+    `sort: str = "id"`,
+    `dir: str = "asc"`,
+  ].join(", ");
+  // Call args in handler-param order (each wire→domain coerced), then the
+  // pagination controls (pageSize → the handler's snake `page_size`).
+  const callArgs = [
+    "session",
+    ...h.params.map((p) => pyWireToDomain(snake(p.name), p.type, ctx)),
+    "page",
+    "pageSize",
+    "sort",
+    "dir",
+  ].join(", ");
+  return lines(
+    `@router.${method}("${path}", operation_id="${opId}")`,
+    `async def ${routeName}(${sig}) -> dict[str, object]:`,
+    `    return await ${snake(h.name)}(${callArgs})`,
+  );
+}
+
 /** Emit one APIRouter per served api whose route list is non-empty:
  *  `app/http/<snake(api)>_routes.py`.  Each `route` becomes a path-op that
  *  coerces its wire path params into the domain types and calls the handler
@@ -444,6 +592,14 @@ export function emitPyExplicitRouteRouter(
     const h: Handler | undefined = cmd ?? qry;
     if (!h) continue;
     handlerImports.add(h.name);
+
+    // paged-run queryHandler: a GET whose criterion params ride the query
+    // string alongside page/pageSize/sort/dir; it calls the paged handler
+    // module (which builds the `{items,…}` envelope) and returns it directly.
+    if (h.returnType && pagedReturn(h.returnType)) {
+      routeBlocks.push(emitPagedRunRoute(r, h, ctx));
+      continue;
+    }
 
     const usesUser = handlerUsesUser(h, ctx);
     // Split params: those bound by a `{token}` in the route path stay URL path

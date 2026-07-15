@@ -30,6 +30,11 @@
 // limitation, matching the workflow op-call's `{:ok, _} <-` discard.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -416,7 +421,36 @@ export function emitExplicitHandlers(
     }
   };
   for (const h of ctx.commandHandlers ?? []) emit(h, "Command handler");
-  for (const h of ctx.queryHandlers ?? []) emit(h, "Query handler");
+  for (const h of ctx.queryHandlers ?? []) {
+    // paged-run queryHandler: no `run/1` handler module — its route action calls
+    // the aggregate context's synthesized paged FIND function directly and
+    // renders the wire envelope (the generic handler body can't return a paged
+    // carrier).  See `emitExplicitRoutesController`.
+    if (!h.extern && h.returnType && pagedReturn(h.returnType)) continue;
+    emit(h, "Query handler");
+  }
+}
+
+/** Recover the synthesized `repo-run` statement of a paged-run queryHandler
+ *  (`queryHandler H(...): <Agg> paged { let r = Repo.run(<Criterion>(args));
+ *  return r }`) — carrying the aggregate + the paged FIND name (`retrievalName`
+ *  = `findAllBy<Criterion>`) so the route can call its context function. */
+function pagedRunStmt(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): Extract<WorkflowStmtIR, { kind: "repo-run" }> {
+  const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+  const run = h.statements.find(
+    (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+      s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+  );
+  if (!run) {
+    throw new Error(
+      `internal: paged queryHandler '${h.name}' in '${ctx.name}' does not match the ` +
+        "supported `let r = Repo.run(<Criterion>(args)); return r` shape. Please file a bug.",
+    );
+  }
+  return run;
 }
 
 /** Resolve a `route`'s `Context.Handler` target to the handler's IR + kind. */
@@ -460,11 +494,48 @@ export function emitExplicitRoutesController(
   const controller = `${upperFirst(apiName)}RoutesController`;
   const apiRoutes: ApiRoute[] = [];
   const actions: string[] = [];
+  // Set when any route is a paged-run queryHandler — the controller then carries
+  // a `page_param/3` coercion helper (Phoenix delivers query params as strings).
+  let hasPaged = false;
   for (const r of routes) {
     const resolved = resolveRoute(r, byName);
     if (!resolved) continue;
     const { ctx, handler } = resolved;
     const action = snake(handler.name);
+    // paged-run queryHandler: call the aggregate context's synthesized paged FIND
+    // (`<find>_<agg>`) directly with the criterion params + page/pageSize/sort/dir
+    // (coerced), then render the `{items,…}` wire envelope (items serialised).
+    if (!handler.extern && handler.returnType && pagedReturn(handler.returnType)) {
+      hasPaged = true;
+      const run = pagedRunStmt(handler, ctx);
+      const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
+      const ctxFn = `${appModule}.${upperFirst(ctx.name)}.${snake(run.retrievalName)}_${snake(run.aggName)}`;
+      const critArgs = handler.params.map(
+        (p) => `params[${JSON.stringify(pathNames.has(p.name) ? snake(p.name) : p.name)}]`,
+      );
+      const callArgs = [
+        ...critArgs,
+        `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
+        `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+        `Map.get(params, "sort", "id")`,
+        `Map.get(params, "dir", "asc")`,
+      ];
+      actions.push(`  def ${action}(conn, params) do
+    with {:ok, result} <-
+           ${ctxFn}(
+             ${callArgs.join(",\n             ")}
+           ) do
+      json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+    end
+  end`);
+      apiRoutes.push({
+        method: r.method.toLowerCase() as ApiRoute["method"],
+        path: `!root:${phoenixPath(r.path)}`,
+        controller,
+        action: `:${action}`,
+      });
+      continue;
+    }
     const handlerMod = `${appModule}.${upperFirst(ctx.name)}.Handlers.${upperFirst(handler.name)}`;
     actions.push(`  def ${action}(conn, params) do
     respond(conn, ${handlerMod}.run(params))
@@ -531,7 +602,27 @@ ${actions.join("\n\n")}
   # struct is not Jason-encodable as-is, so a bare list would 500 on encode.
   defp serialize(list) when is_list(list), do: Enum.map(list, &serialize/1)
   defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
-  defp serialize(other), do: other
+  defp serialize(other), do: other${
+    hasPaged
+      ? `
+
+  # 1-based page coercion for a paged-run queryHandler route (Phoenix delivers
+  # query params as strings; a missing/blank/non-integer value falls back to the
+  # shared default).
+  defp page_param(params, key, default) do
+    case params[key] do
+      v when is_integer(v) -> v
+      v when is_binary(v) ->
+        case Integer.parse(v) do
+          {n, _} when n >= 1 -> n
+          _ -> default
+        end
+
+      _ -> default
+    end
+  end`
+      : ""
+  }
 end
 `,
   );

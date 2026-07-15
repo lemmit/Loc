@@ -114,7 +114,10 @@ export function emitFindQueriesAndHandlers(
   out: Map<string, string>,
 ): void {
   if (!repo) return;
-  for (const find of repo.finds) {
+  // A synthesized find (paged-run queryHandler support) exposes no CQRS
+  // query/handler of its own — the paged queryHandler emits a dedicated one and
+  // calls the repository method directly.  The repo method itself still emits.
+  for (const find of repo.finds.filter((f) => !f.synthesized)) {
     const queryReturn = renderResponseReturnType(find.returnType, agg);
     const usesUser = findUsesCurrentUser(find);
     // A paged return references `Paged<T>` from the shared runtime.

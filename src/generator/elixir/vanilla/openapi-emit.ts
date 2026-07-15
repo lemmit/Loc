@@ -698,7 +698,9 @@ ${pagingQueryParams()}
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     if (repo) {
       for (const find of repo.finds) {
-        if (find.name === "all") continue;
+        // A synthesized find (paged-run queryHandler support) is not auto-exposed
+        // by the aggregate controller — the queryHandler's own route documents it.
+        if (find.name === "all" || find.synthesized) continue;
         const findSnake = snake(find.name);
         // A paged explicit find (`find x(): T paged`) shares the `<Agg>Paged`
         // envelope and gains the page/pageSize/sort/dir controls, mirroring the

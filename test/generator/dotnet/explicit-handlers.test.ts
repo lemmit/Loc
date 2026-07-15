@@ -339,3 +339,59 @@ describe("dotnet — scaffolded handlers consume command/query record params", (
     expect(ctrl).toMatch(/\.Select\(__e => new OrderResponse\(/);
   });
 });
+
+// paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
+// Repo.run(<Criterion>(args)); return r }`) → a dedicated Mediator Query +
+// Handler over the synthesized paged FIND repo method (returning the
+// wire-projected `Paged<Agg>Response`), plus a GET controller action with
+// [FromQuery] page/pageSize/sort/dir + the criterion params.
+const PAGED_SRC = `
+system S {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { code: string  region: string }
+      repository Orders for Order { }
+      criterion InRegion(rgn: string) of Order = region == rgn
+      queryHandler ListInRegion(rgn: string): Order paged {
+        let r = Orders.run(InRegion(rgn))
+        return r
+      }
+    }
+  }
+  api A from Sales { route GET "/orders/projections/in_region" -> Orders.ListInRegion }
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: dotnet, contexts: [Orders], dataSources: [s], serves: A, port: 5001 }
+}
+`;
+describe("dotnet — paged-run queryHandler over run(criterion)", () => {
+  it("the Query returns Paged<AggResponse> and the handler calls the paged FIND repo method", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const rec = fileEndingWith(m, "Application/Orders/Queries/ListInRegionQuery.cs");
+    expect(rec).toContain(
+      "public sealed record ListInRegionQuery(string Rgn, int Page, int PageSize, string Sort, string Dir) : IQuery<Paged<OrderResponse>>;",
+    );
+    const h = fileEndingWith(m, "Application/Orders/Queries/ListInRegionHandler.cs");
+    expect(h).toContain(
+      "var domain = await _orders.FindAllByInRegion(query.Rgn, query.Page, query.PageSize, query.Sort, query.Dir, cancellationToken);",
+    );
+    expect(h).toContain(
+      "return new Paged<OrderResponse>(domain.Items.Select(d => new OrderResponse(",
+    );
+  });
+
+  it("the controller action exposes [FromQuery] page/pageSize/sort/dir and dispatches the Query", async () => {
+    const ctrl = fileEndingWith(await generateSystemFiles(PAGED_SRC), "Api/ARoutesController.cs");
+    expect(ctrl).toContain('[HttpGet("/orders/projections/in_region")]');
+    expect(ctrl).toContain("[FromQuery] int page = 1");
+    expect(ctrl).toContain(
+      "await _mediator.Send(new ListInRegionQuery(rgn, page, pageSize, sort, dir))",
+    );
+  });
+
+  it("the aggregate controller does NOT auto-expose the synthesized find", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const key = [...m.keys()].find((k) => k.endsWith("Api/OrdersController.cs"));
+    if (key) expect(m.get(key)!).not.toContain("FindAllByInRegion");
+  });
+});

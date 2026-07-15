@@ -327,3 +327,61 @@ describe("python — extern commandHandler / queryHandler", () => {
     expect(impl).toContain("raise NotImplementedError(");
   });
 });
+
+// paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
+// Repo.run(<Criterion>(args)); return r }`) → a GET whose criterion params ride
+// the query string alongside page/pageSize/sort/dir; the handler module calls
+// the synthesized paged FIND repo method and returns the wire envelope.
+const PAGED_SRC = `
+system S {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { code: string  region: string }
+      repository Orders for Order { }
+      criterion InRegion(rgn: string) of Order = region == rgn
+      queryHandler ListInRegion(rgn: string): Order paged {
+        let r = Orders.run(InRegion(rgn))
+        return r
+      }
+    }
+  }
+  api A from Sales { route GET "/orders/projections/in_region" -> Orders.ListInRegion }
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: python, contexts: [Orders], dataSources: [s], serves: A, port: 5001 }
+}
+`;
+describe("python — paged-run queryHandler over run(criterion)", () => {
+  it("emits a paged handler module returning the wire envelope", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const handler = fileEndingWith(m, "app/application/list_in_region.py");
+    expect(handler).toContain(
+      "async def list_in_region(session: AsyncSession, rgn: str, page: int, page_size: int, sort: str, dir: str) -> dict[str, object]:",
+    );
+    expect(handler).toContain(
+      "result = await orders.find_all_by_in_region(rgn, page, page_size, sort, dir)",
+    );
+    expect(handler).toContain('"items": [orders.to_wire(__e) for __e in result.items]');
+    expect(handler).toContain('"pageSize": result.page_size');
+    expect(handler).toContain('"totalPages": result.total_pages');
+  });
+
+  it("the route exposes page/pageSize/sort/dir query params and calls the handler", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const routes = fileEndingWith(m, "app/http/a_routes.py");
+    expect(routes).toContain('@router.get("/orders/projections/in_region"');
+    expect(routes).toMatch(
+      /rgn: str, session: SessionDep, page: int = 1, pageSize: int = 20, sort: str = "id", dir: str = "asc"/,
+    );
+    expect(routes).toContain(
+      "return await list_in_region(session, rgn, page, pageSize, sort, dir)",
+    );
+  });
+
+  it("the aggregate router does NOT auto-expose the synthesized find", async () => {
+    const m = await generateSystemFiles(PAGED_SRC);
+    const orderRoutes = fileEndingWith(m, "app/http/order_routes.py");
+    expect(orderRoutes).not.toContain("in_region");
+    expect(orderRoutes).not.toContain("find_all_by_in_region");
+  });
+});

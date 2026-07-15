@@ -36,6 +36,7 @@
 // (single or `.Select(...).ToList()`) at the boundary.
 // ---------------------------------------------------------------------------
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -51,7 +52,7 @@ import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-
 import { plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
-import { projectToResponse } from "./dto-mapping.js";
+import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
 import { renderCsType } from "./render-expr.js";
 import { csWorkflowStmtTarget, renderExprWithCmdParams } from "./workflow-emit.js";
 
@@ -259,6 +260,103 @@ ${body}
 `;
 }
 
+/** Recover the synthesized `repo-run` statement of a paged-run queryHandler
+ *  (`queryHandler H(...): <Agg> paged { let r = Repo.run(<Criterion>(args));
+ *  return r }`) — carrying the repo/aggregate + the paged FIND method name
+ *  (`retrievalName` = `findAllBy<Criterion>`) + the criterion args. */
+function pagedRunStmt(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+): Extract<WorkflowStmtIR, { kind: "repo-run" }> {
+  const retName = h.returnValue?.kind === "ref" ? h.returnValue.name : undefined;
+  const run = h.statements.find(
+    (s): s is Extract<WorkflowStmtIR, { kind: "repo-run" }> =>
+      s.kind === "repo-run" && !!s.synthCriterion && s.name === retName,
+  );
+  if (!run) {
+    throw new Error(
+      `internal: paged queryHandler '${h.name}' in '${ctx.name}' does not match the ` +
+        "supported `let r = Repo.run(<Criterion>(args)); return r` shape. Please file a bug.",
+    );
+  }
+  return run;
+}
+
+/** The Mediator `<Name>Query` record for a paged-run queryHandler:
+ *  `IQuery<Paged<Agg>Response>`, its criterion params joined by the
+ *  page/pageSize/sort/dir controls. */
+function renderPagedQueryRecord(
+  h: Handler,
+  ns: string,
+  ctx: EnrichedBoundedContextIR,
+  agg: string,
+): string {
+  const params = [
+    ...h.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
+    "int Page",
+    "int PageSize",
+    "string Sort",
+    "string Dir",
+  ].join(", ");
+  return `// Auto-generated.
+using Mediator;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Application.${plural(agg)}.Responses;
+
+namespace ${ns}.Application.${plural(agg)}.Queries;
+
+public sealed record ${h.name}Query(${params}) : IQuery<Paged<${agg}Response>>;
+`;
+}
+
+/** The Mediator handler for a paged-run queryHandler: injects the aggregate's
+ *  repository, calls the synthesized paged FIND method (returning the domain
+ *  `Paged<Agg>`), and re-wraps as `Paged<Agg>Response` with items projected via
+ *  the shared `<Agg>Response` factory.  Reuses the #1904 paged repo method. */
+function renderPagedQueryHandlerClass(
+  h: Handler,
+  ns: string,
+  ctx: EnrichedBoundedContextIR,
+  agg: string,
+): string {
+  const run = pagedRunStmt(h, ctx);
+  const aggIR = ctx.aggregates.find((a) => a.name === agg)!;
+  const field = repoField(run.repoName);
+  const critArgs = h.params.map((p) => `query.${upperFirst(p.name)}`);
+  const callArgs = [...critArgs, "query.Page", "query.PageSize", "query.Sort", "query.Dir"].join(
+    ", ",
+  );
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.${plural(agg)};
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Application.${plural(agg)}.Responses;
+
+namespace ${ns}.Application.${plural(agg)}.Queries;
+
+public sealed class ${h.name}Handler : IQueryHandler<${h.name}Query, Paged<${agg}Response>>
+{
+    private readonly I${agg}Repository ${field};
+    public ${h.name}Handler(I${agg}Repository ${field.slice(1)}) => ${field} = ${field.slice(1)};
+
+    public async ValueTask<Paged<${agg}Response>> Handle(${h.name}Query query, CancellationToken cancellationToken)
+    {
+        var domain = await ${field}.${upperFirst(run.retrievalName)}(${callArgs}, cancellationToken);
+        return new Paged<${agg}Response>(domain.Items.Select(d => ${projectEntityExpr("d", aggIR, ctx)}).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);
+    }
+}
+`;
+}
+
 // --- Extern handler (bodyless) — port + [ExternHandler] scaffold-once impl --
 // An `extern` handler has no DSL body and no home aggregate: its Mediator
 // command/query + route wire up as usual, but the Mediator handler delegates to
@@ -433,6 +531,21 @@ export function emitExplicitHandlers(
       emitExternHandler(h, ns, "Query", out);
       continue;
     }
+    // paged-run queryHandler: a dedicated Query + Handler over the synthesized
+    // paged FIND (the generic `paged` carrier can't flow through the Mediator
+    // record's `IQuery<renderCsType(...)>` return).
+    if (h.returnType && pagedReturn(h.returnType)) {
+      const pagedAgg = pagedRunStmt(h, ctx).aggName;
+      out.set(
+        `Application/${plural(pagedAgg)}/Queries/${h.name}Query.cs`,
+        renderPagedQueryRecord(h, ns, ctx, pagedAgg),
+      );
+      out.set(
+        `Application/${plural(pagedAgg)}/Queries/${h.name}Handler.cs`,
+        renderPagedQueryHandlerClass(h, ns, ctx, pagedAgg),
+      );
+      continue;
+    }
     const agg = primaryAgg(h);
     if (!agg) continue;
     out.set(
@@ -469,6 +582,20 @@ function pathActionParam(p: ParamIR): { actionParam: string; commandArg: string 
   return { actionParam: `${renderCsType(t)} ${p.name}`, commandArg: p.name };
 }
 
+/** A `[FromQuery]` criterion param of a paged-run queryHandler: id → wire type
+ *  coerced with `new <Agg>Id(...)`; scalar → the rendered domain type verbatim. */
+function queryActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
+  const t: TypeIR = p.type;
+  if (t.kind === "id") {
+    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    return {
+      actionParam: `[FromQuery] ${wire} ${p.name}`,
+      commandArg: `new ${t.targetName}Id(${p.name})`,
+    };
+  }
+  return { actionParam: `[FromQuery] ${renderCsType(t)} ${p.name}`, commandArg: p.name };
+}
+
 const HTTP_ATTR: Record<string, string> = {
   GET: "HttpGet",
   POST: "HttpPost",
@@ -499,6 +626,40 @@ export function emitExplicitRouteController(
     const qry = (ctx.queryHandlers ?? []).find((h) => h.name === r.target.handler);
     const h = cmd ?? qry;
     if (!h) continue;
+    // paged-run queryHandler: a GET whose criterion params ride the query string
+    // alongside page/pageSize/sort/dir; dispatches the dedicated paged Query and
+    // returns the `Paged<Agg>Response` envelope.
+    if (!h.extern && h.returnType && pagedReturn(h.returnType)) {
+      const run = pagedRunStmt(h, ctx);
+      nsUsings.add(`${ns}.Application.${plural(run.aggName)}.Queries`);
+      const pathNames = pathParamNames(r.path);
+      const bind = new Map(
+        h.params.map((p) => [
+          p.name,
+          pathNames.has(p.name) ? pathActionParam(p) : queryActionParam(p),
+        ]),
+      );
+      const actionParams = [
+        ...h.params.map((p) => bind.get(p.name)!.actionParam),
+        "[FromQuery] int page = 1",
+        "[FromQuery] int pageSize = 20",
+        '[FromQuery] string sort = "id"',
+        '[FromQuery] string dir = "asc"',
+      ].join(", ");
+      const queryArgs = [
+        ...h.params.map((p) => bind.get(p.name)!.commandArg),
+        "page",
+        "pageSize",
+        "sort",
+        "dir",
+      ].join(", ");
+      actions.push(
+        `    [HttpGet("${r.path}")]\n` +
+          `    public async Task<IActionResult> ${h.name}(${actionParams})\n` +
+          `    {\n        var result = await _mediator.Send(new ${h.name}Query(${queryArgs}));\n        return Ok(result);\n    }`,
+      );
+      continue;
+    }
     const agg = primaryAgg(h);
     // A DSL-bodied handler files under its home aggregate; an extern handler has
     // none and lives in the neutral `Application/Handlers/` namespace.

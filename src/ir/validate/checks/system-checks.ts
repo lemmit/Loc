@@ -82,20 +82,22 @@ import { validateE2ETest } from "./test-checks.js";
 // so the limitation is visible rather than a no-op.
 const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 
-// paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is only
-// emitted on the node (Hono) backend today — the .NET/Java/Python/Elixir
-// explicit-handler emitters would crash on the `paged` generic carrier (as Hono
-// did before #1904's paged-find machinery was wired here).  Gate a paged
-// queryHandler hosted on any non-node backend deployable with an honest
-// diagnostic until the per-backend emission fans out, so the feature is
-// Hono-scoped rather than a silent codegen crash.
+// paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
+// emitted by each backend whose explicit-handler emitter has grown the paged
+// branch (mirroring Hono's `emitPagedRunHandler`).  A backend NOT in
+// `PAGED_QH_SUPPORTED` would crash on the `paged` generic carrier at its
+// return-type render, so gate a paged queryHandler hosted on such a deployable
+// with an honest diagnostic until its emitter fans out — a reviewed gap rather
+// than a silent codegen crash.
+const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
   for (const d of sys.deployables) {
-    // Only backend platforms emit application-layer handlers; node is the one
-    // that supports paged queryHandlers.  Frontends / non-backend platforms are
-    // skipped (they host no handlers).
-    if (!platformOwnsBackend(d.platform) || d.platform === "node") continue;
+    // Only backend platforms emit application-layer handlers; the ones in
+    // `PAGED_QH_SUPPORTED` render the paged branch.  Frontends / non-backend
+    // platforms are skipped (they host no handlers).
+    if (!platformOwnsBackend(d.platform) || PAGED_QH_SUPPORTED.has(d.platform)) continue;
     for (const cn of d.contextNames) {
       const c = ctxByName.get(cn);
       if (!c) continue;

@@ -105,7 +105,11 @@ export function buildPyRoutesFile(
   const autoAllFind = repo?.finds.find(
     (f) => f.name === "all" && f.params.length === 0 && !f.filter,
   );
-  const pagedCarriers = [...emittableFinds(repo), ...(autoAllFind ? [autoAllFind] : [])];
+  // A synthesized find (paged-run queryHandler support) is never auto-exposed
+  // by the aggregate router — the queryHandler's own route is the exposure — so
+  // it contributes no route and no `<Agg>Paged` DTO here.
+  const exposedFinds = emittableFinds(repo).filter((f) => !f.synthesized);
+  const pagedCarriers = [...exposedFinds, ...(autoAllFind ? [autoAllFind] : [])];
   for (const f of pagedCarriers) {
     const paged = pagedReturn(f.returnType);
     if (!paged || pagedNames.has(paged.name)) continue;
@@ -162,7 +166,7 @@ export function buildPyRoutesFile(
     allRoute(agg, repo),
     // Finds register before /{id}: Starlette matches in declaration
     // order, so the static find paths must win over the id pattern.
-    ...emittableFinds(repo).flatMap((f) => ["", "", findRoute(agg, f, ctx)]),
+    ...exposedFinds.flatMap((f) => ["", "", findRoute(agg, f, ctx)]),
     "",
     "",
     byIdRoute(agg),
