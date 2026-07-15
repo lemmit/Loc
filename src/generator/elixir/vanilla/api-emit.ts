@@ -505,10 +505,17 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // update, and maps the `{:error, :conflict}` a stale write yields (the
   // repository rescued `Ecto.StaleEntryError`) onto a 409 ProblemDetails.
   // Gated: a non-versioned aggregate's update action stays byte-identical.
+  // The `__expected_version/1` helper (and its binding) is only consumed by the
+  // generic `update` action, so it is gated on BOTH `versioned` AND the presence
+  // of an explicit `update` op — otherwise a versioned aggregate with no update
+  // op (default-on versioning makes EVERY aggregate versioned) would emit an
+  // unused private fn and fail `mix compile --warnings-as-errors`.
+  const hasUpdateOp = agg.operations.some((o) => o.name === "update");
   const versioned = aggregateIsVersioned(agg);
-  const versionBind = versioned ? "    expected_version = __expected_version(conn)\n" : "";
-  const versionCallArg = versioned ? ", expected_version" : "";
-  const conflictClause = versioned
+  const versionsUpdate = versioned && hasUpdateOp;
+  const versionBind = versionsUpdate ? "    expected_version = __expected_version(conn)\n" : "";
+  const versionCallArg = versionsUpdate ? ", expected_version" : "";
+  const conflictClause = versionsUpdate
     ? `
 
       {:error, :conflict} ->
@@ -517,7 +524,7 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // Private helper — parse the client's expected `version` from the `if-match`
   // request header (bare int or a quoted ETag).  Absent/unparseable → nil, which
   // the write path treats as write-time CAS (the loaded row's own version).
-  const versionHelper = versioned
+  const versionHelper = versionsUpdate
     ? `
 
   # Parse the optimistic-concurrency precondition (the client's expected
@@ -547,8 +554,8 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // routed action is never left calling an undefined context fn and no unused
   // action survives `--warnings-as-errors`.  (The generic action does
   // `Map.drop(params, ["id"])` → `update_<agg>`; it does not dispatch to the
-  // op body — the op's own member endpoint does.)
-  const hasUpdateOp = agg.operations.some((o) => o.name === "update");
+  // op body — the op's own member endpoint does.)  (`hasUpdateOp` is computed
+  // above, alongside the optimistic-concurrency gate.)
   const updateAction = !hasUpdateOp
     ? ""
     : `  def update(conn, %{"id" => id} = params) do
