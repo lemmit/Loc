@@ -22,12 +22,16 @@ exports[`wire-spec.json > emits the expected document shape for examples/acme.dd
         "username": {
           "type": "string",
         },
+        "version": {
+          "type": "integer",
+        },
       },
       "required": [
         "id",
         "username",
         "email",
         "age",
+        "version",
         "display",
       ],
       "type": "object",
@@ -55,12 +59,16 @@ exports[`wire-spec.json > emits the expected document shape for examples/acme.dd
         "status": {
           "type": "string",
         },
+        "version": {
+          "type": "integer",
+        },
       },
       "required": [
         "id",
         "customerId",
         "status",
         "placedAt",
+        "version",
         "lines",
       ],
       "type": "object",
@@ -81,11 +89,15 @@ exports[`wire-spec.json > emits the expected document shape for examples/acme.dd
         "sku": {
           "type": "string",
         },
+        "version": {
+          "type": "integer",
+        },
       },
       "required": [
         "id",
         "sku",
         "price",
+        "version",
         "display",
       ],
       "type": "object",

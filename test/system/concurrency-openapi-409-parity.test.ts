@@ -7,8 +7,10 @@
 // (test/e2e error-response dimension) diverges (node declared 409, the four
 // matrix-driven backends did not — the gap this test pins shut).
 //
-// A NON-versioned aggregate's `update` carries no 409 (no `when` gate, no
-// version token), so the declaration is gated on `aggregateIsVersioned`.
+// Versioning is default-on (M-T3.4): EVERY aggregate is versioned, so the 409
+// is declared on every update op whether or not the source writes
+// `with versioned`.  Each backend's negative sibling below pins that the
+// default-on aggregate (no explicit capability) still advertises the 409.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/index.js";
@@ -62,11 +64,11 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
     expect(win).toContain('409: { description: "Conflict"');
   });
 
-  it("Hono declares no 409 on the update route when not versioned", async () => {
+  it("Hono declares 409 on the update route by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system("node", ""));
     const routes = fileMatching(files, (p) => p.endsWith("customer.routes.ts"));
     const win = updateWindow(routes, /path: "\/\{id\}\/update"/);
-    expect(win).not.toContain("409");
+    expect(win).toContain('409: { description: "Conflict"');
   });
 
   it(".NET declares 409 on the UpdateCustomer action", async () => {
@@ -85,14 +87,14 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
     expect(win).toBeTruthy();
   });
 
-  it(".NET declares no 409 on UpdateCustomer when not versioned", async () => {
+  it(".NET declares 409 on UpdateCustomer by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system("dotnet", ""));
     const ctrl = fileMatching(files, (p) => p.endsWith("CustomersController.cs"));
     const around = ctrl.slice(
       Math.max(0, ctrl.indexOf("UpdateCustomer") - 400),
       ctrl.indexOf("UpdateCustomer"),
     );
-    expect(around).not.toContain("409");
+    expect(around).toContain("ProducesResponseType(typeof(ProblemDetails), 409)");
   });
 
   it("Java declares 409 in the update route's status set", async () => {
@@ -101,10 +103,10 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
     expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 422\}/);
   });
 
-  it("Java declares no 409 in the update route when not versioned", async () => {
+  it("Java declares 409 in the update route by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system("java", ""));
     const cust = fileMatching(files, (p) => p.endsWith("OpenApiContractCustomizer.java"));
-    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 422\}/);
+    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 422\}/);
   });
 
   it("Python declares 409 on the updateCustomer route", async () => {
@@ -114,11 +116,11 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
     expect(win).toContain('409: {"model": ProblemDetails');
   });
 
-  it("Python declares no 409 on updateCustomer when not versioned", async () => {
+  it("Python declares 409 on updateCustomer by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system("python", ""));
     const routes = fileMatching(files, (p) => p.endsWith("customer_routes.py"));
     const win = updateWindow(routes, /operation_id="updateCustomer"/);
-    expect(win).not.toContain("409");
+    expect(win).toContain('409: {"model": ProblemDetails');
   });
 
   it("Phoenix declares 409 on the /customers/{id}/update spec path", async () => {
@@ -128,10 +130,10 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
     expect(win).toContain("409 => %OpenApiSpex.Response{");
   });
 
-  it("Phoenix declares no 409 on the update spec path when not versioned", async () => {
+  it("Phoenix declares 409 on the update spec path by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system(ELIXIR, ""));
     const spec = fileMatching(files, (p) => p.endsWith("_api_spec.ex"));
     const win = updateWindow(spec, /"\/customers\/\{id\}\/update"/);
-    expect(win).not.toContain("409");
+    expect(win).toContain("409 => %OpenApiSpex.Response{");
   });
 });

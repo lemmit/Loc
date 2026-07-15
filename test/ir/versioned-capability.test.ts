@@ -66,10 +66,10 @@ describe("versioned capability — wireShape version token", () => {
     expect(has(updatePreconditions(wire)), "precondition carries version").toBe(true);
   });
 
-  it("a non-versioned aggregate has no version field", async () => {
+  it("versions a plain aggregate by DEFAULT — version present without `with versioned` (M-T3.4)", async () => {
     const agg = customerOf(await buildLoomModel(source("")));
-    expect(wireFieldsFor(agg).some((f) => f.name === "version")).toBe(false);
-    expect(agg.capabilities ?? []).not.toContain("versioned");
+    expect(wireFieldsFor(agg).some((f) => f.name === "version")).toBe(true);
+    expect(agg.capabilities ?? []).toContain("versioned");
   });
 
   it("marks the aggregate as carrying the `versioned` capability", async () => {
