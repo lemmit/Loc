@@ -134,23 +134,21 @@ const DIVERGENT = `
 
 describe("M-T5.10 PR2 — .NET reads the <Agg>Response contract record", () => {
   // M-T3.4 (default-on versioning) interaction: the wireShape baseline gains the
-  // synthetic `int Version` token, but the scaffoldApi-generated `response
-  // OrderResponse` record is built from the aggregate's declared fields and does
-  // NOT carry it — so the two read paths now diverge by exactly that one field.
-  // The .NET emitter faithfully READS the declared record (M-T5.10's whole
-  // point), so this is the same declared-record-wins behaviour test (b) proves.
-  // Apart from the version token the read paths remain byte-identical.
-  it("(a) reads the scaffolded record; wireShape baseline additionally carries the default-on version token", async () => {
+  // synthetic `int Version` token, and `apiReadFields` gives the scaffoldApi
+  // `response OrderResponse` record the SAME token in the same wire-shape slot,
+  // so the two read paths stay byte-identical.  The .NET emitter faithfully
+  // READS the declared record (M-T5.10's whole point), so this is the same
+  // declared-record-wins behaviour test (b) proves.
+  it("(a) reads the scaffolded record byte-identically to the wireShape baseline", async () => {
     const scaffold = await generateSystemFiles(SCAFFOLD);
     const baseline = await generateSystemFiles(BASELINE);
     const scaffoldOrder = recordDecl(responsesFile(scaffold, "Order", "Orders"), "OrderResponse");
     const baselineOrder = recordDecl(responsesFile(baseline, "Order", "Orders"), "OrderResponse");
-    // wireShape baseline carries the synthetic version token; the declared
-    // (scaffolded) record omits it.
+    // Both carry the synthetic version token (default-on M-T3.4).
     expect(baselineOrder).toContain("[property: Required] int Version");
-    expect(scaffoldOrder).not.toContain("Version");
-    // Apart from that one token the two read paths are byte-identical.
-    expect(baselineOrder.replace("[property: Required] int Version, ", "")).toBe(scaffoldOrder);
+    expect(scaffoldOrder).toContain("[property: Required] int Version");
+    // The two read paths are byte-identical.
+    expect(baselineOrder).toBe(scaffoldOrder);
     // Read path shape: VO → MoneyResponse, containment →
     // IReadOnlyList<LineResponse> (single-suffixed), internal/secret dropped,
     // leading Guid Id, trailing provenance param.

@@ -660,7 +660,20 @@ export function cloneTypeRef(t: TypeRef): TypeRef {
  * `setContainer` would reparent) carrying name + type only — a response record
  * is name+type, exactly what the wire shape is. */
 export function apiReadFields(agg: Aggregate): readonly Property[] {
-  return apiReadFieldsOf(agg.members ?? []);
+  // Default-on `versioned` (M-T3.4) is spliced onto the aggregate LATER in the
+  // walk (`expandModel` visits this context's `scaffoldHandlers` before it
+  // reaches the child aggregate), so `version` is not yet a member here.  The
+  // IR wire read projection (`forApiRead`) always exposes it, so the read
+  // contract must too — re-derive it from the same default-on rule (every
+  // non-event-sourced aggregate) and splice it into the wire-shape slot (after
+  // declared properties, before containments).  Skip it when a `version` member
+  // already exists (an explicit context-level `with versioned` applied ahead of
+  // `scaffoldHandlers`), so it is never doubled.
+  const members = agg.members ?? [];
+  const isEventSourced = (agg as { persistedAs?: string }).persistedAs === "eventLog";
+  const hasVersion = members.some((m) => isProperty(m) && m.name === "version");
+  const trailing = !isEventSourced && !hasVersion ? [field("version", primType("int"))] : [];
+  return apiReadFieldsOf(members, trailing);
 }
 
 /** The shared read-projection field walk for an aggregate OR an entity part
@@ -669,6 +682,10 @@ export function apiReadFields(agg: Aggregate): readonly Property[] {
  * either, so — like the aggregate case — no `id` field is emitted. */
 export function apiReadFieldsOf(
   members: readonly (AggregateMember | EntityPartMember)[],
+  // Extra property fields spliced right after the declared properties (step a)
+  // and before containments — the wire-shape slot the macro-added `version`
+  // token occupies (`wireFieldsForAggregate` appends it last among `fields`).
+  trailingProps: readonly Property[] = [],
 ): Property[] {
   const out: Property[] = [];
   // (a) declared properties minus internal / secret.
@@ -678,6 +695,7 @@ export function apiReadFieldsOf(
     if (access === "internal" || access === "secret") continue;
     out.push(field(m.name, cloneTypeRef(m.type)));
   }
+  out.push(...trailingProps);
   // (b) containments → `<Part>Response` (the sibling record), array/optional
   //     mirroring the wire shape's `containmentTypeFor` + optionality rule.
   for (const m of members) {

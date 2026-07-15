@@ -265,7 +265,11 @@ function expandHost(
   // *forgetting* to opt in.  Applied here, AFTER any explicit `with versioned`
   // / context-level application, so it stays idempotent (the `versioned` tag is
   // already present → skip).  Runs last so a subtype's auto-`version` and its
-  // base's inherited `version` dedupe by name in `mergedFieldsFor`.
+  // base's inherited `version` dedupe by name in `mergedFieldsFor`.  This is a
+  // per-aggregate splice reached during the walk — a context-level contract
+  // macro (`scaffoldHandlers`) that runs BEFORE the aggregate is visited will
+  // not see `version` in members, so `apiReadFields` re-derives it explicitly
+  // for the read contract (the same default-on rule, keyed on `persistedAs`).
   if (kind === "aggregate") applyDefaultVersioning(host as Aggregate, doc, inv, buildRef);
 }
 

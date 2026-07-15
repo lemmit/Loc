@@ -145,14 +145,15 @@ describe("M-T5.10 PR5 — Java reads the <Agg>Response contract record", () => {
     const baseline = await generateSystemFiles(BASELINE);
     const scaffoldOrder = recordComponents(orderResponseFile(scaffold), "OrderResponse");
     const baselineOrder = recordComponents(orderResponseFile(baseline), "OrderResponse");
-    // Byte-identical read path modulo the synthetic version token: VO →
-    // MoneyResponse, containment → List<LineResponse> (single-suffixed),
-    // internal/secret dropped, leading UUID id, trailing provenance param.
-    // Under default-on versioning (M-T3.4) the wireShape baseline gains an
-    // `int version` token; the scaffoldHandlers-spliced DECLARED `response`
-    // record does not carry it, so the two match once version is stripped.
+    // Byte-identical read path: VO → MoneyResponse, containment →
+    // List<LineResponse> (single-suffixed), internal/secret dropped, leading
+    // UUID id, trailing provenance param.  Under default-on versioning (M-T3.4)
+    // the wireShape baseline carries an `int version` token, and `apiReadFields`
+    // gives the scaffoldHandlers-spliced DECLARED `response` record the SAME
+    // token, so the two stay byte-identical.
     expect(baselineOrder).toContain(", int version,");
-    expect(baselineOrder.replace(", int version", "")).toBe(scaffoldOrder);
+    expect(scaffoldOrder).toContain(", int version,");
+    expect(baselineOrder).toBe(scaffoldOrder);
     expect(scaffoldOrder).toContain("MoneyResponse total");
     expect(scaffoldOrder).toContain("List<LineResponse> lines");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");

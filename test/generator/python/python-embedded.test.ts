@@ -53,7 +53,20 @@ describe("python shape(embedded)", () => {
     expect(repo).toContain(
       '"note": (None if aggregate.note is None else _memo_to_doc(aggregate.note))',
     );
-    expect(repo).toContain('on_conflict_do_update(index_elements=["id"], set_=root)');
+    // Default-on versioning (M-T3.4): the upsert is the guarded write — an
+    // INSERT-conflict only overwrites when the stored version still matches the
+    // caller's expected value, bumping it by one; a stale write returns no row →
+    // ConcurrencyError.
+    expect(repo).toContain(
+      "async def save(self, aggregate: Order, expected_version: int | None = None) -> None:",
+    );
+    expect(repo).toContain(
+      "_expected = aggregate.version if expected_version is None else expected_version",
+    );
+    expect(repo).toContain('index_elements=["id"],');
+    expect(repo).toContain('"version": OrderRow.version + 1');
+    expect(repo).toContain("where=OrderRow.version == _expected,");
+    expect(repo).toContain("if _guarded.first() is None:");
     // async hydrate from row columns + jsonb children.
     expect(repo).toContain("async def _hydrate(self, row: OrderRow) -> Order:");
     expect(repo).toContain("customer=row.customer");

@@ -9,6 +9,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import {
@@ -52,6 +53,7 @@ export function buildPyDocumentRepositoryFile(
 ): string {
   const row = rowClassName(agg.name);
   const parts: EnrichedEntityPartIR[] = agg.parts;
+  const versioned = aggregateIsVersioned(agg);
   const findUser = emittableFinds(repo).some(findUsesCurrentUser);
   // Capability `filter` on a document aggregate (DEBT-02 tail): the jsonb blob
   // isn't per-field queryable, so the predicate is evaluated IN-APP over the
@@ -115,12 +117,27 @@ export function buildPyDocumentRepositoryFile(
       : [`        return [${fromDoc}(r.data) for r in rows]`]),
     ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx, capX != null)]),
     "",
-    `    async def save(self, aggregate: ${agg.name}) -> None:`,
+    versioned
+      ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
+      : `    async def save(self, aggregate: ${agg.name}) -> None:`,
     `        data = _${snake(agg.name)}_to_doc(aggregate)`,
     `        existing = await self._session.get(${row}, aggregate.id)`,
     "        if existing is None:",
     `            self._session.add(${row}(id=aggregate.id, data=data, version=1))`,
     "        else:",
+    // Optimistic-concurrency guard (default-on `versioned`): the caller's
+    // expected version (the `If-Match` header, threaded by the operation route)
+    // must still match the stored row; a stale write raises → 409.  Absent an
+    // explicit expectation, the loaded aggregate's version is used (write-time
+    // CAS).  The jsonb document has no per-field guarded UPDATE, so the check
+    // runs against the loaded row within the request transaction.
+    ...(versioned
+      ? [
+          "            _expected = aggregate.version if expected_version is None else expected_version",
+          "            if existing.version != _expected:",
+          `                raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
+        ]
+      : []),
     "            existing.data = data",
     "            existing.version += 1",
     "        await self._session.flush()",
@@ -184,7 +201,9 @@ export function buildPyDocumentRepositoryFile(
     authUserImport(findUser, usesPrincipal),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
-    "from app.domain.errors import AggregateNotFoundError",
+    versioned
+      ? "from app.domain.errors import AggregateNotFoundError, ConcurrencyError"
+      : "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
       ? "from app.domain.events import DomainEvent, DomainEventDispatcher"
       : "from app.domain.events import DomainEventDispatcher",

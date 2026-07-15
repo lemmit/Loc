@@ -139,17 +139,15 @@ describe("M-T5.10 PR4 — Python reads the <Agg>Response contract record", () =>
     const baseline = await generateSystemFiles(BASELINE);
     const scaffoldOrder = responseModel(modelsFile(scaffold), "OrderResponse");
     const baselineOrder = responseModel(modelsFile(baseline), "OrderResponse");
-    // Near-identical read path: containment → list[LineResponse] (single-
-    // suffixed), internal/secret dropped, leading id, trailing provenance.
-    // Versioning is default-on (M-T3.4): the wireShape baseline now carries the
-    // synthetic `version: int` read token, while the scaffoldHandlers-declared
-    // `response OrderResponse` record does not — so the two differ by exactly
-    // that one line (baseline == scaffold with `version: int` after `amount`).
-    expect(baselineOrder).toBe(
-      scaffoldOrder.replace("    amount: float\n", "    amount: float\n    version: int\n"),
-    );
+    // Identical read path: containment → list[LineResponse] (single-suffixed),
+    // internal/secret dropped, leading id, trailing provenance.  Versioning is
+    // default-on (M-T3.4): the wireShape baseline carries the synthetic
+    // `version: int` read token, and `apiReadFields` gives the
+    // scaffoldHandlers-declared `response OrderResponse` record the SAME token
+    // in the same wire-shape slot — so the two stay byte-identical.
+    expect(baselineOrder).toBe(scaffoldOrder);
     expect(baselineOrder).toContain("    version: int\n");
-    expect(scaffoldOrder).not.toContain("version: int");
+    expect(scaffoldOrder).toContain("    version: int\n");
     expect(scaffoldOrder).toContain("list[LineResponse]");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toContain("id: ");

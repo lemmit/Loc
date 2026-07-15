@@ -101,11 +101,18 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     // Insert: cast attrs into a fresh embed, version 1.
     expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, 1)");
     expect(repo).toContain("%Api.Carts.Cart{}");
-    // Update: cast_embed(on_replace: :update) merges onto the existing embed,
-    // bumps version — no manual Map.merge.
+    // Update: cast_embed(on_replace: :update) merges onto the existing embed;
+    // default-on versioning (M-T3.4) guards the write with `optimistic_lock`
+    // over the client's expected version (stamped as the changeset's current
+    // version), bumping it by one — a stale write raises StaleEntryError →
+    // {:error, :conflict}.  No manual Map.merge.
     expect(repo).toContain(
-      "|> Api.Carts.CartChangeset.document_changeset(attrs, record.version + 1)",
+      "def update(%Api.Carts.Cart{} = record, attrs, expected_version \\\\ nil)",
     );
+    expect(repo).toContain("record = %{record | version: expected_version || record.version}");
+    expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, record.version)");
+    expect(repo).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
+    expect(repo).toContain("Ecto.StaleEntryError -> {:error, :conflict}");
     expect(repo).not.toContain("Map.merge(record.data");
     // Same fn names as the relational repo (so context defdelegates are unchanged).
     expect(repo).toContain("def list do");
