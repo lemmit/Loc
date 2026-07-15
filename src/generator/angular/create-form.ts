@@ -3,13 +3,12 @@ import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
+  type AngularFieldArraySpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
-  collectIdTargets,
-  controlInit,
-  fieldInput,
   formButton,
+  partitionAngularFields,
 } from "./form-fields.js";
 import { angularSink } from "./walker/sink.js";
 
@@ -40,6 +39,9 @@ export interface AngularCreateFormSpec {
   /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
    *  fields (empty when no field renders as a reference Select). */
   idTargets: AngularIdTargetSpec[];
+  /** Dynamic-row (`X[]` of a value-object) fields — the page-shell declares a
+   *  `FormArray` control + the add/remove methods per entry. */
+  fieldArrays: AngularFieldArraySpec[];
 }
 
 /** Resolve the `CreateForm(of: <Agg>)` aggregate ref. */
@@ -84,7 +86,10 @@ export function renderAngularCreateForm(
 
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
-  const fieldMarkup = fields.map((f) => fieldInput(f.name, f.type, bc, ns, ctx));
+  // Split array-of-value-object inputs off — they render as a `FormArray` of
+  // row groups; every other field stays a flat `FormControl`.
+  const parts = partitionAngularFields(fields, bc, ns, ctx);
+  const fieldMarkup = parts.flatMarkup;
   const submit = formButton(ctx, {
     type: "submit",
     emphasis: "primary",
@@ -93,7 +98,7 @@ export function renderAngularCreateForm(
   });
 
   ctx.collectedTestids.add(`${ns}-submit`);
-  for (const f of fields) ctx.collectedTestids.add(`${ns}-input-${f.name}`);
+  for (const name of parts.flatNames) ctx.collectedTestids.add(`${ns}-input-${name}`);
 
   const spec: AngularCreateFormSpec = {
     formVar,
@@ -103,14 +108,15 @@ export function renderAngularCreateForm(
     importFrom,
     submitMethod,
     redirectSlug: snake(plural(agg.name)),
-    controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
-    idTargets: collectIdTargets(fields, bc, ctx),
+    controls: parts.flatControls,
+    idTargets: parts.idTargets,
+    fieldArrays: parts.fieldArrays,
   };
   angularSink(ctx).forms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
-    ...[...fieldMarkup, submit].map((m) => `${inner}${m}`),
+    ...[...fieldMarkup, ...parts.arrayMarkup, submit].map((m) => `${inner}${m}`),
     `${close}</form>`,
   ].join("\n");
 }

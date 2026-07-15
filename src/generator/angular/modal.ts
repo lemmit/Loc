@@ -3,14 +3,13 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
+  type AngularFieldArraySpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
-  collectIdTargets,
-  controlInit,
-  fieldInput,
   formButton,
   formStyle,
+  partitionAngularFields,
 } from "./form-fields.js";
 import { angularSink } from "./walker/sink.js";
 
@@ -41,6 +40,9 @@ export interface AngularModalSpec {
   /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
    *  fields (empty when no field renders as a reference Select). */
   idTargets: AngularIdTargetSpec[];
+  /** Dynamic-row (`X[]` of value-object) fields — page-shell adds a `FormArray`
+   *  control + the add/remove methods per entry. */
+  fieldArrays?: AngularFieldArraySpec[];
 }
 
 /** Resolve the operation a Modal's `OperationForm` child targets, plus the
@@ -137,8 +139,17 @@ export function renderAngularModal(
   else if (style === "primeng") addNg(ctx, "primeng/button", "ButtonModule");
   addNg(ctx, importFrom, mutationFn);
 
-  const fields = bc ? op.params : [];
-  const fieldMarkup = fields.map((f) => (bc ? fieldInput(f.name, f.type, bc, ns, ctx) : ""));
+  const parts = bc
+    ? partitionAngularFields(op.params, bc, ns, ctx)
+    : {
+        flatControls: [],
+        flatMarkup: [],
+        flatNames: [],
+        idTargets: [],
+        fieldArrays: [],
+        arrayMarkup: [],
+      };
+  const fieldMarkup = parts.flatMarkup;
 
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-form`);
@@ -152,8 +163,9 @@ export function renderAngularModal(
     mutationFn,
     importFrom,
     submitMethod,
-    controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
-    idTargets: bc ? collectIdTargets(fields, bc, ctx) : [],
+    controls: parts.flatControls,
+    idTargets: parts.idTargets,
+    fieldArrays: parts.fieldArrays,
   };
   angularSink(ctx).modals.push(spec);
 
@@ -166,7 +178,7 @@ export function renderAngularModal(
     `${inner}<button ${triggerBtn} (click)='${idSig}.set(${idExpr}); ${openSig}.set(true)' data-testid="${ns}">${triggerLabel}</button>`,
     `${inner}@if (${openSig}()) {`,
     `${deep}<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}-form">`,
-    ...fieldMarkup.map((m) => `${deep}  ${m}`),
+    ...[...fieldMarkup, ...parts.arrayMarkup].map((m) => `${deep}  ${m}`),
     `${deep}  ${formButton(ctx, { type: "submit", emphasis: "primary", label, attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"` })}`,
     `${deep}  <button ${cancelBtn} (click)='${openSig}.set(false)'>Cancel</button>`,
     `${deep}</form>`,
