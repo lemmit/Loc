@@ -69,6 +69,10 @@ export function buildPyDocumentRepositoryFile(
   const usesPrincipal = aggUsesPrincipalContextFilter(agg);
   const principalBind = usesPrincipal ? ["        current_user = require_current_user()"] : [];
   const fromDoc = `_${snake(agg.name)}_from_doc`;
+  // A versioned root rehydrates its `version` from the authoritative column, so
+  // every root load threads `<row>.version` alongside the jsonb blob.
+  const fromDocCall = (rowVar: string): string =>
+    versioned ? `${fromDoc}(${rowVar}.data, ${rowVar}.version)` : `${fromDoc}(${rowVar}.data)`;
 
   const body = lines(
     `class ${agg.name}Repository:`,
@@ -83,12 +87,12 @@ export function buildPyDocumentRepositoryFile(
     ...(capRec
       ? [
           ...principalBind,
-          `        rec = ${fromDoc}(row.data)`,
+          `        rec = ${fromDocCall("row")}`,
           `        if not (${capRec.expr}):`,
           "            return None",
           "        return rec",
         ]
-      : [`        return ${fromDoc}(row.data)`]),
+      : [`        return ${fromDocCall("row")}`]),
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
@@ -103,43 +107,57 @@ export function buildPyDocumentRepositoryFile(
     ...(capX
       ? [
           ...principalBind,
-          `        return [x for x in (${fromDoc}(r.data) for r in rows) if (${capX.expr})]`,
+          `        return [x for x in (${fromDocCall("r")} for r in rows) if (${capX.expr})]`,
         ]
-      : [`        return [${fromDoc}(r.data) for r in rows]`]),
+      : [`        return [${fromDocCall("r")} for r in rows]`]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}).where(${row}.id.in_(list(ids))))).scalars().all()`,
     ...(capX
       ? [
           ...principalBind,
-          `        return [x for x in (${fromDoc}(r.data) for r in rows) if (${capX.expr})]`,
+          `        return [x for x in (${fromDocCall("r")} for r in rows) if (${capX.expr})]`,
         ]
-      : [`        return [${fromDoc}(r.data) for r in rows]`]),
+      : [`        return [${fromDocCall("r")} for r in rows]`]),
     ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx, capX != null)]),
     "",
     versioned
       ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
       : `    async def save(self, aggregate: ${agg.name}) -> None:`,
     `        data = _${snake(agg.name)}_to_doc(aggregate)`,
-    `        existing = await self._session.get(${row}, aggregate.id)`,
-    "        if existing is None:",
-    `            self._session.add(${row}(id=aggregate.id, data=data, version=1))`,
-    "        else:",
-    // Optimistic-concurrency guard (default-on `versioned`): the caller's
-    // expected version (the `If-Match` header, threaded by the operation route)
-    // must still match the stored row; a stale write raises → 409.  Absent an
-    // explicit expectation, the loaded aggregate's version is used (write-time
-    // CAS).  The jsonb document has no per-field guarded UPDATE, so the check
-    // runs against the loaded row within the request transaction.
+    // Optimistic-concurrency guard (default-on `versioned`), byte-for-byte the
+    // relational/embedded guarded upsert over the `(id, data, version)` row: a
+    // fresh INSERT seeds the row at the aggregate's own version (the shared 0
+    // create-default), and an INSERT-conflict only overwrites when the stored
+    // `version` still equals the caller's expected value, bumping it by one.  A
+    // stale write matches no row, so `RETURNING id` is empty → ConcurrencyError.
+    // The `version` COLUMN is authoritative (the blob copy lags a write and is
+    // ignored on load — see `entityFromDoc`), so the loaded aggregate's version
+    // is the write-time expectation when no `If-Match` was sent.
     ...(versioned
       ? [
-          "            _expected = aggregate.version if expected_version is None else expected_version",
-          "            if existing.version != _expected:",
-          `                raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
+          "        _expected = aggregate.version if expected_version is None else expected_version",
+          "        _guarded = await self._session.execute(",
+          `            insert(${row})`,
+          "            .values(id=aggregate.id, data=data, version=aggregate.version)",
+          "            .on_conflict_do_update(",
+          '                index_elements=["id"],',
+          `                set_={"data": data, "version": ${row}.version + 1},`,
+          `                where=${row}.version == _expected,`,
+          "            )",
+          `            .returning(${row}.id)`,
+          "        )",
+          "        if _guarded.first() is None:",
+          `            raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
         ]
-      : []),
-    "            existing.data = data",
-    "            existing.version += 1",
+      : [
+          `        existing = await self._session.get(${row}, aggregate.id)`,
+          "        if existing is None:",
+          `            self._session.add(${row}(id=aggregate.id, data=data, version=1))`,
+          "        else:",
+          "            existing.data = data",
+          "            existing.version += 1",
+        ]),
     "        await self._session.flush()",
     `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(aggregate.id))`,
     ...(ctx.events.length > 0
@@ -194,6 +212,7 @@ export function buildPyDocumentRepositoryFile(
     refersTo("cast") ? "from typing import cast" : null,
     "",
     "from sqlalchemy import select",
+    versioned ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
@@ -274,7 +293,9 @@ function findMethod(
       `    async def ${snake(find.name)}(${sig}) -> ${ret}:`,
       `        rows = (await self._session.execute(select(${rowClassName(agg.name)}))).scalars().all()`,
       ...(bindPrincipal ? ["        current_user = require_current_user()"] : []),
-      `        items = [_${snake(agg.name)}_from_doc(r.data) for r in rows]`,
+      aggregateIsVersioned(agg)
+        ? `        items = [_${snake(agg.name)}_from_doc(r.data, r.version) for r in rows]`
+        : `        items = [_${snake(agg.name)}_from_doc(r.data) for r in rows]`,
     ];
     if (isList) {
       out.push(`        result = ${filtered}`);
@@ -364,9 +385,21 @@ export function entityFromDoc(
   root: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
+  // Default-on versioning: the `version` token is server-owned and lives in the
+  // authoritative `version` COLUMN, not the jsonb blob (the blob's copy lags a
+  // write, since the guarded upsert bumps the column but re-stores the loaded
+  // aggregate's data).  Rehydrate it from the column — threaded in as a `version`
+  // parameter — so a loaded aggregate's `version` always reflects the stored row
+  // (the same single-source-of-truth the relational path gets for free from its
+  // column read).  Parts carry no version.
+  const rootVersioned = isRoot && aggregateIsVersioned(entity as EnrichedAggregateIR);
   const entries: string[] = [`id=${entity.name}Id(cast(str, d["id"]))`];
   if (!isRoot) entries.push(`parent_id=${root.name}Id(cast(str, d["parent_id"]))`);
   for (const f of entity.fields) {
+    if (rootVersioned && f.name === "version") {
+      entries.push("version=version");
+      continue;
+    }
     entries.push(`${snake(f.name)}=${deserialize(f.type, `d["${snake(f.name)}"]`, ctx)}`);
   }
   for (const c of entity.contains) {
@@ -378,7 +411,9 @@ export function entityFromDoc(
   }
   // The JSONB column types as `object`; cast each access to the doc dict.
   return lines(
-    `def _${snake(entity.name)}_from_doc(raw: object) -> ${entity.name}:`,
+    rootVersioned
+      ? `def _${snake(entity.name)}_from_doc(raw: object, version: int) -> ${entity.name}:`
+      : `def _${snake(entity.name)}_from_doc(raw: object) -> ${entity.name}:`,
     "    d = cast(dict[str, object], raw)",
     `    return ${entity.name}._rehydrate(${entries.join(", ")})`,
   );

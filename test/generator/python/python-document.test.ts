@@ -40,15 +40,24 @@ describe("python shape(document)", () => {
   it("repo round-trips one jsonb blob via to_doc / from_doc + version-bumped upsert", async () => {
     const files = await build();
     const repo = files.get("api/app/db/repositories/article_repository.py")!;
-    expect(repo).toContain("return _article_from_doc(row.data)");
+    // Default-on versioning: the version COLUMN is authoritative — load threads
+    // `row.version` into `from_doc` (the blob copy lags a write), and the write
+    // is the guarded upsert (seed at the aggregate's version, bump on conflict
+    // only when the stored version still matches → ConcurrencyError otherwise).
+    expect(repo).toContain("return _article_from_doc(row.data, row.version)");
     expect(repo).toContain("data = _article_to_doc(aggregate)");
-    expect(repo).toContain("self._session.add(ArticleRow(id=aggregate.id, data=data, version=1))");
-    expect(repo).toContain("existing.version += 1");
+    expect(repo).toContain(
+      "_expected = aggregate.version if expected_version is None else expected_version",
+    );
+    expect(repo).toContain(".values(id=aggregate.id, data=data, version=aggregate.version)");
+    expect(repo).toContain('set_={"data": data, "version": ArticleRow.version + 1},');
+    expect(repo).toContain("where=ArticleRow.version == _expected,");
+    expect(repo).toContain("if _guarded.first() is None:");
     // Nested part serialisers.
     expect(repo).toContain("def _article_to_doc(a: Article) -> dict[str, object]:");
     expect(repo).toContain("def _section_to_doc(a: Section) -> dict[str, object]:");
     expect(repo).toContain('"sections": [_section_to_doc(e) for e in a.sections]');
-    expect(repo).toContain("def _article_from_doc(raw: object) -> Article:");
+    expect(repo).toContain("def _article_from_doc(raw: object, version: int) -> Article:");
     expect(repo).toContain('Article._rehydrate(id=ArticleId(cast(str, d["id"]))');
   });
 
