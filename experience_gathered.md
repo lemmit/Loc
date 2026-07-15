@@ -2838,3 +2838,47 @@ editable array on a detail page.
   reference generate → `npm install` → `tsc` clean in `node:20`; a shadcn variant
   (stub + unused import) also clean. The unit test pins the emitted rows; the
   docker tsc pins that it actually compiles.
+
+## 47. Feliz dynamic sub-forms — a list-of-records form model, not a string field (2026-07-15)
+
+The React frontends share a VM whose `field-input-array` template each pack opts
+into (§45/§46). Feliz can't: it FORKS `renderCreateForm` and has its OWN form
+model — a flat all-string record where each field is one `Html.input`. Array-of-VO
+was silently dropped (`isExpandableInput` returned false, so the field never
+reached the form). Adding real repeatable rows meant a genuinely different shape,
+not a template opt-in:
+
+- **The row is its own record type + list field.** `items: LineItem[]` becomes a
+  `type LineItemRow = { sku: string; qty: string }` (still all-string — raw input,
+  lifted at submit) held as `items: LineItemRow list` in the form record, `items =
+  []` in the empty binding. Row types dedup by name across forms (one `LineItemRow`
+  for every `LineItem[]`), emitted BEFORE the form records that reference them (F#
+  needs the type in scope).
+
+- **Three MVU Msgs per array, not one setter.** `Add<Form><Array>` (append
+  `emptyRow`), `Remove<Form><Array> of int` (drop by index via `List.indexed |>
+  List.filter (j<>i) |> List.map snd`), and one `Set<Form><Array><Sub> of int *
+  string` per row sub-field (`List.mapi (fun j row -> if j=i then { row with … }
+  else row)`). The React side gets this for free from RHF's `useFieldArray`; in MVU
+  you emit every arm.
+
+- **`yield!` splices the rows into a Feliz `prop.children` list.** `[ label;
+  yield! (model.<form>.<field> |> List.mapi (fun i row -> …)); addBtn ]` — F# allows
+  an implicit yield (the label/button) alongside an explicit `yield!`, and the whole
+  thing stays on ONE line (offside-safe inside the children list, same constraint as
+  every other Feliz fragment). Proven to `dotnet fable`-compile (SDK 8.0).
+
+- **An array-only form still needs collecting + a guarded submit.** The op/workflow
+  collectors skipped a form with `fields.length === 0`; an op whose ONLY param is an
+  array-of-VO would vanish. Guard on `fields.length === 0 && fieldArrays.length ===
+  0` instead. And `Validation.<validFn>` is only emitted for forms with flat fields
+  (rows don't gate submit in v1), so the submit's `prop.disabled` must be omitted
+  when `fields.length === 0` — else it references an undefined validator.
+
+- **The wire type comes from a READ, not the form.** A hand-written ddd with ONLY a
+  `CreateForm` (no QueryView) fails to compile: `type Order` / `Decoders.order`
+  (which the create-form's POST result decodes) are emitted for READ aggregates, not
+  form ones. Real usage (scaffold) always has a list/detail read, so it's a
+  test-ddd artifact — use `scaffold(subdomains:)` in the test/CI ddd so the read
+  pulls the wire type in. The CI Fable leg gets the array-of-VO via a `tags: Tag[]`
+  on the scaffold case's `Product` (create + update forms both compiled).

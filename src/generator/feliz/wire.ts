@@ -207,6 +207,54 @@ export interface FelizFormField {
   emptyValue: string;
 }
 
+/** One scalar sub-field of a dynamic-row group (`sku` / `qty` of a `LineItem`
+ *  row) — the F# row-record field (bound to an input), its indexed `Set` `Msg`
+ *  (`Set<Form><Array><Sub> of int * string`, carrying the row index + new value),
+ *  and the Thoth encoder lifting `row.<wireName>` back to its wire type. */
+export interface FelizRowField {
+  /** Row-record field name / input binding (`sku`). */
+  wireName: string;
+  /** Indexed setter `Msg` (`SetOrderFormItemsSku`), dispatched `(index, value)`. */
+  setMsg: string;
+  /** HTML input widget from the sub-field type. */
+  inputKind: FelizInputKind;
+  /** Thoth encoder lifting `row.<wireName>` to its wire type. */
+  encodeExpr: string;
+  /** JSON key this sub-field encodes to (`sku`). */
+  jsonKey: string;
+  /** For a `select` sub-field, the enum's allowed values. */
+  enumValues?: string[];
+  /** Whether the sub-field is required (non-optional) — informational for v1
+   *  (row validity does not gate submit yet). */
+  required: boolean;
+}
+
+/** A dynamic-row form field — an `X[]` create/param input whose element is a
+ *  value object (`items: LineItem[]`).  Unlike a flat `FelizFormField` (one
+ *  string), it holds a `<Row> list` in the form record and drives a repeatable
+ *  sub-form: an Add trigger, a per-row Remove, and one indexed setter per row
+ *  sub-field.  The F# sibling of the React `useFieldArray` row group. */
+export interface FelizFieldArray {
+  /** Form-record field holding the list (`items`). */
+  fieldName: string;
+  /** JSON key the array encodes to (`items`). */
+  jsonKey: string;
+  /** F# row-record type name (`LineItemRow`). */
+  rowType: string;
+  /** The empty-row value binding (`emptyLineItemRow`). */
+  emptyRowBinding: string;
+  /** Humanized element label for the Add button (`Line Item`). */
+  elementLabel: string;
+  /** Humanized field label shown above the rows (`Items`). */
+  label: string;
+  /** `Msg` appending an empty row (`AddOrderFormItems`). */
+  addMsg: string;
+  /** `Msg` removing a row by index (`RemoveOrderFormItems of int`). */
+  removeMsg: string;
+  /** The row's scalar sub-fields. */
+  rowFields: FelizRowField[];
+}
+
 /** The record-shaped aspects a form (create OR operation) shares — the F#
  *  form-record type + its `empty<Form>` value + Thoth encoder + fields.  The
  *  type/encoder/Model-field/init renderers consume this; only the Msg/update/Api
@@ -223,8 +271,12 @@ export interface FormRecord {
   /** Client-side validity predicate fn name (`Validation.<validFn>`), true when
    *  every required field is non-empty — the submit guard. */
   validFn: string;
-  /** The form's fields. */
+  /** The form's flat (string) fields. */
   fields: FelizFormField[];
+  /** Dynamic-row fields — one per `X[]`-of-value-object input.  Empty for a
+   *  scalar-only form; each drives a repeatable sub-form (Add / Remove / indexed
+   *  setters) alongside the flat `fields`. */
+  fieldArrays: FelizFieldArray[];
 }
 
 /** A create form a page hosts (`CreateForm(of: X)`), projected to its full MVU
@@ -509,10 +561,11 @@ function isScalarInput(t: TypeIR): boolean {
   return base.kind === "primitive" || base.kind === "id" || base.kind === "enum";
 }
 
-/** Whether a create-input field is one the form can render — a scalar, a value
- *  object we can FLATTEN into its scalar sub-fields (`vosByName`), or a SCALAR
- *  ARRAY (`X[]`, rendered as a comma-separated text input).  A nested part /
- *  array-of-VO / array-of-part still needs a repeatable sub-form (follow-up). */
+/** Whether a create-input field is one the form can render as a FLAT field — a
+ *  scalar, a value object we can FLATTEN into its scalar sub-fields (`vosByName`),
+ *  or a SCALAR ARRAY (`X[]`, rendered as a comma-separated text input).  An
+ *  array-OF-value-object is handled separately as a dynamic-row `FelizFieldArray`
+ *  (see `buildFieldArray`); a nested part / array-of-part is still a follow-up. */
 function isExpandableInput(t: TypeIR, vosByName: ReadonlyMap<string, readonly FieldIR[]>): boolean {
   const base = scalarBase(t);
   return (
@@ -520,6 +573,72 @@ function isExpandableInput(t: TypeIR, vosByName: ReadonlyMap<string, readonly Fi
     (base.kind === "valueobject" && vosByName.has(base.name)) ||
     (base.kind === "array" && isScalarInput(base.element))
   );
+}
+
+/** Build a dynamic-row `FelizFieldArray` from an `X[]`-of-value-object input, or
+ *  null when the field isn't an array-of-VO (or the VO isn't resolvable).  Only
+ *  SCALAR sub-fields render in v1 — a nested VO / array inside the row element is
+ *  dropped (mirrors the flat-form scalar limit).  An `id` sub-field degrades to a
+ *  plain text input (the raw id string) since a per-row FK `<select>` would need
+ *  the target list threaded into every row. */
+function buildFieldArray(
+  formType: string,
+  field: { name: string; type: TypeIR },
+  vosByName: ReadonlyMap<string, readonly FieldIR[]>,
+  enumsByName: ReadonlyMap<string, string[]>,
+  idLabels: ReadonlyMap<string, string>,
+): FelizFieldArray | null {
+  const base = scalarBase(field.type);
+  if (base.kind !== "array") return null;
+  const elem = scalarBase(base.element);
+  if (elem.kind !== "valueobject") return null;
+  const voFields = vosByName.get(elem.name);
+  if (!voFields) return null;
+  const rowFields: FelizRowField[] = voFields
+    .filter((vf) => isScalarInput(vf.type))
+    .map((vf) => {
+      const optional = vf.type.kind === "optional";
+      const kind = inputKindFor(vf.type, enumsByName, idLabels);
+      const eb = scalarBase(vf.type);
+      return {
+        wireName: vf.name,
+        setMsg: `Set${formType}${upperFirst(field.name)}${upperFirst(vf.name)}`,
+        // A per-row FK select would need the target list in every row; v1 renders
+        // the id as plain text instead.
+        inputKind: kind === "idselect" ? "text" : kind,
+        encodeExpr: encodeExprFor(vf.type, `row.${vf.name}`, optional),
+        jsonKey: vf.name,
+        enumValues: kind === "select" && eb.kind === "enum" ? enumsByName.get(eb.name) : undefined,
+        required: !optional,
+      };
+    });
+  const rowType = `${upperFirst(elem.name)}Row`;
+  return {
+    fieldName: field.name,
+    jsonKey: field.name,
+    rowType,
+    emptyRowBinding: `empty${rowType}`,
+    elementLabel: humanize(elem.name),
+    label: humanize(field.name),
+    addMsg: `Add${formType}${upperFirst(field.name)}`,
+    removeMsg: `Remove${formType}${upperFirst(field.name)}`,
+    rowFields,
+  };
+}
+
+/** Collect every array-of-value-object input from a field/param list into its
+ *  dynamic-row `FelizFieldArray` (the complement of the flat `isExpandableInput`
+ *  filter). */
+function buildFieldArrays(
+  formType: string,
+  inputs: readonly { name: string; type: TypeIR }[],
+  vosByName: ReadonlyMap<string, readonly FieldIR[]>,
+  enumsByName: ReadonlyMap<string, string[]>,
+  idLabels: ReadonlyMap<string, string>,
+): FelizFieldArray[] {
+  return inputs
+    .map((f) => buildFieldArray(formType, f, vosByName, enumsByName, idLabels))
+    .filter((a): a is FelizFieldArray => a !== null);
 }
 
 /** Build the `FelizForm` for a `CreateForm(of: agg)` from the aggregate's
@@ -559,6 +678,13 @@ export function felizCreateForm(
     decoderExpr: `Decoders.${lowerFirst(name)}`,
     resultType: upperFirst(name),
     fields,
+    fieldArrays: buildFieldArrays(
+      formType,
+      createInputFields(agg),
+      vosByName,
+      enumsByName,
+      idLabels,
+    ),
   };
 }
 
@@ -598,6 +724,7 @@ export function felizOperationForm(
     opPath: snake(op.routeSlug ?? op.name),
     navigateSegs: snake(plural(name)).split("/"),
     fields,
+    fieldArrays: buildFieldArrays(formType, op.params, vosByName, enumsByName, idLabels),
   };
 }
 
@@ -651,6 +778,7 @@ export function felizWorkflowForm(
     route: `${API_BASE_PATH}/workflows/${snake(wf.name)}`,
     navigateSegs: [""], // home
     fields,
+    fieldArrays: buildFieldArrays(formType, wf.params, vosByName, enumsByName, idLabels),
   };
 }
 
@@ -851,7 +979,7 @@ export function collectPageOperationForms(
     if (!op) continue;
     const form = felizOperationForm(agg, op, enumsByName, idLabels, vosByName);
     const key = form.formType;
-    if (form.fields.length === 0 || seen.has(key)) continue;
+    if ((form.fields.length === 0 && form.fieldArrays.length === 0) || seen.has(key)) continue;
     seen.add(key);
     out.push(form);
   }
@@ -969,7 +1097,8 @@ export function collectPageWorkflowForms(
     const wf = workflowsByName.get(wfName);
     if (!wf) continue;
     const form = felizWorkflowForm(wf, enumsByName, idLabels, vosByName);
-    if (form.fields.length === 0 || seen.has(form.formType)) continue;
+    if ((form.fields.length === 0 && form.fieldArrays.length === 0) || seen.has(form.formType))
+      continue;
     seen.add(form.formType);
     out.push(form);
   }
@@ -1504,20 +1633,47 @@ export function renderApiModule(
  *  operation forms (both `FormRecord`). */
 export function renderFormTypes(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
+  // Dynamic-row element records (`type LineItemRow = { … }` + `emptyLineItemRow`),
+  // deduped by name — a `LineItem[]` shared across forms emits ONE row type.  They
+  // precede the form records that reference them (F# needs the type in scope).
+  const rowTypesSeen = new Set<string>();
+  const rowTypeDecls: (string | undefined)[] = [];
+  for (const f of forms) {
+    for (const fa of f.fieldArrays) {
+      if (rowTypesSeen.has(fa.rowType)) continue;
+      rowTypesSeen.add(fa.rowType);
+      rowTypeDecls.push(
+        rowTypeDecls.length > 0 ? "" : undefined,
+        `type ${fa.rowType} =`,
+        "  {",
+        ...fa.rowFields.map((rf) => `    ${rf.wireName}: string`),
+        "  }",
+        "",
+        `let ${fa.emptyRowBinding} : ${fa.rowType} =`,
+        "  {",
+        ...fa.rowFields.map((rf) => `    ${rf.wireName} = ""`),
+        "  }",
+      );
+    }
+  }
   return lines(
-    "// Form state — each field a string (bound to Html.input).",
+    "// Form state — each field a string (bound to Html.input); array-of-VO fields",
+    "// hold a list of string-typed row records (a repeatable sub-form).",
+    ...rowTypeDecls,
     ...forms.flatMap((f, i) => [
-      i > 0 ? "" : undefined,
+      i > 0 || rowTypeDecls.length > 0 ? "" : undefined,
       `type ${f.formType} =`,
       "  {",
       ...f.fields.map((fld) => `    ${fld.wireName}: string`),
+      ...f.fieldArrays.map((fa) => `    ${fa.fieldName}: ${fa.rowType} list`),
       "  }",
       "",
       `let ${f.emptyBinding} : ${f.formType} =`,
       "  {",
       // Most fields start empty; a required enum starts at its first value (its
-      // `<select>` always has a selection).
+      // `<select>` always has a selection); an array field starts empty.
       ...f.fields.map((fld) => `    ${fld.wireName} = ${JSON.stringify(fld.emptyValue)}`),
+      ...f.fieldArrays.map((fa) => `    ${fa.fieldName} = []`),
       "  }",
     ]),
   );
@@ -1548,10 +1704,22 @@ function encoderEntries(fields: FelizFormField[]): string[] {
   return out;
 }
 
+/** The `Encode.object` entry lines for a form's dynamic-row fields — each an
+ *  `"<jsonKey>", Encode.list (form.<field> |> List.map (fun row -> Encode.object
+ *  [ … ]))` re-nesting every row's string sub-fields back to their wire types. */
+function arrayEncoderEntries(fieldArrays: FelizFieldArray[]): string[] {
+  return fieldArrays.flatMap((fa) => [
+    `      "${fa.jsonKey}", Encode.list (form.${fa.fieldName} |> List.map (fun row -> Encode.object [`,
+    ...fa.rowFields.map((rf) => `        "${rf.jsonKey}", ${rf.encodeExpr}`),
+    "      ]))",
+  ]);
+}
+
 /** Emit the `Encoders` module — one `Encode.object` per form, lifting its
  *  string fields back to their wire types (the write-direction sibling of the
- *  `Decoders`).  Value-object sub-fields re-nest under their object key.  Shared
- *  by create + operation forms. */
+ *  `Decoders`).  Value-object sub-fields re-nest under their object key; array-of-
+ *  VO fields encode to a JSON array of row objects.  Shared by create + operation
+ *  forms. */
 export function renderEncoders(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
   return lines(
@@ -1562,6 +1730,7 @@ export function renderEncoders(forms: FormRecord[]): string {
       `  let ${f.encoderFn} (form: ${f.formType}) : JsonValue =`,
       "    Encode.object [",
       ...encoderEntries(f.fields),
+      ...arrayEncoderEntries(f.fieldArrays),
       "    ]",
     ]),
   );

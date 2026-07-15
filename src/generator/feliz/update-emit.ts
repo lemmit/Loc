@@ -10,6 +10,7 @@ import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
   FelizAction,
   FelizAsyncEffect,
+  FelizFieldArray,
   FelizForm,
   FelizMutation,
   FelizOperationForm,
@@ -21,6 +22,40 @@ import type {
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** The `Msg` cases a form's dynamic-row fields contribute — an `Add`/`Remove of
+ *  int` per array plus one indexed `Set … of int * string` per row sub-field. */
+function fieldArrayMsgs(f: FormRecord): string[] {
+  return f.fieldArrays.flatMap((fa) => [
+    `  | ${fa.addMsg}`,
+    `  | ${fa.removeMsg} of int`,
+    ...fa.rowFields.map((rf) => `  | ${rf.setMsg} of int * string`),
+  ]);
+}
+
+/** The `update` arms a form's dynamic-row fields contribute — append an empty
+ *  row, remove a row by index (`List.indexed`/filter/`snd`), and set one row
+ *  sub-field at an index (`List.mapi`).  `formField` is the Model field holding
+ *  the form record. */
+function fieldArrayUpdateArms(f: FormRecord): string[] {
+  const acc = `model.${f.formField}.`;
+  const withForm = (listExpr: string, fa: FelizFieldArray): string =>
+    `{ model with ${f.formField} = { model.${f.formField} with ${fa.fieldName} = ${listExpr} } }, Cmd.none`;
+  return f.fieldArrays.flatMap((fa) => [
+    `  | ${fa.addMsg} -> ${withForm(`${acc}${fa.fieldName} @ [ ${fa.emptyRowBinding} ]`, fa)}`,
+    `  | ${fa.removeMsg} i -> ${withForm(
+      `${acc}${fa.fieldName} |> List.indexed |> List.filter (fun (j, _) -> j <> i) |> List.map snd`,
+      fa,
+    )}`,
+    ...fa.rowFields.map(
+      (rf) =>
+        `  | ${rf.setMsg} (i, v) -> ${withForm(
+          `${acc}${fa.fieldName} |> List.mapi (fun j row -> if j = i then { row with ${rf.wireName} = v } else row)`,
+          fa,
+        )}`,
+    ),
+  ]);
 }
 
 /** The `Model` record type declaration — one field per state cell, plus one
@@ -152,6 +187,7 @@ export function renderMsg(
     // A create form: one `Set` per field + a `Submit` trigger + a `Created` result.
     ...forms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
       `  | ${f.resultMsg} of Result<${f.resultType}, string>`,
     ]),
@@ -159,12 +195,14 @@ export function renderMsg(
     // route id) + a `Done` result (the op returns 204 → `unit`).
     ...operationForms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...fieldArrayMsgs(f),
       `  | ${f.submitMsg} of string`,
       `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
     // A workflow form: `Set` per param + a PARAMLESS `Submit` + a `Done` result.
     ...workflowForms.flatMap((f) => [
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
@@ -417,6 +455,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.resultMsg}`,
       `  | ${f.resultMsg} (Ok _) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
       `  | ${f.resultMsg} (Error _) -> model, Cmd.none`,
@@ -433,6 +472,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} id -> model, Cmd.OfAsync.perform (Api.${f.apiFn} id) model.${f.formField} ${f.doneMsg}`,
       `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
       `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
@@ -448,6 +488,7 @@ export function renderUpdate(
     const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
+      ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.doneMsg}`,
       `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
       `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
