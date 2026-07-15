@@ -39,7 +39,7 @@ export const ProductResponse = z.object({
   display: z.string(),
 }).openapi("ProductResponse");
 export const ProductListResponse = z.array(ProductResponse).openapi("ProductListResponse");
-export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("ProductPaged");
+export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() }).openapi("ProductPaged");
 
 export function productRoutes(repo: ProductRepository): OpenAPIHono {
   const app = newApp();

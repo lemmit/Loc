@@ -37,7 +37,7 @@ export const CustomerResponse = z.object({
   display: z.string(),
 }).openapi("CustomerResponse");
 export const CustomerListResponse = z.array(CustomerResponse).openapi("CustomerListResponse");
-export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("CustomerPaged");
+export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() }).openapi("CustomerPaged");
 
 export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   const app = newApp();

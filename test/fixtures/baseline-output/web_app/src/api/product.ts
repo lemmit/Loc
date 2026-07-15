@@ -42,7 +42,7 @@ export const ProductResponse = z.object({
 export type ProductResponse = z.infer<typeof ProductResponse>;
 export const ProductListResponse = z.array(ProductResponse);
 export type ProductListResponse = z.infer<typeof ProductListResponse>;
-export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });
+export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
 export type ProductPaged = z.infer<typeof ProductPaged>;
 
 export function useAllProducts(query: AllQueryInput = {}) {

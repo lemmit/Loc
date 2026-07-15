@@ -69,7 +69,7 @@ describe("typescript generator — paged finds (P3b)", () => {
 
     // Named paged DTO wrapping the response items.
     expect(routes).toContain(
-      'export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }).openapi("WarehousePaged");',
+      'export const WarehousePaged = z.object({ items: z.array(WarehouseResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() }).openapi("WarehousePaged");',
     );
     // Query schema gains 1-based page + pageSize with defaults 1 / 20, plus the
     // server-side sort controls (M-T2.6): `sort`/`dir` are accepted as plain

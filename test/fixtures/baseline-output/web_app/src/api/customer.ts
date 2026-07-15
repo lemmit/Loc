@@ -41,7 +41,7 @@ export const CustomerResponse = z.object({
 export type CustomerResponse = z.infer<typeof CustomerResponse>;
 export const CustomerListResponse = z.array(CustomerResponse);
 export type CustomerListResponse = z.infer<typeof CustomerListResponse>;
-export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });
+export const CustomerPaged = z.object({ items: z.array(CustomerResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
 export type CustomerPaged = z.infer<typeof CustomerPaged>;
 
 export function useAllCustomers(query: AllQueryInput = {}) {

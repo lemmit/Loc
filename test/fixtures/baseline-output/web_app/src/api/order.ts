@@ -56,7 +56,7 @@ export const OrderResponse = z.object({
 export type OrderResponse = z.infer<typeof OrderResponse>;
 export const OrderListResponse = z.array(OrderResponse);
 export type OrderListResponse = z.infer<typeof OrderListResponse>;
-export const OrderPaged = z.object({ items: z.array(OrderResponse), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });
+export const OrderPaged = z.object({ items: z.array(OrderResponse), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });
 export type OrderPaged = z.infer<typeof OrderPaged>;
 
 export function useAllOrders(query: AllQueryInput = {}) {

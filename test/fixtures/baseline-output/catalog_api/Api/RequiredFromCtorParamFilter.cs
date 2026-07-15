@@ -16,6 +16,19 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         var type = context.Type;
         if (schema.Properties is null || schema.Properties.Count == 0) return;
 
+        // Paged carrier (M-T2.6): the generic Paged<T> record's members
+        // (items/page/pageSize/total/totalPages) are all non-optional, but
+        // Swashbuckle's non-nullable detection can't read nullability off an
+        // OPEN generic parameter, so it leaves the required set empty — while
+        // Hono/Phoenix/Java/Python mark every envelope field required.  Mark
+        // all of them required to restore cross-backend parity (conformance).
+        if (type.IsGenericType
+            && type.GetGenericTypeDefinition().Name.StartsWith("Paged", StringComparison.Ordinal))
+        {
+            foreach (var key in schema.Properties.Keys) schema.Required.Add(key);
+            return;
+        }
+
         // Positional records expose their declared fields via the primary
         // constructor.  Pick the longest constructor (the primary one for a
         // positional record) and mark each [Required] parameter's property.

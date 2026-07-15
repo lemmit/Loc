@@ -215,7 +215,10 @@ export function buildApiModule(
       if (!paged || pagedSeen.has(paged.name)) continue;
       pagedSeen.add(paged.name);
       lines.push(
-        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() });`,
+        // Integer pagination counters — match the backend wire contract
+        // (every backend's OpenAPI types these `integer`; see the Hono
+        // routes-builder paged schema).
+        `export const ${paged.name} = z.object({ items: z.array(${zodForResponseInner(paged.arg)}), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });`,
       );
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
