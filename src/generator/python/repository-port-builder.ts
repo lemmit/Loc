@@ -106,7 +106,7 @@ export function renderRepositoryPortsFile(
       "from typing import Protocol",
       refersTo("Sequence") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
       refersTo("User") ? "from app.auth.user import User" : null,
-      refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
+      refersTo("PagedResult") ? "from app.domain.paging import PagedResult" : null,
       idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
       voEnumNames.length > 0
         ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`

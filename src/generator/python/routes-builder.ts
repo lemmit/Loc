@@ -97,10 +97,16 @@ export function buildPyRoutesFile(
   // side-effect-free `GET /{id}/can_<op>` → `{ allowed }` companion.
   const whenGatedOps = publicOps.filter((o) => o.when);
 
-  // One <Name>Paged response model per distinct paged carrier.
+  // One <Name>Paged response model per distinct paged carrier — the explicit
+  // paged finds plus (M-T2.6) the implicit paged findAll (`all`, excluded from
+  // emittableFinds but paged for a plain relational aggregate).
   const pagedNames = new Set<string>();
   const pagedModels: string[] = [];
-  for (const f of emittableFinds(repo)) {
+  const autoAllFind = repo?.finds.find(
+    (f) => f.name === "all" && f.params.length === 0 && !f.filter,
+  );
+  const pagedCarriers = [...emittableFinds(repo), ...(autoAllFind ? [autoAllFind] : [])];
+  for (const f of pagedCarriers) {
     const paged = pagedReturn(f.returnType);
     if (!paged || pagedNames.has(paged.name)) continue;
     pagedNames.add(paged.name);
@@ -153,7 +159,7 @@ export function buildPyRoutesFile(
     hasCreateFactory(agg) ? ["", "", createRoute(agg, ctx)] : null,
     "",
     "",
-    allRoute(agg),
+    allRoute(agg, repo),
     // Finds register before /{id}: Starlette matches in declaration
     // order, so the static find paths must win over the id pattern.
     ...emittableFinds(repo).flatMap((f) => ["", "", findRoute(agg, f, ctx)]),
@@ -774,7 +780,35 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
   );
 }
 
-function allRoute(agg: EnrichedAggregateIR): string {
+function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): string {
+  // The implicit findAll is paged (M-T2.6) for a plain relational aggregate: the
+  // list GET carries the `<Agg>Paged` envelope + page/pageSize/sort/dir query
+  // controls and maps the `PagedResult` carrier to the wire shape — matching
+  // every other backend.  A non-paged findAll keeps the bare-array list.
+  const autoAll = repo?.finds.find((f) => f.name === "all" && f.params.length === 0 && !f.filter);
+  const paged = autoAll ? pagedReturn(autoAll.returnType) : null;
+  if (paged) {
+    const sig = [
+      "session: SessionDep",
+      `page: int = ${PAGED_DEFAULT_PAGE}`,
+      `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+      `sort: str = "id"`,
+      `dir: str = "asc"`,
+    ].join(", ");
+    return lines(
+      `@router.get("", response_model=${paged.name}, operation_id="all${agg.name}")`,
+      `async def all_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
+      "    repo = _repo(session)",
+      "    result = await repo.all(page, pageSize, sort, dir)",
+      "    return {",
+      '        "items": [repo.to_wire(r) for r in result.items],',
+      '        "page": result.page,',
+      '        "pageSize": result.page_size,',
+      '        "total": result.total,',
+      '        "totalPages": result.total_pages,',
+      "    }",
+    );
+  }
   return lines(
     `@router.get("", response_model=${agg.name}ListResponse, operation_id="all${agg.name}")`,
     `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,

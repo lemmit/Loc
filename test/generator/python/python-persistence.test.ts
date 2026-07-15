@@ -80,7 +80,10 @@ describe("python repository emission", () => {
     expect(repo).toContain("async def find_by_id(self, id: OrderId) -> Order | None:");
     expect(repo).toContain("async def get_by_id(self, id: OrderId) -> Order:");
     expect(repo).toContain('raise AggregateNotFoundError(f"Order {id} not found")');
-    expect(repo).toContain("async def all(self) -> list[Order]:");
+    // The implicit findAll is paged (M-T2.6) for this plain relational aggregate.
+    expect(repo).toContain(
+      "async def all(self, page: int, page_size: int, sort: str, dir: str) -> PagedResult[Order]:",
+    );
     expect(repo).toContain("return Order._rehydrate(");
     expect(repo).toContain("id=OrderId(row.id),");
   });
@@ -102,8 +105,10 @@ describe("python repository emission", () => {
     const repo = files.get("api/app/db/repositories/order_repository.py")!;
     // Every list-returning read routes through the batch hydrator instead of a
     // per-row `[await self._hydrate(row) …]` comprehension.
-    expect(repo).toContain("async def all(self) -> list[Order]:");
-    expect(repo).toContain("        return await self._hydrate_many(rows)");
+    expect(repo).toContain(
+      "async def all(self, page: int, page_size: int, sort: str, dir: str) -> PagedResult[Order]:",
+    );
+    expect(repo).toContain("        items = await self._hydrate_many(rows)");
     expect(repo).not.toContain("[await self._hydrate(row) for row in rows]");
     // The batch hydrator loads each child collection ONCE with `<fk> IN
     // (root_ids)` and groups by parent, rather than one SELECT per root row.

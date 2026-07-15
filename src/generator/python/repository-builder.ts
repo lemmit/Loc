@@ -169,6 +169,43 @@ export function buildPyRepositoryFile(
       ? `        row = (await self._session.execute(select(${root}).where(${root}.id == id, ${root}.kind == ${JSON.stringify(kind)}))).scalars().first()`
       : `        row = await self._session.get(${root}, id)`;
 
+  // The implicit `all` findAll is paged (M-T2.6) for a plain relational
+  // aggregate — the same predicate the enrichment applies (document / embedded /
+  // event-sourced / inheritance subtype keep the bare list).  When paged, `all`
+  // gains the page/pageSize/sort/dir controls and returns the `PagedResult`
+  // carrier, mirroring an explicit paged find.
+  const autoAllFind = repo?.finds.find(
+    (f) => f.name === "all" && f.params.length === 0 && !f.filter,
+  );
+  const pagedAll = autoAllFind ? !!pagedReturn(autoAllFind.returnType) : false;
+  const allWhere = rootWhere(null, root, kind, filterPred);
+  const allSortMap = sortableFields(agg)
+    .map((wf) => `${JSON.stringify(wf)}: ${JSON.stringify(snake(wf))}`)
+    .join(", ");
+  const allMethodLines = pagedAll
+    ? [
+        `    async def all(self, page: int, page_size: int, sort: str, dir: str) -> PagedResult[${agg.name}]:`,
+        "        offset = (page - 1) * page_size",
+        `        _sort_columns = {${allSortMap}}`,
+        `        _sort_attr = getattr(${root}, _sort_columns.get(sort, "id"))`,
+        '        _order = _sort_attr.desc() if dir == "desc" else _sort_attr.asc()',
+        "        total = (",
+        `            await self._session.execute(select(func.count()).select_from(${root})${allWhere})`,
+        "        ).scalar_one()",
+        "        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0",
+        "        rows = (",
+        `            await self._session.execute(select(${root})${allWhere}.order_by(_order).limit(page_size).offset(offset))`,
+        "        ).scalars().all()",
+        `        items = ${hydrateListExpr(agg)}`,
+        findExecutedLine(agg, "all", "total"),
+        "        return PagedResult(items=items, page=page, page_size=page_size, total=total, total_pages=total_pages)",
+      ]
+    : [
+        `    async def all(self) -> list[${agg.name}]:`,
+        `        rows = (await self._session.execute(select(${root})${allWhere})).scalars().all()`,
+        `        return ${hydrateListExpr(agg)}`,
+      ];
+
   const body = lines(
     `class ${agg.name}Repository:`,
     "    def __init__(self, session: AsyncSession, events: DomainEventDispatcher) -> None:",
@@ -198,9 +235,7 @@ export function buildPyRepositoryFile(
     // scope).  Emitted only when `writeScopeFilter` is set.
     ...writeGuardMethod(agg, root, writePred),
     "",
-    `    async def all(self) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${root})${rootWhere(null, root, kind, filterPred)})).scalars().all()`,
-    `        return ${hydrateListExpr(agg)}`,
+    ...allMethodLines,
     ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx, filterPred)]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
@@ -321,7 +356,7 @@ export function buildPyRepositoryFile(
       aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),
     ),
     hasAudit ? "from app.db.audit import AuditRecordRow" : null,
-    refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
+    refersTo("PagedResult") ? "from app.domain.paging import PagedResult" : null,
     hasProv ? "from app.db.provenance import ProvenanceRecord" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,

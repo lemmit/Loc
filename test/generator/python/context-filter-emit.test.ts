@@ -63,8 +63,9 @@ describe("python generator — capability filter (contextFilterPredicate)", () =
     expect(repo).toContain(
       "select(CustomerRow).where(and_(CustomerRow.id.in_(list(ids)), not_(CustomerRow.is_deleted)))",
     );
-    // The import line narrows to include and_ and not_ alongside select.
-    expect(repo).toContain("from sqlalchemy import and_, not_, select");
+    // The import line narrows to include and_ and not_ alongside select — plus
+    // func for the paged findAll's COUNT (M-T2.6).
+    expect(repo).toContain("from sqlalchemy import and_, func, not_, select");
   });
 
   it("emits no capability predicate when the aggregate has no filter (byte-identical guard)", async () => {
@@ -92,9 +93,10 @@ system Shop {
     ).get("api/app/db/repositories/plain_repository.py")!;
     expect(repo).toBeDefined();
 
-    // all() stays a bare select with no capability `.where(`.
+    // all() is paged (M-T2.6) but carries no capability `.where(` — the plain
+    // relational page select with no filter conjunction.
     expect(repo).toContain(
-      "rows = (await self._session.execute(select(PlainRow))).scalars().all()",
+      "await self._session.execute(select(PlainRow).order_by(_order).limit(page_size).offset(offset))",
     );
     // No `and_(` / `not_(` conjunction anywhere — no capability filter was emitted.
     expect(repo).not.toContain("and_(");

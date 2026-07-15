@@ -309,7 +309,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const hasPaged = merged.repositories.some((r) =>
     r.finds.some((f) => pagedReturn(f.returnType) != null),
   );
-  if (hasPaged) out.set("app/db/paging.py", PAGING_PY);
+  // The paged carrier lives in the DOMAIN layer (not app.db) so the ORM-neutral
+  // repository Protocol can reference it without importing the db package.
+  if (hasPaged) out.set("app/domain/paging.py", PAGING_PY);
   out.set("app/db/repositories/__init__.py", "");
   // The runner globs migrations/ at boot; .gitkeep keeps the Docker
   // COPY valid on systems whose snapshot is already up to date.
