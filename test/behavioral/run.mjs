@@ -165,7 +165,9 @@ async function runCase(c) {
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases.filter(
-  (c) => only.length === 0 || only.includes(c.name),
+  // Skip UI-only cases (no api/unit tier) — they're the frontend-fullstack
+  // matrix's job (run-ui.mjs), not this api/unit runner's.
+  (c) => (only.length === 0 || only.includes(c.name)) && (c.api || c.unit),
 );
 
 // Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted

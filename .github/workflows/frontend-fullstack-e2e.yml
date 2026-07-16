@@ -1,0 +1,74 @@
+name: Frontend full-stack e2e (nightly, no docker)
+
+# Closes the frontend↔backend runtime hole the per-PR gates leave open.
+#
+# Per-PR, only React/Mantine ever drives a REAL backend (behavioral-ui-e2e.yml,
+# PGlite-Hono); every OTHER frontend (Vue/Svelte/Angular/Feliz) gets a
+# render-only smoke that TOLERATES the backend 404ing (generated-*-e2e.yml). So a
+# generator change that breaks the wire contract between a non-React client and a
+# real server compiles green, boots each half independently, and is invisible
+# until — before this workflow — the nightly docker conformance leg.
+#
+# This nightly matrix drives each non-React frontend against the SAME in-process
+# Hono-on-PGlite backend the per-PR React cell uses (run-ui.mjs, framework-
+# agnostic): generate → build the frontend → boot backend + serve bundle on one
+# origin → run the EMITTED Playwright `*.ui.spec.ts` page-object round-trips
+# (create → submit → read back). No docker; the frontend build + Chromium
+# dominate, which is why it's nightly rather than per-PR (the user's cost call).
+#
+# Each cell is a corpus case flagged `uiTier: "nightly"` (test/behavioral/
+# corpus.json). Adding a frontend = one `.ddd` twin + one matrix entry (Svelte's
+# `build/` and Angular's `dist/<app>/browser` serve roots need the run-ui.mjs
+# per-framework dist hook first — see its findFrontendDeployable note).
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-fullstack:
+    # Runs nightly, on manual dispatch, or on a PR carrying the
+    # `frontend-fullstack` label (so it can be exercised on demand).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'frontend-fullstack')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - frontend: vue
+            case: sales-system-vue
+    name: ${{ matrix.frontend }} → real Hono backend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run ${{ matrix.frontend }} full-stack UI round-trip
+        working-directory: test/behavioral
+        run: node run-ui.mjs ${{ matrix.case }}
