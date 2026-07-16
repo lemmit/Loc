@@ -43,14 +43,35 @@ function formGroupBody(form: {
   fieldArrays?: AngularFieldArraySpec[];
   fieldGroups?: AngularFieldGroupSpec[];
 }): string {
-  const flat = form.controls.map((c) =>
-    c.tsType
-      ? `${c.name}: new FormControl<${c.tsType}>(${c.init})`
-      : `${c.name}: new FormControl(${c.init}, { nonNullable: true })`,
-  );
+  const flat = form.controls.map((c) => {
+    // A nullable typed control (e.g. a File field's `FileRef | null`) emits with
+    // an explicit generic and no `nonNullable`; such fields carry no
+    // wire-translatable invariant, so no validators option applies.
+    if (c.tsType) return `${c.name}: new FormControl<${c.tsType}>(${c.init})`;
+    // A field carrying wire-translatable invariants gets a `validators: [ … ]`
+    // option (the Angular twin of the other frontends' zod native chain);
+    // fields without one stay byte-identical to the validator-free form.
+    const opts =
+      c.validators && c.validators.length > 0
+        ? `{ nonNullable: true, validators: [${c.validators.join(", ")}] }`
+        : "{ nonNullable: true }";
+    return `${c.name}: new FormControl(${c.init}, ${opts})`;
+  });
   const arrays = (form.fieldArrays ?? []).map((fa) => fieldArrayControlDecl(fa));
   const groups = (form.fieldGroups ?? []).map((fg) => fieldGroupControlDecl(fg));
   return [...flat, ...arrays, ...groups].join(", ");
+}
+
+/** The invalid-submit guard for a form's submit handler.  A form carrying
+ *  field validators additionally `markAllAsTouched()` so every failing field
+ *  reveals its inline error on a blocked submit (the field errors render only
+ *  once `touched`); a validator-free form keeps the bare early-return so its
+ *  handler stays byte-identical. */
+function invalidGuard(form: { formVar: string; controls: { validators?: string[] }[] }): string {
+  const hasValidators = form.controls.some((c) => c.validators && c.validators.length > 0);
+  return hasValidators
+    ? `    if (this.${form.formVar}.invalid) { this.${form.formVar}.markAllAsTouched(); return; }`
+    : `    if (this.${form.formVar}.invalid) return;`;
 }
 
 /** The getter + add/remove member lines a form's dynamic-row fields contribute
@@ -610,7 +631,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push(
       [
         `  async ${form.submitMethod}(): Promise<void> {`,
-        `    if (this.${form.formVar}.invalid) return;`,
+        invalidGuard(form),
         `    const out = await this.${form.mutationVar}.mutateAsync(this.${form.formVar}.getRawValue());`,
         `    this.router.navigateByUrl(\`/${form.redirectSlug}/\${out.id}\`);`,
         "  }",

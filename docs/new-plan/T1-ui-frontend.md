@@ -87,7 +87,7 @@ Remove implicit sidebar derivation + per-page `menu {}` bag; every entry traces 
 Sources: [scaffolded-navigation](../old/proposals/scaffolded-navigation.md).
 
 ## M-T1.14 — Angular tails — `partial` · **S** · P2
-`X id` select/combobox is DONE (verified 2026-07-13: `angular/form-fields.ts:226-247` renders mat-select/p-select/native select via hoisted `useAll<X>()`). Remaining: page-`requires`/nav-link auth gating parity.
+`X id` select/combobox is DONE (verified 2026-07-13: `angular/form-fields.ts:226-247` renders mat-select/p-select/native select via hoisted `useAll<X>()`). **Client-side form validation DONE** (verified 2026-07-16 via `ng build`): the aggregate's wire-translatable `invariant`s fold into per-field `Validators.*` on each create-form `FormControl` (`angular/form-validators.ts`, via the shared `takeSingleFieldChain` gate — same classification as the zod `Create<Agg>Request`), with an inline per-field error revealed on `markAllAsTouched()` at a blocked submit. Closes the Angular leg of the frontend-validation parity gap (React/Vue/Svelte already emit the zod chain). Remaining: page-`requires`/nav-link auth gating parity; operation/workflow-form validators (create-form only for now).
 Sources: [angular-frontend](../old/proposals/angular-frontend.md) tail.
 
 ## M-T1.15 — Richer list filter inputs — `open` · **S** · P3
