@@ -1,6 +1,6 @@
 import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import { humanize, lowerFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
@@ -11,7 +11,7 @@ import {
   formButton,
   partitionAngularFields,
 } from "./form-fields.js";
-import { angularValidatorMap } from "./form-validators.js";
+import { applyAngularValidators } from "./form-validators.js";
 import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
@@ -106,20 +106,7 @@ export function renderAngularCreateForm(
   // reveals once the field is touched (the submit handler marks all touched on
   // a blocked submit).
   const available = new Set(fields.map((f) => f.name));
-  const validatorMap = angularValidatorMap(agg.invariants, available);
-  if (validatorMap.size > 0) {
-    addNg(ctx, "@angular/forms", "Validators");
-    for (const c of parts.flatControls) {
-      const v = validatorMap.get(c.name);
-      if (v) c.validators = v;
-    }
-  }
-  const fieldMarkup = parts.flatNames.map((name, i) => {
-    const base = parts.flatMarkup[i]!;
-    if (!validatorMap.has(name)) return base;
-    const ctrl = `${formVar}.controls.${name}`;
-    return `${base}@if (${ctrl}.invalid && ${ctrl}.touched) {<p class="loom-error" data-testid="${ns}-error-${name}">${humanize(name)} is invalid</p>}`;
-  });
+  const fieldMarkup = applyAngularValidators(parts, agg.invariants, available, formVar, ns, ctx);
   const submit = formButton(ctx, {
     type: "submit",
     emphasis: "primary",

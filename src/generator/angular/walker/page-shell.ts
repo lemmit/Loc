@@ -687,7 +687,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       members.push(
         [
           `  async ${f.submitMethod}(): Promise<void> {`,
-          `    if (this.${f.formVar}.invalid) return;`,
+          invalidGuard(f),
           `    await this.${f.mutationVar}.mutateAsync({ id: ${idExpr}, input: this.${f.formVar}.getRawValue() });`,
           "  }",
         ].join("\n"),
@@ -765,7 +765,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       members.push(
         [
           `  async ${m.submitMethod}(): Promise<void> {`,
-          `    if (this.${m.formVar}.invalid) return;`,
+          invalidGuard(m),
           `    await this.${m.mutationVar}.mutateAsync({ id: this.${m.idSig}(), input: this.${m.formVar}.getRawValue() });`,
           `    this.${m.openSig}.set(false);`,
           "  }",

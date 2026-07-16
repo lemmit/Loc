@@ -1,5 +1,6 @@
 import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { preconditionsAsInvariants } from "../_frontend/zod-schemas.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
@@ -12,6 +13,7 @@ import {
   formStyle,
   partitionAngularFields,
 } from "./form-fields.js";
+import { applyAngularValidators } from "./form-validators.js";
 import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
@@ -159,7 +161,13 @@ export function renderAngularModal(
         groupMarkup: [],
         hasFileField: false,
       };
-  const fieldMarkup = parts.flatMarkup;
+  // Same constraint source as the standalone operation form (and the zod
+  // `<Op>Request`): the aggregate's invariants + this op's `precondition`s,
+  // gated to the op's params.
+  const agg = ctx.aggregatesByName.get(aggName);
+  const opInvariants = [...(agg?.invariants ?? []), ...preconditionsAsInvariants(op)];
+  const available = new Set(op.params.map((p) => p.name));
+  const fieldMarkup = applyAngularValidators(parts, opInvariants, available, formVar, ns, ctx);
 
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-form`);

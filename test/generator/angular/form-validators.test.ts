@@ -101,3 +101,64 @@ describe("angular generator — invariant-derived form Validators", () => {
     expect(page).toContain('data-testid="products-new-error-quantity"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Operation forms fold the same source as the zod `<Op>Request`: the
+// aggregate's invariants + the op's preconditions, gated to the op's params.
+// ---------------------------------------------------------------------------
+
+const OP_SOURCE = `
+  system Shop {
+    subdomain Sales {
+      context Catalog {
+        aggregate Product {
+          name: string
+          quantity: int
+          operation restock(amount: int) {
+            precondition amount >= 1
+            quantity := quantity + amount
+          }
+        }
+        repository Products for Product { }
+      }
+    }
+    api CatalogApi from Sales
+    ui WebApp {
+      api Sales: CatalogApi
+      page ProductRestock {
+        route: "/products/:id/restock"
+        body: OperationForm(of: Product, op: restock)
+      }
+    }
+    storage primary { type: postgres }
+    resource productsState { for: Catalog, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Catalog]
+      dataSources: [productsState]
+      serves: CatalogApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3006
+    }
+  }
+`;
+
+describe("angular generator — operation-form Validators", () => {
+  it("folds the op precondition into a Validators.min on the param control", async () => {
+    const all = await generateSystemFiles(OP_SOURCE);
+    const page = all.get("web/src/app/pages/product-restock.component.ts")!;
+    expect(page).toContain(
+      "amount: new FormControl(0, { nonNullable: true, validators: [Validators.min(1)] })",
+    );
+    expect(page).toContain("import { FormControl, FormGroup, ReactiveFormsModule, Validators }");
+    expect(page).toContain(
+      "if (this.restockProductForm.invalid) { this.restockProductForm.markAllAsTouched(); return; }",
+    );
+    expect(page).toContain('data-testid="products-op-restock-error-amount"');
+  });
+});

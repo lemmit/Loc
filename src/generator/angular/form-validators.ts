@@ -1,6 +1,9 @@
 import type { InvariantIR } from "../../ir/types/loom-ir.js";
 import type { SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
+import { humanize } from "../../util/naming.js";
+import type { WalkContext } from "../_walker/walker-core.js";
 import { takeSingleFieldChain } from "../zod-refine.js";
+import { type AngularFormControlSpec, addNg } from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular Reactive-Forms validator derivation.
@@ -43,6 +46,43 @@ export function angularValidatorMap(
     if (calls.length > 0) out.set(field, calls);
   }
   return out;
+}
+
+/** The subset of a partitioned form's flat fields this helper reads/writes. */
+interface FlatFields {
+  flatControls: AngularFormControlSpec[];
+  flatNames: readonly string[];
+  flatMarkup: readonly string[];
+}
+
+/** Fold `invariants` (over `available` fields) into per-field `Validators.*` on
+ *  a form's flat controls, and return the field markup with an inline error
+ *  appended after each validated field.  Registers the `Validators` import when
+ *  any constraint lands; a form with no wire-translatable invariant is a no-op
+ *  (controls untouched, markup returned verbatim), so validator-free forms stay
+ *  byte-identical.  Shared by the create / operation / modal form renderers. */
+export function applyAngularValidators(
+  parts: FlatFields,
+  invariants: readonly InvariantIR[],
+  available: ReadonlySet<string>,
+  formVar: string,
+  ns: string,
+  ctx: WalkContext,
+): string[] {
+  const validatorMap = angularValidatorMap(invariants, available);
+  if (validatorMap.size > 0) {
+    addNg(ctx, "@angular/forms", "Validators");
+    for (const c of parts.flatControls) {
+      const v = validatorMap.get(c.name);
+      if (v) c.validators = v;
+    }
+  }
+  return parts.flatNames.map((name, i) => {
+    const base = parts.flatMarkup[i]!;
+    if (!validatorMap.has(name)) return base;
+    const ctrl = `${formVar}.controls.${name}`;
+    return `${base}@if (${ctrl}.invalid && ${ctrl}.touched) {<p class="loom-error" data-testid="${ns}-error-${name}">${humanize(name)} is invalid</p>}`;
+  });
 }
 
 /** Map one recognised single-field pattern onto its Angular `Validators.*`
