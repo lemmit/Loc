@@ -59,6 +59,7 @@ import {
   checkPolicyFns,
   checkPrimitiveConversions,
   checkProjectSingletons,
+  checkRepositoryFinds,
   checkRetrievalLiteral,
   checkSeeds,
   checkSelfType,
@@ -238,6 +239,10 @@ export class DddValidator {
     // v1 admits only single-level (non-nested) instantiation, and a carrier
     // may appear only in a transport position (find return / payload field).
     guard("generic-carriers", model, () => checkGenericCarriers(model, accept));
+
+    // loom.repository-find-deprecated — a wire-shaped list `find` warns (steer
+    // to run(criterion)/retrieval); reconstitution finds stay legal.
+    guard("repository-finds", model, () => checkRepositoryFinds(model, accept));
     // `Self id` (typed-capabilities.md) is only valid inside a `capability`.
     guard("self-type", model, () => checkSelfType(model, accept));
     // Discriminated unions (payload-transport-layer.md, P4): anonymous

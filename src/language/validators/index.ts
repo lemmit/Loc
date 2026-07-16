@@ -36,6 +36,7 @@ export { checkMigrations } from "./migration.js";
 export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
 export { checkPolicyFns } from "./policy-fn.js";
+export { checkRepositoryFinds } from "./repository.js";
 export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,
