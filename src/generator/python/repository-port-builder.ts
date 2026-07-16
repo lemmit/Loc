@@ -83,8 +83,20 @@ export function renderRepositoryPortsFile(
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
 
   // Strongly-typed id names referenced (`AccountId`, `OrderId`, …) — all live
-  // in `app.domain.ids`.
-  const idNames = [...new Set(scan.match(/\b[A-Z][A-Za-z0-9]*Id\b/g) ?? [])].sort();
+  // in `app.domain.ids`.  Cross-check the regex hits against the ids ACTUALLY
+  // declared there (`app/domain/ids.py` is `<Aggregate>Id` / `<Part>Id`, one
+  // per aggregate + part — see `renderPyIds`): a value object or enum named
+  // `…Id` lives in `app.domain.value_objects`, not `app.domain.ids`, so
+  // harvesting every `*Id` token would import it from the wrong module →
+  // `ImportError` at load.  The filter keeps only real id types.
+  const declaredIdNames = new Set<string>();
+  for (const a of ctx.aggregates) {
+    declaredIdNames.add(`${a.name}Id`);
+    for (const p of a.parts) declaredIdNames.add(`${p.name}Id`);
+  }
+  const idNames = [...new Set(scan.match(/\b[A-Z][A-Za-z0-9]*Id\b/g) ?? [])]
+    .filter((n) => declaredIdNames.has(n))
+    .sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
