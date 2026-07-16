@@ -66,6 +66,7 @@ Sources: [channels](../old/proposals/channels.md) realtime sections, global-plan
 
 ## M-T1.11 — i18n — `open` · **XL** · P2
 Nothing exists. Phases 1–7 per the proposal pair: extraction skeleton → React runtime → `ddd i18n sync` (content-hash keys, D-I18N-KEY) → pack chrome catalogs → invariant `message:` keys → non-React backends → validator-message centralisation. Prereq: [i18n-strings](../old/proposals/i18n-strings.md) Phase 1 (template-literal → ICU lowering + `loom.user-visible-concat`).
+The **invariant `message:` phase has an extractable foundation slice** — the custom-validation-message authoring surface (`message` on `invariant`/`check`/`precondition`) + IR descriptor + wire per-error `code` + full cross-target fan-out of the literal text — that **ships ahead of the i18n epic** (literal English now, key/catalog swap additive later). Design: [M-T1.11 invariant-message design](./missions/M-T1.11-invariant-message-design.md).
 Sources: [i18n](../old/proposals/i18n.md), [i18n-strings](../old/proposals/i18n-strings.md).
 
 ## M-T1.12 — Accessibility: from contract to emission — `in-flight` · **L** · P2 ⚠ verify-first
