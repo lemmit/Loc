@@ -10,7 +10,14 @@
 > (`(arg: OrderResponse) => void`, `action?` → optional), and the
 > call-site lambda walked in the caller's scope (state writes hit the
 > caller's setters; the lambda param stays bound and typed via
-> `paramTypes`).  LiveView remains designed-only per §4's staging. This note designs a UI-side analogue of the backend's
+> `paramTypes`).  **Frontend fan-out SHIPPED (2026-07-16, code-verified):**
+> `component extern` now emits a real binding on **all five frontends +
+> HEEx** — Vue/Svelte re-export shims, Angular `ngComponentOutlet`, Feliz
+> record invocation, and a genuine LiveView `<.live_component module={…}>`
+> (`elixir/heex-walker-core.ts`).  The §6 `loom.extern-component-framework-mismatch`
+> gate proved unnecessary and was **not** built — every framework got a real
+> binding, not a rejection.  Still designed-not-built: Tier 2 `action`
+> behaviour params (pulled by a concrete widget, §4 staging). This note designs a UI-side analogue of the backend's
 > `operation … extern` escape hatch: a way to drop a **hand-written
 > React/TSX (or HEEx) component** into a Loom page body, type-checked
 > against the domain, wired into routing / state / data, without forking
