@@ -55,15 +55,17 @@ jobs:
             case: sales-system-vue
           - frontend: svelte
             case: sales-system-svelte
-          # Angular is non-blocking pending a known Angular-codegen gap this gate
-          # surfaced (verified under Node 24 locally): the response interfaces
-          # type value-object / enum fields as `unknown` (angular/api-module.ts
-          # `wireTsType`, a deliberately-deferred "precise nested typing" slice),
-          # so a detail page that renders e.g. `price.amount` fails `ng build`
-          # with TS2571. Flip to blocking once that slice lands (emit
-          # `<VO>Response` interfaces + enum unions across the api/views/
-          # workflows/store modules). The shared key-value testid fix already
-          # landed, so the interaction layer should pass once the types compile.
+          # Angular non-blocking: this gate surfaced a cascade of pre-existing
+          # Angular-codegen gaps (all verified under Node 24 locally). FIXED here:
+          # response-side VO/enum typing (`price.amount` → TS2571). STILL OPEN
+          # (an Angular-hardening follow-up, each a distinct emitter): (1)
+          # containment-part response fields still `unknown` (order-detail
+          # `lines` → TS2571) — same pattern, extend to entity parts; (2) the
+          # containment `@for (… ; track idx)` references an undefined `idx`
+          # (TS2339) — template-scope bug in the containment-table walker; (3)
+          # FK/workflow form controls are `FormControl(null)` but the request
+          # type wants `string` (TS2345/2322) — create/op/workflow form
+          # null-soundness. Flip to blocking once (1)-(3) land.
           - frontend: angular
             case: sales-system-angular
             experimental: true
