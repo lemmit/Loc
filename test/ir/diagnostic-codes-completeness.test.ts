@@ -67,11 +67,18 @@ describe("IR validator diagnostic codes", () => {
   });
 
   it("every diags.push carries a stable loom.* code", () => {
-    const uncoded = blocks.filter((b) => !/\bcode:\s*"loom\.[a-z0-9-]+"/.test(b));
+    // A diagnostic's code is stable when it is either a literal `loom.<kebab>`
+    // string OR a reference to one — e.g. a table-driven `code: backend.code`
+    // where the loom strings live in a nearby `const` table (the stamp-support
+    // validators share one body over a per-backend table, so their code is
+    // parameterised rather than inlined).  Both are "coded"; the failure mode
+    // this guard exists to catch is a `diags.push` with NO `code:` key at all.
+    const CODED = /\bcode:\s*("loom\.[a-z0-9-]+"|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*[,}]/;
+    const uncoded = blocks.filter((b) => !CODED.test(b));
     expect(
       uncoded.map((b) => b.replace(/\s+/g, " ").slice(0, 100)),
       "Each IR diagnostic must carry a stable `loom.*` code (contract §2). " +
-        'Add `code: "loom.<kebab>"` to the offending diags.push.',
+        'Add `code: "loom.<kebab>"` (or a reference to one) to the offending diags.push.',
     ).toEqual([]);
   });
 });
