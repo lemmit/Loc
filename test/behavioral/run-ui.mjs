@@ -78,11 +78,28 @@ function findNodeDeployable(genDir) {
   return dirs[0];
 }
 
+/** Locate the built SPA root under a frontend dir — the dir that holds the
+ *  emitted `index.html`.  Framework-agnostic: react/vue → `dist/`, SvelteKit
+ *  (adapter-static) → `build/`, Angular → `dist/<app>/browser/`.  Excludes the
+ *  source tree (a frontend's `index.html` also lives at its root pre-build) by
+ *  only accepting a build-output dir (`dist`/`build` segment in the path). */
+function findDistRoot(frontendDir) {
+  const hits = walk(frontendDir, (p) => p.endsWith("/index.html")).filter((p) => {
+    const rel = p.slice(frontendDir.length);
+    return /[/\\](dist|build)[/\\]/.test(rel);
+  });
+  if (hits.length === 0) {
+    throw new Error(`no built index.html under ${frontendDir} — did the frontend build?`);
+  }
+  // Prefer the shallowest (e.g. dist/index.html over a nested asset copy).
+  hits.sort((a, b) => a.split("/").length - b.split("/").length);
+  return dirname(hits[0]);
+}
+
 /** The frontend deployable dir: has e2e/playwright.config.ts.  Framework-agnostic
- *  — react OR vue (both `vite build` → `dist`); the emitted `.ui.spec.ts` + page
- *  objects are testid-driven, so the same round-trip runs against any frontend.
- *  (Svelte's `build/` and Angular's `dist/<app>/browser` output dirs will need a
- *  per-framework serve-root once those frontends join the corpus.) */
+ *  — the emitted `.ui.spec.ts` + page objects are testid-driven, so the same
+ *  round-trip runs against any frontend; the per-framework build command
+ *  (`npm run build`) and built-root (findDistRoot) are resolved below. */
 function findFrontendDeployable(genDir) {
   const hits = walk(genDir, (p) => p.endsWith("/e2e/playwright.config.ts")).map((p) =>
     resolve(p, "..", ".."),
@@ -236,15 +253,20 @@ async function runCase(c) {
     if (uiSpecs.length === 0) return { skipped: "no .ui.spec.ts emitted" };
     const deplDir = findNodeDeployable(genDir);
 
-    // 1. Build the generated frontend (react or vue — real npm install + vite
-    //    build → dist).
+    // 1. Build the generated frontend via ITS OWN build script (react/vue →
+    //    vite→dist, svelte → vite→build, angular → ng→dist/<app>/browser,
+    //    feliz → fable+vite→dist).  `npm run build` picks the right one per
+    //    package.json; findDistRoot locates the emitted index.html.
     execFileSync(npm, ["install", "--no-audit", "--no-fund"], { cwd: frontendDir, stdio: "pipe" });
-    execFileSync(npx, ["vite", "build"], { cwd: frontendDir, stdio: "pipe" });
+    const pkg = JSON.parse(readFileSync(join(frontendDir, "package.json"), "utf8"));
+    if (pkg.scripts?.build) execFileSync(npm, ["run", "build"], { cwd: frontendDir, stdio: "pipe" });
+    else execFileSync(npx, ["vite", "build"], { cwd: frontendDir, stdio: "pipe" });
+    const distDir = findDistRoot(frontendDir);
 
     // 2. Boot ONE in-process server: built SPA + the generated Hono
     //    backend on PGlite (/api), same origin.
     const { startServer } = await buildServerModule(deplDir, workDir);
-    server = await startServer({ distDir: join(frontendDir, "dist") });
+    server = await startServer({ distDir });
     process.stdout.write(`    stack on :${server.port}\n`);
 
     // 3. Install the e2e deps + Chromium, then run the emitted UI spec.

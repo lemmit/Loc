@@ -17,9 +17,12 @@ name: Frontend full-stack e2e (nightly, no docker)
 # dominate, which is why it's nightly rather than per-PR (the user's cost call).
 #
 # Each cell is a corpus case flagged `uiTier: "nightly"` (test/behavioral/
-# corpus.json). Adding a frontend = one `.ddd` twin + one matrix entry (Svelte's
-# `build/` and Angular's `dist/<app>/browser` serve roots need the run-ui.mjs
-# per-framework dist hook first — see its findFrontendDeployable note).
+# corpus.json); run-ui.mjs builds each frontend via its own `npm run build` and
+# auto-detects the built root (react/vue→dist, svelte→build, angular→dist/<app>/
+# browser). Vue + Svelte are verified locally (full round-trip green); Angular is
+# CI-first (ng build needs Node above the local floor) and non-blocking until
+# green. Feliz is not yet wired — it emits no e2e/playwright.config.ts (its smoke
+# harness differs) and needs dotnet/fable in the runner; a follow-up.
 
 on:
   schedule:
@@ -50,6 +53,17 @@ jobs:
         include:
           - frontend: vue
             case: sales-system-vue
+          - frontend: svelte
+            case: sales-system-svelte
+          # Angular's `ng build` needs Node ≥22.22.3, above the local floor, so
+          # this cell is CI-first-verified (non-blocking until it goes green —
+          # the shared key-value testid fix should carry it, but any residual
+          # Angular Material/PrimeNG interaction divergence surfaces here first).
+          - frontend: angular
+            case: sales-system-angular
+            experimental: true
+    # Non-blocking for cells not yet locally verified; flip by dropping the flag.
+    continue-on-error: ${{ matrix.experimental || false }}
     name: ${{ matrix.frontend }} → real Hono backend
     steps:
       - uses: actions/checkout@v6

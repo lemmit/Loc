@@ -1,0 +1,227 @@
+// Svelte (SvelteKit)-frontend twin of `sales-system.ddd`: the same Sales context and Hono
+// (`platform: node`) backend, but the frontend deployable is `platform: svelte`
+// (Svelte (SvelteKit) pack) instead of react.  Kept SEPARATE so the headless full-stack UI
+// tier can drive a REAL generated Svelte (SvelteKit) client against the REAL generated Hono
+// backend (PGlite, in-process) — the round-trip the per-PR React cell covers for
+// React only.  The UI e2e spec + page objects are framework-agnostic (testid
+// driven), so flipping the frontend platform is the only change from the react
+// twin.
+
+requirement US-001 {
+  type: UserStory
+  title: "A customer can place an order"
+  status: InProgress
+}
+
+requirement AC-001 parent US-001 {
+  type: AcceptanceCriteria
+  title: "An order can only be confirmed when it has at least one line"
+}
+
+requirement AC-002 parent US-001 {
+  type: AcceptanceCriteria
+  title: "Lines can only be added while the order is still a draft"
+}
+
+requirement AC-003 parent US-001 {
+  type: AcceptanceCriteria
+  title: "An order can be placed and confirmed end-to-end through the UI"
+}
+
+system SalesSystem {
+
+  // Visual identity for the Vue frontend — design tokens land in the generated
+  // theme as a Vuetify config.  The four tokens are framework-agnostic, so the
+  // same source applies whether the generator targets React/Mantine or Vue.
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#64748b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  subdomain Sales {
+    context Sales {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Order id, at: datetime }
+
+      aggregate Customer with crudish {
+        name: string
+        email: string
+        invariant email.length > 0
+        derived display: string = name
+      }
+
+      aggregate Product with crudish {
+        sku: string
+        price: Money
+        invariant sku.length > 0
+        derived display: string = sku
+      }
+
+      aggregate Order with crudish {
+        customerId: Customer id
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Product id, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += OrderLine { productId: productId, quantity: qty }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          productId: Product id
+          quantity: int
+          invariant quantity > 0
+        }
+
+        test "adding a line then confirming yields a confirmed order" verifies TC-001 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.status).toBe(Confirmed)
+          expect(order.lines.count).toBe(1)
+        }
+
+        test "lines cannot be added once the order is confirmed" verifies TC-002 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.addLine("00000000-0000-0000-0000-000000000002", 1)).toThrow()
+        }
+      }
+
+      repository Customers for Customer { }
+      repository Products for Product { }
+      repository Orders for Order { }
+
+      workflow placeOrder transactional {
+        create(customerId: Customer id, productId: Product id, qty: int) {
+          precondition qty > 0
+          let customer = Customers.getById(customerId)
+          let product = Products.getById(productId)
+          let order = Order.create({
+            customerId: customer.id,
+            status: Draft,
+            placedAt: now()
+          })
+          order.addLine(productId, qty)
+          order.confirm()
+        }
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Sales]) {
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable api {
+    platform: node
+    contexts: [Sales]
+    dataSources: [salesState]
+    port: 3000
+  }
+
+  // Svelte (SvelteKit) frontend — the only structural difference from the react twin.
+  deployable webApp {
+    platform: svelte
+    targets: api
+    ui: WebApp
+    port: 3001
+  }
+
+  // System e2e tests.  `against api` (Hono) lowers to a vitest + fetch suite;
+  // `against webApp` (svelte) lowers to Playwright page objects driven against the
+  // built Svelte (SvelteKit) bundle wired to the real Hono backend.
+  test e2e "create a product and read it back" against api {
+    let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+    let read = api.products.getById(p)
+    expect(read.sku).toBe("WIDGET-1")
+  }
+
+  test e2e "create, add a line to, and confirm an order" against api {
+    let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+    let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test" })
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    api.orders.confirm(ord)
+    let read = api.orders.getById(ord)
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
+  }
+
+  test e2e "place and confirm an order through the UI" against webApp verifies TC-003 {
+    let prod = ui.products.create({ sku: "UI-WIDGET", price: { amount: 5.00, currency: "USD" } })
+    let cust = ui.customers.create({ name: "UI Buyer", email: "ui@buyer.test" })
+    let ord = ui.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    ui.orders.addLine(ord, { productId: prod.id, qty: 2 })
+    ui.orders.confirm(ord)
+    let read = ui.orders.getById(ord)
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
+  }
+}
+
+solution SOL-001 for US-001 {
+  title: "Ordering flows through the Order aggregate and the placeOrder workflow"
+  entitles [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm,
+    Sales.Sales.placeOrder
+  ]
+}
+
+testCase TC-001 verifies AC-001 {
+  title: "Add a line then confirm the order"
+  covers [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm
+  ]
+}
+
+testCase TC-002 verifies AC-002 {
+  title: "Adding a line to a confirmed order is rejected"
+  covers [ Sales.Sales.Order.addLine ]
+}
+
+testCase TC-003 verifies AC-003 {
+  title: "Place and confirm an order end-to-end via the UI"
+  covers [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm,
+    Sales.Sales.placeOrder
+  ]
+}
