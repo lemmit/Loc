@@ -108,7 +108,7 @@ below).**
 | Concern | React | Vue | Svelte | Angular | Feliz | Phoenix-HEEx |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | pack-dispatched page primitives ship | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | ✓ |
-| `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✗ gated | ✓ LiveView struct |
+| `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | ✓ LiveView struct |
 | Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | (elixir build) |
 | Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | n/a |
 | Design system | 4 packs | 2 packs | 2 packs | 3 packs | daisyUI theme | 2 packs (coreComponents/daisyui) |

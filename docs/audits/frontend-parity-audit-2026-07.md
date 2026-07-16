@@ -85,8 +85,8 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 | Expression-syntax leaves | ✓ JS | ✓ JS | ✓ JS | ✓ JS | ✓ F# | `js-expr-leaves.ts` / feliz `FS_LEAVES` |
 | Pack-dispatched primitives ship on target | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | `REQUIRED_PRIMITIVES` gate — **Feliz not gated**; `feliz/pack.ts` |
 | Forms (Create/Op/Workflow/Destroy) | ✓ RHF | ✓ | ✓ | ✓ Reactive Forms | ✓ Elmish seams | Feliz `renderCreateForm`… `feliz-target.ts` |
-| `store` UI primitive | ✓ | ✓ | ✓ | ✓ | ✗ gated | `loom.feliz-store-unsupported`, `store-checks.ts:298` |
-| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ⚠ classified | `loom.feliz-async-effect-unsupported`, `store-checks.ts` + `feliz-async-effect.ts` |
+| `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | store gate lifted on all 5 — `store-checks.ts:301-304` |
+| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ⚠ partial | v1 shape emits; harder shapes gated — `loom.feliz-async-effect-unsupported`, `store-checks.ts:354` |
 | `design:` axis | pack family | pack family | pack family | pack family | daisyUI **theme** | Rule 14 feliz branch, `deployable.ts:363`; `DAISYUI_THEMES` |
 | Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (inline showcase only) |
 | Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | no `generated-feliz-e2e.yml` |
@@ -181,15 +181,30 @@ never surface F1. And unlike the other four frontends, Feliz has **no**
 correctness bug on its own, but it means Feliz's rendered output is never exercised
 end-to-end. Lower priority than F1; closing F1's gate hole is the higher-value move.
 
-### Honest gaps on Feliz (correct — fail fast, no action needed)
+### Feliz feature status — implemented, and honest gaps where not
 
-These are the parity invariant working as designed:
+Two things that look like gaps are actually **implemented** on Feliz (do not gate
+them — the store gate was already lifted):
 
-- **`store` UI primitive** → `loom.feliz-store-unsupported` (`store-checks.ts:298`,
-  keyed on `dep.platform === "feliz"`). Fails validation; nothing mis-emits.
-- **Async effects** (`await`ed op in an action body) → classified by
-  `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`); the unsupported shape
-  raises `loom.feliz-async-effect-unsupported`.
+- **`store` UI primitive → implemented.** Stores fold into the single-program
+  Elmish `Model`/`Msg`/`update` — each store field becomes a namespaced `Model`
+  field, each action a `Msg` case (`fs-expr.ts` `storeModelField`/`storeMsgCase`,
+  `index.ts` `storeWrappers`, `feliz-target.ts:224` `renderStoreFieldRead` /
+  `renderStoreActionCall`). `loom.feliz-store-unsupported` **no longer exists** as a
+  live diagnostic — the comment at `store-checks.ts:301-304` records it was lifted
+  when the subsystem landed. Store parity is uniform across all five frontends.
+- **Async effects (`match await <op>()`) → v1 shape implemented, ⚠ partial.** The
+  Feliz MVU renderer emits the v1 shape — a 0-arg instance op, one aggregate-binding
+  success arm + `else`, hosted on a `:id` detail page — as a trigger→result
+  projection (M-T6.15). The unsupported slice **fails fast honestly**:
+  `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`) is the shared arbiter,
+  and `store-checks.ts:354` raises `loom.feliz-async-effect-unsupported` for a
+  genuine multi-variant union, a parameterised op, a missing `else`, or a host with
+  no route `id`. So this is a ⚠ partial with the boundary correctly gated — not a
+  silent gap.
+
+Genuinely honest gap (parity invariant working as designed):
+
 - **`design:` must be a daisyUI theme** → the validator (Rule 14 feliz branch,
   `deployable.ts:363`) rejects a component-library pack name on Feliz with the
   daisyUI theme list. Reproduced: `design: mantine` on a feliz deployable →
@@ -234,8 +249,11 @@ defaulting to `corporate` (light) / `business` (dark). `PackFormat` remains
   lacks the feliz sentinel; `npx vitest run … -t "feliz"` → 3 passed while
   placeholders are present. `generated-output-sentinels.test.ts:57` iterates
   `BACKENDS` only.
-- **Honest gaps:** `store-checks.ts:279-303` (`loom.feliz-store-unsupported`),
-  `deployable.ts:363` (Rule 14 daisyUI-theme branch) — reproduced the `design:
-  mantine` rejection via the CLI.
+- **Feliz feature status:** store gate lifted — no live `loom.feliz-store-unsupported`
+  (`rg 'code:.*feliz-store-unsupported' src/` → 0 hits; comment at
+  `store-checks.ts:301-304`); store emitters `fs-expr.ts`/`index.ts storeWrappers`/
+  `feliz-target.ts:224`. Async v1 shape emits; unsupported slice gated at
+  `store-checks.ts:354`. Design-theme gate `deployable.ts:363` — reproduced the
+  `design: mantine` rejection via the CLI.
 - **Root cause:** `loader.ts:346-363` (`compilePack` → `flattenRequired` gate) vs
   `feliz/index.ts:229` (`felizPack()` constructed outside it).
