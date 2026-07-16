@@ -1156,11 +1156,15 @@ export interface FelizAsyncVariant {
  *  arg is rendered at dispatch time (view scope) and threaded through the trigger
  *  `Msg` tuple; the api fn takes it curried and Thoth-encodes it into the body. */
 export interface FelizAsyncParam {
+  /** The F# binder name for the value — the op param name itself (`note`), so the
+   *  api fn signature + Msg-tuple destructure read like hand-written code, not
+   *  `arg0`.  Guarded against colliding with the route `id` param. */
+  name: string;
   /** F# type of the value on the wire + in the Msg tuple / api fn param
    *  (`string` / `int` — enums arrive as strings). */
   fsType: string;
-  /** Thoth encoder function (`Encode.string` / `Encode.int`) applied to the
-   *  positional `argN` local in the api fn body. */
+  /** Thoth encoder function (`Encode.string` / `Encode.int`) applied to `name`
+   *  in the api fn body. */
   encoder: string;
   /** JSON body key (the op param name). */
   jsonKey: string;
@@ -1255,6 +1259,9 @@ function felizAsyncEffect(
     };
   });
   const params: FelizAsyncParam[] = op.params.map((p, i) => ({
+    // The op param name reads best as the F# binder (`note`), except when it
+    // collides with the route `id` param already curried into the api fn.
+    name: p.name === "id" ? "idArg" : p.name,
     fsType: wireFieldType(p.type),
     encoder: paramEncoder(p.type),
     jsonKey: p.name,
@@ -1327,17 +1334,19 @@ function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
   const successVariants = e.variants.filter((v) => !v.isError);
   const errorVariants = e.variants.filter((v) => v.isError);
   // Wrap a decoded record into the `Some` outcome payload: bare `Some` for a
-  // single-variant effect, `Some (<DuCase> x)` for the multi-variant DU.
-  const wrap = (v: FelizAsyncVariant): string =>
-    e.isMulti ? `(fun x -> Some (${v.duCase} x))` : "Some";
-  const paramSig = e.params.map((_, i) => `(arg${i}: ${e.params[i]!.fsType}) `).join("");
+  // single-variant effect, `<DuCase> >> Some` (compose into the DU) for a
+  // multi-variant one.
+  const wrap = (v: FelizAsyncVariant): string => (e.isMulti ? `(${v.duCase} >> Some)` : "Some");
+  // Name each curried param after the op param itself (`note`), so the signature
+  // reads like hand-written code rather than `arg0`.
+  const paramSig = e.params.map((p) => `(${p.name}: ${p.fsType}) `).join("");
   const bodyDecl =
     e.params.length === 0
       ? []
       : [
           "      let body =",
           `        Encode.object [ ${e.params
-            .map((p, i) => `"${p.jsonKey}", ${p.encoder} arg${i}`)
+            .map((p) => `"${p.jsonKey}", ${p.encoder} ${p.name}`)
             .join("; ")} ]`,
           "        |> Encode.toString 0",
         ];
@@ -1345,18 +1354,22 @@ function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
     e.params.length === 0
       ? '        |> Http.content (BodyContent.Text "{}")'
       : "        |> Http.content (BodyContent.Text body)";
-  // A `type`-tagged decode chain over `variants`, keyed on `field` (`"type"` for
-  // both the 200 success body and the non-2xx ProblemDetails), matching each
-  // variant's `key` (the wire tag on success, the error URI on failure).
-  const decodeChain = (variants: FelizAsyncVariant[], keyOf: (v: FelizAsyncVariant) => string) => {
+  // A `type`-tagged decode chain over `variants`.  The 200 body tags by the wire
+  // variant name (`binder = "tag"`); the non-2xx ProblemDetails tags by the error
+  // `type` URI (`binder = "uri"`).  `keyOf` yields the string each variant matches.
+  const decodeChain = (
+    variants: FelizAsyncVariant[],
+    keyOf: (v: FelizAsyncVariant) => string,
+    binder: string,
+  ) => {
     const out = [
       "        let decoder =",
       '          Decode.field "type" Decode.string',
-      "          |> Decode.andThen (fun tag ->",
+      `          |> Decode.andThen (fun ${binder} ->`,
     ];
     variants.forEach((v, i) => {
       out.push(
-        `              ${i === 0 ? "if" : "elif"} tag = "${keyOf(v)}" then Decode.map ${wrap(v)} ${v.decoder}`,
+        `              ${i === 0 ? "if" : "elif"} ${binder} = "${keyOf(v)}" then Decode.map ${wrap(v)} ${v.decoder}`,
       );
     });
     out.push("              else Decode.succeed None)");
@@ -1366,7 +1379,7 @@ function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
     successVariants.length === 0
       ? ["        return Ok None"]
       : [
-          ...decodeChain(successVariants, (v) => v.tag),
+          ...decodeChain(successVariants, (v) => v.tag, "tag"),
           "        match Decode.fromString decoder response.responseText with",
           "        | Ok data -> return Ok data",
           "        | Error e -> return Error e",
@@ -1375,7 +1388,7 @@ function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
     errorVariants.length === 0
       ? ['        return Error (sprintf "HTTP %d" response.statusCode)']
       : [
-          ...decodeChain(errorVariants, (v) => v.uri ?? ""),
+          ...decodeChain(errorVariants, (v) => v.uri ?? "", "uri"),
           "        match Decode.fromString decoder response.responseText with",
           "        | Ok (Some v) -> return Ok (Some v)",
           '        | _ -> return Error (sprintf "HTTP %d" response.statusCode)',

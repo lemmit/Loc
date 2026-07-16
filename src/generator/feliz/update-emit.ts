@@ -529,8 +529,9 @@ export function renderUpdate(
   // (the tag didn't match / no success) and `(Error _)` (a thrown / non-2xx).
   const asyncEffectArms = asyncEffects.flatMap((e) => {
     const elseCtx: FsExprCtx = { stateNames, locals: new Set() };
-    // Trigger arm: destructure `(id, arg0, …)` and fire the curried api fn.
-    const argNames = e.params.map((_, i) => `arg${i}`);
+    // Trigger arm: destructure `(id, <param>, …)` (named after the op params) and
+    // fire the curried api fn.
+    const argNames = e.params.map((p) => p.name);
     const triggerPat = e.params.length === 0 ? "id" : `(id, ${argNames.join(", ")})`;
     const apiArgs = ["id", ...argNames].join(" ");
     const arms: string[] = [

@@ -186,24 +186,31 @@ describe("feliz async effect — harder shapes (multi-variant / params / no-else
     const fs = await hardFs();
     expect(fs).toContain("| Confirm of string * string");
     expect(fs).toContain('let confirm () = dispatch (Confirm (id, "hi"))');
+    // The curried param + Msg destructure are named after the op param (`note`),
+    // not a positional `arg0` — the F# reads like hand-written code.
     expect(fs).toContain(
-      "let confirmOrderEffect (id: string) (arg0: string) () : Async<Result<ConfirmOrderOutcome option, string>> =",
+      "let confirmOrderEffect (id: string) (note: string) () : Async<Result<ConfirmOrderOutcome option, string>> =",
     );
-    expect(fs).toContain('Encode.object [ "note", Encode.string arg0 ]');
+    expect(fs).toContain('Encode.object [ "note", Encode.string note ]');
+    expect(fs).toContain(
+      "| Confirm (id, note) -> model, Cmd.OfAsync.perform (Api.confirmOrderEffect id note) () ConfirmResult",
+    );
   });
 
   it("decodes the success variant at 200 and reifies error variants from the non-2xx `type` URI", async () => {
     const fs = await hardFs();
-    // 200 → the success aggregate, wrapped into the DU.
+    // 200 → the success aggregate, composed into the DU (`<Case> >> Some`).
     expect(fs).toContain(
-      'if tag = "Order" then Decode.map (fun x -> Some (ConfirmOrderOrder x)) Decoders.order',
+      'if tag = "Order" then Decode.map (ConfirmOrderOrder >> Some) Decoders.order',
     );
-    // non-2xx → the ProblemDetails `type` URI → the matching error DU case.
+    // non-2xx → the ProblemDetails `type` URI → the matching error DU case.  The
+    // binder reads `uri` (it's a URI, not a wire tag).
+    expect(fs).toContain("|> Decode.andThen (fun uri ->");
     expect(fs).toContain(
-      'if tag = "/errors/rejected" then Decode.map (fun x -> Some (ConfirmOrderRejected x)) Decoders.rejected',
+      'if uri = "/errors/rejected" then Decode.map (ConfirmOrderRejected >> Some) Decoders.rejected',
     );
     expect(fs).toContain(
-      'elif tag = "/errors/blocked" then Decode.map (fun x -> Some (ConfirmOrderBlocked x)) Decoders.blocked',
+      'elif uri = "/errors/blocked" then Decode.map (ConfirmOrderBlocked >> Some) Decoders.blocked',
     );
     // The error records + decoders are force-emitted for the reification.
     expect(fs).toMatch(/(let|and) rejected : Decoder<Rejected> =/);
