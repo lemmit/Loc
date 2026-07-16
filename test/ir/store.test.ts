@@ -393,62 +393,20 @@ ${arms}
     // React never gates regardless.
     expect(await codesOf(asyncSystem("react", "/orders/:id", V1_ARMS))).not.toContain(GATE);
 
-    // A PARAMLESS page is NOT gated either — Feliz sources the route id with an
-    // empty fallback (`dispatch (Trigger "")`), exactly as the JS frontends emit
-    // `useParams` `id ?? ""` on any route (there is no JS-side gate for it, so
-    // Feliz doesn't gate one — a `.ddd` valid for React is valid for Feliz).
-    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).not.toContain(GATE);
+    // Gated (no route id): the SAME shape on a non-`:id` page has no id to source
+    // — the ONE remaining Feliz async-effect gate (the routeless-host case).
+    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).toContain(GATE);
 
-    // Supported (harder shapes): a genuine multi-variant union renders (the
-    // tagged-union decoder + error reification) → the Feliz gate is gone.  (The
-    // example names an error arm, so it may trip the FRONTEND-AGNOSTIC
-    // `loom.unmapped-error-status`; that's a separate concern — here we only
-    // assert the Feliz-specific gate lifted.)
+    // Supported now (harder shapes): a genuine multi-variant union on a `:id`
+    // detail page renders (the tagged-union decoder + error reification) → the
+    // Feliz gate is gone.  (The example still names an error arm, so it may trip
+    // the FRONTEND-AGNOSTIC `loom.unmapped-error-status`; that's a separate
+    // concern — here we only assert the Feliz-specific gate lifted.)
     const multiArm =
       "          Order o        => { draftName := o.customerId }\n" +
       "          OrderMissing e => { draftName := e.missingRef }\n" +
       '          else           => { draftName := "x" }';
     expect(await codesOf(asyncSystem("feliz", "/orders/:id", multiArm))).not.toContain(GATE);
-
-    // Gated: a match-await hosted by a COMPONENT (not a page).  The Feliz
-    // generator projects async effects only on pages, so a component effect would
-    // silently drop — it stays gated (fail-fast).  React renders it (no gate).
-    const compSys = (plat: string) => `
-system Demo {
-  subdomain S {
-    context C {
-      error OrderMissing { missingRef: string }
-      aggregate Order with crudish {
-        customerId: string
-        operation reserve(): Order or OrderMissing { return OrderMissing { missingRef: customerId } }
-      }
-    }
-  }
-  api A from S
-  ui Web {
-    api C: A
-    component Confirmer(order: Order) {
-      state { note: string = "" }
-      action go() {
-        match await C.Order.reserve() {
-          Order o => { note := o.customerId }
-          else    => { note := "x" }
-        }
-      }
-      body: Button { "Go", onClick: go }
-    }
-    page Detail(id: Order id) {
-      route: "/orders/:id"
-      body: Confirmer(order: C.Order.byId(id))
-    }
-  }
-  storage primary { type: postgres }
-  resource st { for: C, kind: state, use: primary }
-  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
-  deployable web { platform: ${plat} targets: api ui: Web { C: api } port: 3001 }
-}`;
-    expect(await codesOf(compSys("feliz"))).toContain(GATE);
-    expect(await codesOf(compSys("react"))).not.toContain(GATE);
   });
 
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {
