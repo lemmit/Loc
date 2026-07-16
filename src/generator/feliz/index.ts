@@ -46,6 +46,7 @@ import {
 import {
   collectPageActions,
   collectPageAsyncEffects,
+  collectPageBoundState,
   collectPageForms,
   collectPageMutations,
   collectPageOperationForms,
@@ -53,6 +54,7 @@ import {
   collectPageWorkflowForms,
   type FelizAction,
   type FelizAsyncEffect,
+  type FelizBoundState,
   type FelizForm,
   type FelizMutation,
   type FelizOperationForm,
@@ -606,6 +608,21 @@ function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fel
   return out;
 }
 
+/** The page `state` fields a ui's controlled inputs two-way-bind, across ALL
+ *  pages (deduped by name) — each gets a `Set<Field>` Msg + update arm so the
+ *  input `onChange` can dispatch it. */
+function boundStateForUi(ui: UiIR): FelizBoundState[] {
+  const seen = new Set<string>();
+  const out: FelizBoundState[] = [];
+  for (const page of ui.pages)
+    for (const b of collectPageBoundState(page))
+      if (!seen.has(b.name)) {
+        seen.add(b.name);
+        out.push(b);
+      }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -769,6 +786,9 @@ function renderAppFs(
       s.actions.map((a) => ({ name: storeMsgCase(s.name, a.name), params: a.params, body: [] })),
     ),
   ];
+  // Controlled inputs (`Field`/`Toggle`/… via `bind:`, `Modal` via `open:`)
+  // two-way-bind page `state` — each needs a `Set<Field>` Msg + update arm.
+  const boundState = boundStateForUi(ui);
   const model = renderModel(state, reads, routed, formRecords, authUi, pageGate);
   const init = renderInit(state, reads, routed, formRecords, authUi, pageGate);
   const msg = renderMsg(
@@ -783,6 +803,7 @@ function renderAppFs(
     asyncEffects,
     pageGate,
     opActions,
+    boundState,
   );
   const update = renderUpdate(
     actions,
@@ -798,6 +819,7 @@ function renderAppFs(
     asyncEffects,
     pageGate,
     opActions,
+    boundState,
   );
   const wire = hasWire
     ? renderWireTypes(

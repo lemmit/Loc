@@ -1059,6 +1059,57 @@ export function collectPageActions(
   return out;
 }
 
+/** A page `state` field two-way-bound by a controlled input primitive (`Field`
+ *  / `NumberField` / … via `bind:`, or `Modal` via `open:`) — the MVU projection
+ *  needs a `Set<Field>` Msg + update arm for each, so the input's `onChange` can
+ *  dispatch it (the setter the React `useState` gives for free). */
+export interface FelizBoundState {
+  name: string;
+  type: TypeIR;
+}
+
+/** The `bind:`-carrying input primitives (name → the arg holding the state ref).
+ *  `Modal`'s visibility ref is `open:`; the rest bind a value via `bind:`. */
+const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, string> = new Map([
+  ["Field", "bind"],
+  ["NumberField", "bind"],
+  ["PasswordField", "bind"],
+  ["MultilineField", "bind"],
+  ["SelectField", "bind"],
+  ["Toggle", "bind"],
+  ["Modal", "open"],
+]);
+
+/** Collect the page `state` fields a controlled input primitive two-way-binds —
+ *  deduped by name, in tree order.  Each needs a `Set<Field>` Msg + update arm
+ *  (built by `renderMsg`/`renderUpdate`); the input's `onChange` dispatches it.
+ *  A `bind:`/`open:` that isn't a ref to a declared `state` field is ignored (the
+ *  pack renders an uncontrolled stub for it). */
+export function collectPageBoundState(page: PageIR): FelizBoundState[] {
+  if (!page.body) return [];
+  const stateByName = new Map(page.state.map((s) => [s.name, s.type] as const));
+  const seen = new Set<string>();
+  const out: FelizBoundState[] = [];
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call") {
+      const bindArg = BOUND_INPUT_PRIMITIVES.get(e.name);
+      if (bindArg) {
+        const names = e.argNames ?? [];
+        const idx = names.indexOf(bindArg);
+        const a = idx >= 0 ? e.args[idx] : undefined;
+        const type = a && a.kind === "ref" ? stateByName.get(a.name) : undefined;
+        if (a && a.kind === "ref" && type && !seen.has(a.name)) {
+          seen.add(a.name);
+          out.push({ name: a.name, type });
+        }
+      }
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(page.body);
+  return out;
+}
+
 /** True when a `QueryView` call is `single: true` (byId — one record, not a list). */
 function isSingleQueryView(e: Extract<ExprIR, { kind: "call" }>): boolean {
   const names = e.argNames ?? [];
