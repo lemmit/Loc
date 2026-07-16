@@ -17,13 +17,13 @@
 > - **I2 foundation** — enrichment merges a concrete's inherited base fields
 >   into its `wireShape` (base fields after `id`, then own; own shadows a
 >   like-named base field), so every backend DTO carries the shared shape.
-> - **I3 — `ownTable`/TPC, all four backends** — abstract base dropped from each
+> - **I3 — `ownTable`/TPC, all five backends** — abstract base dropped from each
 >   backend's table emission; each concrete a standalone table carrying the
 >   merged fields.  Polymorphic `find all <Base>` read home on node/Hono, .NET
 >   (abstract C# base + `Ignore<Base>()` + delegating reader → `IReadOnlyList<Base>`),
 >   and Phoenix (`list_<bases>!/0` on the Ash.Domain).  `Base id` refs rejected
 >   (`loom.polymorphic-id-ref-unsupported`).
-> - **I2 — `sharedTable`/TPH, all three backends** — one shared table + `kind`
+> - **I2 — `sharedTable`/TPH, all five backends** — one shared table + `kind`
 >   discriminator + nullable per-concrete columns; `Base id` refs + base reader
 >   supported.  Emits on node/Hono (`kind` column), .NET (EF Core
 >   `HasDiscriminator`), and Phoenix (Ash shared-table multi-resource +
@@ -34,7 +34,7 @@
 >   and `contains` on a TPH concrete (Pattern 4: `loom.tph-contains-unsupported`)
 >   are rejected, not emitted.
 >
-> **Deferred**: Patterns 3 and 4. (TPH now ships on all three backends; React is
+> **Deferred**: Patterns 3 and 4. (TPH now ships on all five backends; React is
 > N/A — the frontend consumes the concrete wire shapes, not storage.)
 >
 > **Sister proposal**:

@@ -1,7 +1,11 @@
 # Fable / Feliz / Elmish — an F# frontend target
 
-> Status: **PROPOSED (gap analysis).** No Fable target is implemented — but its
-> one hard dependency now **is**: [`named-actions-and-stores.md`](named-actions-and-stores.md)
+> Status: **SHIPPED (2026-07, code-verified).** The Feliz (F#/Fable/Elmish)
+> frontend is a registered platform — `src/platform/feliz.ts` +
+> `src/generator/feliz/` (index/update-emit/feliz-target/fs-expr/wire) — so
+> this gap-analysis note's target landed; it is Loom's 5th frontend
+> (`registry.ts:83`).  Its one hard dependency also shipped:
+> [`named-actions-and-stores.md`](named-actions-and-stores.md)
 > shipped its **Stage 1 (named sync `action`s) + Stage 5 (`store`)** across all
 > five UI targets (2026-07, code-verified — `ActionIR`/`StoreIR` in
 > `src/ir/types/loom-ir.ts:287,312`, per-target `named-actions.test.ts`). This

@@ -10,7 +10,7 @@
 > module-level predicate composed into the context query, not an Ash calculation.
 > The Ash idiom is retained only as design history.
 
-> Status: **PARTIAL — retrieval *and* find criteria reified on all four
+> Status: **PARTIAL — retrieval *and* find criteria reified on all five
 > backends.** The Specification reframe landed first on the .NET/EF backend
 > in four slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the
 > in-memory evaluate face, #890); Slice 2a — emit the `ToExpression()` query

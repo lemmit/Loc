@@ -6,7 +6,7 @@
 > **I2** — TPH (`sharedTable`) storage on the **.NET / EF Core** backend.
 > Phoenix TPH has since shipped too (see
 > [`phoenix-tph-emission.md`](./phoenix-tph-emission.md)) — TPH is now
-> live on all three DB backends (`TPH_CAPABLE = {node, dotnet, elixir}`
+> live on all five DB backends (`TPH_CAPABLE = {node, dotnet, elixir, python, java}`
 > in `src/ir/validate/checks/system-checks.ts`).
 > **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only, so elixir TPH is the vanilla Ecto emission; `foundation: ash` is now a validation error.)**
 >
@@ -21,7 +21,7 @@ At the time this note was written, TPH existed on Hono/Drizzle only
 (`src/generator/typescript/emit/schema.ts:emitTphTable`); .NET had TPC
 (`emit/entity.ts:renderAbstractBaseEntity` + `efcore.ts:Ignore<Base>()`)
 but TPH was gated by `loom.tph-backend-unsupported`, and Phoenix had
-neither. **Today TPC and TPH both ship on all three DB backends.**
+neither. **Today TPC and TPH both ship on all five DB backends.**
 
 So the .NET frontier was **TPH only** (TPC already shipped). EF Core has
 native TPH (`HasDiscriminator`), so EF derives the single wide table from

@@ -776,6 +776,29 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 | Page stub | Only a page with **no body** (route/title-only) renders a title stub; every form / action / read primitive now renders a real body.  The `pageNeedsDeferredFeatures` predicate is defence-in-depth (the shared react-hook-form `formOfs` / `actionMutations` sinks are never populated on Angular — each primitive forks via its `render<X>Form` seam), and `validateRequired` keeps any unsupported construct a compile error rather than a codegen crash. |
 | CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
+## Feliz frontend (`platform: feliz`)
+
+The fifth frontend generator (`src/generator/feliz/`).  Emits a **Feliz
+(F#/Fable/Elmish) SPA** per feliz deployable, built with `dotnet fable` + vite
+(not the vite-only static pipeline of the JS frontends).  Pages flow through the
+**same shared markup walker** the other frontends use
+(`src/generator/_walker/walker-core.ts`) via `feliz-target.ts` — but Feliz is
+the one frontend whose embedded language is **F#, not JS**, so instead of
+consuming the wire shape only, it supplies its own F# expression leaves
+(`src/generator/feliz/fs-expr.ts`, the `FS_LEAVES` table) through the shared
+`emitExpr` dispatcher.  See `docs/old/plans/feliz-frontend-build.md`.
+
+| Concern | Emission |
+|---|---|
+| Architecture | **Elmish MVU** — a `Model` record, a `Msg` union, and an `update` fn per page (`update-emit.ts`); page-level `state {}` fields become `Model` fields and `:=` writes lower to `Msg` dispatch + an `update` arm. |
+| Expressions | Rendered to F# via `FS_LEAVES` (`fs-expr.ts`) — `==`→`=`, `null`→`None`, list `[ a; b ]`, anonymous records `{| n = v |}` — the F# sibling of the JS-family `jsExprLeaves`. |
+| Data / wire | Decodes the JSON wire shape into F# records (`wire.ts`); a paged `.all` decodes the envelope's `items` to a `'T list` (so the Model holds a list, page 1). |
+| Design | The **daisyUI** pack — real Tailwind + daisyUI build (`styles.css` + `tailwind.config.js`), a `design: "<theme>"` theme picker over the built-in daisyUI theme set (default `corporate`), and a persistent app-shell `navbar` for multi-page routed UIs. |
+| Forms | Controlled string form state on the Model + per-field blur validation with inline errors (#1944); required/whole-form submit gate. |
+| CI | `generated-feliz-build.yml` — real `dotnet fable` + `vite build` + a Playwright smoke against the built bundle. |
+
+Known frontier (M-T1.16): modal open-state, typed in-flight form state, enum DU wire decoder, per-page sub-models, multi-param routes; and the interactive-`Table` sort/pagination/filter seams degrade (Elmish needs Set-Msg/update plumbing) rather than emit.
+
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
 `generate system` for deployables marked `platform: elixir`.
@@ -1147,11 +1170,15 @@ Out of scope for v1 (intentional):
   text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
 - **Ordering on `X id[]` collections**: the wire contract is
-  unordered — a relational join table is naturally a set, and the
-  three backends realise that differently (TS/Drizzle and .NET/EF
-  happen to write a per-row `ordinal` and load `ORDER BY ordinal`;
-  Phoenix/Ecto leaves ordinal at the column default and returns rows
-  in whatever order Postgres yields).  Treat `party[0]` as "some
+  unordered — a relational join table is naturally a set, and the five
+  backends realise that differently.  TS/Drizzle and .NET/EF happen to
+  write a per-row `ordinal` and load `ORDER BY ordinal`.  Phoenix/Ecto,
+  Java/JPA, and Python/SQLAlchemy treat `Target id[]` as a set with no
+  ordinal column at all (Java: `@ElementCollection` join table, no
+  `@OrderColumn`, `jpa-annotations.ts:158`; Python: the ref-collection
+  join table carries no ordinal, `repository-builder.ts:60`), returning
+  rows in whatever order Postgres yields.  Either way the contract is
+  unordered — treat `party[0]` as "some
   element of `party`," not "the first element of `party`."  When
   position is part of the domain (a battle slot, a draft pick
   number), model it as an explicit ordinal field on a separate child

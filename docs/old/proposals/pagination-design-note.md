@@ -1,6 +1,6 @@
 # Pagination — design note for the implementing agent
 
-> Status: **SHIPPED (offset paging on all four backends).** Functional paged
+> Status: **SHIPPED (offset paging on all five backends).** Functional paged
 > finds emit across Hono/Drizzle, .NET (CQRS+EF), Phoenix (offset), and
 > React, all returning the `Paged<T>` envelope (`items`, `page`, `pageSize`,
 > `total`, `totalPages`); landed as the payload P3b slice (#898 React, #916

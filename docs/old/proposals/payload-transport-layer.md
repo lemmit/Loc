@@ -12,7 +12,7 @@
 > `httpStatus` overrides live on the api body. **P2** — compiler-
 > synthesised `<Agg>Wire` payloads exist (`PayloadIR.synthesized`).
 > **P3b** — the `Paged<T>` carrier + functional **paged finds** emit
-> across all four backends (#898 React, #916 .NET, #925 Phoenix, #933
+> across all five backends (#898 React, #916 .NET, #925 Phoenix, #933
 > wire-parity closeout; see
 > [`pagination-design-note.md`](./pagination-design-note.md)).
 > **P4** — named (`payload Foo = A | B`) and anonymous (`A or B`)

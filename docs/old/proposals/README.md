@@ -83,9 +83,30 @@ alignment slices (#1061–#1064).
 > **[2026-06-21 refresh, code-verified against #1496]** Targeted docs-only
 > pass: corrected the `global-implementation-plan.md` "current state"
 > freeze line to the present registry (five backends — node/.NET/Java/
-> Python/elixir·vanilla — and four frontends — React/Vue/Svelte/
-> Angular; `src/platform/registry.ts`). No per-proposal status tags were
+> Python/elixir·vanilla — and five frontends — React/Vue/Svelte/
+> Angular/Feliz; `src/platform/registry.ts`). No per-proposal status tags were
 > flipped in this pass.
+
+> **[2026-07-16 refresh, code-verified against `origin/main` @ 2ea4dc2]**
+> Docs-only status-refresh pass, motivated by repeated stale-parity hits.
+> Drained a cluster of **N-target-era freezes** — prose frozen at three/four
+> backends or four frontends that omitted Java/Python (backends) and Feliz
+> (the 5th frontend). Flipped, each verified against the emitter/registry:
+> `fable-elmish-frontend` PROPOSED → **SHIPPED** (Feliz is a registered
+> platform); `workflow-instance-views` "Phoenix deferred" → **all 5 backends**
+> (`java/emit/view.ts`, `python/views-builder.ts`, `elixir/vanilla/view-emit.ts`);
+> `state-controlled-modal` "building" → **SHIPPED**; `dispatch-delivery`
+> three → **five backends**; `pagination-design-note`/`payload-transport-layer`
+> "four backends" → **five**; `reified-criteria`/`retrieval` "four" → **five**;
+> `aggregate-inheritance` TPH "three" → **five** (Python TPH confirmed,
+> `python/emit/schema.ts`). Corrected this README's own frontend rosters
+> (Feliz was omitted, HEEx miscounted as an SPA frontend), and reference docs
+> `technical.md` / `generators.md` (added the missing **Feliz frontend
+> section**; `page-metamodel.md` / `payloads.md` / `actions.md` / `docs/README.md`
+> Feliz omissions), plus the `X id[]`-ordering enumeration (now covers all 5).
+> Also refreshed `stack-versions-audit.md`'s stale stack-v3 pins (zod →4,
+> react-router →7, `@hookform/resolvers` →5) against `stacks/v3/`. No code
+> touched; no code-wrong cases found (docs trailed the code in every instance).
 
 > **[2026-07-03 refresh, code-verified]** "Implementable-now" audit against
 > fresh `main` + open PRs. Flipped six stale rows where the table lagged the
@@ -113,7 +134,7 @@ alignment slices (#1061–#1064).
 | [`global-implementation-plan.md`](./global-implementation-plan.md) | REFERENCE | The **code-verified gap inventory + tiered roadmap** across the whole corpus (rewritten 2026-06-10; supersedes both its previous self and the deleted `remaining-work-plan.md`). Owns ordering, dependencies, and the coordinated single-PR moments. Start here for "what's next". |
 | [`implementation-plan.md`](./implementation-plan.md) | REFERENCE | Stacked delivery plan for the type-system family (aggregate-inheritance + payload-transport + exception-less + criterion). Phase-by-phase, dependency-explicit. Consumed by Phase 2 of the global plan. |
 | [`type-system-overview.md`](./type-system-overview.md) | REFERENCE | 10-minute orientation across the type-system family. Read first if you're picking up any of P/A/Crit. |
-| [`platform-parity-debt.md`](./platform-parity-debt.md) | REFERENCE (debt register) | Single roll-up of every feature that works on some targets but not others, across the five backends (node/Hono, .NET, Java, Python, Phoenix) and five frontends (React, Vue, Svelte, Angular, HEEx) — the cross-target gate inventory, each row linking the proposal that owns the fix. Code-verified detail in [`../audits/backend-feature-parity-2026-06.md`](../../audits/backend-feature-parity-2026-06.md) + [`../audits/frontend-parity-audit-2026-06.md`](../../audits/frontend-parity-audit-2026-06.md). |
+| [`platform-parity-debt.md`](./platform-parity-debt.md) | REFERENCE (debt register) | Single roll-up of every feature that works on some targets but not others, across the five backends (node/Hono, .NET, Java, Python, Phoenix) and five SPA frontends (React, Vue, Svelte, Angular, Feliz) — plus Phoenix LiveView HEEx as the elixir backend's frontend — the cross-target gate inventory, each row linking the proposal that owns the fix. Code-verified detail in [`../audits/backend-feature-parity-2026-06.md`](../../audits/backend-feature-parity-2026-06.md) + [`../audits/frontend-parity-audit-2026-06.md`](../../audits/frontend-parity-audit-2026-06.md). |
 | [`dependency-upgrades.md`](./dependency-upgrades.md) | NOTE (backlog) | Deferred dependency upgrades + the `npm audit` picture. vitest 2→4 done (#951, cleared both criticals); the **langium 3→4** migration (foundational; clears the remaining build-time lodash/chevrotain advisories) is the one pending item, with a checklist of what it touches. All outstanding findings are build/dev-time — none ship. |
 | [`production-readiness.md`](./production-readiness.md) | REFERENCE | Roadmap naming the scaffold→system gap (bounded reads, deny-by-default, async messaging/outbox, caching, search projections, account management, i18n, k8s emit, ops surface, inter-service calls). Cross-references the per-feature proposals and flags which still need one. |
 | [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) | REFERENCE | 14-phase, 17–19 PR build order for the storage proposal. Consumed by Phase 1A. |
@@ -203,7 +224,7 @@ alignment slices (#1061–#1064).
 | Doc | Status | Core addition |
 |---|---|---|
 | [`aggregate-inheritance.md`](./aggregate-inheritance.md) | PARTIAL — **I1–I3 shipped**: surface + IR + validators, TPC (`ownTable`) on all backends, TPH (`sharedTable`) on all three DB backends (see [`dotnet-tph-emission.md`](./dotnet-tph-emission.md) / [`phoenix-tph-emission.md`](./phoenix-tph-emission.md)); reference-documented in [`../inheritance.md`](../../inheritance.md) | Abstract aggregates with single inheritance; storage strategies `sharedTable`/`ownTable` (the `inheritanceUsing(…)` header modifier per D-RENAME). Nominal, no generics. Remaining: I4 — per-concrete storage override / mixed strategy (gated `loom.inheritance` checks; needs the UNION-ALL read), polymorphic `<Base> id` refs, TPT-via-`contains` docs. |
-| [`payload-transport-layer.md`](./payload-transport-layer.md) | PARTIAL — **most of P1–P4 shipped** (code-verified): P1 `payload`/`error` kinds + file-scope declarations (#1024) + per-error `httpStatus`; P2 synthesised `<Agg>Wire`; P3b `Paged<T>` + paged finds on all 4 backends (#898/#916/#925/#933); P4 named + anonymous `or` unions emit on node/dotnet/elixir. Union-find producer path implemented on Hono + .NET (absence shape pinned by `loom.union-find-shape-unsupported`). Remaining: P3 full (nested carriers), P5 (`validate for X`), the elixir union-find absence producer, `unpaged` opt-out | `payload` umbrella over events/commands/queries/responses/errors. Carrier-bounded generics with ML-postfix syntax (`customer page`). Named (`payload Foo = A \| B`) and anonymous `or` unions. Auto-synthesised aggregate wire payloads. Foundation for the whole family. |
+| [`payload-transport-layer.md`](./payload-transport-layer.md) | PARTIAL — **most of P1–P4 shipped** (code-verified): P1 `payload`/`error` kinds + file-scope declarations (#1024) + per-error `httpStatus`; P2 synthesised `<Agg>Wire`; P3b `Paged<T>` + paged finds on all 5 backends (#898/#916/#925/#933); P4 named + anonymous `or` unions emit on node/dotnet/elixir. Union-find producer path implemented on Hono + .NET (absence shape pinned by `loom.union-find-shape-unsupported`). Remaining: P3 full (nested carriers), P5 (`validate for X`), the elixir union-find absence producer, `unpaged` opt-out | `payload` umbrella over events/commands/queries/responses/errors. Carrier-bounded generics with ML-postfix syntax (`customer page`). Named (`payload Foo = A \| B`) and anonymous `or` unions. Auto-synthesised aggregate wire payloads. Foundation for the whole family. |
 | [`exception-less.md`](./exception-less.md) | PROPOSED — partially landed, partially walked back: `error` payloads, operation `or`-union returns (node/dotnet; gated on elixir) and per-error `httpStatus` mapping are shipped; **the `?` propagation operator is DROPPED and its surface removed** (#1030 shipped surface-only; since deleted — do not re-introduce) | `error` payloads (HTTP-blind in the domain). `option` ML-postfix sugar. `Repo.getById` re-shape to `T or NotFound`. Per-api `status` mapping + stdlib defaults driving auto-generated RFC 7807 ProblemDetails. Two-regime split (aggregate-throws vs boundary-returns-carrier). No `Result<T, E>` wrappers. Read with [`failure-taxonomy.md`](./failure-taxonomy.md) for the current direction. |
 | [`failure-taxonomy.md`](./failure-taxonomy.md) | DESIGN NOTE — revisits `exception-less.md` | Step-back rethink of the whole error story. Keeps the structural core (errors-as-data, HTTP-blind domain + edge `httpStatus`, two-regime throw/return, dependency-direction layer visibility, inline opt-in translation); reconsiders the ergonomics (`?` operator, carrier-monad stdlib — likely drop); grounds **validation** in the shipped value-object `invariant` (the only new work is routing a construction failure to 422 — *not* a new `validate` keyword). Reframes "exception-less" as a five-kind **failure taxonomy** (absence / validation / expected-domain / bug / integration), each getting the lightest mechanism, and maps the four shipped guard constructs (VO `invariant`→422, `precondition`→400, `requires`→403, aggregate `invariant`→500) to status. Settles error placement on three constructs (`operation` / `workflow` / `api`) + a declarative policy bucket. |
 | [`domain-service.md`](./domain-service.md) | SUPERSEDED by [`domain-services.md`](./domain-services.md) | Exploratory options-menu (six design axes, three assembled shapes — A pure-calculator, B coordinator, C unified function family) for the missing third construct. Kept as the design-space record; the successor pins answers and adds spec. The cross-reference distinctions added in #1052 (vs `criterion`, the `authorization.md` `policy {}` block, and `workflow`) carry over unchanged. |

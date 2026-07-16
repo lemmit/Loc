@@ -782,13 +782,17 @@ walker-stdlib primitive into the active design pack's templates.
 (A legacy `pages-builder.ts` archetype renderer that this section
 previously mentioned no longer exists in tree.)
 
-The other three frontends mirror this layout, each driving the shared
+The other four frontends mirror this layout, each driving the shared
 `_walker/walker-core.ts` through its own `WalkerTarget`:
 `src/generator/vue/` (Vue 3 / vue-query, packs `vuetify` / `shadcnVue`),
 `src/generator/svelte/` (SvelteKit static SPA, packs `shadcnSvelte` /
-`flowbite`), and `src/generator/angular/` (standalone Angular SPA, pack
-`angularMaterial`).  Like React, none of them emit `render-expr.ts` /
-`render-stmt.ts` — they consume the wire shape only.
+`flowbite`), `src/generator/angular/` (standalone Angular SPA, pack
+`angularMaterial`), and `src/generator/feliz/` (Feliz F#/Fable/Elmish
+SPA via `dotnet fable` + vite, daisyUI pack).  The three JSX/markup
+frontends, like React, emit no `render-expr.ts` / `render-stmt.ts` —
+they consume the wire shape only; Feliz is the exception, supplying its
+own F# expression leaves (`FS_LEAVES`) because its embedded language is
+F#, not JS.
 
 ### Scaffold expansion (compile-time sugar, not a codegen path)
 

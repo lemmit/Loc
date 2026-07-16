@@ -14,7 +14,7 @@
 |---|---|---|
 | `lifecycle-operations.md` | Phase 1 shipped (#722) — `OperationIR.kind` | Provides what I depend on |
 | `lifecycle-url-style.md` | PINNED — Phase 1 shipped (#722) | I reframe `urlStyle` as a macro input |
-| `payload-transport-layer.md` | `Paged<T>` carrier + paged finds shipped on all 4 backends (#898/#916/#925/#933). **`<Agg>Wire payload` Phase 2 unshipped.** | The `<Agg>Wire` deprecation concern is hypothetical until P2 lands |
+| `payload-transport-layer.md` | `Paged<T>` carrier + paged finds shipped on all 5 backends (#898/#916/#925/#933). **`<Agg>Wire payload` Phase 2 unshipped.** | The `<Agg>Wire` deprecation concern is hypothetical until P2 lands |
 | `aggregate-inheritance.md` | I1 shipped (surface + IR + validators). **I2 (TPH emission) unshipped.** | The chain-walk-has-two-consumers split lands with I2 |
 | `workflow-and-applier.md` | Appliers + Hono/.NET event-sourced emission shipped (#914, #889) | I extend routes to target workflow `handle`; no shipped friction |
 | `failure-taxonomy.md` | DESIGN NOTE — nothing shipped | Pure design conversation |
@@ -23,12 +23,12 @@
 | `extern-function-hook-escape-hatch.md` | PROPOSED | Hypothetical until shipped |
 | `channels.md` | Slice 1 surface + IRs shipped (#797); `DomainEventDispatcher` is the in-process emit path (Hono #970, .NET #1012, Phoenix #1020 — all shipped) | Handler `emit` syntax inherits today's path; transparent |
 | `criterion.md` | Core shipped; filter-capability targeting on Hono/Drizzle (#760) + Phoenix (#762) shipped | queryHandler scaffold coordinates with existing API |
-| `reified-criteria.md` | Retrieval + find criteria reified on all 4 backends (#890/#901/#910/#926/#936/#943/#952/#955/#963/#964) | queryHandler bodies dispatch through existing `Repo.run`/`Repo.findAll(criterion)` |
+| `reified-criteria.md` | Retrieval + find criteria reified on all 5 backends (#890/#901/#910/#926/#936/#943/#952/#955/#963/#964) | queryHandler bodies dispatch through existing `Repo.run`/`Repo.findAll(criterion)` |
 | `retrieval.md` | Surface + IR + lowering + validation shipped (#794); `Run<Name>Async` shipped on .NET (#810), Hono (#952), Phoenix (#955) | queryHandler scaffolds target `Repo.run(R(args), page?)` — known API |
 | `validation-error-extension.md` | Hono (#782) + .NET (#829) shipped | RFC 7807 `errors[]` is response-shape only; no friction |
 | `frontend-acl.md` | Phases 1+2 shipped (#769) | Form catch blocks don't touch wireShape |
 | `loom-forms.md` | PROPOSED | Aligns with my proposal (both: operation params IS input shape) |
-| `dispatch-delivery-semantics.md` | In-process dispatch shipped on all 3 backends; outbox unstarted | Outbox is delivery-time, transparent to handler grammar |
+| `dispatch-delivery-semantics.md` | In-process dispatch shipped on all 5 backends; outbox unstarted | Outbox is delivery-time, transparent to handler grammar |
 
 ## Coordination items, ranked by urgency
 
