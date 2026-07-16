@@ -1147,11 +1147,15 @@ Out of scope for v1 (intentional):
   text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
 - **Ordering on `X id[]` collections**: the wire contract is
-  unordered — a relational join table is naturally a set, and the
-  three backends realise that differently (TS/Drizzle and .NET/EF
-  happen to write a per-row `ordinal` and load `ORDER BY ordinal`;
-  Phoenix/Ecto leaves ordinal at the column default and returns rows
-  in whatever order Postgres yields).  Treat `party[0]` as "some
+  unordered — a relational join table is naturally a set, and the five
+  backends realise that differently.  TS/Drizzle and .NET/EF happen to
+  write a per-row `ordinal` and load `ORDER BY ordinal`.  Phoenix/Ecto,
+  Java/JPA, and Python/SQLAlchemy treat `Target id[]` as a set with no
+  ordinal column at all (Java: `@ElementCollection` join table, no
+  `@OrderColumn`, `jpa-annotations.ts:158`; Python: the ref-collection
+  join table carries no ordinal, `repository-builder.ts:60`), returning
+  rows in whatever order Postgres yields.  Either way the contract is
+  unordered — treat `party[0]` as "some
   element of `party`," not "the first element of `party`."  When
   position is part of the domain (a battle slot, a draft pick
   number), model it as an explicit ordinal field on a separate child
