@@ -462,10 +462,14 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "${relPrefix(input)}lib/format";`,
   );
-  // Interactive-table sort helper — imported only when a `Table` on this page
-  // renders sortable columns (M-T1.1).
-  if (result.usesTableSort) {
-    script.push(`import { sortRows } from "${relPrefix(input)}lib/table-sort";`);
+  // Interactive-table helpers — imported only when a `Table` on this page
+  // renders sortable columns / a filter box (M-T1.1); both share one module.
+  const tableHelpers = [
+    ...(result.usesTableSort ? ["sortRows"] : []),
+    ...(result.usesTableFilter ? ["filterRows"] : []),
+  ];
+  if (tableHelpers.length > 0) {
+    script.push(`import { ${tableHelpers.join(", ")} } from "${relPrefix(input)}lib/table-sort";`);
   }
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session
   // user so the `<template>` can `v-if`-guard a `<Forbidden/>` fallback — the
@@ -1137,8 +1141,12 @@ export function renderVueComponentFile(
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
   );
-  if (result.usesTableSort) {
-    script.push(`import { sortRows } from "../lib/table-sort";`);
+  const componentTableHelpers = [
+    ...(result.usesTableSort ? ["sortRows"] : []),
+    ...(result.usesTableFilter ? ["filterRows"] : []),
+  ];
+  if (componentTableHelpers.length > 0) {
+    script.push(`import { ${componentTableHelpers.join(", ")} } from "../lib/table-sort";`);
   }
   // currentUser binding for a gated `Action(...)` button in the body (the
   // action-level mirror of the page gate; binding-only — a component has no

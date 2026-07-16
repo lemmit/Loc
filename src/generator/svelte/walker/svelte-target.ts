@@ -115,6 +115,23 @@ export const svelteTarget: WalkerTarget = {
     );
   },
 
+  /** A `bind:value` search box driving the client-side filter — Svelte 5
+   *  two-way binds the `$state` rune, so no manual event handler is needed. */
+  renderFilterInput(filter) {
+    const style = "margin-bottom: 0.75rem; padding: 0.375rem 0.5rem;";
+    return (
+      `<input type="search" bind:value={${filter.name}} placeholder="Filter…" ` +
+      `aria-label="Filter table" style="${style}" data-testid="table-filter" />`
+    );
+  },
+
+  /** Filter via the shared `filterRows` helper (`$lib/table-sort`) — Svelte's
+   *  strict `svelte-check` can't carry the inline `Object.values` cast, so it
+   *  lives in the helper module. */
+  renderFilteredRows(rowsExpr, filter) {
+    return `filterRows(${rowsExpr}, ${filter.name})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Identical naming to the TSX target — the svelte api modules

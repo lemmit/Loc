@@ -155,6 +155,12 @@ export interface WalkResult {
    *  "../lib/table-sort"` when set — targets whose `renderSortedRows`
    *  inlines the sort (React) leave it false. */
   usesTableSort: boolean;
+  /** True when a `Table` emitted a client-side filter via the
+   *  `renderFilteredRows` seam that references the shared `filterRows`
+   *  helper (M-T1.1).  The page-shell adds `import { filterRows } from
+   *  "../lib/table-sort"` when set — React inlines the filter and leaves
+   *  it false. */
+  usesTableFilter: boolean;
   /** The default tab value of the first `Tabs` on the body, when any — the
    *  shell declares the controlled tab state (`const __loomTab = ref(<default>)`)
    *  for targets that v-model the tab group (Vue/Vuetify). Undefined when the
@@ -399,6 +405,7 @@ export function walkBody(
     usedParams: new Set(),
     usesNavigate: false,
     usesTableSort: false,
+    usesTableFilter: false,
     stateNames,
     derivedNames,
     usesState: false,
@@ -440,6 +447,7 @@ export function walkBody(
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
     usesTableSort: ctx.usesTableSort ?? false,
+    usesTableFilter: ctx.usesTableFilter ?? false,
     tabsDefault: ctx.tabsDefault,
     usesState: ctx.usesState,
     usesCurrentUser: ctx.usesCurrentUser,
@@ -568,6 +576,10 @@ export interface Sink {
    *  shared `sortRows` helper.  Optional so the many `Sink` construction sites
    *  needn't all initialise it; only the interactive-table path writes it. */
   usesTableSort?: boolean;
+  /** M-T1.1 — set by a `Table` whose `renderFilteredRows` seam references the
+   *  shared `filterRows` helper.  Optional so the many `Sink` construction sites
+   *  needn't all initialise it; only the interactive-table path writes it. */
+  usesTableFilter?: boolean;
   /** Set by `emitTabs` to the first `Tabs`' default value — drives the shell's
    *  controlled tab-state declaration (Vue). Optional; only the tabs path writes it. */
   tabsDefault?: string;
@@ -979,6 +991,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesRouteId) parent.usesRouteId = true;
   if (child.usesTableSort) parent.usesTableSort = true;
+  if (child.usesTableFilter) parent.usesTableFilter = true;
   if (child.tabsDefault !== undefined && parent.tabsDefault === undefined) {
     parent.tabsDefault = child.tabsDefault;
   }

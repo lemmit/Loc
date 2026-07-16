@@ -753,6 +753,33 @@ export interface WalkerTarget {
    *  `renderStateRead`.  Omitted → the table renders unpaged (all rows). */
   renderPager?(spec: PagerSpec): string;
 
+  /** Render the search `<input>` emitted ABOVE a filterable `Table` — bound
+   *  to the `filter:` page-state string field, it drives a case-insensitive
+   *  client-side substring match across every row value.  Framework-shaped
+   *  (two-way binding idiom: React's controlled `value`/`onChange`, Vue
+   *  `v-model`, Svelte `bind:value`, Angular `[value]`/`(input)`), so it's a
+   *  seam.  Omitted → no filter box renders. */
+  renderFilterInput?(filter: StateRef): string;
+
+  /** Wrap a `Table`'s already-rendered `rows` expression in a client-side
+   *  filter by the active `filter:` state field (case-insensitive substring
+   *  over `Object.values(row)`; an empty query passes every row).  Applied
+   *  BEFORE sort/slice, so the pager counts the filtered set.  React returns
+   *  an inline `.filter(...)`; the strict-template frameworks (Vue/Svelte/
+   *  Angular) call the shared `filterRows` helper.  Omitted → rows render
+   *  unfiltered. */
+  renderFilteredRows?(rowsExpr: string, filter: StateRef): string;
+
+  /** OPTIONAL — wrap a `Table`'s multi-root markup (a filter box and/or a
+   *  pager rendered as siblings of the `<table>`) into a SINGLE root.  JSX
+   *  forbids adjacent elements in a single-expression slot — a `QueryView`'s
+   *  `{cond && ( … )}`, a conditional child, a lambda body — so React returns
+   *  `<>…</>`.  Vue/Svelte/Angular permit multiple template roots in those
+   *  positions and omit the seam (markup returned unchanged, byte-identical).
+   *  Called only when the table actually emitted >1 root; a plain table never
+   *  reaches it. */
+  wrapMultiRoot?(markup: string): string;
+
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //
   // `emitExpr` renders the pure-syntax `ExprIR` arms (operators, literals,

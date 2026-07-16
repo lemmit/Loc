@@ -156,6 +156,24 @@ export const vueTarget: WalkerTarget = {
     );
   },
 
+  /** A `v-model` search box driving the client-side filter — two-way binds the
+   *  ref (the SFC compiler unwraps it), so no manual event cast is needed. */
+  renderFilterInput(filter) {
+    const style = "margin-bottom: 0.75rem; padding: 0.375rem 0.5rem;";
+    return (
+      `<input type="search" v-model="${filter.name}" placeholder="Filter…" ` +
+      `aria-label="Filter table" style="${style}" data-testid="table-filter" />`
+    );
+  },
+
+  /** Filter via the shared `filterRows` helper — Vue's strict template can't
+   *  carry the inline `Object.values` cast, so the logic lives in
+   *  `src/lib/table-sort.ts` and the `v-for` expression just calls it.  Refs
+   *  auto-unwrap in the template. */
+  renderFilteredRows(rowsExpr, filter) {
+    return `filterRows(${rowsExpr}, ${filter.name})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into vue-query composable naming +

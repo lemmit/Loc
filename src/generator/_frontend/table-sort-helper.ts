@@ -22,5 +22,24 @@ export function sortRows<T>(rows: readonly T[] | undefined, key: string, dir: st
     return dir === "desc" ? -c : c;
   });
 }
+
+// Client-side row filter for interactive tables (generated — M-T1.1).
+// Case-insensitive substring match across every value of each row; an empty
+// query passes all rows.  Emitted alongside sortRows in the same module for
+// the strict-template frontends (Vue/Svelte/Angular); React inlines it.
+export function filterRows<T>(rows: readonly T[] | undefined, query: string): T[] {
+  if (!rows) {
+    return [];
+  }
+  const q = query.trim().toLowerCase();
+  if (q === "") {
+    return [...rows];
+  }
+  return rows.filter((r) =>
+    Object.values(r as Record<string, unknown>).some(
+      (v) => v != null && String(v).toLowerCase().includes(q),
+    ),
+  );
+}
 `;
 }
