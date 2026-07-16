@@ -9,6 +9,7 @@ export type {
   AggregateMember,
   Area,
   BoundedContext,
+  Criterion,
   FieldAccess,
   Operation,
   Page,

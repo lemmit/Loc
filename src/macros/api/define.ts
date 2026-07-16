@@ -78,7 +78,8 @@ export type NamedDeclKind =
   | "Workflow"
   | "View"
   | "ValueObject"
-  | "EnumDecl";
+  | "EnumDecl"
+  | "Criterion";
 
 /** A declared parameter list: name -> spec. */
 export type ParamSpec = Record<string, ParamType>;

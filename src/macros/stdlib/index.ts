@@ -8,6 +8,8 @@ import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
 import scaffoldApi from "./scaffold/scaffoldApi.macro.js";
 import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
 import scaffoldHandlers from "./scaffold/scaffoldHandlers.macro.js";
+import scaffoldPaged from "./scaffold/scaffoldPaged.macro.js";
+import scaffoldPagedApi from "./scaffold/scaffoldPagedApi.macro.js";
 import scaffoldSubdomain from "./scaffold/scaffoldSubdomain.macro.js";
 import scaffoldView from "./scaffold/scaffoldView.macro.js";
 import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
@@ -55,6 +57,12 @@ export function loadStdlibMacros(): void {
   // emits the routes that bind to them.
   registerMacro(scaffoldHandlers);
   registerMacro(scaffoldApi);
+  // Ergonomic paged criterion read (read-path-architecture.md, "The ergonomic
+  // default"): `scaffoldPaged` (context) emits the paged queryHandler over the
+  // read-only port (`Repo.run(<criterion>)`); `scaffoldPagedApi` (api) emits the
+  // `/projections/<criterion>` route that binds to it.
+  registerMacro(scaffoldPaged);
+  registerMacro(scaffoldPagedApi);
 }
 
 /** Test/harness hook: allow tests that reset the registry to
