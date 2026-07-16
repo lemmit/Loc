@@ -1058,18 +1058,18 @@ function isApiHandle(name: string, ctx: WalkContext): boolean {
 }
 
 function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
-  // The api handle resolves to a backend that hosts a `<App>.<Ctx>`
-  // module; v0 emits `<AppModule>.<Handle>.<fn>(...)` since the
-  // handle name and context name match in acme.ddd (`Sales`).
+  // The resource lives in the Phoenix context module of the aggregate's
+  // bounded context — `<App>.<Ctx>` — which `contextModuleByAggName`
+  // already resolves (the same map every other Elixir emit site routes
+  // through).  The api *handle* is a UI-local alias (`UiApiParamIR.name`),
+  // NOT the context: routing on it only worked because acme.ddd happens to
+  // name the alias `Sales`, equal to its context.  Route on the aggregate's
+  // context instead, so a handle aliased to anything else stays correct.
   //
-  // The bare `<fn>(<args>)` shape — including the op→fn naming
-  // convention and the crude pluralisation — is delegated to
-  // `heexTarget.renderApiCall` (cross-framework contract — see
-  // src/generator/_walker/target.ts).  The `<AppModule>.<Handle>.`
-  // prefix stays walker-local because it's a Phoenix-orchestration
-  // concern (which module the resource lives in), not a per-target
-  // rendering decision.
-  const handle = upperFirst(call.apiHandle);
+  // The bare `<fn>(<args>)` shape — including the op→fn naming convention
+  // and the crude pluralisation — is delegated to `heexTarget.renderApiCall`
+  // (cross-framework contract — see src/generator/_walker/target.ts).
+  const ctxModule = ctx.contextModuleByAggName.get(call.aggregateName) ?? ctx.appModule;
   const renderedArgs = call.args.map((a) => renderExpr(a, ctx)).join(", ");
   const bare = heexTarget.renderApiCall(
     {
@@ -1084,7 +1084,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
     },
     renderedArgs,
   );
-  return `${ctx.appModule}.${handle}.${bare}`;
+  return `${ctxModule}.${bare}`;
 }
 
 // ---------------------------------------------------------------------------
