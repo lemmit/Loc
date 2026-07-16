@@ -83,6 +83,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         );
         if (slots.size > 0) componentActionParams.set(comp.name, slots);
       }
+      const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
       for (const page of ui.pages) {
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
@@ -99,6 +100,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.title, ctx, diags);
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
+        checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
       }
       for (const comp of ui.components) {
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
@@ -117,6 +119,76 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
       }
     }
   }
+}
+
+// -------------------------------------------------------------------------
+// `loom.instance-effect-needs-route-id` (M-T6.17) — a page action whose body
+// awaits an aggregate INSTANCE operation (`match await <api>.<Agg>.<op>(…)`)
+// acts on the record identified by the page's route `:id`.  On a paramless page
+// there is no record in scope, so the effect is user error on EVERY frontend:
+// the Feliz generator gates it, and the JS frontends (React/Vue/Svelte/Angular)
+// synthesize a `useParams` `id` and POST an empty-id (`id ?? ""`) request — a
+// broken call.  This TARGET-AGNOSTIC check rejects it uniformly so a `.ddd`
+// generates working code on every target, or fails validation on every target.
+// (Workflows / non-aggregate subjects aren't record-scoped, so they're skipped.)
+// -------------------------------------------------------------------------
+
+/** True when a page `route:` binds a `:param` segment (`/orders/:id`). */
+function pageRouteHasParam(route: string | undefined): boolean {
+  return (route ?? "/").split("/").some((s) => s.startsWith(":"));
+}
+
+/** True when a `variant-match` subject awaits an aggregate INSTANCE operation —
+ *  `<apiParam>.<Agg>.<op>(…)` (Pattern B) or a bare `<Agg>.<op>(…)` (Pattern E).
+ *  Mirrors `detectAwaitedInstanceOp` in the Feliz classifier, target-neutral. */
+function isAggregateInstanceOpSubject(
+  subject: ExprIR,
+  apiParamNames: ReadonlySet<string>,
+  aggNames: ReadonlySet<string>,
+): boolean {
+  if (subject.kind !== "method-call") return false;
+  const recv = subject.receiver;
+  if (
+    recv.kind === "member" &&
+    recv.receiver.kind === "ref" &&
+    apiParamNames.has(recv.receiver.name) &&
+    aggNames.has(recv.member)
+  ) {
+    return true;
+  }
+  return recv.kind === "ref" && aggNames.has(recv.name);
+}
+
+/** Reject an instance-op `match await` on a page with no `:id` route. */
+function checkInstanceEffectRouteId(
+  page: PageIR,
+  aggNames: ReadonlySet<string>,
+  apiParamNames: ReadonlySet<string>,
+  diags: LoomDiagnostic[],
+): void {
+  if (pageRouteHasParam(page.route)) return;
+  const visit = (stmts: readonly StmtIR[]): void => {
+    for (const s of stmts) {
+      if (s.kind === "variant-match") {
+        if (isAggregateInstanceOpSubject(s.subject, apiParamNames, aggNames)) {
+          diags.push({
+            severity: "error",
+            code: "loom.instance-effect-needs-route-id",
+            message:
+              `page '${page.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
+              `on the record identified by the page's route \`:id\` — but this page (route ` +
+              `"${page.route ?? "/"}") declares no \`:id\` param, so no record is in scope.  Host the ` +
+              `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
+              `(OperationForm).  M-T6.17.`,
+            source: `page '${page.name}'`,
+          });
+        }
+        for (const arm of s.arms) visit(arm.body);
+        visit(s.elseBody ?? []);
+      }
+    }
+  };
+  for (const action of page.actions) visit(action.body);
 }
 
 interface BodyCheckCtx {

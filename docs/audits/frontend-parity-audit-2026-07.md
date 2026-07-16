@@ -86,7 +86,7 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 | Pack-dispatched primitives ship on target | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | `REQUIRED_PRIMITIVES` gate — **Feliz not gated**; `feliz/pack.ts` |
 | Forms (Create/Op/Workflow/Destroy) | ✓ RHF | ✓ | ✓ | ✓ Reactive Forms | ✓ Elmish seams | Feliz `renderCreateForm`… `feliz-target.ts` |
 | `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | store gate lifted on all 5 — `store-checks.ts:301-304` |
-| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ✓ | multi-variant unions + params + missing-`else` render; only routeless host / non-instance-op gated — `store-checks.ts:354` |
+| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ✓ | multi-variant unions + params + missing-`else` render; paramless-page instance effect rejected uniformly (`loom.instance-effect-needs-route-id`, `ui-checks.ts`); Feliz-only gate = component host / non-instance-op |
 | `design:` axis | pack family | pack family | pack family | pack family | daisyUI **theme** | Rule 14 feliz branch, `deployable.ts:363`; `DAISYUI_THEMES` |
 | Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (inline showcase only) |
 | Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | no `generated-feliz-e2e.yml` |
@@ -198,12 +198,16 @@ them — the store gate was already lifted):
   multi-variant discriminated union (per-op outcome DU, one `update` arm per
   variant, named error arms reified from the non-2xx RFC-7807 `type` URI), an op
   with params (args threaded through the trigger Msg + Thoth-encoded into the POST
-  body), and a missing `else` (no-op fallthrough). Fable-compile verified. Only two
-  cases remain honestly gated (`loom.feliz-async-effect-unsupported`,
-  `store-checks.ts:354`): a host with no route `id` (a component or non-`:id`
-  page — an instance op has no id to POST to), and a subject that isn't an
-  aggregate instance op. `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`)
-  stays the shared arbiter so the gate and renderer can't drift.
+  body), and a missing `else` (no-op fallthrough). Fable-compile verified. The
+  **route-id requirement is now target-agnostic** (M-T6.17): a paramless-page
+  instance-op `match await` is user error on every frontend (no record in scope),
+  rejected uniformly by `loom.instance-effect-needs-route-id` (`ui-checks.ts`) —
+  this replaced a Feliz-only gate and fixed the latent JS-frontend bug (they used
+  to emit a broken `id ?? ""` POST). The Feliz-specific gate
+  (`loom.feliz-async-effect-unsupported`) narrowed to two genuinely-Feliz cases: a
+  COMPONENT host (not projected) and a non-aggregate-instance-op subject.
+  `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`) stays the shared
+  arbiter so the gate and renderer can't drift.
 
 Genuinely honest gap (parity invariant working as designed):
 

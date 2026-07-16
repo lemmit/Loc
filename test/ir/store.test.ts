@@ -393,9 +393,14 @@ ${arms}
     // React never gates regardless.
     expect(await codesOf(asyncSystem("react", "/orders/:id", V1_ARMS))).not.toContain(GATE);
 
-    // Gated (no route id): the SAME shape on a non-`:id` page has no id to source
-    // — the ONE remaining Feliz async-effect gate (the routeless-host case).
-    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).toContain(GATE);
+    // A paramless page is NOT a Feliz-specific gate: it's invalid on EVERY
+    // frontend (no record in scope), so the target-agnostic
+    // `loom.instance-effect-needs-route-id` (M-T6.17) rejects it — the Feliz gate
+    // does not double-fire.  (Both feliz and react hit the universal gate.)
+    const UNIVERSAL = "loom.instance-effect-needs-route-id";
+    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).not.toContain(GATE);
+    expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).toContain(UNIVERSAL);
+    expect(await codesOf(asyncSystem("react", "/p", V1_ARMS))).toContain(UNIVERSAL);
 
     // Supported now (harder shapes): a genuine multi-variant union on a `:id`
     // detail page renders (the tagged-union decoder + error reification) → the
@@ -407,6 +412,48 @@ ${arms}
       "          OrderMissing e => { draftName := e.missingRef }\n" +
       '          else           => { draftName := "x" }';
     expect(await codesOf(asyncSystem("feliz", "/orders/:id", multiArm))).not.toContain(GATE);
+
+    // The ONE remaining Feliz-specific gate: a match-await hosted by a COMPONENT
+    // (not a page).  The Feliz generator projects async effects only on pages, so
+    // a component effect would silently drop — it stays Feliz-gated.  React
+    // renders it (no gate).  (The component has a `:id`-routed host, so the
+    // universal route-id check is satisfied — this isolates the component gate.)
+    const compSys = (plat: string) => `
+system Demo {
+  subdomain S {
+    context C {
+      error OrderMissing { missingRef: string }
+      aggregate Order with crudish {
+        customerId: string
+        operation reserve(): Order or OrderMissing { return OrderMissing { missingRef: customerId } }
+      }
+    }
+  }
+  api A from S
+  ui Web {
+    api C: A
+    component Confirmer(order: Order) {
+      state { note: string = "" }
+      action go() {
+        match await C.Order.reserve() {
+          Order o => { note := o.customerId }
+          else    => { note := "x" }
+        }
+      }
+      body: Button { "Go", onClick: go }
+    }
+    page Detail(id: Order id) {
+      route: "/orders/:id"
+      body: Confirmer(order: C.Order.byId(id))
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: ${plat} targets: api ui: Web { C: api } port: 3001 }
+}`;
+    expect(await codesOf(compSys("feliz"))).toContain(GATE);
+    expect(await codesOf(compSys("react"))).not.toContain(GATE);
   });
 
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {

@@ -99,7 +99,11 @@ page OrderDetail {
 ```
 
 - The subject is `await <api>.<Agg>.<op>(args)` — an instance operation, so it is
-  invoked against the page's **route-id record** (a detail page).
+  invoked against the page's **route-id record**. The hosting page **must** declare
+  a `:id` route param (a detail page): the instance is that record. A paramless page
+  has no record in scope, so an instance-op `match await` there is rejected on every
+  frontend (`loom.instance-effect-needs-route-id`) — host it on a `/…/:id` page, or
+  drive the op through an `OperationForm`.
 - Each arm names a **variant** of the op's `or`-union: the **success** variant is
   the aggregate itself (`Order`); the rest are **error** variants.
 - Arm bodies run statements (state writes, `navigate`), binding the narrowed
