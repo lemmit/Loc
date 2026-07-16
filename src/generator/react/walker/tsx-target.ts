@@ -171,6 +171,13 @@ export const tsxTarget: WalkerTarget = {
     );
   },
 
+  /** Wrap a multi-root table (filter box / pager siblings) in a JSX fragment so
+   *  it's a single element in a `QueryView`'s `{cond && ( … )}` slot.  The
+   *  `<>…</>` shorthand needs no import. */
+  wrapMultiRoot(markup) {
+    return `<>${markup}</>`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into React-Query naming + import.

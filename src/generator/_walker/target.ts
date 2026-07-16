@@ -770,6 +770,16 @@ export interface WalkerTarget {
    *  unfiltered. */
   renderFilteredRows?(rowsExpr: string, filter: StateRef): string;
 
+  /** OPTIONAL — wrap a `Table`'s multi-root markup (a filter box and/or a
+   *  pager rendered as siblings of the `<table>`) into a SINGLE root.  JSX
+   *  forbids adjacent elements in a single-expression slot — a `QueryView`'s
+   *  `{cond && ( … )}`, a conditional child, a lambda body — so React returns
+   *  `<>…</>`.  Vue/Svelte/Angular permit multiple template roots in those
+   *  positions and omit the seam (markup returned unchanged, byte-identical).
+   *  Called only when the table actually emitted >1 root; a plain table never
+   *  reaches it. */
+  wrapMultiRoot?(markup: string): string;
+
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //
   // `emitExpr` renders the pure-syntax `ExprIR` arms (operators, literals,

@@ -264,6 +264,14 @@ export function emitTable(
   // wraps it only with the controls actually requested.
   let result = pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
   if (filterMarkup) result = `${filterMarkup}\n${closeIndent}${result}`;
+  // A filter box and/or pager makes the table MULTI-ROOT (adjacent siblings).
+  // JSX rejects that in a single-expression slot (a `QueryView`'s `{cond && (
+  // … )}`, a conditional child), so React wraps it in a `<>…</>` fragment; the
+  // multi-root-tolerant frameworks omit the seam and stay byte-identical.  A
+  // plain table (single root) never wraps.
+  if ((filterMarkup !== undefined || pagerMarkup !== undefined) && ctx.target.wrapMultiRoot) {
+    result = ctx.target.wrapMultiRoot(result);
+  }
   return result;
 }
 

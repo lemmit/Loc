@@ -48,6 +48,11 @@ describe("Table client-side filter (React)", () => {
       `<input type="search" placeholder="Filter…" aria-label="Filter table" value={q} onChange={(e) => setQ(e.target.value)}`,
     );
     expect(content).toContain('data-testid="table-filter"');
+    // The search box + table are two roots in the QueryView's `{cond && (…)}`
+    // slot, so the multi-root output is wrapped in a JSX fragment (illegal
+    // adjacent JSX otherwise — TS2657).
+    expect(content).toContain('<><input type="search"');
+    expect(content).toMatch(/<\/Table>\s*<\/>/);
     // Rows wrapped in an inline case-insensitive substring filter.
     expect(content).toContain("((customerAll.data.items) ?? []).filter((r) =>");
     expect(content).toContain("Object.values(r as Record<string, unknown>)");
