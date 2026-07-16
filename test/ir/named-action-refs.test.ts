@@ -462,4 +462,58 @@ describe("loom.effect-in-lambda (fable-elmish-frontend.md §8)", () => {
     `);
     expect(diags).toContain("loom.effect-in-lambda");
   });
+
+  // --- api-mutation arm (fable-elmish-frontend.md §2.2 — the last inline form) -
+  // A direct remote mutation inline in the view is the one effect that lowers to
+  // an `expression`-statement wrapping a `method-call` (a pure StmtIR kind), so
+  // the effect-token scan misses it.  The dedicated arm rejects it so the MVU
+  // view is pure by construction, not by convention.
+
+  it("fires on an inline remote mutation, block form (`onClick: e => { Order.confirm() }`)", async () => {
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => { C.Order.confirm() } } }`),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it("fires on an inline remote mutation, single-expression form (`onClick: e => Order.confirm()`)", async () => {
+    // No block — the mutation rides the expression body; still an effect in the
+    // view (a value lambda's expression is a render, never a remote write).
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => C.Order.confirm() } }`),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it("fires via a bare aggregate ref receiver too (`onClick: e => { Order.confirm() }`)", async () => {
+    // Pattern E (no api-handle prefix) classifies identically to Pattern B.
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => { Order.confirm() } } }`),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it("does NOT fire on a READ (finder) call in a lambda (`e => Order.active()`)", async () => {
+    // Only a MUTATING command (operation / create / destroy) is a remote write;
+    // a `find` is a read and stays legal inside a value lambda — the arm must
+    // not over-fire and reject data access.
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => Order.active() } }`),
+    );
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
+
+  it("does NOT fire when the same mutation sits in a named `action` body (arm is render-tree-scoped)", async () => {
+    // The api-mutation arm targets render-tree lambdas only; a mutation inside a
+    // named action body is that effect's legitimate home (it draws its own
+    // await-floor diagnostic, `loom.missing-effect-marker`, not this one).
+    const diags = await lambdaDiags(
+      withApi(
+        `action confirmIt() { C.Order.confirm() }`,
+        ``,
+        `body: Stack { Button { "Go", onClick: confirmIt } }`,
+      ),
+    );
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
 });
