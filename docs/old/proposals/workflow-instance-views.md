@@ -1,11 +1,13 @@
 # Workflow instances as `view` sources — curated saga projections
 
-> Status: **implemented on Hono, .NET, and React/scaffold (#1037).** The
+> Status: **SHIPPED on all five backends (#1037 + follow-ups).** The
 > foundation (grammar `ViewSource = Aggregate | Workflow`, `ViewIR.source`,
-> lowering via `inWorkflow`, IR validation) and backend emission for Hono,
-> .NET, and the React client + scaffold pages all ship; aggregate views are
-> byte-identical. **Phoenix workflow-view emission is deferred** — see
-> *Deferred* below. Follow-up to
+> lowering via `inWorkflow`, IR validation) and workflow-source view emission
+> ship on Hono, .NET, Java (`java/emit/view.ts`), Python
+> (`python/views-builder.ts`), and elixir/Phoenix
+> (`elixir/vanilla/view-emit.ts`), plus the React client + scaffold pages;
+> aggregate views are byte-identical. **Phoenix workflow-view emission is no
+> longer deferred** — the *Deferred* note below is superseded. Follow-up to
 > [workflow-instance-visibility.md](./workflow-instance-visibility.md)
 > (#1035), which gave every correlation-bearing workflow an
 > `instanceWireShape` and a raw read surface (`GET

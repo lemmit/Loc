@@ -112,6 +112,12 @@ page OrderDetail {
 The JS frontends run the async boundary in the browser: await the mutation, reify
 a thrown `ApiError` back into the error variant, then `switch` on the tag.
 
+The **Feliz** frontend reaches the same result through Elmish MVU rather than
+`await`/`switch`: the action dispatches a `Msg`, the `update` fn fires
+`Cmd.OfAsync.perform Api.<fn> … <ResultMsg>` (`src/generator/feliz/update-emit.ts`),
+and a result-`Msg` arm branches on the variant tag — the F#/Elmish equivalent of
+the JS try/catch/switch below.
+
 ```tsx
 const confirm = async () => {
   let result: ConfirmOrderResponse;

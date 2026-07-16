@@ -3,7 +3,7 @@
 > **[2026-06-20 status audit]** Retrieval emission ships on all FIVE backends now (add Java `java/emit/repository.ts:~138` + Python `python/repository-builder.ts:~336`), not 'four'. Explicit `loads:` plan still gated (`loom.retrieval-loads-unsupported`, `query-checks.ts:~204`).
 
 > Status: **PARTIAL.** Surface + IR + lowering + validation shipped (#794);
-> emission shipped on **all four backends** — .NET `Run<Name>Async` + workflow
+> emission shipped on **all five backends** — .NET `Run<Name>Async` + workflow
 > `foreach` (#810), Hono `run<Name>` (#952), Phoenix Ecto context query (#955).
 > *(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
 > Ecto/Phoenix only and `foundation: ash` is a validation error — the Phoenix

@@ -49,11 +49,11 @@ acting; these numbers age).
 | package | stack v1 (mantine@v7, chakra@v2, mui@v5, shadcn@v3) | stack v3 (mantine@v9; React 19 + Router 7 + Zod 4) | latest stable |
 | --- | --- | --- | --- |
 | `react` / `react-dom` | ^18.3.0 | **^19.2.0** | 19.2 |
-| `react-router-dom` | ^6.27.0 | ^6.27.0 (RR 7 is a follow-up stack axis) | **7.x** |
+| `react-router-dom` | ^6.27.0 | `react-router` ^7.0.0 (renamed; RR 7 adopted in stack v3) | **7.x** |
 | `@tanstack/react-query` | ^5.59.0 | ^5.59.0 | 5.100 |
 | `react-hook-form` | ^7.53.0 | ^7.53.0 | 7.75 |
-| `@hookform/resolvers` | ^3.9.0 | ^3.9.0 | **5.x** |
-| `zod` | ^3.23.0 | ^3.23.0 | **4.x** |
+| `@hookform/resolvers` | ^3.9.0 | ^5.0.0 | **5.x** |
+| `zod` | ^3.23.0 | ^4.0.0 | **4.x** |
 | `dayjs` | ^1.11.0 | ^1.11.0 | 1.11 |
 | `@types/react` / `-dom` (dev) | ^18.3.0 | **^19.2.0** | 19.2 |
 | `@vitejs/plugin-react` (dev) | **^6.0.0** | **^6.0.0** | 6.x (Vite-8 / Rolldown era) |

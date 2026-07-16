@@ -353,7 +353,7 @@ Two boundaries to know:
   single-arg key-sort (`sortBy(o => o.key)`) has no native array method or
   runtime helper yet on any frontend, so pre-shape ordering in a backend
   `view`/`find` for now.
-- **All frontends.** React, Vue, Svelte, and Angular share the `emitExpr` engine;
+- **All frontends.** React, Vue, Svelte, and Angular share the `emitExpr` engine; Feliz supplies its own F# leaves (`src/generator/feliz/fs-expr.ts`) through the same dispatcher;
   Phoenix/HEEx runs a parallel engine that mirrors the same ops to Elixir
   idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
   `filter`/`map` shaping works on every frontend.

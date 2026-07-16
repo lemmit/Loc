@@ -13,7 +13,7 @@ section that matches what you need.
 | [`page-metamodel.md`](page-metamodel.md) | You're writing `ui` / `page` / `component` blocks. |
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
 | [`tools.md`](tools.md) | You're using the `ddd` CLI (`generate`, `verify`, `snapshot`, `patch`, `trace`), `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
-| [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular) emits for a given DSL construct. |
+| [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular, Feliz) emits for a given DSL construct. |
 | [`kubernetes.md`](kubernetes.md) | You want to deploy the generated system to a cluster — the opt-in `generate system --k8s` Helm chart + raw manifests. |
 | [`playground.md`](playground.md) | You want to know what the browser playground is — the typed editor, visual builders, live preview, and in-browser PGlite test runner at lemmit.github.io/Loc/playground. |
 

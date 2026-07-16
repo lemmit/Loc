@@ -1,7 +1,8 @@
 # In-process dispatch delivery semantics — at-most-once → transactional outbox
 
-> Status: **PARTIAL** — the in-process dispatcher shipped on all three
-> backends (Hono #970, .NET #1012, Phoenix #1020), and the **transactional
+> Status: **PARTIAL** — the in-process dispatcher shipped on all five
+> backends (Hono #970, .NET #1012, Phoenix #1020, plus Java
+> `java/emit/dispatch.ts` + Python `python/dispatch-builder.ts`), and the **transactional
 > outbox tier is now live on Hono** (2026-06-10): a channel with
 > `retention: log | work` makes its carried events durable — `createApp`'s
 > default dispatcher records them in `__loom_outbox` (schema + MigrationsIR
