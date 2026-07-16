@@ -24,6 +24,7 @@ import type {
   ExprIR,
   PageIR,
   StmtIR,
+  TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -101,6 +102,14 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
+        checkAsyncEffectArgs(
+          pageWhere(page),
+          page.actions,
+          aggByName,
+          apiParamNames,
+          aggNames,
+          diags,
+        );
       }
       for (const comp of ui.components) {
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
@@ -116,6 +125,14 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         };
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
+        checkAsyncEffectArgs(
+          `component '${comp.name}'`,
+          comp.actions,
+          aggByName,
+          apiParamNames,
+          aggNames,
+          diags,
+        );
       }
     }
   }
@@ -138,15 +155,16 @@ function pageRouteHasParam(route: string | undefined): boolean {
   return (route ?? "/").split("/").some((s) => s.startsWith(":"));
 }
 
-/** True when a `variant-match` subject awaits an aggregate INSTANCE operation —
- *  `<apiParam>.<Agg>.<op>(…)` (Pattern B) or a bare `<Agg>.<op>(…)` (Pattern E).
- *  Mirrors `detectAwaitedInstanceOp` in the Feliz classifier, target-neutral. */
-function isAggregateInstanceOpSubject(
+/** The aggregate + op a `variant-match` subject awaits, when it is an aggregate
+ *  INSTANCE operation — `<apiParam>.<Agg>.<op>(…)` (Pattern B) or a bare
+ *  `<Agg>.<op>(…)` (Pattern E); otherwise null.  Mirrors `detectAwaitedInstanceOp`
+ *  in the Feliz classifier, target-neutral. */
+function resolveInstanceOpSubject(
   subject: ExprIR,
   apiParamNames: ReadonlySet<string>,
   aggNames: ReadonlySet<string>,
-): boolean {
-  if (subject.kind !== "method-call") return false;
+): { aggregate: string; op: string } | null {
+  if (subject.kind !== "method-call") return null;
   const recv = subject.receiver;
   if (
     recv.kind === "member" &&
@@ -154,9 +172,26 @@ function isAggregateInstanceOpSubject(
     apiParamNames.has(recv.receiver.name) &&
     aggNames.has(recv.member)
   ) {
-    return true;
+    return { aggregate: recv.member, op: subject.member };
   }
-  return recv.kind === "ref" && aggNames.has(recv.name);
+  if (recv.kind === "ref" && aggNames.has(recv.name)) {
+    return { aggregate: recv.name, op: subject.member };
+  }
+  return null;
+}
+
+/** Walk a `variant-match` subject at every depth in an action body. */
+function forEachVariantMatch(
+  stmts: readonly StmtIR[],
+  visit: (s: Extract<StmtIR, { kind: "variant-match" }>) => void,
+): void {
+  for (const s of stmts) {
+    if (s.kind === "variant-match") {
+      visit(s);
+      for (const arm of s.arms) forEachVariantMatch(arm.body, visit);
+      forEachVariantMatch(s.elseBody ?? [], visit);
+    }
+  }
 }
 
 /** Reject an instance-op `match await` on a page with no `:id` route. */
@@ -167,28 +202,84 @@ function checkInstanceEffectRouteId(
   diags: LoomDiagnostic[],
 ): void {
   if (pageRouteHasParam(page.route)) return;
-  const visit = (stmts: readonly StmtIR[]): void => {
-    for (const s of stmts) {
-      if (s.kind === "variant-match") {
-        if (isAggregateInstanceOpSubject(s.subject, apiParamNames, aggNames)) {
-          diags.push({
-            severity: "error",
-            code: "loom.instance-effect-needs-route-id",
-            message:
-              `page '${page.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
-              `on the record identified by the page's route \`:id\` — but this page (route ` +
-              `"${page.route ?? "/"}") declares no \`:id\` param, so no record is in scope.  Host the ` +
-              `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
-              `(OperationForm).  M-T6.17.`,
-            source: `page '${page.name}'`,
-          });
-        }
-        for (const arm of s.arms) visit(arm.body);
-        visit(s.elseBody ?? []);
-      }
-    }
-  };
-  for (const action of page.actions) visit(action.body);
+  for (const action of page.actions) {
+    forEachVariantMatch(action.body, (s) => {
+      if (!resolveInstanceOpSubject(s.subject, apiParamNames, aggNames)) return;
+      diags.push({
+        severity: "error",
+        code: "loom.instance-effect-needs-route-id",
+        message:
+          `page '${page.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
+          `on the record identified by the page's route \`:id\` — but this page (route ` +
+          `"${page.route ?? "/"}") declares no \`:id\` param, so no record is in scope.  Host the ` +
+          `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
+          `(OperationForm).  M-T6.17.`,
+        source: `page '${page.name}'`,
+      });
+    });
+  }
+}
+
+/** `loom.match-await-arg-mismatch` — the awaited op call's arguments must match
+ *  the operation signature.  The request payload every frontend POSTs is built by
+ *  index-aligning the call's args with the op's params, so a wrong count silently
+ *  ships a broken request (React emits `{ note: undefined }`; Feliz fails the
+ *  Fable compile).  Validate the arity here, target-agnostically: at most one arg
+ *  per param, and every un-supplied trailing param must be `optional`. */
+function checkAsyncEffectArgs(
+  where: string,
+  actions: readonly ActionIR[],
+  aggByName: ReadonlyMap<string, AggregateIR>,
+  apiParamNames: ReadonlySet<string>,
+  aggNames: ReadonlySet<string>,
+  diags: LoomDiagnostic[],
+): void {
+  for (const action of actions) {
+    forEachVariantMatch(action.body, (s) => {
+      if (s.subject.kind !== "method-call") return;
+      const resolved = resolveInstanceOpSubject(s.subject, apiParamNames, aggNames);
+      const agg = resolved && aggByName.get(resolved.aggregate);
+      const op = agg?.operations.find((o) => o.name === resolved!.op);
+      if (!op) return; // not a resolvable aggregate op — nothing to arity-check
+      const args = s.subject.args;
+      const params = op.params;
+      const tooMany = args.length > params.length;
+      const missingRequired = params.slice(args.length).some((p) => p.type.kind !== "optional");
+      if (!tooMany && !missingRequired) return;
+      const sig = params.map((p) => `${p.name}: ${typeLabel(p.type)}`).join(", ");
+      diags.push({
+        severity: "error",
+        code: "loom.match-await-arg-mismatch",
+        message:
+          `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes ${args.length} ` +
+          `argument(s), but operation \`${resolved!.op}(${sig})\` expects ${params.length} ` +
+          `(${params.filter((p) => p.type.kind !== "optional").length} required).  The awaited call's ` +
+          `arguments build the request payload — a mismatch ships a broken request.  Pass one argument ` +
+          `per parameter, in order.`,
+        source: where,
+      });
+    });
+  }
+}
+
+/** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
+function typeLabel(t: TypeIR): string {
+  switch (t.kind) {
+    case "optional":
+      return `${typeLabel(t.inner)}?`;
+    case "primitive":
+      return t.name;
+    case "id":
+      return `${t.targetName} id`;
+    case "enum":
+    case "valueobject":
+    case "entity":
+      return t.name;
+    case "array":
+      return `${typeLabel(t.element)}[]`;
+    default:
+      return t.kind;
+  }
 }
 
 interface BodyCheckCtx {

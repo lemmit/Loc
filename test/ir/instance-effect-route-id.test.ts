@@ -79,3 +79,66 @@ describe("loom.instance-effect-needs-route-id (M-T6.17)", () => {
     expect(codes).not.toContain(CODE);
   });
 });
+
+// `loom.match-await-arg-mismatch` — the awaited op call's args must match the op
+// signature (the request payload is built by index-aligning args → params).
+const ARG_CODE = "loom.match-await-arg-mismatch";
+
+/** A `:id` detail page whose op signature + call args vary. */
+const argSys = (opSig: string, callArgs: string, plat = "react") => `
+system Demo {
+  subdomain S {
+    context C {
+      error Rejected { reason: string }
+      aggregate Order with crudish {
+        code: string
+        operation confirm(${opSig}): Order or Rejected { return Rejected { reason: code } }
+      }
+    }
+  }
+  api A from S
+  ui Web {
+    api C: A
+    page Detail(id: Order id) {
+      route: "/orders/:id"
+      state { m: string = "" }
+      action go() {
+        match await C.Order.confirm(${callArgs}) {
+          Order o    => { m := o.code }
+          Rejected r => { m := r.reason }
+        }
+      }
+      body: Button { "Go", onClick: go }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: ${plat} targets: api ui: Web { C: api } port: 3001 }
+}`;
+
+describe("loom.match-await-arg-mismatch (senior-toolchain arity check)", () => {
+  it("rejects too FEW args (a required param left unsupplied) on every frontend", async () => {
+    for (const plat of ["react", "vue", "svelte", "angular", "feliz"]) {
+      const codes = await codesOf(argSys("note: string", "", plat));
+      expect(codes, `${plat} should reject 0 args for a 1-required-param op`).toContain(ARG_CODE);
+    }
+  });
+
+  it("rejects too MANY args", async () => {
+    expect(await codesOf(argSys("note: string", '"a", "b"'))).toContain(ARG_CODE);
+  });
+
+  it("is CLEAN when the arg count matches", async () => {
+    expect(await codesOf(argSys("note: string", '"hi"'))).not.toContain(ARG_CODE);
+    expect(await codesOf(argSys("", ""))).not.toContain(ARG_CODE);
+  });
+
+  it("allows an omitted TRAILING optional param", async () => {
+    // `confirm(note: string?)` called with no args — the optional may be omitted.
+    expect(await codesOf(argSys("note: string?", ""))).not.toContain(ARG_CODE);
+    // …but a required param BEFORE an optional still must be supplied.
+    expect(await codesOf(argSys("note: string, memo: string?", ""))).toContain(ARG_CODE);
+    expect(await codesOf(argSys("note: string, memo: string?", '"hi"'))).not.toContain(ARG_CODE);
+  });
+});

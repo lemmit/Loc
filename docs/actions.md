@@ -104,6 +104,10 @@ page OrderDetail {
   has no record in scope, so an instance-op `match await` there is rejected on every
   frontend (`loom.instance-effect-needs-route-id`) — host it on a `/…/:id` page, or
   drive the op through an `OperationForm`.
+- The `args` build the request payload, so they must **match the operation
+  signature** — one argument per parameter, in order (a trailing `optional` param
+  may be omitted). A mismatch is rejected (`loom.match-await-arg-mismatch`) rather
+  than shipping a broken request.
 - Each arm names a **variant** of the op's `or`-union: the **success** variant is
   the aggregate itself (`Order`); the rest are **error** variants.
 - Arm bodies run statements (state writes, `navigate`), binding the narrowed
