@@ -99,6 +99,19 @@ Elmish from flavor-(2)-is-a-mountain to flavor-(2)-is-an-increment.
 
 ### 2.2 The residual: anonymous-lambda pages
 
+> **STATUS — CLOSED (2026-07).** The global lambda-purity invariant shipped:
+> `loom.effect-in-lambda` (`src/ir/validate/checks/ui-checks.ts`) rejects an
+> inline effect handler in any page/component render-tree lambda on **every**
+> target — both the effect-*statement* forms (`:=`/`+=`/`emit`/bare `call`/
+> `match await`) and the **direct remote-mutation** form (`onClick: e => {
+> X.create(v) }`, the api-mutation arm reusing the same `mutatingAggCommand`
+> classifier as the action-body await-floor). Effects live only in a named
+> `action`, so the MVU `Model → Html` view is pure **by construction**, not by
+> convention — `Msg`/`update` project straight off `ActionIR`. Corpus census at
+> flip time: zero files used the rejected form (named actions had already
+> drained it), so no migration was needed. The rest of this section is the
+> original design record of how the fork was chosen.
+
 Named actions are **opt-in**, not mandatory — a page may still write inline
 `onClick: () => { count := count + 1 }`. For a JSX target that inlines
 identically; for MVU there is no inline effect position, so an anonymous-lambda
@@ -125,7 +138,9 @@ it, cheapest first:
 Recommendation (developed with a corpus census in §8): because every `.ddd`
 file lives in this repo, the residual is ~4 files — so **eliminate the form**
 (migrate them + a global lambda-purity invariant) rather than build a per-target
-gate to tolerate it. §8 expands the trade-off.
+gate to tolerate it. §8 expands the trade-off. **This is the path that shipped**
+(option 1's gate, made global rather than MVU-only) — see the status note at the
+top of this section.
 
 ### 2.1 Distance-to-MVU scorecard (per axis)
 
