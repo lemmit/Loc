@@ -28,7 +28,7 @@ Depends: resource verb layer (shipped), M-T4.6 for storage wiring.
 ## M-T1.3 — Charts beyond `Stat` — `open` · **M** · P2
 A minimal `Chart` primitive (line/bar over a collection expr). Keep the set closed and small; HEEx renderer required or pinned (heex-parity gate).
 
-## M-T1.4 — Frontend extern parity: Angular + HEEx + Vue/Svelte components — `partial` · **M** · P1
+## M-T1.4 — Frontend extern parity: Angular + HEEx + Vue/Svelte components — `in-flight` · **M** · P1
 `component extern` ships React-only (Tier 1); `function extern` React/TS. Bring `component`/`function extern` to Vue/Svelte/Angular, and design the HEEx/LiveView binding (or an honest `loom.extern-component-framework-mismatch` gate). Also: Stage 3 `hook … extern` stays demand-pulled.
 Sources: [extern-component-escape-hatch](../old/proposals/extern-component-escape-hatch.md), [extern-function-hook-escape-hatch](../old/proposals/extern-function-hook-escape-hatch.md) (Stage 2 Phoenix `@spec`), global-plan T3.15.
 
