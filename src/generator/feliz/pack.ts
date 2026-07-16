@@ -333,6 +333,57 @@ function primitiveAvatar(c: Ctx): string {
   return `Html.div [ prop.className "avatar"; prop.children [ Html.div [ prop.className "w-10 rounded-full"; prop.children [ Html.img [ prop.src ${String(c.src)}; prop.alt ${alt} ] ] ] ] ]`;
 }
 
+/** Icon(name|svg, size?) — an inline SVG.  The registry/user SVG is injected
+ *  verbatim via `dangerouslySetInnerHTML` (Feliz's raw-HTML escape hatch); the
+ *  span sizes it and a child-selector variant makes the inner `<svg>` fill.  A
+ *  triple-quoted F# string carries the markup as-is — the SVGs embed `"` (never
+ *  `"""`), so no escaping is needed.  `size:` → a fixed h/w utility. */
+function primitiveIcon(c: Ctx): string {
+  const svg = String(c.svg ?? "");
+  const size =
+    c.size === "sm"
+      ? "h-4 w-4"
+      : c.size === "lg"
+        ? "h-6 w-6"
+        : c.size === "xl"
+          ? "h-8 w-8"
+          : "h-5 w-5";
+  const cls = `loom-icon inline-flex ${size} [&>svg]:h-full [&>svg]:w-full`;
+  return `Html.span [ prop.className "${cls}"; prop.dangerouslySetInnerHTML """${svg}""" ]`;
+}
+
+/** Tabs(Tab("A", …), Tab("B", …)) — daisyUI's CSS-only radio-tabs: one
+ *  `<input type=radio role=tab>` per tab (sharing a `name` so exactly one is
+ *  active) followed by its `tab-content` panel.  Pure CSS switching — no MVU
+ *  state — so a Tabs group needs no Model field.  The group `name` is derived
+ *  from the tab values so distinct groups on a page don't share a radio set.
+ *  Each panel's body is an already-walked F# element (offside-safe on its own
+ *  line inside the panel's `children [ … ]`). */
+function primitiveTabs(c: Ctx): string {
+  const tabs = (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[]) ?? [];
+  if (tabs.length === 0) return "Html.none";
+  const group = `loom_tabs_${tabs.map((t) => t.value).join("_")}`;
+  const parts = tabs.flatMap((t, i) => {
+    const radioProps = [
+      "prop.type'.radio",
+      `prop.name "${group}"`,
+      'prop.role "tab"',
+      'prop.className "tab"',
+      `prop.ariaLabel "${t.label}"`,
+      // The first tab is active by default (uncontrolled — CSS owns the switch).
+      ...(i === 0 ? ["prop.defaultChecked true"] : []),
+    ];
+    const body = asElement(t.bodyJsx);
+    return [
+      `    Html.input [ ${radioProps.join("; ")} ]`,
+      `    Html.div [ prop.role "tabpanel"; prop.className "tab-content p-4"; prop.children [\n      ${body}\n    ] ]`,
+    ];
+  });
+  return `(Html.div [ prop.role "tablist"; prop.className "tabs tabs-bordered"; prop.children [\n${parts.join(
+    "\n",
+  )}\n  ] ])`;
+}
+
 // --- Layout containers (children-bearing) ---------------------------------
 function primitiveGrid(c: Ctx): string {
   return containerEl("div", "grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3", c);
@@ -412,6 +463,9 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-container": primitiveContainer,
   "primitive-section": primitiveSection,
   "primitive-sticky": primitiveSticky,
+  // Stateless leaf/layout primitives (no MVU binding).
+  "primitive-icon": primitiveIcon,
+  "primitive-tabs": primitiveTabs,
 };
 
 /** Build the procedural Feliz pack.  Implements the `LoadedPack` render
