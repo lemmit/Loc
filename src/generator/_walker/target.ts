@@ -753,6 +753,23 @@ export interface WalkerTarget {
    *  `renderStateRead`.  Omitted → the table renders unpaged (all rows). */
   renderPager?(spec: PagerSpec): string;
 
+  /** Render the search `<input>` emitted ABOVE a filterable `Table` — bound
+   *  to the `filter:` page-state string field, it drives a case-insensitive
+   *  client-side substring match across every row value.  Framework-shaped
+   *  (two-way binding idiom: React's controlled `value`/`onChange`, Vue
+   *  `v-model`, Svelte `bind:value`, Angular `[value]`/`(input)`), so it's a
+   *  seam.  Omitted → no filter box renders. */
+  renderFilterInput?(filter: StateRef): string;
+
+  /** Wrap a `Table`'s already-rendered `rows` expression in a client-side
+   *  filter by the active `filter:` state field (case-insensitive substring
+   *  over `Object.values(row)`; an empty query passes every row).  Applied
+   *  BEFORE sort/slice, so the pager counts the filtered set.  React returns
+   *  an inline `.filter(...)`; the strict-template frameworks (Vue/Svelte/
+   *  Angular) call the shared `filterRows` helper.  Omitted → rows render
+   *  unfiltered. */
+  renderFilteredRows?(rowsExpr: string, filter: StateRef): string;
+
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //
   // `emitExpr` renders the pure-syntax `ExprIR` arms (operators, literals,

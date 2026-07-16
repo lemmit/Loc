@@ -129,6 +129,25 @@ export const angularTarget: WalkerTarget = {
     );
   },
 
+  /** A `[value]`/`(input)` search box driving the client-side filter.  Angular
+   *  signals read as `filter()` and write as `filter.set(…)`; `$any(...)` casts
+   *  the event target so the template typechecker accepts `.value`. */
+  renderFilterInput(filter) {
+    const n = filter.name;
+    const style = "margin-bottom: 0.75rem; padding: 0.375rem 0.5rem;";
+    return (
+      `<input type="search" [value]="${n}()" (input)="${n}.set($any($event.target).value)" ` +
+      `placeholder="Filter…" aria-label="Filter table" style="${style}" data-testid="table-filter" />`
+    );
+  },
+
+  /** Filter via the shared `filterRows` helper, which the Angular page-shell
+   *  re-exposes as a component member (templates can only call members, not free
+   *  imports).  Signals read with `()`. */
+  renderFilteredRows(rowsExpr, filter) {
+    return `filterRows(${rowsExpr}, ${filter.name}())`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Same `use*` naming + `../api/<agg>` import as React/Vue — the

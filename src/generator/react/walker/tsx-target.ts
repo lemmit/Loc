@@ -146,6 +146,31 @@ export const tsxTarget: WalkerTarget = {
     );
   },
 
+  /** A controlled search box driving the client-side filter.  `value`/`onChange`
+   *  is React's two-way idiom; inline-styled so it stays pack-agnostic. */
+  renderFilterInput(filter) {
+    const n = filter.name;
+    const setN = `set${n[0]!.toUpperCase()}${n.slice(1)}`;
+    const style = `{ marginBottom: "0.75rem", padding: "0.375rem 0.5rem" }`;
+    return (
+      `<input type="search" placeholder="Filter…" aria-label="Filter table" ` +
+      `value={${n}} onChange={(e) => ${setN}(e.target.value)} ` +
+      `style={${style}} data-testid="table-filter" />`
+    );
+  },
+
+  /** Inline case-insensitive substring filter across every row value.  `Object
+   *  .values` hits the `{}` overload (→ `any[]`), so no per-value cast; the row
+   *  cast satisfies strict indexing.  An empty query passes all rows. */
+  renderFilteredRows(rowsExpr, filter) {
+    const q = filter.name;
+    return (
+      `((${rowsExpr}) ?? []).filter((r) => { const __q = (${q}).trim().toLowerCase(); ` +
+      `return __q === "" || Object.values(r as Record<string, unknown>)` +
+      `.some((v) => v != null && String(v).toLowerCase().includes(__q)); })`
+    );
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into React-Query naming + import.

@@ -233,6 +233,7 @@ export function renderSveltePage(
     usedParams,
     usesNavigate,
     usesTableSort,
+    usesTableFilter,
     usesState,
     usesCurrentUser,
     usesRouteId,
@@ -321,7 +322,14 @@ export function renderSveltePage(
   const packImports = renderSvelteImportLines(imports);
   // Interactive-table sort helper — imported only when a sortable `Table`
   // renders on this page (M-T1.1).
-  const tableSortImport = usesTableSort ? `  import { sortRows } from "$lib/table-sort";\n` : "";
+  const tableHelperNames = [
+    ...(usesTableSort ? ["sortRows"] : []),
+    ...(usesTableFilter ? ["filterRows"] : []),
+  ];
+  const tableSortImport =
+    tableHelperNames.length > 0
+      ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
+      : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `  import ${name} from "$lib/components/${name}.svelte";\n`)
@@ -528,6 +536,7 @@ export function renderSvelteComponentFile(
     imports,
     usesState,
     usesTableSort,
+    usesTableFilter,
     usesNavigate,
     usesCurrentUser,
     usedUserComponents,
@@ -595,7 +604,14 @@ export function renderSvelteComponentFile(
     { decls: "", templateScope: "", usesNavigate: false },
   );
   const packImports = renderSvelteImportLines(imports);
-  const tableSortImport = usesTableSort ? `  import { sortRows } from "$lib/table-sort";\n` : "";
+  const tableHelperNames = [
+    ...(usesTableSort ? ["sortRows"] : []),
+    ...(usesTableFilter ? ["filterRows"] : []),
+  ];
+  const tableSortImport =
+    tableHelperNames.length > 0
+      ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
+      : "";
   const apiHookImports = renderSvelteApiHookImports(usedApiHooks);
   const apiHookDecls = svelteTarget
     .renderApiHoisting(

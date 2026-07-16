@@ -68,6 +68,27 @@ export function emitTable(
   const serverPaged = boolNamed(call, "serverPaged");
   const totalPagesArg = namedArgValue(call, "totalPages");
 
+  // Column filter (M-T1.1 client).  A `filter:` state ref binds a search box
+  // (rendered ABOVE the table) that narrows the rows by a case-insensitive
+  // substring match across every value.  Client-only: `serverPaged` rows are a
+  // server window, so a client filter would silently narrow one page — gated
+  // off there (a server-driven filter is a later slice, like sort/pager).  A
+  // target without the seams ignores the arg (byte-identical plain table).
+  const filterName = refArgName(call, "filter");
+  const filterActive =
+    filterName !== undefined &&
+    !serverPaged &&
+    ctx.target.renderFilteredRows !== undefined &&
+    ctx.target.renderFilterInput !== undefined;
+  const filterRef = filterName !== undefined ? stateRefFor(filterName) : undefined;
+  let filterMarkup: string | undefined;
+  if (filterActive && filterRef) {
+    ctx.usesState = true;
+    ctx.usesTableFilter = true;
+    rowsExpr = ctx.target.renderFilteredRows!(rowsExpr, filterRef);
+    filterMarkup = ctx.target.renderFilterInput!(filterRef);
+  }
+
   // Column sort (M-T1.1 client / M-T2.6 server).  The clickable sortable
   // HEADERS render in both modes (they write `sortKey`/`sortDir` state); only
   // CLIENT mode additionally wraps the rows in a client-side `sortRows`.  A
@@ -120,10 +141,16 @@ export function emitTable(
       // guard on a never-nullish operand is a strict-Angular error (TS2869).
       const preSliceExpr = rowsExpr;
       rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
-      const totalBase = sortActive ? preSliceExpr : boundRowsExpr;
+      // Filter and sort both leave `rowsExpr` a non-null array (`.filter(...)` /
+      // `sortRows(...)` / `[...].sort(...)`), so when either is active the total
+      // reads off the transformed (post-filter) expression with no `?? []`
+      // guard — a redundant guard on a never-nullish operand is a strict-Angular
+      // error (TS2869).  Untransformed rows keep the guard.
+      const rowsTransformed = sortActive || filterActive;
+      const totalBase = rowsTransformed ? preSliceExpr : boundRowsExpr;
       const lengthExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
         ? `(${totalBase}).length`
-        : sortActive
+        : rowsTransformed
           ? `(${totalBase}).length`
           : `((${totalBase}) ?? []).length`;
       totalPagesExpr = `Math.max(1, Math.ceil(${lengthExpr} / ${pageSize}))`;
@@ -232,9 +259,12 @@ export function emitTable(
     styleAttr: styleAttr(call, ctx),
   });
   // The pager renders as a sibling below the table (both inside the scaffold's
-  // `Paper`).  Concatenation keeps the table markup untouched for un-paged
-  // tables (byte-identical) and appends the control only when paged.
-  return pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
+  // `Paper`); the filter box renders as a sibling ABOVE it.  Concatenation
+  // keeps the table markup untouched for a plain table (byte-identical) and
+  // wraps it only with the controls actually requested.
+  let result = pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
+  if (filterMarkup) result = `${filterMarkup}\n${closeIndent}${result}`;
+  return result;
 }
 
 /** Emit one `Column("Header", <accessor>)` into a

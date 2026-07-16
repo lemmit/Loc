@@ -406,9 +406,15 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // Interactive-table sort helper (M-T1.1) — a sortable `Table` renders a
   // `sortRows(…)` call; import it and re-expose as a member so the template
   // resolves it against the component (same lift as FORMAT_HELPERS).
-  if (result.tsx.includes("sortRows(")) {
-    imports.push(`import { sortRows } from "../../lib/table-sort";`);
-    members.push(`  protected readonly sortRows = sortRows;`);
+  // A filterable `Table` renders a `filterRows(…)` call (M-T1.1); both helpers
+  // share `src/lib/table-sort.ts`, so collect the used names into ONE import to
+  // avoid a duplicate-module import, and re-expose each as a member.
+  const tableHelpers = (["sortRows", "filterRows"] as const).filter((h) =>
+    result.tsx.includes(`${h}(`),
+  );
+  if (tableHelpers.length > 0) {
+    imports.push(`import { ${tableHelpers.join(", ")} } from "../../lib/table-sort";`);
+    for (const h of tableHelpers) members.push(`  protected readonly ${h} = ${h};`);
   }
 
   // Interactive-table pager (M-T1.1) — the "Page N of M" label calls `Math.*`,
