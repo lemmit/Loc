@@ -59,6 +59,7 @@ import {
   type FelizRead,
   type FelizWorkflowForm,
   felizAllRead,
+  formHasFieldErrors,
   idLabelsFrom,
   renderApiModule,
   renderEncoders,
@@ -727,6 +728,9 @@ function renderAppFs(
   }
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
+  // Any form with a message-bearing (required) field → the `View.fieldError`
+  // helper must ship even on a form-only page that has no reads.
+  const hasFieldErrors = formRecords.some(formHasFieldErrors);
   // Http/Api are needed for reads, mutations, forms (POST) AND async effects
   // (POST + decode); the auth probe also uses `Http.get`.  The Thoth
   // record/decoder layer is needed for reads AND async effects (the op's
@@ -929,9 +933,10 @@ function renderAppFs(
     // Api module — reads (fetch + decode), mutations (verb request), creates (POST).
     hasHttp && "",
     hasHttp && api,
-    // View helpers (reads only) — Remote matchers the QueryView renderer calls.
-    hasReads && "",
-    hasReads && renderViewModule(reads, hasIdSelect),
+    // View helpers — Remote matchers (reads) + the per-field `fieldError` matcher
+    // (validated forms), so a form-only page still gets the helper.
+    (hasReads || hasFieldErrors) && "",
+    (hasReads || hasFieldErrors) && renderViewModule(reads, hasIdSelect, hasFieldErrors),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
     routed && renderRouting(pages),
