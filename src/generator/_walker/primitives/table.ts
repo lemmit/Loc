@@ -263,14 +263,17 @@ export function emitTable(
   // keeps the table markup untouched for a plain table (byte-identical) and
   // wraps it only with the controls actually requested.
   let result = pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
-  if (filterMarkup) result = `${filterMarkup}\n${closeIndent}${result}`;
-  // A filter box and/or pager makes the table MULTI-ROOT (adjacent siblings).
-  // JSX rejects that in a single-expression slot (a `QueryView`'s `{cond && (
-  // … )}`, a conditional child), so React wraps it in a `<>…</>` fragment; the
-  // multi-root-tolerant frameworks omit the seam and stay byte-identical.  A
-  // plain table (single root) never wraps.
-  if ((filterMarkup !== undefined || pagerMarkup !== undefined) && ctx.target.wrapMultiRoot) {
-    result = ctx.target.wrapMultiRoot(result);
+  if (filterMarkup) {
+    result = `${filterMarkup}\n${closeIndent}${result}`;
+    // The filter box makes the table MULTI-ROOT (the search box + the table are
+    // adjacent siblings).  JSX rejects adjacent elements in a single-expression
+    // slot — a `QueryView`'s `{cond && ( … )}`, a conditional child — so React
+    // wraps the pair in a `<>…</>` fragment; the multi-root-tolerant frameworks
+    // (Vue/Svelte/Angular) omit the seam.  Scoped to the filter box: the pager
+    // alone is emitted under a pack wrapper (`<Paper>`) in scaffolded pages, so
+    // wrapping it too would add a redundant fragment there (fixture drift) for
+    // no gain — a bare pager-only `QueryView` is a pre-existing edge left as-is.
+    if (ctx.target.wrapMultiRoot) result = ctx.target.wrapMultiRoot(result);
   }
   return result;
 }

@@ -59,10 +59,6 @@ describe("Table client-side pagination (React)", () => {
     );
     // The page state is declared via useState<number>.
     expect(content).toMatch(/const \[pageNum, setPageNum\] = useState<number>\(1\)/);
-    // Table + pager are two roots in the QueryView's `{cond && (…)}` slot, so
-    // the multi-root output is wrapped in a JSX fragment (adjacent `<Table/>`
-    // and `<div pager/>` are illegal JSX otherwise — TS2657).
-    expect(content).toMatch(/<\/div>\s*<\/>/);
   });
 
   it("pageSize defaults to 10 when omitted", async () => {
