@@ -243,23 +243,88 @@ function checkAsyncEffectArgs(
       if (!op) return; // not a resolvable aggregate op — nothing to arity-check
       const args = s.subject.args;
       const params = op.params;
+      const sig = params.map((p) => `${p.name}: ${typeLabel(p.type)}`).join(", ");
+      // Arity — the request payload index-aligns args → params.
       const tooMany = args.length > params.length;
       const missingRequired = params.slice(args.length).some((p) => p.type.kind !== "optional");
-      if (!tooMany && !missingRequired) return;
-      const sig = params.map((p) => `${p.name}: ${typeLabel(p.type)}`).join(", ");
-      diags.push({
-        severity: "error",
-        code: "loom.match-await-arg-mismatch",
-        message:
-          `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes ${args.length} ` +
-          `argument(s), but operation \`${resolved!.op}(${sig})\` expects ${params.length} ` +
-          `(${params.filter((p) => p.type.kind !== "optional").length} required).  The awaited call's ` +
-          `arguments build the request payload — a mismatch ships a broken request.  Pass one argument ` +
-          `per parameter, in order.`,
-        source: where,
-      });
+      if (tooMany || missingRequired) {
+        diags.push({
+          severity: "error",
+          code: "loom.match-await-arg-mismatch",
+          message:
+            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes ${args.length} ` +
+            `argument(s), but operation \`${resolved!.op}(${sig})\` expects ${params.length} ` +
+            `(${params.filter((p) => p.type.kind !== "optional").length} required).  The awaited call's ` +
+            `arguments build the request payload — a mismatch ships a broken request.  Pass one argument ` +
+            `per parameter, in order.`,
+          source: where,
+        });
+      }
+      // Type — for the args we can PROVE a type of (literals), the family must
+      // match the param's.  Refs / computed exprs are skipped (no false positive);
+      // full expr-type inference over the args is the language-type-checker's job.
+      for (let i = 0; i < Math.min(args.length, params.length); i++) {
+        const arg = args[i]!;
+        if (arg.kind !== "literal") continue;
+        const argFam = literalFamily(arg.lit);
+        const paramFam = typeFamily(params[i]!.type);
+        if (!argFam || !paramFam || argFam === paramFam) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.match-await-arg-type",
+          message:
+            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes a ${argFam} ` +
+            `literal (\`${arg.value}\`) for parameter \`${params[i]!.name}: ${typeLabel(params[i]!.type)}\` ` +
+            `(a ${paramFam} type).  The argument encodes into the request payload — pass a ${paramFam} value.`,
+          source: where,
+        });
+      }
     });
   }
+}
+
+/** Coarse type family of a literal, or undefined when it doesn't constrain
+ *  (`null` / `now`).  Used for a low-false-positive arg/param type check. */
+function literalFamily(lit: string): "numeric" | "string" | "bool" | undefined {
+  switch (lit) {
+    case "int":
+    case "long":
+    case "decimal":
+    case "money":
+      return "numeric";
+    case "string":
+      return "string";
+    case "bool":
+      return "bool";
+    default:
+      return undefined; // null / now — don't constrain
+  }
+}
+
+/** Coarse type family of a param type (peeling `optional`), or undefined when a
+ *  literal can't be meaningfully family-checked against it (VO / entity / array).
+ *  Enum + id + datetime are string-ish on the wire, so a string literal fits. */
+function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
+  const base = t.kind === "optional" ? t.inner : t;
+  if (base.kind === "id" || base.kind === "enum") return "string";
+  if (base.kind === "primitive") {
+    switch (base.name) {
+      case "int":
+      case "long":
+      case "decimal":
+      case "money":
+        return "numeric";
+      case "bool":
+        return "bool";
+      case "string":
+      case "json":
+      case "datetime":
+        return "string";
+      default:
+        return undefined;
+    }
+  }
+  return undefined;
 }
 
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */

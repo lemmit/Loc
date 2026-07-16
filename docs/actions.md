@@ -106,8 +106,9 @@ page OrderDetail {
   drive the op through an `OperationForm`.
 - The `args` build the request payload, so they must **match the operation
   signature** — one argument per parameter, in order (a trailing `optional` param
-  may be omitted). A mismatch is rejected (`loom.match-await-arg-mismatch`) rather
-  than shipping a broken request.
+  may be omitted). A count mismatch is rejected (`loom.match-await-arg-mismatch`),
+  and a literal argument of the wrong type (`confirm(42)` for a `string` param) is
+  rejected (`loom.match-await-arg-type`) — rather than shipping a broken request.
 - Each arm names a **variant** of the op's `or`-union: the **success** variant is
   the aggregate itself (`Order`); the rest are **error** variants.
 - Arm bodies run statements (state writes, `navigate`), binding the narrowed

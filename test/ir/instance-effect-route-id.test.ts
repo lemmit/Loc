@@ -142,3 +142,30 @@ describe("loom.match-await-arg-mismatch (senior-toolchain arity check)", () => {
     expect(await codesOf(argSys("note: string, memo: string?", '"hi"'))).not.toContain(ARG_CODE);
   });
 });
+
+const TYPE_CODE = "loom.match-await-arg-type";
+
+describe("loom.match-await-arg-type (literal arg / param family check)", () => {
+  it("rejects a literal whose family clashes with the param type", async () => {
+    // numeric literal → string param
+    expect(await codesOf(argSys("note: string", "42"))).toContain(TYPE_CODE);
+    // string literal → numeric param
+    expect(await codesOf(argSys("count: int", '"hi"'))).toContain(TYPE_CODE);
+    // bool literal → string param
+    expect(await codesOf(argSys("note: string", "true"))).toContain(TYPE_CODE);
+  });
+
+  it("is CLEAN when the literal family matches (incl. numeric widening)", async () => {
+    expect(await codesOf(argSys("note: string", '"hi"'))).not.toContain(TYPE_CODE);
+    expect(await codesOf(argSys("count: int", "42"))).not.toContain(TYPE_CODE);
+    // an int literal for a decimal/money param is the same (numeric) family
+    expect(await codesOf(argSys("price: decimal", "42"))).not.toContain(TYPE_CODE);
+  });
+
+  it("does not flag a NON-literal arg (a ref) — refs are the type-checker's job", async () => {
+    // `m` is the page's `string` state; passing it to an `int` param is a real
+    // mismatch, but it's a ref (not a literal we can prove), so this check skips it
+    // — no false positive.
+    expect(await codesOf(argSys("count: int", "m"))).not.toContain(TYPE_CODE);
+  });
+});
