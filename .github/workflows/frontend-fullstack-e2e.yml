@@ -55,10 +55,15 @@ jobs:
             case: sales-system-vue
           - frontend: svelte
             case: sales-system-svelte
-          # Angular's `ng build` needs Node ≥22.22.3, above the local floor, so
-          # this cell is CI-first-verified (non-blocking until it goes green —
-          # the shared key-value testid fix should carry it, but any residual
-          # Angular Material/PrimeNG interaction divergence surfaces here first).
+          # Angular is non-blocking pending a known Angular-codegen gap this gate
+          # surfaced (verified under Node 24 locally): the response interfaces
+          # type value-object / enum fields as `unknown` (angular/api-module.ts
+          # `wireTsType`, a deliberately-deferred "precise nested typing" slice),
+          # so a detail page that renders e.g. `price.amount` fails `ng build`
+          # with TS2571. Flip to blocking once that slice lands (emit
+          # `<VO>Response` interfaces + enum unions across the api/views/
+          # workflows/store modules). The shared key-value testid fix already
+          # landed, so the interaction layer should pass once the types compile.
           - frontend: angular
             case: sales-system-angular
             experimental: true
