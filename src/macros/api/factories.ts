@@ -199,10 +199,13 @@ export function selfRef(opts: { array?: boolean; optional?: boolean } = {}): Typ
   return ref;
 }
 
-/** A bare named-type reference: `Money`, `OrderStatus`. */
+/** A bare named-type reference: `Money`, `OrderStatus`.  Pass `paged: true`
+ * for the ML-postfix generic instantiation `<Name> paged` — the wire carrier
+ * `scaffoldPaged`'s queryHandler declares as its return (`Order paged`), a
+ * `TypeRef` with a single `paged` `GenericCtor`. */
 export function namedType(
   targetName: string,
-  opts: { array?: boolean; optional?: boolean } = {},
+  opts: { array?: boolean; optional?: boolean; paged?: boolean } = {},
 ): TypeRef {
   const origin = currentOrigin();
   const nt: NamedType = tag(
@@ -213,7 +216,7 @@ export function namedType(
     mkTypeRef({
       $type: "TypeRef",
       base: nt,
-      ctors: [],
+      ctors: opts.paged ? ["paged"] : [],
       alternatives: [],
       array: opts.array ?? false,
       optional: opts.optional ?? false,

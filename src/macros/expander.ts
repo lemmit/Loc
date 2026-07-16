@@ -38,6 +38,7 @@ import {
   isApi,
   isBoundedContext,
   isCapability,
+  isCriterion,
   isImplementsDecl,
   isSubdomain,
   isSystem,
@@ -151,6 +152,9 @@ interface Inventory {
   View: Map<string, AstNode>;
   ValueObject: Map<string, AstNode>;
   EnumDecl: Map<string, AstNode>;
+  /** Reusable predicate specifications (`criterion X(...) of T = …`) keyed by
+   * name — the `of:` target of `scaffoldPaged` / `scaffoldPagedApi`. */
+  Criterion: Map<string, AstNode>;
   /** Typed capability declarations (typed-capabilities.md) keyed by name.
    * A `with <cap>` clause resolves against this when no macro matches. */
   Capability: Map<string, Capability>;
@@ -165,6 +169,7 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
     View: new Map(),
     ValueObject: new Map(),
     EnumDecl: new Map(),
+    Criterion: new Map(),
     Capability: new Map(),
   };
   const scan = (root: Model): void => {
@@ -178,6 +183,7 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
       else if (isView(node)) inv.View.set(named.name, node);
       else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
       else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
+      else if (isCriterion(node)) inv.Criterion.set(named.name, node);
       else if (isCapability(node)) inv.Capability.set(named.name, node);
     }
   };
