@@ -11,14 +11,14 @@
 > **Role:** A single roll-up of every feature that works on some targets but
 > not others, across the **five backends** (node/Hono, dotnet/.NET, java/Spring,
 > python/FastAPI, elixir/Phoenix) and **five frontends** (React, Vue, Svelte,
-> Angular, Phoenix-HEEx). It exists so the parity gaps that are otherwise
+> Angular, Feliz) plus the Phoenix-HEEx render path. It exists so the parity gaps that are otherwise
 > scattered across per-feature proposals and validator codes have one home to
 > prioritise against. Each row links to the proposal that owns the fix.
 > **Authoritative detail:** the code-verified, file-and-line snapshots live in
 > [`../audits/backend-feature-parity-2026-06.md`](../../audits/backend-feature-parity-2026-06.md)
 > (backends) and
-> [`../audits/frontend-parity-audit-2026-06.md`](../../audits/frontend-parity-audit-2026-06.md)
-> (frontends). When this précis and those audits disagree, the audit (and the
+> [`../audits/frontend-parity-audit-2026-07.md`](../../audits/frontend-parity-audit-2026-07.md)
+> (frontends — refreshes the 2026-06 pass, adds Feliz). When this précis and those audits disagree, the audit (and the
 > cited code) wins. The older [`gated-features-inventory.md`](../../audits/gated-features-inventory.md)
 > (2026-06-03) is **superseded** — it predates the java/python backends.
 
@@ -95,23 +95,35 @@ foundation (the only elixir foundation since Ash was removed).
 
 ## Frontend matrix at a glance
 
-Five frontends; the four JSX/markup targets (React/Vue/Svelte/Angular) share one
-walker core, Phoenix-HEEx runs a parallel core off the same primitive table.
-Contract-level parity is **strong** — all 17 required `WalkerTarget` seams are
-implemented on all four JSX targets, HEEx primitive parity is complete
-(`KNOWN_HEEX_GAPS` empty), and the cross-cutting feature set (forms, realtime,
-views, workflows, layouts, auth, e2e surface) is uniform.
+Five JSX/markup-class frontends plus a sixth F#/Fable target. The four JSX/markup
+targets (React/Vue/Svelte/Angular) share one walker core; **Feliz (F#/Fable/Elmish)**
+also drives `walkBody` but emits F# via an F# expression-leaf table; Phoenix-HEEx
+runs a parallel core off the same primitive table. Contract-level parity is
+**strong** — all required `WalkerTarget` seams (incl. the expression-syntax leaf
+seam) are implemented on all five frontends, HEEx primitive parity is complete
+(`KNOWN_HEEX_GAPS` empty), and forms/realtime/views/workflows/layouts/auth are
+uniform. **The exception is Feliz's page-primitive coverage — a 🔴 silent gap (see
+below).**
 
-| Concern | React | Vue | Svelte | Angular | Phoenix-HEEx |
-|---|:---:|:---:|:---:|:---:|:---:|
-| 52 walker primitives (incl. `Section`/`Sticky`) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `store` UI primitive (5th target #1564) | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ LiveView struct |
-| Build CI gate | ✓ | ✓ | ✓ | ✓ | (elixir build) |
-| Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | n/a |
-| Design-pack families | 4 (mantine/shadcn/mui/chakra) | 2 (vuetify/shadcnVue) | 2 (shadcnSvelte/flowbite) | 3 (angularMaterial/primeng/spartanNg) | 1 (ashPhoenix) |
+| Concern | React | Vue | Svelte | Angular | Feliz | Phoenix-HEEx |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| pack-dispatched page primitives ship | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | ✓ |
+| `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✗ gated | ✓ LiveView struct |
+| Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | (elixir build) |
+| Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | n/a |
+| Design system | 4 packs | 2 packs | 2 packs | 3 packs | daisyUI theme | 2 packs (coreComponents/daisyui) |
 
 **The standing frontend debt:**
 
+0. **🔴 Feliz drops 24 page primitives silently** (HIGH — the one correctness bug).
+   Feliz's *procedural* pack (`feliz/pack.ts`) renders 20 of 44 pack-dispatched
+   primitives; the rest emit `(* feliz pack: no renderer *)` — a compile-clean F#
+   comment that drops the UI element with no error. It escapes the load-time
+   `REQUIRED_PRIMITIVES` gate (procedural pack, no `feliz` format) and the showcase
+   render matrix (`FALLBACK_MARKERS` lacks the sentinel). Full write-up + repro:
+   [`../audits/frontend-parity-audit-2026-07.md`](../../audits/frontend-parity-audit-2026-07.md)
+   §F1. Safe interim: gate it loud; principled fix: implement the 23 reachable
+   renderers.
 1. **Pack breadth is uneven** (LOW, not a correctness bug) — React has 4 pack
    families / 8 versions; Vue and Svelte have 2 each; Angular has 3
    (`angularMaterial`, `primeng`, `spartanNg` — the latter two **shipped**, no
