@@ -846,8 +846,9 @@ export function printIgnoringClause(node: { bypassAll?: boolean; bypass?: string
 
 function printFindDecl(node: FindDecl): string {
   const params = node.params.map(printParameter).join(", ");
+  const requires = node.gate ? ` requires ${printExpr(node.gate)}` : "";
   const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
-  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}${printIgnoringClause(node)}`;
+  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${requires}${where}${printIgnoringClause(node)}`;
 }
 
 /** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form

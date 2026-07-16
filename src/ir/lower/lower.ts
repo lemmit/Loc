@@ -1480,10 +1480,18 @@ function lowerRepository(
       for (const p of f.params) {
         env = withLocal(env, p.name, "param", lowerType(p.type));
       }
+      // The `requires` gate is lowered in the BARE context env (not
+      // `inAggregate`, no params), so `currentUser` resolves but the source
+      // row's fields do not — the gate decides endpoint access before any row
+      // exists, so it may reference only the principal (+ constants).
+      // Referencing an aggregate field is then a name-resolution error, exactly
+      // the restriction we want (the read-side twin of the view gate).
+      const gateEnv = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       return {
         name: f.name,
         params: f.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
         returnType: lowerType(f.returnType),
+        requires: f.gate ? lowerExpr(f.gate, gateEnv) : undefined,
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
         criterionRef: criterionRefOf(f.filter, env),
         ...resolveBypass(f),

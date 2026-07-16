@@ -7,6 +7,7 @@ import { validateDomainServices } from "./checks/domain-service-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
+  validateFindGates,
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
@@ -188,6 +189,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
     validateViewGates(c, diags);
+    validateFindGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);

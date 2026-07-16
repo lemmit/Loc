@@ -1266,6 +1266,7 @@ Repository:
 
 FindDecl:
     'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        ('requires' gate=Expression)?
         ('where' filter=Expression)?
         IgnoringClause?;
 

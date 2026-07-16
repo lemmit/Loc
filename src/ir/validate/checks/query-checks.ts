@@ -309,7 +309,7 @@ const GATE_ALLOWED_REFS: ReadonlySet<RefKind> = new Set<RefKind>([
 export function validateViewGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const view of ctx.views) {
     if (!view.requires) continue;
-    const offending = firstNonCurrentUserRef(view.requires);
+    const offending = firstNonGateRef(view.requires, GATE_ALLOWED_REFS);
     if (offending !== null) {
       diags.push({
         severity: "error",
@@ -325,52 +325,83 @@ export function validateViewGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]
   }
 }
 
-/** The name of the first reference in an expression tree that isn't legal in a
- *  view gate (anything but currentUser / enum / lambda / helper), or null when
- *  the expression touches only currentUser / constants / operators. */
-function firstNonCurrentUserRef(e: ExprIR): string | null {
-  if (e.kind === "ref") return GATE_ALLOWED_REFS.has(e.refKind) ? null : e.name;
+// Find `requires` gate (D-AUTH-OIDC / default-deny) — the read-side twin of
+// the view gate.  A repository find's optional `requires <expr>` runs before
+// the query; because no row exists yet it may reference only `currentUser`
+// (+ constants), never the source row.  Reject any source-row reference (which
+// lowers to an `unknown` ref in the bare gate env).
+export function validateFindGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const repo of ctx.repositories) {
+    for (const find of repo.finds) {
+      if (!find.requires) continue;
+      const offending = firstNonGateRef(find.requires, GATE_ALLOWED_REFS);
+      if (offending !== null) {
+        diags.push({
+          severity: "error",
+          code: "loom.find-gate-not-current-user",
+          message:
+            `find '${repo.name}.${find.name}': a \`requires\` gate runs before the query (no row ` +
+            `exists yet), so it may only reference \`currentUser\` (and constants) — \`${offending}\` ` +
+            "is not available here. Use `where` to scope which rows return; use `requires` to " +
+            "allow / deny the caller.",
+          source: `find/${repo.name}.${find.name}`,
+        });
+      }
+    }
+  }
+}
+
+/** The name of the first reference in an expression tree that isn't in the
+ *  gate's `allowed` refKind set, or null when the expression touches only
+ *  allowed refs / constants / operators. */
+function firstNonGateRef(e: ExprIR, allowed: ReadonlySet<RefKind>): string | null {
+  if (e.kind === "ref") return allowed.has(e.refKind) ? null : e.name;
   switch (e.kind) {
     case "member":
-      return firstNonCurrentUserRef(e.receiver);
+      return firstNonGateRef(e.receiver, allowed);
     case "method-call":
-      return firstNonCurrentUserRef(e.receiver) ?? firstFromArgs(e.args);
+      return firstNonGateRef(e.receiver, allowed) ?? firstFromArgs(e.args, allowed);
     case "call":
-      return firstFromArgs(e.args);
+      return firstFromArgs(e.args, allowed);
     case "binary":
-      return firstNonCurrentUserRef(e.left) ?? firstNonCurrentUserRef(e.right);
+      return firstNonGateRef(e.left, allowed) ?? firstNonGateRef(e.right, allowed);
     case "ternary":
       return (
-        firstNonCurrentUserRef(e.cond) ??
-        firstNonCurrentUserRef(e.then) ??
-        firstNonCurrentUserRef(e.otherwise)
+        firstNonGateRef(e.cond, allowed) ??
+        firstNonGateRef(e.then, allowed) ??
+        firstNonGateRef(e.otherwise, allowed)
       );
     case "unary":
-      return firstNonCurrentUserRef(e.operand);
+      return firstNonGateRef(e.operand, allowed);
     case "paren":
-      return firstNonCurrentUserRef(e.inner);
+      return firstNonGateRef(e.inner, allowed);
     case "convert":
-      return firstNonCurrentUserRef(e.value);
+      return firstNonGateRef(e.value, allowed);
     case "list":
-      return firstFromArgs(e.elements);
+      return firstFromArgs(e.elements, allowed);
     case "match":
       return (
-        firstFromArgs(e.arms.flatMap((a) => [a.cond, a.value])) ??
-        (e.otherwise ? firstNonCurrentUserRef(e.otherwise) : null)
+        firstFromArgs(
+          e.arms.flatMap((a) => [a.cond, a.value]),
+          allowed,
+        ) ?? (e.otherwise ? firstNonGateRef(e.otherwise, allowed) : null)
       );
     case "lambda":
-      return e.body ? firstNonCurrentUserRef(e.body) : null;
+      return e.body ? firstNonGateRef(e.body, allowed) : null;
     case "new":
     case "object":
-      return firstFromArgs(e.fields.map((f) => f.value));
+      return firstFromArgs(
+        e.fields.map((f) => f.value),
+        allowed,
+      );
     default:
       return null;
   }
 }
 
-function firstFromArgs(args: ExprIR[]): string | null {
+function firstFromArgs(args: ExprIR[], allowed: ReadonlySet<RefKind>): string | null {
   for (const a of args) {
-    const r = firstNonCurrentUserRef(a);
+    const r = firstNonGateRef(a, allowed);
     if (r !== null) return r;
   }
   return null;

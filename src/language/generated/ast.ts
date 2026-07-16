@@ -1439,6 +1439,7 @@ export interface FindDecl extends langium.AstNode {
     bypass: Array<string>;
     bypassAll: boolean;
     filter?: Expression;
+    gate?: Expression;
     name: string;
     params: Array<Parameter>;
     returnType: TypeRef;
@@ -1449,6 +1450,7 @@ export const FindDecl = {
     bypass: 'bypass',
     bypassAll: 'bypassAll',
     filter: 'filter',
+    gate: 'gate',
     name: 'name',
     params: 'params',
     returnType: 'returnType'
@@ -5303,6 +5305,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 filter: {
                     name: FindDecl.filter,
+                    optional: true
+                },
+                gate: {
+                    name: FindDecl.gate,
                     optional: true
                 },
                 name: {
