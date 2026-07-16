@@ -24,6 +24,7 @@ import type {
   ExprIR,
   PageIR,
   StmtIR,
+  TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -83,6 +84,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         );
         if (slots.size > 0) componentActionParams.set(comp.name, slots);
       }
+      const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
       for (const page of ui.pages) {
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
@@ -99,6 +101,15 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.title, ctx, diags);
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
+        checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
+        checkAsyncEffectArgs(
+          pageWhere(page),
+          page.actions,
+          aggByName,
+          apiParamNames,
+          aggNames,
+          diags,
+        );
       }
       for (const comp of ui.components) {
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
@@ -114,8 +125,225 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         };
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
+        checkAsyncEffectArgs(
+          `component '${comp.name}'`,
+          comp.actions,
+          aggByName,
+          apiParamNames,
+          aggNames,
+          diags,
+        );
       }
     }
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.instance-effect-needs-route-id` (M-T6.17) — a page action whose body
+// awaits an aggregate INSTANCE operation (`match await <api>.<Agg>.<op>(…)`)
+// acts on the record identified by the page's route `:id`.  On a paramless page
+// there is no record in scope, so the effect is user error on EVERY frontend:
+// the Feliz generator gates it, and the JS frontends (React/Vue/Svelte/Angular)
+// synthesize a `useParams` `id` and POST an empty-id (`id ?? ""`) request — a
+// broken call.  This TARGET-AGNOSTIC check rejects it uniformly so a `.ddd`
+// generates working code on every target, or fails validation on every target.
+// (Workflows / non-aggregate subjects aren't record-scoped, so they're skipped.)
+// -------------------------------------------------------------------------
+
+/** True when a page `route:` binds a `:param` segment (`/orders/:id`). */
+function pageRouteHasParam(route: string | undefined): boolean {
+  return (route ?? "/").split("/").some((s) => s.startsWith(":"));
+}
+
+/** The aggregate + op a `variant-match` subject awaits, when it is an aggregate
+ *  INSTANCE operation — `<apiParam>.<Agg>.<op>(…)` (Pattern B) or a bare
+ *  `<Agg>.<op>(…)` (Pattern E); otherwise null.  Mirrors `detectAwaitedInstanceOp`
+ *  in the Feliz classifier, target-neutral. */
+function resolveInstanceOpSubject(
+  subject: ExprIR,
+  apiParamNames: ReadonlySet<string>,
+  aggNames: ReadonlySet<string>,
+): { aggregate: string; op: string } | null {
+  if (subject.kind !== "method-call") return null;
+  const recv = subject.receiver;
+  if (
+    recv.kind === "member" &&
+    recv.receiver.kind === "ref" &&
+    apiParamNames.has(recv.receiver.name) &&
+    aggNames.has(recv.member)
+  ) {
+    return { aggregate: recv.member, op: subject.member };
+  }
+  if (recv.kind === "ref" && aggNames.has(recv.name)) {
+    return { aggregate: recv.name, op: subject.member };
+  }
+  return null;
+}
+
+/** Walk a `variant-match` subject at every depth in an action body. */
+function forEachVariantMatch(
+  stmts: readonly StmtIR[],
+  visit: (s: Extract<StmtIR, { kind: "variant-match" }>) => void,
+): void {
+  for (const s of stmts) {
+    if (s.kind === "variant-match") {
+      visit(s);
+      for (const arm of s.arms) forEachVariantMatch(arm.body, visit);
+      forEachVariantMatch(s.elseBody ?? [], visit);
+    }
+  }
+}
+
+/** Reject an instance-op `match await` on a page with no `:id` route. */
+function checkInstanceEffectRouteId(
+  page: PageIR,
+  aggNames: ReadonlySet<string>,
+  apiParamNames: ReadonlySet<string>,
+  diags: LoomDiagnostic[],
+): void {
+  if (pageRouteHasParam(page.route)) return;
+  for (const action of page.actions) {
+    forEachVariantMatch(action.body, (s) => {
+      if (!resolveInstanceOpSubject(s.subject, apiParamNames, aggNames)) return;
+      diags.push({
+        severity: "error",
+        code: "loom.instance-effect-needs-route-id",
+        message:
+          `page '${page.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
+          `on the record identified by the page's route \`:id\` — but this page (route ` +
+          `"${page.route ?? "/"}") declares no \`:id\` param, so no record is in scope.  Host the ` +
+          `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
+          `(OperationForm).  M-T6.17.`,
+        source: `page '${page.name}'`,
+      });
+    });
+  }
+}
+
+/** `loom.match-await-arg-mismatch` — the awaited op call's arguments must match
+ *  the operation signature.  The request payload every frontend POSTs is built by
+ *  index-aligning the call's args with the op's params, so a wrong count silently
+ *  ships a broken request (React emits `{ note: undefined }`; Feliz fails the
+ *  Fable compile).  Validate the arity here, target-agnostically: at most one arg
+ *  per param, and every un-supplied trailing param must be `optional`. */
+function checkAsyncEffectArgs(
+  where: string,
+  actions: readonly ActionIR[],
+  aggByName: ReadonlyMap<string, AggregateIR>,
+  apiParamNames: ReadonlySet<string>,
+  aggNames: ReadonlySet<string>,
+  diags: LoomDiagnostic[],
+): void {
+  for (const action of actions) {
+    forEachVariantMatch(action.body, (s) => {
+      if (s.subject.kind !== "method-call") return;
+      const resolved = resolveInstanceOpSubject(s.subject, apiParamNames, aggNames);
+      const agg = resolved && aggByName.get(resolved.aggregate);
+      const op = agg?.operations.find((o) => o.name === resolved!.op);
+      if (!op) return; // not a resolvable aggregate op — nothing to arity-check
+      const args = s.subject.args;
+      const params = op.params;
+      const sig = params.map((p) => `${p.name}: ${typeLabel(p.type)}`).join(", ");
+      // Arity — the request payload index-aligns args → params.
+      const tooMany = args.length > params.length;
+      const missingRequired = params.slice(args.length).some((p) => p.type.kind !== "optional");
+      if (tooMany || missingRequired) {
+        diags.push({
+          severity: "error",
+          code: "loom.match-await-arg-mismatch",
+          message:
+            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes ${args.length} ` +
+            `argument(s), but operation \`${resolved!.op}(${sig})\` expects ${params.length} ` +
+            `(${params.filter((p) => p.type.kind !== "optional").length} required).  The awaited call's ` +
+            `arguments build the request payload — a mismatch ships a broken request.  Pass one argument ` +
+            `per parameter, in order.`,
+          source: where,
+        });
+      }
+      // Type — for the args we can PROVE a type of (literals), the family must
+      // match the param's.  Refs / computed exprs are skipped (no false positive);
+      // full expr-type inference over the args is the language-type-checker's job.
+      for (let i = 0; i < Math.min(args.length, params.length); i++) {
+        const arg = args[i]!;
+        if (arg.kind !== "literal") continue;
+        const argFam = literalFamily(arg.lit);
+        const paramFam = typeFamily(params[i]!.type);
+        if (!argFam || !paramFam || argFam === paramFam) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.match-await-arg-type",
+          message:
+            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes a ${argFam} ` +
+            `literal (\`${arg.value}\`) for parameter \`${params[i]!.name}: ${typeLabel(params[i]!.type)}\` ` +
+            `(a ${paramFam} type).  The argument encodes into the request payload — pass a ${paramFam} value.`,
+          source: where,
+        });
+      }
+    });
+  }
+}
+
+/** Coarse type family of a literal, or undefined when it doesn't constrain
+ *  (`null` / `now`).  Used for a low-false-positive arg/param type check. */
+function literalFamily(lit: string): "numeric" | "string" | "bool" | undefined {
+  switch (lit) {
+    case "int":
+    case "long":
+    case "decimal":
+    case "money":
+      return "numeric";
+    case "string":
+      return "string";
+    case "bool":
+      return "bool";
+    default:
+      return undefined; // null / now — don't constrain
+  }
+}
+
+/** Coarse type family of a param type (peeling `optional`), or undefined when a
+ *  literal can't be meaningfully family-checked against it (VO / entity / array).
+ *  Enum + id + datetime are string-ish on the wire, so a string literal fits. */
+function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
+  const base = t.kind === "optional" ? t.inner : t;
+  if (base.kind === "id" || base.kind === "enum") return "string";
+  if (base.kind === "primitive") {
+    switch (base.name) {
+      case "int":
+      case "long":
+      case "decimal":
+      case "money":
+        return "numeric";
+      case "bool":
+        return "bool";
+      case "string":
+      case "json":
+      case "datetime":
+        return "string";
+      default:
+        return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
+function typeLabel(t: TypeIR): string {
+  switch (t.kind) {
+    case "optional":
+      return `${typeLabel(t.inner)}?`;
+    case "primitive":
+      return t.name;
+    case "id":
+      return `${t.targetName} id`;
+    case "enum":
+    case "valueobject":
+    case "entity":
+      return t.name;
+    case "array":
+      return `${typeLabel(t.element)}[]`;
+    default:
+      return t.kind;
   }
 }
 

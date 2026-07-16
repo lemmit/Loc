@@ -218,11 +218,13 @@ export function renderMsg(
       `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
-    // An async effect (`match await`): a trigger carrying the route id + a
-    // result carrying the decoded `<Succ> option` (success tag → Some, else None).
+    // An async effect (`match await`): a trigger carrying the route id (+ any op
+    // args) + a result carrying the decoded `<outcome> option` (a matched variant
+    // → Some, an unmatched tag / failure → None/Error).  `<outcome>` is the single
+    // variant's record type, or the discriminated-union type for a multi-variant.
     ...asyncEffects.flatMap((e) => [
-      `  | ${e.triggerMsg} of string`,
-      `  | ${e.resultMsg} of Result<${e.successType} option, string>`,
+      `  | ${e.triggerMsg} of ${["string", ...e.params.map((p) => p.fsType)].join(" * ")}`,
+      `  | ${e.resultMsg} of Result<${e.outcomeType} option, string>`,
     ]),
     // A one-click action (`Action { instance.op }`): a trigger carrying the
     // route id + a `Done` result (the op returns 204 → `unit`).
@@ -526,21 +528,40 @@ export function renderUpdate(
   // (its body rendered with `p` bound), the `else` body under BOTH `(Ok None)`
   // (the tag didn't match / no success) and `(Error _)` (a thrown / non-2xx).
   const asyncEffectArms = asyncEffects.flatMap((e) => {
-    const successCtx: FsExprCtx = {
-      stateNames,
-      locals: new Set(e.binding ? [e.binding] : []),
-    };
     const elseCtx: FsExprCtx = { stateNames, locals: new Set() };
-    return [
-      `  | ${e.triggerMsg} id -> model, Cmd.OfAsync.perform (Api.${e.apiFn} id) () ${e.resultMsg}`,
-      assembleArm(
-        `  | ${e.resultMsg} (Ok (Some ${e.binding ?? "_"})) ->`,
-        e.successBody,
-        successCtx,
-      ),
-      assembleArm(`  | ${e.resultMsg} (Ok None) ->`, e.elseBody, elseCtx),
-      assembleArm(`  | ${e.resultMsg} (Error _) ->`, e.elseBody, elseCtx),
+    // Trigger arm: destructure `(id, <param>, …)` (named after the op params) and
+    // fire the curried api fn.
+    const argNames = e.params.map((p) => p.name);
+    const triggerPat = e.params.length === 0 ? "id" : `(id, ${argNames.join(", ")})`;
+    const apiArgs = ["id", ...argNames].join(" ");
+    const arms: string[] = [
+      `  | ${e.triggerMsg} ${triggerPat} -> model, Cmd.OfAsync.perform (Api.${e.apiFn} ${apiArgs}) () ${e.resultMsg}`,
     ];
+    // One result arm per named variant.  Single-variant → `(Ok (Some b))`;
+    // multi-variant → `(Ok (Some (<DuCase> b)))`.  A variant that binds a local
+    // its body never reads gets a `_` binder so `--warnings-as-errors` stays green.
+    for (const v of e.variants) {
+      const ctx: FsExprCtx = { stateNames, locals: new Set(v.binding ? [v.binding] : []) };
+      const inner = (b: string) => (e.isMulti ? `(${v.duCase} ${b})` : b);
+      const arm = assembleArm(
+        `  | ${e.resultMsg} (Ok (Some ${inner(v.binding ?? "_")})) ->`,
+        v.body,
+        ctx,
+      );
+      if (v.binding) {
+        const bodyPortion = arm.slice(arm.indexOf("\n") + 1);
+        const used = new RegExp(`\\b${v.binding}\\b`).test(bodyPortion);
+        arms.push(used ? arm : `  | ${e.resultMsg} (Ok (Some ${inner("_")})) ->\n${bodyPortion}`);
+      } else {
+        arms.push(arm);
+      }
+    }
+    // The unmatched / failure outcome reduces the `else` body — or a no-op when
+    // the source had no `else` (an empty body → `model, Cmd.none`).
+    const elseBody = e.elseBody ?? [];
+    arms.push(assembleArm(`  | ${e.resultMsg} (Ok None) ->`, elseBody, elseCtx));
+    arms.push(assembleArm(`  | ${e.resultMsg} (Error _) ->`, elseBody, elseCtx));
+    return arms;
   });
   // A one-click action: the trigger fires the id-qualified POST `Cmd`; on
   // success it refetches the detail read (`pageCmd` when byId reads exist, so the
