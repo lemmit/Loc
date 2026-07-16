@@ -326,10 +326,25 @@ export interface StoreIR {
   actions: ActionIR[];
 }
 
+/** An author-written, user-facing validation message attached to a rule via a
+ *  `message "..."` clause. A descriptor (not a bare string) so the i18n mission
+ *  can later add `key`/`args` without changing the shape every emitter reads;
+ *  v1 carries only `text` (the one genuine input). The wire/i18n `code` is a
+ *  pure content-hash of `text` — derived on demand via `messageCode`
+ *  (`src/util/message-code.ts`), never stored (derive, don't stamp). */
+export interface MessageIR {
+  /** The author-written text, shown to the user (STRING-terminal-stripped). */
+  text: string;
+}
+
 export interface InvariantIR {
   expr: ExprIR;
   guard?: ExprIR;
   source: string;
+  /** When present, a `message "..."` clause forces this rule onto the wire/refine
+   *  carrier (never the native-chain optimisation) so the text reaches the
+   *  frontend inline error, the wire 422 `errors[]`, and the domain floor. */
+  message?: MessageIR;
   /** When `"server-only"`, the invariant skips wire-boundary
    *  validators (frontend Zod, Hono routes, FluentValidation) even
    *  when its expression would translate cleanly.  Domain-layer
@@ -1453,7 +1468,7 @@ export interface ProjectionOnIR {
 }
 
 export type WorkflowStmtIR =
-  | { kind: "precondition"; expr: ExprIR; source: string; origin?: OriginRef }
+  | { kind: "precondition"; expr: ExprIR; source: string; message?: MessageIR; origin?: OriginRef }
   | { kind: "requires"; expr: ExprIR; source: string; origin?: OriginRef }
   | {
       kind: "emit";
@@ -2903,7 +2918,7 @@ export interface UiParamBindingIR {
 // ---------------------------------------------------------------------------
 
 export type StmtIR =
-  | { kind: "precondition"; expr: ExprIR; source: string; origin?: OriginRef }
+  | { kind: "precondition"; expr: ExprIR; source: string; message?: MessageIR; origin?: OriginRef }
   | { kind: "requires"; expr: ExprIR; source: string; origin?: OriginRef }
   | { kind: "let"; name: string; expr: ExprIR; type: TypeIR; origin?: OriginRef }
   | {

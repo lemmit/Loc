@@ -633,7 +633,7 @@ function opRequestModel(
 function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
   const out: InvariantIR[] = [];
   for (const s of op.statements) {
-    if (s.kind === "precondition") out.push({ expr: s.expr, source: s.source });
+    if (s.kind === "precondition") out.push({ expr: s.expr, source: s.source, message: s.message });
   }
   return out;
 }

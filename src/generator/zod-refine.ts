@@ -80,10 +80,19 @@ export function takeSingleFieldChain(
  *  emitter consumes them via `takeSingleFieldChain` first. */
 export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string | null {
   if (!classifyForWire(inv, ctx)) return null;
-  if (takeSingleFieldChain(inv, ctx)) return null;
+  // A messaged single-field invariant is deliberately kept OUT of the native
+  // chain (which has no message slot) so its refine survives — only suppress the
+  // refine for a message-less shape the chain already absorbed.
+  if (!inv.message && takeSingleFieldChain(inv, ctx)) return null;
   const body = renderRefineExpr(inv.expr);
   const guarded = inv.guard ? `!(${renderRefineExpr(inv.guard)}) || (${body})` : body;
-  const message = JSON.stringify(`Invariant violated: ${inv.source}`);
+  // Author `message "..."` wins over the derived "Invariant violated: <src>"
+  // default.  (The stable wire `code` that would ride alongside it is a
+  // cross-backend ProblemDetails contract change — deferred to its own
+  // all-backend lockstep slice so parity stays green.)
+  const message = JSON.stringify(
+    inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+  );
   const path = pickErrorPath(inv);
   const opts = path
     ? `{ path: [${JSON.stringify(path)}], message: ${message} }`

@@ -201,6 +201,7 @@ export type DddKeywordNames =
     | "match"
     | "meilisearch"
     | "menu"
+    | "message"
     | "migration"
     | "modules"
     | "money"
@@ -927,10 +928,10 @@ export function isCommandHandler(item: unknown): item is CommandHandler {
     return reflection.isInstance(item, CommandHandler.$type);
 }
 
-export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
+export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 export function isCommonSoftKeywords(item: unknown): item is CommonSoftKeywords {
-    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'managed' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
+    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
 }
 
 export interface Component extends langium.AstNode {
@@ -1691,6 +1692,7 @@ export interface Invariant extends langium.AstNode {
     readonly $type: 'Invariant';
     expr: Expression;
     guard?: Expression;
+    message?: string;
     serverOnly: boolean;
 }
 
@@ -1698,6 +1700,7 @@ export const Invariant = {
     $type: 'Invariant',
     expr: 'expr',
     guard: 'guard',
+    message: 'message',
     serverOnly: 'serverOnly'
 } as const;
 
@@ -2709,11 +2712,13 @@ export interface PreconditionStmt extends langium.AstNode {
     readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
+    message?: string;
 }
 
 export const PreconditionStmt = {
     $type: 'PreconditionStmt',
-    expr: 'expr'
+    expr: 'expr',
+    message: 'message'
 } as const;
 
 export function isPreconditionStmt(item: unknown): item is PreconditionStmt {
@@ -2808,6 +2813,7 @@ export interface Property extends langium.AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
+    message?: string;
     name: 'await' | CommonSoftKeywords | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
@@ -2819,6 +2825,7 @@ export const Property = {
     access: 'access',
     check: 'check',
     default: 'default',
+    message: 'message',
     name: 'name',
     provenanced: 'provenanced',
     sensitivity: 'sensitivity',
@@ -5491,6 +5498,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: Invariant.guard,
                     optional: true
                 },
+                message: {
+                    name: Invariant.message,
+                    optional: true
+                },
                 serverOnly: {
                     name: Invariant.serverOnly,
                     defaultValue: false,
@@ -6274,6 +6285,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             properties: {
                 expr: {
                     name: PreconditionStmt.expr
+                },
+                message: {
+                    name: PreconditionStmt.message,
+                    optional: true
                 }
             },
             superTypes: [Statement.$type, TestStatement.$type]
@@ -6359,6 +6374,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 default: {
                     name: Property.default,
+                    optional: true
+                },
+                message: {
+                    name: Property.message,
                     optional: true
                 },
                 name: {

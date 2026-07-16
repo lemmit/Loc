@@ -432,6 +432,14 @@
     "nameRef",
     "paramName"
   ],
+  "message": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "migration": [
     "fieldName",
     "lValue",

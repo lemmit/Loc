@@ -177,6 +177,9 @@ export function lowerInvariant(i: Invariant, env: Env): InvariantIR {
     // layers (frontend Zod, Hono routes, FluentValidation).  The
     // domain-layer `AssertInvariants()` floor still enforces it.
     scope: i.serverOnly ? "server-only" : undefined,
+    // `message "..."` — the STRING terminal is delimiter-stripped, so `i.message`
+    // is the raw text; re-quote on emission.
+    message: i.message ? { text: i.message } : undefined,
   };
 }
 
@@ -201,6 +204,7 @@ export function lowerPropertyChecks(props: Property[], env: Env): InvariantIR[] 
       // Normalise whitespace so multi-line `check` clauses don't
       // carry indentation into error messages.
       source: `${p.name} check ${cstText(p.check).replace(/\s+/g, " ").trim()}`,
+      message: p.message ? { text: p.message } : undefined,
     });
   }
   return out;

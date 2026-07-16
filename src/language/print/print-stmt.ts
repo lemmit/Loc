@@ -10,7 +10,7 @@ import { printExpr, printTypeAtomLite, registerStatementPrinter } from "./print-
 export function printStmt(node: Statement): string {
   switch (node.$type) {
     case "PreconditionStmt":
-      return `precondition ${printExpr(node.expr)}`;
+      return `precondition ${printExpr(node.expr)}${node.message ? ` message ${JSON.stringify(node.message)}` : ""}`;
     case "RequiresStmt":
       return `requires ${printExpr(node.expr)}`;
     case "LetStmt":

@@ -1729,7 +1729,7 @@ export function emitWireSchema(
   const chainByField = new Map<string, SingleFieldPattern[]>();
   const remaining: InvariantIR[] = [];
   for (const inv of invariants) {
-    const taken = takeSingleFieldChain(inv, ctx);
+    const taken = inv.message ? null : takeSingleFieldChain(inv, ctx);
     if (taken) {
       const list = chainByField.get(taken.field) ?? [];
       list.push(taken.pattern);
@@ -1766,7 +1766,7 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
   const out: InvariantIR[] = [];
   for (const s of op.statements) {
     if (s.kind === "precondition") {
-      out.push({ expr: s.expr, source: s.source });
+      out.push({ expr: s.expr, source: s.source, message: s.message });
     }
   }
   return out;

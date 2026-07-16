@@ -12257,6 +12257,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                   },
                   "arguments": []
                 }
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "message"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "message",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@236"
+                      },
+                      "arguments": []
+                    }
+                  }
+                ],
+                "cardinality": "?"
               }
             ],
             "cardinality": "?"
@@ -12504,6 +12526,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                   "$type": "RuleCall",
                   "rule": {
                     "$ref": "#/rules@197"
+                  },
+                  "arguments": []
+                }
+              }
+            ],
+            "cardinality": "?"
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "message"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "message",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@236"
                   },
                   "arguments": []
                 }
@@ -13368,6 +13412,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "managed"
+          },
+          {
+            "$type": "Keyword",
+            "value": "message"
           },
           {
             "$type": "Keyword",
@@ -14699,6 +14747,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               },
               "arguments": []
             }
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "message"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "message",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@236"
+                  },
+                  "arguments": []
+                }
+              }
+            ],
+            "cardinality": "?"
           }
         ]
       },
