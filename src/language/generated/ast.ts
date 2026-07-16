@@ -70,6 +70,7 @@ export type DddKeywordNames =
     | "api"
     | "apply"
     | "area"
+    | "as"
     | "asc"
     | "audience"
     | "audited"
@@ -1060,6 +1061,7 @@ export function isCreate(item: unknown): item is Create {
 export interface Criterion extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Criterion';
+    alias?: string;
     body: Expression;
     name: string;
     params: Array<Parameter>;
@@ -1068,6 +1070,7 @@ export interface Criterion extends langium.AstNode {
 
 export const Criterion = {
     $type: 'Criterion',
+    alias: 'alias',
     body: 'body',
     name: 'name',
     params: 'params',
@@ -4980,6 +4983,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Criterion: {
             name: Criterion.$type,
             properties: {
+                alias: {
+                    name: Criterion.alias,
+                    optional: true
+                },
                 body: {
                     name: Criterion.body
                 },

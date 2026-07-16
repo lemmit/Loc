@@ -1257,7 +1257,13 @@ function inlineCriterion(c: Criterion, args: ExprIR[], env: Env): ExprIR {
     const a = args[i];
     if (a) argMap.set(p.name, a);
   });
-  bodyEnv = { ...bodyEnv, criterionArgs: argMap, criterionStack: [...stack, c.name] };
+  bodyEnv = {
+    ...bodyEnv,
+    criterionArgs: argMap,
+    criterionStack: [...stack, c.name],
+    // `of T as o` — a bare `o` in the body resolves as `this` (the candidate).
+    ...(c.alias ? { candidateAlias: c.alias } : {}),
+  };
   return lowerExpr(c.body, bodyEnv);
 }
 
@@ -1353,6 +1359,10 @@ function resolveNameRef(name: string, env: Env): ExprIR {
   // unshadowable.
   const alias = env.refAliases?.get(name);
   if (alias) return alias;
+  // Criterion candidate alias (`criterion … of T as o`): a bare `o` IS the
+  // candidate — resolve it exactly as `this`, so `o.region` lowers identically
+  // to `this.region` and stays SQL-queryable.
+  if (name === env.candidateAlias) return { kind: "this" };
   const local = env.locals.get(name);
   if (local) {
     const refKind = local.kind;
@@ -1729,6 +1739,11 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     const alias = env.refAliases?.get(expr.name);
     if (alias) {
       return "type" in alias && alias.type ? alias.type : { kind: "primitive", name: "string" };
+    }
+    // Criterion candidate alias (`of T as o`) — types as the candidate entity,
+    // exactly like `this`, so `o.field` member access resolves against it.
+    if (expr.name === env.candidateAlias && env.aggregate) {
+      return { kind: "entity", name: env.aggregate.name };
     }
     // Parameterless criterion / policy-function reference types as a boolean
     // predicate.

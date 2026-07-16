@@ -102,6 +102,14 @@ export interface Env {
    *  `resolveNameRef` before the ordinary local lookup.  Undefined outside
    *  an absence-match arm. */
   refAliases?: Map<string, ExprIR>;
+  /** The optional `of T as <alias>` binder on a `criterion` — the author's
+   *  chosen name for the candidate (read-path-architecture.md, "Aligned with
+   *  criterion").  Set while lowering a criterion body (declaration or inline)
+   *  whose candidate is aliased; a bare reference to it resolves EXACTLY like
+   *  `this` (same candidate aggregate), so `o.region` lowers byte-identically
+   *  to `this.region` / bare `region` and stays SQL-queryable.  `this`/bare
+   *  remains the default; undefined when no alias is declared. */
+  candidateAlias?: string;
   /** Active criterion-parameter substitutions, set only while inlining
    *  a `criterion` body at a use site (see `inlineCriterion` in
    *  lower-expr.ts).  Maps each parameter name to the caller's already-

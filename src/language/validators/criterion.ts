@@ -70,6 +70,15 @@ export function checkCriteria(model: Model, accept: ValidationAcceptor): void {
 
 function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
   const candidate = candidateAggregate(c);
+  // --- alias collision: `of T as o` where `o` is also a parameter name is
+  // ambiguous (does `o` mean the candidate or the param?).  Reject it.
+  if (c.alias && c.params.some((p) => p.name === c.alias)) {
+    accept(
+      "error",
+      `criterion '${c.name}' binds the candidate alias '${c.alias}', but a parameter of the same name already exists — rename one so a bare '${c.alias}' is unambiguous.`,
+      { node: c, property: "alias", code: "loom.criterion-alias-collision" },
+    );
+  }
   // --- target kind ----------------------------------------------------
   if (!candidate && !isBoolTarget(c)) {
     accept(

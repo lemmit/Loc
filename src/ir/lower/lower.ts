@@ -1225,6 +1225,9 @@ function lowerCriterion(c: Criterion, env: Env): CriterionIR {
     const candidate = findEntityByName(env, targetType.name);
     if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
   }
+  // `of T as o` — the author's alias for the candidate; a bare `o` resolves as
+  // `this` (read-path-architecture.md, "Aligned with criterion").
+  if (c.alias) bodyEnv = { ...bodyEnv, candidateAlias: c.alias };
   for (const p of c.params) {
     bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
   }
