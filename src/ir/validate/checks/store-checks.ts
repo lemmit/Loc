@@ -311,11 +311,18 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         // variants, reified from the RFC-7807 `type` URI), and an OPTIONAL `else`
         // — projected to a trigger→result MVU pair with a tagged-union decoder.
         // Only TWO cases stay gated: (1) a host with no route `id` (a component,
-        // or a page without a `:id` route — an instance op has no id to POST to),
-        // and (2) a subject that isn't an aggregate instance op (a collection op,
-        // a workflow).  `classifyFelizAsyncEffect` is the shared arbiter for (2)
-        // so the gate and the generator can't drift; the host route-id check (1)
-        // lives here (the classifier is host-agnostic).
+        // or a page without a `:id` route — an instance op acts on a record it has
+        // no id to identify), and (2) a subject that isn't an aggregate instance op
+        // (a collection op, a workflow).  `classifyFelizAsyncEffect` is the shared
+        // arbiter for (2) so the gate and the generator can't drift; the host
+        // route-id check (1) lives here (the classifier is host-agnostic).
+        //
+        // NOTE — case (1) is a TARGET-AGNOSTIC invalidity, enforced only on Feliz
+        // today.  A paramless-page instance-op `match await` is user error on ANY
+        // frontend (there is no record in scope), but the JS frontends don't gate
+        // it: they synthesize a `useParams` `id` and emit `id ?? ""`, POSTing a
+        // broken empty-id request.  Lifting this to a universal frontend validator
+        // (so React/Vue/Svelte/Angular reject it too) is tracked as M-T6.17.
         const ui = sys.uis.find((u) => u.name === uiName);
         if (!ui) continue;
         const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
