@@ -1280,23 +1280,17 @@ function felizAsyncEffect(
   };
 }
 
-/** True when a page `route:` binds a `:param` — the detail-page `id` an
- *  instance-op async effect's trigger sources.  Mirrors `hasRouteParam`
- *  (index.ts) + `routeHasParam` (store-checks.ts). */
-function routeHasParam(route: string | undefined): boolean {
-  return (route ?? "/").split("/").some((s) => s.startsWith(":"));
-}
-
 /** Collect the supported `match await` async effects a page hosts, deduped by
- *  action name.  Only a `:id` detail page can source the trigger id, so a
- *  non-detail page yields none (its effects stay gated at validation). */
+ *  action name.  Emitted on ANY page (the trigger sources the route `id` when the
+ *  page declares `:id`, else an empty-string fallback — mirroring the JS
+ *  frontends' `useParams` `id ?? ""`, which synthesize an `id` binding even on a
+ *  paramless route).  Components are not projected here (they stay gated). */
 export function collectPageAsyncEffects(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   apiParamNames: ReadonlySet<string>,
   errorPayloadNames: ReadonlySet<string>,
 ): FelizAsyncEffect[] {
-  if (!routeHasParam(page.route)) return [];
   const aggregateNames = new Set(aggregatesByName.keys());
   const out: FelizAsyncEffect[] = [];
   const seen = new Set<string>();

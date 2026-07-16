@@ -132,22 +132,25 @@ function dispatchWrappers(
   asyncEffectActions: ReadonlyMap<string, FelizAsyncEffect> = new Map(),
 ): string[] {
   const stateNames = new Set(page.state.map((s) => s.name));
-  // Args are rendered in the VIEW's scope — a state read resolves to
-  // `model.<Field>`; the route `id` is a bound local of the detail-page view fn.
+  // The route `id` the trigger sources: a `:id` detail page binds it in the view
+  // fn; a paramless page has none, so it falls back to `""` — the F# twin of the
+  // JS frontends' `useParams` `id ?? ""` (which synthesize an `id` binding on any
+  // route).  Args are rendered in the VIEW's scope (a state read → `model.<Field>`).
+  const routeId = hasRouteParam(page) ? "id" : '""';
   const argCtx: FsExprCtx = { stateNames, locals: new Set(["id"]) };
   return page.actions
     .filter((a) => used.has(a.name))
     .map((a) => {
       // An async-effect action's body is a `match await` — its trigger Msg
-      // carries the route `id` (the detail-page view fn's `id` param) plus any op
-      // args, so the wrapper dispatches `<Trigger> id` / `<Trigger> (id, …args)`.
+      // carries the route `id` plus any op args, so the wrapper dispatches
+      // `<Trigger> <routeId>` / `<Trigger> (<routeId>, …args)`.
       const effect = asyncEffectActions.get(a.name);
       if (effect) {
         if (effect.params.length === 0) {
-          return `    let ${a.name} () = dispatch (${msgCase(a.name)} id)`;
+          return `    let ${a.name} () = dispatch (${msgCase(a.name)} ${routeId})`;
         }
         const args = effect.params.map((p) => renderFsExpr(p.argExpr, argCtx)).join(", ");
-        return `    let ${a.name} () = dispatch (${msgCase(a.name)} (id, ${args}))`;
+        return `    let ${a.name} () = dispatch (${msgCase(a.name)} (${routeId}, ${args}))`;
       }
       const p = a.params[0]?.name;
       return p
