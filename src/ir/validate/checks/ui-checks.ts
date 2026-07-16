@@ -358,11 +358,16 @@ const EFFECT_STMT_TOKEN: Record<string, string> = {
  *  through `checkBody`'s `lambda` arm — an `action` body is walked via
  *  `checkActionBodies` and never reaches here, so effects there are untouched.
  *
- *  Scope: the census vocabulary — effect StmtIR kinds + a single-expression
- *  view-effect (`navigate`/`toast`) call.  A direct api-hook mutation call
- *  (`onClick: e => { X.create.mutate(v) }`) is a SEPARATE mechanism (the
- *  `tryDetectApiHook` hoist, not a free effect statement) and is intentionally
- *  out of scope here. */
+ *  Scope: two arms, both raising `loom.effect-in-lambda`.
+ *    1. Effect StmtIR kinds (`:=`/`+=`/`emit`/bare `call`/`match await`) + a
+ *       single-expression view-effect (`navigate`/`toast`) call.
+ *    2. A direct remote MUTATION reachable in the lambda body (`onClick: e => {
+ *       X.create(v) }`).  This lowers to an `expression`-statement wrapping a
+ *       `method-call` — a *pure* StmtIR kind the arm-1 token scan skips — so it
+ *       needs its own detection (`firstMutatingCallInLambda`), reusing the same
+ *       remote-write classifier as the action-body await-floor.  Closes the last
+ *       inline-effect form so the MVU `Model → Html` view is pure BY
+ *       CONSTRUCTION on every target (fable-elmish-frontend.md §2.2 / §8). */
 function checkLambdaPurity(
   lambda: Extract<ExprIR, { kind: "lambda" }>,
   ctx: BodyCheckCtx,
@@ -371,6 +376,8 @@ function checkLambdaPurity(
   // Extern-component `action`-typed param callback — effects are legitimate and
   // walk in the caller's scope; the call arm marked it exempt.
   if (ctx.exemptLambdas.has(lambda)) return;
+  const arrow = lambda.param ? `${lambda.param} => …` : `() => …`;
+  // Arm 1 — effect StmtIR / view-effect.
   // Block form (`e => { count := count + 1 }`): any effectful StmtIR kind.
   // Single-expression form (`e => navigate("/x")`): a bare view-effect call
   // (`navigate`/`toast`) — the only effect an expression body can carry (a
@@ -385,15 +392,32 @@ function checkLambdaPurity(
     : singleExprEffect
       ? body.name
       : undefined;
-  if (!token) return;
-  const arrow = lambda.param ? `${lambda.param} => …` : `() => …`;
+  if (token) {
+    diags.push({
+      severity: "error",
+      code: "loom.effect-in-lambda",
+      message:
+        `${ctx.where}: inline handler \`${arrow}\` performs an effect (\`${token}\`) in the page body. ` +
+        `Only a named \`action\` may carry effects — declare one and reference it by name ` +
+        `(e.g. \`action doIt(…) { … }\` then \`onClick: doIt\`). Render-tree lambdas must be pure.`,
+      source: ctx.where,
+    });
+    return;
+  }
+  // Arm 2 — a direct remote mutation inline in the view (no effect StmtIR token,
+  // so arm 1 missed it).  Reads (`.all`/`.byId`/finders) inside a value lambda
+  // stay legal — only a mutating command is rejected.
+  const mut = firstMutatingCallInLambda(lambda, ctx);
+  if (!mut) return;
   diags.push({
     severity: "error",
     code: "loom.effect-in-lambda",
     message:
-      `${ctx.where}: inline handler \`${arrow}\` performs an effect (\`${token}\`) in the page body. ` +
-      `Only a named \`action\` may carry effects — declare one and reference it by name ` +
-      `(e.g. \`action doIt(…) { … }\` then \`onClick: doIt\`). Render-tree lambdas must be pure.`,
+      `${ctx.where}: inline handler \`${arrow}\` performs a remote mutation ` +
+      `(\`${mut.aggName}.${mut.op}(…)\`) in the page body. Only a named \`action\` may carry ` +
+      `effects — declare one and await the command so its Result is handled (e.g. ` +
+      `\`action doIt(…) { match await ${mut.aggName}.${mut.op}(…) { … } }\` then \`onClick: doIt\`). ` +
+      `Render-tree lambdas must be pure.`,
     source: ctx.where,
   });
 }
@@ -600,6 +624,34 @@ function checkMissingEffectMarker(
   // An `await`-marked call (the subject of a `match await <op>() { … }`) is the
   // explicit, handled form — accept it (async-actions-and-effects.md Stage 2).
   if (call.awaited) return;
+  const m = mutatingAggCommand(call, ctx);
+  if (!m) return;
+  diags.push({
+    severity: "error",
+    code: "loom.missing-effect-marker",
+    message:
+      `${ctx.where}: action body calls \`${m.aggName}.${m.op}(…)\`, a remote mutating command on ` +
+      `aggregate '${m.aggName}', with no effect marker — it has an invisible async boundary. Mark it ` +
+      `\`match await ${m.aggName}.${m.op}(…) { … }\` so its Result is handled ` +
+      `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
+      `Result matched).`,
+    source: ctx.where,
+  });
+}
+
+/** Classify a `method-call` as a REMOTE, MUTATING aggregate command
+ *  (`Order.placeOrder(o)` / `api.Order.placeOrder(o)`) — the one shape both the
+ *  action-body await-floor (`checkMissingEffectMarker`) and the render-tree
+ *  lambda-purity gate (`checkLambdaPurity`, the api-mutation arm) must reject.
+ *  Returns the aggregate + op when the receiver resolves to an aggregate (bare
+ *  Pattern E, or api-handle-rooted Pattern B) and `op` is a public operation /
+ *  create / destroy; `undefined` for reads (`byId`, finders), non-aggregate
+ *  receivers, and view-effects.  Shared so the two gates classify identically —
+ *  a single source of truth for "this is a remote write". */
+function mutatingAggCommand(
+  call: Extract<ExprIR, { kind: "method-call" }>,
+  ctx: BodyCheckCtx,
+): { aggName: string; op: string } | undefined {
   let aggName: string | undefined;
   // Pattern E: receiver is a bare aggregate ref.
   if (call.receiver.kind === "ref" && ctx.aggByName.has(call.receiver.name)) {
@@ -614,26 +666,122 @@ function checkMissingEffectMarker(
   ) {
     aggName = call.receiver.member;
   }
-  if (!aggName) return;
+  if (!aggName) return undefined;
   const agg = ctx.aggByName.get(aggName);
-  if (!agg) return;
+  if (!agg) return undefined;
   const op = call.member;
   const isMutating =
     agg.operations.some((o) => o.name === op && o.visibility === "public") ||
     (agg.creates ?? []).some((o) => o.name === op) ||
     (agg.destroys ?? []).some((o) => o.name === op);
-  if (!isMutating) return;
-  diags.push({
-    severity: "error",
-    code: "loom.missing-effect-marker",
-    message:
-      `${ctx.where}: action body calls \`${aggName}.${op}(…)\`, a remote mutating command on ` +
-      `aggregate '${aggName}', with no effect marker — it has an invisible async boundary. Mark it ` +
-      `\`match await ${aggName}.${op}(…) { … }\` so its Result is handled ` +
-      `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
-      `Result matched).`,
-    source: ctx.where,
-  });
+  return isMutating ? { aggName, op } : undefined;
+}
+
+/** The first REMOTE MUTATING aggregate command reachable anywhere inside a
+ *  render-tree lambda's body/block — WITHOUT descending into nested lambdas
+ *  (each is checked by its own `checkLambdaPurity` pass, so recursing here would
+ *  double-report).  Drives the api-mutation arm of `loom.effect-in-lambda`: a
+ *  bare `onClick: e => { X.create(v) }` inline handler performs a remote write in
+ *  the view, so it must move to a named `action` (awaited + Result-matched).
+ *  The AWAITED form (`match await X.create(v)`) is a `variant-match` StmtIR
+ *  already caught by the effect-token scan, so the caller only reaches here for
+ *  lambdas that carry no effect StmtIR at all. */
+function firstMutatingCallInLambda(
+  lambda: Extract<ExprIR, { kind: "lambda" }>,
+  ctx: BodyCheckCtx,
+): { aggName: string; op: string } | undefined {
+  let found: { aggName: string; op: string } | undefined;
+  const visitExpr = (e: ExprIR | undefined): void => {
+    if (!e || found) return;
+    switch (e.kind) {
+      case "method-call": {
+        const m = mutatingAggCommand(e, ctx);
+        if (m) {
+          found = m;
+          return;
+        }
+        visitExpr(e.receiver);
+        for (const a of e.args) visitExpr(a);
+        return;
+      }
+      case "call":
+        for (const a of e.args) visitExpr(a);
+        return;
+      case "member":
+        visitExpr(e.receiver);
+        return;
+      case "binary":
+        visitExpr(e.left);
+        visitExpr(e.right);
+        return;
+      case "unary":
+        visitExpr(e.operand);
+        return;
+      case "paren":
+        visitExpr(e.inner);
+        return;
+      case "ternary":
+        visitExpr(e.cond);
+        visitExpr(e.then);
+        visitExpr(e.otherwise);
+        return;
+      case "convert":
+        visitExpr(e.value);
+        return;
+      case "list":
+        for (const el of e.elements) visitExpr(el);
+        return;
+      case "match":
+        for (const arm of e.arms) {
+          visitExpr(arm.cond);
+          visitExpr(arm.value);
+        }
+        visitExpr(e.otherwise);
+        return;
+      case "new":
+      case "object":
+        for (const f of e.fields) visitExpr(f.value);
+        return;
+      // "lambda" is intentionally NOT descended — a nested lambda self-checks.
+      default:
+        return;
+    }
+  };
+  const visitStmt = (s: StmtIR): void => {
+    if (found) return;
+    switch (s.kind) {
+      case "precondition":
+      case "requires":
+      case "let":
+      case "expression":
+        visitExpr(s.expr);
+        return;
+      case "assign":
+      case "add":
+      case "remove":
+        visitExpr(s.value);
+        return;
+      case "emit":
+        for (const f of s.fields) visitExpr(f.value);
+        return;
+      case "call":
+        for (const a of s.args) visitExpr(a);
+        return;
+      case "return":
+        visitExpr(s.value);
+        return;
+      case "variant-match":
+        visitExpr(s.subject);
+        for (const arm of s.arms) for (const b of arm.body) visitStmt(b);
+        for (const b of s.elseBody ?? []) visitStmt(b);
+        return;
+      default:
+        return;
+    }
+  };
+  visitExpr(lambda.body);
+  for (const s of lambda.block ?? []) visitStmt(s);
+  return found;
 }
 
 /** The deepest root ref of a member / method-call receiver chain. */
