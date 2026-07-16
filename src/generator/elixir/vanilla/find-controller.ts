@@ -18,9 +18,11 @@ import {
 } from "../../../ir/stdlib/generics.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { renderExpr } from "../render-expr.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
@@ -96,6 +98,7 @@ export function findRoutes(agg: AggregateIR, ctx: BoundedContextIR): ApiRoute[] 
 
 /** Controller actions for the aggregate's HTTP finds. */
 export function renderFindActions(
+  appModule: string,
   ctxModule: string,
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -106,10 +109,19 @@ export function renderFindActions(
   // `conn.assigns` and pass it as the trailing find arg.  Non-principal finds
   // stay byte-identical.
   const principal = aggregateUsesPrincipalContextFilter(agg);
-  const cuLine = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  // Read-side `requires` authorization gate (default-deny): a 403 returned
+  // before the query when the currentUser-only predicate fails — the read-side
+  // analogue of an operation's `requires` and the twin of the view gate.
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const webModule = `${appModule}Web`;
   const actions = httpFindsOf(ctx, agg).map((f) => {
     const findSnake = snake(f.name);
     const paged = pagedReturn(f.returnType);
+    const gateUsesUser = !!f.requires && exprUsesCurrentUser(f.requires);
+    // Bind `current_user` when the find is principal-scoped (repo arg) or its
+    // gate reads the actor; `requires true` on a non-principal find binds none.
+    const cuLine =
+      principal || gateUsesUser ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
     // A find that reads NO params (param-less and non-paged) binds `_params` so
     // it doesn't trip the unused-variable check; a paged find always reads
     // `page`/`pageSize` off `params`.
@@ -132,17 +144,41 @@ export function renderFindActions(
     ].join(", ");
     const call = `${ctxModule}.${findSnake}_${aggSnake}(${argReads})`;
 
+    // Assemble the action from its inner body — wrapping it in an `if not (gate)
+    // do <403> else … end` guard when the find declares a `requires` clause.
+    // Ungated finds stay byte-identical (no gate, original shape).
+    const wrap = (innerBody: string): string => {
+      if (!f.requires) {
+        return `
+  def ${findSnake}(conn, ${paramArg}) do
+${cuLine}${innerBody}
+  end`;
+      }
+      const gate = renderExpr(f.requires, {
+        thisName: "record",
+        contextModule,
+        foundation: "vanilla",
+      });
+      return `
+  def ${findSnake}(conn, ${paramArg}) do
+${cuLine}    if not (${gate}) do
+      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: find ${f.name}`,
+      )})
+    else
+${innerBody}
+    end
+  end`;
+    };
+
     if (paged) {
       // The repository already returns the `%{items, page, pageSize, total,
       // totalPages}` envelope (atom keys) — only `items` needs per-record
       // serialisation; the scalar counters pass straight through to the
       // canonical camelCase JSON.
-      return `
-  def ${findSnake}(conn, ${paramArg}) do
-${cuLine}    with {:ok, result} <- ${call} do
+      return wrap(`    with {:ok, result} <- ${call} do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
-    end
-  end`;
+    end`);
     }
 
     const absent = absentSpec(agg, f.returnType, ctx);
@@ -156,33 +192,24 @@ ${cuLine}    with {:ok, result} <- ${call} do
         absent.kind === "none"
           ? `        problem_variant(conn, 404, "about:blank", "Not Found", %{})`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
-      return `
-  def ${findSnake}(conn, ${paramArg}) do
-${cuLine}    case ${call} do
+      return wrap(`    case ${call} do
       {:ok, nil} ->
 ${absentArm}
 
       {:ok, record} ->
         json(conn, serialize(record))
-    end
-  end`;
+    end`);
     }
 
     if (isSingleReturn(f.returnType)) {
-      return `
-  def ${findSnake}(conn, ${paramArg}) do
-${cuLine}    case ${call} do
+      return wrap(`    case ${call} do
       {:ok, nil} -> json(conn, nil)
       {:ok, record} -> json(conn, serialize(record))
-    end
-  end`;
+    end`);
     }
-    return `
-  def ${findSnake}(conn, ${paramArg}) do
-${cuLine}    with {:ok, records} <- ${call} do
+    return wrap(`    with {:ok, records} <- ${call} do
       json(conn, Enum.map(records, &serialize/1))
-    end
-  end`;
+    end`);
   });
   // A `page_param/3` coercion helper — once per controller — backs every paged
   // find's `page`/`pageSize` query reads (Phoenix delivers params as strings; a

@@ -83,8 +83,9 @@ describe("default-deny enforcement", () => {
 
   /** A system with an aggregate `create`, a command-triggered `workflow`, a
    *  read `find`, and a `view` — commands gated by `gate`, the view by
-   *  `viewGate` (the `requires …` clause, or "" for ungated). */
-  function commandSys(gate: string, viewGate: string): string {
+   *  `viewGate`, the find by `findGate` (each a `requires …` clause, or "" for
+   *  ungated). */
+  function commandSys(gate: string, viewGate: string, findGate = ""): string {
     return `
 system Helpdesk {
   user { id: string role: string }
@@ -97,7 +98,7 @@ system Helpdesk {
         create register(s: string) { ${gate}subject := s open := true }
       }
       repository Tickets for Ticket {
-        find openOnes(): Ticket[] where open == true
+        find openOnes(): Ticket[] ${findGate}where open == true
       }
       workflow openTicket {
         create(s: string) { ${gate}let t = Ticket.register(s) }
@@ -115,6 +116,7 @@ system Helpdesk {
 
   const OP_GATE = 'requires currentUser.role == "agent"\n        ';
   const VIEW_GATE = 'requires currentUser.role == "agent" ';
+  const FIND_GATE = 'requires currentUser.role == "agent" ';
 
   it("rejects an ungated public create under denyByDefault", async () => {
     const errs = await denyErrors(commandSys("", ""));
@@ -131,15 +133,49 @@ system Helpdesk {
     expect(errs.some((m) => m.includes("view 'ActiveTickets'"))).toBe(true);
   });
 
-  it("accepts gated creates + workflows + views (requires on every command + view)", async () => {
-    // Everything gated; the ungated `find` remains — and must NOT be flagged
-    // (finds stay out of default-deny scope: no `requires` surface yet).
-    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE));
+  it("rejects an ungated repository find under denyByDefault", async () => {
+    const errs = await denyErrors(commandSys("", ""));
+    expect(errs.some((m) => m.includes("find 'Tickets.openOnes'"))).toBe(true);
+  });
+
+  it("accepts gated creates + workflows + views + finds (requires on every reachable endpoint)", async () => {
+    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE, FIND_GATE));
     expect(errs).toEqual([]);
   });
 
   it("accepts `requires true` on a view as the intentionally-public escape", async () => {
-    const errs = await denyErrors(commandSys(OP_GATE, "requires true "));
+    const errs = await denyErrors(commandSys(OP_GATE, "requires true ", FIND_GATE));
     expect(errs).toEqual([]);
+  });
+
+  it("accepts `requires true` on a find as the intentionally-public escape", async () => {
+    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE, "requires true "));
+    expect(errs).toEqual([]);
+  });
+
+  it("does not flag the auto-`findAll` (no author gate surface)", async () => {
+    // The synthesized `find all` list route has no source line to gate; only
+    // author-declared named finds are in scope.  A system whose only read is the
+    // auto-findAll must pass once its commands are gated.
+    const src = `
+system Helpdesk {
+  user { id: string role: string }
+  auth { enforcement: denyByDefault }
+  subdomain S {
+    context Tickets {
+      aggregate Ticket {
+        subject: string
+        create register(s: string) { requires true subject := s }
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Tickets, kind: state, use: primary }
+  api SupportApi from S
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+}
+`;
+    expect(await denyErrors(src)).toEqual([]);
   });
 });

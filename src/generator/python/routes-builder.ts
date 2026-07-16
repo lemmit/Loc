@@ -42,7 +42,7 @@ import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../ir/validate/invariant-classify.js";
-import { lines } from "../../util/code-builder.js";
+import { type LinesPart, lines } from "../../util/code-builder.js";
 import {
   defaultErrorStatus,
   errorTitle,
@@ -227,6 +227,8 @@ export function buildPyRoutesFile(
     // not import `User` (ruff F401 under `--warnings-as-errors`).
     publicOps.some(operationUsesCurrentUser) ||
       emittableFinds(repo).some(findUsesCurrentUser) ||
+      // A find `requires` gate that reads currentUser binds `current_user: User`.
+      emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
       (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
       (publicOps.length > 0 && stampUsesUser(agg, "update"))
       ? "from app.auth.user import User"
@@ -1055,9 +1057,20 @@ function findRoute(
   // A currentUser-scoped find (`where … == currentUser.x`) reads the
   // actor off the request scope and passes it as the trailing repo arg.
   const usesUser = findUsesCurrentUser(find);
-  const userBind = usesUser ? "    current_user: User = request.state.current_user" : null;
+  // A `requires` authorization gate (default-deny) runs before the query and
+  // raises ForbiddenError (→ 403) when the predicate fails — the read-side twin
+  // of a view gate.  It needs the principal bound when it reads currentUser.
+  const gateUsesUser = !!find.requires && exprUsesCurrentUser(find.requires);
+  const needsUser = usesUser || gateUsesUser;
+  const userBind = needsUser ? "    current_user: User = request.state.current_user" : null;
+  const gateLines: LinesPart = find.requires
+    ? [
+        `    if not (${renderPyExpr(find.requires)}):`,
+        `        raise ForbiddenError(${JSON.stringify(`Forbidden: find ${find.name}`)})`,
+      ]
+    : null;
   const params = find.params.map((p) => `${p.name}: ${requestPyType(p.type, ctx)}`);
-  const sig = [...params, ...(usesUser ? ["request: Request"] : []), "session: SessionDep"].join(
+  const sig = [...params, ...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(
     ", ",
   );
   const args = [
@@ -1102,6 +1115,7 @@ function findRoute(
       `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}", responses={${absentStatus}: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(absentStatus))}}})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
       userBind,
+      gateLines,
       "    repo = _repo(session)",
       ...absent,
       // Found → the success variant directly (untagged); a single-success union
@@ -1114,7 +1128,7 @@ function findRoute(
     // Defaulted params last (python syntax) — FastAPI is order-agnostic.
     const pagedSig = [
       ...params,
-      ...(usesUser ? ["request: Request"] : []),
+      ...(needsUser ? ["request: Request"] : []),
       "session: SessionDep",
       `page: int = ${PAGED_DEFAULT_PAGE}`,
       `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
@@ -1134,6 +1148,7 @@ function findRoute(
       `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${pagedSig}) -> dict[str, object]:`,
       userBind,
+      gateLines,
       "    repo = _repo(session)",
       `    result = await repo.${findSnake}(${callArgs.join(", ")})`,
       "    return {",
@@ -1150,6 +1165,7 @@ function findRoute(
       `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
       userBind,
+      gateLines,
       "    repo = _repo(session)",
       `    return [repo.to_wire(r) for r in await repo.${findSnake}(${args})]`,
     );
@@ -1158,6 +1174,7 @@ function findRoute(
     `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional")})`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
     userBind,
+    gateLines,
     "    repo = _repo(session)",
     `    found = await repo.${findSnake}(${args})`,
     "    if found is None:",
