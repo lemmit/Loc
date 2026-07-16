@@ -35,6 +35,7 @@ import {
   checkBuilderCallType,
   checkChannels,
   checkComponent,
+  checkConstructionFields,
   checkContext,
   checkCriteria,
   checkDataSource,
@@ -181,6 +182,7 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     guard("builder-call-type", model, () => checkBuilderCallType(model, accept, this.services));
+    guard("construction-fields", model, () => checkConstructionFields(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
