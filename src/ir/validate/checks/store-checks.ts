@@ -305,15 +305,17 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
 
         // async-effect gate — loom.feliz-async-effect-unsupported.  A frontend
         // `match await <op>()` (async-actions-and-effects.md Stage 2) lowers to a
-        // `variant-match` statement.  The Feliz MVU renderer now handles the v1
-        // shape (`match await <api>.<Agg>.<op>() { <Agg> b => … else => … }` — a
-        // 0-arg instance op, one aggregate-binding SUCCESS arm + `else`, hosted on
-        // a `:id` detail page) as a trigger→result projection (M-T6.15).  Only the
-        // shapes it does NOT render yet are gated: a genuine multi-variant union, an
-        // op with params, a missing `else`, or a host with no route `id` (a
-        // component, or a page without a `:id` route — the instance op has no id to
-        // POST to).  `classifyFelizAsyncEffect` is the shared arbiter so the gate
-        // and the generator can't drift.
+        // `variant-match` statement.  The Feliz MVU renderer handles the full
+        // shape on a `:id` detail page: an aggregate instance op with or without
+        // params, ONE OR MORE named arms (success aggregate + named error
+        // variants, reified from the RFC-7807 `type` URI), and an OPTIONAL `else`
+        // — projected to a trigger→result MVU pair with a tagged-union decoder.
+        // Only TWO cases stay gated: (1) a host with no route `id` (a component,
+        // or a page without a `:id` route — an instance op has no id to POST to),
+        // and (2) a subject that isn't an aggregate instance op (a collection op,
+        // a workflow).  `classifyFelizAsyncEffect` is the shared arbiter for (2)
+        // so the gate and the generator can't drift; the host route-id check (1)
+        // lives here (the classifier is host-agnostic).
         const ui = sys.uis.find((u) => u.name === uiName);
         if (!ui) continue;
         const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
@@ -355,11 +357,11 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
                 message:
                   `${where}: \`match await …\` (an async effect) is used on ui '${uiName}', hosted by ` +
                   `the Feliz (F#/Fable) deployable '${dep.name}', but this shape is not rendered on the ` +
-                  `Feliz frontend yet — ${reason}.  Supported v1: \`match await <api>.<Agg>.<op>() { ` +
-                  `<Agg> b => … else => … }\` (a 0-arg instance op, one aggregate SUCCESS arm + \`else\`, ` +
-                  `on a \`:id\` detail page).  Otherwise host this ui on an SPA frontend ` +
-                  `(React/Vue/Svelte/Angular), or drive the op through a form primitive ` +
-                  `(CreateForm/OperationForm).  Tracked in M-T6.15.`,
+                  `Feliz frontend yet — ${reason}.  Supported: \`match await <api>.<Agg>.<op>(args?) { ` +
+                  `<Variant> b => … … else? => … }\` — an aggregate instance op (with or without params), ` +
+                  `one or more named success/error arms, and an optional \`else\`, on a \`:id\` detail ` +
+                  `page.  Otherwise host this ui on an SPA frontend (React/Vue/Svelte/Angular), or drive ` +
+                  `the op through a form primitive (CreateForm/OperationForm).  Tracked in M-T6.15.`,
                 source: where,
               });
             });

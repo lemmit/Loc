@@ -23,6 +23,7 @@ import {
   wireFieldsForPart,
   wireFieldsForValueObject,
 } from "../../ir/enrich/wire-projection.js";
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -31,6 +32,7 @@ import type {
   FieldIR,
   OperationIR,
   PageIR,
+  PayloadIR,
   StmtIR,
   TypeIR,
   WorkflowIR,
@@ -41,6 +43,7 @@ import {
 } from "../../ir/util/feliz-async-effect.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
+import { errorTypeUri } from "../../util/error-defaults.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { typeToFs } from "./type-fs.js";
@@ -1122,57 +1125,158 @@ export function collectPageWorkflowForms(
 // the `loom.feliz-async-effect-unsupported` validator gate).
 // ---------------------------------------------------------------------------
 
+/** One resolved arm of an async effect's union — a named success (aggregate) or
+ *  error variant, with everything the MVU projection needs: the wire tag, the F#
+ *  record + Thoth decoder, the DU case (multi-variant only), the RFC-7807 `type`
+ *  URI (error variants only), the arm binding + body. */
+export interface FelizAsyncVariant {
+  /** Wire `type` discriminator (`variantTag(varType)`) — the aggregate name for a
+   *  success variant, the error name for an error variant (`Order` / `Rejected`). */
+  tag: string;
+  /** True when this is an `error` variant (reified from the non-2xx ProblemDetails
+   *  `type` URI); false for the success aggregate (decoded off the 200 body). */
+  isError: boolean;
+  /** F# record type the arm decodes to (`Order` / `Rejected`). */
+  recordType: string;
+  /** Thoth decoder for the record (`Decoders.order` / `Decoders.rejected`). */
+  decoder: string;
+  /** DU case wrapping this variant in the multi-variant outcome DU
+   *  (`ConfirmOrderOrder`) — unused when the effect is single-variant (bare option). */
+  duCase: string;
+  /** The RFC-7807 `type` URI the backend stamps for an error variant
+   *  (`/errors/rejected`) — matched on the non-2xx branch.  Undefined for success. */
+  uri?: string;
+  /** The arm's binding local (`o`, `r`), if it binds one. */
+  binding?: string;
+  /** The arm body (rendered under this variant's update arm). */
+  body: readonly StmtIR[];
+}
+
+/** One op-param of an async effect — the awaited call passed an arg for it.  The
+ *  arg is rendered at dispatch time (view scope) and threaded through the trigger
+ *  `Msg` tuple; the api fn takes it curried and Thoth-encodes it into the body. */
+export interface FelizAsyncParam {
+  /** F# type of the value on the wire + in the Msg tuple / api fn param
+   *  (`string` / `int` — enums arrive as strings). */
+  fsType: string;
+  /** Thoth encoder function (`Encode.string` / `Encode.int`) applied to the
+   *  positional `argN` local in the api fn body. */
+  encoder: string;
+  /** JSON body key (the op param name). */
+  jsonKey: string;
+  /** Source arg expression — rendered in the dispatch wrapper's view scope. */
+  argExpr: ExprIR;
+}
+
 export interface FelizAsyncEffect {
   /** The page action whose body is the `match await` (`reserveNow`). */
   action: string;
-  /** Trigger `Msg` case, carrying the route id (`ReserveNow`). */
+  /** Trigger `Msg` case, carrying the route id (+ any op args) (`ReserveNow`). */
   triggerMsg: string;
-  /** Result `Msg` case, carrying `Result<<successType> option, string>`
-   *  (`ReserveNowResult`). */
+  /** Result `Msg` case (`ReserveNowResult`), carrying `Result<<outcome> option,
+   *  string>` — `<outcome>` is the single variant's record type, or the DU. */
   resultMsg: string;
-  /** Curried api fn `(id: string) () : Async<Result<<successType> option, string>>`
-   *  (`reserveProjectEffect`). */
+  /** Curried api fn `(id) (args…) () : Async<Result<<outcome> option, string>>`
+   *  (`reserveOrderEffect`). */
   apiFn: string;
-  /** F# record type of the success outcome (`Project`). */
-  successType: string;
-  /** Thoth decoder for the success record (`Decoders.project`). */
-  successDecoder: string;
-  /** Wire `type` discriminator of the success variant (`Project`) — an entity
-   *  variant tags by its own name. */
-  successTag: string;
-  /** Collection base route (`/api/projects`) — the api fn appends `/<id>/<opPath>`. */
+  /** Collection base route (`/api/orders`) — the api fn appends `/<id>/<opPath>`. */
   route: string;
   /** The op's URL path segment (`reserve` — `snake(routeSlug ?? name)`). */
   opPath: string;
-  /** The success arm's binding local (`p`), if the arm binds one. */
-  binding?: string;
-  /** The success arm body (rendered under `(Ok (Some p))`). */
-  successBody: readonly StmtIR[];
-  /** The `else` body (rendered under `(Ok None)` and `(Error _)`). */
-  elseBody: readonly StmtIR[];
+  /** True when the outcome is a discriminated union (more than one named arm) —
+   *  drives the DU type + per-case Msg/decode wrapping.  A single named arm stays
+   *  a bare `<record> option` (byte-identical to the M-T6.15 v1 shape). */
+  isMulti: boolean;
+  /** The `Some`-payload F# type: the single variant's record type, or (multi) the
+   *  outcome DU type name (`ConfirmOrderOutcome`). */
+  outcomeType: string;
+  /** The outcome DU type name to emit near the wire records (multi only). */
+  duTypeName?: string;
+  /** The named arms (success + error), in source order (≥1). */
+  variants: FelizAsyncVariant[];
+  /** The op's params, index-aligned with the awaited call's args (empty for a
+   *  0-arg op — then the body is the byte-identical `"{}"`). */
+  params: FelizAsyncParam[];
+  /** The `else` body (rendered under `(Ok None)` and `(Error _)`), or undefined
+   *  when the source had no `else` (then those arms reduce to a no-op). */
+  elseBody?: readonly StmtIR[];
+  /** Success-variant aggregate names to force-emit as records + decoders. */
+  extraAggregates: string[];
+  /** Error-variant payload names to force-emit as records + decoders. */
+  extraErrorPayloads: string[];
 }
 
-/** Build the `FelizAsyncEffect` for a supported `match await` shape on `action`. */
+/** Thoth encoder function for a scalar op-param type (peeling `optional`).  Non-
+ *  scalar params fall back to `Encode.string`, which fails loud at the Fable
+ *  compile (a type mismatch) rather than silently mis-encoding. */
+function paramEncoder(t: TypeIR): string {
+  const base = scalarBase(t);
+  if (base.kind === "primitive") {
+    switch (base.name) {
+      case "int":
+      case "long":
+        return "Encode.int";
+      case "decimal":
+      case "money":
+        return "Encode.decimal";
+      case "bool":
+        return "Encode.bool";
+      default:
+        return "Encode.string";
+    }
+  }
+  return "Encode.string";
+}
+
+/** Build the `FelizAsyncEffect` for a supported `match await` shape on `action`.
+ *  `errorPayloadNames` classifies an arm as an error variant (authoritative over
+ *  the lowered `isError` hint, which a UI body can't always resolve). */
 function felizAsyncEffect(
   action: string,
   shape: FelizAsyncEffectShape,
   op: OperationIR,
+  errorPayloadNames: ReadonlySet<string>,
 ): FelizAsyncEffect {
   const trigger = upperFirst(action);
-  const succ = shape.successAggregate;
+  const opCap = `${upperFirst(op.name)}${upperFirst(shape.opAggregate)}`;
+  const isMulti = shape.arms.length > 1;
+  const variants: FelizAsyncVariant[] = shape.arms.map((arm) => {
+    const tag = variantTag(arm.varType);
+    const isError = errorPayloadNames.has(tag) || arm.isError;
+    return {
+      tag,
+      isError,
+      recordType: upperFirst(tag),
+      decoder: `Decoders.${lowerFirst(tag)}`,
+      duCase: `${opCap}${upperFirst(tag)}`,
+      uri: isError ? errorTypeUri(tag) : undefined,
+      binding: arm.binding,
+      body: arm.body,
+    };
+  });
+  const params: FelizAsyncParam[] = op.params.map((p, i) => ({
+    fsType: wireFieldType(p.type),
+    encoder: paramEncoder(p.type),
+    jsonKey: p.name,
+    // The awaited call supplies one arg per param (validated upstream); fall back
+    // to a null literal if a call under-applies (keeps the arity aligned).
+    argExpr: shape.args[i] ?? { kind: "literal", lit: "null", value: "null" },
+  }));
   return {
     action,
     triggerMsg: trigger,
     resultMsg: `${trigger}Result`,
     apiFn: `${op.name}${upperFirst(shape.opAggregate)}Effect`,
-    successType: upperFirst(succ),
-    successDecoder: `Decoders.${lowerFirst(succ)}`,
-    successTag: succ, // entity variant → tags by its own name
     route: `${API_BASE_PATH}/${snake(plural(shape.opAggregate))}`,
     opPath: snake(op.routeSlug ?? op.name),
-    binding: shape.binding,
-    successBody: shape.successBody,
+    isMulti,
+    outcomeType: isMulti ? `${opCap}Outcome` : variants[0]!.recordType,
+    duTypeName: isMulti ? `${opCap}Outcome` : undefined,
+    variants,
+    params,
     elseBody: shape.elseBody,
+    extraAggregates: variants.filter((v) => !v.isError).map((v) => v.tag),
+    extraErrorPayloads: variants.filter((v) => v.isError).map((v) => v.tag),
   };
 }
 
@@ -1190,6 +1294,7 @@ export function collectPageAsyncEffects(
   page: PageIR,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   apiParamNames: ReadonlySet<string>,
+  errorPayloadNames: ReadonlySet<string>,
 ): FelizAsyncEffect[] {
   if (!routeHasParam(page.route)) return [];
   const aggregateNames = new Set(aggregatesByName.keys());
@@ -1204,39 +1309,109 @@ export function collectPageAsyncEffects(
       const op = agg?.operations.find((o) => o.name === cls.shape.op && o.visibility === "public");
       if (!op || seen.has(action.name)) continue;
       seen.add(action.name);
-      out.push(felizAsyncEffect(action.name, cls.shape, op));
+      out.push(felizAsyncEffect(action.name, cls.shape, op, errorPayloadNames));
     }
   }
   return out;
 }
 
-/** One async-effect api fn — curried `(id) ()`, POSTs `{}` to
- *  `/api/<agg>/<id>/<opPath>`, and at 200 decodes the `type`-tagged union: the
- *  success tag decodes the aggregate record into `Some`, any other tag → `None`
- *  (the error variant never reaches the client at 200 — it's a non-2xx). */
+/** One async-effect api fn — curried `(id) (args…) ()`, POSTs the Thoth-encoded
+ *  op args to `/api/<agg>/<id>/<opPath>`.  At 200 it decodes the `type`-tagged
+ *  SUCCESS body (the aggregate variant); on a non-2xx it reifies a named ERROR
+ *  variant from the RFC-7807 ProblemDetails `type` URI (mirroring the JS
+ *  frontends' catch-and-restamp).  A matched variant → `Some <outcome>`, anything
+ *  else → `Ok None` (routed to the `else` arm) or `Error` (a genuine failure).
+ *  For a single named success arm with no params (the M-T6.15 v1 shape) the
+ *  output is byte-identical to the original. */
 function renderAsyncEffectFn(e: FelizAsyncEffect): (string | undefined)[] {
+  const successVariants = e.variants.filter((v) => !v.isError);
+  const errorVariants = e.variants.filter((v) => v.isError);
+  // Wrap a decoded record into the `Some` outcome payload: bare `Some` for a
+  // single-variant effect, `Some (<DuCase> x)` for the multi-variant DU.
+  const wrap = (v: FelizAsyncVariant): string =>
+    e.isMulti ? `(fun x -> Some (${v.duCase} x))` : "Some";
+  const paramSig = e.params.map((_, i) => `(arg${i}: ${e.params[i]!.fsType}) `).join("");
+  const bodyDecl =
+    e.params.length === 0
+      ? []
+      : [
+          "      let body =",
+          `        Encode.object [ ${e.params
+            .map((p, i) => `"${p.jsonKey}", ${p.encoder} arg${i}`)
+            .join("; ")} ]`,
+          "        |> Encode.toString 0",
+        ];
+  const bodyLine =
+    e.params.length === 0
+      ? '        |> Http.content (BodyContent.Text "{}")'
+      : "        |> Http.content (BodyContent.Text body)";
+  // A `type`-tagged decode chain over `variants`, keyed on `field` (`"type"` for
+  // both the 200 success body and the non-2xx ProblemDetails), matching each
+  // variant's `key` (the wire tag on success, the error URI on failure).
+  const decodeChain = (variants: FelizAsyncVariant[], keyOf: (v: FelizAsyncVariant) => string) => {
+    const out = [
+      "        let decoder =",
+      '          Decode.field "type" Decode.string',
+      "          |> Decode.andThen (fun tag ->",
+    ];
+    variants.forEach((v, i) => {
+      out.push(
+        `              ${i === 0 ? "if" : "elif"} tag = "${keyOf(v)}" then Decode.map ${wrap(v)} ${v.decoder}`,
+      );
+    });
+    out.push("              else Decode.succeed None)");
+    return out;
+  };
+  const successBranch =
+    successVariants.length === 0
+      ? ["        return Ok None"]
+      : [
+          ...decodeChain(successVariants, (v) => v.tag),
+          "        match Decode.fromString decoder response.responseText with",
+          "        | Ok data -> return Ok data",
+          "        | Error e -> return Error e",
+        ];
+  const errorBranch =
+    errorVariants.length === 0
+      ? ['        return Error (sprintf "HTTP %d" response.statusCode)']
+      : [
+          ...decodeChain(errorVariants, (v) => v.uri ?? ""),
+          "        match Decode.fromString decoder response.responseText with",
+          "        | Ok (Some v) -> return Ok (Some v)",
+          '        | _ -> return Error (sprintf "HTTP %d" response.statusCode)',
+        ];
   return [
-    `  let ${e.apiFn} (id: string) () : Async<Result<${e.successType} option, string>> =`,
+    `  let ${e.apiFn} (id: string) ${paramSig}() : Async<Result<${e.outcomeType} option, string>> =`,
     "    async {",
+    ...bodyDecl,
     "      let! response =",
     `        Http.request (sprintf "${e.route}/%s/${e.opPath}" id)`,
     "        |> Http.method POST",
-    '        |> Http.content (BodyContent.Text "{}")',
+    bodyLine,
     '        |> Http.header (Headers.contentType "application/json")',
     "        |> Http.send",
     "      if response.statusCode = 200 then",
-    "        let decoder =",
-    '          Decode.field "type" Decode.string',
-    "          |> Decode.andThen (fun tag ->",
-    `              if tag = "${e.successTag}" then Decode.map Some ${e.successDecoder}`,
-    "              else Decode.succeed None)",
-    "        match Decode.fromString decoder response.responseText with",
-    "        | Ok data -> return Ok data",
-    "        | Error e -> return Error e",
+    ...successBranch,
     "      else",
-    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    ...errorBranch,
     "    }",
   ];
+}
+
+/** Emit the outcome discriminated unions for the MULTI-variant async effects —
+ *  one `type <Op><Agg>Outcome = | <Case> of <Record> | …` per effect, placed
+ *  after the domain records (the DU cases reference them).  Empty for a system
+ *  with only single-variant (bare-option) effects. */
+export function renderAsyncOutcomeTypes(effects: readonly FelizAsyncEffect[]): string {
+  const multi = effects.filter((e) => e.isMulti);
+  if (multi.length === 0) return "";
+  return lines(
+    "// Async-effect outcome unions — one case per matched `match await` variant.",
+    ...multi.flatMap((e) => [
+      `type ${e.duTypeName} =`,
+      ...e.variants.map((v) => `  | ${v.duCase} of ${v.recordType}`),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1383,6 +1558,11 @@ export function renderWireTypes(
    *  read references them — e.g. an async effect's success aggregate, decoded off
    *  the op's `type`-tagged 200 body without a `Remote` read. */
   extraAggregates: readonly string[] = [],
+  /** Extra ERROR payload names whose record + decoder must be emitted — an async
+   *  effect's named error variants, decoded off the non-2xx ProblemDetails body
+   *  when reifying the error arm.  Resolved against the contexts' `error`
+   *  payloads. */
+  extraErrorPayloads: readonly string[] = [],
 ): { domain: string; decoders: string } {
   const byName = new Map<string, EnrichedAggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) byName.set(a.name, a);
@@ -1393,6 +1573,25 @@ export function renderWireTypes(
     .filter((a): a is EnrichedAggregateIR => !!a);
 
   const records = collectRecords(readAggs, contexts);
+
+  // Error payloads named by an async effect's error arms — emitted as flat
+  // records (errors are scalar payloads), deduped against the aggregate records.
+  const errorByName = new Map<string, PayloadIR>();
+  for (const c of contexts) {
+    for (const p of c.payloads) if (p.kind === "error") errorByName.set(p.name, p);
+  }
+  const seenRecord = new Set(records.map((r) => r.typeName));
+  for (const name of new Set(extraErrorPayloads)) {
+    const p = errorByName.get(name);
+    if (!p || seenRecord.has(upperFirst(name))) continue;
+    seenRecord.add(upperFirst(name));
+    records.push({
+      typeName: upperFirst(name),
+      decoderName: lowerFirst(name),
+      fields: p.fields.map((f) => ({ name: f.name, type: f.type, optional: f.optional })),
+    });
+  }
+
   if (records.length === 0) return { domain: "", decoders: "" };
 
   // A field is optional from EITHER signal — the wire-shape `optional` flag or

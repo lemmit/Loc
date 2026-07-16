@@ -122,3 +122,103 @@ describe("feliz async effect — `match await` (M-T6.15)", () => {
     expect(fs).toContain("let reserveNow () = dispatch (ReserveNow id)");
   });
 });
+
+// The "harder shapes": a multi-variant discriminated union (named success +
+// error arms), an op WITH params, and a MISSING `else`.  A detail page's action
+// awaits `confirm(note): Order or Rejected or Blocked` with one arm per variant
+// and no `else`.  Proven to `dotnet fable`-compile (the DU + tagged-union decoder
+// + ProblemDetails error reification + no-op fallthrough all type-check).
+const HARD = `
+system Demo {
+  subdomain S {
+    context C {
+      error Rejected { reason: string }
+      error Blocked { until: string }
+      aggregate Order with crudish {
+        code: string
+        operation confirm(note: string): Order or Rejected or Blocked {
+          return Rejected { reason: note }
+        }
+      }
+    }
+  }
+  api A from S
+  ui Web {
+    api C: A
+    page Detail(id: Order id) {
+      route: "/orders/:id"
+      state { message: string = "" }
+      action confirm() {
+        match await C.Order.confirm("hi") {
+          Order o    => { message := o.code }
+          Rejected r => { message := r.reason }
+          Blocked b  => { message := "blocked" }
+        }
+      }
+      body: Stack { Heading { "Order", level: 1 }, Button { "Confirm", onClick: confirm } }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: feliz targets: api ui: Web { C: api } port: 3001 }
+}`;
+
+async function hardFs(): Promise<string> {
+  const files = await generateSystemFiles(HARD);
+  const entry = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"));
+  expect(entry).toBeDefined();
+  return entry![1];
+}
+
+describe("feliz async effect — harder shapes (multi-variant / params / no-else)", () => {
+  it("emits the outcome discriminated union — one case per named variant", async () => {
+    const fs = await hardFs();
+    expect(fs).toContain("type ConfirmOrderOutcome =");
+    expect(fs).toContain("  | ConfirmOrderOrder of Order");
+    expect(fs).toContain("  | ConfirmOrderRejected of Rejected");
+    expect(fs).toContain("  | ConfirmOrderBlocked of Blocked");
+    // The result Msg carries the DU (not a bare `<Succ> option`).
+    expect(fs).toContain("| ConfirmResult of Result<ConfirmOrderOutcome option, string>");
+  });
+
+  it("carries the op arg through the trigger Msg + dispatch, and encodes it into the body", async () => {
+    const fs = await hardFs();
+    expect(fs).toContain("| Confirm of string * string");
+    expect(fs).toContain('let confirm () = dispatch (Confirm (id, "hi"))');
+    expect(fs).toContain(
+      "let confirmOrderEffect (id: string) (arg0: string) () : Async<Result<ConfirmOrderOutcome option, string>> =",
+    );
+    expect(fs).toContain('Encode.object [ "note", Encode.string arg0 ]');
+  });
+
+  it("decodes the success variant at 200 and reifies error variants from the non-2xx `type` URI", async () => {
+    const fs = await hardFs();
+    // 200 → the success aggregate, wrapped into the DU.
+    expect(fs).toContain(
+      'if tag = "Order" then Decode.map (fun x -> Some (ConfirmOrderOrder x)) Decoders.order',
+    );
+    // non-2xx → the ProblemDetails `type` URI → the matching error DU case.
+    expect(fs).toContain(
+      'if tag = "/errors/rejected" then Decode.map (fun x -> Some (ConfirmOrderRejected x)) Decoders.rejected',
+    );
+    expect(fs).toContain(
+      'elif tag = "/errors/blocked" then Decode.map (fun x -> Some (ConfirmOrderBlocked x)) Decoders.blocked',
+    );
+    // The error records + decoders are force-emitted for the reification.
+    expect(fs).toMatch(/(let|and) rejected : Decoder<Rejected> =/);
+    expect(fs).toMatch(/(let|and) blocked : Decoder<Blocked> =/);
+  });
+
+  it("projects one update arm per variant; the unused binder degrades to `_`; missing else is a no-op", async () => {
+    const fs = await hardFs();
+    expect(fs).toContain("| ConfirmResult (Ok (Some (ConfirmOrderOrder o))) ->");
+    expect(fs).toContain("| ConfirmResult (Ok (Some (ConfirmOrderRejected r))) ->");
+    // `Blocked b` never reads `b` → the binder drops to `_` (no unused-var warning).
+    expect(fs).toContain("| ConfirmResult (Ok (Some (ConfirmOrderBlocked _))) ->");
+    // No `else` in source → the non-matching / error outcome is a no-op.
+    expect(fs).toContain("| ConfirmResult (Ok None) ->");
+    expect(fs).toContain("| ConfirmResult (Error _) ->");
+    expect(fs).toMatch(/\| ConfirmResult \(Error _\) ->\n\s+model, Cmd\.none/);
+  });
+});

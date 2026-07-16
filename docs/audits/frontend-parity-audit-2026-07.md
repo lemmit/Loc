@@ -86,7 +86,7 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 | Pack-dispatched primitives ship on target | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | `REQUIRED_PRIMITIVES` gate — **Feliz not gated**; `feliz/pack.ts` |
 | Forms (Create/Op/Workflow/Destroy) | ✓ RHF | ✓ | ✓ | ✓ Reactive Forms | ✓ Elmish seams | Feliz `renderCreateForm`… `feliz-target.ts` |
 | `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | store gate lifted on all 5 — `store-checks.ts:301-304` |
-| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ⚠ partial | v1 shape emits; harder shapes gated — `loom.feliz-async-effect-unsupported`, `store-checks.ts:354` |
+| Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ✓ | multi-variant unions + params + missing-`else` render; only routeless host / non-instance-op gated — `store-checks.ts:354` |
 | `design:` axis | pack family | pack family | pack family | pack family | daisyUI **theme** | Rule 14 feliz branch, `deployable.ts:363`; `DAISYUI_THEMES` |
 | Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (inline showcase only) |
 | Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | no `generated-feliz-e2e.yml` |
@@ -193,15 +193,17 @@ them — the store gate was already lifted):
   `renderStoreActionCall`). `loom.feliz-store-unsupported` **no longer exists** as a
   live diagnostic — the comment at `store-checks.ts:301-304` records it was lifted
   when the subsystem landed. Store parity is uniform across all five frontends.
-- **Async effects (`match await <op>()`) → v1 shape implemented, ⚠ partial.** The
-  Feliz MVU renderer emits the v1 shape — a 0-arg instance op, one aggregate-binding
-  success arm + `else`, hosted on a `:id` detail page — as a trigger→result
-  projection (M-T6.15). The unsupported slice **fails fast honestly**:
-  `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`) is the shared arbiter,
-  and `store-checks.ts:354` raises `loom.feliz-async-effect-unsupported` for a
-  genuine multi-variant union, a parameterised op, a missing `else`, or a host with
-  no route `id`. So this is a ⚠ partial with the boundary correctly gated — not a
-  silent gap.
+- **Async effects (`match await <op>()`) → implemented, incl. the harder shapes.**
+  The Feliz MVU renderer covers the full shape on a `:id` detail page: a genuine
+  multi-variant discriminated union (per-op outcome DU, one `update` arm per
+  variant, named error arms reified from the non-2xx RFC-7807 `type` URI), an op
+  with params (args threaded through the trigger Msg + Thoth-encoded into the POST
+  body), and a missing `else` (no-op fallthrough). Fable-compile verified. Only two
+  cases remain honestly gated (`loom.feliz-async-effect-unsupported`,
+  `store-checks.ts:354`): a host with no route `id` (a component or non-`:id`
+  page — an instance op has no id to POST to), and a subject that isn't an
+  aggregate instance op. `classifyFelizAsyncEffect` (`util/feliz-async-effect.ts`)
+  stays the shared arbiter so the gate and renderer can't drift.
 
 Genuinely honest gap (parity invariant working as designed):
 

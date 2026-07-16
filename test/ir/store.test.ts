@@ -343,7 +343,7 @@ system Demo {
     expect(await codes(STORE, "react")).not.toContain("loom.feliz-store-unsupported");
   });
 
-  it("loom.feliz-async-effect-unsupported — the supported v1 shape on a `:id` page is CLEAN; unsupported shapes gate (M-T6.15)", async () => {
+  it("loom.feliz-async-effect-unsupported — supported shapes on a `:id` page are CLEAN (incl. multi-variant); only the routeless host gates (M-T6.15)", async () => {
     // The Feliz MVU renderer now handles the v1 `match await` shape (a 0-arg
     // instance op, one aggregate SUCCESS arm + `else`, on a `:id` detail page) as
     // a trigger→result projection.  Only the shapes it does NOT render yet gate.
@@ -393,14 +393,20 @@ ${arms}
     // React never gates regardless.
     expect(await codesOf(asyncSystem("react", "/orders/:id", V1_ARMS))).not.toContain(GATE);
 
-    // Gated (no route id): the SAME shape on a non-`:id` page has no id to source.
+    // Gated (no route id): the SAME shape on a non-`:id` page has no id to source
+    // — the ONE remaining Feliz async-effect gate (the routeless-host case).
     expect(await codesOf(asyncSystem("feliz", "/p", V1_ARMS))).toContain(GATE);
-    // Gated (multi-variant union): a second, non-`else` arm.
+
+    // Supported now (harder shapes): a genuine multi-variant union on a `:id`
+    // detail page renders (the tagged-union decoder + error reification) → the
+    // Feliz gate is gone.  (The example still names an error arm, so it may trip
+    // the FRONTEND-AGNOSTIC `loom.unmapped-error-status`; that's a separate
+    // concern — here we only assert the Feliz-specific gate lifted.)
     const multiArm =
       "          Order o        => { draftName := o.customerId }\n" +
       "          OrderMissing e => { draftName := e.missingRef }\n" +
       '          else           => { draftName := "x" }';
-    expect(await codesOf(asyncSystem("feliz", "/orders/:id", multiArm))).toContain(GATE);
+    expect(await codesOf(asyncSystem("feliz", "/orders/:id", multiArm))).not.toContain(GATE);
   });
 
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {

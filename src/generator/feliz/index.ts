@@ -33,7 +33,7 @@ import {
   uiHasPageGate,
 } from "./auth-gate.js";
 import { felizTarget } from "./feliz-target.js";
-import { storeModelField, storeMsgCase } from "./fs-expr.js";
+import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
 import {
   msgCase,
@@ -62,6 +62,7 @@ import {
   formHasFieldErrors,
   idLabelsFrom,
   renderApiModule,
+  renderAsyncOutcomeTypes,
   renderEncoders,
   renderFormTypes,
   renderValidation,
@@ -128,16 +129,25 @@ function indentBlock(block: string, n: number): string {
 function dispatchWrappers(
   page: PageIR,
   used: ReadonlySet<string>,
-  asyncEffectActions: ReadonlySet<string> = new Set(),
+  asyncEffectActions: ReadonlyMap<string, FelizAsyncEffect> = new Map(),
 ): string[] {
+  const stateNames = new Set(page.state.map((s) => s.name));
+  // Args are rendered in the VIEW's scope — a state read resolves to
+  // `model.<Field>`; the route `id` is a bound local of the detail-page view fn.
+  const argCtx: FsExprCtx = { stateNames, locals: new Set(["id"]) };
   return page.actions
     .filter((a) => used.has(a.name))
     .map((a) => {
       // An async-effect action's body is a `match await` — its trigger Msg
-      // carries the route `id` (the detail-page view fn's `id` param), so the
-      // wrapper dispatches `<Trigger> id` regardless of the action's own arity.
-      if (asyncEffectActions.has(a.name)) {
-        return `    let ${a.name} () = dispatch (${msgCase(a.name)} id)`;
+      // carries the route `id` (the detail-page view fn's `id` param) plus any op
+      // args, so the wrapper dispatches `<Trigger> id` / `<Trigger> (id, …args)`.
+      const effect = asyncEffectActions.get(a.name);
+      if (effect) {
+        if (effect.params.length === 0) {
+          return `    let ${a.name} () = dispatch (${msgCase(a.name)} id)`;
+        }
+        const args = effect.params.map((p) => renderFsExpr(p.argExpr, argCtx)).join(", ");
+        return `    let ${a.name} () = dispatch (${msgCase(a.name)} (id, ${args}))`;
       }
       const p = a.params[0]?.name;
       return p
@@ -207,7 +217,7 @@ function renderPageView(
   used?: { components: Set<string>; functions: Set<string> },
   /** Action names whose body is a `match await` async effect — their dispatch
    *  wrapper passes the route `id` to the trigger Msg. */
-  asyncEffectActions: ReadonlySet<string> = new Set(),
+  asyncEffectActions: ReadonlyMap<string, FelizAsyncEffect> = new Map(),
   /** UI-gate mode (D-AUTH-OIDC): the app decodes session claims + holds them on
    *  the Model, so a page carrying `requires` wraps its body in a
    *  `match model.CurrentUser with Some currentUser when <gate> -> … | _ ->
@@ -562,10 +572,20 @@ function asyncEffectsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Feli
   const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
+  // Error payloads across the ui's contexts — used to classify a match arm as an
+  // error variant (reified from the non-2xx ProblemDetails) vs a success arm.
+  const errorPayloadNames = new Set<string>();
+  for (const c of contexts)
+    for (const p of c.payloads) if (p.kind === "error") errorPayloadNames.add(p.name);
   const seen = new Set<string>();
   const out: FelizAsyncEffect[] = [];
   for (const page of ui.pages) {
-    for (const e of collectPageAsyncEffects(page, aggregatesByName, apiParamNames)) {
+    for (const e of collectPageAsyncEffects(
+      page,
+      aggregatesByName,
+      apiParamNames,
+      errorPayloadNames,
+    )) {
       if (seen.has(e.action)) continue;
       seen.add(e.action);
       out.push(e);
@@ -706,7 +726,7 @@ function renderAppFs(
   // `match await` async effects — projected to trigger/result Msg cases + arms
   // (excluded from the plain-action path below) and a `type`-tagged decode.
   const asyncEffects: FelizAsyncEffect[] = asyncEffectsForUi(ui, contexts);
-  const asyncEffectActions = new Set(asyncEffects.map((e) => e.action));
+  const asyncEffectActions = new Map(asyncEffects.map((e) => [e.action, e] as const));
   const hasEffects = asyncEffects.length > 0;
   const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
   // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
@@ -803,9 +823,13 @@ function renderAppFs(
     ? renderWireTypes(
         reads,
         contexts,
-        asyncEffects.map((e) => e.successType),
+        asyncEffects.flatMap((e) => e.extraAggregates),
+        asyncEffects.flatMap((e) => e.extraErrorPayloads),
       )
     : { domain: "", decoders: "" };
+  // Multi-variant async effects emit a discriminated-union outcome type, placed
+  // right after the domain records (its cases reference them).
+  const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);
   const api = hasHttp
     ? renderApiModule(
         reads,
@@ -922,6 +946,9 @@ function renderAppFs(
     hasReads && REMOTE_TYPE,
     hasWire && "",
     hasWire && wire.decoders,
+    // Multi-variant async-effect outcome unions (after the records they wrap).
+    asyncOutcomes ? "" : false,
+    asyncOutcomes || undefined,
     // Create-form state (form record types + empty values) → encoders (write dir)
     // → validation (submit guard: every required field non-empty).
     hasForms && "",
