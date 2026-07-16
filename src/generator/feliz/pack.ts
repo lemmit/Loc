@@ -269,6 +269,84 @@ function primitiveButton(c: Ctx): string {
   return `Html.button [ ${props.join("; ")} ]`;
 }
 
+// --- Prose / text-decoration primitives -----------------------------------
+function primitiveBold(c: Ctx): string {
+  return `Html.strong [ ${asChild(String(c.text ?? ""))} ]`;
+}
+function primitiveItalic(c: Ctx): string {
+  return `Html.em [ ${asChild(String(c.text ?? ""))} ]`;
+}
+function primitiveInlineCode(c: Ctx): string {
+  return `Html.code [ prop.className "rounded bg-base-200 px-1 text-sm"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
+}
+/** CodeBlock(source, language?, title?) — a `<pre><code>` block.  The F# string
+ *  literal can't span lines, so real newlines in the source escape to `\n`. */
+function primitiveCodeBlock(c: Ctx): string {
+  const source = String(c.source ?? "").replace(/\n/g, "\\n");
+  const pre = `Html.pre [ prop.className "overflow-x-auto rounded-md border border-base-300 bg-base-200 p-4 text-sm"; prop.children [ Html.code [ prop.text "${source}" ] ] ]`;
+  if (!c.hasTitle) return pre;
+  const title = `Html.div [ prop.className "border-b border-base-300 px-4 py-2 text-xs font-medium text-base-content/70"; prop.text "${String(c.title ?? "")}" ]`;
+  return `Html.div [ prop.className "overflow-hidden rounded-md border border-base-300 bg-base-200"; prop.children [ ${title}; ${pre} ] ]`;
+}
+
+// --- Data-display primitives ----------------------------------------------
+/** Money(value, currency?, decimals?) — a tabular-nums amount, currency-prefixed
+ *  when given.  `valueExpr` is already an F# expression (a field read / literal);
+ *  `string (…)` coerces whatever its type (decimal / int) to text. */
+function primitiveMoney(c: Ctx): string {
+  const amount = `string (${String(c.valueExpr ?? "0")})`;
+  const text = c.hasCurrency ? `(${String(c.currency)} + " " + ${amount})` : `(${amount})`;
+  return `Html.span [ prop.className "tabular-nums"; prop.text ${text} ]`;
+}
+function primitiveDateDisplay(c: Ctx): string {
+  const value = String(c.valueExpr ?? '""');
+  return `Html.time [ prop.className "whitespace-nowrap text-sm text-base-content/70"; prop.text (string (${value})) ]`;
+}
+function primitiveEnumBadge(c: Ctx): string {
+  const value = String(c.valueExpr ?? '""');
+  return `Html.span [ prop.className "badge badge-outline"; prop.text (string (${value})) ]`;
+}
+/** Stat(label, value) — a daisyUI stat card.  `label`/`value` are raw text. */
+function primitiveStat(c: Ctx): string {
+  const title = `Html.div [ prop.className "stat-title"; prop.children [ ${asChild(String(c.label ?? ""))} ] ]`;
+  const val = `Html.div [ prop.className "stat-value tabular-nums"; prop.children [ ${asChild(String(c.value ?? ""))} ] ]`;
+  return `Html.div [ prop.className "stats"; prop.children [ Html.div [ prop.className "stat"; prop.children [ ${title}; ${val} ] ] ] ]`;
+}
+/** Loader() — a centred daisyUI spinner (size v1-fixed). */
+function primitiveLoader(_c: Ctx): string {
+  return `Html.div [ prop.className "flex justify-center py-8"; prop.children [ Html.span [ prop.className "loading loading-spinner loading-lg text-primary" ] ] ]`;
+}
+/** Image(src, alt?) — a rounded `<img>`; `src`/`alt` are already-rendered exprs
+ *  (a quoted literal or a ref).  A missing alt renders `alt=""` (the validator
+ *  guarantees an explicit alt or `decorative`). */
+function primitiveImage(c: Ctx): string {
+  const src = String(c.src ?? '""');
+  const alt = c.hasAlt ? String(c.alt) : '""';
+  return `Html.img [ prop.className "rounded"; prop.src ${src}; prop.alt ${alt} ]`;
+}
+/** Avatar(src?, alt?) — a circle-cropped image, or a neutral placeholder circle. */
+function primitiveAvatar(c: Ctx): string {
+  if (!c.hasSrc) {
+    return `Html.div [ prop.className "avatar placeholder"; prop.children [ Html.div [ prop.className "w-10 rounded-full bg-neutral text-neutral-content" ] ] ]`;
+  }
+  const alt = c.hasAlt ? String(c.alt) : '""';
+  return `Html.div [ prop.className "avatar"; prop.children [ Html.div [ prop.className "w-10 rounded-full"; prop.children [ Html.img [ prop.src ${String(c.src)}; prop.alt ${alt} ] ] ] ] ]`;
+}
+
+// --- Layout containers (children-bearing) ---------------------------------
+function primitiveGrid(c: Ctx): string {
+  return containerEl("div", "grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3", c);
+}
+function primitiveContainer(c: Ctx): string {
+  return containerEl("div", "mx-auto max-w-4xl px-4", c);
+}
+function primitiveSection(c: Ctx): string {
+  return containerEl("section", "flex flex-col gap-4", c);
+}
+function primitiveSticky(c: Ctx): string {
+  return containerEl("div", "sticky top-0 z-10", c);
+}
+
 /** QueryView — the MVU RemoteData match, rendered through the `View.remoteList`
  *  helper (emitted into App.fs by index.ts).  A helper CALL is offside-safe
  *  inside a Feliz children `[ … ]` list where a raw multi-line `match` is not:
@@ -316,6 +394,24 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-table": primitiveTable,
   "primitive-id-link": primitiveIdLink,
   "primitive-modal": primitiveModal,
+  // Prose / text-decoration.
+  "primitive-bold": primitiveBold,
+  "primitive-italic": primitiveItalic,
+  "primitive-inline-code": primitiveInlineCode,
+  "primitive-code-block": primitiveCodeBlock,
+  // Data-display.
+  "primitive-money": primitiveMoney,
+  "primitive-date-display": primitiveDateDisplay,
+  "primitive-enum-badge": primitiveEnumBadge,
+  "primitive-stat": primitiveStat,
+  "primitive-loader": primitiveLoader,
+  "primitive-image": primitiveImage,
+  "primitive-avatar": primitiveAvatar,
+  // Layout containers.
+  "primitive-grid": primitiveGrid,
+  "primitive-container": primitiveContainer,
+  "primitive-section": primitiveSection,
+  "primitive-sticky": primitiveSticky,
 };
 
 /** Build the procedural Feliz pack.  Implements the `LoadedPack` render
