@@ -10,6 +10,7 @@ import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
   FelizAction,
   FelizAsyncEffect,
+  FelizBoundState,
   FelizFieldArray,
   FelizForm,
   FelizMutation,
@@ -23,6 +24,43 @@ import { formHasFieldErrors, formTouchedField, formTouchMsg } from "./wire.js";
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** Coerce a numeric-literal `state` init to an F# `decimal` literal when the
+ *  field is `money`/`decimal`.  A DSL `price: money = 0` renders the init as the
+ *  bare int `0`, which F# then implicitly converts `int → decimal` — a
+ *  conversion Fable rejects (`op_Implicit not supported`).  Suffixing `m`
+ *  (`0` → `0m`, `9.99` → `9.99m`) makes it a decimal literal outright.  Only
+ *  touches a plain numeric literal; any other init expression is left as-is. */
+function decimalLit(rendered: string, type: StateFieldIR["type"]): string {
+  if (typeToFs(type) !== "decimal") return rendered;
+  return /^-?\d+(\.\d+)?$/.test(rendered) ? `${rendered}m` : rendered;
+}
+
+/** The `Set<Field>` Msg case a two-way-bound input contributes.  A `bool` state
+ *  (a `Toggle` / controlled `Modal`) carries the bool directly; every other
+ *  state (`Field`/`NumberField`/`SelectField`/…) carries the raw input `string`
+ *  and the update arm converts it to the field's type. */
+function boundSetMsg(b: FelizBoundState): string {
+  const payload = typeToFs(b.type) === "bool" ? "bool" : "string";
+  return `  | Set${upperFirst(b.name)} of ${payload}`;
+}
+
+/** The `update` arm a two-way-bound input contributes — assign the Model field
+ *  from the dispatched value, converting the raw input `string` to the field's
+ *  type (a bad/partial number parses to the zero value, never throwing). */
+function boundSetArm(b: FelizBoundState): string {
+  const field = upperFirst(b.name);
+  const fs = typeToFs(b.type);
+  const conv =
+    fs === "bool"
+      ? "v"
+      : fs === "int"
+        ? "(match System.Int32.TryParse v with | true, n -> n | _ -> 0)"
+        : fs === "decimal"
+          ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
+          : "v";
+  return `  | Set${field} v -> { model with ${field} = ${conv} }, Cmd.none`;
 }
 
 /** The `Msg` cases a form's dynamic-row fields contribute — an `Add`/`Remove of
@@ -133,7 +171,7 @@ export function renderInit(
       : []),
     ...state.map((f) => {
       const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
-      const v = f.init ? renderFsExpr(f.init, ctx) : fsZeroValue(f.type);
+      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : fsZeroValue(f.type);
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
@@ -178,12 +216,15 @@ export function renderMsg(
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
   opActions: readonly FelizAction[] = [],
+  boundState: readonly FelizBoundState[] = [],
 ): string {
   const cases = [
     // Under a page gate the probe carries the decoded claims (None on 401);
     // otherwise it's a bare authenticated? boolean.
     ...(authUi ? [`  | SessionChecked of ${pageGate ? "CurrentUser option" : "bool"}`] : []),
     ...(routed ? ["  | UrlChanged of string list"] : []),
+    // One `Set<Field>` per two-way-bound controlled input (Field/Toggle/…).
+    ...boundState.map(boundSetMsg),
     ...actions.map((a) => {
       const p = a.params[0];
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
@@ -371,8 +412,11 @@ export function renderUpdate(
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
   opActions: readonly FelizAction[] = [],
+  boundState: readonly FelizBoundState[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
+  // One `| Set<Field> v -> …` arm per two-way-bound controlled input.
+  const boundArms = boundState.map(boundSetArm);
   const byIdReads = reads.filter((r) => r.single);
   // The auth gate: the session probe resolves to Authed / Anon.  Under a page
   // gate it also stashes the decoded claims (`Some user`) so a gated view can
@@ -578,6 +622,7 @@ export function renderUpdate(
   const arms = [
     ...authArms,
     ...routeArms,
+    ...boundArms,
     ...actionArms,
     ...storeArms,
     ...asyncEffectArms,
