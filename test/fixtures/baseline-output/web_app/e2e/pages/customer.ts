@@ -51,13 +51,25 @@ export class CustomerNewPage {
 
   async fill(input: Partial<CreateCustomerRequest>): Promise<this> {
     if (input.username !== undefined) {
-      await this.page.getByTestId("customers-new-input-username").fill(input.username!);
+      {
+        const __f = this.page.getByTestId("customers-new-input-username");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.username!);
+      }
     }
     if (input.email !== undefined) {
-      await this.page.getByTestId("customers-new-input-email").fill(input.email!);
+      {
+        const __f = this.page.getByTestId("customers-new-input-email");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.email!);
+      }
     }
     if (input.age !== undefined) {
-      await this.page.getByTestId("customers-new-input-age").fill(String(input.age));
+      {
+        const __f = this.page.getByTestId("customers-new-input-age");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(String(input.age));
+      }
     }
     return this;
   }
@@ -96,13 +108,25 @@ export class CustomerDetailPage {
     await this.page.getByTestId("customers-op-update").click();
     await this.page.getByTestId("customers-op-update-form").waitFor();
     if (input.username !== undefined) {
-      await this.page.getByTestId("customers-op-update-input-username").fill(input.username!);
+      {
+        const __f = this.page.getByTestId("customers-op-update-input-username");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.username!);
+      }
     }
     if (input.email !== undefined) {
-      await this.page.getByTestId("customers-op-update-input-email").fill(input.email!);
+      {
+        const __f = this.page.getByTestId("customers-op-update-input-email");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.email!);
+      }
     }
     if (input.age !== undefined) {
-      await this.page.getByTestId("customers-op-update-input-age").fill(String(input.age));
+      {
+        const __f = this.page.getByTestId("customers-op-update-input-age");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(String(input.age));
+      }
     }
     await this.page.getByTestId("customers-op-update-submit").click();
     await this.page.getByTestId("customers-op-update-form").waitFor({ state: "detached" });
