@@ -23,9 +23,62 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 
 export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const proj of ctx.projections) {
-    validateKey(ctx, proj, diags);
+    // Keyed projections name a routing key; a SINGLETON (no `keyed by`) has no
+    // key to validate — its `correlationField` is undefined (the singleton
+    // discriminant).
+    if (proj.correlationField !== undefined) validateKey(ctx, proj, diags);
     validateHandlers(ctx, proj, diags);
+    validateQueryComprehension(ctx, proj, diags);
   }
+}
+
+/** The query-time comprehension gates (read-path-architecture.md rev.13).  The
+ *  generalised `projection` surface (grammar + IR + lowering) lands here ahead
+ *  of the per-backend query-time emit, so a query-time / `join` projection is
+ *  parsed, lowered, and validated — but HONESTLY REJECTED until a backend ports
+ *  the emit (PR-C onward), rather than silently mis-emitted by the folded path.
+ *
+ *   - `loom.projection-query-and-fold-unsupported` — a `from` source AND
+ *     `on(e)` folds together (a seed-then-update read model) is a RESERVED
+ *     combo (proposal § "Exotic combos are deferred behind gates").
+ *   - `loom.projection-query-time-unsupported` — the HONEST not-yet-emitted
+ *     gate: any comprehension clause (`from`/`where`/`join`/`select`) is
+ *     surface+IR-complete but has no backend emitter yet.  Lifted per backend
+ *     as each ports the `view`-full-form emitter.  (The `order by` clause, the
+ *     groupby / singleton-whole-table-aggregation / paged-sort refinements land
+ *     WITH that emit, where they first become reachable.)
+ */
+function validateQueryComprehension(
+  ctx: BoundedContextIR,
+  proj: ProjectionIR,
+  diags: LoomDiagnostic[],
+): void {
+  const q = proj.query;
+  if (!q) return;
+  if (q.source && proj.handlers.length > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-query-and-fold-unsupported",
+      message:
+        `projection '${proj.name}' declares both a 'from ${q.source}' query source ` +
+        `and 'on(e)' event folds. A query source and event folds together ` +
+        `(seed-then-update) is a reserved combination — use EITHER a query-time ` +
+        `projection ('from … select …') OR a folded one ('on(e) { … }'), not both.`,
+      source: `${ctx.name}/${proj.name}`,
+    });
+    return;
+  }
+  diags.push({
+    severity: "error",
+    code: "loom.projection-query-time-unsupported",
+    message:
+      `projection '${proj.name}' uses the query-time comprehension ` +
+      `('from'/'where'/'join'/'select'), which is parsed and lowered but not yet ` +
+      `emitted by any backend. The per-backend query-time projection emit lands ` +
+      `in a follow-up; for now express the read as a 'view' or a folded ` +
+      `'projection'.`,
+    source: `${ctx.name}/${proj.name}`,
+  });
 }
 
 function validateKey(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagnostic[]): void {

@@ -107,6 +107,17 @@ const ALLOWLIST = new Set<string>([
   // conflict this HARD_GATE is designed to surface).
   "Projection",
   "ProjectionOn",
+  // The query-time projection comprehension (read-path-architecture.md rev.13,
+  // § "projection generalises") — `join <Agg> as <c> on <idRef>` follows and
+  // `select <field> = <expr>` projections.  Surface + IR + validation only:
+  // a query-time / `join` projection is HONESTLY rejected
+  // (`loom.projection-query-time-unsupported`) until a backend ports the emit,
+  // so putting one in showcase.ddd (which feeds every cross-backend matrix)
+  // would trip that gate rather than add a conformance dimension.  The
+  // query-time emit slice owns removing these two entries when it lands (same
+  // cross-PR pattern as `Projection` above).
+  "ProjectionJoin",
+  "ProjectionSelect",
   // `policy {}` (+ its `PolicyReadRule` rows) is the tenant read-reachability
   // ladder (multi-tenancy Phase 2 P2.4): it only validates on a `tenancy by`
   // system with `tenantOwned` aggregates (`deep`/`global` also need an

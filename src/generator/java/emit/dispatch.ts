@@ -83,7 +83,7 @@ function renderProjectionFold(
   sub: EventSubscriptionIR,
   imports: Set<string>,
 ): string[] {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const param = sub.param;
   // this-prop refs resolve through the row's record-style accessors
   // (`state.status()`); writes go through the JavaBean setter (spelled below).

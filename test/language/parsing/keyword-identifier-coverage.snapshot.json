@@ -370,6 +370,14 @@
   ],
   "issuer": [],
   "java": [],
+  "join": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "json": [],
   "jwt": [],
   "kafka": [],
@@ -675,6 +683,14 @@
     "paramName"
   ],
   "seed": [],
+  "select": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "sensitive": [],
   "serializable": [],
   "serves": [],

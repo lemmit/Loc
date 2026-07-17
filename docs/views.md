@@ -363,3 +363,36 @@ A future slice adds **projections** — materialised denormalised
 read models updated by event handlers — for the cases where view
 queries become too expensive or need to denormalise across
 aggregates.
+
+## The query-time `projection` comprehension (in progress)
+
+The read-path rethink ([`read-path-architecture.md`](old/proposals/read-path-architecture.md)
+rev.13) **generalises `projection`** so a `view`'s full form becomes a
+query-time projection flavor — a LINQ/SQL-shaped comprehension whose
+expressions are Loom's one candidate-rooted language (the same `criterion`
+dialect):
+
+```ddd
+projection OrdersInRegion(region: string) keyed by orderId {
+  orderId: Order id;  customerName: string
+  from Order as o                               // query source (aliased like `criterion … of T as o`)
+  where InRegion(region) && o.status == Confirmed   // criterion position — composes named criteria
+  join Customer as c on o.customerId            // by-id follow (boundary-respecting, batched)
+  select orderId = o.id, customerName = c.name  // fills the row from source + join alias
+}
+```
+
+The `from … as` / `where` / `join … as … on` / `select` clauses are optional
+and fixed-order; a projection with **no** query clause is today's folded read
+model. "Mode" facts are **derived from clause presence** (never stamped): folds
+present ⇒ materialised; no `keyed by` ⇒ singleton; a `from` with no folds ⇒
+query-time.
+
+> **Status — surface + IR only.** The grammar, lowering (the cross-aggregate
+> `join` reuses the same bulk-load `auxiliaries` machinery as the `view`
+> follow), and validation ship, but the per-backend query-time **emit** is a
+> follow-up. Until a backend ports it, a query-time / `join` projection is
+> HONESTLY rejected (`loom.projection-query-time-unsupported`) rather than
+> silently mis-emitted — use a `view` or a folded `projection` today. The
+> `order by` ordering clause (and its columnar-paging gate) lands with that
+> emit.

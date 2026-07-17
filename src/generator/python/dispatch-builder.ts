@@ -355,7 +355,7 @@ function stateHelpers(wf: WorkflowIR): string {
  *  by its correlation key. */
 function projectionStateHelper(proj: ProjectionIR): string {
   const row = `${proj.name}Row`;
-  const corr = snake(proj.correlationField);
+  const corr = snake(proj.correlationField as string);
   return lines(
     `async def _load_${snake(proj.name)}(session: AsyncSession, key: str) -> ${row} | None:`,
     `    return (`,
@@ -370,7 +370,7 @@ function projectionStateHelper(proj: ProjectionIR): string {
  *  emit, no child-context frame (enforced by `loom.projection-fold-impure`). */
 function projectionHandlerFn(fn: string, proj: ProjectionIR, on: ProjectionOnIR): string {
   const row = `${proj.name}Row`;
-  const corr = snake(proj.correlationField);
+  const corr = snake(proj.correlationField as string);
   const param = snake(on.param);
   const keyExpr = on.correlation
     ? renderPyExpr(on.correlation, { thisName: "state" })
