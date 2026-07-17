@@ -1016,7 +1016,10 @@ function printProperty(node: Property): string {
   // greedily swallow a trailing modifier keyword.
   const def = node.default ? ` = ${printExpr(node.default)}` : "";
   const check = node.check ? ` check ${printExpr(node.check)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}`;
+  // `message "..."` re-quotes (the STRING terminal is delimiter-stripped); only
+  // parses with a `check`, so it's appended after it.
+  const msg = node.message ? ` message ${JSON.stringify(node.message)}` : "";
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}${msg}`;
 }
 
 function printContainment(node: Containment): string {
@@ -1038,7 +1041,8 @@ function printActionDecl(node: ActionDecl): string {
 function printInvariant(node: Invariant): string {
   const priv = node.serverOnly ? "private " : "";
   const guard = node.guard ? ` when ${printExpr(node.guard)}` : "";
-  return `${priv}invariant ${printExpr(node.expr)}${guard}`;
+  const msg = node.message ? ` message ${JSON.stringify(node.message)}` : "";
+  return `${priv}invariant ${printExpr(node.expr)}${guard}${msg}`;
 }
 
 function printUnique(node: import("../generated/ast.js").Unique): string {

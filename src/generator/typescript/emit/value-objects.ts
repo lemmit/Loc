@@ -68,7 +68,7 @@ function renderValueObject(v: ValueObjectIR): string[] {
     const check = inv.guard
       ? `if ((${renderTsExpr(inv.guard)}) && !(${renderTsExpr(inv.expr)}))`
       : `if (!(${renderTsExpr(inv.expr)}))`;
-    return `    ${check} throw new DomainError(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+    return `    ${check} throw new DomainError(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)});`;
   });
   const derived = v.derived.map(
     (d) => `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,

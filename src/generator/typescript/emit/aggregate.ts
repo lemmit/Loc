@@ -584,7 +584,11 @@ function renderEntity(
   // Op context comes from the implicit `__op` parameter on the trace-on
   // signature of `_assertInvariants`.
   const invariants = e.invariants.map((inv, i) => {
-    const exprSrc = JSON.stringify(`Invariant violated: ${inv.source}`);
+    // Author `message "..."` becomes the domain-floor detail; otherwise the
+    // derived "Invariant violated: <src>" default.
+    const exprSrc = JSON.stringify(
+      inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+    );
     if (!emitTrace) {
       const check = inv.guard
         ? `if ((${renderTsExpr(inv.guard)}) && !(${renderTsExpr(inv.expr)}))`
