@@ -42,6 +42,20 @@ describe("validator — criterion", () => {
     expect(errors).toEqual([]);
   });
 
+  it("accepts an aliased candidate binder (`of T as o`)", async () => {
+    const { errors } = await parseString(
+      ctx(`criterion InRegion(r: string) of Customer as o = o.region == r`),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects an alias that collides with a parameter name (loom.criterion-alias-collision)", async () => {
+    const { diagnostics } = await parseString(
+      ctx(`criterion Bad(o: string) of Customer as o = region == o`),
+    );
+    expect(diagnostics.map((d) => d.code)).toContain("loom.criterion-alias-collision");
+  });
+
   it("rejects an unsupported candidate type (`of decimal`)", async () => {
     const { errors } = await parseString(ctx(`criterion ValidAmount of decimal = active`));
     expect(errors.join("\n")).toMatch(/unsupported candidate type/);

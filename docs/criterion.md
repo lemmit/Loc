@@ -79,12 +79,28 @@ context Sales {
 Grammar:
 
 ```
-criterion <Name>(<Param>*) of <T> = <bool expression>
+criterion <Name>(<Param>*) of <T> [as <alias>] = <bool expression>
 criterion <Name>(<Param>*) of <T> { where: <bool expression> }
 ```
 
 `<T>` (the candidate) must be an **aggregate** or **`bool`** in this
 release.
+
+### `of T as <alias>` — an optional candidate binder
+
+The candidate is `this` / bare fields by default. `of T as o` additionally
+binds the author's chosen name `o` to that same candidate, so `o.region`
+reads exactly like `this.region` (same aggregate, SQL-queryable — byte-
+identical lowering). This is the *one* `as`-binding convention shared with
+`from … as o` / `join … as c` (read-path-architecture.md, "Aligned with
+`criterion`"); it is **not** a fixed `self` receiver — the alias is
+author-chosen and optional, and every existing criterion keeps parsing.
+
+```ddd
+criterion InRegion(rgn: string) of Order as o = o.region == rgn   // ≡ region == rgn
+```
+
+The alias must not collide with a parameter name (`loom.criterion-alias-collision`).
 
 ## Composition
 

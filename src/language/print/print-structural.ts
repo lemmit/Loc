@@ -856,7 +856,8 @@ function printFindDecl(node: FindDecl): string {
  *  the same `body`). */
 function printCriterion(node: import("../generated/ast.js").Criterion): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
-  return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+  const alias = node.alias ? ` as ${node.alias}` : "";
+  return `criterion ${node.name}${params} of ${printTypeRef(node.target)}${alias} = ${printExpr(node.body)}`;
 }
 
 /** `domainService <Name> { operation … }` — a stateless container of

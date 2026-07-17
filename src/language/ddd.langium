@@ -1473,6 +1473,7 @@ SeedRow:
 // where→SQL path the inline filter does today.
 Criterion:
     'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    ('as' alias=ID)?
     (
         '=' body=Expression
     );
