@@ -810,9 +810,14 @@ test "negative money rejected" {
 Assertions are **method-based**: every `expect` carries a matcher — a bare
 `expect <bool>` is a validation error.  The matcher set is a closed,
 compiler-known catalogue (`toBe` / `toBeGreaterThan(OrEqual)` /
-`toBeLessThan(OrEqual)` / `toHaveText` / `toHaveCount` / `toBeVisible` /
-`toThrow`); they are not methods on a domain type but intrinsic assertions the
-compiler type-checks and lowers per backend.  Inside a test body the standard
+`toBeLessThan(OrEqual)` / `toBeSameInstant` / `toHaveText` / `toHaveCount` /
+`toBeVisible` / `toThrow`); they are not methods on a domain type but intrinsic
+assertions the compiler type-checks and lowers per backend.  Two are context-
+restricted (validator-enforced): `toThrow(<status>)` and `toBeSameInstant` are
+only valid in a `test e2e` body — the first pins an HTTP status, the second
+compares two ISO-8601 timestamps as *instants* (so a backend that serializes a
+datetime as `…00.0000000Z` still equals the canonical `…00Z` on the wire, while
+a real difference in time still fails).  Inside a test body the standard
 operation statements are allowed plus:
 
 | Form | Lowers to |
