@@ -57,11 +57,15 @@ describe("timerSource → Hono scheduler", () => {
 
     const scheduler = get("d/scheduler.ts");
     expect(scheduler).not.toBe("");
-    // Single-fire advisory lock keyed per timer.
-    expect(scheduler).toContain("pg_try_advisory_lock");
-    expect(scheduler).toContain("pg_advisory_unlock");
+    // Single-fire via a TRANSACTION-SCOPED advisory lock (auto-released on tx
+    // commit — a plain session lock + pool would leak the unlock onto a
+    // different connection). Keyed per timer.
+    expect(scheduler).toContain("pg_try_advisory_xact_lock");
+    expect(scheduler).toContain("db.transaction(async (tx)");
     expect(scheduler).toContain("function timerLockKey");
-    // Dispatches through the existing in-process dispatcher.
+    // No manual session-lock unlock (the tx commit releases it).
+    expect(scheduler).not.toContain("pg_advisory_unlock");
+    // Dispatches through the existing in-process dispatcher, inside the lock tx.
     expect(scheduler).toContain("events.dispatch(build())");
     // Catalog obs events (cross-backend parity).
     expect(scheduler).toContain('event: "timer_fired"');

@@ -153,14 +153,26 @@ timer (its subdomain is the for-event's `migrationsOwner`), the Hono backend
 emits `scheduler.ts` and wires it at boot:
 
 - **One job per timer.** `cron:` → `node-cron`; `every:` → a bare `setInterval`.
-- **Single-fire across replicas.** Each tick takes a `pg_try_advisory_lock`
-  keyed by an FNV-1a hash of the timer name; the loser skips (logged). A
-  `running` guard skips (does not queue) an overlapping tick.
+- **Single-fire across replicas.** Each tick opens a transaction and takes a
+  `pg_try_advisory_xact_lock` keyed by an FNV-1a hash of the timer name; the
+  lock is held for the dispatch and released automatically when the tx commits
+  (a plain session `pg_advisory_lock` + a connection pool would leak the unlock
+  onto a different pooled connection). The loser of the race skips (logged). A
+  `running` guard skips (does not queue) an overlapping tick on the same replica.
 - **Dispatch.** The tick event is constructed (id fields minted, `at` stamped)
   and dispatched through the same in-process dispatcher the sagas use, so an
   `on`/`create` reactor fires with no new machinery.
 - **Observability.** `timer_fired` / `timer_skipped_overlap` /
   `timer_lock_contended` / `timer_emit_failed` on the catalog.
+
+**Delivery semantics (multi-pod).** The advisory lock is a *mutex around the
+body*: while one replica is dispatching, a peer's concurrent tick fails the lock
+and skips — no concurrent double-fire. It is **at-least-once**, not
+exactly-once: if a replica commits before a peer's clock-skewed tick fires, the
+peer can also fire, so **tick reactors must be idempotent** (the same contract
+event reactors already carry). True exactly-once-per-instant (a durable claim
+keyed by the cadence bucket / competing-consumer queue) is not implemented — a
+Phase-3 durability item.
 
 A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
 boot wiring — byte-identical to before. (`.NET` and the other backends are
