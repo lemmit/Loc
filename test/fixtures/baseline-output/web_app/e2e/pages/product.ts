@@ -51,14 +51,26 @@ export class ProductNewPage {
 
   async fill(input: Partial<CreateProductRequest>): Promise<this> {
     if (input.sku !== undefined) {
-      await this.page.getByTestId("products-new-input-sku").fill(input.sku!);
+      {
+        const __f = this.page.getByTestId("products-new-input-sku");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.sku!);
+      }
     }
     if (input.price !== undefined) {
       if (input.price!.amount !== undefined) {
-        await this.page.getByTestId("products-new-input-price-amount").fill(String(input.price!.amount));
+        {
+          const __f = this.page.getByTestId("products-new-input-price-amount");
+          const __i = __f.locator("input, textarea");
+          await ((await __i.count()) ? __i.first() : __f).fill(String(input.price!.amount));
+        }
       }
       if (input.price!.currency !== undefined) {
-        await this.page.getByTestId("products-new-input-price-currency").fill(input.price!.currency!);
+        {
+          const __f = this.page.getByTestId("products-new-input-price-currency");
+          const __i = __f.locator("input, textarea");
+          await ((await __i.count()) ? __i.first() : __f).fill(input.price!.currency!);
+        }
       }
     }
     return this;
@@ -98,14 +110,26 @@ export class ProductDetailPage {
     await this.page.getByTestId("products-op-update").click();
     await this.page.getByTestId("products-op-update-form").waitFor();
     if (input.sku !== undefined) {
-      await this.page.getByTestId("products-op-update-input-sku").fill(input.sku!);
+      {
+        const __f = this.page.getByTestId("products-op-update-input-sku");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.sku!);
+      }
     }
     if (input.price !== undefined) {
       if (input.price!.amount !== undefined) {
-        await this.page.getByTestId("products-op-update-input-price-amount").fill(String(input.price!.amount));
+        {
+          const __f = this.page.getByTestId("products-op-update-input-price-amount");
+          const __i = __f.locator("input, textarea");
+          await ((await __i.count()) ? __i.first() : __f).fill(String(input.price!.amount));
+        }
       }
       if (input.price!.currency !== undefined) {
-        await this.page.getByTestId("products-op-update-input-price-currency").fill(input.price!.currency!);
+        {
+          const __f = this.page.getByTestId("products-op-update-input-price-currency");
+          const __i = __f.locator("input, textarea");
+          await ((await __i.count()) ? __i.first() : __f).fill(input.price!.currency!);
+        }
       }
     }
     await this.page.getByTestId("products-op-update-submit").click();

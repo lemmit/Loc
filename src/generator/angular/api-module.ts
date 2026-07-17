@@ -8,9 +8,11 @@ import { unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnumIR,
   FindIR,
   RepositoryIR,
   TypeIR,
+  ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
@@ -32,16 +34,24 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 //
 // Response types are plain TS interfaces derived from the aggregate's
 // `wireShape` (the same ordered field list every backend's DTO emitter
-// consumes).  Primitive + id fields map precisely; value-object / enum /
-// nested-entity fields fall back to `unknown` for now (the read path only
-// needs the collection shape — precise nested typing is a later slice).
+// consumes).  Primitive + id fields map precisely.  RESPONSE-side value-object
+// and enum fields are typed precisely too — VO fields as `<VO>Response` (nested
+// interfaces emitted alongside), enum fields as a `<Enum>` string union — so a
+// detail/view that dereferences `x.price.amount` or narrows an enum compiles
+// under `ng build` (previously `unknown` → TS2571).  REQUEST-side fields
+// (create / op params / find queries) stay `unknown`: the reactive forms hold
+// them as `FormControl(null)`, which is assignable to `unknown` but not to the
+// precise type — request-side precise typing is a separate concern.
 // ---------------------------------------------------------------------------
 
-/** Map a wire `TypeIR` to a TS type string for a response interface field. */
-function wireTsType(t: TypeIR): string {
+/** Map a wire `TypeIR` to a TS type string for an interface field.  `precise`
+ *  (response-side only) types value objects / enums by name instead of
+ *  `unknown`; the referenced `<VO>Response` / `<Enum>` types are emitted by
+ *  `collectResponseTypes` for the same field set. */
+function wireTsType(t: TypeIR, precise = false): string {
   const info = wireTypeInfo(t, "response");
-  if (info.isNullable) return `${wireTsType(peelNullable(t))} | null`;
-  if (info.isCollection) return `${wireTsType(peelCollection(t))}[]`;
+  if (info.isNullable) return `${wireTsType(peelNullable(t), precise)} | null`;
+  if (info.isCollection) return `${wireTsType(peelCollection(t), precise)}[]`;
   switch (info.refKind) {
     case "primitive":
       switch (info.primitive) {
@@ -63,11 +73,63 @@ function wireTsType(t: TypeIR): string {
       }
     case "id":
       return "string";
-    // Enums / value objects / nested entities: the collection read path
-    // doesn't dereference them yet — keep the field present but untyped.
     default:
+      if (precise && t.kind === "valueobject") return `${t.name}Response`;
+      if (precise && t.kind === "enum") return t.name;
+      // Nested entities (and request-side VO/enum) stay untyped.
       return "unknown";
   }
+}
+
+/** Peel array/optional wrappers to the base type. */
+function baseType(t: TypeIR): TypeIR {
+  if (t.kind === "array") return baseType(t.element);
+  if (t.kind === "optional") return baseType(t.inner);
+  return t;
+}
+
+/** The value objects + enums a response field set references, transitively
+ *  (a VO field may reference another VO or an enum).  Their `<VO>Response` /
+ *  `<Enum>` types must be emitted so the precise response interface resolves. */
+function collectResponseTypes(
+  types: readonly TypeIR[],
+  bc: BoundedContextIR | undefined,
+): { vos: ValueObjectIR[]; enums: EnumIR[] } {
+  const voByName = new Map((bc?.valueObjects ?? []).map((v) => [v.name, v]));
+  const enumByName = new Map((bc?.enums ?? []).map((e) => [e.name, e]));
+  const vos = new Map<string, ValueObjectIR>();
+  const enums = new Map<string, EnumIR>();
+  const visit = (t: TypeIR): void => {
+    const b = baseType(t);
+    if (b.kind === "valueobject" && !vos.has(b.name)) {
+      const vo = voByName.get(b.name);
+      if (!vo) return;
+      vos.set(b.name, vo);
+      for (const f of forApiRead(wireFieldsFor(vo))) if (f.source !== "id") visit(f.type);
+    } else if (b.kind === "enum" && !enums.has(b.name)) {
+      const e = enumByName.get(b.name);
+      if (e) enums.set(b.name, e);
+    }
+  };
+  for (const t of types) visit(t);
+  return { vos: [...vos.values()], enums: [...enums.values()] };
+}
+
+/** `export type <Enum> = "A" | "B";` — the response-side enum union. */
+function emitEnumType(e: EnumIR): string {
+  return `export type ${e.name} = ${e.values.map((v) => JSON.stringify(v)).join(" | ")};`;
+}
+
+/** `export interface <VO>Response { … }` over the VO's canonical wire shape. */
+function emitVoResponseInterface(vo: ValueObjectIR): string[] {
+  return [
+    `export interface ${vo.name}Response {`,
+    ...forApiRead(wireFieldsFor(vo)).map(
+      (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
+    ),
+    "}",
+    "",
+  ];
 }
 
 /** Parameterised finds (everything but the auto `all`) the aggregate's
@@ -150,6 +212,12 @@ export function buildAngularApiModule(
 
   const fields = forApiRead(wireFieldsFor(agg));
   const createFields = createInputFields(agg);
+  // VO / enum types referenced by the response field set — emitted before the
+  // response interface so its precise (non-`unknown`) field types resolve.
+  const { vos: responseVos, enums: responseEnums } = collectResponseTypes(
+    fields.filter((f) => f.source !== "id").map((f) => f.type),
+    bc,
+  );
 
   // Public domain operations → a `POST /<tag>/:id/<op>` mutation each
   // (request type = op params, mirrors the React op-mutation shape).  The
@@ -296,8 +364,14 @@ export function buildAngularApiModule(
     'import { firstValueFrom } from "rxjs";',
     'import { API_BASE_URL } from "./config";',
     "",
+    // Response-side value objects + enums, typed by name (nested interfaces /
+    // enum unions) so a detail/view dereference compiles.
+    ...responseEnums.map(emitEnumType).flatMap((l) => [l, ""]),
+    ...responseVos.flatMap(emitVoResponseInterface),
     `export interface ${responseName} {`,
-    ...fields.map((f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type)};`),
+    ...fields.map(
+      (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
+    ),
     "}",
     "",
     // Client-suppliable create payload (server-controlled fields dropped).

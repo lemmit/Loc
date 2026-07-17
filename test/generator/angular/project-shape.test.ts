@@ -232,4 +232,39 @@ describe("angular generator — per-operation mutations", () => {
     expect(api).toContain('.invalidateQueries({ queryKey: ["order", vars.id] })');
     expect(api).toContain('.then(() => queryClient.invalidateQueries({ queryKey: ["orders"] })),');
   });
+
+  // Response-side value-object + enum fields are typed by name (not `unknown`),
+  // so a detail/view that dereferences them compiles under `ng build` — the gap
+  // the nightly frontend-fullstack Angular cell surfaced (`price.amount` → TS2571
+  // when `price` was `unknown`). Request-side fields stay `unknown` because the
+  // reactive form holds them as `FormControl(null)`.
+  it("types response VO/enum fields precisely (VO → <VO>Response, enum → union); request stays unknown", async () => {
+    const SRC = `
+      system Shop {
+        subdomain Sales { context Orders {
+          enum OrderStatus { Draft, Confirmed }
+          valueobject Money { amount: decimal  currency: string  invariant amount >= 0 }
+          aggregate Order with crudish {
+            status: OrderStatus
+            price: Money
+          }
+        } }
+        ui Web { }
+        storage primary { type: postgres }
+        resource s { for: Orders, kind: state, use: primary }
+        deployable api { platform: node, contexts: [Orders], dataSources: [s], port: 3000 }
+        deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+      }`;
+    const all = await generateSystemFiles(SRC);
+    const api = all.get("web/src/api/order.ts")!;
+    // Nested interfaces / enum union emitted before the response interface.
+    expect(api).toContain("export interface MoneyResponse {");
+    expect(api).toContain('export type OrderStatus = "Draft" | "Confirmed";');
+    // Response interface references them precisely.
+    expect(api).toMatch(/export interface OrderResponse \{[\s\S]*price: MoneyResponse;/);
+    expect(api).toMatch(/export interface OrderResponse \{[\s\S]*status: OrderStatus;/);
+    // Request/create side stays `unknown` (FormControl(null) is assignable to it).
+    expect(api).toMatch(/export interface CreateOrderRequest \{[\s\S]*price: unknown;/);
+    expect(api).toMatch(/export interface CreateOrderRequest \{[\s\S]*status: unknown;/);
+  });
 });

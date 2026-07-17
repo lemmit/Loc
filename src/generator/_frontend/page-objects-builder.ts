@@ -258,6 +258,23 @@ export function buildPageObjectModule(
  *  time out. */
 export type SelectStyle = "combobox" | "native";
 
+/** A framework-robust text fill.  A design pack may put the field's `data-testid`
+ *  on the actual `<input>` (Mantine) or on a wrapper that CONTAINS it (Vuetify's
+ *  `v-text-field` forwards attrs to its root `<div>`, so `getByTestId(id).fill()`
+ *  hits the div and Playwright errors "Element is not an <input>").  Prefer a
+ *  fillable descendant when present, else the testid element itself — so the
+ *  SHARED page objects drive any pack.  Caught by the nightly frontend-fullstack
+ *  matrix (a Vue round-trip), invisible to the React-only per-PR UI cell. */
+function robustFill(testId: string, valueExpr: string): string[] {
+  return [
+    `  {`,
+    `    const __f = this.page.getByTestId("${testId}");`,
+    `    const __i = __f.locator("input, textarea");`,
+    `    await ((await __i.count()) ? __i.first() : __f).fill(${valueExpr});`,
+    `  }`,
+  ];
+}
+
 export function fillBlock(
   inputVar: string,
   path: string,
@@ -307,16 +324,16 @@ export function fillBlock(
       // backend treats the unmarked value as UTC and accepts
       // minute-precision datetimes, so the round-trip stays correct as
       // long as the test source uses `Z` consistently.
-      lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 16));`);
+      lines.push(...robustFill(testId, `${accessor}!.slice(0, 16)`));
     } else if (inner.name === "int" || inner.name === "long" || inner.name === "decimal") {
-      lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
+      lines.push(...robustFill(testId, `String(${accessor})`));
     } else if (inner.name === "money") {
       // Money form fields render as text inputs; the test passes a
       // Decimal instance (or string) and we fill its .toString()
       // value so the precise wire-shape is what hits the form.
-      lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
+      lines.push(...robustFill(testId, `String(${accessor})`));
     } else {
-      lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
+      lines.push(...robustFill(testId, `${accessor}!`));
     }
   } else if (inner.kind === "id") {
     if (selectStyle === "native") {

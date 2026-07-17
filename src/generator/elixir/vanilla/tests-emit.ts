@@ -72,13 +72,32 @@ const MONEY_CMP: Record<string, string> = {
 const TEST_ACTOR =
   '%{id: "00000000-0000-0000-0000-000000000000", role: "admin", permissions: ["*"]}';
 
-const SKIP_BODY = [
-  "  # Skipped on vanilla Elixir: this test constructs/validates a value object",
-  "  # (a plain map with no validating constructor) or uses a shape this emitter",
-  "  # can't lower to the pure domain core. See",
-  "  # docs/audits/test-parity-generated-backends.md.",
-  "  :ok",
-];
+/** A domain `test` shape the vanilla ExUnit emitter deliberately cannot lower to
+ *  the pure domain core — an unsupported matcher/statement/expression, or a
+ *  `toThrow` over a non-create/op/validatable-VO expression. This is the ONLY
+ *  error class that degrades a test to `@tag :skip`; every other throw is a real
+ *  emitter bug and must propagate loudly rather than masquerade as an
+ *  "unsupported shape" skip that leaves `behavioral-e2e-elixir` green while the
+ *  domain suite silently shrinks. Carries a one-line reason surfaced both in the
+ *  emitted skip comment and to the no-silent-skip conformance gate
+ *  (test/conformance/elixir-domain-test-no-silent-skip.test.ts). */
+export class UnsupportedTestShapeError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "UnsupportedTestShapeError";
+  }
+}
+
+/** The `@tag :skip` body, carrying the concrete reason so a human reading the
+ *  generated file (and the conformance gate) sees WHY the port degraded. */
+function skipBody(reason: string): string[] {
+  return [
+    "  # Skipped on vanilla Elixir: this emitter can't lower the test to the pure",
+    `  # domain core.  Reason: ${reason}`,
+    "  # See docs/audits/test-parity-generated-backends.md.",
+    "  :ok",
+  ];
+}
 
 export function renderVanillaAggregateTestModule(
   agg: AggregateIR,
@@ -105,10 +124,13 @@ function renderTest(t: TestIR, env: Env): string[] {
     const used = usedRefNames(t.statements);
     const lines = t.statements.flatMap((s) => renderStmt(s, env, used));
     return [`test ${elixirString(t.name)} do`, ...lines.map((l) => `  ${l}`), "end"];
-  } catch {
-    // Anything we can't faithfully lower (VO-construction invariants, VO
-    // instance methods, exotic shapes) → a documented skip, never broken Elixir.
-    return ["@tag :skip", `test ${elixirString(t.name)} do`, ...SKIP_BODY, "end"];
+  } catch (err) {
+    // ONLY a deliberate "can't lower this shape" signal degrades to a skip
+    // (VO-construction invariants, VO instance methods, exotic shapes) — never
+    // broken Elixir. Any OTHER error is a real emitter bug and propagates: it
+    // would otherwise be swallowed as a benign skip and pass CI green.
+    if (!(err instanceof UnsupportedTestShapeError)) throw err;
+    return ["@tag :skip", `test ${elixirString(t.name)} do`, ...skipBody(err.message), "end"];
   }
 }
 
@@ -138,13 +160,13 @@ function renderStmt(s: TestStmtIR, env: Env, used: Set<string>): string[] {
       return [`${snake(s.name)}(${s.args.map((a) => vtExpr(a, env)).join(", ")})`];
     default:
       // assign / add / remove / return etc. don't appear at test top-level.
-      throw new Error(`unsupported test statement '${s.kind}'`);
+      throw new UnsupportedTestShapeError(`unsupported test statement '${s.kind}'`);
   }
 }
 
 function renderExpect(expr: ExprIR, env: Env): string {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) {
-    throw new Error("expect requires a matcher");
+    throw new UnsupportedTestShapeError("expect requires a matcher");
   }
   let receiver = expr.receiver;
   let negate = false;
@@ -154,7 +176,7 @@ function renderExpect(expr: ExprIR, env: Env): string {
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
   const op = MATCHER_OP[expr.member];
-  if (!op) throw new Error(`unsupported value matcher '${expr.member}'`);
+  if (!op) throw new UnsupportedTestShapeError(`unsupported value matcher '${expr.member}'`);
   const actual = vtExpr(inner, env);
   const arg = expr.args[0];
   const expected = arg ? vtExpr(arg, env) : "";
@@ -188,7 +210,7 @@ function renderThrows(expr: ExprIR, env: Env): string {
     const voMod = `${env.ctxModule}.${upperFirst(inner.name)}`;
     return `assert {:error, _} = ${voMod}.new(${vtExpr(inner, env)})`;
   }
-  throw new Error(
+  throw new UnsupportedTestShapeError(
     "toThrow over a non-create/op/validatable-VO expression is not runnable on vanilla",
   );
 }
@@ -227,7 +249,9 @@ function vtExpr(e: ExprIR, env: Env): string {
     case "method-call": {
       if (isCreate(e)) return renderCreate(e, env);
       if (isAggOp(e, env)) return renderOp(e, env);
-      throw new Error(`unsupported method-call '${e.member}' in vanilla test position`);
+      throw new UnsupportedTestShapeError(
+        `unsupported method-call '${e.member}' in vanilla test position`,
+      );
     }
     case "call":
       // A value-object constructor builds a plain map on vanilla.
@@ -241,7 +265,9 @@ function vtExpr(e: ExprIR, env: Env): string {
       if (e.callKind === "free") {
         return `${snake(e.name)}(${e.args.map((a) => vtExpr(a, env)).join(", ")})`;
       }
-      throw new Error(`unsupported call kind '${e.callKind}' in vanilla test position`);
+      throw new UnsupportedTestShapeError(
+        `unsupported call kind '${e.callKind}' in vanilla test position`,
+      );
     case "object":
     case "new":
       return `%{${e.fields.map((f) => `${snake(f.name)}: ${vtExpr(f.value, env)}`).join(", ")}}`;
@@ -262,7 +288,9 @@ function vtExpr(e: ExprIR, env: Env): string {
     case "binary":
       return `${vtExpr(e.left, env)} ${binOp(e.op)} ${vtExpr(e.right, env)}`;
     default:
-      throw new Error(`unsupported expression kind '${e.kind}' in vanilla test position`);
+      throw new UnsupportedTestShapeError(
+        `unsupported expression kind '${e.kind}' in vanilla test position`,
+      );
   }
 }
 
