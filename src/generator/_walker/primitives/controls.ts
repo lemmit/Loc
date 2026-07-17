@@ -251,6 +251,8 @@ export function emitAction(
     hasLoading: true,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
+    // Action button's visible text (the humanised op) is its accessible name.
+    a11yAttr: "",
   });
   // Action-button gating (D-AUTH-OIDC, the action-level mirror of the page
   // `requires` guard).  On an `auth: ui` frontend, hide the button at runtime
