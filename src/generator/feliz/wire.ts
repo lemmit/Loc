@@ -995,7 +995,9 @@ export function collectPageOperationForms(
     if (!op) continue;
     const form = felizOperationForm(agg, op, enumsByName, idLabels, vosByName);
     const key = form.formType;
-    if ((form.fields.length === 0 && form.fieldArrays.length === 0) || seen.has(key)) continue;
+    // Param-less ops (`confirm()`) ARE collected now — they wire a trigger +
+    // submit + empty-`{}` POST (no form record); `opHasForm` gates the record.
+    if (seen.has(key)) continue;
     seen.add(key);
     out.push(form);
   }
@@ -1799,13 +1801,24 @@ function renderCreateFn(f: FelizForm): (string | undefined)[] {
   ];
 }
 
+/** Whether an operation form carries any input — a form record is emitted only
+ *  for these.  A PARAM-LESS op (`confirm()`) has none: it is wired as a
+ *  trigger + submit (empty `{}` body), with no form state / encoder / record. */
+export function opHasForm(f: FelizOperationForm): boolean {
+  return f.fields.length > 0 || f.fieldArrays.length > 0;
+}
+
 /** One async operation function — CURRIED `(id) (form)`, POSTs the encoded body
- *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body). */
+ *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body).
+ *  A PARAM-LESS op takes `(id) ()` and posts an empty `{}` body (no form). */
 function renderOperationFn(f: FelizOperationForm): (string | undefined)[] {
+  const hasForm = opHasForm(f);
   return [
-    `  let ${f.apiFn} (id: string) (form: ${f.formType}) : Async<Result<unit, string>> =`,
+    `  let ${f.apiFn} (id: string) ${hasForm ? `(form: ${f.formType})` : "()"} : Async<Result<unit, string>> =`,
     "    async {",
-    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    hasForm
+      ? `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`
+      : '      let body = "{}"',
     "      let! response =",
     `        Http.request (sprintf "${f.route}/%s/${f.opPath}" id)`,
     "        |> Http.method POST",

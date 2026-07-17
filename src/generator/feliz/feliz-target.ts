@@ -451,7 +451,10 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS op (`confirm()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard); the page object still drives it as
+    // trigger → submit → form-detach.  (Only the whole-body `null` fall-throughs
+    // above — unresolved refs / unknown op — bail.)
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     // Testid namespace: the scaffold's `testid:` arg (`orders-op-addLine`) or the
     // `<plural>-op-<op>` default the page-object builder computes.  The form

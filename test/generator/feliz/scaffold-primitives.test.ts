@@ -53,6 +53,10 @@ describe("feliz scaffold primitives", () => {
     expect(app).toContain('prop.className "alert alert-error"'); // error branch
     expect(app).toContain("text-base-content/70"); // empty branch (muted)
     expect(app).toContain("sm:flex-row sm:gap-4"); // detail field row (kv)
+    // A detail field's `data-testid` rides the VALUE cell (`Html.dd`), not the
+    // whole row — the detail page object reads `field(name).innerText()`
+    // expecting only the value (no label text).
+    expect(app).toMatch(/Html\.dd \[ prop\.custom\("data-testid", "\w+-detail-\w+"\)/);
   });
 
   it("emits the list Table with a header row + a yield! row map", async () => {

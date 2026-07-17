@@ -73,6 +73,7 @@ import {
   felizAllRead,
   formHasFieldErrors,
   idLabelsFrom,
+  opHasForm,
   renderApiModule,
   renderAsyncOutcomeTypes,
   renderEncoders,
@@ -787,7 +788,11 @@ function renderAppFs(
   const asyncEffects: FelizAsyncEffect[] = asyncEffectsForUi(ui, contexts);
   const asyncEffectActions = new Map(asyncEffects.map((e) => [e.action, e] as const));
   const hasEffects = asyncEffects.length > 0;
-  const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
+  // Shared form-record wiring (Model field + `type <X>Form` + encoder).  A
+  // PARAM-LESS op (`confirm()`) has NO form record — it wires only a trigger +
+  // submit + empty-`{}` POST — so it's excluded here but still in `operationForms`
+  // for its Msg / update arm / Api fn / view.
+  const formRecords = [...forms, ...operationForms.filter(opHasForm), ...workflowForms];
   // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
   // populate their options — an IMPLICIT list read per target, merged into the
   // page's read set (deduped against any explicit QueryView `.all` of it) so the

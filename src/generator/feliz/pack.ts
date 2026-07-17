@@ -162,10 +162,13 @@ function primitiveSkeleton(_c: Ctx): string {
  *  `label` is raw text; `childJsx` is an already-walked value element. */
 function primitiveKeyValueRow(c: Ctx): string {
   const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
-  const value = `Html.dd [ prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  // The `data-testid` rides the VALUE cell, not the whole row — the detail page
+  // object reads `field(name).innerText()` expecting just the value ("Confirmed"),
+  // so it must not include the label text.
   const tid = testidProp(c);
-  const tidPart = tid ? `${tid}; ` : "";
-  return `Html.div [ ${tidPart}prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
+  const valueTid = tid ? `${tid}; ` : "";
+  const value = `Html.dd [ ${valueTid}prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  return `Html.div [ prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
 /** Anchor(label, to?) — a link.  With a `to:` route it hrefs the History-API

@@ -19,7 +19,7 @@ import type {
   FelizWorkflowForm,
   FormRecord,
 } from "./wire.js";
-import { formHasFieldErrors, formTouchedField, formTouchMsg } from "./wire.js";
+import { formHasFieldErrors, formTouchedField, formTouchMsg, opHasForm } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -546,6 +546,15 @@ export function renderUpdate(
         `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
     );
     const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    // A PARAM-LESS op (`confirm()`) has no form record: the submit posts `()`
+    // (empty body) and the done arm doesn't reset a form field.
+    if (!opHasForm(f)) {
+      return [
+        `  | ${f.submitMsg} id -> model, Cmd.OfAsync.perform (Api.${f.apiFn} id) () ${f.doneMsg}`,
+        `  | ${f.doneMsg} (Ok ()) -> model, ${nav}`,
+        `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+      ].join("\n");
+    }
     return [
       ...setters,
       ...touchArm(f),
