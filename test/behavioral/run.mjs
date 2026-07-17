@@ -136,20 +136,42 @@ export async function run() {
 `;
 }
 
+/** Load the typed feature corpus (`test/fixtures/corpus/manifest.ts`) via a
+ *  one-shot esbuild bundle — the SAME single source of truth the generation and
+ *  compile tiers iterate, so the behavioural tier needs no hand-maintained
+ *  per-backend allowlist. */
+async function loadCorpusFeatures() {
+  mkdirSync(WORK, { recursive: true });
+  const bundled = join(WORK, "_manifest.mjs");
+  await build({ entryPoints: [join(REPO, "test/fixtures/corpus/manifest.ts")], outfile: bundled, bundle: true, format: "esm", platform: "node", logLevel: "silent" });
+  const { CORPUS } = await import(pathToFileURL(bundled).href);
+  return CORPUS;
+}
+
+/** True when a `.ddd` carries a behavioural block this tier can run — a
+ *  `test e2e "…"` (api) or a domain `test "…"` (unit). Features without one are
+ *  generation/compile-only for now and are skipped (nothing to boot). */
+function hasBehaviouralBlock(src) {
+  return /(^|\n)\s*test\s+e2e\s+"/.test(src) || /(^|\n)\s*test\s+"/.test(src);
+}
+
 async function runCase(c) {
   const genDir = mkdtempSync(join(tmpdir(), `loom-bh-${c.name}-`));
   const workDir = join(WORK, c.name);
   mkdirSync(workDir, { recursive: true });
   try {
-    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", join(REPO, c.ddd), "-o", genDir], { stdio: "pipe" });
+    const srcPath = join(workDir, "system.ddd");
+    writeFileSync(srcPath, c.source);
+    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", srcPath, "-o", genDir], { stdio: "pipe" });
     const deplDir = findNodeDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
-    const e2eFile = c.api && existsSync(e2eDir)
+    // Tiers are DERIVED from the emitted file map, not declared: a system that
+    // emits an e2e suite runs the api tier; one that emits unit tests runs the
+    // unit tier. No api/unit flags to drift out of sync.
+    const e2eFile = existsSync(e2eDir)
       ? walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null
       : null;
-    const unitFiles = c.unit
-      ? walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"))
-      : [];
+    const unitFiles = walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"));
 
     const traceFile = join(genDir, ".loom", "traceability.json");
     const entry = join(workDir, "entry.mts");
@@ -164,10 +186,27 @@ async function runCase(c) {
 }
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
-const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases.filter(
-  // Skip UI-only cases (no api/unit tier) — they're the frontend-fullstack
-  // matrix's job (run-ui.mjs), not this api/unit runner's.
-  (c) => (only.length === 0 || only.includes(c.name)) && (c.api || c.unit),
+
+// Feature cases — DERIVED from the typed corpus manifest: every feature that
+// declares the `node` backend AND carries a behavioural block. One source of
+// truth (manifest.ts + the `.ddd`), swapped to `node` in-process. No allowlist.
+const featureCases = [];
+for (const f of await loadCorpusFeatures()) {
+  if (!f.backends.includes("node")) continue;
+  const raw = readFileSync(join(REPO, "test/fixtures/corpus", `${f.id}.ddd`), "utf8");
+  if (!hasBehaviouralBlock(raw)) continue;
+  featureCases.push({ name: f.id, source: raw.replaceAll("__PLATFORM__", "node") });
+}
+
+// Example cases — the small curated set of broad, multi-aggregate systems that
+// aren't single-feature corpus fixtures; the one thing left in corpus.json. Its
+// UI-only entries are run-ui.mjs's job and are filtered out here.
+const exampleCases = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases
+  .filter((c) => !String(c.ddd).startsWith("corpus:") && (c.api || c.unit))
+  .map((c) => ({ name: c.name, source: readFileSync(join(REPO, c.ddd), "utf8") }));
+
+const corpus = [...featureCases, ...exampleCases].filter(
+  (c) => only.length === 0 || only.includes(c.name),
 );
 
 // Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted
@@ -175,7 +214,7 @@ const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases
 // Definition-of-Done rollup, fails the case.
 let pass = 0, fail = 0, errored = 0, reqFailing = 0;
 for (const c of corpus) {
-  process.stdout.write(`\n▶ ${c.name}  (${c.ddd})\n`);
+  process.stdout.write(`\n▶ ${c.name}\n`);
   let out;
   try {
     out = await runCase(c);

@@ -4,7 +4,7 @@ system WhenShop {
   subdomain Sales {
     context Orders {
       enum OrderStatus { Draft, Shipped, Cancelled }
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         status: OrderStatus
         operation cancel() when this.status != OrderStatus.Shipped && this.status != OrderStatus.Cancelled {
@@ -23,5 +23,16 @@ system WhenShop {
     dataSources: [st]
     serves: A
     port: 4000
+  }
+
+  // Behavioural proof of the `when` gate: the same authored suite runs on every
+  // backend via the shared HTTP-dispatch harness (one source, N targets).
+  test e2e "cancel is state-gated: a shipped order cannot be cancelled" against d {
+    // a Draft order is cancellable — the gate's predicate holds
+    let ok = api.orders.create({ code: "A1", status: "Draft" })
+    api.orders.cancel(ok)
+    // a Shipped order is not — the `when` predicate fails → 409 Conflict
+    let shipped = api.orders.create({ code: "A2", status: "Shipped" })
+    expect(api.orders.cancel(shipped)).toThrow(409)
   }
 }

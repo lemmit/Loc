@@ -1,10 +1,43 @@
 {
-  "comment": "Curated allowlist for the headless behavioral tier. Each entry is generated, its single `platform: node` (Hono) deployable booted on PGlite, and its emitted suites run. CONSTRAINT: exactly one node backend per system, so dispatch (host-agnostic, path-matched) is unambiguous — multi-backend systems (showcase, examples/acme) stay in the docker `conformance-full` leg. `api` runs the emitted `e2e/<Sys>.e2e.test.ts` (run.mjs); `unit` runs the emitted pure-domain `*.test.ts` (run.mjs); `ui` runs the emitted `*.ui.spec.ts` Playwright round-trips against a built+served frontend wired to the backend (run-ui.mjs). `ui: false` = the system has no `test e2e … against <frontend>` block. `uiTier: \"nightly\"` = the UI round-trip runs only in the nightly frontend-fullstack matrix (run-ui.mjs --all), NOT the per-PR behavioral-ui gate — used to cover non-React frontends against a real backend without adding their build cost to every PR (default tier is per-PR).",
+  "comment": "Curated BROAD example systems for the headless behavioral tier — the multi-aggregate systems that are NOT single-feature corpus fixtures. The per-feature cases come from the typed corpus manifest (test/fixtures/corpus/manifest.ts): run.mjs runs every feature declaring the `node` backend that carries a `test e2e`/`test` block, so there is no per-feature allowlist here. Each entry below is generated, its single `platform: node` (Hono) deployable booted on PGlite, and its emitted suites run. CONSTRAINT: exactly one node backend per system, so dispatch (host-agnostic, path-matched) is unambiguous — multi-backend systems (showcase, examples/acme) stay in the docker `conformance-full` leg. Tiers are DERIVED from the emitted file map, not the flags: `api`/`unit` here are only an inclusion hint (an entry with neither is UI-only → run-ui.mjs, skipped by run.mjs). `ui` runs the emitted `*.ui.spec.ts` Playwright round-trips against a built+served frontend (run-ui.mjs); `uiTier: \"nightly\"` = that UI round-trip runs only in the nightly frontend-fullstack matrix (run-ui.mjs --all), not the per-PR behavioral-ui gate.",
   "cases": [
-    { "name": "sales-system", "ddd": "web/src/examples/sales-system.ddd", "api": true, "unit": true, "ui": true },
-    { "name": "storefront-system", "ddd": "web/src/examples/storefront-system.ddd", "api": true, "unit": true, "ui": false },
-    { "name": "sales-system-vue", "ddd": "web/src/examples/sales-system-vue.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" },
-    { "name": "sales-system-svelte", "ddd": "web/src/examples/sales-system-svelte.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" },
-    { "name": "sales-system-angular", "ddd": "web/src/examples/sales-system-angular.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" }
+    {
+      "name": "sales-system",
+      "ddd": "web/src/examples/sales-system.ddd",
+      "api": true,
+      "unit": true,
+      "ui": true
+    },
+    {
+      "name": "storefront-system",
+      "ddd": "web/src/examples/storefront-system.ddd",
+      "api": true,
+      "unit": true,
+      "ui": false
+    },
+    {
+      "name": "sales-system-vue",
+      "ddd": "web/src/examples/sales-system-vue.ddd",
+      "api": false,
+      "unit": false,
+      "ui": true,
+      "uiTier": "nightly"
+    },
+    {
+      "name": "sales-system-svelte",
+      "ddd": "web/src/examples/sales-system-svelte.ddd",
+      "api": false,
+      "unit": false,
+      "ui": true,
+      "uiTier": "nightly"
+    },
+    {
+      "name": "sales-system-angular",
+      "ddd": "web/src/examples/sales-system-angular.ddd",
+      "api": false,
+      "unit": false,
+      "ui": true,
+      "uiTier": "nightly"
+    }
   ]
 }
