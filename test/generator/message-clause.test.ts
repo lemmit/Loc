@@ -49,7 +49,7 @@ describe("message clause — wire refine carrier", () => {
   it("renders a messaged invariant as a refine with the text + a stable loomCode", async () => {
     const { reactApi } = await gen();
     expect(reactApi).toContain(
-      `.refine((data) => data.name.length >= 2 && data.name.length <= 120, { path: ["name"], message: "Name must be 2-120 characters" }`,
+      `.refine((data) => data.name.length >= 2 && data.name.length <= 120, { path: ["name"], message: "Name must be 2-120 characters"`,
     );
   });
 
@@ -82,5 +82,29 @@ describe("message clause — domain floor", () => {
     expect(domain).toContain('throw new DomainError("SKU is required")');
     // message-less invariant keeps the derived default.
     expect(domain).toContain('throw new DomainError("Invariant violated: sku.length > 0")');
+  });
+});
+
+describe("message clause — wire code (Hono runtime)", () => {
+  it("carries a stable loomCode in the refine params", async () => {
+    const { reactApi } = await gen();
+    expect(reactApi).toMatch(
+      /message: "Name must be 2-120 characters", params: \{ loomCode: "msg\.[a-z0-9]{6}" \}/,
+    );
+    // Same text → same code (deterministic content hash).
+    const codes = [...reactApi.matchAll(/loomCode: "(msg\.[a-z0-9]{6})"/g)].map((m) => m[1]);
+    expect(new Set(codes).size).toBe(codes.length); // distinct messages → distinct codes
+  });
+
+  it("declares the optional `code` on the runtime ProblemDetails errors[] entry", async () => {
+    const { problem } = await gen();
+    expect(problem).toContain(
+      "errors: z.array(z.object({ pointer: z.string(), message: z.string(), code: z.string().nullish() }))",
+    );
+  });
+
+  it("maps issue.params.loomCode onto errors[].code in the defaultHook", async () => {
+    const { problem } = await gen();
+    expect(problem).toContain("issue.params?.loomCode");
   });
 });

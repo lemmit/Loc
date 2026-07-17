@@ -6,6 +6,7 @@ import {
   type SingleFieldPattern,
   singleFieldShape,
 } from "../ir/validate/invariant-classify.js";
+import { messageCode } from "../util/message-code.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +
@@ -87,16 +88,20 @@ export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string 
   const body = renderRefineExpr(inv.expr);
   const guarded = inv.guard ? `!(${renderRefineExpr(inv.guard)}) || (${body})` : body;
   // Author `message "..."` wins over the derived "Invariant violated: <src>"
-  // default.  (The stable wire `code` that would ride alongside it is a
-  // cross-backend ProblemDetails contract change — deferred to its own
-  // all-backend lockstep slice so parity stays green.)
+  // default; when present it also carries a stable content-hash `loomCode` in the
+  // zod issue `params` so the route's `defaultHook` can surface it on
+  // `errors[].code` (a runtime-body extension — not part of the OpenAPI
+  // component schema, so cross-backend OpenAPI parity is unaffected).
   const message = JSON.stringify(
     inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
   );
+  const code = inv.message
+    ? `, params: { loomCode: ${JSON.stringify(messageCode(inv.message.text))} }`
+    : "";
   const path = pickErrorPath(inv);
   const opts = path
-    ? `{ path: [${JSON.stringify(path)}], message: ${message} }`
-    : `{ message: ${message} }`;
+    ? `{ path: [${JSON.stringify(path)}], message: ${message}${code} }`
+    : `{ message: ${message}${code} }`;
   return `.refine((data) => ${guarded}, ${opts})`;
 }
 
