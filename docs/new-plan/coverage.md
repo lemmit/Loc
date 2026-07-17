@@ -206,6 +206,7 @@
 | Audit | Open findings → missions |
 |---|---|
 | architecture-weak-spots-2026-07.md | §1→T1, §2→T2, §3→T3/M-T7.1, §4→M-T4.1, §5→T9, §6→M-T6.1/M-T6.4, §7→M-T5.16/M-T8.1 |
+| direction-review-2026-07.md | target-freeze decision→T10 (closed); redirected depth budget→M-T4.1/T2; honest-gate discipline→M-T9.8; customization-cliff + bus-factor→open (no mission — noted below) |
 | completeness-audit-2026-07.md | stdlib→M-T5.5, reporting/money→M-T2.12, jobs/email→M-T4.1/M-T4.6, pagination→M-T1.1, metrics→M-T7.1, identity→M-T3.12, API versioning → no mission (needs proposal; note here) |
 | full-code-review-2026-07.md | #6→M-T5.6, #22→M-T5.16, C-mediums→M-T9.4 |
 | generated-code-ddd-review-2026-07.md | S5(d)→M-T4.3, S10 residue→M-T5.11, S4 default-on→M-T3.4, api-grouping→M-T6.13 |
@@ -219,3 +220,5 @@
 - **API versioning** (completeness audit) — no proposal exists; whoever picks it up writes one and adds a mission under T5.
 - **`infrastructure-port`** — explicitly usage-pulled; no mission until a concrete case.
 - **Brownfield adoption** (M-T2.5) is a proposal-writing mission, reflecting that no design exists yet.
+- **Customization cliff** (direction-review-2026-07) — the "what does the no-code user hit when the closed primitive set runs out" question. Partially served by the existing escape-hatch surface (`extern`, unfold) under T1/T5; not yet its own mission because the gap is a product-completeness judgement, not a single coded feature. Whoever scopes it writes the study first.
+- **Bus factor** (direction-review-2026-07) — a process/ownership risk (one maintainer, large surface), not a codegen gap; tracked as context, not mission-able. The recurring **M-T9.8** hollow-work sweep is the closest standing mitigation.
