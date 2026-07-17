@@ -10,6 +10,7 @@ import type {
   Model,
   NameRef,
   PayloadDecl,
+  Property,
   Ui,
   ValueObject,
 } from "../generated/ast.js";
@@ -210,7 +211,30 @@ export function recordFieldTypes(
   return out;
 }
 
-/** Reject a construction entry whose name isn't a declared field of the record. */
+/** The REQUIRED constructor fields of a record decl — a declared `Property`
+ *  that is non-optional (`T`, not `T?`), has no `= default`, and isn't
+ *  `provenanced` (those are auto-filled at construction).  `contains` members
+ *  auto-default to empty and are never required, so only `Property` members are
+ *  considered.  Consumed by the completeness check. */
+function requiredFieldNames(decl: ValueObject | EntityPart | PayloadDecl): Set<string> {
+  const req = new Set<string>();
+  const consider = (p: Property) => {
+    if (p.type?.optional || p.default || p.provenanced) return;
+    req.add(p.name);
+  };
+  if (isPayloadDecl(decl)) {
+    for (const f of decl.fields) consider(f);
+    return req;
+  }
+  for (const m of decl.members) if (isProperty(m)) consider(m);
+  return req;
+}
+
+/** Reject a construction entry whose name isn't a declared field of the record
+ *  (`loom.unknown-construction-field`), and a construction that OMITS a required
+ *  field (`loom.construction-missing-field`, M-T6.18 — completes the record
+ *  construction gap: name + value type + presence).  Both are pure name-set
+ *  checks over the model stream, so no lexical env is needed. */
 export function checkConstructionFields(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "BuilderCall") continue;
@@ -218,15 +242,34 @@ export function checkConstructionFields(model: Model, accept: ValidationAcceptor
     const decl = resolveRecordDecl(bc, model);
     if (!decl) continue; // not a record — primitive / component / unknown-type
     const fields = recordFieldNames(decl);
+    const provided = new Set<string>();
+    let hasPositional = false;
     for (const entry of bc.entries) {
       // Positional entries (`Card { "hi" }`) carry no name — not a field ref.
-      if (typeof entry.name !== "string") continue;
+      if (typeof entry.name !== "string") {
+        hasPositional = true;
+        continue;
+      }
+      provided.add(entry.name);
       if (!fields.has(entry.name)) {
         accept(
           "error",
           `'${bc.type}' has no field '${entry.name}'.` +
             (fields.size > 0 ? ` Declared fields: ${[...fields].join(", ")}.` : ""),
           { node: entry, property: "name", code: "loom.unknown-construction-field" },
+        );
+      }
+    }
+    // Completeness: every required field must be supplied.  Skip when the
+    // construction mixes in a positional entry — the provided-set can't be read
+    // by name, so requiring fields would risk a false positive.
+    if (!hasPositional) {
+      const missing = [...requiredFieldNames(decl)].filter((n) => !provided.has(n));
+      if (missing.length > 0) {
+        accept(
+          "error",
+          `'${bc.type}' construction is missing required field${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
+          { node: bc, property: "type", code: "loom.construction-missing-field" },
         );
       }
     }
