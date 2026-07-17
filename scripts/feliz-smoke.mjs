@@ -27,7 +27,7 @@ async function main() {
   await page.getByRole("button", { name: "+" }).click();
   await page.getByText("Clicks: 2").waitFor();
 
-  // 3. Routing — navigate to the Products page (Feliz.Router hash route).
+  // 3. Routing — navigate to the Products page (Feliz.Router path route).
   // Target the page HEADING specifically: the app-shell navbar also carries a
   // "Products" link, so a bare getByText would match two elements.
   await page.getByRole("button", { name: "Browse products" }).click();
@@ -76,7 +76,7 @@ async function main() {
   // `Cmd.OfAsync.perform`; with no backend the POST throws → the `Error` arm
   // runs the `else` body → the page state flips to "unavailable".  Proves the
   // trigger→Cmd→result MVU projection executes end-to-end at runtime.
-  await page.goto(`${URL}#/products/smoke-id`, { waitUntil: "networkidle" });
+  await page.goto(`${URL}products/smoke-id`, { waitUntil: "networkidle" });
   await page.getByText("Reserve: idle").waitFor({ timeout: 10000 });
   await page.getByRole("button", { name: "Reserve", exact: true }).click();
   await page.getByText("Reserve: unavailable").waitFor({ timeout: 10000 });
