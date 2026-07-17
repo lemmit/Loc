@@ -3,9 +3,33 @@ import { provideHttpClient, withFetch } from "@angular/common/http";
 import { type ApplicationConfig, provideZoneChangeDetection } from "@angular/core";
 import { provideRouter } from "@angular/router";
 import { providePrimeNG } from "primeng/config";
+import { definePreset } from "@primeuix/themes";
 import Aura from "@primeuix/themes/aura";
 import { QueryClient, provideTanStackQuery } from "@tanstack/angular-query-experimental";
 import { routes } from "./app.routes";
+
+// Aura's stock light primary maps `--p-primary-color` to the `500` shade
+// (emerald `#10b981`), which clears only ~2.2–2.5:1 against white and the
+// `#f0f0f0` nav rail — below WCAG AA (4.5:1) for the primary buttons and the
+// active nav links that use it as text/fill (axe flags serious color-contrast
+// violations on every scanned route).  Shift the light scheme's primary role to
+// the `700` shade so those roles pass; dark mode already has ample contrast, so
+// it is left untouched.  Palette tokens (`{primary.700}`) keep this
+// theme-agnostic — no hardcoded hex tied to emerald.
+const LoomAura = definePreset(Aura, {
+  semantic: {
+    colorScheme: {
+      light: {
+        primary: {
+          color: "{primary.700}",
+          contrastColor: "#ffffff",
+          hoverColor: "{primary.800}",
+          activeColor: "{primary.800}",
+        },
+      },
+    },
+  },
+});
 
 // App-wide providers: the router table, a fetch-backed HttpClient the api
 // query/mutation layer wraps, the PrimeNG runtime config (Aura theme preset —
@@ -17,7 +41,7 @@ export const appConfig: ApplicationConfig = {
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
     provideHttpClient(withFetch()),
-    providePrimeNG({ theme: { preset: Aura } }),
+    providePrimeNG({ theme: { preset: LoomAura } }),
     provideTanStackQuery(new QueryClient()),
   ],
 };
