@@ -27,9 +27,9 @@ page.on("pageerror", (e) => errors.push(String(e)));
 // goto that triggers it, so there is no race window.  This turns the smoke from
 // "poll for the button and hope it shows up in 10s" into "wait for the exact
 // network round-trips the gated UI depends on, then assert".
-async function navAndAwait(hash, ...responseGlobs) {
+async function navAndAwait(path, ...responseGlobs) {
   const pending = responseGlobs.map((glob) => page.waitForResponse(glob, WAIT));
-  await page.goto(`${URL}#${hash}`, { waitUntil: "networkidle" });
+  await page.goto(`${URL}${path.replace(/^\//, "")}`, { waitUntil: "networkidle" });
   await Promise.all(pending);
 }
 
@@ -73,8 +73,9 @@ async function main() {
   await page.getByRole("heading", { name: "Admin Console" }).waitFor(WAIT);
 
   // 2) Admin claims → the gated one-click Action button renders on the detail
-  //    page; clicking it fires the real POST (the write path).  Hash-nav reuses
-  //    the already-probed claims, so only the byId load gates the button.
+  //    page; clicking it fires the real POST (the write path).  A path nav is a
+  //    full document load, so the claims probe re-fires (still admin) alongside
+  //    the byId load; wait on the byId response before asserting the button.
   await navAndAwait("/products/smoke-id", "**/api/products/smoke-id");
   const activate = page.getByRole("button", { name: "Activate" });
   await activate.waitFor(WAIT);
@@ -83,14 +84,11 @@ async function main() {
   if (!activatePosted) throw new Error("clicking Activate should POST /activate");
 
   // 3) Viewer claims → the SAME gated page renders the Forbidden fallback, and
-  //    the gated Action button is hidden on the detail page.  A full reload
-  //    re-inits the app so the claims probe re-fires with the new role — wait
-  //    for THAT response (not the hash-nav, which reuses the cached claims).
+  //    the gated Action button is hidden on the detail page.  A path nav is a
+  //    full document load that re-inits the app, so the claims probe re-fires
+  //    with the new role — wait for THAT response before asserting.
   role = "viewer";
-  await page.goto(`${URL}#/admin`, { waitUntil: "networkidle" });
-  const reprobe = page.waitForResponse("**/api/auth/me", WAIT);
-  await page.reload({ waitUntil: "networkidle" });
-  await reprobe;
+  await navAndAwait("/admin", "**/api/auth/me");
   await page.getByRole("heading", { name: "Forbidden" }).waitFor(WAIT);
   if (await page.getByRole("heading", { name: "Admin Console" }).isVisible()) {
     throw new Error("viewer role should NOT see the gated Admin Console body");

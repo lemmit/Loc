@@ -67,17 +67,22 @@ describe("feliz create forms", () => {
     expect(app).toContain('"price", Encode.decimal (decimal form.price)');
   });
 
-  it("emits a create Api fn (encode + POST + decode response)", async () => {
+  it("emits a create Api fn (encode + POST + decode the `{ id }` envelope)", async () => {
     const app = await appFs(CREATE);
+    // The create endpoint returns the new record's id envelope (`{ id }`), NOT the
+    // full aggregate — the Api fn returns the id `string` so the success handler
+    // can route to the new record's detail page.
     expect(app).toContain(
-      "let createProduct (form: ProductForm) : Async<Result<Product, string>> =",
+      "let createProduct (form: ProductForm) : Async<Result<string, string>> =",
     );
     expect(app).toContain("let body = Encode.toString 0 (Encoders.productForm form)");
     expect(app).toContain("|> Http.method POST");
     expect(app).toContain("|> Http.content (BodyContent.Text body)");
     expect(app).toContain('|> Http.header (Headers.contentType "application/json")');
     expect(app).toContain("if response.statusCode = 200 || response.statusCode = 201 then");
-    expect(app).toContain("match Decode.fromString Decoders.product response.responseText with");
+    expect(app).toContain(
+      'match Decode.fromString (Decode.field "id" Decode.string) response.responseText with',
+    );
   });
 
   it("wires per-field Set Msgs + Submit + Created", async () => {
@@ -85,10 +90,11 @@ describe("feliz create forms", () => {
     expect(app).toContain("| SetProductFormName of string");
     expect(app).toContain("| SetProductFormPrice of string");
     expect(app).toContain("| SubmitProductForm");
-    expect(app).toContain("| ProductCreated of Result<Product, string>");
+    // Created carries the new record's id (from the `{ id }` response).
+    expect(app).toContain("| ProductCreated of Result<string, string>");
   });
 
-  it("wires the update arms (setters, submit Cmd, created navigate)", async () => {
+  it("wires the update arms (setters, submit Cmd, created → detail navigate)", async () => {
     const app = await appFs(CREATE);
     expect(app).toContain(
       "  | SetProductFormName v -> { model with ProductForm = { model.ProductForm with name = v } }, Cmd.none",
@@ -96,8 +102,10 @@ describe("feliz create forms", () => {
     expect(app).toContain(
       "  | SubmitProductForm -> model, Cmd.OfAsync.perform Api.createProduct model.ProductForm ProductCreated",
     );
+    // On success, reset the form and route to the NEW record's detail page
+    // (`/products/<id>`) using the id the create resolved.
     expect(app).toContain(
-      '  | ProductCreated (Ok _) -> { model with ProductForm = emptyProductForm }, Cmd.navigate("products")',
+      '  | ProductCreated (Ok created) -> { model with ProductForm = emptyProductForm }, Cmd.navigatePath("products", created)',
     );
     expect(app).toContain("  | ProductCreated (Error _) -> model, Cmd.none");
   });
@@ -105,14 +113,20 @@ describe("feliz create forms", () => {
   it("the CreateForm renders typed inputs + a validity-guarded submit button", async () => {
     const app = await appFs(CREATE);
     // A `string` field → a plain text input.  The `data-testid` (the shared
-    // page-object fill target, `<plural>-new-input-<field>`) leads the prop list.
+    // page-object fill target, `<plural>-new-input-<field>`) leads the prop list;
+    // the a11y aria-invalid/aria-describedby props follow the onBlur (asserted
+    // below), so this is a PREFIX match up to and including the onBlur.
     expect(app).toContain(
-      'Html.input [ prop.custom("data-testid", "products-new-input-name"); prop.className "input input-bordered w-full"; prop.placeholder "name"; prop.value model.ProductForm.name; prop.onChange (fun (v: string) -> dispatch (SetProductFormName v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "name")) ]',
+      'Html.input [ prop.custom("data-testid", "products-new-input-name"); prop.className "input input-bordered w-full"; prop.placeholder "name"; prop.value model.ProductForm.name; prop.onChange (fun (v: string) -> dispatch (SetProductFormName v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "name"))',
     );
     // A `money` field → a `type: number` input (browser-enforced numeric entry).
     expect(app).toContain(
-      'Html.input [ prop.custom("data-testid", "products-new-input-price"); prop.className "input input-bordered w-full"; prop.type\'.number; prop.placeholder "price"; prop.value model.ProductForm.price; prop.onChange (fun (v: string) -> dispatch (SetProductFormPrice v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "price")) ]',
+      'Html.input [ prop.custom("data-testid", "products-new-input-price"); prop.className "input input-bordered w-full"; prop.type\'.number; prop.placeholder "price"; prop.value model.ProductForm.price; prop.onChange (fun (v: string) -> dispatch (SetProductFormPrice v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "price"))',
     );
+    // a11y: each validated input wires aria-invalid (touched && error) +
+    // aria-describedby to its error element.
+    expect(app).toContain('prop.ariaDescribedBy "ProductForm-name-error"');
+    expect(app).toContain('prop.ariaDescribedBy "ProductForm-price-error"');
     // The submit is disabled until the form validates (both fields non-empty);
     // it carries the `<plural>-new-submit` testid the page object clicks.
     expect(app).toContain(
@@ -208,8 +222,13 @@ describe("feliz create forms", () => {
     `);
     // The FK field renders a select over the target list, blank-first, labelled
     // by the target's `display` derived; the option value is the target `id`.
+    // (Prefix + tail: the a11y aria props sit between the onBlur and children.)
     expect(app).toContain(
-      'Html.select [ prop.custom("data-testid", "orders-new-input-customer"); prop.className "select select-bordered w-full"; prop.value model.OrderForm.customer; prop.onChange (fun (v: string) -> dispatch (SetOrderFormCustomer v)); prop.onBlur (fun _ -> dispatch (TouchOrderForm "customer")); prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions model.AllCustomers (fun x -> x.id) (fun x -> x.display)) ]',
+      'Html.select [ prop.custom("data-testid", "orders-new-input-customer"); prop.className "select select-bordered w-full"; prop.value model.OrderForm.customer; prop.onChange (fun (v: string) -> dispatch (SetOrderFormCustomer v)); prop.onBlur (fun _ -> dispatch (TouchOrderForm "customer"))',
+    );
+    expect(app).toContain('prop.ariaDescribedBy "OrderForm-customer-error"');
+    expect(app).toContain(
+      'prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions model.AllCustomers (fun x -> x.id) (fun x -> x.display)) ]',
     );
     // The `View.idOptions` helper is emitted.
     expect(app).toContain(
@@ -311,9 +330,14 @@ describe("feliz create forms", () => {
         deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
       }
     `);
-    // Required enum → a select of all values, NO blank option.
+    // Required enum → a select of all values, NO blank option.  (Prefix + tail:
+    // the a11y aria props sit between the onBlur and children.)
     expect(app).toContain(
-      'Html.select [ prop.custom("data-testid", "products-new-input-status"); prop.className "select select-bordered w-full"; prop.value model.ProductForm.status; prop.onChange (fun (v: string) -> dispatch (SetProductFormStatus v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "status")); prop.children [ Html.option [ prop.value "active"; prop.text "active" ]; Html.option [ prop.value "inactive"; prop.text "inactive" ]; Html.option [ prop.value "archived"; prop.text "archived" ] ] ]',
+      'Html.select [ prop.custom("data-testid", "products-new-input-status"); prop.className "select select-bordered w-full"; prop.value model.ProductForm.status; prop.onChange (fun (v: string) -> dispatch (SetProductFormStatus v)); prop.onBlur (fun _ -> dispatch (TouchProductForm "status"))',
+    );
+    expect(app).toContain('prop.ariaDescribedBy "ProductForm-status-error"');
+    expect(app).toContain(
+      'prop.children [ Html.option [ prop.value "active"; prop.text "active" ]; Html.option [ prop.value "inactive"; prop.text "inactive" ]; Html.option [ prop.value "archived"; prop.text "archived" ] ] ]',
     );
     // Required enum defaults to its FIRST value (select always has a selection).
     expect(app).toContain('status = "active"');

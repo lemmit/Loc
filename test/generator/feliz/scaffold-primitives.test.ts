@@ -45,6 +45,8 @@ describe("feliz scaffold primitives", () => {
   it("emits the container/leaf primitives with their daisyUI classes", async () => {
     const app = await appFs(SCAFFOLD);
     expect(app).toContain('prop.className "flex flex-row items-center justify-between gap-2 py-2"'); // toolbar
+    // Toolbar is a labelled ARIA toolbar (a11y contract).
+    expect(app).toContain('prop.role "toolbar"; prop.ariaLabel "Actions"');
     expect(app).toContain('prop.className "breadcrumbs text-sm"'); // nav trail
     expect(app).toContain(
       'prop.className "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm"',
@@ -53,6 +55,10 @@ describe("feliz scaffold primitives", () => {
     expect(app).toContain('prop.className "alert alert-error"'); // error branch
     expect(app).toContain("text-base-content/70"); // empty branch (muted)
     expect(app).toContain("sm:flex-row sm:gap-4"); // detail field row (kv)
+    // A detail field's `data-testid` rides the VALUE cell (`Html.dd`), not the
+    // whole row — the detail page object reads `field(name).innerText()`
+    // expecting only the value (no label text).
+    expect(app).toMatch(/Html\.dd \[ prop\.custom\("data-testid", "\w+-detail-\w+"\)/);
   });
 
   it("emits the list Table with a header row + a yield! row map", async () => {
@@ -67,15 +73,15 @@ describe("feliz scaffold primitives", () => {
     expect(app).toContain("Html.tbody [ prop.children [");
   });
 
-  it("emits IdLink cells + hash-route Anchors", async () => {
+  it("emits IdLink cells + path-route Anchors", async () => {
     const app = await appFs(SCAFFOLD);
-    // The id column links to the row's detail page (Feliz.Router hash path).
+    // The id column links to the row's detail page (History-API PATH, not a hash).
     expect(app).toMatch(
-      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("#\/products\/" \+ \w+\.id\)/,
+      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("\/products\/" \+ \w+\.id\)/,
     );
-    // Breadcrumb anchors fold a literal route into a static hash href.
+    // Breadcrumb anchors fold a literal route into a static PATH href.
     expect(app).toContain(
-      'Html.a [ prop.className "link link-primary"; prop.href "#/"; prop.text "Home" ]',
+      'Html.a [ prop.className "link link-primary"; prop.href "/"; prop.text "Home" ]',
     );
   });
 

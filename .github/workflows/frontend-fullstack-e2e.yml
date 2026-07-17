@@ -19,9 +19,9 @@ name: Frontend full-stack e2e (nightly, no docker)
 # Each cell is a corpus case flagged `uiTier: "nightly"` (test/behavioral/
 # corpus.json); run-ui.mjs builds each frontend via its own `npm run build` and
 # auto-detects the built root (react/vue→dist, svelte→build, angular→dist/<app>/
-# browser). Vue + Svelte + Angular are verified locally (full round-trip green,
-# all blocking). Feliz is not yet wired — it emits no e2e/playwright.config.ts
-# (its smoke harness differs) and needs dotnet/fable in the runner; a follow-up.
+# browser, feliz→dist). Vue + Svelte + Angular + Feliz are all verified locally
+# (full round-trip green, all blocking). Feliz needs dotnet/Fable in the runner
+# (the gated setup-dotnet step below).
 
 on:
   schedule:
@@ -67,6 +67,19 @@ jobs:
           # matching the Hono route — was camelCase → 404).
           - frontend: angular
             case: sales-system-angular
+          # Feliz (F#/Fable/Elmish): BLOCKING.  The frontend emits the full
+          # `data-testid` surface, so the SHARED testid-driven page objects + smoke
+          # spec + e2e config are wired in (feliz/index.ts); run-ui.mjs builds it
+          # (`fable+vite→dist`) — needs dotnet (Fable is a dotnet tool), the gated
+          # setup-dotnet step below.  Verified locally (Node 24 + .NET 8 + Fable
+          # 4.29): the create product (value-object price) → create customer →
+          # create order → addLine → confirm → read-back round-trip is 10/10 green.
+          # The Feliz-codegen cascade a real build surfaced is fixed: aggregate-
+          # qualified Page cases, HASH→PATH routing, create→detail redirect, `{ id }`
+          # create decode, param-less op forms (`confirm()`), and the detail-field
+          # testid on the value cell.
+          - frontend: feliz
+            case: sales-system-feliz
     # Non-blocking for cells not yet locally verified; flip by dropping the flag.
     continue-on-error: ${{ matrix.experimental || false }}
     name: ${{ matrix.frontend }} → real Hono backend
@@ -77,6 +90,15 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      # Feliz builds via Fable, a dotnet tool (`dotnet tool restore && dotnet
+      # fable`), so the Feliz cell needs the .NET SDK on PATH.  Gated so the
+      # JSX-family cells don't pay for it.
+      - name: Set up .NET (Feliz/Fable only)
+        if: matrix.frontend == 'feliz'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
 
       - name: Install Loom toolchain
         run: npm ci

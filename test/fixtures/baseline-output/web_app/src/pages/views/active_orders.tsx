@@ -10,7 +10,7 @@ export default function ActiveOrdersView() {
       <Title order={2}>Active Orders</Title>
       <>
         { activeOrdersView.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

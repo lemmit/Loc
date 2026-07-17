@@ -48,7 +48,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "./extern-function-builder.js";
-import { buildPageObjectModule } from "./page-objects-builder.js";
+import { buildPageObjectModule, type SelectStyle } from "./page-objects-builder.js";
 import {
   renderCustomLayoutPage,
   renderExternComponentProps,
@@ -477,6 +477,12 @@ export function emitPageObjectsForUi(
    *  scaffold-archetype page objects above stay framework-neutral and emit
    *  for every frontend. */
   walkerPageObjects = true,
+  /** How choice fields (`enum` / `X id`) are driven in the emitted page-object
+   *  fill blocks.  Combobox (default) for the portal-select frontends (React
+   *  Mantine et al.); `"native"` for frontends rendering a real `<select>`
+   *  (Svelte, Feliz) — Playwright drives those with `selectOption`, and native
+   *  mode needs no per-option `-option-<id>` testids. */
+  selectStyle: SelectStyle = "combobox",
 ): Map<string, string> {
   const out = new Map<string, string>();
   const pageCtx = pageNameCtx(ctx);
@@ -511,7 +517,10 @@ export function emitPageObjectsForUi(
           }
         }
         if (!agg || !ctxIR) break;
-        out.set(`e2e/pages/${lowerFirst(agg.name)}.ts`, buildPageObjectModule(agg, ctxIR));
+        out.set(
+          `e2e/pages/${lowerFirst(agg.name)}.ts`,
+          buildPageObjectModule(agg, ctxIR, undefined, selectStyle),
+        );
         break;
       }
       case "workflow-form": {
@@ -530,7 +539,10 @@ export function emitPageObjectsForUi(
           }
         }
         if (!ctxIR || !wf) break;
-        out.set(`e2e/pages/workflows/${snake(wf.name)}.ts`, buildWorkflowPageObject(wf, ctxIR));
+        out.set(
+          `e2e/pages/workflows/${snake(wf.name)}.ts`,
+          buildWorkflowPageObject(wf, ctxIR, undefined, selectStyle),
+        );
         break;
       }
       case "view-list": {

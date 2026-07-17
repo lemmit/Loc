@@ -14,9 +14,10 @@
 // icon's intrinsic dimensions.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { iconA11yAttr } from "../a11y-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
-import { stringNamed } from "../shared/args.js";
+import { boolNamed, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { testidAttr } from "../walker-core.js";
 
@@ -25,6 +26,8 @@ export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const name = stringNamed(call, "name");
   const customSvg = stringNamed(call, "svg");
   const size = stringNamed(call, "size");
+  const label = stringNamed(call, "label");
+  const decorative = boolNamed(call, "decorative");
 
   // User-supplied SVG wins.  Falling back to the registry lookup
   // lets the typical "named icon" call stay terse while custom SVG
@@ -41,5 +44,11 @@ export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     size,
     hasSize: size !== undefined,
     testidAttr: testidAttr(call, ctx),
+    // The HTML/markup packs (React/Vue/Svelte/Angular) consume the pre-rendered
+    // `a11yAttr` fragment; Feliz (non-HTML markup) reads the raw `label` /
+    // `decorative` to build its own F# `prop.*` props.
+    a11yAttr: iconA11yAttr({ label, decorative }),
+    label,
+    decorative,
   });
 }

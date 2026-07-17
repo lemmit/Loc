@@ -173,6 +173,14 @@ describe("svelte generator — project shape", () => {
     expect(detail).toContain("{@render confirmOpModal(confirmForm)}");
     expect(detail).toContain("{#snippet confirmOpModal(form: LoomForm<ConfirmOrderRequest>)}");
     expect(detail).toContain('data-testid="orders-op-confirm-submit"');
+    // a11y: the raw modal box is a labelled dialog (role/aria-modal +
+    // aria-labelledby → the titled <h3>).  The lib packs (Radix/bits-ui) get
+    // this from their Dialog component; the raw shadcnSvelte/flowbite boxes did
+    // not until this contract-emit slice.
+    expect(detail).toContain(
+      'role="dialog" aria-modal="true" aria-labelledby="orders-op-confirm-title"',
+    );
+    expect(detail).toContain('<h3 id="orders-op-confirm-title"');
   });
 
   it("magic route id: a hand-written byId(id) page derives id from page.params", async () => {

@@ -85,6 +85,17 @@ describe("walker primitives — Icon", () => {
     expect(tsx).toMatch(/<svg viewBox='0 0 1 1'\/>/);
   });
 
+  it("an unlabelled Icon is decorative — aria-hidden hides it from assistive tech", async () => {
+    const tsx = await emit(`Icon { svg: "<svg/>" }`);
+    expect(tsx).toMatch(/<span className="loom-icon" aria-hidden="true"/);
+  });
+
+  it("a labelled Icon becomes a named img (role=img + aria-label), not aria-hidden", async () => {
+    const tsx = await emit(`Icon { svg: "<svg/>", label: "Search" }`);
+    expect(tsx).toMatch(/role="img" aria-label="Search"/);
+    expect(tsx).not.toContain('aria-hidden="true"');
+  });
+
   it("Icon size: lands as a loom-icon-<size> modifier class", async () => {
     const tsx = await emit(`Icon { svg: "<svg/>", size: "lg" }`);
     expect(tsx).toMatch(/className="loom-icon loom-icon-lg"/);

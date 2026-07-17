@@ -75,7 +75,7 @@ export default function CustomerDetail() {
       <Title order={2}>Customer detail</Title>
       <>
         { customerById.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 3 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

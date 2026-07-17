@@ -156,6 +156,8 @@ export function emitDestroyForm(
     hasLoading: true,
     testidAttr: ` data-testid="${testidNamespace}"`,
     styleAttr: "",
+    // Delete button's visible text is its accessible name — no aria-label.
+    a11yAttr: "",
   });
 }
 
@@ -606,11 +608,17 @@ function emitFormOfOperation(
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
-  // Note: unlike the inline forms, the op-form does NOT register
-  // `primitive-form-of` here — the pack-specific shell (toast lib,
-  // useState/useDisclosure, modals manager) rides on
-  // `imports["primitive-modal"]`, which the enclosing `emitModal`
-  // auto-registers.
+  // The page shell ALWAYS emits this op-form's module-scope component from the
+  // recorded `formOfs` state — whether or not an enclosing `Modal { … }` wraps
+  // it — and that component references the pack modal shell (toast lib, modals
+  // manager, `Button`/`Group`, `applyServerErrors`).  Those specifiers live on
+  // `imports["primitive-modal"]`.  Register them here rather than relying on
+  // `emitModal` to have run, so a BARE `OperationForm(<instance>.<op>)` in a
+  // hand-written page body still compiles instead of emitting a component that
+  // references un-imported `modals`/`notifications`/`Button`/`Group`.  A
+  // no-op for packs that ship no `primitive-modal` key; idempotent when a
+  // Modal also registered it.
+  addImportsForPrimitive(ctx, "primitive-modal");
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   addImport(
     ctx,

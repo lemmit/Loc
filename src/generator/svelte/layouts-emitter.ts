@@ -134,7 +134,7 @@ ${packImports}${componentImports}  let { children } = $props();
 
 <div class="loom-layout">
 ${header}  <div class="loom-layout-body">
-${sidebar}    <main class="loom-layout-main">
+${sidebar}    <main id="main-content" class="loom-layout-main">
       {@render children()}
     </main>
   </div>

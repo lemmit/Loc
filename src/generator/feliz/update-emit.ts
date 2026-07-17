@@ -19,7 +19,7 @@ import type {
   FelizWorkflowForm,
   FormRecord,
 } from "./wire.js";
-import { formHasFieldErrors, formTouchedField, formTouchMsg } from "./wire.js";
+import { formHasFieldErrors, formTouchedField, formTouchMsg, opHasForm } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -166,7 +166,7 @@ export function renderInit(
       ? [
           hasPageCmd
             ? "      CurrentPage = page"
-            : "      CurrentPage = parseUrl (Router.currentUrl ())",
+            : "      CurrentPage = parseUrl (Router.currentPath ())",
         ]
       : []),
     ...state.map((f) => {
@@ -194,7 +194,7 @@ export function renderInit(
         ? cmds[0]!
         : `Cmd.batch [\n${cmds.map((c) => `    ${c}`).join("\n")}\n  ]`;
   const prefix = hasPageCmd
-    ? "let init () =\n  let page = parseUrl (Router.currentUrl ())\n"
+    ? "let init () =\n  let page = parseUrl (Router.currentPath ())\n"
     : "let init () =\n";
   if (inits.length === 0) return `let init () = { Unit = () }, ${cmd}`;
   return `${prefix}  {\n${inits.join("\n")}\n  }, ${cmd}`;
@@ -496,7 +496,7 @@ export function renderUpdate(
   // A delete: the trigger fires the `Cmd`; on success navigate to the list
   // route (the record is gone), on error stay put.
   const mutationArms = mutations.map((m) => {
-    const nav = `Cmd.navigate(${m.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    const nav = `Cmd.navigatePath(${m.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return (
       `  | ${m.dispatchCase} id -> model, Cmd.OfAsync.perform Api.${m.apiFn} id ${m.resultCase}\n` +
       `  | ${m.resultCase} (Ok ()) -> model, ${nav}\n` +
@@ -521,13 +521,19 @@ export function renderUpdate(
       (fld) =>
         `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
     );
-    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    // On success land on the NEW record's DETAIL page (`/<coll>/<id>`), not the
+    // collection — the standard create→detail CRUD flow every other Loom frontend
+    // follows.  The create Api fn resolves the new record's id (from the `{ id }`
+    // response envelope), so append it to the collection segments.
+    const nav = `Cmd.navigatePath(${[...f.navigateSegs.map((s) => `"${s}"`), "created"].join(
+      ", ",
+    )})`;
     return [
       ...setters,
       ...touchArm(f),
       ...fieldArrayUpdateArms(f),
       `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.resultMsg}`,
-      `  | ${f.resultMsg} (Ok _) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
+      `  | ${f.resultMsg} (Ok created) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
       `  | ${f.resultMsg} (Error _) -> model, Cmd.none`,
     ].join("\n");
   });
@@ -539,7 +545,16 @@ export function renderUpdate(
       (fld) =>
         `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
     );
-    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    // A PARAM-LESS op (`confirm()`) has no form record: the submit posts `()`
+    // (empty body) and the done arm doesn't reset a form field.
+    if (!opHasForm(f)) {
+      return [
+        `  | ${f.submitMsg} id -> model, Cmd.OfAsync.perform (Api.${f.apiFn} id) () ${f.doneMsg}`,
+        `  | ${f.doneMsg} (Ok ()) -> model, ${nav}`,
+        `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+      ].join("\n");
+    }
     return [
       ...setters,
       ...touchArm(f),
@@ -556,7 +571,7 @@ export function renderUpdate(
       (fld) =>
         `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
     );
-    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,
       ...touchArm(f),

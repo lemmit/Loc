@@ -119,12 +119,21 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   const onBlur = validated
     ? `; prop.onBlur (fun _ -> dispatch (${formTouchMsg(formField)} "${fld.wireName}"))`
     : "";
+  // a11y: a validated input links to its error via `aria-describedby` and marks
+  // itself `aria-invalid` when the field is touched AND currently in error (the
+  // same condition that reveals the visible message).  Unvalidated fields carry
+  // no error binding, so no aria.
+  const errorId = `${formField}-${fld.wireName}-error`;
+  const aria = validated
+    ? `; prop.ariaInvalid ((model.${formTouchedField(formField)} |> Set.contains "${fld.wireName}") && (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField} |> Option.isSome)); prop.ariaDescribedBy "${errorId}"`
+    : "";
   const wrap = (input: string): string => {
     if (!validated) return input;
     // The touched-gated message goes through the `View.fieldError` helper (the
     // codebase's convention for repeated view logic, beside `View.remoteList`)
-    // rather than an inlined match at every input.
-    const errEl = `(View.fieldError model.${formTouchedField(formField)} "${fld.wireName}" (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField}))`;
+    // rather than an inlined match at every input.  It carries the `errorId` the
+    // input's `aria-describedby` references.
+    const errEl = `(View.fieldError model.${formTouchedField(formField)} "${fld.wireName}" "${errorId}" (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField}))`;
     return `Html.div [ prop.className "form-control"; prop.children [ ${input}; ${errEl} ] ]`;
   };
   if (fld.inputKind === "select") {
@@ -134,7 +143,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
     return wrap(
-      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children [ ${allOpts.join("; ")} ] ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children [ ${allOpts.join("; ")} ] ]`,
     );
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
@@ -144,7 +153,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     const listField = `model.${readFieldName(fld.idTarget)}`;
     const label = fld.idLabelField ?? "id";
     return wrap(
-      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
     );
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
@@ -152,7 +161,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
   return wrap(
-    `Html.input [ ${tidP}prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur} ]`,
+    `Html.input [ ${tidP}prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria} ]`,
   );
 }
 
@@ -192,7 +201,7 @@ function renderFieldArray(formField: string, fa: FelizFieldArray): string {
   return `Html.div [ prop.className "flex flex-col gap-2"; prop.children [ ${label}; yield! (${rows}); ${add} ] ]`;
 }
 
-/** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
+/** A route path → a `Router.navigatePath(<segments>)` call (Feliz.Router).  Each
  *  literal path segment becomes a quoted arg; a `:param` segment interpolates
  *  the matching named arg's value (or its bare name when no arg matches). */
 function routerNavigate(
@@ -208,8 +217,8 @@ function routerNavigate(
     return `(string ${byName.get(name) ?? name})`;
   });
   // `Router.navigate` needs ≥1 arg; the root path (`/`) navigates to `""`.
-  if (rendered.length === 0) return `Router.navigate("")`;
-  return `Router.navigate(${rendered.join(", ")})`;
+  if (rendered.length === 0) return `Router.navigatePath("")`;
+  return `Router.navigatePath(${rendered.join(", ")})`;
 }
 
 /** Collapse a walked markup fragment to ONE line.  The walker joins children
@@ -325,16 +334,16 @@ export const felizTarget: WalkerTarget = {
     const frag = `React.fragment (${coll} |> List.map (fun ${itemVar} -> ${oneLine(body)}))`;
     return `(if List.isEmpty ${coll} then ${oneLine(emptyBody)} else ${frag})`;
   },
-  // Cross-page navigation → `Router.navigate(<segments>)` (Feliz.Router).  A
+  // Cross-page navigation → `Router.navigatePath(<segments>)` (Feliz.Router).  A
   // `then: navigate(<Page>)` / `Anchor(to:)` reaches here with the target
   // page's route template; `:param` segments interpolate the matching arg.
   renderNavigate: (routeTemplate, args) => routerNavigate(routeTemplate, args),
 
-  // `Button(to: "/products")` → `Router.navigate("products")`.  A literal path
+  // `Button(to: "/products")` → `Router.navigatePath("products")`.  A literal path
   // is split into segments; a non-literal (a ref) navigates to it as one.
   renderNavigateExpr: (toArg) => {
     const lit = toArg.match(/^"(.*)"$/);
-    if (!lit) return `Router.navigate(${toArg})`;
+    if (!lit) return `Router.navigatePath(${toArg})`;
     return routerNavigate(lit[1]!, []);
   },
 
@@ -451,7 +460,10 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS op (`confirm()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard); the page object still drives it as
+    // trigger → submit → form-detach.  (Only the whole-body `null` fall-throughs
+    // above — unresolved refs / unknown op — bail.)
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     // Testid namespace: the scaffold's `testid:` arg (`orders-op-addLine`) or the
     // `<plural>-op-<op>` default the page-object builder computes.  The form

@@ -21,7 +21,7 @@ async function main() {
 
   // List page — the toolbar heading + table render; with no backend the wire
   // layer's Remote settles on the error/empty branch.
-  await page.goto(`${URL}#/products`, { waitUntil: "networkidle" });
+  await page.goto(`${URL}products`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Products" }).waitFor({ timeout: 10000 });
   await page
     .getByText(/Couldn't load products|No products yet\./)
@@ -29,13 +29,13 @@ async function main() {
     .waitFor({ timeout: 10000 });
 
   // New page — the CreateForm inputs render.
-  await page.goto(`${URL}#/products/new`, { waitUntil: "networkidle" });
+  await page.goto(`${URL}products/new`, { waitUntil: "networkidle" });
   await page.getByPlaceholder("name").waitFor({ timeout: 10000 });
 
   // Detail page — the per-operation `Modal` renders as a `<details>` disclosure
   // (the operations area is a sibling of the QueryView, so it renders without a
   // backend).  Expanding the "Rename" summary reveals the wrapped operation form.
-  await page.goto(`${URL}#/products/smoke-id`, { waitUntil: "networkidle" });
+  await page.goto(`${URL}products/smoke-id`, { waitUntil: "networkidle" });
   const summary = page.getByText("Rename", { exact: true });
   await summary.waitFor({ timeout: 10000 });
   await summary.click();

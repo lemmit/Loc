@@ -45,8 +45,10 @@ describe("feliz stateless primitives (Icon / Tabs)", () => {
   it("renders Icon as an inline SVG span via dangerouslySetInnerHTML", async () => {
     const app = await appFs();
     // A named registry icon → the looked-up SVG, sized `md` (h-5 w-5), injected raw.
+    // Decorative-by-default: the wrapper carries `prop.ariaHidden true` (icon
+    // a11y contract) so an unlabelled glyph is hidden from assistive tech.
     expect(app).toContain(
-      'Html.span [ prop.className "loom-icon inline-flex h-5 w-5 [&>svg]:h-full [&>svg]:w-full"; prop.dangerouslySetInnerHTML """<svg viewBox="0 0 24 24"',
+      'Html.span [ prop.className "loom-icon inline-flex h-5 w-5 [&>svg]:h-full [&>svg]:w-full"; prop.ariaHidden true; prop.dangerouslySetInnerHTML """<svg viewBox="0 0 24 24"',
     );
     // `size: "sm"` → h-4 w-4.
     expect(app).toContain('prop.className "loom-icon inline-flex h-4 w-4');

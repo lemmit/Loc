@@ -1,0 +1,36 @@
+// Stage 1 — the no-code start.
+// A single aggregate, scaffolded UI, one backend + one frontend.
+// This is as small as a real full-stack app gets in Loom: `with crudish`
+// gives CRUD operations for free, `with scaffold(...)` builds the whole UI.
+system Todo {
+
+  subdomain Core {
+    context Tasks {
+      aggregate Task with crudish {
+        title: string
+        done: bool
+      }
+      repository Tasks for Task { }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Core]) { }
+
+  storage primary { type: postgres }
+  resource appState { for: Tasks, kind: state, use: primary }
+
+  deployable api {
+    platform: node,
+    contexts: [Tasks],
+    dataSources: [appState],
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react,
+    targets: api,
+    ui: WebApp,
+    port: 3001,
+    design: mantine
+  }
+}

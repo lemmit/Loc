@@ -1,5 +1,5 @@
-{{#if isMulti}}<div class="flex flex-col gap-2"{{{testidAttr}}}>
+{{#if isMulti}}<div class="flex flex-col gap-2"{{{testidAttr}}} aria-hidden="true">
 {#each Array.from({ length: {{count}} }) as _unused, i (i)}
 <div class="h-7 animate-pulse rounded-sm bg-muted"></div>
 {/each}
-</div>{{else}}<div class="h-7 animate-pulse rounded-sm bg-muted"{{{testidAttr}}}></div>{{/if}}
+</div>{{else}}<div class="h-7 animate-pulse rounded-sm bg-muted"{{{testidAttr}}} aria-hidden="true"></div>{{/if}}
