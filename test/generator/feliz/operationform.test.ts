@@ -100,12 +100,16 @@ describe("feliz operation forms", () => {
   it("the OperationForm renders inputs + a submit dispatching Submit… id", async () => {
     const app = await appFs(OPFORM);
     expect(app).toContain(
-      'Html.input [ prop.className "input input-bordered w-full"; prop.placeholder "newName"; prop.value model.RenameProductForm.newName; prop.onChange (fun (v: string) -> dispatch (SetRenameProductFormNewName v)); prop.onBlur (fun _ -> dispatch (TouchRenameProductForm "newName")) ]',
+      'Html.input [ prop.custom("data-testid", "products-op-rename-input-newName"); prop.className "input input-bordered w-full"; prop.placeholder "newName"; prop.value model.RenameProductForm.newName; prop.onChange (fun (v: string) -> dispatch (SetRenameProductFormNewName v)); prop.onBlur (fun _ -> dispatch (TouchRenameProductForm "newName")) ]',
     );
-    // The submit carries the route id (instance-qualified op) + a validity guard.
+    // The submit carries the route id (instance-qualified op) + a validity guard,
+    // plus the `<plural>-op-<op>-submit` testid the op page-object method clicks.
     expect(app).toContain(
-      'Html.button [ prop.className "btn btn-primary"; prop.disabled (not (Validation.renameProductFormValid model.RenameProductForm)); prop.onClick (fun _ -> dispatch (SubmitRenameProductForm id)); prop.text "Rename Product" ]',
+      'Html.button [ prop.custom("data-testid", "products-op-rename-submit"); prop.className "btn btn-primary"; prop.disabled (not (Validation.renameProductFormValid model.RenameProductForm)); prop.onClick (fun _ -> dispatch (SubmitRenameProductForm id)); prop.text "Rename Product" ]',
     );
+    // The form container carries `<plural>-op-<op>-form` (waited for after the
+    // trigger click, detached after submit).
+    expect(app).toContain('prop.custom("data-testid", "products-op-rename-form")');
     // The op form's field is validated too (shares the Validation module).
     expect(app).toContain("  let renameProductFormValid (form: RenameProductForm) : bool =");
     expect(app).not.toContain("useForm");

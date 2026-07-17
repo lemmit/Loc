@@ -90,15 +90,17 @@ describe("feliz workflow forms", () => {
 
   it("the WorkflowForm renders typed inputs + a validity-guarded paramless submit", async () => {
     const app = await appFs(WF);
-    // `name: string` → text; `initial: money` → a `type: number` input.
+    // `name: string` → text; `initial: money` → a `type: number` input.  Each
+    // carries the `workflow-<snake(wf)>-input-<param>` testid the shared workflow
+    // page object fills.
     expect(app).toContain(
-      'Html.input [ prop.className "input input-bordered w-full"; prop.placeholder "name"; prop.value model.OpenAccountForm.name; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormName v)); prop.onBlur (fun _ -> dispatch (TouchOpenAccountForm "name")) ]',
+      'Html.input [ prop.custom("data-testid", "workflow-open_account-input-name"); prop.className "input input-bordered w-full"; prop.placeholder "name"; prop.value model.OpenAccountForm.name; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormName v)); prop.onBlur (fun _ -> dispatch (TouchOpenAccountForm "name")) ]',
     );
     expect(app).toContain(
-      'Html.input [ prop.className "input input-bordered w-full"; prop.type\'.number; prop.placeholder "initial"; prop.value model.OpenAccountForm.initial; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormInitial v)); prop.onBlur (fun _ -> dispatch (TouchOpenAccountForm "initial")) ]',
+      'Html.input [ prop.custom("data-testid", "workflow-open_account-input-initial"); prop.className "input input-bordered w-full"; prop.type\'.number; prop.placeholder "initial"; prop.value model.OpenAccountForm.initial; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormInitial v)); prop.onBlur (fun _ -> dispatch (TouchOpenAccountForm "initial")) ]',
     );
     expect(app).toContain(
-      'Html.button [ prop.className "btn btn-primary"; prop.disabled (not (Validation.openAccountFormValid model.OpenAccountForm)); prop.onClick (fun _ -> dispatch SubmitOpenAccountForm); prop.text "Run OpenAccount" ]',
+      'Html.button [ prop.custom("data-testid", "workflow-open_account-submit"); prop.className "btn btn-primary"; prop.disabled (not (Validation.openAccountFormValid model.OpenAccountForm)); prop.onClick (fun _ -> dispatch SubmitOpenAccountForm); prop.text "Run OpenAccount" ]',
     );
   });
 
