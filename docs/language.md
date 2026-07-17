@@ -988,6 +988,25 @@ The validator runs after parsing and reports errors for:
   or receivers whose type couldn't be resolved.
 - Assignment to a derived property.
 - `emit` payloads that don't match the event's declared shape.
+- **Record construction** (`X { field: value }` for a value object, entity part,
+  or `error` / `payload` / … record) is checked on three axes at every
+  construction site (operation / create / destroy bodies, property defaults,
+  `derived` / `invariant` / `function` bodies): an entry naming a field the
+  record doesn't declare (`loom.unknown-construction-field`), an entry whose
+  value type isn't assignable to the declared field (`loom.construction-field-type`),
+  and a construction that omits a **required** field — a declared `Property` that
+  is non-optional, has no `= default`, and isn't `provenanced`
+  (`loom.construction-missing-field`; `contains` members auto-default to empty,
+  so they're never required).
+- **Call arguments** — an operation / function call with the wrong number of
+  arguments (`loom.call-arg-count`) or a wrong-typed argument
+  (`loom.call-arg-type`), at both statement position (`bump(a)`, `o.bump(a)`) and
+  expression position (free calls `fee(a)` and member calls `price.scaled(a)` in
+  `derived` / `let` / `precondition` / …). Criterion / policy-function calls keep
+  their own arity gate (`loom.criterion-arity`) and share the argument **type**
+  check. Bare-name arguments that don't resolve, and ergonomic numeric-literal
+  promotions (`bump(5)` into a `money` / `decimal` param), are admitted exactly
+  as elsewhere.
 - Unknown / out-of-scope `X id` targets.
 - `contains` referencing a part that belongs to a different aggregate.
 - Operations or `test` blocks declared outside an aggregate root.

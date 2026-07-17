@@ -190,6 +190,7 @@ that still inline).
 | `loom.criterion-impure` | The body calls a mutating `operation`. Criteria are pure — call a pure `function` instead. |
 | `loom.criterion-cycle` | A criterion (transitively) references itself. |
 | `loom.criterion-arity` | A criterion call supplies the wrong number of arguments. |
+| `loom.call-arg-type` | A criterion call supplies an argument whose type isn't assignable to the declared parameter (the shared call-argument type check; arity stays `loom.criterion-arity`). Checked at the env-bearing call sites (body `precondition` / `requires`, `derived`, …). |
 
 The body is an ordinary expression, so mutation (`:=`, `+=`), `emit`,
 and workflow calls are already excluded by the grammar.
