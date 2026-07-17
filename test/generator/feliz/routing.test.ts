@@ -106,7 +106,10 @@ describe("feliz multi-page routing", () => {
   it("wraps the router in a persistent daisyUI navbar over the top-level pages", async () => {
     const app = await appFs(MULTI);
     // A persistent shell: the navbar sits above the route-swapping router.
-    expect(app).toContain('Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"');
+    // The bar is a real <nav> landmark with an accessible name (a11y contract).
+    expect(app).toContain(
+      'Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel "Primary navigation"',
+    );
     expect(app).toContain('Html.ul [ prop.className "menu menu-horizontal px-1"');
     // One menu item per top-level (static-route) page — the brand + both pages.
     expect(app).toContain('prop.href "#/"; prop.text "Home"');
@@ -115,6 +118,17 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain(
       'prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "Web App"',
     );
+  });
+
+  it("routed content is a <main> landmark reachable via a skip link", async () => {
+    const app = await appFs(MULTI);
+    // WCAG 2.4.1 Bypass Blocks — the skip link is the first focusable element,
+    // visually hidden until focused, and jumps past the nav to the <main>.
+    expect(app).toContain(
+      'prop.href "#main-content"; prop.text "Skip to content"',
+    );
+    // The route-swapping router lives inside the <main id="main-content">.
+    expect(app).toContain('Html.main [ prop.id "main-content"; prop.children [');
   });
 
   it("cross-page nav renders Router.navigate + fsproj pulls Feliz.Router", async () => {

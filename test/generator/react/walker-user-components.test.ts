@@ -427,7 +427,46 @@ describe("user-defined components", () => {
     // LandingFrameLayout wrapper renders <Logo /> in its header slot.
     expect(app).toMatch(/function LandingFrameLayout\(\)/);
     expect(app).toMatch(/<Logo \/>/);
+    // a11y: the header slot is a <header> landmark and the Outlet lives in a
+    // <main id="main-content"> landmark (named layouts otherwise had no
+    // landmarks at all — the default AppShellLayout gets them from AppShell.*).
+    expect(app).toMatch(/<header><Logo \/><\/header>/);
+    expect(app).toMatch(/<main id="main-content">\s*<AppErrorBoundary>/);
     // The component file itself is emitted exactly once.
     expect(files.get("web/src/components/Logo.tsx")).toBeDefined();
+  });
+
+  it("a named layout's footer slot is wrapped in a <footer> landmark", async () => {
+    const files = await buildAndGenerate(`
+      component SiteFooter() {
+        body: Text { "© Loom" }
+      }
+
+      system S {
+        subdomain M { context C { } }
+        layout LandingFrame {
+          main
+          footer { SiteFooter() }
+        }
+        ui WebApp {
+          page Home {
+            route: "/"
+            layout: LandingFrame
+            body: Heading { "Hi", level: 1 }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const app = files.get("web/src/App.tsx")!;
+    expect(app).toBeDefined();
+    // The footer slot renders inside a <footer> (contentinfo) landmark.
+    expect(app).toMatch(/<footer><SiteFooter \/><\/footer>/);
   });
 });

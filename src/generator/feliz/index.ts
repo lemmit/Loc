@@ -393,8 +393,10 @@ function renderNavbar(pages: readonly PageIR[], brand: string): string {
       return `          Html.li [ prop.children [ Html.a [ prop.href "${href}"; prop.text "${humanizeLabel(p.name)}" ] ] ]`;
     })
     .join("\n");
+  // The bar is a real <nav> landmark (a11y contract) — a screen reader
+  // announces it as the primary navigation and can jump straight to it.
   return [
-    '    Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.children [',
+    '    Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel "Primary navigation"; prop.children [',
     '      Html.div [ prop.className "flex-1"; prop.children [',
     `        Html.a [ prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "${humanizeLabel(brand)}" ]`,
     "      ] ]",
@@ -424,20 +426,29 @@ function renderRootView(pages: readonly PageIR[], fnName = "view", brand = ""): 
     "    ]",
   ];
   // A persistent app shell wraps the router so the navbar stays put across route
-  // changes (only the router's children swap).  With no navbar (a single top-
-  // level page) the router is the view body directly — byte-identical to before.
+  // changes (only the router's children swap).  The routed content is the <main>
+  // landmark (id="main-content") so the skip link + assistive tech can target it.
+  // With no navbar (a single top-level page) there is nothing to bypass, so the
+  // skip link is omitted — the <main> landmark alone remains.
   if (navbar === "") {
     return [
       `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`,
-      ...router.map((l) => l.replace(/^ {2}/, "")),
+      '  Html.main [ prop.id "main-content"; prop.children [',
+      ...router,
+      "  ] ]",
     ].join("\n");
   }
   return [
     `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`,
     "  Html.div [",
     "    prop.children [",
+    // Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element, visually
+    // hidden until focused, jumps past the nav to the <main> landmark.
+    '      Html.a [ prop.className "sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 btn btn-sm"; prop.href "#main-content"; prop.text "Skip to content" ]',
     navbar,
+    '      Html.main [ prop.id "main-content"; prop.children [',
     ...router,
+    "      ] ]",
     "    ]",
     "  ]",
   ].join("\n");
