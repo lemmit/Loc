@@ -798,7 +798,9 @@ export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Wa
     { length: count },
     () => `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
   ).join("\n");
-  return `<div class="skeleton"${testidAttr}>\n${lines}\n</div>`;
+  // Decorative loading placeholder — hidden from assistive tech (the loading
+  // state is announced elsewhere; real content announces once loaded).
+  return `<div class="skeleton" aria-hidden="true"${testidAttr}>\n${lines}\n</div>`;
 }
 
 /** `Alert("message")` → `<div class="alert">` */

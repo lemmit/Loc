@@ -158,9 +158,11 @@ function primitiveEmpty(c: Ctx): string {
   return `Html.div [ prop.className "flex min-h-40 flex-col items-center justify-center gap-2 text-center text-base-content/70"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
 }
 
-/** Skeleton — a loading placeholder (daisyUI `skeleton`; count/height v1-fixed). */
+/** Skeleton — a loading placeholder (daisyUI `skeleton`; count/height v1-fixed).
+ *  Decorative: hidden from assistive tech (the loading state is announced by a
+ *  Loader/status region, and the real content announces once it loads). */
 function primitiveSkeleton(_c: Ctx): string {
-  return `Html.div [ prop.className "skeleton h-24 w-full" ]`;
+  return `Html.div [ prop.className "skeleton h-24 w-full"; prop.ariaHidden true ]`;
 }
 
 /** KeyValueRow(label, value) — a detail-page field row (label + value cell).

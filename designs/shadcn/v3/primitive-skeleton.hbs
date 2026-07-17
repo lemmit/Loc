@@ -1,5 +1,5 @@
-{{#if isMulti}}<div className="flex flex-col gap-2"{{{testidAttr}}}>
+{{#if isMulti}}<div className="flex flex-col gap-2"{{{testidAttr}}} aria-hidden="true">
 { Array.from({ length: {{count}} }).map((_, i) => (
 <Skeleton key={i} className="h-7 rounded-sm" />
 )) }
-</div>{{else}}<Skeleton className="h-7 rounded-sm"{{{testidAttr}}} />{{/if}}
+</div>{{else}}<Skeleton className="h-7 rounded-sm"{{{testidAttr}}} aria-hidden="true" />{{/if}}
