@@ -46,6 +46,23 @@ function asChild(text: string | undefined): string {
   return `Html.text "${s}"`;
 }
 
+/** Turn the walker's `testidAttr` context value into a Feliz `prop.custom(…)`
+ *  prop-list element, or `""` when the primitive carried no `testid:`.  The
+ *  shared walker (`testidAttr` in walker-core) hands a STATIC testid as the
+ *  JSX-shaped fragment ` data-testid="orders-list"` and a DYNAMIC one already as
+ *  the Feliz prop `prop.custom("data-testid", …)` (via the target's
+ *  `renderAttrBinding`).  JSX targets splice the string into a tag; Feliz needs
+ *  a prop-list element, so unwrap the static form to `prop.custom(...)` and pass
+ *  the dynamic form through unchanged.  This is the whole reason the pack picked
+ *  up no testids before — the JSX fragment is meaningless inside `[ prop… ]`. */
+function testidProp(c: Ctx): string {
+  const raw = String(c.testidAttr ?? "").trim();
+  if (raw === "") return "";
+  if (raw.startsWith("prop.")) return raw; // dynamic — already an F# prop
+  const m = raw.match(/^data-testid=(.+)$/); // static ` data-testid="x"` (trimmed)
+  return m ? `prop.custom("data-testid", ${m[1]})` : "";
+}
+
 /** A flex-container primitive (Stack = vertical, Group = horizontal) with a
  *  daisyUI/Tailwind layout class.  Same offside-safe children handling either
  *  way — only the flex direction differs.  An empty container (e.g. a scaffold
@@ -61,7 +78,9 @@ function flexContainer(className: string, c: Ctx): string {
   // share the col-2 column, offside-consistent.
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
-  return `Html.div [\n  prop.className "${className}";\n  prop.children [\n${children}\n  ]\n]`;
+  const tid = testidProp(c);
+  const tidLine = tid ? `\n  ${tid};` : "";
+  return `Html.div [\n  prop.className "${className}";${tidLine}\n  prop.children [\n${children}\n  ]\n]`;
 }
 
 /** Stack — a vertical flow (daisyUI/Tailwind `flex flex-col gap-4`). */
@@ -78,7 +97,8 @@ function primitiveGroup(c: Ctx): string {
  *  CSS class.  Same offside-safe children handling as `primitiveStack` (multi-
  *  line element lists are fine inside `[ … ]`; only offside-keywords aren't). */
 function containerEl(tag: string, className: string, c: Ctx): string {
-  const cls = `prop.className "${className}"`;
+  const tid = testidProp(c);
+  const cls = `prop.className "${className}"${tid ? `; ${tid}` : ""}`;
   if (!c.hasChildren) return `Html.${tag} [ ${cls} ]`;
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
@@ -143,7 +163,9 @@ function primitiveSkeleton(_c: Ctx): string {
 function primitiveKeyValueRow(c: Ctx): string {
   const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
   const value = `Html.dd [ prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
-  return `Html.div [ prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
 /** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
@@ -172,18 +194,26 @@ function primitiveTable(c: Ctx): string {
     .map((col) => `Html.td [ prop.children [ ${asChild(col.cellJsx)} ] ]`)
     .join("; ");
   const head = `Html.thead [ prop.children [ Html.tr [ prop.children [ ${headCells} ] ] ] ]`;
+  // Per-row `data-testid` (the list-table `rowTestid:` lambda → `"orders-row-" +
+  // row.id`, already rendered as an F# expression by the active target).  A
+  // contained-collection table carries no `rowTestid` — the row stays testid-less
+  // (that per-row testid is under-delivered on every frontend, out of scope).
+  const rowTidPart = c.rowTestid ? `prop.custom("data-testid", (${String(c.rowTestid)})); ` : "";
   // The `yield!` + its bracket-delimited body are offside-safe inside the
   // enclosing `prop.children [ … ]`.
   const body =
     `Html.tbody [ prop.children [\n` +
     `      yield! ${rowsExpr} |> List.map (fun ${rowVar} ->\n` +
-    `        Html.tr [ prop.children [ ${bodyCells} ] ])\n` +
+    `        Html.tr [ ${rowTidPart}prop.children [ ${bodyCells} ] ])\n` +
     `    ] ]`;
   // daisyUI `table table-zebra`, wrapped in a bordered, horizontally-scrollable
   // surface so wide tables stay contained.  Paren-wrapped against sibling
-  // absorption (§24) since the wrapper is now the returned element.
+  // absorption (§24) since the wrapper is now the returned element.  The `rows()`
+  // page-object locator reads the CONTAINER's `data-testid`, so it rides here.
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
   const table = `Html.table [ prop.className "table table-zebra w-full"; prop.children [ ${head}; ${body} ] ]`;
-  return `(Html.div [ prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
+  return `(Html.div [ ${tidPart}prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
 }
 
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
@@ -236,7 +266,9 @@ function primitiveCard(c: Ctx): string {
     kids.length > 0
       ? `; prop.children [ Html.div [ prop.className "card-body"; prop.children [ ${kids.join("; ")} ] ] ]`
       : "";
-  return `Html.div [ prop.className "card bg-base-100 shadow"${body} ]`;
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "card bg-base-100 shadow"${body} ]`;
 }
 
 function primitiveBadge(c: Ctx): string {
@@ -259,6 +291,8 @@ function primitiveButton(c: Ctx): string {
   // `prop.children [ … ]` when the label is an already-rendered element.  The
   // daisyUI `btn btn-primary` class makes it a real design-system button.
   const props: string[] = [`prop.className "btn btn-primary"`];
+  const tid = testidProp(c);
+  if (tid) props.push(tid);
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
   const label = String(c.label ?? "").trim();
   if (label.startsWith("Html.") || label.startsWith("(")) {
@@ -413,7 +447,9 @@ function formControl(c: Ctx, inputEl: string): string {
   const parts = [inputLabel(String(c.labelText ?? "")), inputEl, inputError(c)].filter(
     (p) => p !== "",
   );
-  return `Html.div [ prop.className "form-control w-full"; prop.children [ ${parts.join("; ")} ] ]`;
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "form-control w-full"; prop.children [ ${parts.join("; ")} ] ]`;
 }
 
 /** The `Set<Field>` Msg name + Model read for a bound input, or undefined when

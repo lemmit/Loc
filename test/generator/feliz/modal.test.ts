@@ -46,8 +46,10 @@ describe("feliz modal", () => {
     expect(app).toContain(
       'Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [',
     );
+    // The summary IS the trigger the op page-object clicks, so it carries the
+    // `<plural>-op-<op>` testid (from the scaffold's trigger Button).
     expect(app).toContain(
-      'Html.summary [ prop.className "collapse-title font-medium"; prop.text "Rename" ]',
+      'Html.summary [ prop.custom("data-testid", "products-op-rename"); prop.className "collapse-title font-medium"; prop.text "Rename" ]',
     );
     // The wrapped operation form renders inline inside the disclosure (its inputs
     // + the id-carrying submit — the same `renderOperationForm` markup).

@@ -8,7 +8,8 @@
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
 import type { BoundedContextIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
@@ -77,6 +78,17 @@ function vosFromBc(bc: BoundedContextIR | undefined): Map<string, readonly Field
   return m;
 }
 
+/** The `data-testid` a form field carries so the SHARED (testid-driven) page
+ *  objects can fill it: `<base>-input-<jsonKey>` for a normal field, and
+ *  `<base>-input-<objectKey>-<jsonKey>` for a FLATTENED value-object sub-field
+ *  (`price-amount`) — matching the `fillBlock` recursion in
+ *  `_frontend/page-objects-builder.ts` (`${testId}-${vf.name}`). */
+function fieldTestid(base: string, fld: FelizFormField): string {
+  return fld.objectKey
+    ? `${base}-input-${fld.objectKey}-${fld.jsonKey}`
+    : `${base}-input-${fld.jsonKey}`;
+}
+
 /** One form field → its typed input (shared by create / operation / workflow
  *  forms — the markup is identical, only the field set differs).  The widget is
  *  derived from the field's `inputKind`:
@@ -89,13 +101,16 @@ function vosFromBc(bc: BoundedContextIR | undefined): Map<string, readonly Field
  *   - `text` — a plain text input.
  *  Rendered on ONE line so it stays offside-safe inside the form's Feliz
  *  children list.  (`type'` — Feliz's apostrophe-suffixed name, since `type` is
- *  an F# keyword.) */
-function renderFormInput(formField: string, fld: FelizFormField): string {
+ *  an F# keyword.)  `base` is the form's testid namespace (`orders-new` /
+ *  `orders-op-addLine` / `workflow-place_order`); the input carries
+ *  `<base>-input-<field>` via `prop.custom` so the shared page objects drive it. */
+function renderFormInput(formField: string, fld: FelizFormField, base: string): string {
   const value = `model.${formField}.${fld.wireName}`;
+  const tidP = `prop.custom("data-testid", "${fieldTestid(base, fld)}"); `;
   if (fld.inputKind === "checkbox") {
     // A bool checkbox is always a legitimate value (checked/unchecked) — no
     // required-ness, so no touched onBlur / inline error.
-    return `Html.input [ prop.className "checkbox"; prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
+    return `Html.input [ ${tidP}prop.className "checkbox"; prop.type'.checkbox; prop.isChecked (${value} = "true"); prop.onChange (fun (v: bool) -> dispatch (${fld.setMsg} (if v then "true" else "false"))) ]`;
   }
   // Message-bearing fields (required, non-checkbox) get a touched onBlur + an
   // inline error below the input — the Elmish mirror of react-hook-form's
@@ -119,7 +134,7 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
     return wrap(
-      `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children [ ${allOpts.join("; ")} ] ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children [ ${allOpts.join("; ")} ] ]`,
     );
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
@@ -129,7 +144,7 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
     const listField = `model.${readFieldName(fld.idTarget)}`;
     const label = fld.idLabelField ?? "id";
     return wrap(
-      `Html.select [ prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
     );
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
@@ -137,7 +152,7 @@ function renderFormInput(formField: string, fld: FelizFormField): string {
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
   return wrap(
-    `Html.input [ prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur} ]`,
+    `Html.input [ ${tidP}prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur} ]`,
   );
 }
 
@@ -400,14 +415,18 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByAggregate.get(aggName)),
     );
-    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    // The testid namespace the SHARED page objects fill against — the scaffold's
+    // `testid:` arg (`orders-new`) when present, else the same `<plural>-new`
+    // default the page-object builder computes from the aggregate.
+    const base = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-new`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld, base));
     const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
     const disabled =
       form.fields.length > 0
         ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
         : "";
-    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.custom("data-testid", "${base}-submit"); prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.custom("data-testid", "${base}"); prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `OperationForm(of: <Agg>, op: <op>)` → one `Html.input` per op param + a
@@ -434,7 +453,12 @@ export const felizTarget: WalkerTarget = {
     );
     if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
     ctx.usesRouteId = true; // the op dispatches with the route `id`
-    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    // Testid namespace: the scaffold's `testid:` arg (`orders-op-addLine`) or the
+    // `<plural>-op-<op>` default the page-object builder computes.  The form
+    // container is `<base>-form`, the submit `<base>-submit` — the exact ids the
+    // op page-object method waits for / clicks.
+    const base = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld, base));
     const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
     // The submit guard reads `Validation.<validFn>`, only emitted when the form
     // has flat fields; an array-only form has no required-field guard.
@@ -442,8 +466,8 @@ export const felizTarget: WalkerTarget = {
       form.fields.length > 0
         ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
         : "";
-    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.custom("data-testid", "${base}-submit"); prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.custom("data-testid", "${base}-form"); prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `WorkflowForm(runs: <wf>)` → one `Html.input` per workflow param + a
@@ -465,14 +489,17 @@ export const felizTarget: WalkerTarget = {
       vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
     if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
-    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld));
+    // Testid namespace: the scaffold's `testid:` arg (`workflow-place_order`) or
+    // the `workflow-<snake(wf)>` default the workflow page-object builder computes.
+    const base = stringNamed(call, "testid") ?? `workflow-${snake(wf.name)}`;
+    const inputs = form.fields.map((fld) => renderFormInput(form.formField, fld, base));
     const arrays = form.fieldArrays.map((fa) => renderFieldArray(form.formField, fa));
     const disabled =
       form.fields.length > 0
         ? `prop.disabled (not (Validation.${form.validFn} model.${form.formField})); `
         : "";
-    const submit = `Html.button [ prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
-    return `Html.div [ prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
+    const submit = `Html.button [ prop.custom("data-testid", "${base}-submit"); prop.className "btn btn-primary"; ${disabled}prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Run ${upperFirst(form.workflow)}" ]`;
+    return `Html.div [ prop.custom("data-testid", "${base}"); prop.className "flex flex-col gap-3"; prop.children [ ${[...inputs, ...arrays, submit].join("; ")} ] ]`;
   },
 
   // `Modal(trigger: Button(…), OperationForm(<agg>.<op>))` — the scaffold detail's
@@ -494,11 +521,25 @@ export const felizTarget: WalkerTarget = {
     const form = felizTarget.renderOperationForm?.(formChild, ctx, 0);
     if (!form) return null;
     const label = modalTriggerLabel(call).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    // The op page-object method CLICKS the trigger (`<slug>-op-<op>`) before it
+    // waits for the form (`<slug>-op-<op>-form`, on the OperationForm wrapper the
+    // seam above emits).  The scaffold puts that trigger testid on the Modal's
+    // `trigger: Button(…, testid:)` (not the Modal call itself), so read it off
+    // the trigger Button; the `<summary>` IS the trigger in this native
+    // `<details>` disclosure.  Fall back to the Modal's own `testid:` (a custom
+    // page may set it there).
+    const names2 = call.argNames ?? [];
+    const triggerArg =
+      names2.indexOf("trigger") >= 0 ? call.args[names2.indexOf("trigger")] : undefined;
+    const triggerTid =
+      (triggerArg?.kind === "call" ? stringNamed(triggerArg, "testid") : undefined) ??
+      stringNamed(call, "testid");
+    const summaryTid = triggerTid ? `prop.custom("data-testid", "${triggerTid}"); ` : "";
     // ONE line (the op form is one line) so it stays offside-safe spliced into
     // the enclosing Group's children list; paren-wrapped against sibling absorption.
     // A native <details> styled as a daisyUI `collapse` disclosure — the summary
     // is the trigger, the operation form the revealed `collapse-content`.
-    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ prop.className "collapse-title font-medium"; prop.text "${label}" ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
+    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ ${summaryTid}prop.className "collapse-title font-medium"; prop.text "${label}" ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),
