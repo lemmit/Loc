@@ -1,4 +1,4 @@
-import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, MessageIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import { collectLeaves } from "../_stmt/leaves.js";
 import type { CsRenderContext } from "./render-expr.js";
@@ -101,7 +101,7 @@ function renderCsStatement(
 ): string {
   switch (s.kind) {
     case "precondition":
-      return precondition(s.expr, s.source, index, ctx, traceCtx);
+      return precondition(s.expr, s.source, s.message, index, ctx, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 (handled by
       // DomainExceptionFilter mapping ForbiddenException → 403).
@@ -180,11 +180,14 @@ function renderCsStatement(
 function precondition(
   expr: ExprIR,
   source: string,
+  message: MessageIR | undefined,
   index: number,
   ctx: CsRenderContext,
   traceCtx: TraceCtx,
 ): string {
-  const thrown = `throw new DomainException(${JSON.stringify(`Precondition failed: ${source}`)})`;
+  // Author `message "..."` becomes the domain-floor detail; else the default.
+  const detail = message ? message.text : `Precondition failed: ${source}`;
+  const thrown = `throw new DomainException(${JSON.stringify(detail)})`;
   if (!traceCtx.emitTrace) {
     return `${INDENT}if (!(${renderCsExpr(expr, ctx)})) ${thrown};`;
   }

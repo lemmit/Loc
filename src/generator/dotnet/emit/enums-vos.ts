@@ -48,7 +48,7 @@ export function renderValueObject(vo: ValueObjectIR, ns: string): string {
     const check = inv.guard
       ? `if ((${renderCsExpr(inv.guard, renderCtx)}) && !(${renderCsExpr(inv.expr, renderCtx)}))`
       : `if (!(${renderCsExpr(inv.expr, renderCtx)}))`;
-    return `        ${check} throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+    return `        ${check} throw new DomainException(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)});`;
   });
   const efCtorAssignments = vo.fields.map((f) => `        ${upperFirst(f.name)} = default!;`);
   const derivedLines = vo.derived.map(
