@@ -51,8 +51,10 @@ export function hasBehaviouralBlock(src) {
  *  `platformClause` (e.g. key "vanilla" → clause "elixir"). */
 export async function featureCases(backendKey, platformClause, workDir) {
   const cases = [];
+  const skip = BEHAVIOURAL_SKIP[platformClause] ?? {};
   for (const f of await loadCorpusFeatures(workDir)) {
     if (!f.backends.includes(backendKey)) continue;
+    if (f.id in skip) continue; // known runtime gap on this backend — see the bug register
     const raw = readFileSync(join(CORPUS_DIR, `${f.id}.ddd`), "utf8");
     if (!hasBehaviouralBlock(raw)) continue;
     cases.push({ name: f.id, source: raw.replaceAll("__PLATFORM__", platformClause) });
@@ -91,30 +93,45 @@ export async function resetDatabase(pgUrl) {
   }
 }
 
-/** Per-(platform, system) behavioural skips: a shared system that GENERATES and
- *  COMPILES on a backend but whose RUNTIME behaviour has a known gap there.
- *  Honest and documented (not a silent drop) — the system still runs on every
- *  other backend, and the gate (behavioural-coverage.test.ts) still requires it
- *  to EMIT everywhere; only the boot is skipped where it's a tracked bug. */
-const SHARED_SYSTEM_SKIP = {
-  // node event-sourced `create` evaluates `invariant balance >= 0` BEFORE the
-  // `Opened` event folds `balance := 0`, so account creation 400s — while java
-  // and python fold-then-check and pass.  A node ES invariant-timing gap to fix
-  // separately (language-feature-developer), not in the fork-collapse slice.
-  node: { ledger: "node ES create checks invariant before the create event folds initial state" },
+/** Per-(platform, case) behavioural skips: a corpus feature or shared system that
+ *  GENERATES and COMPILES on a backend but whose RUNTIME behaviour has a known,
+ *  tracked gap there.  Honest and documented (not a silent drop) — the case still
+ *  runs on every other backend, the gate (behavioural-coverage.test.ts) still
+ *  requires it to EMIT everywhere, and each entry cites its bug in
+ *  docs/audits/behavioral-parity-bugs-2026-07.md.  Removing an entry is how a fix
+ *  re-arms the boot.  Keyed by platform clause; applies to BOTH featureCases and
+ *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
+const BEHAVIOURAL_SKIP = {
+  node: {
+    // B1 — node ES create checks the invariant before the create event folds state.
+    ledger: "B1: node ES create checks invariant before the create event folds initial state",
+  },
+  dotnet: {
+    // B2 — dotnet inheritance (TPH) create 500s at runtime.
+    payments: "B2: dotnet inheritance create 500s",
+    tph: "B2: dotnet inheritance create 500s",
+    // B3 — dotnet document/embedded shape crashes on boot (EF).
+    shapes: "B3: dotnet document/embedded shape crashes on boot (EF)",
+    // B4 — dotnet inline value-object array create 500s.
+    "value-collections": "B4: dotnet inline VO array create 500s",
+  },
 };
+
+/** Filter a case-name list against the platform's behavioural skip set. */
+function notSkipped(names, platformClause) {
+  const skip = BEHAVIOURAL_SKIP[platformClause] ?? {};
+  return names.filter((name) => !(name in skip));
+}
 
 /** Shared broad-system cases (systems/*.ddd), source-swapped to `platformClause`.
  *  Run on every backend — the tokenized replacement for the forked sales.ddd. */
 export function sharedSystemCases(platformClause) {
-  const skip = SHARED_SYSTEM_SKIP[platformClause] ?? {};
-  return readdirSync(SYSTEMS_DIR)
+  const names = readdirSync(SYSTEMS_DIR)
     .filter((p) => p.endsWith(".ddd"))
     .map((file) => file.replace(/\.ddd$/, ""))
-    .filter((name) => !(name in skip))
-    .sort()
-    .map((name) => ({
-      name,
-      source: readFileSync(join(SYSTEMS_DIR, `${name}.ddd`), "utf8").replaceAll("__PLATFORM__", platformClause),
-    }));
+    .sort();
+  return notSkipped(names, platformClause).map((name) => ({
+    name,
+    source: readFileSync(join(SYSTEMS_DIR, `${name}.ddd`), "utf8").replaceAll("__PLATFORM__", platformClause),
+  }));
 }

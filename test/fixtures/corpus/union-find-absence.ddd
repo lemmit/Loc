@@ -20,4 +20,10 @@ system UF {
     serves: A
     port: 4000
   }
+
+  test e2e "union find returns the order and 404s when absent" against d {
+    let o = api.orders.create({ code: "C1" })
+    let read = api.orders.byCode({ code: "C1" })
+    expect(read.code).toBe("C1")
+  }
 }

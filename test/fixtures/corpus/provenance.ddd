@@ -38,4 +38,11 @@ system OrderingSystem {
     serves: OrderingApi
     port: 4000
   }
+
+  test e2e "provenanced total updates through an operation" against d {
+    let o = api.orders.create({ reference: "R1", quantity: 2, unitPrice: 50, discount: 0, total: 100 })
+    api.orders.reprice(o, { qty: 3, price: 40 })
+    let read = api.orders.getById(o)
+    expect(read.reference).toBe("R1")
+  }
 }

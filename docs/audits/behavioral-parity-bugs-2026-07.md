@@ -64,6 +64,21 @@ once this branch's CI runs, and appended here.
   type mapping) — needs the app's stderr on the failing request.
 - **Status:** confirmed 500; root cause pending.
 
+> **B2 is general.** Confirmed on a 2nd fixture: `test/fixtures/corpus/tph.ddd`
+> (`POST /api/cars` → 500) fails the same way as `payments.ddd`. Both are TPH
+> (`extends` / sharedTable) — dotnet inheritance persistence create is broken at
+> runtime regardless of the fixture. node/java/python pass both.
+
+## B4 🔴 dotnet — inline value-object array (`Money[]`) create 500s
+
+- **Where:** `src/generator/dotnet/` (inline VO-collection persistence).
+- **Repro:** `test/fixtures/corpus/value-collections.ddd` on dotnet —
+  `POST /api/invoices { lineItems: [{amount,currency}, …] }` → **500**. node +
+  java + python round-trip the array fine.
+- **Impact:** any aggregate with an inline `<VO>[]` field can't be created on
+  dotnet at runtime.
+- **Status:** confirmed 500; jsonb/owned-collection EF mapping suspect.
+
 ## B3 🔴 dotnet — `shape: document` / `shape: embedded` crashes on boot (EF)
 
 - **Where:** `src/generator/dotnet/` (jsonb shape → EF Core model/migrations).
