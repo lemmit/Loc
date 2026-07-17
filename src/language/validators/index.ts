@@ -7,6 +7,7 @@ export { checkAuthBlock } from "./auth.js";
 export {
   checkBindableInputArgs,
   checkBuilderCallType,
+  checkConstructionFields,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
 export { checkChannels } from "./channel.js";
