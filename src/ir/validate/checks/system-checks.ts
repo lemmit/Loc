@@ -148,10 +148,11 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
 //     `requires`).  Event-triggered creates / `on(...)` reactors are not
 //     client-reachable, so they are excluded.
 //
-// Out of scope: finds and views.  These are *reads*, and the grammar gives them
-// no `requires` surface at all (only a `where` filter) — so flagging them would
-// leave the author no escape hatch.  Gating reads needs a `requires`-on-query
-// language addition first; tracked as a separate follow-up.
+// Read endpoints — **views** and repository **finds** — are in scope too: each
+// is a GET endpoint, and both now carry an optional `requires <expr>` gate (the
+// read-side twin of an operation's in-handler 403).  An ungated read under
+// denyByDefault serves to any caller; `requires true` is the explicit
+// intentionally-public escape.
 export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): void {
   if (sys.auth?.enforcement !== "denyByDefault") return;
   // Contexts hosted by any `auth: required` backend deployable.  A frontend
@@ -208,6 +209,25 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             message: `denyByDefault: view '${view.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
             source: `view/${view.name}`,
           });
+        }
+      }
+      // Repository finds: each author-declared named find is its own GET route
+      // and now carries the same optional `requires <expr>` gate.  The aggregate
+      // list-all endpoint (the auto-injected `find all`) is out of scope — it is
+      // compiler-synthesized and has no author source line to attach a gate to;
+      // gating it needs an aggregate-level default-read surface (follow-up).
+      // Internal synthesized finds (paged-run helpers) are never their own route.
+      for (const repo of c.repositories) {
+        for (const find of repo.finds) {
+          if (find.synthesized || find.name === "all") continue;
+          if (!find.requires) {
+            diags.push({
+              severity: "error",
+              code: "loom.default-deny-ungated",
+              message: `denyByDefault: find '${repo.name}.${find.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              source: `find/${repo.name}.${find.name}`,
+            });
+          }
         }
       }
     }

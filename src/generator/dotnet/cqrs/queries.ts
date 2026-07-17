@@ -7,11 +7,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { findGateUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 import { projectEntityExpr } from "../dto-mapping.js";
 import { renderQuery, renderQueryHandler } from "../emit.js";
-import { renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Get-by-id query (returns Response | null)
@@ -120,8 +120,17 @@ export function emitFindQueriesAndHandlers(
   for (const find of repo.finds.filter((f) => !f.synthesized)) {
     const queryReturn = renderResponseReturnType(find.returnType, agg);
     const usesUser = findUsesCurrentUser(find);
-    // A paged return references `Paged<T>` from the shared runtime.
+    // A `requires` gate needs the principal accessor when it reads currentUser.
+    const gateUsesUser = findGateUsesCurrentUser(find);
+    const needsUser = usesUser || gateUsesUser;
+    // A paged return references `Paged<T>` from the shared runtime; a gate needs
+    // `ForbiddenException` from `Domain.Common` (→ 403 via DomainExceptionFilter).
     const pagedUsings = pagedReturn(find.returnType) ? [`${ns}.Domain.Common`] : [];
+    const gateUsings = new Set<string>();
+    if (find.requires) {
+      gateUsings.add(`${ns}.Domain.Common`);
+      collectCsExprUsings(find.requires, gateUsings);
+    }
     out.set(
       `Application/${aggFolder}/Queries/${upperFirst(find.name)}Query.cs`,
       renderQuery({
@@ -148,9 +157,9 @@ export function emitFindQueriesAndHandlers(
         handlerName: `${upperFirst(find.name)}Handler`,
         queryName: `${upperFirst(find.name)}Query`,
         returnType: queryReturn,
-        body: buildFindHandlerBody(find, agg, ctx, usesUser),
-        extraDeps: usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
-        extraUsings: [...(usesUser ? [`${ns}.Auth`] : []), ...pagedUsings],
+        body: buildFindHandlerBody(find, agg, ctx, usesUser, gateUsesUser),
+        extraDeps: needsUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
+        extraUsings: [...(needsUser ? [`${ns}.Auth`] : []), ...pagedUsings, ...gateUsings],
       }),
     );
   }
@@ -161,7 +170,20 @@ function buildFindHandlerBody(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
   usesUser: boolean = false,
+  gateUsesUser: boolean = false,
 ): string {
+  // Authorization gate (default-deny): a 403 when the `requires` predicate
+  // fails, BEFORE the repository call.  ForbiddenException → 403 via the
+  // DomainExceptionFilter — the read-side analogue of an operation `requires`
+  // gate (render-stmt).  `var currentUser = _currentUser.User;` binds the local
+  // the rendered predicate references (renderCsExpr → bare `currentUser`).
+  let gate = "";
+  if (find.requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(find.requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: find ${find.name}`,
+    )});\n`;
+  }
   const baseArgs = find.params.map((p) => `query.${upperFirst(p.name)}`);
   const allArgs = usesUser ? [...baseArgs, "_currentUser.User"] : baseArgs;
   // The repository signature ends with `CancellationToken cancellationToken`; drop the
@@ -182,6 +204,7 @@ function buildFindHandlerBody(
     ];
     const pagedCall = `${pagedArgs.join(", ")}, cancellationToken`;
     return (
+      gate +
       `        var domain = await _repo.${upperFirst(find.name)}(${pagedCall});\n` +
       `        return new Paged<${agg.name}Response>(domain.Items.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);\n`
     );
@@ -196,23 +219,27 @@ function buildFindHandlerBody(
     // so no tagged union DTO is produced.  (Multi-success unions, which would
     // need a `oneOf`, are rejected for finds at IR validation.)
     return (
+      gate +
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        return domain is null ? null : ${projectEntityExpr("domain", agg, ctx)};\n`
     );
   }
   if (find.returnType.kind === "array") {
     return (
+      gate +
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        return domain.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList();\n`
     );
   }
   if (find.returnType.kind === "optional") {
     return (
+      gate +
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        return domain is null ? null : ${projectEntityExpr("domain", agg, ctx)};\n`
     );
   }
   return (
+    gate +
     `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
     `        return ${projectEntityExpr("domain", agg, ctx)};\n`
   );

@@ -22,23 +22,31 @@ Shipped over four slices:
   authorization gate that maps to HTTP 403, distinct from
   `precondition` (which maps to 400).
 
+**Default-deny enforcement** is opt-in via
+`auth { enforcement: denyByDefault }` (the language default stays `opt`,
+which preserves the per-`requires` behaviour — the default-flip to
+`denyByDefault` is deferred to a major version).  **Deny-by-default is the
+recommended posture** for anything security-sensitive, and `ddd new`'s
+scaffold points at it.  Under `denyByDefault`, every **client-reachable
+command AND read** on an `auth: required` deployable must declare a
+`requires` gate — `requires true` is the explicit "intentionally public"
+escape — else `loom.default-deny-ungated` fires.  Covered:
+
+- public aggregate **operations, creates, and destroys** (each carries
+  `requires` in its body);
+- **workflows** — every command-triggered `create … {}` starter and named
+  `handle …(){}` continuation (event-triggered creates and `on(...)`
+  reactors are not client-reachable, so they are excluded);
+- **`view`s** — the optional gate before the query (see
+  [View gates](#view-requires-gates) below);
+- **repository `find`s** — the same optional `requires` gate (see
+  [Find gates](#find-requires-gates) below).  The auto-injected `find all`
+  list route is the one exception: it is compiler-synthesized with no author
+  source line, so it is out of default-deny scope (declare an explicit
+  `find all(): T[] requires <expr>` to gate that route).
+
 What's intentionally **not** here yet:
 
-- **Default-deny enforcement** is now opt-in via
-  `auth { enforcement: denyByDefault }` (default `opt` preserves the
-  per-`requires` behaviour).  Under `denyByDefault`, every **client-reachable
-  command** on an `auth: required` deployable must declare a `requires`
-  gate — `requires true` is the explicit "intentionally public" escape —
-  else `loom.default-deny-ungated` fires.  Covered: public aggregate
-  **operations, creates, and destroys**, plus **workflows** (every
-  command-triggered `create … {}` starter and named `handle …(){}`
-  continuation; event-triggered creates and `on(...)` reactors are not
-  client-reachable and so excluded), and **`view`s** (which now carry an
-  optional `requires` gate — see [View gates](#view-requires-gates) below).
-  Still uncovered: **repository `find`s** — these have no `requires`
-  surface in the grammar (only a `where` filter), so flagging them would
-  leave no escape hatch; gating bare finds needs the same `requires`-on-
-  query addition (separate follow-up).
 - Workflow bodies calling currentUser-bound finds — the validator
   currently rejects this with a pointer at `getById` or moving the
   call out to the route layer.
@@ -369,6 +377,36 @@ Phoenix LiveView); the validation (currentUser-only, default-deny) is
 platform-neutral.  See
 [Views → Authorization](views.md#authorization--the-requires-gate)
 for the full surface.
+
+### Find `requires` gates
+
+A repository `find` accepts the same optional `requires <expr>` clause,
+**before** its `where` filter — the read-side twin of the view gate:
+
+```ddd
+repository Tickets for Ticket {
+  find openOnes(): Ticket[] requires currentUser.role == "agent" where open == true
+  find mine(): Ticket[]     requires true where open == true   // intentionally public
+}
+```
+
+The gate emits an in-handler **403** at the top of the find's route, evaluated
+against the request's `currentUser` before the query runs.  Like the view
+gate it is **`currentUser`-only** (plus constants) — no source row exists yet,
+so referencing an aggregate field is a compile error
+(`loom.find-gate-not-current-user`).  Use `where` to scope *which rows* come
+back, `requires` to decide *who* may run the find.  `requires true` is the
+intentionally-public escape that also satisfies default-deny.
+
+The generated handler throws `ForbiddenError`/`ForbiddenException` (→ RFC-7807
+403) on all five backends before touching the repository:
+
+```ts
+// generated Hono route for `find openOnes ... requires currentUser.role == "agent"`
+const currentUser = c.get("currentUser");
+if (!(currentUser.role === "agent")) throw new ForbiddenError("Forbidden");
+const result = await repo.openOnes();
+```
 
 ### UI gate — `page { requires <expr> }`
 

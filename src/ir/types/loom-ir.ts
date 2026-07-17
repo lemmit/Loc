@@ -807,6 +807,16 @@ export interface FindIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
+  /** Authorization gate (D-AUTH-OIDC / default-deny).  An optional
+   *  `requires <expr>` clause — a boolean evaluated against `currentUser`
+   *  *before* the query runs; failure → 403.  Distinct from `filter`: the
+   *  filter scopes which rows come back (queryable, pushed to SQL), the gate
+   *  decides whether the caller may hit the endpoint at all.  Lowered in the
+   *  bare context scope (currentUser only, no aggregate row / params), so it
+   *  can reference `currentUser` + constants but not the source row's fields.
+   *  `requires true` is the explicit intentionally-public escape (the
+   *  read-side twin of the view / operation gate). */
+  requires?: ExprIR;
   /** Optional `where ...` filter expression in IR form. */
   filter?: ExprIR;
   /** Set when the `where` filter is *exactly* one named `criterion`
@@ -3575,6 +3585,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
  *  sites. */
 export function findUsesCurrentUser(find: FindIR): boolean {
   return exprUsesCurrentUser(find.filter);
+}
+
+/** True when the find's `requires` authorization gate references
+ *  `currentUser`.  The route handler must then read the request principal
+ *  into scope before evaluating the gate (the read-side analogue of a view's
+ *  gate needing `currentUser`). */
+export function findGateUsesCurrentUser(find: FindIR): boolean {
+  return exprUsesCurrentUser(find.requires);
 }
 
 /** True when the view's where filter or any bind expression

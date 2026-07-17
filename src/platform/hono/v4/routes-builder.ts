@@ -42,6 +42,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoneyDeep,
+  findGateUsesCurrentUser,
   findUsesCurrentUser,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -1394,12 +1395,21 @@ function emitFindRoute(
   // When the find's where clause references currentUser,
   // the repository method gains a trailing `currentUser: User`
   // parameter.  Read it from the request scope where the auth
-  // middleware stashed it earlier in the pipeline.
+  // middleware stashed it earlier in the pipeline.  A `requires`
+  // gate that reads currentUser needs the same principal in scope.
   const usesUser = findUsesCurrentUser(find);
-  if (usesUser) {
+  const needsUser = usesUser || findGateUsesCurrentUser(find);
+  if (needsUser) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
+  }
+  // Authorization gate (default-deny): a 403 when the `requires` predicate
+  // (evaluated against the in-scope currentUser) fails, BEFORE the query runs.
+  // ForbiddenError is mapped to a 403 ProblemDetails by the file's onError
+  // filter — the read-side analogue of an operation `requires` gate.
+  if (find.requires) {
+    out.push(`    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError("Forbidden");`);
   }
   const baseArgs = find.params.map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx));
   if (paged) {
