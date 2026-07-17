@@ -1,15 +1,24 @@
-// RST-2 behavioral-tier fixture — the Sales domain from
-// web/src/examples/sales-system.ddd, retargeted to a `platform: dotnet`
-// backend (no UI/react). Its `test e2e` create→read round-trips exercise the
-// behavioral RS-rules against a booted .NET (ASP.NET + EF Core) backend:
-// camelCase multi-word keys both directions (RS-1 `externalRef`/`customerId`/
-// `placedAt`), enum declared casing (RS-2), temporal round-trip (RS-4
-// `placedAt`), bool create default (RS-6 `active`), value-object survival
-// (RS-7 `price`), and association round-trip (RS-8 `lines`). Mirrors
-// corpus-python/sales.ddd — see docs/old/plans/runtime-semantics-tier-followups.md
-// (RST-2) + docs/old/plans/a6.2-behavioral-tier-second-backend.md.
+// Shared behavioural system — the Sales domain, ONE platform-agnostic source
+// (`platform: __PLATFORM__`) that every backend runner token-swaps and boots.
+// It replaces the five hand-forked copies (corpus-{python,java,dotnet,elixir}/
+// sales.ddd + web/src/examples/sales-system.ddd's backend) that had drifted
+// apart; the runners derive it here, so "same test, all targets" is one file.
+//
+// Its `test e2e` create→read round-trips exercise the behavioural RS-rules:
+// camelCase multi-word keys both directions (RS-1 externalRef/customerId/
+// placedAt), enum declared casing (RS-2), no leaked columns (RS-3), temporal
+// round-trip (RS-4 placedAt), bool create default (RS-6 active), value-object
+// survival (RS-7 price), association round-trip (RS-8 lines).  The pure-domain
+// `test` blocks are the unit tier (in-memory operations + precondition/invariant
+// violations, DB-free).
+//
+// RS-4 uses `toBeSameInstant` — instant equality that forgives wire timestamp
+// FORMAT (a backend serialising `…00.0000000Z` still equals the canonical
+// `…00Z`) while still catching a real difference in time.  .NET canonicalises
+// today (RST-9), so plain `toBe` would also pass; the instant matcher keeps the
+// single shared assertion robust to any future serializer drift.
 
-system SalesPy {
+system Sales {
 
   subdomain Sales {
     context Sales {
@@ -69,6 +78,38 @@ system SalesPy {
           quantity: int
           invariant quantity > 0
         }
+
+        test "adding a line then confirming yields a confirmed order" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.status).toBe(Confirmed)
+          expect(order.lines.count).toBe(1)
+        }
+
+        test "lines cannot be added once the order is confirmed" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.addLine("00000000-0000-0000-0000-000000000002", 1)).toThrow()
+        }
+
+        test "an order cannot be confirmed with no lines" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          expect(order.confirm()).toThrow()
+        }
       }
 
       repository Customers for Customer { }
@@ -81,7 +122,7 @@ system SalesPy {
   resource salesState { for: Sales, kind: state, use: primary }
 
   deployable api {
-    platform: dotnet
+    platform: __PLATFORM__
     contexts: [Sales]
     dataSources: [salesState]
     port: 8000
@@ -94,12 +135,10 @@ system SalesPy {
     expect(read.sku).toBe("WIDGET-1")
   }
 
-  // RS-6 (bool create default materializes at the wire boundary): `active` is
-  // omitted on create and must read back `true` (its declared default), not a
-  // zero-value false/null.
-  // RS-1 (multi-word wire key survives both directions): `externalRef` is sent
-  // camelCase on create — it must persist (snake `external_ref`) and read back
-  // as `externalRef`, not be dropped by a verbatim snake-key cast.
+  // RS-6 (bool create default materialises at the wire boundary): `active` is
+  // omitted on create and must read back `true`, not a zero-value false/null.
+  // RS-1 (multi-word wire key both directions): `externalRef` is sent camelCase
+  // and must persist (snake `external_ref`) and read back camelCase.
   test e2e "create a customer: bool default + multi-word key round-trip" against api {
     let c = api.customers.create({ name: "Defaulter", email: "def@acme.test", externalRef: "ext-42" })
     let read = api.customers.getById(c)
@@ -108,21 +147,16 @@ system SalesPy {
   }
 
   // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum
-  // declared casing "Draft") + RS-4 (temporal round-trip placedAt): the .NET
-  // backend now canonicalizes the instant wire form (trailing zero fractional
-  // seconds trimmed → `2024-01-01T00:00:00Z`), matching node/python (RST-9).
+  // declared casing "Draft") + RS-4 (temporal round-trip placedAt, instant-equal).
   test e2e "create an order and read it back" against api {
     let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test", externalRef: "ext-b1" })
     let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
     let read = api.orders.getById(ord)
     expect(read.status).toBe("Draft")
-    expect(read.placedAt).toBe("2024-01-01T00:00:00Z")
+    expect(read.placedAt).toBeSameInstant("2024-01-01T00:00:00Z")
   }
 
   // RS-8 (association round-trip via an operation) + RS-2 (enum "Confirmed").
-  // Exercises the cross-aggregate operation param (`addLine(productId: Product
-  // id)`) whose emitted id wrapper is the cross-backend spot the Python tier
-  // caught a missing import on — the .NET path renders it as `new ProductId(...)`.
   test e2e "create, add a line to, and confirm an order" against api {
     let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
     let cust = api.customers.create({ name: "Buyer2", email: "buyer2@acme.test", externalRef: "ext-b2" })

@@ -1,6 +1,6 @@
 // RST-8 behavioral-tier fixture — alternative persistence SHAPES
 // (`shape: document` + `shape: embedded`), retargeted from
-// examples/document.ddd to a single `platform: python` (FastAPI) backend.
+// examples/document.ddd to a single `platform: __PLATFORM__` (FastAPI) backend.
 // A relational Customer coexists with a document-shaped Cart (the whole
 // aggregate as one opaque JSONB blob) and an embedded-shaped Wishlist
 // (queryable root row + contained parts folded into a JSONB column). Two
@@ -16,7 +16,7 @@
 //         and read back (`items += …` on both document and embedded).
 //   RS-2  enum declared casing survives the jsonb blob (`CartStatus` → "Open").
 
-system ShapesPy {
+system Shapes {
 
   subdomain Shopping {
     context Shopping {
@@ -100,7 +100,7 @@ system ShapesPy {
   resource shoppingState { for: Shopping, kind: state, use: primary }
 
   deployable api {
-    platform: python
+    platform: __PLATFORM__
     contexts: [Shopping]
     dataSources: [shoppingState]
     port: 8000

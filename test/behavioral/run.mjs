@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { featureCases, sharedSystemCases } from "./cases.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -140,21 +141,6 @@ export async function run() {
  *  one-shot esbuild bundle — the SAME single source of truth the generation and
  *  compile tiers iterate, so the behavioural tier needs no hand-maintained
  *  per-backend allowlist. */
-async function loadCorpusFeatures() {
-  mkdirSync(WORK, { recursive: true });
-  const bundled = join(WORK, "_manifest.mjs");
-  await build({ entryPoints: [join(REPO, "test/fixtures/corpus/manifest.ts")], outfile: bundled, bundle: true, format: "esm", platform: "node", logLevel: "silent" });
-  const { CORPUS } = await import(pathToFileURL(bundled).href);
-  return CORPUS;
-}
-
-/** True when a `.ddd` carries a behavioural block this tier can run — a
- *  `test e2e "…"` (api) or a domain `test "…"` (unit). Features without one are
- *  generation/compile-only for now and are skipped (nothing to boot). */
-function hasBehaviouralBlock(src) {
-  return /(^|\n)\s*test\s+e2e\s+"/.test(src) || /(^|\n)\s*test\s+"/.test(src);
-}
-
 async function runCase(c) {
   const genDir = mkdtempSync(join(tmpdir(), `loom-bh-${c.name}-`));
   const workDir = join(WORK, c.name);
@@ -190,13 +176,13 @@ const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 // Feature cases — DERIVED from the typed corpus manifest: every feature that
 // declares the `node` backend AND carries a behavioural block. One source of
 // truth (manifest.ts + the `.ddd`), swapped to `node` in-process. No allowlist.
-const featureCases = [];
-for (const f of await loadCorpusFeatures()) {
-  if (!f.backends.includes("node")) continue;
-  const raw = readFileSync(join(REPO, "test/fixtures/corpus", `${f.id}.ddd`), "utf8");
-  if (!hasBehaviouralBlock(raw)) continue;
-  featureCases.push({ name: f.id, source: raw.replaceAll("__PLATFORM__", "node") });
-}
+const features = await featureCases("node", "node", WORK);
+
+// Shared tokenized systems (systems/*.ddd) — run on every backend.  Node skips
+// `sales`: it gets the Sales domain from the richer UI-carrying example below
+// (which also drives the requirements-verification rollup), so pulling the
+// tokenized sales too would just run it twice.
+const shared = sharedSystemCases("node").filter((c) => c.name !== "sales");
 
 // Example cases — the small curated set of broad, multi-aggregate systems that
 // aren't single-feature corpus fixtures; the one thing left in corpus.json. Its
@@ -205,7 +191,7 @@ const exampleCases = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8"))
   .filter((c) => !String(c.ddd).startsWith("corpus:") && (c.api || c.unit))
   .map((c) => ({ name: c.name, source: readFileSync(join(REPO, c.ddd), "utf8") }));
 
-const corpus = [...featureCases, ...exampleCases].filter(
+const corpus = [...features, ...shared, ...exampleCases].filter(
   (c) => only.length === 0 || only.includes(c.name),
 );
 

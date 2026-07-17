@@ -33,6 +33,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -158,7 +159,9 @@ async function runCase(c) {
   mkdirSync(workDir, { recursive: true });
   let server;
   try {
-    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", join(REPO, c.ddd), "-o", genDir], { stdio: "pipe" });
+    const srcPath = join(workDir, "system.ddd");
+    writeFileSync(srcPath, c.source);
+    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", srcPath, "-o", genDir], { stdio: "pipe" });
     const deplDir = findElixirDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
@@ -172,6 +175,9 @@ async function runCase(c) {
       execFileSync("mix", ["local.rebar", "--force"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
       execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
       execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
+      // Clean DB per case (context-named schemas + schema_migrations), else the
+      // 2nd case collides.  ecto.create ensured the DB exists first.
+      await resetDatabase(DATABASE_URL.replace("ecto://", "postgresql://"));
       execFileSync("mix", ["ecto.migrate"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
 
       server = spawn("mix", ["phx.server"], {
@@ -208,7 +214,8 @@ async function runCase(c) {
 }
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
-const corpus = JSON.parse(readFileSync(join(HERE, "corpus-elixir.json"), "utf8")).cases.filter(
+// Manifest-derived corpus features (vanilla elixir) + shared tokenized systems.
+const corpus = [...(await featureCases("vanilla", "elixir", WORK)), ...sharedSystemCases("elixir")].filter(
   (c) => only.length === 0 || only.includes(c.name),
 );
 
@@ -216,7 +223,7 @@ let pass = 0;
 let fail = 0;
 let errored = 0;
 for (const c of corpus) {
-  process.stdout.write(`\n▶ ${c.name}  (${c.ddd})  [elixir → ${BASE}]\n`);
+  process.stdout.write(`\n▶ ${c.name}  [elixir → ${BASE}]\n`);
   let results;
   try {
     results = await runCase(c);

@@ -1,9 +1,0 @@
-{
-  "comment": "Corpus for the A6.2 Python behavioral tier (run-python.mjs). Each case is generated, its `platform: python` (FastAPI) deployable booted against a real Postgres (DATABASE_URL), and its emitted `test e2e` api suite HTTP-dispatched at the booted server. Unlike the node tier (corpus.json, in-process PGlite + app.fetch), Python has no in-process Postgres, so this needs a real DB — see docs/old/plans/a6.2-behavioral-tier-second-backend.md.",
-  "cases": [
-    { "name": "sales", "ddd": "test/behavioral/corpus-python/sales.ddd" },
-    { "name": "payments", "ddd": "test/behavioral/corpus-python/payments.ddd" },
-    { "name": "ledger", "ddd": "test/behavioral/corpus-python/ledger.ddd" },
-    { "name": "shapes", "ddd": "test/behavioral/corpus-python/shapes.ddd" }
-  ]
-}
