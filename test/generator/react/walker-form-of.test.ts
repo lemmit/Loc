@@ -269,4 +269,41 @@ describe("CreateForm renders the create-input contract, not raw fields (S1b)", (
     expect(createSchema).not.toMatch(/createdByRole/);
     expect(api).toMatch(/createdByRole/);
   });
+
+  it("seeds defaultValues from declared field defaults (client-evaluable subset)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M {
+          context C {
+            enum Priority { High Low }
+            aggregate Order {
+              customerId: string
+              derived display: string = customerId
+              quantity:   int      = 3
+              label:      string   = "draft"
+              active:     bool     = true
+              priority:   Priority = High
+            }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          page CreateOrder { route: "/orders/new" body: CreateForm { of: Order } }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const tsx = files.get("web/src/pages/create_order.tsx")!;
+    expect(tsx).toBeDefined();
+    const defaults = tsx.match(/defaultValues:\s*(\{[^}]*\})/)?.[1] ?? "";
+    // Declared defaults seed the form instead of the type-zero placeholder.
+    expect(defaults).toMatch(/quantity:\s*3\b/);
+    expect(defaults).toMatch(/label:\s*"draft"/);
+    expect(defaults).toMatch(/active:\s*true\b/);
+    // An enum-member default renders as its wire (member-name) string.
+    expect(defaults).toMatch(/priority:\s*"High"/);
+    // A field with no declared default keeps its type-zero seed.
+    expect(defaults).toMatch(/customerId:\s*""/);
+  });
 });

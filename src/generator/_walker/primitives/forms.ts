@@ -268,7 +268,7 @@ interface FieldArraySpec {
 function prepareFormFields(
   ctx: WalkContext,
   fields: { name: string; type: TypeIR }[],
-  fieldsForHelpers: { name: string; type: TypeIR; optional: boolean }[],
+  fieldsForHelpers: { name: string; type: TypeIR; optional: boolean; default?: ExprIR }[],
   bc: BoundedContextIR,
   testidNamespace: string,
 ): PreparedForm {
