@@ -11,9 +11,12 @@ import type {
   Create,
   Destroy,
   EmitStmt,
+  Expression,
+  FunctionDecl,
   LValue,
   Model,
   Operation,
+  Parameter,
   Statement,
 } from "../generated/ast.js";
 import {
@@ -399,6 +402,50 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
   }
 }
 
+/** Arity + per-argument type check for a resolved domain call (`bump("hi")`,
+ *  `o.bump(a)`) — the statement-call twin of `checkAsyncEffectArgs` / `checkEmit`
+ *  (M-T6.18 gap #2).  The callee is already resolved to an operation / function
+ *  with a fixed, all-required param list (the grammar has no optional/defaulted
+ *  params), so the discipline mirrors the sibling gates: strict arity, then
+ *  per-arg `isAssignable` with `unknown`-suppression (a typo'd bare arg is
+ *  reported once at its source) + numeric-literal promotion (`bump(5)` into a
+ *  `money`/`decimal` param).  On an arity mismatch we stop before the per-arg
+ *  loop — the positions no longer line up, so per-arg type errors would be
+ *  noise. */
+function checkCallArgs(
+  params: Parameter[],
+  args: Expression[],
+  env: Env,
+  label: string,
+  node: AstNode,
+  accept: ValidationAcceptor,
+): void {
+  if (args.length !== params.length) {
+    accept(
+      "error",
+      `${label} expects ${params.length} argument${params.length === 1 ? "" : "s"}, got ${args.length}.`,
+      { node, code: "loom.call-arg-count" },
+    );
+    return;
+  }
+  for (let i = 0; i < args.length; i++) {
+    const expected = paramType(params[i]!);
+    if (expected.kind === "unknown") continue;
+    const actual = typeOf(args[i], env);
+    if (
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, expected) &&
+      !canPromoteLiteralTo(args[i], expected)
+    ) {
+      accept(
+        "error",
+        `Argument ${i + 1} of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+        { node: args[i]!, code: "loom.call-arg-type" },
+      );
+    }
+  }
+}
+
 export function checkCallStmt(
   stmt: AssignOrCallStmt,
   agg: Aggregate,
@@ -410,12 +457,16 @@ export function checkCallStmt(
   if (lv.tail.length === 0 && lv.call) {
     const name = lv.head;
     const fn = findFunction(agg, name);
-    if (fn) return;
+    if (fn) {
+      checkCallArgs(fn.params, lv.args, env, `Function '${name}'`, stmt, accept);
+      return;
+    }
     const target = findOperation(agg, name);
     if (target) {
       if (target === op) {
         accept("warning", `Operation '${name}' calls itself.`, { node: stmt });
       }
+      checkCallArgs(target.params, lv.args, env, `Operation '${name}'`, stmt, accept);
       return;
     }
     accept("error", `Cannot resolve call to '${name}' from aggregate '${agg.name}'.`, {
@@ -458,7 +509,16 @@ export function checkCallStmt(
         `Member '${methodName}' is not callable — only operations and functions can be called.`,
         { node: lv },
       );
+      return;
     }
+    checkCallArgs(
+      (memberNode as Operation | FunctionDecl).params,
+      lv.args,
+      env,
+      `'${methodName}'`,
+      lv,
+      accept,
+    );
     return;
   }
   accept(
