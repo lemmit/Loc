@@ -454,11 +454,35 @@ function inputLabel(labelText: string): string {
     : `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text"; prop.text "${labelText}" ] ] ]`;
 }
 
+/** A stable id for a field's inline error element, derived from its bound state
+ *  field (`name` → `name-error`) so the input can point `aria-describedby` at it.
+ *  Empty when the field isn't bound (an uncontrolled stub carries no error). */
+function fieldErrorId(c: Ctx): string {
+  const bind = String(c.bind ?? "").trim();
+  return bind === "" ? "" : `${bind}-error`;
+}
+
+/** The a11y props that link a raw input to its error state: `aria-invalid`
+ *  reflects the RUNTIME error (`errorExpr <> ""` — empty string means valid) and
+ *  `aria-describedby` points at the inline error element so a screen reader
+ *  announces the message with the field.  Empty (no leading `;`) when the field
+ *  has no error binding.  Each returned fragment starts with `; ` so it slots
+ *  straight into an existing Feliz prop list after the className. */
+function fieldAriaProps(c: Ctx): string {
+  if (!c.hasError) return "";
+  const invalid = `; prop.ariaInvalid (${String(c.error)} <> "")`;
+  const id = fieldErrorId(c);
+  return id === "" ? invalid : `${invalid}; prop.ariaDescribedBy "${id}"`;
+}
+
 /** The inline error line under an input — bound to the walked `error:` F#
- *  expression (empty string at runtime → an empty line, harmless). */
+ *  expression (empty string at runtime → an empty line, harmless).  Carries the
+ *  `id` the input's `aria-describedby` references (a11y). */
 function inputError(c: Ctx): string {
   if (!c.hasError) return "";
-  return `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text-alt text-error"; prop.text (${String(c.error)}) ] ] ]`;
+  const id = fieldErrorId(c);
+  const idProp = id === "" ? "" : `prop.id "${id}"; `;
+  return `Html.label [ ${idProp}prop.className "label"; prop.children [ Html.span [ prop.className "label-text-alt text-error"; prop.text (${String(c.error)}) ] ] ]`;
 }
 
 /** Wrap a controlled input element in a daisyUI `form-control` with its label +
@@ -485,8 +509,8 @@ function bindTargets(c: Ctx): { model: string; setMsg: string } | undefined {
 function primitiveField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full" ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)} ]`;
   return formControl(c, input);
 }
 
@@ -494,8 +518,8 @@ function primitiveField(c: Ctx): string {
 function primitiveMultilineField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.textarea [ prop.className "textarea textarea-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.textarea [ prop.className "textarea textarea-bordered w-full" ]`;
+    ? `Html.textarea [ prop.className "textarea textarea-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.textarea [ prop.className "textarea textarea-bordered w-full"${fieldAriaProps(c)} ]`;
   return formControl(c, input);
 }
 
@@ -503,8 +527,8 @@ function primitiveMultilineField(c: Ctx): string {
 function primitivePasswordField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.password; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.password ]`;
   return formControl(c, input);
 }
 
@@ -514,8 +538,8 @@ function primitivePasswordField(c: Ctx): string {
 function primitiveNumberField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number; prop.value (string ${t.model}); prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.number; prop.value (string ${t.model}); prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.number ]`;
   return formControl(c, input);
 }
 
@@ -527,8 +551,8 @@ function primitiveSelectField(c: Ctx): string {
   const options = String(c.optionsExpr ?? "[]");
   const opts = `yield! (${options}) |> Seq.map (fun o -> Html.option [ prop.value o; prop.text o ])`;
   const input = t
-    ? `Html.select [ prop.className "select select-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)); prop.children [ ${opts} ] ]`
-    : `Html.select [ prop.className "select select-bordered w-full"; prop.children [ ${opts} ] ]`;
+    ? `Html.select [ prop.className "select select-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)); prop.children [ ${opts} ] ]`
+    : `Html.select [ prop.className "select select-bordered w-full"${fieldAriaProps(c)}; prop.children [ ${opts} ] ]`;
   return formControl(c, input);
 }
 
@@ -538,8 +562,8 @@ function primitiveSelectField(c: Ctx): string {
 function primitiveToggle(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "toggle"; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "toggle"; prop.type'.checkbox ]`;
+    ? `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox ]`;
   const labelText = String(c.labelText ?? "");
   const span =
     labelText.trim() === ""
