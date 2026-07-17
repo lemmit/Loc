@@ -149,11 +149,13 @@ defmodule ${webModule}.CoreComponents do
           value="true"
           checked={@checked}
           class="rounded border-zinc-300 text-zinc-900 focus:ring-0"
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && "#{@id}-error"}
           {@rest}
         />
         {@label}
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={msg <- @errors} id={"#{@id}-error"}>{msg}</.error>
     </div>
     """
   end
@@ -167,12 +169,14 @@ defmodule ${webModule}.CoreComponents do
         name={@name}
         class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
         multiple={@multiple}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && "#{@id}-error"}
         {@rest}
       >
         <option :if={@prompt} value="">{@prompt}</option>
         {Phoenix.HTML.Form.options_for_select(@options, @value)}
       </select>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={msg <- @errors} id={"#{@id}-error"}>{msg}</.error>
     </div>
     """
   end
@@ -185,9 +189,11 @@ defmodule ${webModule}.CoreComponents do
         id={@id}
         name={@name}
         class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && "#{@id}-error"}
         {@rest}
       >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={msg <- @errors} id={"#{@id}-error"}>{msg}</.error>
     </div>
     """
   end
@@ -202,9 +208,11 @@ defmodule ${webModule}.CoreComponents do
         id={@id}
         value={Phoenix.HTML.Form.normalize_value(@type, @value)}
         class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && "#{@id}-error"}
         {@rest}
       />
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.error :for={msg <- @errors} id={"#{@id}-error"}>{msg}</.error>
     </div>
     """
   end
@@ -220,11 +228,12 @@ defmodule ${webModule}.CoreComponents do
     """
   end
 
+  attr :id, :string, default: nil
   slot :inner_block, required: true
 
   def error(assigns) do
     ~H"""
-    <p class="mt-1 text-sm leading-6 text-rose-600">{render_slot(@inner_block)}</p>
+    <p id={@id} class="mt-1 text-sm leading-6 text-rose-600">{render_slot(@inner_block)}</p>
     """
   end
 
