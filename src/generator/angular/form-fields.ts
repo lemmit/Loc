@@ -177,19 +177,32 @@ export function controlInit(t: TypeIR): string {
     return '""';
   }
   if (t.kind === "enum") return '""';
+  // Required `X id` (FK) → the request wants a `string` (`wireTsType`'s id case),
+  // and a Select binds the chosen id into it.  Init `""` (not `null`) so the
+  // `nonNullable` control types as `FormControl<string>` and `getRawValue()`
+  // stays assignable to the request DTO — a `FormControl(null)` typed as
+  // `FormControl<null>` failed `mutateAsync` under `ng build` (TS2345/2322).
+  if (t.kind === "id") return '""';
+  // Optional id (`t.kind === "optional"`), value objects and nested entities
+  // keep `null`: their request type is nullable or `unknown` (request-side VO/
+  // entity stay `unknown` in `wireTsType`), both null-assignable.
   return "null";
 }
 
-/** Render one field's control markup, registering the Material module it needs. */
+/** Render one field's control markup, registering the Material module it needs.
+ *  `testidBase` overrides the field's `data-testid` (default `${ns}-input-${name}`)
+ *  — a value-object sub-field passes `${container}-${sub}` so its testid nests
+ *  under the fieldset container (`products-new-input-price-amount`). */
 export function fieldInput(
   name: string,
   t: TypeIR,
   bc: BoundedContextIR,
   ns: string,
   ctx: WalkContext,
+  testidBase: string = `${ns}-input-${name}`,
 ): string {
   const label = humanize(name);
-  const testid = ` data-testid="${ns}-input-${name}"`;
+  const testid = ` data-testid="${testidBase}"`;
   const cn = JSON.stringify(name);
   const style = formStyle(ctx);
   if (t.kind === "enum") {
@@ -234,7 +247,7 @@ export function fieldInput(
   const idTarget = idTargetForField(t, bc, ctx);
   if (idTarget) {
     const { hookVar } = idTarget;
-    const optionTestid = `${ns}-input-${name}-option`;
+    const optionTestid = `${testidBase}-option`;
     if (style === "material") {
       addNg(ctx, "@angular/material/form-field", "MatFormFieldModule");
       addNg(ctx, "@angular/material/select", "MatSelectModule");
@@ -386,12 +399,90 @@ export function fieldArrayInput(
   return `<div class="loom-field" formArrayName=${JSON.stringify(spec.fieldName)}><span class="loom-label">${label}</span>@for (__row of ${spec.getter}.controls; track $index) {<div class="loom-row" [formGroupName]="$index">${rowInputs}${remove}</div>}${add}</div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Value-object sub-form group — a single `price: Money` input renders as a
+// nested `FormGroup` (one sub-`FormControl` per value-object field), NOT one
+// flat control.  This mirrors the shared page object's fill contract (a VO
+// field `price` fills sub-inputs `<ns>-input-price-amount` / `-currency`), so
+// `getRawValue()` yields `{ amount, currency }` — the object the request wants
+// — instead of a single string.  Parallels the `FormArray` path above; only
+// the wrapper (`formGroupName` vs `formArrayName`) and the fixed (non-dynamic)
+// row differ.
+// ---------------------------------------------------------------------------
+
+/** A value-object sub-form group — the `FormGroup` sibling of an
+ *  `AngularFieldArraySpec`.  The page-shell declares `<fieldName>: new
+ *  FormGroup({ <sub>: new FormControl(...) , … })` inside the form group; the
+ *  markup (`fieldGroupInput`) wraps the reused sub-field inputs in a
+ *  `formGroupName` container. */
+export interface AngularFieldGroupSpec {
+  /** Form-group control name holding the nested group (`price`). */
+  fieldName: string;
+  /** The per-value-object-field sub-`FormControl` specs (`amount`, `currency`). */
+  subControls: AngularFormControlSpec[];
+}
+
+/** The value-object element fields of a single `X: <VO>` input, or null when the
+ *  field isn't a resolvable value object.  Only SCALAR-ish sub-fields (anything
+ *  `fieldInput` renders as a single control — primitives, enums, `X id`) are
+ *  kept; a nested VO / array inside the VO is dropped (v1, mirrors the other
+ *  frontends and the array-of-VO path). */
+export function voScalarFields(t: TypeIR, bc: BoundedContextIR): FieldIR[] | null {
+  const inner = unwrapOpt(t);
+  if (inner.kind !== "valueobject") return null;
+  const vo = bc.valueObjects.find((v) => v.name === inner.name);
+  if (!vo) return null;
+  const scalar = vo.fields.filter((f) => {
+    const ft = unwrapOpt(f.type);
+    return ft.kind === "primitive" || ft.kind === "enum" || ft.kind === "id";
+  });
+  return scalar.length > 0 ? scalar : null;
+}
+
+/** Build the `AngularFieldGroupSpec` for a single value-object field. */
+export function fieldGroupSpec(name: string, voFields: FieldIR[]): AngularFieldGroupSpec {
+  return {
+    fieldName: name,
+    subControls: voFields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+  };
+}
+
+/** The nested `FormGroup` control declaration for the form group (`price: new
+ *  FormGroup({ amount: new FormControl(0, …), currency: new FormControl("", …) })`).
+ *  The `FormGroup` import is registered by the form builder (walk time). */
+export function fieldGroupControlDecl(spec: AngularFieldGroupSpec): string {
+  const inner = spec.subControls
+    .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+    .join(", ");
+  return `${spec.fieldName}: new FormGroup({ ${inner} })`;
+}
+
+/** The value-object fieldset markup: a `formGroupName` container (carrying the
+ *  field's `data-testid` so the page object's VO fill targets it) wrapping the
+ *  reused `fieldInput` sub-field inputs, each with a nested
+ *  `<container>-<sub>` testid matching the shared page-object fill path. */
+export function fieldGroupInput(
+  spec: AngularFieldGroupSpec,
+  voFields: FieldIR[],
+  label: string,
+  bc: BoundedContextIR,
+  ns: string,
+  ctx: WalkContext,
+): string {
+  const containerTid = `${ns}-input-${spec.fieldName}`;
+  const subInputs = voFields
+    .map((f) => fieldInput(f.name, f.type, bc, ns, ctx, `${containerTid}-${f.name}`))
+    .join("");
+  return `<div class="loom-fieldset" formGroupName=${JSON.stringify(spec.fieldName)} data-testid="${containerTid}"><span class="loom-label">${label}</span>${subInputs}</div>`;
+}
+
 /** Split a form's input fields into the flat `FormControl` fields (rendered +
- *  spec'd as before) and the array-of-value-object `FormArray` fields (row
- *  markup + add/remove spec).  Shared by every Angular form builder (create /
- *  operation / modal / workflow) so the fork is uniform; when a field set has no
- *  object array, `flatMarkup`/`flatControls` are byte-identical to the previous
- *  all-flat output. */
+ *  spec'd as before), the array-of-value-object `FormArray` fields (row markup +
+ *  add/remove spec), and the single-value-object `FormGroup` fields (nested
+ *  sub-field markup).  Shared by every Angular form builder (create / operation /
+ *  modal / workflow) so the fork is uniform; when a field set has no object array
+ *  and no value object, `flatMarkup`/`flatControls` are byte-identical to the
+ *  previous all-flat output. */
 export function partitionAngularFields(
   fields: readonly { name: string; type: TypeIR }[],
   bc: BoundedContextIR,
@@ -404,9 +495,14 @@ export function partitionAngularFields(
   idTargets: AngularIdTargetSpec[];
   fieldArrays: AngularFieldArraySpec[];
   arrayMarkup: string[];
+  fieldGroups: AngularFieldGroupSpec[];
+  groupMarkup: string[];
 } {
-  const flat = fields.filter((f) => arrayVoFields(f.type, bc) === null);
-  const arrays = fields.filter((f) => arrayVoFields(f.type, bc) !== null);
+  const isArray = (f: { type: TypeIR }) => arrayVoFields(f.type, bc) !== null;
+  const isGroup = (f: { type: TypeIR }) => !isArray(f) && voScalarFields(f.type, bc) !== null;
+  const flat = fields.filter((f) => !isArray(f) && !isGroup(f));
+  const arrays = fields.filter(isArray);
+  const groups = fields.filter(isGroup);
   const fieldArrays: AngularFieldArraySpec[] = [];
   const arrayMarkup: string[] = [];
   for (const f of arrays) {
@@ -418,13 +514,30 @@ export function partitionAngularFields(
     fieldArrays.push(spec);
     arrayMarkup.push(fieldArrayInput(spec, voFields, humanize(f.name), bc, ns, ctx));
   }
-  if (fieldArrays.length > 0) addNg(ctx, "@angular/forms", "FormArray", "FormGroup");
+  const fieldGroups: AngularFieldGroupSpec[] = [];
+  const groupMarkup: string[] = [];
+  const groupIdFields: FieldIR[] = [];
+  for (const f of groups) {
+    const voFields = voScalarFields(f.type, bc)!;
+    const spec = fieldGroupSpec(f.name, voFields);
+    fieldGroups.push(spec);
+    groupMarkup.push(fieldGroupInput(spec, voFields, humanize(f.name), bc, ns, ctx));
+    groupIdFields.push(...voFields);
+  }
+  if (fieldArrays.length > 0 || fieldGroups.length > 0) {
+    addNg(ctx, "@angular/forms", "FormGroup");
+  }
+  if (fieldArrays.length > 0) addNg(ctx, "@angular/forms", "FormArray");
   return {
     flatControls: flat.map((f) => ({ name: f.name, init: controlInit(f.type) })),
     flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx)),
     flatNames: flat.map((f) => f.name),
-    idTargets: collectIdTargets(flat, bc, ctx),
+    // A value-object sub-field that is itself an `X id` needs the target's
+    // `useAll<X>()` Select query hoisted too (rare, but kept uniform).
+    idTargets: collectIdTargets([...flat, ...groupIdFields], bc, ctx),
     fieldArrays,
     arrayMarkup,
+    fieldGroups,
+    groupMarkup,
   };
 }

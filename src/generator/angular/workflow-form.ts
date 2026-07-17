@@ -4,6 +4,7 @@ import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
+  type AngularFieldGroupSpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
@@ -39,6 +40,9 @@ export interface AngularWorkflowFormSpec {
   /** Dynamic-row (`X[]` of value-object) fields — page-shell adds a `FormArray`
    *  control + the add/remove methods per entry. */
   fieldArrays?: AngularFieldArraySpec[];
+  /** Single-value-object (`price: Money`) params — page-shell adds a nested
+   *  `FormGroup` control per entry. */
+  fieldGroups?: AngularFieldGroupSpec[];
 }
 
 export function renderAngularWorkflowForm(
@@ -92,6 +96,7 @@ export function renderAngularWorkflowForm(
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-submit`);
   for (const name of parts.flatNames) ctx.collectedTestids.add(`${ns}-input-${name}`);
+  for (const g of parts.fieldGroups) ctx.collectedTestids.add(`${ns}-input-${g.fieldName}`);
 
   const spec: AngularWorkflowFormSpec = {
     formVar,
@@ -103,12 +108,15 @@ export function renderAngularWorkflowForm(
     controls: parts.flatControls,
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
+    fieldGroups: parts.fieldGroups,
   };
   angularSink(ctx).workflowForms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
-    ...[...fieldMarkup, ...parts.arrayMarkup, submit].map((m) => `${inner}${m}`),
+    ...[...fieldMarkup, ...parts.groupMarkup, ...parts.arrayMarkup, submit].map(
+      (m) => `${inner}${m}`,
+    ),
     `${close}</form>`,
   ].join("\n");
 }

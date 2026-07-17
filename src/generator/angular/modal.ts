@@ -4,6 +4,7 @@ import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/ar
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
+  type AngularFieldGroupSpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
@@ -43,6 +44,9 @@ export interface AngularModalSpec {
   /** Dynamic-row (`X[]` of value-object) fields — page-shell adds a `FormArray`
    *  control + the add/remove methods per entry. */
   fieldArrays?: AngularFieldArraySpec[];
+  /** Single-value-object (`price: Money`) params — page-shell adds a nested
+   *  `FormGroup` control per entry. */
+  fieldGroups?: AngularFieldGroupSpec[];
 }
 
 /** Resolve the operation a Modal's `OperationForm` child targets, plus the
@@ -148,6 +152,8 @@ export function renderAngularModal(
         idTargets: [],
         fieldArrays: [],
         arrayMarkup: [],
+        fieldGroups: [],
+        groupMarkup: [],
       };
   const fieldMarkup = parts.flatMarkup;
 
@@ -166,6 +172,7 @@ export function renderAngularModal(
     controls: parts.flatControls,
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
+    fieldGroups: parts.fieldGroups,
   };
   angularSink(ctx).modals.push(spec);
 
@@ -178,7 +185,7 @@ export function renderAngularModal(
     `${inner}<button ${triggerBtn} (click)='${idSig}.set(${idExpr}); ${openSig}.set(true)' data-testid="${ns}">${triggerLabel}</button>`,
     `${inner}@if (${openSig}()) {`,
     `${deep}<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}-form">`,
-    ...[...fieldMarkup, ...parts.arrayMarkup].map((m) => `${deep}  ${m}`),
+    ...[...fieldMarkup, ...parts.groupMarkup, ...parts.arrayMarkup].map((m) => `${deep}  ${m}`),
     `${deep}  ${formButton(ctx, { type: "submit", emphasis: "primary", label, attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"` })}`,
     `${deep}  <button ${cancelBtn} (click)='${openSig}.set(false)'>Cancel</button>`,
     `${deep}</form>`,

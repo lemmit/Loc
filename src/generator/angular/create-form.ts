@@ -4,6 +4,7 @@ import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
+  type AngularFieldGroupSpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
@@ -42,6 +43,9 @@ export interface AngularCreateFormSpec {
   /** Dynamic-row (`X[]` of a value-object) fields — the page-shell declares a
    *  `FormArray` control + the add/remove methods per entry. */
   fieldArrays: AngularFieldArraySpec[];
+  /** Single-value-object (`price: Money`) fields — the page-shell declares a
+   *  nested `FormGroup` control per entry. */
+  fieldGroups: AngularFieldGroupSpec[];
 }
 
 /** Resolve the `CreateForm(of: <Agg>)` aggregate ref. */
@@ -99,6 +103,7 @@ export function renderAngularCreateForm(
 
   ctx.collectedTestids.add(`${ns}-submit`);
   for (const name of parts.flatNames) ctx.collectedTestids.add(`${ns}-input-${name}`);
+  for (const g of parts.fieldGroups) ctx.collectedTestids.add(`${ns}-input-${g.fieldName}`);
 
   const spec: AngularCreateFormSpec = {
     formVar,
@@ -111,12 +116,15 @@ export function renderAngularCreateForm(
     controls: parts.flatControls,
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
+    fieldGroups: parts.fieldGroups,
   };
   angularSink(ctx).forms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
-    ...[...fieldMarkup, ...parts.arrayMarkup, submit].map((m) => `${inner}${m}`),
+    ...[...fieldMarkup, ...parts.groupMarkup, ...parts.arrayMarkup, submit].map(
+      (m) => `${inner}${m}`,
+    ),
     `${close}</form>`,
   ].join("\n");
 }

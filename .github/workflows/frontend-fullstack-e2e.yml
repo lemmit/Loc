@@ -19,10 +19,9 @@ name: Frontend full-stack e2e (nightly, no docker)
 # Each cell is a corpus case flagged `uiTier: "nightly"` (test/behavioral/
 # corpus.json); run-ui.mjs builds each frontend via its own `npm run build` and
 # auto-detects the built root (react/vue→dist, svelte→build, angular→dist/<app>/
-# browser). Vue + Svelte are verified locally (full round-trip green); Angular is
-# CI-first (ng build needs Node above the local floor) and non-blocking until
-# green. Feliz is not yet wired — it emits no e2e/playwright.config.ts (its smoke
-# harness differs) and needs dotnet/fable in the runner; a follow-up.
+# browser). Vue + Svelte + Angular are verified locally (full round-trip green,
+# all blocking). Feliz is not yet wired — it emits no e2e/playwright.config.ts
+# (its smoke harness differs) and needs dotnet/fable in the runner; a follow-up.
 
 on:
   schedule:
@@ -55,20 +54,19 @@ jobs:
             case: sales-system-vue
           - frontend: svelte
             case: sales-system-svelte
-          # Angular non-blocking: this gate surfaced a cascade of pre-existing
-          # Angular-codegen gaps (all verified under Node 24 locally). FIXED here:
-          # response-side VO/enum typing (`price.amount` → TS2571). STILL OPEN
-          # (an Angular-hardening follow-up, each a distinct emitter): (1)
-          # containment-part response fields still `unknown` (order-detail
-          # `lines` → TS2571) — same pattern, extend to entity parts; (2) the
-          # containment `@for (… ; track idx)` references an undefined `idx`
-          # (TS2339) — template-scope bug in the containment-table walker; (3)
-          # FK/workflow form controls are `FormControl(null)` but the request
-          # type wants `string` (TS2345/2322) — create/op/workflow form
-          # null-soundness. Flip to blocking once (1)-(3) land.
+          # Angular: BLOCKING. The Angular-codegen cascade this gate first
+          # surfaced is fixed and the full round-trip (create product w/ a
+          # value-object price → add a line → confirm → read back) is 10/10
+          # green under Node 24. What landed: (1) containment-part response
+          # fields typed precisely (`<Part>Response` instead of `unknown[]`);
+          # (2) the containment `@for` tracks `$index` (was an undefined `idx`);
+          # (3) FK/workflow/op form controls init `""` so the nonNullable
+          # control types as `FormControl<string>` (was `FormControl(null)`);
+          # (4) value-object fields render a nested `FormGroup` fieldset (was a
+          # single flat input); (5) op REST paths are snake-cased (`add_line`,
+          # matching the Hono route — was camelCase → 404).
           - frontend: angular
             case: sales-system-angular
-            experimental: true
     # Non-blocking for cells not yet locally verified; flip by dropping the flag.
     continue-on-error: ${{ matrix.experimental || false }}
     name: ${{ matrix.frontend }} → real Hono backend
