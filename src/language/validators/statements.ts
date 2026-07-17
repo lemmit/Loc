@@ -41,6 +41,7 @@ import {
   type Env,
   findFunction,
   findOperation,
+  freeCallFunction,
   isAssignable,
   lookupRootMember,
   makeEnv,
@@ -194,6 +195,7 @@ export function checkStatement(
   // value can't reference the binding it introduces, and later statements get
   // the extended env passed in.
   checkConstructionArgTypes(stmt, env, accept);
+  checkExprCallArgs(stmt, env, accept);
   if (isPreconditionStmt(stmt)) {
     const t = typeOf(stmt.expr, env);
     if (t.kind !== "primitive" || t.name !== "bool") {
@@ -343,6 +345,31 @@ export function checkConstructionArgTypes(
       }
       warnSensitivityDrop(actual, expected, accept, { node: entry, property: "value" });
     }
+  }
+}
+
+/** Arity + type check for FREE calls in EXPRESSION position (`derived x =
+ *  fee(a)`, `let y := compute(a, b)`, `precondition check(a)`, `emit E { f:
+ *  fee(3) }`) — the expression-walk companion to `checkCallStmt`'s statement-call
+ *  check (M-T6.18 gap #2).  Streams every free-call `PostfixChain` (a bare
+ *  `NameRef` head with a leading `CallSuffix`) reachable from `node`; when the
+ *  name resolves to a user `FunctionDecl` (via `freeCallFunction`, kept in
+ *  lockstep with `typeOfFreeCall`) its args are checked through the shared
+ *  `checkCallArgs`.  Everything else is deliberately skipped: value-object
+ *  constructors, criteria, policy-fns, and duration builtins aren't free
+ *  user-function calls (or have their own gates), and member calls
+ *  (`recv.m(a)`) — a `MemberSuffix`, not a leading `CallSuffix` — are the
+ *  follow-on slice.  Bare call STATEMENTS (`fee(5)` alone) are an `LValue`, not a
+ *  `PostfixChain`, so they stay `checkCallStmt`'s job with no double report. */
+export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcceptor): void {
+  for (const n of AstUtils.streamAst(node)) {
+    if (!isPostfixChain(n)) continue;
+    const first = n.suffixes[0];
+    if (!first || !isCallSuffix(first) || !isNameRef(n.head)) continue;
+    const fn = freeCallFunction(n.head.name, env);
+    if (!fn) continue; // VO ctor / criterion / policy-fn / duration builtin / unresolved
+    const args = first.args.map((a) => a.value);
+    checkCallArgs(fn.params, args, env, `Function '${n.head.name}'`, first, accept);
   }
 }
 

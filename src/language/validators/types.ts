@@ -58,7 +58,7 @@ import {
   literalPromotionAnchor,
   warnSensitivityDrop,
 } from "./_shared.js";
-import { checkConstructionArgTypes } from "./statements.js";
+import { checkConstructionArgTypes, checkExprCallArgs } from "./statements.js";
 
 // ---------------------------------------------------------------------------
 // Binary operand-compatibility check.
@@ -594,10 +594,12 @@ export function checkPropertyCheck(p: Property, env: Env, accept: ValidationAcce
  * literal defaulting a `money` / `decimal` field) is allowed. */
 export function checkPropertyDefault(p: Property, env: Env, accept: ValidationAcceptor): void {
   if (!p.default) return;
-  // A record construction in the default (`price: Coin = Coin { … }`) gets its
-  // entry values type-checked here — the non-body-site companion to the
-  // statement-walk coverage (M-T6.18).
+  // A record construction / free function call in the default
+  // (`price: Coin = Coin { … }`, `n: int = compute(2)`) gets its entry values /
+  // args type-checked here — the non-body-site companion to the statement-walk
+  // coverage (M-T6.18).
   checkConstructionArgTypes(p.default, env, accept);
+  checkExprCallArgs(p.default, env, accept);
   const declared = resolveTypeRef(p.type);
   const actual = typeOf(p.default, env);
   if (
@@ -617,7 +619,11 @@ export function checkPropertyDefault(p: Property, env: Env, accept: ValidationAc
 
 export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAcceptor): void {
   checkConstructionArgTypes(inv.expr, env, accept);
-  if (inv.guard) checkConstructionArgTypes(inv.guard, env, accept);
+  checkExprCallArgs(inv.expr, env, accept);
+  if (inv.guard) {
+    checkConstructionArgTypes(inv.guard, env, accept);
+    checkExprCallArgs(inv.guard, env, accept);
+  }
   const t = typeOf(inv.expr, env);
   if (t.kind !== "primitive" || t.name !== "bool") {
     accept("error", `Invariant must be of type 'bool', got '${typeToString(t)}'.`, {
@@ -639,6 +645,7 @@ export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAccep
 
 export function checkDerived(d: DerivedProp, env: Env, accept: ValidationAcceptor): void {
   checkConstructionArgTypes(d.expr, env, accept);
+  checkExprCallArgs(d.expr, env, accept);
   const declared = resolveTypeRef(d.type);
   const actual = typeOf(d.expr, env);
   if (
@@ -669,6 +676,7 @@ export function checkFunction(
   // literal promotion (`function fee(): money = 0`) as defaults / `:=` do (C1).
   if (fn.body) {
     checkConstructionArgTypes(fn.body, env, accept);
+    checkExprCallArgs(fn.body, env, accept);
     const actual = typeOf(fn.body, env);
     if (
       declared.kind !== "unknown" &&
@@ -696,10 +704,12 @@ export function checkFunction(
   let blockEnv: Env = env;
   let sawReturn = false;
   for (const stmt of fn.block) {
-    // Type-check any construction in this statement under the current block env
-    // (a `let`'s own value can't reference the binding it introduces, and the
-    // env is extended only after — matching the statement-walk discipline).
+    // Type-check any construction / free function call in this statement under
+    // the current block env (a `let`'s own value can't reference the binding it
+    // introduces, and the env is extended only after — matching the
+    // statement-walk discipline).
     checkConstructionArgTypes(stmt, blockEnv, accept);
+    checkExprCallArgs(stmt, blockEnv, accept);
     if (isLetStmt(stmt)) {
       const t = typeOf(stmt.expr, blockEnv);
       const next = new Map<string, { type: DddType; origin: AstNode }>();
