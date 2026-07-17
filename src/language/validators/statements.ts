@@ -42,6 +42,7 @@ import {
   findFunction,
   findOperation,
   freeCallFunction,
+  freeCallPredicate,
   isAssignable,
   lookupRootMember,
   makeEnv,
@@ -389,6 +390,21 @@ export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcc
           first,
           accept,
         );
+      } else {
+        // Criterion / policy-function predicate (`InRegion(r)`, `CanApprove(c)`).
+        // Its ARITY is already checked model-wide (loom.criterion-arity /
+        // checkPolicyFns), so only type-check the args — and only when the arity
+        // lines up, to avoid mis-pairing after a separately-reported miscount.
+        const predParams = freeCallPredicate(n.head.name, env);
+        if (predParams && predParams.length === first.args.length) {
+          checkArgTypesPositional(
+            predParams,
+            first.args.map((a) => a.value),
+            env,
+            `'${n.head.name}'`,
+            accept,
+          );
+        }
       }
       continue;
     }
@@ -479,6 +495,36 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
  *  `money`/`decimal` param).  On an arity mismatch we stop before the per-arg
  *  loop — the positions no longer line up, so per-arg type errors would be
  *  noise. */
+/** Per-argument type check (positional, over the overlap of params/args), shared
+ *  by the arity-and-type `checkCallArgs` and the type-ONLY predicate path.  Same
+ *  discipline as `checkEmit`: suppress on `unknown`, admit numeric-literal
+ *  promotion. */
+function checkArgTypesPositional(
+  params: Parameter[],
+  args: Expression[],
+  env: Env,
+  label: string,
+  accept: ValidationAcceptor,
+): void {
+  const n = Math.min(params.length, args.length);
+  for (let i = 0; i < n; i++) {
+    const expected = paramType(params[i]!);
+    if (expected.kind === "unknown") continue;
+    const actual = typeOf(args[i], env);
+    if (
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, expected) &&
+      !canPromoteLiteralTo(args[i], expected)
+    ) {
+      accept(
+        "error",
+        `Argument ${i + 1} of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+        { node: args[i]!, code: "loom.call-arg-type" },
+      );
+    }
+  }
+}
+
 function checkCallArgs(
   params: Parameter[],
   args: Expression[],
@@ -495,22 +541,7 @@ function checkCallArgs(
     );
     return;
   }
-  for (let i = 0; i < args.length; i++) {
-    const expected = paramType(params[i]!);
-    if (expected.kind === "unknown") continue;
-    const actual = typeOf(args[i], env);
-    if (
-      actual.kind !== "unknown" &&
-      !isAssignable(actual, expected) &&
-      !canPromoteLiteralTo(args[i], expected)
-    ) {
-      accept(
-        "error",
-        `Argument ${i + 1} of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
-        { node: args[i]!, code: "loom.call-arg-type" },
-      );
-    }
-  }
+  checkArgTypesPositional(params, args, env, label, accept);
 }
 
 export function checkCallStmt(
