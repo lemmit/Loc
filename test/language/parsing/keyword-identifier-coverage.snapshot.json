@@ -147,6 +147,7 @@
     "nameRef"
   ],
   "criterion": [],
+  "cron": [],
   "crossTenant": [
     "fieldName",
     "lValue",
@@ -504,6 +505,7 @@
     "paramName",
     "stateField"
   ],
+  "overlap": [],
   "ownTable": [],
   "page": [
     "nameRef",
@@ -762,6 +764,7 @@
   "this": [
     "nameRef"
   ],
+  "timerSource": [],
   "title": [
     "fieldName",
     "lValue",

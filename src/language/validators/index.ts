@@ -62,6 +62,7 @@ export {
 export { checkTemplateHoles } from "./template.js";
 export { checkDurationConstructors } from "./temporal.js";
 export { checkOrgPathReferences, checkTenancyDecls } from "./tenancy.js";
+export { checkTimers } from "./timer.js";
 export { checkTopLevelFunctions } from "./toplevel-function.js";
 export { checkTraceability } from "./traceability.js";
 export {

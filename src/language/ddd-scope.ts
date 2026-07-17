@@ -22,6 +22,7 @@ import {
   isDomainService,
   isEntityPart,
   isEnumDecl,
+  isEventDecl,
   isFunctionDecl,
   isModel,
   isPage,
@@ -136,6 +137,17 @@ export class DddScopeProvider extends DefaultScopeProvider {
       const userBlock = system?.members.find(isUserBlock);
       if (!userBlock) return EMPTY_SCOPE;
       return this.createScopeForNodes(userBlock.fields);
+    }
+    // `timerSource sweep { for: SweepTick, … }` — the `for:` event resolves to
+    // any event declared anywhere in the enclosing system.  Events are not
+    // globally exported (the same reason the tenancy/workflow arms above exist),
+    // so without this arm a system-scope timerSource could never link to a
+    // context-nested tick event.  System-wide, because a timerSource is
+    // infrastructure that may fire an event from any context it hosts.
+    if (context.container.$type === "TimerSource" && context.property === "event") {
+      const system = AstUtils.getContainerOfType(context.container, isSystem);
+      if (!system) return EMPTY_SCOPE;
+      return this.createScopeForNodes(AstUtils.streamAllContents(system).filter(isEventDecl));
     }
     // `menu { link Orders.List }` — a page link resolves within the enclosing
     // ui, by BOTH the page's bare name (`Home`, a unique top-level page) AND its
