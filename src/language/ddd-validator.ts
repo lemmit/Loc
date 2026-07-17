@@ -71,6 +71,7 @@ import {
   checkTernaryExprs,
   checkTheme,
   checkThemeContrast,
+  checkTimers,
   checkTopLevelDomainComposition,
   checkTopLevelFunctions,
   checkTraceability,
@@ -331,6 +332,9 @@ export class DddValidator {
     // Channel + channelSource: key-field existence and the channel<->storage
     // transport compatibility matrix (channels.md, Slice 1).
     guard("channels", model, () => checkChannels(model, accept));
+    // TimerSource cadence: exactly-one-of cron/every, cron range-check, every
+    // floor + cron-expressibility (scheduling.md, M-T4.1).
+    guard("timers", model, () => checkTimers(model, accept));
     // Implicit composition (finding 23): when the project has exactly one
     // `system { }`, the deployment-shape members written at file top level
     // fold into it (implicit-system-composition.md).  They must run through

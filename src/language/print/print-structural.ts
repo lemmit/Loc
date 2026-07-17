@@ -198,6 +198,8 @@ export function printStructural(node: AstNode): string {
       return printChannel(node as import("../generated/ast.js").Channel);
     case "ChannelSource":
       return printChannelSource(node as import("../generated/ast.js").ChannelSource);
+    case "TimerSource":
+      return printTimerSource(node as import("../generated/ast.js").TimerSource);
     case "Repository":
       return printRepository(node as Repository);
     case "Workflow":
@@ -827,6 +829,17 @@ function printChannelSource(node: import("../generated/ast.js").ChannelSource): 
   const items: string[] = [`for: ${node.channel}`];
   if (node.use) items.push(`use: ${node.use.$refText}`);
   return block(`channelSource ${node.name}`, items);
+}
+
+function printTimerSource(node: import("../generated/ast.js").TimerSource): string {
+  const items: string[] = [`for: ${node.event.$refText}`];
+  // STRING props (cron / timezone) had their delimiters stripped by Langium —
+  // re-quote on emission.  `every` is a DURATION token, printed verbatim.
+  if (node.cron) items.push(`cron: ${JSON.stringify(node.cron)}`);
+  if (node.every) items.push(`every: ${node.every}`);
+  if (node.timezone) items.push(`in: ${JSON.stringify(node.timezone)}`);
+  if (node.overlap) items.push(`overlap: allow`);
+  return block(`timerSource ${node.name}`, items);
 }
 
 function printRepository(node: Repository): string {

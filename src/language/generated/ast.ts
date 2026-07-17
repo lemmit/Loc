@@ -15,6 +15,7 @@ export const DddTerminals = {
     TEMPLATE_START: /`(\\.|[^`\\{])*\{/,
     TEMPLATE_MIDDLE: /\}(\\.|[^`\\{])*\{/,
     TEMPLATE_END: /\}(\\.|[^`\\{])*`/,
+    DURATION: /[0-9]+(ms|s|m|h|d)/,
     DECIMAL: /[0-9]+\.[0-9]+/,
     INT: /[0-9]+/,
     TRACE_ID: /[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+/,
@@ -107,6 +108,7 @@ export type DddKeywordNames =
     | "covers"
     | "create"
     | "criterion"
+    | "cron"
     | "crossTenant"
     | "daisyui"
     | "dataSources"
@@ -222,6 +224,7 @@ export type DddKeywordNames =
     | "opt"
     | "option"
     | "or"
+    | "overlap"
     | "ownTable"
     | "page"
     | "paged"
@@ -307,6 +310,7 @@ export type DddKeywordNames =
     | "testCase"
     | "theme"
     | "this"
+    | "timerSource"
     | "title"
     | "token"
     | "transactional"
@@ -3476,7 +3480,7 @@ export function isSystem(item: unknown): item is System {
     return reflection.isInstance(item, System.$type);
 }
 
-export type SystemMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Deployable | FunctionDecl | Layout | Resource | Storage | Subdomain | TenancyDecl | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Deployable | FunctionDecl | Layout | Resource | Storage | Subdomain | TenancyDecl | TestE2E | ThemeBlock | TimerSource | Ui | UserBlock;
 
 export const SystemMember = {
     $type: 'SystemMember'
@@ -3680,6 +3684,31 @@ export const ThisRef = {
 
 export function isThisRef(item: unknown): item is ThisRef {
     return reflection.isInstance(item, ThisRef.$type);
+}
+
+export interface TimerSource extends langium.AstNode {
+    readonly $container: System;
+    readonly $type: 'TimerSource';
+    cron?: string;
+    event: langium.Reference<EventDecl>;
+    every?: string;
+    name: LooseName;
+    overlap: boolean;
+    timezone?: string;
+}
+
+export const TimerSource = {
+    $type: 'TimerSource',
+    cron: 'cron',
+    event: 'event',
+    every: 'every',
+    name: 'name',
+    overlap: 'overlap',
+    timezone: 'timezone'
+} as const;
+
+export function isTimerSource(item: unknown): item is TimerSource {
+    return reflection.isInstance(item, TimerSource.$type);
 }
 
 export interface TitleProp extends langium.AstNode {
@@ -4341,6 +4370,7 @@ export type DddAstType = {
     ThemeBlock: ThemeBlock
     ThemeProp: ThemeProp
     ThisRef: ThisRef
+    TimerSource: TimerSource
     TitleProp: TitleProp
     TypeAtom: TypeAtom
     TypeRef: TypeRef
@@ -7075,6 +7105,36 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             properties: {
             },
             superTypes: [Expression.$type]
+        },
+        TimerSource: {
+            name: TimerSource.$type,
+            properties: {
+                cron: {
+                    name: TimerSource.cron,
+                    optional: true
+                },
+                event: {
+                    name: TimerSource.event,
+                    referenceType: EventDecl.$type
+                },
+                every: {
+                    name: TimerSource.every,
+                    optional: true
+                },
+                name: {
+                    name: TimerSource.name
+                },
+                overlap: {
+                    name: TimerSource.overlap,
+                    defaultValue: false,
+                    optional: true
+                },
+                timezone: {
+                    name: TimerSource.timezone,
+                    optional: true
+                }
+            },
+            superTypes: [SystemMember.$type]
         },
         TitleProp: {
             name: TitleProp.$type,

@@ -62,9 +62,11 @@ import {
   type DataSourceIR,
   type DeployableIR,
   type EnrichedBoundedContextIR,
+  type EventIR,
   type FieldIR,
   type RepositoryIR,
   type SystemIR,
+  type TimerSourceIR,
   type TypeIR,
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
@@ -104,6 +106,7 @@ import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildProjectionsFile } from "./projection-builder.js";
 import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
+import { anyTimerUsesCron, renderTimerScheduler } from "./scheduler-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
 
@@ -810,12 +813,32 @@ export function generateTypeScriptForContexts(
     }
   }
 
+  // TimerSource scheduling (scheduling.md, M-T4.1).  A timer's emit owner is
+  // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
+  // for-event's context (single-fire lock owner == DB owner).  Filter the
+  // system's timers to the ones THIS deployable owns; a timer-free deployable
+  // stays byte-identical (no scheduler.ts, no import, no dep, no boot block).
+  const ownedTimers: TimerSourceIR[] = system
+    ? (system.sys.timerSources ?? []).filter((ts) => {
+        const sub = system.sys.subdomains.find((s) =>
+          s.contexts.some((c) => c.name === ts.context),
+        );
+        return sub?.migrationsOwner === system.deployable.name;
+      })
+    : [];
+  const hasTimers = ownedTimers.length > 0 && !usingMikro;
+  if (hasTimers) {
+    const eventByName = new Map<string, EventIR>(merged.events.map((e) => [e.name, e]));
+    out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName));
+  }
+
   const projectUsesMoney = contexts.some(contextUsesMoney);
   out.set(
     "package.json",
     projectPackageJson(pins, {
       withMoney: projectUsesMoney,
       withOidc: !!oidcAuth,
+      withCronTimers: hasTimers && anyTimerUsesCron(ownedTimers),
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -863,6 +886,9 @@ export function generateTypeScriptForContexts(
             return reg ? lowerFirst(plural(reg.name)) : undefined;
           })()
         : undefined,
+      // Timer scheduler (scheduling.md, M-T4.1): boot wires startTimerScheduler
+      // into the same in-process dispatcher the outbox relay uses.
+      hasTimers,
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -911,6 +937,10 @@ function projectPackageJson(
   opts: {
     withMoney: boolean;
     withOidc?: boolean;
+    /** scheduling.md, M-T4.1 — a `node-cron` dep, added only when an owned
+     *  timerSource uses a real `cron:` expression (an `every:`-only deployable
+     *  uses a bare setInterval and needs no dep). */
+    withCronTimers?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -945,7 +975,12 @@ function projectPackageJson(
         "@mikro-orm/postgresql": "^6.4.0",
       }
     : { ...pins.dependencies };
-  const devDependencies = mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies };
+  const devDependencies = {
+    ...(mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies }),
+    // Types for the node-cron scheduler dep (scheduling.md) — devDep so the
+    // generated project's `tsc --noEmit` resolves `import cron from "node-cron"`.
+    ...(opts.withCronTimers ? { "@types/node-cron": "^3.0.11" } : {}),
+  };
   const dbScripts = mikro
     ? {}
     : {
@@ -989,6 +1024,9 @@ function projectPackageJson(
           // OIDC token verification (D-AUTH-OIDC) — jose owns JWKS fetch +
           // signature/claims validation in the generated verifier.
           ...(opts.withOidc ? { jose: "^5.9.0" } : {}),
+          // Timer scheduler (scheduling.md) — node-cron parses real cron
+          // expressions; an `every:`-only deployable stays on setInterval.
+          ...(opts.withCronTimers ? { "node-cron": "^3.0.3" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,
@@ -1121,6 +1159,7 @@ function renderProjectIndexTs(
   hasRealtime = false,
   oidc = false,
   orgPathRegistryTable?: string,
+  hasTimers = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -1140,6 +1179,9 @@ function renderProjectIndexTs(
   // With an `auth { oidc }` block (D-AUTH-OIDC) we register the generated
   // OIDC verifier; otherwise we emit a permissive dev stub so the stack
   // boots out of the box (replace in production with a real verifier).
+  // The in-process dispatcher is constructed once and shared by the outbox
+  // relay and/or the timer scheduler (scheduling.md, M-T4.1).
+  const needsDispatcher = outboxRelay || hasTimers;
   const authStubImport = !userShape
     ? ""
     : oidc
@@ -1175,9 +1217,14 @@ import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
 ${
-  outboxRelay
-    ? `import { createInProcessDispatcher, createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n${
-        hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""
+  // The in-process dispatcher is shared by the outbox relay and the timer
+  // scheduler (scheduling.md) — import it (and the realtime tee) whenever
+  // either is wired; the outbox-only helpers stay behind the outbox flag.
+  needsDispatcher
+    ? `import { createInProcessDispatcher${
+        outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
+      } } from "./http/workflows";\n${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
+        hasTimers ? `import { startTimerScheduler } from "./scheduler";\n` : ""
       }`
     : ""
 }${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";`;
@@ -1195,15 +1242,27 @@ ${connectionBlock}
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
 ${effectiveMigCall}${seedCall}${authStubCall}${orgPathRegistration}${
-  outboxRelay
-    ? `// Transactional outbox (dispatch-delivery-semantics.md): durable events
+  needsDispatcher
+    ? `${
+        outboxRelay
+          ? `// Transactional outbox (dispatch-delivery-semantics.md): durable events
 // (channels with retention: log | work) are recorded in __loom_outbox by
 // the app's dispatcher; the relay drains them through the in-process
 // dispatcher at-least-once.  Consumers must tolerate redelivery.
-const inProcessEvents = ${hasRealtime ? "realtimeTee(createInProcessDispatcher(db))" : "createInProcessDispatcher(db)"};
-const app = createApp(db, createOutboxDispatcher(db, inProcessEvents));
-const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);
 `
+          : `// In-process event dispatcher — shared with the timer scheduler
+// (scheduling.md): tick events dispatch through the same routing sagas use.
+`
+      }const inProcessEvents = ${hasRealtime ? "realtimeTee(createInProcessDispatcher(db))" : "createInProcessDispatcher(db)"};
+const app = ${outboxRelay ? "createApp(db, createOutboxDispatcher(db, inProcessEvents))" : "createApp(db)"};
+${outboxRelay ? "const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);\n" : ""}${
+  hasTimers
+    ? `// Timer sources (scheduling.md): infrastructure fires tick events on a
+// wall-clock cadence, single-fire across replicas via a pg advisory lock.
+const stopTimers = startTimerScheduler(db, inProcessEvents);
+`
+    : ""
+}`
     : `const app = createApp(db);
 `
 }const server = serve({ fetch: app.fetch, port });
@@ -1218,6 +1277,11 @@ async function shutdown(signal: string): Promise<void> {
     outboxRelay
       ? `
   stopOutboxRelay();`
+      : ""
+  }${
+    hasTimers
+      ? `
+  stopTimers();`
       : ""
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));

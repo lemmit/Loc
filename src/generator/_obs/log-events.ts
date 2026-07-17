@@ -142,6 +142,14 @@ export const LogEvents = {
   outboxRelayStarted: { event: "outbox_relay_started", level: "info", fields: [] },
   outboxRelayError: { event: "outbox_relay_error", level: "warn", fields: ["error"] },
 
+  // Timer sources (scheduling.md §8, M-T4.1).  The infrastructure scheduler
+  // that fires tick events on a wall-clock cadence.  Cross-backend parity —
+  // every backend that emits a scheduler logs the same four events.
+  timerFired: { event: "timer_fired", level: "info", fields: ["timer"] },
+  timerSkippedOverlap: { event: "timer_skipped_overlap", level: "info", fields: ["timer"] },
+  timerLockContended: { event: "timer_lock_contended", level: "debug", fields: ["timer"] },
+  timerEmitFailed: { event: "timer_emit_failed", level: "error", fields: ["timer", "error"] },
+
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {
     event: "domain_error",
