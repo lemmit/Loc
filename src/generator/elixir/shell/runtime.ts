@@ -6,7 +6,14 @@ import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 // Consumed by `vanilla/shell-emit.ts`.
 // ---------------------------------------------------------------------------
 
-export function renderApplication(appName: string, appModule: string): string {
+export function renderApplication(
+  appName: string,
+  appModule: string,
+  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer GenServer
+  // module names, appended to the supervision tree so each starts at boot
+  // (after the Repo it locks against + the Endpoint).  Empty ⇒ byte-identical.
+  schedulerChildren: string[] = [],
+): string {
   // Catalog server-lifecycle events.  Same identities Hono + .NET
   // emit so a cross-backend dashboard pivots on one event name.
   //
@@ -45,7 +52,7 @@ defmodule ${appModule}.Application do
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
       ${appModule}.Telemetry,
-      ${appModule}Web.Endpoint
+      ${appModule}Web.Endpoint${schedulerChildren.map((c) => `,\n      ${c}`).join("")}
     ]
 
     opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
