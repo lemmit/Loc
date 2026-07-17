@@ -5,7 +5,9 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedSystemIR,
+  EventIR,
   SystemIR,
+  TimerSourceIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import {
@@ -71,6 +73,7 @@ import {
 } from "./repository-port-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
+import { renderPyTimerScheduler } from "./scheduler-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
 import {
   buildPyWorkflowsFile,
@@ -122,6 +125,18 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const merged = mergeContexts(args.contexts);
   const sourcemap = args.sourcemap;
 
+  // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
+  // owner is DERIVED (no stamp): the deployable whose subdomain
+  // `migrationsOwner` owns the for-event's context — the single-fire lock owner
+  // == the DB owner.  Filter the system's timers to the ones THIS deployable
+  // owns; a timer-free deployable stays byte-identical (no scheduling.py, no
+  // apscheduler dep, no lifespan wiring).  Mirrors the Hono owner derivation.
+  const ownedTimers: TimerSourceIR[] = (args.sys.timerSources ?? []).filter((ts) => {
+    const sub = args.sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
+    return sub?.migrationsOwner === args.deployable.name;
+  });
+  const hasTimers = ownedTimers.length > 0;
+
   // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
   // React SPA — routers move under /api/*, main.py serves wwwroot/ with
   // an index.html fallback, the Dockerfile becomes multi-stage, and the
@@ -135,9 +150,19 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
   // in pyproject only under an `auth { oidc }` block.
   const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
+  // APScheduler drives the owned timerSources (cron / interval jobs); added
+  // only when this deployable owns a timer, so a timer-free project stays
+  // byte-identical.  Pinned within major 3 (the AsyncIOScheduler /
+  // CronTrigger.from_crontab API the scheduler emits; 4.x is a rewrite).
+  const timerDeps = hasTimers ? ["apscheduler>=3.10,<4"] : [];
   out.set(
     "pyproject.toml",
-    renderPyproject(slug, [...resources.deps, ...oidcDeps], [...resources.devDeps]),
+    renderPyproject(
+      slug,
+      [...resources.deps, ...oidcDeps, ...timerDeps],
+      [...resources.devDeps],
+      hasTimers,
+    ),
   );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
@@ -269,6 +294,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       startsRelay,
       !!oidc,
       explicitRouteApis,
+      hasTimers,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -356,6 +382,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
         sourcemap.fragment("app/dispatch.py", dispatchFile, frag.fragmentText, frag.subRegions);
       }
     }
+  }
+
+  // TimerSource scheduler (scheduling.md, M-T4.1 Phase 2): one APScheduler job
+  // per owned timer, dispatching each tick through the same in-process
+  // dispatcher the sagas use.  Emitted only when this deployable owns a timer
+  // (see `ownedTimers` above); the lifespan wiring in `renderMain` is gated on
+  // the same `hasTimers`.
+  if (hasTimers) {
+    const eventByName = new Map<string, EventIR>(merged.events.map((e) => [e.name, e]));
+    out.set("app/scheduling.py", renderPyTimerScheduler(ownedTimers, eventByName, hasDispatch));
   }
 
   out.set("app/http/__init__.py", "");
@@ -511,6 +547,11 @@ function renderPyproject(
   slug: string,
   extraDeps: readonly string[] = [],
   extraDevDeps: readonly string[] = [],
+  /** scheduling.md, M-T4.1 — APScheduler ships no `py.typed` marker, so a
+   *  per-module override silences mypy's `import-untyped` under `--strict`.
+   *  Added only when the deployable owns a timer, keeping a timer-free
+   *  pyproject byte-identical. */
+  withTimers = false,
 ): string {
   const dep = (r: string) => `  "${r}",`;
   return lines(
@@ -549,6 +590,12 @@ function renderPyproject(
     `python_version = "3.13"`,
     "strict = true",
     "",
+    // APScheduler (timerSource driver) ships no py.typed marker; ignore the
+    // missing stubs for its modules so `--strict` doesn't flag import-untyped.
+    withTimers ? "[[tool.mypy.overrides]]" : null,
+    withTimers ? `module = "apscheduler.*"` : null,
+    withTimers ? "ignore_missing_imports = true" : null,
+    withTimers ? "" : null,
     "[tool.pytest.ini_options]",
     `asyncio_mode = "auto"`,
     `pythonpath = ["."]`,
@@ -676,6 +723,7 @@ function renderMain(
   startsRelay = false,
   oidc = false,
   explicitRouteApis: string[] = [],
+  hasTimers = false,
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -733,6 +781,7 @@ function renderMain(
     hasSeeds ? "from app.db.seed import run_seeds" : null,
     startsRelay ? "from app.dispatch import start_outbox_relay" : null,
     stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
+    hasTimers ? "from app.scheduling import start_timer_scheduler" : null,
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
@@ -813,8 +862,12 @@ function renderMain(
     // rows, drained on a background task for the process lifetime.
     startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
     startsRelay ? '    log("info", "outbox_relay_started")' : null,
+    // Timer sources (scheduling.md): infrastructure fires tick events on a
+    // wall-clock cadence, single-fire across replicas via a pg advisory lock.
+    hasTimers ? "    _timer_scheduler = start_timer_scheduler()" : null,
     '    log("info", "server_listening", port=_PORT)',
     "    yield",
+    hasTimers ? "    _timer_scheduler.shutdown(wait=False)" : null,
     startsRelay ? "    _outbox_relay.cancel()" : null,
     '    log("info", "server_shutdown", signal="SIGTERM")',
     '    log("info", "server_drained")',
