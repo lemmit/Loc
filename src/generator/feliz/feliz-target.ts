@@ -192,7 +192,7 @@ function renderFieldArray(formField: string, fa: FelizFieldArray): string {
   return `Html.div [ prop.className "flex flex-col gap-2"; prop.children [ ${label}; yield! (${rows}); ${add} ] ]`;
 }
 
-/** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
+/** A route path → a `Router.navigatePath(<segments>)` call (Feliz.Router).  Each
  *  literal path segment becomes a quoted arg; a `:param` segment interpolates
  *  the matching named arg's value (or its bare name when no arg matches). */
 function routerNavigate(
@@ -208,8 +208,8 @@ function routerNavigate(
     return `(string ${byName.get(name) ?? name})`;
   });
   // `Router.navigate` needs ≥1 arg; the root path (`/`) navigates to `""`.
-  if (rendered.length === 0) return `Router.navigate("")`;
-  return `Router.navigate(${rendered.join(", ")})`;
+  if (rendered.length === 0) return `Router.navigatePath("")`;
+  return `Router.navigatePath(${rendered.join(", ")})`;
 }
 
 /** Collapse a walked markup fragment to ONE line.  The walker joins children
@@ -325,16 +325,16 @@ export const felizTarget: WalkerTarget = {
     const frag = `React.fragment (${coll} |> List.map (fun ${itemVar} -> ${oneLine(body)}))`;
     return `(if List.isEmpty ${coll} then ${oneLine(emptyBody)} else ${frag})`;
   },
-  // Cross-page navigation → `Router.navigate(<segments>)` (Feliz.Router).  A
+  // Cross-page navigation → `Router.navigatePath(<segments>)` (Feliz.Router).  A
   // `then: navigate(<Page>)` / `Anchor(to:)` reaches here with the target
   // page's route template; `:param` segments interpolate the matching arg.
   renderNavigate: (routeTemplate, args) => routerNavigate(routeTemplate, args),
 
-  // `Button(to: "/products")` → `Router.navigate("products")`.  A literal path
+  // `Button(to: "/products")` → `Router.navigatePath("products")`.  A literal path
   // is split into segments; a non-literal (a ref) navigates to it as one.
   renderNavigateExpr: (toArg) => {
     const lit = toArg.match(/^"(.*)"$/);
-    if (!lit) return `Router.navigate(${toArg})`;
+    if (!lit) return `Router.navigatePath(${toArg})`;
     return routerNavigate(lit[1]!, []);
   },
 
@@ -451,7 +451,10 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS op (`confirm()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard); the page object still drives it as
+    // trigger → submit → form-detach.  (Only the whole-body `null` fall-throughs
+    // above — unresolved refs / unknown op — bail.)
     ctx.usesRouteId = true; // the op dispatches with the route `id`
     // Testid namespace: the scaffold's `testid:` arg (`orders-op-addLine`) or the
     // `<plural>-op-<op>` default the page-object builder computes.  The form

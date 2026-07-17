@@ -162,22 +162,25 @@ function primitiveSkeleton(_c: Ctx): string {
  *  `label` is raw text; `childJsx` is an already-walked value element. */
 function primitiveKeyValueRow(c: Ctx): string {
   const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
-  const value = `Html.dd [ prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  // The `data-testid` rides the VALUE cell, not the whole row — the detail page
+  // object reads `field(name).innerText()` expecting just the value ("Confirmed"),
+  // so it must not include the label text.
   const tid = testidProp(c);
-  const tidPart = tid ? `${tid}; ` : "";
-  return `Html.div [ ${tidPart}prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
+  const valueTid = tid ? `${tid}; ` : "";
+  const value = `Html.dd [ ${valueTid}prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
+  return `Html.div [ prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
-/** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
- *  hash path (`#/products`); without one it's a plain text span (breadcrumb
- *  leaf).  `to` is a JS expression (a quoted literal or a ref) — a literal
- *  folds into a static `"#/path"`, a ref concatenates at runtime. */
+/** Anchor(label, to?) — a link.  With a `to:` route it hrefs the History-API
+ *  PATH (`/products`), matching the path-mode router; without one it's a plain
+ *  text span (breadcrumb leaf).  `to` is a JS expression (a quoted literal or a
+ *  ref) — a literal folds into a static `"/path"`, a ref is used verbatim. */
 function primitiveAnchor(c: Ctx): string {
   const label = String(c.label ?? "");
   if (!c.hasTo) return `Html.span [ Html.text "${label}" ]`;
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
-  const href = lit ? `"#${lit[1]}"` : `("#" + ${to})`;
+  const href = lit ? `"${lit[1]}"` : `${to}`;
   return `Html.a [ prop.className "link link-primary"; prop.href ${href}; prop.text "${label}" ]`;
 }
 
@@ -217,11 +220,12 @@ function primitiveTable(c: Ctx): string {
 }
 
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
- *  Feliz.Router hash path (`#/products/<id>`); the id is the visible label. */
+ *  History-API PATH (`/products/<id>`), matching the path-mode router; the id is
+ *  the visible label. */
 function primitiveIdLink(c: Ctx): string {
   const idExpr = String(c.idExpr ?? '""');
   const prefix = String(c.pathPrefix ?? "/");
-  return `Html.a [ prop.className "link link-primary"; prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
+  return `Html.a [ prop.className "link link-primary"; prop.href ("${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
 }
 
 /** Modal(trigger, form) — SUPERSEDED for Feliz by `felizTarget.renderModal`

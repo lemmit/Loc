@@ -84,7 +84,7 @@ describe("feliz workflow forms", () => {
       "  | SubmitOpenAccountForm -> model, Cmd.OfAsync.perform Api.runOpenAccount model.OpenAccountForm OpenAccountDone",
     );
     expect(app).toContain(
-      '  | OpenAccountDone (Ok ()) -> { model with OpenAccountForm = emptyOpenAccountForm }, Cmd.navigate("")',
+      '  | OpenAccountDone (Ok ()) -> { model with OpenAccountForm = emptyOpenAccountForm }, Cmd.navigatePath("")',
     );
   });
 

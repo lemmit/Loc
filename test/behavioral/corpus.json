@@ -5,6 +5,7 @@
     { "name": "storefront-system", "ddd": "web/src/examples/storefront-system.ddd", "api": true, "unit": true, "ui": false },
     { "name": "sales-system-vue", "ddd": "web/src/examples/sales-system-vue.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" },
     { "name": "sales-system-svelte", "ddd": "web/src/examples/sales-system-svelte.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" },
-    { "name": "sales-system-angular", "ddd": "web/src/examples/sales-system-angular.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" }
+    { "name": "sales-system-angular", "ddd": "web/src/examples/sales-system-angular.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" },
+    { "name": "sales-system-feliz", "ddd": "web/src/examples/sales-system-feliz.ddd", "api": false, "unit": false, "ui": true, "uiTier": "nightly" }
   ]
 }

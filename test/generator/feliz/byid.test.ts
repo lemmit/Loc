@@ -95,7 +95,7 @@ describe("feliz byId detail-page reads", () => {
     );
     expect(app).toContain("  | _ -> Cmd.none");
     // init binds `let page` and batches pageCmd alongside the list read.
-    expect(app).toContain("let init () =\n  let page = parseUrl (Router.currentUrl ())");
+    expect(app).toContain("let init () =\n  let page = parseUrl (Router.currentPath ())");
     expect(app).toContain("      CurrentPage = page");
     expect(app).toContain("    pageCmd page");
     // UrlChanged re-parses, resets the byId field to Loading, and re-fires pageCmd.
@@ -158,7 +158,7 @@ describe("feliz byId detail-page reads", () => {
     expect(app).not.toContain("pageCmd");
     expect(app).not.toContain("remoteOne");
     // The list-only routing stays on the inline-parse init form.
-    expect(app).toContain("CurrentPage = parseUrl (Router.currentUrl ())");
+    expect(app).toContain("CurrentPage = parseUrl (Router.currentPath ())");
   });
 
   // Reachability — the detail system must PARSE + VALIDATE cleanly
