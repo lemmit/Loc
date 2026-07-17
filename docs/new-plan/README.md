@@ -35,13 +35,13 @@ Loom lets you program architecturally correct business apps concisely, with a no
 | [T7 — Deployment & operations](T7-deployment-ops.md) | Metrics/OTel, k8s hardening, proxy/networking, terraform, PaaS deploy | P2 |
 | [T8 — DX, tooling & the AI platform](T8-dx-tooling-ai.md) | Debugger frontier, sourcemaps, LSP tail, playground chat/agent loop, builder, packaging split, mutation testing | P2/P3 |
 | [T9 — Toolchain & process health](T9-toolchain-health.md) | Langium 4 ⭐, persistence-emit seam ⭐, per-PR boot gates, test-coverage phases, doc hygiene | **P1 — prerequisite to growing the matrix** |
-| [T10 — New targets](T10-new-targets.md) | Feliz completion; Go/PHP/NestJS/Blazor/HTMX/Next.js studies; **frozen by default** until M-T9.2 | P3 |
+| [T10 — New targets](T10-new-targets.md) | Feliz completion only; Go/PHP/NestJS/Blazor/HTMX/Next.js studies **retired to design-record**; **matrix frozen — decided 2026-07-17, no more targets** | — (closed) |
 
 ## Sequencing — the load-bearing dependencies
 
 - **The governance spine is mostly built.** execution-context backbone, multi-tenancy Phases 1–2, authorization read/write ladders + named policy fns all ship. What remains, in order: authorization item 3 (operation/view/workflow gates) → P4 `deny` → field rules (item 6) → `organizationContext` (M-T3.6, explicitly sequenced *after* the authorization gate it depends on).
 - **Coordinated single-PR moments** (one PR + fixture re-baseline, don't slice): **A4** `Repo.getById` re-shape to `T or NotFound` (M-T5.1); **versioned default-on** (M-T3.4, breaking wire change); **paged-by-default implicit findAll** (M-T2.6, breaking change to every list endpoint).
-- **Target freeze:** T10 missions (new backends/frontends) should not start before **M-T9.2 (persistence-emit seam)** exists — every new target today re-lands the whole emit surface by hand and multiplies T1–T6 gaps. The in-flight Feliz frontend completes; nothing new starts.
+- **Target freeze — decided (2026-07-17):** the matrix is permanently closed; **there will be no more backends or frontends** (owner decision, see [direction-review-2026-07](../audits/direction-review-2026-07.md)). This supersedes the earlier "don't start before M-T9.2" gating — M-T9.2 concluded the persistence surface can't be abstracted, so a growing matrix would have re-landed it by hand forever; frozen, that cost is bounded ×5 and amortizes. The in-flight Feliz frontend completes as a committed target; the T10 studies are design-record, not backlog. **The breadth budget redirects to depth (T4 temporal, T2 data-evolution) — each capability now lands ×5 once against a closed set, then is done.**
 - **Ordering within a track is top-to-bottom** unless a mission states a dependency.
 
 ## Priority shortlist (if you only take five things)
