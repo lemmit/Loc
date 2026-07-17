@@ -108,8 +108,14 @@ export function renderDocumentConfiguration(
       "    {",
       `        builder.ToTable(${tableArgs});`,
       "        builder.HasKey(x => x.Id);",
-      `        builder.Property(x => x.Data).HasColumnType("jsonb");`,
-      "        builder.Property(x => x.Version).IsConcurrencyToken();",
+      // Map each property to the migration's snake_case column — EF's default
+      // is the PascalCase CLR name (`Id`/`Data`/`Version`), which does NOT
+      // match the `id`/`data`/`version` DDL → `column c.Id does not exist` on
+      // every read/insert.  The key is a plain `Guid` (minted app-side), so no
+      // value converter is needed, only the column name + ValueGeneratedNever.
+      `        builder.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();`,
+      `        builder.Property(x => x.Data).HasColumnName("data").HasColumnType("jsonb");`,
+      `        builder.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();`,
       "    }",
       "}",
     ) + "\n"
