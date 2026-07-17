@@ -1,7 +1,7 @@
 # State-controlled `Modal { open: <state> }`
 
-> Status: building (React slice — Mantine + shadcn — landing first; other packs
-> fall back gracefully). Motivated by the all-platform review: showcase's
+> Status: **SHIPPED** (all frontend packs; see the 2026-06-20 audit note
+> below — react/vue/svelte `modal-state-controlled.test.ts`). Motivated by the all-platform review: showcase's
 > `Modal { open: editing }` emitted a stub comment because the only Modal shape
 > implemented was the *operation-form* modal.
 

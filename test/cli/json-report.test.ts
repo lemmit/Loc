@@ -45,7 +45,14 @@ describe("ddd parse --json", () => {
 
     expect(report.ok).toBe(true);
     expect(report.summary.errors).toBe(0);
-    expect(report.diagnostics).toEqual([]);
+    // `sales.ddd` uses list `find`s (byCustomer / activeForCustomer), now
+    // deprecated in favour of criterion reads (loom.repository-find-deprecated,
+    // a warning) — the model is still valid (no errors). Tolerate those
+    // deprecation warnings but assert nothing else surfaces.
+    const nonDeprecation = report.diagnostics.filter(
+      (d) => d.code !== "loom.repository-find-deprecated",
+    );
+    expect(nonDeprecation).toEqual([]);
     expect(report.loomVersion).toMatch(/^\d+\.\d+\.\d+$/);
 
     const sales = report.outline.contexts.find((c) => c.name === "Sales");

@@ -78,15 +78,36 @@ function findNodeDeployable(genDir) {
   return dirs[0];
 }
 
-/** The React frontend deployable dir: has e2e/playwright.config.ts. */
-function findReactDeployable(genDir) {
+/** Locate the built SPA root under a frontend dir — the dir that holds the
+ *  emitted `index.html`.  Framework-agnostic: react/vue → `dist/`, SvelteKit
+ *  (adapter-static) → `build/`, Angular → `dist/<app>/browser/`.  Excludes the
+ *  source tree (a frontend's `index.html` also lives at its root pre-build) by
+ *  only accepting a build-output dir (`dist`/`build` segment in the path). */
+function findDistRoot(frontendDir) {
+  const hits = walk(frontendDir, (p) => p.endsWith("/index.html")).filter((p) => {
+    const rel = p.slice(frontendDir.length);
+    return /[/\\](dist|build)[/\\]/.test(rel);
+  });
+  if (hits.length === 0) {
+    throw new Error(`no built index.html under ${frontendDir} — did the frontend build?`);
+  }
+  // Prefer the shallowest (e.g. dist/index.html over a nested asset copy).
+  hits.sort((a, b) => a.split("/").length - b.split("/").length);
+  return dirname(hits[0]);
+}
+
+/** The frontend deployable dir: has e2e/playwright.config.ts.  Framework-agnostic
+ *  — the emitted `.ui.spec.ts` + page objects are testid-driven, so the same
+ *  round-trip runs against any frontend; the per-framework build command
+ *  (`npm run build`) and built-root (findDistRoot) are resolved below. */
+function findFrontendDeployable(genDir) {
   const hits = walk(genDir, (p) => p.endsWith("/e2e/playwright.config.ts")).map((p) =>
     resolve(p, "..", ".."),
   );
   const dirs = [...new Set(hits)];
   if (dirs.length !== 1) {
     throw new Error(
-      `expected exactly one React frontend (e2e/playwright.config.ts), found ${dirs.length}: ${dirs.join(", ")}`,
+      `expected exactly one frontend with a UI e2e suite (e2e/playwright.config.ts), found ${dirs.length}: ${dirs.join(", ")}`,
     );
   }
   return dirs[0];
@@ -226,20 +247,26 @@ async function runCase(c) {
       [join(REPO, "bin/cli.js"), "generate", "system", join(REPO, c.ddd), "-o", genDir],
       { stdio: "pipe" },
     );
-    const reactDir = findReactDeployable(genDir);
-    const e2eDir = join(reactDir, "e2e");
+    const frontendDir = findFrontendDeployable(genDir);
+    const e2eDir = join(frontendDir, "e2e");
     const uiSpecs = walk(e2eDir, (p) => p.endsWith(".ui.spec.ts"));
     if (uiSpecs.length === 0) return { skipped: "no .ui.spec.ts emitted" };
     const deplDir = findNodeDeployable(genDir);
 
-    // 1. Build the generated React frontend (real npm install + vite build).
-    execFileSync(npm, ["install", "--no-audit", "--no-fund"], { cwd: reactDir, stdio: "pipe" });
-    execFileSync(npx, ["vite", "build"], { cwd: reactDir, stdio: "pipe" });
+    // 1. Build the generated frontend via ITS OWN build script (react/vue →
+    //    vite→dist, svelte → vite→build, angular → ng→dist/<app>/browser,
+    //    feliz → fable+vite→dist).  `npm run build` picks the right one per
+    //    package.json; findDistRoot locates the emitted index.html.
+    execFileSync(npm, ["install", "--no-audit", "--no-fund"], { cwd: frontendDir, stdio: "pipe" });
+    const pkg = JSON.parse(readFileSync(join(frontendDir, "package.json"), "utf8"));
+    if (pkg.scripts?.build) execFileSync(npm, ["run", "build"], { cwd: frontendDir, stdio: "pipe" });
+    else execFileSync(npx, ["vite", "build"], { cwd: frontendDir, stdio: "pipe" });
+    const distDir = findDistRoot(frontendDir);
 
     // 2. Boot ONE in-process server: built SPA + the generated Hono
     //    backend on PGlite (/api), same origin.
     const { startServer } = await buildServerModule(deplDir, workDir);
-    server = await startServer({ distDir: join(reactDir, "dist") });
+    server = await startServer({ distDir });
     process.stdout.write(`    stack on :${server.port}\n`);
 
     // 3. Install the e2e deps + Chromium, then run the emitted UI spec.
@@ -279,8 +306,15 @@ async function runCase(c) {
 }
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+// Nightly-tier cases (non-React frontends) run only when explicitly named or
+// under `--all` / LOOM_UI_ALL — so the per-PR behavioral-ui gate stays React-only
+// (no extra frontend build cost per PR) while the nightly matrix covers the rest.
+const allTiers = process.argv.includes("--all") || process.env.LOOM_UI_ALL === "1";
 const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases.filter(
-  (c) => (only.length === 0 || only.includes(c.name)) && c.ui !== false,
+  (c) =>
+    (only.length === 0 || only.includes(c.name)) &&
+    c.ui !== false &&
+    (only.length > 0 || allTiers || c.uiTier !== "nightly"),
 );
 
 let pass = 0;

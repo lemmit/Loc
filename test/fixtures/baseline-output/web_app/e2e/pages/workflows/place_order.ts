@@ -17,7 +17,11 @@ export class PlaceOrderWorkflowPage {
 
   async fill(input: Partial<PlaceOrderRequest>): Promise<this> {
     if (input.customerId !== undefined) {
-      await this.page.getByTestId("workflow-place_order-input-customerId").fill(input.customerId!);
+      {
+        const __f = this.page.getByTestId("workflow-place_order-input-customerId");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.customerId!);
+      }
     }
     if (input.productId !== undefined) {
       {
@@ -28,7 +32,11 @@ export class PlaceOrderWorkflowPage {
       }
     }
     if (input.quantity !== undefined) {
-      await this.page.getByTestId("workflow-place_order-input-quantity").fill(String(input.quantity));
+      {
+        const __f = this.page.getByTestId("workflow-place_order-input-quantity");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(String(input.quantity));
+      }
     }
     return this;
   }

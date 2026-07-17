@@ -57,16 +57,16 @@ docs had not absorbed:
   plain Ecto/Phoenix project, RFC 7807 parity, CI fixture.
 - **Workflow instances as view sources** on all backends
   (#1035/#1037).
-- **TPH inheritance on all three DB backends**
+- **TPH inheritance on all five DB backends**
   (`TPH_CAPABLE = {node, dotnet, elixir}`,
   `src/ir/validate/checks/system-checks.ts`); TPC everywhere.
 - **Payload transport**: P1 kinds + file-scope declarations (#1024),
   P2 synthesised `<Agg>Wire`, P3b `Paged<T>` everywhere, P4 named +
   anonymous `or` unions on node/dotnet/elixir.
-- **Reified criteria consumed at use-sites** on all four backends
+- **Reified criteria consumed at use-sites** on all five backends
   (`criterionRef` in the IR; .NET `find-emit.ts`/`spec-emit.ts` emit
   `.Where(new XCriterion(args).ToExpression())`).
-- **Retrieval emission on all four backends** (#810/#952/#955).
+- **Retrieval emission on all five backends** (#810/#952/#955).
 - **RFC 7807 `errors[]`** on all three backends (#782/#829/#836).
 - **Seeding**: `__loom_seed` ship-once marker + `raw` direct-INSERT
   path on all three backends; D-SEED-XREF explicit ids.

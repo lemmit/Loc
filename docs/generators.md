@@ -120,6 +120,7 @@ For a context with aggregates `Order` (containing parts) and `Product`:
 ├── package.json                     # deps: hono, @hono/node-server, @hono/zod-openapi, zod, drizzle-orm, pg
 ├── tsconfig.json
 ├── index.ts                         # pg Pool → drizzle → createApp(db) → @hono/node-server.serve
+├── scheduler.ts                     # timerSource jobs (when the deployable owns any) — see "Timer sources"
 ├── drizzle.config.ts                # Drizzle Kit config (db:generate, db:migrate, db:push, db:studio)
 ├── Dockerfile                       # multi-stage node:22-alpine; runtime serves `node out/index.js`
 ├── .dockerignore
@@ -142,6 +143,40 @@ For a context with aggregates `Order` (containing parts) and `Product`:
     ├── order.routes.ts              # OpenAPIHono router with createRoute() + Zod request/response schemas
     └── product.routes.ts
 ```
+
+### Timer sources (`timerSource`)
+
+A system-scope `timerSource { for: <Event>, cron: "…" | every: <dur> }`
+(scheduling.md) fires a plain domain event on a wall-clock cadence; workflows
+react through the existing `on`/`create … by` triggers. When a deployable owns a
+timer (its subdomain is the for-event's `migrationsOwner`), the Hono backend
+emits `scheduler.ts` and wires it at boot:
+
+- **One job per timer.** `cron:` → `node-cron`; `every:` → a bare `setInterval`.
+- **Single-fire across replicas.** Each tick opens a transaction and takes a
+  `pg_try_advisory_xact_lock` keyed by an FNV-1a hash of the timer name; the
+  lock is held for the dispatch and released automatically when the tx commits
+  (a plain session `pg_advisory_lock` + a connection pool would leak the unlock
+  onto a different pooled connection). The loser of the race skips (logged). A
+  `running` guard skips (does not queue) an overlapping tick on the same replica.
+- **Dispatch.** The tick event is constructed (id fields minted, `at` stamped)
+  and dispatched through the same in-process dispatcher the sagas use, so an
+  `on`/`create` reactor fires with no new machinery.
+- **Observability.** `timer_fired` / `timer_skipped_overlap` /
+  `timer_lock_contended` / `timer_emit_failed` on the catalog.
+
+**Delivery semantics (multi-pod).** The advisory lock is a *mutex around the
+body*: while one replica is dispatching, a peer's concurrent tick fails the lock
+and skips — no concurrent double-fire. It is **at-least-once**, not
+exactly-once: if a replica commits before a peer's clock-skewed tick fires, the
+peer can also fire, so **tick reactors must be idempotent** (the same contract
+event reactors already carry). True exactly-once-per-instant (a durable claim
+keyed by the cadence bucket / competing-consumer queue) is not implemented — a
+Phase-3 durability item.
+
+A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
+boot wiring — byte-identical to before. (`.NET` and the other backends are
+in-progress; see M-T4.1.)
 
 ### Per-aggregate detail
 
@@ -776,6 +811,29 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 | Page stub | Only a page with **no body** (route/title-only) renders a title stub; every form / action / read primitive now renders a real body.  The `pageNeedsDeferredFeatures` predicate is defence-in-depth (the shared react-hook-form `formOfs` / `actionMutations` sinks are never populated on Angular — each primitive forks via its `render<X>Form` seam), and `validateRequired` keeps any unsupported construct a compile error rather than a codegen crash. |
 | CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
+## Feliz frontend (`platform: feliz`)
+
+The fifth frontend generator (`src/generator/feliz/`).  Emits a **Feliz
+(F#/Fable/Elmish) SPA** per feliz deployable, built with `dotnet fable` + vite
+(not the vite-only static pipeline of the JS frontends).  Pages flow through the
+**same shared markup walker** the other frontends use
+(`src/generator/_walker/walker-core.ts`) via `feliz-target.ts` — but Feliz is
+the one frontend whose embedded language is **F#, not JS**, so instead of
+consuming the wire shape only, it supplies its own F# expression leaves
+(`src/generator/feliz/fs-expr.ts`, the `FS_LEAVES` table) through the shared
+`emitExpr` dispatcher.  See `docs/old/plans/feliz-frontend-build.md`.
+
+| Concern | Emission |
+|---|---|
+| Architecture | **Elmish MVU** — a `Model` record, a `Msg` union, and an `update` fn per page (`update-emit.ts`); page-level `state {}` fields become `Model` fields and `:=` writes lower to `Msg` dispatch + an `update` arm. |
+| Expressions | Rendered to F# via `FS_LEAVES` (`fs-expr.ts`) — `==`→`=`, `null`→`None`, list `[ a; b ]`, anonymous records `{| n = v |}` — the F# sibling of the JS-family `jsExprLeaves`. |
+| Data / wire | Decodes the JSON wire shape into F# records (`wire.ts`); a paged `.all` decodes the envelope's `items` to a `'T list` (so the Model holds a list, page 1). |
+| Design | The **daisyUI** pack — real Tailwind + daisyUI build (`styles.css` + `tailwind.config.js`), a `design: "<theme>"` theme picker over the built-in daisyUI theme set (default `corporate`), and a persistent app-shell `navbar` for multi-page routed UIs. |
+| Forms | Controlled string form state on the Model + per-field blur validation with inline errors (#1944); required/whole-form submit gate. |
+| CI | `generated-feliz-build.yml` — real `dotnet fable` + `vite build` + a Playwright smoke against the built bundle. |
+
+Known frontier (M-T1.16): modal open-state, typed in-flight form state, enum DU wire decoder, per-page sub-models, multi-param routes; and the interactive-`Table` sort/pagination/filter seams degrade (Elmish needs Set-Msg/update plumbing) rather than emit.
+
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
 `generate system` for deployables marked `platform: elixir`.
@@ -1147,11 +1205,15 @@ Out of scope for v1 (intentional):
   text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
 - **Ordering on `X id[]` collections**: the wire contract is
-  unordered — a relational join table is naturally a set, and the
-  three backends realise that differently (TS/Drizzle and .NET/EF
-  happen to write a per-row `ordinal` and load `ORDER BY ordinal`;
-  Phoenix/Ecto leaves ordinal at the column default and returns rows
-  in whatever order Postgres yields).  Treat `party[0]` as "some
+  unordered — a relational join table is naturally a set, and the five
+  backends realise that differently.  TS/Drizzle and .NET/EF happen to
+  write a per-row `ordinal` and load `ORDER BY ordinal`.  Phoenix/Ecto,
+  Java/JPA, and Python/SQLAlchemy treat `Target id[]` as a set with no
+  ordinal column at all (Java: `@ElementCollection` join table, no
+  `@OrderColumn`, `jpa-annotations.ts:158`; Python: the ref-collection
+  join table carries no ordinal, `repository-builder.ts:60`), returning
+  rows in whatever order Postgres yields.  Either way the contract is
+  unordered — treat `party[0]` as "some
   element of `party`," not "the first element of `party`."  When
   position is part of the domain (a battle slot, a draft pick
   number), model it as an explicit ordinal field on a separate child

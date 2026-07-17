@@ -2955,3 +2955,144 @@ the biggest of the three. The leverage that kept it small:
   had to keep that guard or the paramless-op byte gate flips. Angular's node 22+
   requirement also bites: `ng build` needs `node:22`, not the `node:20` the
   React/Vue/Svelte tsc/vite gates use.
+
+## 51. `requires`-on-find gate — mirror the view gate exactly, one seam per backend (2026-07-17)
+
+M-T3.1 added a `requires <expr>` gate to repository finds (the read-side twin of
+the view gate). The whole feature is "do what the view gate already does, but at
+the find route." What made it a clean, low-risk landing:
+
+- **The view gate is the byte-for-byte template on every backend.** Each backend
+  already had a view-gate emitter (`view-emit.ts` / `emit/view.ts` /
+  `views-builder.ts` / `vanilla/view-emit.ts` / hono `view-routes-builder.ts`);
+  the find gate is the same three moves — bind `currentUser`, `if (!(pred)) throw
+  Forbidden…`, before the query. Reusing `renderCsExpr`/`renderJavaExpr`/
+  `renderPyExpr`/`renderExpr`/`renderTsExpr` + the same `exprUsesCurrentUser`
+  guard means zero new expression machinery. A find-gate helper
+  (`findGateUsesCurrentUser`) sits beside `findUsesCurrentUser`.
+- **Gate env = bare context, currentUser-only.** Lower the gate in `newEnv(ctx,
+  user)` WITHOUT `inAggregate` and WITHOUT the find's params — the source row
+  doesn't exist at gate time, so a row/param ref must be a name-resolution error.
+  The validator (`loom.find-gate-not-current-user`) is the view-gate check
+  parametrized by an allowed-refKind set (`current-user`/`enum-value`/`lambda`/
+  `helper-fn`). I initially allowed `param` too, then dropped it for view-gate
+  parity + emit simplicity (a param ref would need `params.<name>` remapping in
+  every backend handler — not worth it for this slice).
+- **The per-backend currentUser-binding condition must widen from `usesUser` to
+  `usesUser || gateUsesUser`.** Every backend threaded `currentUser` only when
+  the find's WHERE filter used it. A gate that reads currentUser but a filter
+  that doesn't would emit an unbound `currentUser`. Widen the read/inject
+  condition (and Python's explicit `User`-import predicate — it's NOT scan-based,
+  unlike `ForbiddenError`/`Request`) or you get a NameError/unused-import.
+- **Java's find gate lives in the CONTROLLER, not a service** (unlike the view
+  gate which runs in the view service) — so the controller constructor has to
+  gain `CurrentUserAccessor` injection when any find gate reads the principal.
+  `Objects.equals` (string `==`) pulls `java.util.Objects` via
+  `collectJavaExprImports`; `ForbiddenException`/`CurrentUserAccessor` imports are
+  conditional. Verified with `gradle testClasses` (host, no docker).
+- **`requires true` → `if (!(true))` is intentional parity with the view gate**
+  and biome's `noConstantCondition` flags it under `biome.generated.json` — but
+  no example/fixture uses a `requires true` find, so `test:biome-gen` stays green.
+  It's a shared latent papercut with views, not a new one; don't special-case
+  finds alone (that would diverge them from views).
+- **default-deny scope for finds excludes the auto-`findAll`.** `validateDefaultDeny`
+  flags ungated author-declared NAMED finds (`find.name !== "all" && !synthesized`);
+  the auto-injected `find all` list route is compiler-synthesized with no author
+  source line to gate (declare an explicit `find all(): T[] requires …` to gate it).
+
+## 52. Compiling generated .NET in docker needs the proxy CA injected (2026-07-17)
+
+Spot-checking a generated .NET backend by hand (`dotnet build -warnaserror` in
+`mcr.microsoft.com/dotnet/sdk:10.0`) fails NuGet restore with `NU1301 … The
+remote certificate is invalid because of errors in the certificate chain:
+UntrustedRoot` — the egress proxy's CA isn't in the container trust store (the
+same class of wrinkle as the Elixir hex-mirror fingerprint issue in §14, but
+here it's a plain missing-CA, not a fingerprint mismatch). Fix: mount the CA
+bundle and install it into the container's store before building —
+
+```bash
+docker run --rm -v $OUT:/w -v /root/.ccr:/ccr:ro -w /w/api \
+  mcr.microsoft.com/dotnet/sdk:10.0 bash -c '
+    cp /ccr/ca-bundle.crt /usr/local/share/ca-certificates/ccr.crt && update-ca-certificates >/dev/null
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    dotnet build -warnaserror'
+```
+
+(Java/gradle on the HOST already has the truststore via `JAVA_TOOL_OPTIONS`;
+Python `uv`/ruff/mypy on the host just work. Only the container-based .NET build
+needs the manual CA step.) Also: running the docker-backed vitest e2e suites
+(e.g. `LOOM_PHOENIX_VANILLA_BUILD=1 … generated-elixir-vanilla-build.test.ts`)
+OOM-killed the session container — prefer a direct `docker run … 'mix compile'`
+(or a targeted `elixirc --warnings-as-errors` snippet to check ONE concern, like
+whether `if not (true)` warns — it doesn't) over the full vitest+docker harness
+when you only need a spot-check.
+
+## 53. `git checkout <stale-local-main>` silently reverts your working tree (2026-07-17)
+
+After merging a PR to `origin/main`, I ran `git checkout main` to pick up the
+next mission. The LOCAL `main` was days stale (never fast-forwarded this
+session), so the checkout reverted every file to the old main — the just-merged
+work "vanished" from the working tree (it was safe on `origin/main` and the
+feature branch, but the harness flagged a dozen files as "modified" and the
+old code was staring back at me). `git pull` then failed on
+`Need to specify how to reconcile divergent branches`. The clean recovery is to
+NEVER trust local `main`: `git fetch origin main && git checkout -B main
+origin/main` (or branch straight off `origin/main`). Reflex after any merge:
+sync `origin/main` FIRST, then branch — the SessionStart hook's "N commits
+behind" warning is the tell.
+## 54. Silent-wrong codegen that compiles green — example-coincidence routing + regex-over-emitted-source (2026-07-17)
+
+Three fixes from a "is Loom real or shortcut-ridden?" audit. Verdict was *real*
+(the `_expr`/`_walker`/`_type` seams and the honest `loom.*-unsupported` gate
+discipline are load-bearing), but the audit surfaced a class of bug the per-PR
+*compile* gates are structurally blind to: output that compiles green on the
+corpus yet is wrong on an input the corpus never exercises.
+
+- **A generator that routes on an alias only works while the alias coincides
+  with the real thing.** HEEx `renderApiCall` emitted `<App>.<Handle>.<fn>(...)`
+  where `<Handle>` is the UI-local `api <handle>: <Api>` alias — correct *only*
+  because `acme.ddd` names the alias `Sales`, equal to the aggregate's context.
+  A UI that aliases the api to any other name emitted a path to a nonexistent
+  module → uncompilable Elixir, no validator blocking it. Fix routed through
+  `contextModuleByAggName` (the map every *other* Elixir site already used).
+  **Lesson:** when codegen derives a path from a name, prove it with a test
+  where the names *diverge* — a corpus where handle==context hides the bug
+  forever. (PR #1959.)
+
+- **Recovering structure by regex-scanning your own emitted source is a latent
+  bug generator.** The Python port file harvested import names with
+  `scan.match(/\b[A-Z][A-Za-z0-9]*Id\b/g)` and imported every `*Id` from
+  `app.domain.ids` — but a value object / enum named `…Id` lives in
+  `value_objects`, so an ordinary `.ddd` with such a type emitted an import for a
+  name that isn't there → `ImportError` at load. Targeted fix cross-checks the
+  regex hits against the *actually declared* ids (`<Aggregate>Id`/`<Part>Id`),
+  which is complete w.r.t. `ids.py`, so it can only *remove* broken imports.
+  **Remaining:** ~17 sites still do string-blank-then-`\b`word-test import
+  detection; the principled fix is a `used: Set<string>` populated *during*
+  emission, not a scan of the output. (PR #1961; full rework tracked in M-T9.8.)
+
+- **Near-duplicate per-backend validators collapse to one table — but watch the
+  one row that isn't identical.** The five `validate<Backend>StampSupport` were
+  byte-identical except a `platformFamily` guard, a `(platform <x>)` label, and
+  the code — *and*, for Elixir alone, `principal (request actor)` vs `principal`.
+  Folded to one `validateStampSupport(sys, diags, backend)` over a
+  `STAMP_BACKENDS` table (per-row `principalNoun` preserves Elixir's wording);
+  the five exports stay as thin wrappers so `validate.ts` is untouched.
+  Diagnostics byte-identical, ~160 lines gone. Broke `diagnostic-codes-
+  completeness.test.ts` (it source-scans each `diags.push` for a *literal*
+  `loom.*` code; the table-driven `code: backend.code` failed it) — broadened the
+  guard to accept a code *reference* while still failing a push with no `code:`
+  key. **Lesson:** a source-scanning meta-test encodes an assumption about *how*
+  the checked code is written; a legitimate refactor can trip it, and the fix is
+  to teach the test the new (still-valid) shape, not to un-refactor. Left
+  `validateDapper/MikroOrmSupport` alone — they share only a shape, not logic.
+  (PR #1964.)
+
+- **Still open (recorded so it isn't lost):** authorization/tenancy filters ride
+  as *sentinel* `ExprIR`s (`__loomDeepScope__`/`__loomDeny__`) that ~8 backend
+  filter translators pattern-match. Correct today (recognition, not
+  re-resolution — the decision is made once in enrichment), but there is **no
+  compile-time exhaustiveness**: a 6th backend that forgets the `deny` arm
+  emits nothing that enforces always-false → a *silent* tenant-data leak, not a
+  crash. The principled fix is a discriminated `FilterIR` node kind so a missing
+  arm is a `tsc` error. Tracked in M-T9.9.

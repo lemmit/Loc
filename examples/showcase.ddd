@@ -111,9 +111,15 @@ system DevPlatform {
             event ProjectArchived { project: Project id, at: datetime }
             event ProjectArchivedRecorded { project: Project id, count: int }
             event ArchivalReset { project: Project id }
+            // Infrastructure tick (scheduling.md) — fired by the `catalogSweep`
+            // timerSource.  A plain event; its timer-ness is derived from being a
+            // timerSource's `for:` target.  (Catalog's migrations owner here is a
+            // non-node backend, so the node-only Phase-1 scheduler is not emitted
+            // for showcase — see examples/timers.ddd for the working node demo.)
+            event CatalogSweepTick { project: Project id, at: datetime }
 
             // Channel — the event-transport contract carrying a context's events.
-            channel ProjectEvents { carries: ProjectArchived }
+            channel ProjectEvents { carries: ProjectArchived, CatalogSweepTick }
 
             // Payload family (PayloadDecl record forms) — the four sugar
             // keywords carry intent over the same record shape.
@@ -732,6 +738,14 @@ system DevPlatform {
     resource catalogCache  { for: Catalog, kind: cache, use: hotCache }
     resource buildsState   { for: Builds,  kind: state, use: primarySql }
     resource peopleState   { for: People,  kind: state, use: primarySql }
+
+    // ----- TimerSource: time as an event source (scheduling.md, M-T4.1) -----
+    // Fires CatalogSweepTick on a nightly cadence.  On the node backend this
+    // lowers to a scheduler.ts with a pg advisory-lock single-fire dispatching
+    // the tick through the in-process dispatcher; cadence lives here, swappable
+    // per environment.  (Illustrative in showcase — the fully-wired, node-owned,
+    // runtime-verified example is examples/timers.ddd.)
+    timerSource catalogSweep { for: CatalogSweepTick, cron: "0 3 * * *" }
 
     // ----- Backend deployables (same contexts for OpenAPI parity) -----
     deployable dotnetApi {

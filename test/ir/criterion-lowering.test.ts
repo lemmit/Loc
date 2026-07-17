@@ -50,6 +50,40 @@ function stripOrigin<T>(value: T): T {
   return value;
 }
 
+describe("lowering — criterion `of T as <alias>`", () => {
+  const ALIAS_SRC = `
+    context Sales {
+      aggregate Customer { active: bool  region: string }
+      criterion ExplicitThis(rgn: string) of Customer = this.region == rgn
+      criterion Aliased(rgn: string) of Customer as o = o.region == rgn
+    }
+  `;
+
+  it("an aliased candidate access lowers byte-identically to explicit `this.field`", async () => {
+    const loom = await buildLoomModel(ALIAS_SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    const thisForm = ctx.criteria.find((c) => c.name === "ExplicitThis")!;
+    const aliased = ctx.criteria.find((c) => c.name === "Aliased")!;
+    // `o.region == rgn` ≡ `this.region == rgn` — `o` IS the candidate.
+    expect(stripOrigin(aliased.body)).toEqual(stripOrigin(thisForm.body));
+  });
+
+  it("`o.field` is a member access on the candidate (stays SQL-queryable)", async () => {
+    const loom = await buildLoomModel(ALIAS_SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    const aliased = ctx.criteria.find((c) => c.name === "Aliased")!;
+    // body is `o.region == rgn`; the LHS is `region` on a `this` receiver typed
+    // as the candidate — the same shape explicit `this.region` produces.
+    const lhs = (aliased.body as unknown as { left: ExprIR }).left;
+    expect(lhs).toMatchObject({
+      kind: "member",
+      member: "region",
+      receiver: { kind: "this" },
+      receiverType: { kind: "entity", name: "Customer" },
+    });
+  });
+});
+
 describe("lowering — criterion", () => {
   it("records criteria on the bounded-context IR", async () => {
     const loom = await buildLoomModel(SRC);

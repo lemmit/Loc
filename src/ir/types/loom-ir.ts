@@ -822,6 +822,16 @@ export interface FindIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
+  /** Authorization gate (D-AUTH-OIDC / default-deny).  An optional
+   *  `requires <expr>` clause — a boolean evaluated against `currentUser`
+   *  *before* the query runs; failure → 403.  Distinct from `filter`: the
+   *  filter scopes which rows come back (queryable, pushed to SQL), the gate
+   *  decides whether the caller may hit the endpoint at all.  Lowered in the
+   *  bare context scope (currentUser only, no aggregate row / params), so it
+   *  can reference `currentUser` + constants but not the source row's fields.
+   *  `requires true` is the explicit intentionally-public escape (the
+   *  read-side twin of the view / operation gate). */
+  requires?: ExprIR;
   /** Optional `where ...` filter expression in IR form. */
   filter?: ExprIR;
   /** Set when the `where` filter is *exactly* one named `criterion`
@@ -2098,6 +2108,13 @@ export interface SystemIR {
    *  of `dataSource`.  Deployables will list which they wire in a later
    *  slice; Slice 1 carries the bindings and emits `.loom/asyncapi.yaml`. */
   channelSources: ChannelSourceIR[];
+  /** TimerSource declarations at system scope (scheduling.md, M-T4.1) — a
+   *  wall-clock cadence that fires a plain domain `event`, which workflows
+   *  react to via the existing `on`/`create … by` triggers.  Time modelled as
+   *  an event source, not a new trigger.  The emit owner is DERIVED (not stored
+   *  here): the backend deployable whose `migrationsOwner` owns the for-event's
+   *  context emits the scheduler, so single-fire lock and DB owner coincide. */
+  timerSources: TimerSourceIR[];
   /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
    *  reference one via `layout: <Name>` — the React generator emits
    *  one `<Name>Layout` wrapper component per entry and routes
@@ -2113,6 +2130,30 @@ export interface ChannelSourceIR {
   channelName: string;
   storageName: string;
 }
+
+/** A wall-clock cadence bound to a domain event (scheduling.md, M-T4.1).
+ *  System-scope, the clock twin of `ChannelSourceIR`.  `event` is the resolved
+ *  name of the plain `EventDecl` the timer fires; `context` is the bounded
+ *  context that declares it (used to derive the emit/lock owner from the
+ *  subdomain's `migrationsOwner`).  `cadence` is discriminated by which of the
+ *  grammar's `cron:` / `every:` fields was set.  `timezone` / `overlap` parse in
+ *  Phase 1 but are inert (Phase 2). */
+export interface TimerSourceIR {
+  name: string;
+  event: string;
+  context: string;
+  cadence: TimerCadenceIR;
+  /** `in: "<tz>"` — inert in Phase 1, carried for Phase 2 timezone support. */
+  timezone?: string;
+  /** `overlap: allow` — inert in Phase 1 (default is skip-on-overlap). */
+  overlap?: boolean;
+}
+
+/** Timer cadence, discriminated by the grammar field that set it.  `cron` is a
+ *  real 5-field expression (or an `@nickname`) passed through to the backend's
+ *  native scheduler; `everyMs` is a fixed interval in milliseconds, used only
+ *  for cadences cron cannot express (sub-minute / non-dividing). */
+export type TimerCadenceIR = { kind: "cron"; cron: string } | { kind: "every"; everyMs: number };
 
 /** A single typed storage instance.  v0 type enum covers the
  *  common roles seen in real deployments — postgres / mysql /
@@ -3590,6 +3631,14 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
  *  sites. */
 export function findUsesCurrentUser(find: FindIR): boolean {
   return exprUsesCurrentUser(find.filter);
+}
+
+/** True when the find's `requires` authorization gate references
+ *  `currentUser`.  The route handler must then read the request principal
+ *  into scope before evaluating the gate (the read-side analogue of a view's
+ *  gate needing `currentUser`). */
+export function findGateUsesCurrentUser(find: FindIR): boolean {
+  return exprUsesCurrentUser(find.requires);
 }
 
 /** True when the view's where filter or any bind expression

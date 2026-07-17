@@ -37,6 +37,7 @@ import type {
   TestBlock,
   TestE2E,
   ThemeBlock,
+  TimerSource,
   TypeRef,
   Ui,
   UserBlock,
@@ -90,6 +91,7 @@ import {
   isTestCase,
   isTestE2E,
   isThemeBlock,
+  isTimerSource,
   isUi,
   isUnique,
   isUserBlock,
@@ -100,6 +102,7 @@ import {
 import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
 import { plural, snake } from "../../util/naming.js";
+import { parseDurationMs } from "../../util/timer.js";
 import { emitsRestCreate } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
@@ -153,6 +156,7 @@ import type {
   TestIR,
   TestStmtIR,
   ThemeIR,
+  TimerSourceIR,
   UserIR,
   ValueObjectIR,
   ViewIR,
@@ -686,6 +690,27 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
         storageName: cs.use?.ref?.name ?? "",
       }),
     );
+  // TimerSource — time as an event source (scheduling.md, M-T4.1).  Resolve the
+  // `for:` event to its declaring context (for owner derivation) and normalise
+  // the cadence to the discriminated `TimerCadenceIR`.  A malformed `every:`
+  // (rejected by `loom.timer-cadence`) lowers to `everyMs: 0`; validation, not
+  // lowering, is where the user learns of it.
+  const timerSources = members
+    .filter((m): m is TimerSource => m.$type === "TimerSource")
+    .map(
+      (ts): TimerSourceIR => ({
+        name: ts.name,
+        event: ts.event?.ref?.name ?? "",
+        context: ts.event?.ref
+          ? (AstUtils.getContainerOfType(ts.event.ref, isBoundedContext)?.name ?? "")
+          : "",
+        cadence: ts.cron
+          ? { kind: "cron", cron: ts.cron }
+          : { kind: "every", everyMs: parseDurationMs(ts.every ?? "") },
+        ...(ts.timezone ? { timezone: ts.timezone } : {}),
+        ...(ts.overlap ? { overlap: true } : {}),
+      }),
+    );
   const layouts = members
     .filter((m): m is Layout => m.$type === "Layout")
     .map((l): LayoutIR => lowerLayout(l));
@@ -703,6 +728,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     storages,
     dataSources,
     channelSources,
+    timerSources,
     layouts,
   };
   // Scaffold post-passes.  A page's kind (`<Agg>` list/new/detail, `<Wf>`
@@ -1225,6 +1251,9 @@ function lowerCriterion(c: Criterion, env: Env): CriterionIR {
     const candidate = findEntityByName(env, targetType.name);
     if (candidate && isAggregate(candidate)) bodyEnv = inAggregate(bodyEnv, candidate);
   }
+  // `of T as o` — the author's alias for the candidate; a bare `o` resolves as
+  // `this` (read-path-architecture.md, "Aligned with criterion").
+  if (c.alias) bodyEnv = { ...bodyEnv, candidateAlias: c.alias };
   for (const p of c.params) {
     bodyEnv = withLocal(bodyEnv, p.name, "param", lowerType(p.type));
   }
@@ -1480,10 +1509,18 @@ function lowerRepository(
       for (const p of f.params) {
         env = withLocal(env, p.name, "param", lowerType(p.type));
       }
+      // The `requires` gate is lowered in the BARE context env (not
+      // `inAggregate`, no params), so `currentUser` resolves but the source
+      // row's fields do not — the gate decides endpoint access before any row
+      // exists, so it may reference only the principal (+ constants).
+      // Referencing an aggregate field is then a name-resolution error, exactly
+      // the restriction we want (the read-side twin of the view gate).
+      const gateEnv = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       return {
         name: f.name,
         params: f.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
         returnType: lowerType(f.returnType),
+        requires: f.gate ? lowerExpr(f.gate, gateEnv) : undefined,
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
         criterionRef: criterionRefOf(f.filter, env),
         ...resolveBypass(f),

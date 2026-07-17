@@ -13,7 +13,7 @@
 // `collapse` / … + the theme.  This matches the in-repo HEEx daisyUI pack, so
 // the aesthetic stays consistent across the Feliz and Phoenix frontends.
 
-import { lowerFirst } from "../../util/naming.js";
+import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 type Ctx = Record<string, string | number | boolean | undefined>;
@@ -46,6 +46,23 @@ function asChild(text: string | undefined): string {
   return `Html.text "${s}"`;
 }
 
+/** Turn the walker's `testidAttr` context value into a Feliz `prop.custom(…)`
+ *  prop-list element, or `""` when the primitive carried no `testid:`.  The
+ *  shared walker (`testidAttr` in walker-core) hands a STATIC testid as the
+ *  JSX-shaped fragment ` data-testid="orders-list"` and a DYNAMIC one already as
+ *  the Feliz prop `prop.custom("data-testid", …)` (via the target's
+ *  `renderAttrBinding`).  JSX targets splice the string into a tag; Feliz needs
+ *  a prop-list element, so unwrap the static form to `prop.custom(...)` and pass
+ *  the dynamic form through unchanged.  This is the whole reason the pack picked
+ *  up no testids before — the JSX fragment is meaningless inside `[ prop… ]`. */
+function testidProp(c: Ctx): string {
+  const raw = String(c.testidAttr ?? "").trim();
+  if (raw === "") return "";
+  if (raw.startsWith("prop.")) return raw; // dynamic — already an F# prop
+  const m = raw.match(/^data-testid=(.+)$/); // static ` data-testid="x"` (trimmed)
+  return m ? `prop.custom("data-testid", ${m[1]})` : "";
+}
+
 /** A flex-container primitive (Stack = vertical, Group = horizontal) with a
  *  daisyUI/Tailwind layout class.  Same offside-safe children handling either
  *  way — only the flex direction differs.  An empty container (e.g. a scaffold
@@ -61,7 +78,9 @@ function flexContainer(className: string, c: Ctx): string {
   // share the col-2 column, offside-consistent.
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
-  return `Html.div [\n  prop.className "${className}";\n  prop.children [\n${children}\n  ]\n]`;
+  const tid = testidProp(c);
+  const tidLine = tid ? `\n  ${tid};` : "";
+  return `Html.div [\n  prop.className "${className}";${tidLine}\n  prop.children [\n${children}\n  ]\n]`;
 }
 
 /** Stack — a vertical flow (daisyUI/Tailwind `flex flex-col gap-4`). */
@@ -78,7 +97,8 @@ function primitiveGroup(c: Ctx): string {
  *  CSS class.  Same offside-safe children handling as `primitiveStack` (multi-
  *  line element lists are fine inside `[ … ]`; only offside-keywords aren't). */
 function containerEl(tag: string, className: string, c: Ctx): string {
-  const cls = `prop.className "${className}"`;
+  const tid = testidProp(c);
+  const cls = `prop.className "${className}"${tid ? `; ${tid}` : ""}`;
   if (!c.hasChildren) return `Html.${tag} [ ${cls} ]`;
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
@@ -143,7 +163,9 @@ function primitiveSkeleton(_c: Ctx): string {
 function primitiveKeyValueRow(c: Ctx): string {
   const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
   const value = `Html.dd [ prop.className "text-sm text-base-content"; prop.children [ ${asChild(String(c.childJsx ?? ""))} ] ]`;
-  return `Html.div [ prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
 /** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
@@ -172,18 +194,26 @@ function primitiveTable(c: Ctx): string {
     .map((col) => `Html.td [ prop.children [ ${asChild(col.cellJsx)} ] ]`)
     .join("; ");
   const head = `Html.thead [ prop.children [ Html.tr [ prop.children [ ${headCells} ] ] ] ]`;
+  // Per-row `data-testid` (the list-table `rowTestid:` lambda → `"orders-row-" +
+  // row.id`, already rendered as an F# expression by the active target).  A
+  // contained-collection table carries no `rowTestid` — the row stays testid-less
+  // (that per-row testid is under-delivered on every frontend, out of scope).
+  const rowTidPart = c.rowTestid ? `prop.custom("data-testid", (${String(c.rowTestid)})); ` : "";
   // The `yield!` + its bracket-delimited body are offside-safe inside the
   // enclosing `prop.children [ … ]`.
   const body =
     `Html.tbody [ prop.children [\n` +
     `      yield! ${rowsExpr} |> List.map (fun ${rowVar} ->\n` +
-    `        Html.tr [ prop.children [ ${bodyCells} ] ])\n` +
+    `        Html.tr [ ${rowTidPart}prop.children [ ${bodyCells} ] ])\n` +
     `    ] ]`;
   // daisyUI `table table-zebra`, wrapped in a bordered, horizontally-scrollable
   // surface so wide tables stay contained.  Paren-wrapped against sibling
-  // absorption (§24) since the wrapper is now the returned element.
+  // absorption (§24) since the wrapper is now the returned element.  The `rows()`
+  // page-object locator reads the CONTAINER's `data-testid`, so it rides here.
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
   const table = `Html.table [ prop.className "table table-zebra w-full"; prop.children [ ${head}; ${body} ] ]`;
-  return `(Html.div [ prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
+  return `(Html.div [ ${tidPart}prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
 }
 
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
@@ -236,7 +266,9 @@ function primitiveCard(c: Ctx): string {
     kids.length > 0
       ? `; prop.children [ Html.div [ prop.className "card-body"; prop.children [ ${kids.join("; ")} ] ] ]`
       : "";
-  return `Html.div [ prop.className "card bg-base-100 shadow"${body} ]`;
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "card bg-base-100 shadow"${body} ]`;
 }
 
 function primitiveBadge(c: Ctx): string {
@@ -259,6 +291,8 @@ function primitiveButton(c: Ctx): string {
   // `prop.children [ … ]` when the label is an already-rendered element.  The
   // daisyUI `btn btn-primary` class makes it a real design-system button.
   const props: string[] = [`prop.className "btn btn-primary"`];
+  const tid = testidProp(c);
+  if (tid) props.push(tid);
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
   const label = String(c.label ?? "").trim();
   if (label.startsWith("Html.") || label.startsWith("(")) {
@@ -331,6 +365,190 @@ function primitiveAvatar(c: Ctx): string {
   }
   const alt = c.hasAlt ? String(c.alt) : '""';
   return `Html.div [ prop.className "avatar"; prop.children [ Html.div [ prop.className "w-10 rounded-full"; prop.children [ Html.img [ prop.src ${String(c.src)}; prop.alt ${alt} ] ] ] ] ]`;
+}
+
+/** Icon(name|svg, size?) — an inline SVG.  The registry/user SVG is injected
+ *  verbatim via `dangerouslySetInnerHTML` (Feliz's raw-HTML escape hatch); the
+ *  span sizes it and a child-selector variant makes the inner `<svg>` fill.  A
+ *  triple-quoted F# string carries the markup as-is — the SVGs embed `"` (never
+ *  `"""`), so no escaping is needed.  `size:` → a fixed h/w utility. */
+function primitiveIcon(c: Ctx): string {
+  const svg = String(c.svg ?? "");
+  const size =
+    c.size === "sm"
+      ? "h-4 w-4"
+      : c.size === "lg"
+        ? "h-6 w-6"
+        : c.size === "xl"
+          ? "h-8 w-8"
+          : "h-5 w-5";
+  const cls = `loom-icon inline-flex ${size} [&>svg]:h-full [&>svg]:w-full`;
+  return `Html.span [ prop.className "${cls}"; prop.dangerouslySetInnerHTML """${svg}""" ]`;
+}
+
+/** Tabs(Tab("A", …), Tab("B", …)) — daisyUI's CSS-only radio-tabs: one
+ *  `<input type=radio role=tab>` per tab (sharing a `name` so exactly one is
+ *  active) followed by its `tab-content` panel.  Pure CSS switching — no MVU
+ *  state — so a Tabs group needs no Model field.  The group `name` is derived
+ *  from the tab values so distinct groups on a page don't share a radio set.
+ *  Each panel's body is an already-walked F# element (offside-safe on its own
+ *  line inside the panel's `children [ … ]`). */
+function primitiveTabs(c: Ctx): string {
+  const tabs = (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[]) ?? [];
+  if (tabs.length === 0) return "Html.none";
+  const group = `loom_tabs_${tabs.map((t) => t.value).join("_")}`;
+  const parts = tabs.flatMap((t, i) => {
+    const radioProps = [
+      "prop.type'.radio",
+      `prop.name "${group}"`,
+      'prop.role "tab"',
+      'prop.className "tab"',
+      `prop.ariaLabel "${t.label}"`,
+      // The first tab is active by default (uncontrolled — CSS owns the switch).
+      ...(i === 0 ? ["prop.defaultChecked true"] : []),
+    ];
+    const body = asElement(t.bodyJsx);
+    return [
+      `    Html.input [ ${radioProps.join("; ")} ]`,
+      `    Html.div [ prop.role "tabpanel"; prop.className "tab-content p-4"; prop.children [\n      ${body}\n    ] ]`,
+    ];
+  });
+  return `(Html.div [ prop.role "tablist"; prop.className "tabs tabs-bordered"; prop.children [\n${parts.join(
+    "\n",
+  )}\n  ] ])`;
+}
+
+// --- Controlled input primitives (MVU two-way binding) --------------------
+// Each binds a page `state` field: it READS `model.<Field>` and its `onChange`
+// DISPATCHES `Set<Field>` — the Msg + update arm the MVU projection emits from
+// `collectPageBoundState` (update-emit.ts).  `c.bind` is the state field name;
+// the setter Msg is `Set<Pascal(bind)>` (matching `boundSetMsg`).  An input with
+// no resolvable state bind (`hasBind` false) renders an uncontrolled stub so the
+// page still compiles.
+
+/** The daisyUI label above a form-control input (skipped when the label is
+ *  empty — e.g. a bare `Field(bind: x)`). */
+function inputLabel(labelText: string): string {
+  return labelText.trim() === ""
+    ? ""
+    : `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text"; prop.text "${labelText}" ] ] ]`;
+}
+
+/** The inline error line under an input — bound to the walked `error:` F#
+ *  expression (empty string at runtime → an empty line, harmless). */
+function inputError(c: Ctx): string {
+  if (!c.hasError) return "";
+  return `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text-alt text-error"; prop.text (${String(c.error)}) ] ] ]`;
+}
+
+/** Wrap a controlled input element in a daisyUI `form-control` with its label +
+ *  optional inline error.  Multi-child, but single-line-safe (inputs are flat). */
+function formControl(c: Ctx, inputEl: string): string {
+  const parts = [inputLabel(String(c.labelText ?? "")), inputEl, inputError(c)].filter(
+    (p) => p !== "",
+  );
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+  return `Html.div [ ${tidPart}prop.className "form-control w-full"; prop.children [ ${parts.join("; ")} ] ]`;
+}
+
+/** The `Set<Field>` Msg name + Model read for a bound input, or undefined when
+ *  the `bind:` didn't resolve to a state field (→ uncontrolled stub). */
+function bindTargets(c: Ctx): { model: string; setMsg: string } | undefined {
+  const bind = String(c.bind ?? "");
+  if (!c.hasBind || bind === "") return undefined;
+  const field = upperFirst(bind);
+  return { model: `model.${field}`, setMsg: `Set${field}` };
+}
+
+/** Field — a controlled daisyUI text input bound to a string state field. */
+function primitiveField(c: Ctx): string {
+  const t = bindTargets(c);
+  const input = t
+    ? `Html.input [ prop.className "input input-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full" ]`;
+  return formControl(c, input);
+}
+
+/** MultilineField — a controlled `<textarea>` bound to a string state field. */
+function primitiveMultilineField(c: Ctx): string {
+  const t = bindTargets(c);
+  const input = t
+    ? `Html.textarea [ prop.className "textarea textarea-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.textarea [ prop.className "textarea textarea-bordered w-full" ]`;
+  return formControl(c, input);
+}
+
+/** PasswordField — a controlled password input bound to a string state field. */
+function primitivePasswordField(c: Ctx): string {
+  const t = bindTargets(c);
+  const input = t
+    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password ]`;
+  return formControl(c, input);
+}
+
+/** NumberField — a controlled number input bound to an int/decimal state field.
+ *  `onChange` dispatches the raw string; the update arm parses it (so partial
+ *  input never throws).  The value is stringified for display. */
+function primitiveNumberField(c: Ctx): string {
+  const t = bindTargets(c);
+  const input = t
+    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number; prop.value (string ${t.model}); prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number ]`;
+  return formControl(c, input);
+}
+
+/** SelectField — a controlled `<select>` over an `options:` string sequence,
+ *  bound to a string state field.  `Seq.map` tolerates a list OR array options
+ *  expression; `yield!` is offside-safe inside the children list. */
+function primitiveSelectField(c: Ctx): string {
+  const t = bindTargets(c);
+  const options = String(c.optionsExpr ?? "[]");
+  const opts = `yield! (${options}) |> Seq.map (fun o -> Html.option [ prop.value o; prop.text o ])`;
+  const input = t
+    ? `Html.select [ prop.className "select select-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)); prop.children [ ${opts} ] ]`
+    : `Html.select [ prop.className "select select-bordered w-full"; prop.children [ ${opts} ] ]`;
+  return formControl(c, input);
+}
+
+/** Toggle — a controlled daisyUI checkbox toggle bound to a bool state field.
+ *  Renders the label inline (daisyUI's `label cursor-pointer` row) rather than
+ *  above, matching the toggle's horizontal affordance. */
+function primitiveToggle(c: Ctx): string {
+  const t = bindTargets(c);
+  const input = t
+    ? `Html.input [ prop.className "toggle"; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "toggle"; prop.type'.checkbox ]`;
+  const labelText = String(c.labelText ?? "");
+  const span =
+    labelText.trim() === ""
+      ? ""
+      : `Html.span [ prop.className "label-text"; prop.text "${labelText}" ]; `;
+  const row = `Html.label [ prop.className "label cursor-pointer justify-start gap-3"; prop.children [ ${span}${input} ] ]`;
+  if (!c.hasError)
+    return `Html.div [ prop.className "form-control w-full"; prop.children [ ${row} ] ]`;
+  return `Html.div [ prop.className "form-control w-full"; prop.children [ ${row}; ${inputError(c)} ] ]`;
+}
+
+/** Controlled Modal — a daisyUI dialog whose visibility is a bool state field
+ *  (`open: <stateBool>`).  Open by dispatching a sibling action that sets it
+ *  true; the built-in Close button dispatches `Set<Opened> false`.  Children are
+ *  the walked modal body (offside-safe on their own line inside `modal-box`). */
+function primitiveModalControlled(c: Ctx): string {
+  const opened = String(c.opened ?? "");
+  const field = upperFirst(opened);
+  const model = `model.${field}`;
+  const close = `Set${field}`;
+  const kids: string[] = [];
+  if (c.hasTitle)
+    kids.push(
+      `Html.h3 [ prop.className "text-lg font-bold"; prop.text "${String(c.title ?? "")}" ]`,
+    );
+  const body = asElement(String(c.childrenJsx ?? ""));
+  const action = `Html.div [ prop.className "modal-action"; prop.children [ Html.button [ prop.className "btn"; prop.onClick (fun _ -> dispatch (${close} false)); prop.text "Close" ] ] ]`;
+  const boxKids = [...kids, body, action].join("\n    ");
+  return `(Html.div [ prop.className (if ${model} then "modal modal-open" else "modal"); prop.children [\n  Html.div [ prop.className "modal-box"; prop.children [\n    ${boxKids}\n  ] ]\n] ])`;
 }
 
 // --- Layout containers (children-bearing) ---------------------------------
@@ -412,15 +630,36 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-container": primitiveContainer,
   "primitive-section": primitiveSection,
   "primitive-sticky": primitiveSticky,
+  // Stateless leaf/layout primitives (no MVU binding).
+  "primitive-icon": primitiveIcon,
+  "primitive-tabs": primitiveTabs,
+  // Controlled inputs (two-way state binding → Set<Field> Msg dispatch).
+  "primitive-field": primitiveField,
+  "primitive-multiline-field": primitiveMultilineField,
+  "primitive-password-field": primitivePasswordField,
+  "primitive-number-field": primitiveNumberField,
+  "primitive-select-field": primitiveSelectField,
+  "primitive-toggle": primitiveToggle,
+  "primitive-modal-controlled": primitiveModalControlled,
 };
 
 /** Build the procedural Feliz pack.  Implements the `LoadedPack` render
- *  contract without Handlebars — the loader's template path is unused here. */
+ *  contract without Handlebars — the loader's template path is unused here.
+ *
+ *  `templates` is normally empty (the procedural pack renders via `RENDERERS`,
+ *  not compiled `.hbs`), but `emitControlledModal` (walker `forms.ts`) gates the
+ *  state-controlled `Modal` on `pack.templates.has("primitive-modal-controlled")`
+ *  — a capability probe, not a render call (only `.has()` is used, never
+ *  `.get()`).  Seed that one key so the procedural renderer is recognised; the
+ *  sentinel value is never invoked. */
 export function felizPack(): LoadedPack {
+  const templates = new Map([
+    ["primitive-modal-controlled", { fn: () => "", filePath: "<feliz-procedural>" }],
+  ]) as unknown as LoadedPack["templates"];
   return {
     manifest: { name: "felizBasic", version: "v1", format: "tsx", emits: {}, imports: {} },
     rootDir: "<feliz-procedural>",
-    templates: new Map(),
+    templates,
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
       if (!fn) return `(* feliz pack: no renderer for "${name}" *)`;

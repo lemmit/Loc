@@ -7,6 +7,7 @@ import { validateDomainServices } from "./checks/domain-service-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
+  validateFindGates,
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
@@ -72,6 +73,7 @@ import {
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
+import { validateTimerSources } from "./checks/timer-checks.js";
 import { validateUiBodies } from "./checks/ui-checks.js";
 import {
   validateEventChannelAmbiguous,
@@ -162,6 +164,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // Tenancy (multi-tenancy Phase 1a): registry existence, the explicit-
     // stance lint, marker-without-declaration, conflicting markers.
     validateTenancy(sys, diags);
+    // Timer sources (scheduling.md, M-T4.1): cadence well-formedness, the
+    // infra-emitted tick-event shape, single-fire state requirement, and the
+    // dead-config unbound warning.
+    validateTimerSources(sys, diags);
     // Advisory index-suggestion lint (uniqueness-and-indexes.md §11,
     // D-INDEX-SUGGEST) — WARNING-severity `loom.index-suggestion` for a
     // query-filtered column with no covering index.  Never auto-derives; rides
@@ -188,6 +194,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
     validateViewGates(c, diags);
+    validateFindGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);

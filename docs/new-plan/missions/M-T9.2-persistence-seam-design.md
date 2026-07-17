@@ -6,6 +6,16 @@
 
 ---
 
+## Addendum (2026-07-17) — the `QueryTarget` decline is cost/benefit, not impossibility
+
+*An independent re-read of `lowerToDrizzle` ↔ `lowerToSqlAlchemy` ↔ `renderJpqlWhere` during a separate "is Loom real?" audit agreed with the **scoping** below but flagged that §0.7's rationale on the flagship is overstated — recording the correction so a future reader doesn't treat "declined" as "cannot be done."*
+
+§0.7 argues a shared dispatcher "**cannot** unify a uniform-recurse walk (Python) with a split-by-role walk (Drizzle)." That is true only of a **string-returning** dispatcher. The whole point of the `Target` pattern this repo already uses (`ExprTarget`) is that the dispatcher owns the walk and the leaf owns the spelling — and an **AST/callback-returning** `QueryTarget<Q>` (exactly the §2.3.1 sketch) does the column/value role-split *once* and hands `compare(op, col, value)` to leaves that emit `eq(col,val)` (Drizzle), `(col op val)` (SQLAlchemy), or a JPQL string. The combinator-vs-operator divergence is textbook leaf divergence, not a structural blocker; the bare-bool / unary-bool normalization arms Drizzle carries are a `boolColumn(col)` leaf.
+
+So the **write-path** decline is a genuine hard wall (five framework-native composition topologies — EF change-tracking, Spring `save()`, Ecto changeset tuples, Drizzle↔SQLAlchemy procedures), but the **`QueryTarget`** decline is a **cost/benefit** judgment, not an impossibility: it nets only 3 backends (.NET/Elixir already lower queries through `ExprTarget`), the detection/classification/intrinsic-key substrate is already shared, and the `*_INTRINSIC_SQL` leaf tables stay per-backend regardless — so ~9 shared arms + the deep-scope composition (currently triplicated: TS `:144-156` / Py `:241-254` / Java `:121-131`) behind a ~10-method interface is a *reasonable* "not worth it," but a reviewer could legitimately land it. **Consequence:** if query-path feature traffic later concentrates the recurring cost (a wave of custom-find / capability-filter work across TS/Py/Java), reopen `QueryTarget` as an AST-returning seam — the decline was a present-day ROI call, not a law. (Tracked in `T9-toolchain-health.md` → M-T9.2 refinement.)
+
+---
+
 ## 0.7 Implementation finding #3 (the conclusion) — `QueryTarget` declines too; the realizable seam is seed + the already-shared substrate
 
 *(Recorded after reading `lowerToDrizzle` and `lowerToSqlAlchemy` at the byte level to build the seam — the "recommended" slice 2.)*

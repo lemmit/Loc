@@ -1,5 +1,10 @@
 # Frontend feature-parity audit
 
+> **SUPERSEDED (2026-07-16)** by [`frontend-parity-audit-2026-07.md`](frontend-parity-audit-2026-07.md),
+> which adds the **Feliz (F#/Fable/Elmish)** frontend this pass predates and
+> reports a 🔴 silent gap (24 page primitives with no Feliz renderer). Kept for
+> history — the four-JSX-frontend findings below remain code-verified.
+
 > Status: **empirical pass — 2026-06-21; refreshed 2026-06-24.**  Covers the
 > four registered frontends (React, Vue, Svelte, Angular) plus the Phoenix
 > LiveView (HEEx) fullstack render path, and every shipped design pack.

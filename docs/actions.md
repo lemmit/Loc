@@ -99,7 +99,16 @@ page OrderDetail {
 ```
 
 - The subject is `await <api>.<Agg>.<op>(args)` — an instance operation, so it is
-  invoked against the page's **route-id record** (a detail page).
+  invoked against the page's **route-id record**. The hosting page **must** declare
+  a `:id` route param (a detail page): the instance is that record. A paramless page
+  has no record in scope, so an instance-op `match await` there is rejected on every
+  frontend (`loom.instance-effect-needs-route-id`) — host it on a `/…/:id` page, or
+  drive the op through an `OperationForm`.
+- The `args` build the request payload, so they must **match the operation
+  signature** — one argument per parameter, in order (a trailing `optional` param
+  may be omitted). A count mismatch is rejected (`loom.match-await-arg-mismatch`),
+  and a literal argument of the wrong type (`confirm(42)` for a `string` param) is
+  rejected (`loom.match-await-arg-type`) — rather than shipping a broken request.
 - Each arm names a **variant** of the op's `or`-union: the **success** variant is
   the aggregate itself (`Order`); the rest are **error** variants.
 - Arm bodies run statements (state writes, `navigate`), binding the narrowed
@@ -111,6 +120,12 @@ page OrderDetail {
 
 The JS frontends run the async boundary in the browser: await the mutation, reify
 a thrown `ApiError` back into the error variant, then `switch` on the tag.
+
+The **Feliz** frontend reaches the same result through Elmish MVU rather than
+`await`/`switch`: the action dispatches a `Msg`, the `update` fn fires
+`Cmd.OfAsync.perform Api.<fn> … <ResultMsg>` (`src/generator/feliz/update-emit.ts`),
+and a result-`Msg` arm branches on the variant tag — the F#/Elmish equivalent of
+the JS try/catch/switch below.
 
 ```tsx
 const confirm = async () => {

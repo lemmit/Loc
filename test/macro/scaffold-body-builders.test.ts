@@ -213,6 +213,54 @@ describe("scaffoldOperations — per-operation modals", () => {
   });
 });
 
+describe("scaffold list/detail — internal & secret fields stay off the page", () => {
+  // A scaffold list/detail renders the API-read wire shape, which excludes
+  // `internal`/`secret`-access fields (wire-projection.ts `forApiRead`).  If the
+  // scaffold enumerated them, the emitted React would reference a column the
+  // client DTO never carries and fail `tsc`.  Capability mixins (`tenantOwned`,
+  // `softDeletable`) inject exactly such `internal` fields, so this is the gate
+  // that keeps `with scaffold` compiling across the multi-tenant/soft-delete
+  // turn.  Managed/token fields (`deletedAt`, `version`) ARE on the wire and
+  // must stay.
+  const withAccessFields = `
+    system S {
+      context C {
+        aggregate Widget {
+          name: string
+          tenantId: string internal
+          apiKey: string secret
+          deletedAt: datetime? managed
+          version: int token
+        }
+        repository Widgets for Widget { }
+      }
+    }
+  `;
+
+  it("scalarColumnsForAggregate drops internal + secret, keeps managed/token", async () => {
+    const { model, errors } = await parseString(withAccessFields);
+    expect(errors).toEqual([]);
+    const widget = findNode(model, "Aggregate", "Widget");
+    const names = scalarColumnsForAggregate(widget).map((c) => c.name);
+    expect(names).toContain("name");
+    expect(names).toContain("deletedAt");
+    expect(names).toContain("version");
+    expect(names).not.toContain("tenantId");
+    expect(names).not.toContain("apiKey");
+  });
+
+  it("scaffoldDetails omits internal + secret field rows", async () => {
+    const { model, errors } = await parseString(withAccessFields);
+    expect(errors).toEqual([]);
+    const widget = findNode(model, "Aggregate", "Widget");
+    const src = printExpr(scaffoldDetails(widget));
+    expect(src).toContain('KeyValueRow("Name"');
+    expect(src).toContain('KeyValueRow("Deleted At"');
+    expect(src).not.toContain("tenantId");
+    expect(src).not.toContain("apiKey");
+  });
+});
+
 describe("scaffoldDetails — aggregate read view + related cards", () => {
   it("builds a field card (scalars + flattened value-objects) and a related table card", async () => {
     const { model, errors } = await parseString(`

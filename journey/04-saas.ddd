@@ -1,0 +1,136 @@
+// Stage 4 — the SaaS turn. Same domain, now multi-tenant + authenticated.
+// New surface: a `user {}` JWT claim shape, `tenancy by ... of <Registry>`,
+// the built-in capabilities `tenantOwned` / `auditable` / `softDeletable` /
+// `versioned` (+ the `softDelete` operation macro), a `permissions {}`
+// catalogue, `requires` authorization gates (403) distinct from
+// `precondition` domain gates (400), and `auth: required` / `auth: ui`.
+//
+// The whole point: none of the Stage-3 domain code changed. Multi-tenancy,
+// audit columns, soft-delete, optimistic concurrency, and per-request tenant
+// scoping are all *mixed in* by name, not hand-threaded through every method.
+system Todo {
+
+  // The verifier decodes this claim shape per request; `currentUser.<field>`
+  // type-checks against it.
+  user {
+    id: string
+    role: string
+    tenantId: string
+    permissions: string[]
+  }
+
+  // One line turns the app multi-tenant: the tenant id rides `user.tenantId`,
+  // and `Organization` is the tenant registry (self-scoped, claim-less signup).
+  tenancy by user.tenantId of Organization
+
+  subdomain Core {
+
+    permissions {
+      projectsArchive,
+      tasksComplete
+    }
+
+    context Work {
+
+      enum Status { Open, InProgress, Done }
+      enum Priority { Low, Normal, High, Urgent }
+
+      event TaskCompleted   { task: Task id, at: datetime }
+      event ProjectArchived { project: Project id, at: datetime }
+
+      // The tenant registry — self-keyed, no tenant marker.
+      aggregate Organization with crudish {
+        name: string
+        invariant name.length > 0
+        derived display: string = name
+      }
+
+      // tenantOwned  → tenantId column + per-request read filter + create stamp
+      // auditable    → createdAt/updatedAt/createdBy/updatedBy + stamps
+      // softDeletable→ isDeleted/deletedAt + read filter; softDelete → ops
+      aggregate Project with crudish, tenantOwned, auditable, softDeletable, softDelete {
+        name: string
+        description: string?
+        archived: bool
+
+        invariant name.length > 0
+        derived display: string = name
+
+        operation archive() {
+          requires currentUser.role == "admin"
+                || currentUser.permissions.contains(permissions.projectsArchive)
+          precondition archived == false
+          archived := true
+          emit ProjectArchived { project: id, at: now() }
+        }
+      }
+
+      repository Projects for Project {
+        find active(): Project[] where this.archived == false
+      }
+
+      // versioned → optimistic-concurrency `version` column + 409 on conflict
+      aggregate Task with crudish, tenantOwned, auditable, softDeletable, softDelete, versioned {
+        project: Project id
+        title: string
+        status: Status
+        priority: Priority
+        due: datetime?
+
+        invariant title.length > 0
+        derived display: string = title
+        derived active: bool = status != Done
+
+        operation complete() {
+          requires currentUser.role == "admin"
+                || currentUser.permissions.contains(permissions.tasksComplete)
+          precondition status != Done
+          status := Done
+          emit TaskCompleted { task: id, at: now() }
+        }
+
+        test "completing a task is idempotent-guarded" {
+          let t = Task.create({ project: "00000000-0000-0000-0000-000000000001",
+                                title: "ship", status: Open, priority: High })
+          t.complete()
+          expect(t.status).toBe(Done)
+          expect(t.complete()).toThrow()
+        }
+      }
+
+      criterion InProject(projectId: Project id) of Task = this.project == projectId
+
+      repository Tasks for Task {
+        find byProject(projectId: Project id): Task[] where this.project == projectId
+      }
+
+      retrieval OpenByPriority(projectId: Project id) of Task {
+        where: InProject(projectId) && this.status != Done
+        sort:  [priority desc]
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Core]) { }
+
+  storage primary { type: postgres }
+  resource appState { for: Work, kind: state, use: primary,
+                      index: [Task.status, Task.project, Project.archived] }
+
+  deployable api {
+    platform: node,
+    contexts: [Work],
+    dataSources: [appState],
+    port: 3000,
+    auth: required
+  }
+
+  deployable webApp {
+    platform: react,
+    targets: api,
+    ui: WebApp,
+    port: 3001,
+    design: mantine,
+    auth: ui
+  }
+}

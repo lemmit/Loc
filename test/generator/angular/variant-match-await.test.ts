@@ -106,8 +106,11 @@ describe("Angular variant-`match await` (MVU Stage 2)", () => {
     );
     // The service method types the response as the discriminated union (the URL
     // template is a runtime string — assert only the union-typed post call).
+    // The REST path segment is the SNAKE-cased op name (`place_order`), the
+    // convention the Hono route emitter registers (`POST /{id}/place_order`);
+    // the TS method keeps its camelCase name (`placeOrder`, asserted above).
     expect(api).toContain("return this.http.post<PlaceOrderOrderResponse>(");
-    expect(api).toContain("/placeOrder`, input);");
+    expect(api).toContain("/place_order`, input);");
     // The discriminated-union type alias: the success variant intersects its
     // response interface with the tag, the error variant is its own tagged object.
     expect(api).toContain("export type PlaceOrderOrderResponse =");

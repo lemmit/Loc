@@ -4,6 +4,7 @@ import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/ar
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
+  type AngularFieldGroupSpec,
   type AngularFormControlSpec,
   type AngularIdTargetSpec,
   addNg,
@@ -49,6 +50,9 @@ export interface AngularOperationFormSpec {
   /** Dynamic-row (`X[]` of value-object) fields — page-shell adds a `FormArray`
    *  control + the add/remove methods per entry. */
   fieldArrays?: AngularFieldArraySpec[];
+  /** Single-value-object (`price: Money`) params — page-shell adds a nested
+   *  `FormGroup` control per entry. */
+  fieldGroups?: AngularFieldGroupSpec[];
 }
 
 /** Resolve the operation the call targets, plus the template-scope id
@@ -125,12 +129,15 @@ export function renderAngularOperationForm(
         idTargets: [],
         fieldArrays: [],
         arrayMarkup: [],
+        fieldGroups: [],
+        groupMarkup: [],
       };
   const fieldMarkup = parts.flatMarkup;
 
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-submit`);
   for (const name of parts.flatNames) ctx.collectedTestids.add(`${ns}-input-${name}`);
+  for (const g of parts.fieldGroups) ctx.collectedTestids.add(`${ns}-input-${g.fieldName}`);
 
   const spec: AngularOperationFormSpec = {
     formVar,
@@ -142,6 +149,7 @@ export function renderAngularOperationForm(
     controls: parts.flatControls,
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
+    fieldGroups: parts.fieldGroups,
   };
   angularSink(ctx).opForms.push(spec);
 
@@ -156,7 +164,9 @@ export function renderAngularOperationForm(
   });
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
-    ...[...fieldMarkup, ...parts.arrayMarkup, submit].map((m) => `${inner}${m}`),
+    ...[...fieldMarkup, ...parts.groupMarkup, ...parts.arrayMarkup, submit].map(
+      (m) => `${inner}${m}`,
+    ),
     `${close}</form>`,
   ].join("\n");
 }

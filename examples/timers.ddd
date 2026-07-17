@@ -1,0 +1,54 @@
+// timers.ddd — `timerSource`: time as an event source (scheduling.md, M-T4.1).
+//
+// A `timerSource` fires a plain domain `event` on a wall-clock cadence; a
+// workflow reacts to that tick with the EXISTING `create(e) by` / `on(e)`
+// triggers — there is no `schedule` trigger and no new workflow grammar.  The
+// cadence lives on the system-scope binding (swappable per environment), the
+// same domain/infra split as `channel` / `channelSource`.
+//
+// Generated (node): a `scheduler.ts` whose per-timer job takes a Postgres
+// advisory lock (single-fire across replicas), builds the tick event, and
+// dispatches it through the same in-process dispatcher the sagas use.
+system Reaping {
+  subdomain Ops {
+    context Orders {
+      aggregate Sweep {
+        runId: string
+        firedAt: datetime
+      }
+
+      // A tick is an ordinary event — a fact, carrying the fire time (`at`) and
+      // a fresh instance id the reactor correlates by.  No marked subtype:
+      // timer-ness is derived from membership in a timerSource's `for:`.
+      event SweepTick { sweep: Sweep id, at: datetime }
+      event SweepRan  { sweep: Sweep id, at: datetime }
+
+      // The dispatcher is channel-routed, so the tick is carried like any event.
+      channel Ticks { carries: SweepTick }
+
+      // React with the EXISTING event-triggered create — one saga instance per
+      // tick, correlated by the tick's id.  Zero new workflow grammar.
+      workflow SweepRun eventSourced {
+        sweep: Sweep id
+        firedAt: datetime
+        create(t: SweepTick) by t.sweep { emit SweepRan { sweep: t.sweep, at: t.at } }
+        apply(r: SweepRan) { firedAt := r.at }
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+  resource opsState { for: Orders, kind: state, use: pg }
+  api OrdersApi from Ops
+  deployable d {
+    platform: node
+    contexts: [Orders]
+    dataSources: [opsState]
+    serves: OrdersApi
+    port: 4000
+  }
+
+  // ── System scope — infrastructure binding, mirrors channelSource. ──
+  // Cadence lives HERE, swappable per environment.
+  timerSource sweep { for: SweepTick, cron: "*/5 * * * *" }   // every 5 min — standard cron
+}

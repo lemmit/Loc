@@ -526,7 +526,7 @@ export function renderEsController(
   const aggSnake = snake(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
   // `GET /<plural>/<find>` actions — event-sourced finds run load-all + filter.
-  const findActions = renderFindActions(ctxModule, agg, ctx);
+  const findActions = renderFindActions(appModule, ctxModule, agg, ctx);
 
   const create =
     (agg.creates ?? []).length > 0

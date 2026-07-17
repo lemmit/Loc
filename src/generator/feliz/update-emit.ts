@@ -10,6 +10,7 @@ import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
   FelizAction,
   FelizAsyncEffect,
+  FelizBoundState,
   FelizFieldArray,
   FelizForm,
   FelizMutation,
@@ -23,6 +24,43 @@ import { formHasFieldErrors, formTouchedField, formTouchMsg } from "./wire.js";
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
   return upperFirst(action);
+}
+
+/** Coerce a numeric-literal `state` init to an F# `decimal` literal when the
+ *  field is `money`/`decimal`.  A DSL `price: money = 0` renders the init as the
+ *  bare int `0`, which F# then implicitly converts `int → decimal` — a
+ *  conversion Fable rejects (`op_Implicit not supported`).  Suffixing `m`
+ *  (`0` → `0m`, `9.99` → `9.99m`) makes it a decimal literal outright.  Only
+ *  touches a plain numeric literal; any other init expression is left as-is. */
+function decimalLit(rendered: string, type: StateFieldIR["type"]): string {
+  if (typeToFs(type) !== "decimal") return rendered;
+  return /^-?\d+(\.\d+)?$/.test(rendered) ? `${rendered}m` : rendered;
+}
+
+/** The `Set<Field>` Msg case a two-way-bound input contributes.  A `bool` state
+ *  (a `Toggle` / controlled `Modal`) carries the bool directly; every other
+ *  state (`Field`/`NumberField`/`SelectField`/…) carries the raw input `string`
+ *  and the update arm converts it to the field's type. */
+function boundSetMsg(b: FelizBoundState): string {
+  const payload = typeToFs(b.type) === "bool" ? "bool" : "string";
+  return `  | Set${upperFirst(b.name)} of ${payload}`;
+}
+
+/** The `update` arm a two-way-bound input contributes — assign the Model field
+ *  from the dispatched value, converting the raw input `string` to the field's
+ *  type (a bad/partial number parses to the zero value, never throwing). */
+function boundSetArm(b: FelizBoundState): string {
+  const field = upperFirst(b.name);
+  const fs = typeToFs(b.type);
+  const conv =
+    fs === "bool"
+      ? "v"
+      : fs === "int"
+        ? "(match System.Int32.TryParse v with | true, n -> n | _ -> 0)"
+        : fs === "decimal"
+          ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
+          : "v";
+  return `  | Set${field} v -> { model with ${field} = ${conv} }, Cmd.none`;
 }
 
 /** The `Msg` cases a form's dynamic-row fields contribute — an `Add`/`Remove of
@@ -133,7 +171,7 @@ export function renderInit(
       : []),
     ...state.map((f) => {
       const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
-      const v = f.init ? renderFsExpr(f.init, ctx) : fsZeroValue(f.type);
+      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : fsZeroValue(f.type);
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
@@ -178,12 +216,15 @@ export function renderMsg(
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
   opActions: readonly FelizAction[] = [],
+  boundState: readonly FelizBoundState[] = [],
 ): string {
   const cases = [
     // Under a page gate the probe carries the decoded claims (None on 401);
     // otherwise it's a bare authenticated? boolean.
     ...(authUi ? [`  | SessionChecked of ${pageGate ? "CurrentUser option" : "bool"}`] : []),
     ...(routed ? ["  | UrlChanged of string list"] : []),
+    // One `Set<Field>` per two-way-bound controlled input (Field/Toggle/…).
+    ...boundState.map(boundSetMsg),
     ...actions.map((a) => {
       const p = a.params[0];
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
@@ -218,11 +259,13 @@ export function renderMsg(
       `  | ${f.submitMsg}`,
       `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
-    // An async effect (`match await`): a trigger carrying the route id + a
-    // result carrying the decoded `<Succ> option` (success tag → Some, else None).
+    // An async effect (`match await`): a trigger carrying the route id (+ any op
+    // args) + a result carrying the decoded `<outcome> option` (a matched variant
+    // → Some, an unmatched tag / failure → None/Error).  `<outcome>` is the single
+    // variant's record type, or the discriminated-union type for a multi-variant.
     ...asyncEffects.flatMap((e) => [
-      `  | ${e.triggerMsg} of string`,
-      `  | ${e.resultMsg} of Result<${e.successType} option, string>`,
+      `  | ${e.triggerMsg} of ${["string", ...e.params.map((p) => p.fsType)].join(" * ")}`,
+      `  | ${e.resultMsg} of Result<${e.outcomeType} option, string>`,
     ]),
     // A one-click action (`Action { instance.op }`): a trigger carrying the
     // route id + a `Done` result (the op returns 204 → `unit`).
@@ -369,8 +412,11 @@ export function renderUpdate(
   asyncEffects: readonly FelizAsyncEffect[] = [],
   pageGate = false,
   opActions: readonly FelizAction[] = [],
+  boundState: readonly FelizBoundState[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
+  // One `| Set<Field> v -> …` arm per two-way-bound controlled input.
+  const boundArms = boundState.map(boundSetArm);
   const byIdReads = reads.filter((r) => r.single);
   // The auth gate: the session probe resolves to Authed / Anon.  Under a page
   // gate it also stashes the decoded claims (`Some user`) so a gated view can
@@ -526,21 +572,40 @@ export function renderUpdate(
   // (its body rendered with `p` bound), the `else` body under BOTH `(Ok None)`
   // (the tag didn't match / no success) and `(Error _)` (a thrown / non-2xx).
   const asyncEffectArms = asyncEffects.flatMap((e) => {
-    const successCtx: FsExprCtx = {
-      stateNames,
-      locals: new Set(e.binding ? [e.binding] : []),
-    };
     const elseCtx: FsExprCtx = { stateNames, locals: new Set() };
-    return [
-      `  | ${e.triggerMsg} id -> model, Cmd.OfAsync.perform (Api.${e.apiFn} id) () ${e.resultMsg}`,
-      assembleArm(
-        `  | ${e.resultMsg} (Ok (Some ${e.binding ?? "_"})) ->`,
-        e.successBody,
-        successCtx,
-      ),
-      assembleArm(`  | ${e.resultMsg} (Ok None) ->`, e.elseBody, elseCtx),
-      assembleArm(`  | ${e.resultMsg} (Error _) ->`, e.elseBody, elseCtx),
+    // Trigger arm: destructure `(id, <param>, …)` (named after the op params) and
+    // fire the curried api fn.
+    const argNames = e.params.map((p) => p.name);
+    const triggerPat = e.params.length === 0 ? "id" : `(id, ${argNames.join(", ")})`;
+    const apiArgs = ["id", ...argNames].join(" ");
+    const arms: string[] = [
+      `  | ${e.triggerMsg} ${triggerPat} -> model, Cmd.OfAsync.perform (Api.${e.apiFn} ${apiArgs}) () ${e.resultMsg}`,
     ];
+    // One result arm per named variant.  Single-variant → `(Ok (Some b))`;
+    // multi-variant → `(Ok (Some (<DuCase> b)))`.  A variant that binds a local
+    // its body never reads gets a `_` binder so `--warnings-as-errors` stays green.
+    for (const v of e.variants) {
+      const ctx: FsExprCtx = { stateNames, locals: new Set(v.binding ? [v.binding] : []) };
+      const inner = (b: string) => (e.isMulti ? `(${v.duCase} ${b})` : b);
+      const arm = assembleArm(
+        `  | ${e.resultMsg} (Ok (Some ${inner(v.binding ?? "_")})) ->`,
+        v.body,
+        ctx,
+      );
+      if (v.binding) {
+        const bodyPortion = arm.slice(arm.indexOf("\n") + 1);
+        const used = new RegExp(`\\b${v.binding}\\b`).test(bodyPortion);
+        arms.push(used ? arm : `  | ${e.resultMsg} (Ok (Some ${inner("_")})) ->\n${bodyPortion}`);
+      } else {
+        arms.push(arm);
+      }
+    }
+    // The unmatched / failure outcome reduces the `else` body — or a no-op when
+    // the source had no `else` (an empty body → `model, Cmd.none`).
+    const elseBody = e.elseBody ?? [];
+    arms.push(assembleArm(`  | ${e.resultMsg} (Ok None) ->`, elseBody, elseCtx));
+    arms.push(assembleArm(`  | ${e.resultMsg} (Error _) ->`, elseBody, elseCtx));
+    return arms;
   });
   // A one-click action: the trigger fires the id-qualified POST `Cmd`; on
   // success it refetches the detail read (`pageCmd` when byId reads exist, so the
@@ -557,6 +622,7 @@ export function renderUpdate(
   const arms = [
     ...authArms,
     ...routeArms,
+    ...boundArms,
     ...actionArms,
     ...storeArms,
     ...asyncEffectArms,

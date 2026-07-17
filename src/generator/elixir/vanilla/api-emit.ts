@@ -350,7 +350,7 @@ ${GUARD_RESCUE}
       : "";
 
   // `GET /<plural>/<find>` actions for the aggregate's custom finds.
-  const findActions = renderFindActions(ctxModule, agg, ctx);
+  const findActions = renderFindActions(appModule, ctxModule, agg, ctx);
 
   // Audited lifecycle actions — the create/destroy handler stages an audit row
   // INSIDE a forced `Repo.transaction` so it commits atomically with the

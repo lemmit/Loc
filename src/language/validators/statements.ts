@@ -7,12 +7,16 @@ import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Aggregate,
   AssignOrCallStmt,
+  BuilderCall,
   Create,
   Destroy,
   EmitStmt,
+  Expression,
+  FunctionDecl,
   LValue,
   Model,
   Operation,
+  Parameter,
   Statement,
 } from "../generated/ast.js";
 import {
@@ -23,6 +27,7 @@ import {
   isFunctionDecl,
   isLetStmt,
   isMemberSuffix,
+  isModel,
   isNameRef,
   isOperation,
   isPostfixChain,
@@ -36,6 +41,8 @@ import {
   type Env,
   findFunction,
   findOperation,
+  freeCallFunction,
+  freeCallPredicate,
   isAssignable,
   lookupRootMember,
   makeEnv,
@@ -45,6 +52,7 @@ import {
   stepInto,
   stepIntoNode,
   T,
+  typeAfterSuffix,
   typeOf,
   typeToString,
   withTags,
@@ -55,6 +63,7 @@ import {
   pathString,
   warnSensitivityDrop,
 } from "./_shared.js";
+import { recordFieldTypes, resolveRecordDecl } from "./builder-call.js";
 
 /** An aggregate action whose body reuses operation-body statement
  * rules: today's `operation`, plus the lifecycle `create` / `destroy`
@@ -181,6 +190,14 @@ export function checkStatement(
   env: Env,
   accept: ValidationAcceptor,
 ): Env {
+  // Type-check any record construction reachable from this statement's
+  // expressions (`price := Coin { amount: … }`, emit-field values, nested
+  // constructions) against the record's declared field types.  Every
+  // sub-expression of the statement shares this incoming env — a `let`'s own
+  // value can't reference the binding it introduces, and later statements get
+  // the extended env passed in.
+  checkConstructionArgTypes(stmt, env, accept);
+  checkExprCallArgs(stmt, env, accept);
   if (isPreconditionStmt(stmt)) {
     const t = typeOf(stmt.expr, env);
     if (t.kind !== "primitive" || t.name !== "bool") {
@@ -284,6 +301,134 @@ export function checkAssignOrCall(
   }
 }
 
+/** Entry-VALUE type check for record construction (`X { field: value, … }`)
+ *  reachable from an operation / create / destroy body — the type-checking twin
+ *  of `checkConstructionFields` (which validates entry NAMES model-wide without
+ *  an env).  Value typing needs the lexical `Env`, so it hooks into the
+ *  statement walk here rather than at the model-stream level.  Streams every
+ *  `BuilderCall` descendant of the statement (nested constructions included) and
+ *  checks each named entry's value type against the record's declared field type,
+ *  mirroring `checkEmit`: suppress on `unknown` (a typo'd bare name is reported
+ *  once at its source by `checkUnknownNameRefs`, not doubly here) and admit
+ *  numeric-literal promotion (`amount: 5` into a `money`/`decimal` field) exactly
+ *  as `checkEmit` / `:=` do.  A construction inside a binding lambda types its
+ *  lambda-bound refs as `unknown` under this body env → suppressed (skipped, not
+ *  false-flagged). */
+export function checkConstructionArgTypes(
+  node: AstNode,
+  env: Env,
+  accept: ValidationAcceptor,
+): void {
+  for (const n of AstUtils.streamAst(node)) {
+    if (n.$type !== "BuilderCall") continue;
+    const bc = n as BuilderCall;
+    const model = AstUtils.getContainerOfType(bc, isModel);
+    if (!model) continue;
+    const decl = resolveRecordDecl(bc, model);
+    if (!decl) continue; // primitive / component / unknown — not a record
+    const types = recordFieldTypes(decl);
+    for (const entry of bc.entries) {
+      // Positional entries (no name) and unknown field NAMES are
+      // `checkConstructionFields`'s concern, not this value check.
+      if (typeof entry.name !== "string") continue;
+      const expected = types.get(entry.name);
+      if (!expected || expected.kind === "unknown") continue;
+      const actual = typeOf(entry.value, env);
+      if (
+        actual.kind !== "unknown" &&
+        !isAssignable(actual, expected) &&
+        !canPromoteLiteralTo(entry.value, expected)
+      ) {
+        accept(
+          "error",
+          `Field '${entry.name}' of '${bc.type}' expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          { node: entry, property: "value", code: "loom.construction-field-type" },
+        );
+      }
+      warnSensitivityDrop(actual, expected, accept, { node: entry, property: "value" });
+    }
+  }
+}
+
+/** Arity + type check for calls in EXPRESSION position (`derived x = fee(a)`,
+ *  `let y := compute(a, b)`, `precondition check(a)`, `derived t = price.scaled(f)`)
+ *  — the expression-walk companion to `checkCallStmt`'s statement-call check
+ *  (M-T6.18 gap #2).  Streams every `PostfixChain` reachable from `node` and
+ *  covers two call shapes:
+ *
+ *   - **Free call** (`name(args)` — a bare `NameRef` head with a leading
+ *     `CallSuffix`): when the name resolves to a user `FunctionDecl` (via
+ *     `freeCallFunction`, kept in lockstep with `typeOfFreeCall`).  Value-object
+ *     constructors, criteria, policy-fns, and duration builtins resolve to
+ *     `undefined` and are skipped — they aren't free user-function calls / have
+ *     their own gates.
+ *   - **Member call** (`recv.method(args)`): walk the chain's running receiver
+ *     type and, at each `MemberSuffix` invocation, resolve the member via
+ *     `stepIntoNode`.  It returns a node only for function / operation members of
+ *     an entity / aggregate / value object receiver — so collection ops
+ *     (`.sum`/`.count`/`.filter` on arrays) and scalar intrinsics (primitive
+ *     receivers) resolve to `undefined` and are skipped, no false positives.
+ *
+ *  Both shapes check through the shared `checkCallArgs` (arity +
+ *  `unknown`-suppression + numeric-literal promotion).  Bare call STATEMENTS
+ *  (`fee(5)` / `o.f(5)` alone) are an `LValue`, not a `PostfixChain`, so they
+ *  stay `checkCallStmt`'s job with no double report. */
+export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcceptor): void {
+  for (const n of AstUtils.streamAst(node)) {
+    if (!isPostfixChain(n)) continue;
+    const first = n.suffixes[0];
+    if (first && isCallSuffix(first) && isNameRef(n.head)) {
+      // Free call at the front (`fee(args)`).  Member accesses on its return
+      // (`fee(x).bar`) are a niche running-type case we don't chase here.
+      const fn = freeCallFunction(n.head.name, env);
+      if (fn) {
+        checkCallArgs(
+          fn.params,
+          first.args.map((a) => a.value),
+          env,
+          `Function '${n.head.name}'`,
+          first,
+          accept,
+        );
+      } else {
+        // Criterion / policy-function predicate (`InRegion(r)`, `CanApprove(c)`).
+        // Its ARITY is already checked model-wide (loom.criterion-arity /
+        // checkPolicyFns), so only type-check the args — and only when the arity
+        // lines up, to avoid mis-pairing after a separately-reported miscount.
+        const predParams = freeCallPredicate(n.head.name, env);
+        if (predParams && predParams.length === first.args.length) {
+          checkArgTypesPositional(
+            predParams,
+            first.args.map((a) => a.value),
+            env,
+            `'${n.head.name}'`,
+            accept,
+          );
+        }
+      }
+      continue;
+    }
+    // Member-call chain (`recv.method(args)`): thread the running receiver type.
+    let curType: DddType = typeOf(n.head, env);
+    for (const s of n.suffixes) {
+      if (isMemberSuffix(s) && s.call && curType.kind !== "unknown") {
+        const member = stepIntoNode(curType, s.member);
+        if (member && (isFunctionDecl(member) || isOperation(member))) {
+          checkCallArgs(
+            member.params,
+            s.args.map((a) => a.value),
+            env,
+            `'${s.member}'`,
+            s,
+            accept,
+          );
+        }
+      }
+      curType = typeAfterSuffix(curType, s, env);
+    }
+  }
+}
+
 export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor): void {
   const ev = stmt.event?.ref;
   if (!ev) return;
@@ -340,6 +485,65 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
   }
 }
 
+/** Arity + per-argument type check for a resolved domain call (`bump("hi")`,
+ *  `o.bump(a)`) — the statement-call twin of `checkAsyncEffectArgs` / `checkEmit`
+ *  (M-T6.18 gap #2).  The callee is already resolved to an operation / function
+ *  with a fixed, all-required param list (the grammar has no optional/defaulted
+ *  params), so the discipline mirrors the sibling gates: strict arity, then
+ *  per-arg `isAssignable` with `unknown`-suppression (a typo'd bare arg is
+ *  reported once at its source) + numeric-literal promotion (`bump(5)` into a
+ *  `money`/`decimal` param).  On an arity mismatch we stop before the per-arg
+ *  loop — the positions no longer line up, so per-arg type errors would be
+ *  noise. */
+/** Per-argument type check (positional, over the overlap of params/args), shared
+ *  by the arity-and-type `checkCallArgs` and the type-ONLY predicate path.  Same
+ *  discipline as `checkEmit`: suppress on `unknown`, admit numeric-literal
+ *  promotion. */
+function checkArgTypesPositional(
+  params: Parameter[],
+  args: Expression[],
+  env: Env,
+  label: string,
+  accept: ValidationAcceptor,
+): void {
+  const n = Math.min(params.length, args.length);
+  for (let i = 0; i < n; i++) {
+    const expected = paramType(params[i]!);
+    if (expected.kind === "unknown") continue;
+    const actual = typeOf(args[i], env);
+    if (
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, expected) &&
+      !canPromoteLiteralTo(args[i], expected)
+    ) {
+      accept(
+        "error",
+        `Argument ${i + 1} of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+        { node: args[i]!, code: "loom.call-arg-type" },
+      );
+    }
+  }
+}
+
+function checkCallArgs(
+  params: Parameter[],
+  args: Expression[],
+  env: Env,
+  label: string,
+  node: AstNode,
+  accept: ValidationAcceptor,
+): void {
+  if (args.length !== params.length) {
+    accept(
+      "error",
+      `${label} expects ${params.length} argument${params.length === 1 ? "" : "s"}, got ${args.length}.`,
+      { node, code: "loom.call-arg-count" },
+    );
+    return;
+  }
+  checkArgTypesPositional(params, args, env, label, accept);
+}
+
 export function checkCallStmt(
   stmt: AssignOrCallStmt,
   agg: Aggregate,
@@ -351,12 +555,16 @@ export function checkCallStmt(
   if (lv.tail.length === 0 && lv.call) {
     const name = lv.head;
     const fn = findFunction(agg, name);
-    if (fn) return;
+    if (fn) {
+      checkCallArgs(fn.params, lv.args, env, `Function '${name}'`, stmt, accept);
+      return;
+    }
     const target = findOperation(agg, name);
     if (target) {
       if (target === op) {
         accept("warning", `Operation '${name}' calls itself.`, { node: stmt });
       }
+      checkCallArgs(target.params, lv.args, env, `Operation '${name}'`, stmt, accept);
       return;
     }
     accept("error", `Cannot resolve call to '${name}' from aggregate '${agg.name}'.`, {
@@ -399,7 +607,16 @@ export function checkCallStmt(
         `Member '${methodName}' is not callable — only operations and functions can be called.`,
         { node: lv },
       );
+      return;
     }
+    checkCallArgs(
+      (memberNode as Operation | FunctionDecl).params,
+      lv.args,
+      env,
+      `'${methodName}'`,
+      lv,
+      accept,
+    );
     return;
   }
   accept(

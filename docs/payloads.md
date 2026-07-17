@@ -42,7 +42,7 @@ Every aggregate, part, and value object carries a canonical, ordered
 `wireShape` (id → declared properties → containments → derived), synthesized
 once in enrichment. Every backend's DTO emitter walks the *same* list, so the
 JSON an aggregate takes on the network is identical across Hono, .NET, Phoenix,
-Python, Java (and the React/Vue/Svelte/Angular frontends) by construction — not
+Python, Java (and the React/Vue/Svelte/Angular/Feliz frontends) by construction — not
 by coincidence. This is the shape a union
 variant or a carrier argument projects through when it names an aggregate.
 

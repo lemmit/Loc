@@ -745,6 +745,48 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   return T.unknown;
 }
 
+/** The user `FunctionDecl` a free call `name(args)` resolves to, or `undefined`
+ *  when the call targets anything else — a value-object constructor, a criterion,
+ *  a policy function, a duration builtin, or an unresolved name.  Mirrors
+ *  `typeOfFreeCall`'s resolution ORDER exactly (same lookups, same shadowing) so
+ *  the arg-count/type validator and the type system can never disagree about
+ *  what a free call targets.  The validator uses this to arg-check ONLY the
+ *  unambiguous user-function case, leaving criteria / policy-fns / duration
+ *  builtins to their own gates. */
+export function freeCallFunction(name: string, env: Env): FunctionDecl | undefined {
+  const sym = env.resolve(name);
+  if (sym && isFunctionDecl(sym.origin)) return sym.origin;
+  if (sym && isValueObject(sym.origin)) return undefined; // VO constructor, not a function
+  const fn = lookupFunctionInScope(name, env);
+  if (fn) return fn;
+  if (lookupValueObjectByName(name, env)) return undefined; // VO shadows a top-level fn
+  if (lookupCriterionByName(name, env)) return undefined;
+  if (lookupPolicyFnByName(name, env)) return undefined;
+  const topFn = lookupTopLevelFunction(name, env);
+  if (topFn) return topFn;
+  return undefined; // duration builtin / unresolved — not the call-arg validator's concern
+}
+
+/** The parameter list of the criterion / policy-function a free call `name(args)`
+ *  targets, or `undefined` when it targets neither.  Mirrors `typeOfFreeCall`'s
+ *  order for the predicate arms (after function / value-object resolution, which
+ *  shadow a predicate).  Consumed by the arg-TYPE validator: a criterion / policy
+ *  call already has its ARITY checked model-wide (`loom.criterion-arity` /
+ *  `checkPolicyFns`), so the validator only type-checks the args this resolves. */
+export function freeCallPredicate(name: string, env: Env): Parameter[] | undefined {
+  // A function or value object shadows a predicate of the same name — the caller
+  // only reaches here when `freeCallFunction` already returned undefined, so
+  // guard the value-object case (functions are already excluded).
+  const sym = env.resolve(name);
+  if (sym && isValueObject(sym.origin)) return undefined;
+  if (lookupValueObjectByName(name, env)) return undefined;
+  const crit = lookupCriterionByName(name, env);
+  if (crit) return crit.params;
+  const pol = lookupPolicyFnByName(name, env);
+  if (pol) return pol.params;
+  return undefined;
+}
+
 /**
  * True iff a free call to `name` is an A5 duration-constructor BUILTIN in
  * `env` — i.e. `name` is one of `days`/`hours`/`minutes` AND no

@@ -4,6 +4,7 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -14,7 +15,12 @@ import {
 } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
-import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
+import {
+  collectJavaExprImports,
+  javaValueTypeForId,
+  renderJavaExpr,
+  renderJavaType,
+} from "../render-expr.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 
@@ -83,6 +89,30 @@ export function renderJavaController(
       if (rendered.includes("UUID")) imports.add("java.util.UUID");
     }
   }
+
+  // Authorization gates on finds (default-deny) — a `requires <expr>` runs in
+  // the controller action before delegating to the service, throwing
+  // ForbiddenException (→ 403 via ApiExceptionAdvice), the read-side twin of a
+  // view gate.  When the gate reads the principal the controller injects a
+  // `CurrentUserAccessor`; `requires true` needs neither.
+  const gatedFinds = declaredFinds(repo).filter((f) => !f.synthesized && f.requires);
+  const anyFindGate = gatedFinds.length > 0;
+  const anyFindGateUsesUser = gatedFinds.some((f) => exprUsesCurrentUser(f.requires));
+  for (const f of gatedFinds) collectJavaExprImports(f.requires!, imports);
+  /** Gate lines for one find action: bind the principal (when the predicate
+   *  reads it) then a 403 on failure. */
+  const findGateLines = (f: (typeof gatedFinds)[number]): string[] => {
+    const gl: string[] = [];
+    if (exprUsesCurrentUser(f.requires)) {
+      gl.push(`        var currentUser = currentUserAccessor.user();`);
+    }
+    gl.push(
+      `        if (!(${renderJavaExpr(f.requires!, { thisName: "this" })})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: find ${f.name}`,
+      )});`,
+    );
+    return gl;
+  };
 
   const unionImports = new Set<string>();
   let anyUnionProblem = false;
@@ -212,6 +242,7 @@ export function renderJavaController(
         return [
           `    @GetMapping("/${snake(f.name)}")`,
           `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
+          ...(f.requires ? findGateLines(f) : []),
           `        var r = service.${f.name}(${args});`,
           `        if (r == null) {`,
           ...absent,
@@ -233,6 +264,7 @@ export function renderJavaController(
         return [
           `    @GetMapping("/${snake(f.name)}")`,
           `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
+          ...(f.requires ? findGateLines(f) : []),
           `        return service.${f.name}(${pagedArgs});`,
           `    }`,
           ``,
@@ -243,6 +275,7 @@ export function renderJavaController(
       return [
         `    @GetMapping("/${snake(f.name)}")`,
         `    public ${retType} ${f.name}${agg.name}(${params}) {`,
+        ...(f.requires ? findGateLines(f) : []),
         single
           ? `        var response = service.${f.name}(${args});`
           : `        return service.${f.name}(${args});`,
@@ -328,6 +361,8 @@ export function renderJavaController(
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
     ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
+    anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.config.CatalogLog;`,
@@ -336,9 +371,11 @@ export function renderJavaController(
     `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
     `public class ${plural(agg.name)}Controller {`,
     `    private final ${agg.name}Service service;`,
+    anyFindGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${plural(agg.name)}Controller(${agg.name}Service service) {`,
+    `    public ${plural(agg.name)}Controller(${agg.name}Service service${anyFindGateUsesUser ? ", CurrentUserAccessor currentUserAccessor" : ""}) {`,
     `        this.service = service;`,
+    anyFindGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     ...body,

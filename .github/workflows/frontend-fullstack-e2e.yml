@@ -1,0 +1,93 @@
+name: Frontend full-stack e2e (nightly, no docker)
+
+# Closes the frontend↔backend runtime hole the per-PR gates leave open.
+#
+# Per-PR, only React/Mantine ever drives a REAL backend (behavioral-ui-e2e.yml,
+# PGlite-Hono); every OTHER frontend (Vue/Svelte/Angular/Feliz) gets a
+# render-only smoke that TOLERATES the backend 404ing (generated-*-e2e.yml). So a
+# generator change that breaks the wire contract between a non-React client and a
+# real server compiles green, boots each half independently, and is invisible
+# until — before this workflow — the nightly docker conformance leg.
+#
+# This nightly matrix drives each non-React frontend against the SAME in-process
+# Hono-on-PGlite backend the per-PR React cell uses (run-ui.mjs, framework-
+# agnostic): generate → build the frontend → boot backend + serve bundle on one
+# origin → run the EMITTED Playwright `*.ui.spec.ts` page-object round-trips
+# (create → submit → read back). No docker; the frontend build + Chromium
+# dominate, which is why it's nightly rather than per-PR (the user's cost call).
+#
+# Each cell is a corpus case flagged `uiTier: "nightly"` (test/behavioral/
+# corpus.json); run-ui.mjs builds each frontend via its own `npm run build` and
+# auto-detects the built root (react/vue→dist, svelte→build, angular→dist/<app>/
+# browser). Vue + Svelte + Angular are verified locally (full round-trip green,
+# all blocking). Feliz is not yet wired — it emits no e2e/playwright.config.ts
+# (its smoke harness differs) and needs dotnet/fable in the runner; a follow-up.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-fullstack:
+    # Runs nightly, on manual dispatch, or on a PR carrying the
+    # `frontend-fullstack` label (so it can be exercised on demand).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'frontend-fullstack')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - frontend: vue
+            case: sales-system-vue
+          - frontend: svelte
+            case: sales-system-svelte
+          # Angular: BLOCKING. The Angular-codegen cascade this gate first
+          # surfaced is fixed and the full round-trip (create product w/ a
+          # value-object price → add a line → confirm → read back) is 10/10
+          # green under Node 24. What landed: (1) containment-part response
+          # fields typed precisely (`<Part>Response` instead of `unknown[]`);
+          # (2) the containment `@for` tracks `$index` (was an undefined `idx`);
+          # (3) FK/workflow/op form controls init `""` so the nonNullable
+          # control types as `FormControl<string>` (was `FormControl(null)`);
+          # (4) value-object fields render a nested `FormGroup` fieldset (was a
+          # single flat input); (5) op REST paths are snake-cased (`add_line`,
+          # matching the Hono route — was camelCase → 404).
+          - frontend: angular
+            case: sales-system-angular
+    # Non-blocking for cells not yet locally verified; flip by dropping the flag.
+    continue-on-error: ${{ matrix.experimental || false }}
+    name: ${{ matrix.frontend }} → real Hono backend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run ${{ matrix.frontend }} full-stack UI round-trip
+        working-directory: test/behavioral
+        run: node run-ui.mjs ${{ matrix.case }}

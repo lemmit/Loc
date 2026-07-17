@@ -35,6 +35,7 @@ import {
   checkBuilderCallType,
   checkChannels,
   checkComponent,
+  checkConstructionFields,
   checkContext,
   checkCriteria,
   checkDataSource,
@@ -59,6 +60,7 @@ import {
   checkPolicyFns,
   checkPrimitiveConversions,
   checkProjectSingletons,
+  checkRepositoryFinds,
   checkRetrievalLiteral,
   checkSeeds,
   checkSelfType,
@@ -69,6 +71,7 @@ import {
   checkTernaryExprs,
   checkTheme,
   checkThemeContrast,
+  checkTimers,
   checkTopLevelDomainComposition,
   checkTopLevelFunctions,
   checkTraceability,
@@ -181,6 +184,7 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     guard("builder-call-type", model, () => checkBuilderCallType(model, accept, this.services));
+    guard("construction-fields", model, () => checkConstructionFields(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
@@ -238,6 +242,10 @@ export class DddValidator {
     // v1 admits only single-level (non-nested) instantiation, and a carrier
     // may appear only in a transport position (find return / payload field).
     guard("generic-carriers", model, () => checkGenericCarriers(model, accept));
+
+    // loom.repository-find-deprecated — a wire-shaped list `find` warns (steer
+    // to run(criterion)/retrieval); reconstitution finds stay legal.
+    guard("repository-finds", model, () => checkRepositoryFinds(model, accept));
     // `Self id` (typed-capabilities.md) is only valid inside a `capability`.
     guard("self-type", model, () => checkSelfType(model, accept));
     // Discriminated unions (payload-transport-layer.md, P4): anonymous
@@ -324,6 +332,9 @@ export class DddValidator {
     // Channel + channelSource: key-field existence and the channel<->storage
     // transport compatibility matrix (channels.md, Slice 1).
     guard("channels", model, () => checkChannels(model, accept));
+    // TimerSource cadence: exactly-one-of cron/every, cron range-check, every
+    // floor + cron-expressibility (scheduling.md, M-T4.1).
+    guard("timers", model, () => checkTimers(model, accept));
     // Implicit composition (finding 23): when the project has exactly one
     // `system { }`, the deployment-shape members written at file top level
     // fold into it (implicit-system-composition.md).  They must run through

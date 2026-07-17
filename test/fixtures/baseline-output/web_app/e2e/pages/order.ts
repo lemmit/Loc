@@ -51,7 +51,11 @@ export class OrderNewPage {
 
   async fill(input: Partial<CreateOrderRequest>): Promise<this> {
     if (input.customerId !== undefined) {
-      await this.page.getByTestId("orders-new-input-customerId").fill(input.customerId!);
+      {
+        const __f = this.page.getByTestId("orders-new-input-customerId");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.customerId!);
+      }
     }
     if (input.status !== undefined) {
       {
@@ -63,7 +67,11 @@ export class OrderNewPage {
       }
     }
     if (input.placedAt !== undefined) {
-      await this.page.getByTestId("orders-new-input-placedAt").fill(input.placedAt!.slice(0, 16));
+      {
+        const __f = this.page.getByTestId("orders-new-input-placedAt");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.placedAt!.slice(0, 16));
+      }
     }
     return this;
   }
@@ -120,7 +128,11 @@ export class OrderDetailPage {
       }
     }
     if (input.qty !== undefined) {
-      await this.page.getByTestId("orders-op-addLine-input-qty").fill(String(input.qty));
+      {
+        const __f = this.page.getByTestId("orders-op-addLine-input-qty");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(String(input.qty));
+      }
     }
     await this.page.getByTestId("orders-op-addLine-submit").click();
     await this.page.getByTestId("orders-op-addLine-form").waitFor({ state: "detached" });
@@ -142,7 +154,11 @@ export class OrderDetailPage {
     await this.page.getByTestId("orders-op-update").click();
     await this.page.getByTestId("orders-op-update-form").waitFor();
     if (input.customerId !== undefined) {
-      await this.page.getByTestId("orders-op-update-input-customerId").fill(input.customerId!);
+      {
+        const __f = this.page.getByTestId("orders-op-update-input-customerId");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.customerId!);
+      }
     }
     if (input.status !== undefined) {
       {
@@ -154,7 +170,11 @@ export class OrderDetailPage {
       }
     }
     if (input.placedAt !== undefined) {
-      await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 16));
+      {
+        const __f = this.page.getByTestId("orders-op-update-input-placedAt");
+        const __i = __f.locator("input, textarea");
+        await ((await __i.count()) ? __i.first() : __f).fill(input.placedAt!.slice(0, 16));
+      }
     }
     await this.page.getByTestId("orders-op-update-submit").click();
     await this.page.getByTestId("orders-op-update-form").waitFor({ state: "detached" });

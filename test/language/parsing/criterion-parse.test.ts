@@ -34,6 +34,20 @@ describe("parsing — criterion declaration", () => {
     expect(criteria[1]!.params.map((p) => p.name)).toEqual(["region"]);
   });
 
+  it("parses the optional `of T as <alias>` candidate binder", async () => {
+    const { model, errors } = await parseString(`
+      context Sales {
+        aggregate Order { region: string }
+        repository Orders for Order { }
+        criterion InRegion(rgn: string) of Order as o = o.region == rgn
+      }
+    `);
+    expect(errors).toEqual([]);
+    const ctx = model.members.find(isBoundedContext)!;
+    const crit = ctx.members.filter(isCriterion)[0]!;
+    expect(crit.alias).toBe("o");
+  });
+
   it("admits a composed criterion declaration (`A && B`)", async () => {
     const { errors } = await parseString(`
       context Sales {

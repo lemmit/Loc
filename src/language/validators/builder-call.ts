@@ -4,16 +4,28 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { DddServices } from "../ddd-module.js";
-import type { BuilderCall, EntityPart, Model, NameRef, Ui } from "../generated/ast.js";
+import type {
+  BuilderCall,
+  EntityPart,
+  Model,
+  NameRef,
+  PayloadDecl,
+  Ui,
+  ValueObject,
+} from "../generated/ast.js";
 import {
   isAggregate,
   isBoundedContext,
   isCallSuffix,
   isComponent,
+  isContainment,
+  isEntityPart,
   isPayloadDecl,
   isPostfixChain,
+  isProperty,
   isValueObject,
 } from "../generated/ast.js";
+import { type DddType, resolveTypeRef, T } from "../type-system.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
 /** Bindable page-body inputs — they wire to a `state` field via `bind:`. */
@@ -108,6 +120,115 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
         `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
         { node, code: "loom.legacy-vo-call" },
       );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `loom.unknown-construction-field` (M-T6.18, slice 1) — a record built with
+// `X { field: value, … }` must only name fields the record DECLARES.  A typo'd
+// or stale field name (`Money { amount: …, bogus: 3 }`) previously slipped
+// through — `checkBuilderCallType` resolves the type NAME but never the entries
+// — and mis-generated (`new Money(…, 3)`, a stray positional arg / dropped
+// field), caught only downstream by `tsc`/`gradle`/`mix`.  This is the safest
+// slice of the systemic parameter-passing gap: an entry name that isn't a
+// declared field is unambiguously wrong (no optional / required / derived
+// nuance, no type inference, no `Env`).  Completeness + entry-VALUE type checks
+// are the follow-on slices.  Scoped to RECORD construction (value object /
+// entity part / record payload); walker primitives + components have their own
+// arg surfaces and are skipped.
+// ---------------------------------------------------------------------------
+
+/** Resolve a `BuilderCall` to the RECORD declaration it constructs — a value
+ *  object, an entity part, or a record payload (`error`/`payload`/… with fields,
+ *  not a `= A | B` union) — mirroring `checkBuilderCallType`'s record branches.
+ *  Returns undefined for walker primitives, components, and unknown names (those
+ *  aren't records; `checkBuilderCallType` owns their diagnostics). */
+export function resolveRecordDecl(
+  bc: BuilderCall,
+  model: Model,
+): ValueObject | EntityPart | PayloadDecl | undefined {
+  const name = bc.type;
+  if (isWalkerPrimitive(name)) return undefined;
+  const isRecordPayload = (m: unknown): m is PayloadDecl =>
+    isPayloadDecl(m) && m.name === name && m.variants.length === 0;
+  const ctx = AstUtils.getContainerOfType(bc, isBoundedContext);
+  for (const m of ctx?.members ?? []) {
+    if (isValueObject(m) && m.name === name) return m;
+    if (isRecordPayload(m)) return m;
+    if (isAggregate(m)) {
+      for (const inner of m.members) {
+        if (isEntityPart(inner) && inner.name === name) return inner;
+      }
+    }
+  }
+  for (const m of model.members) {
+    if (isValueObject(m) && m.name === name) return m;
+    if (isRecordPayload(m)) return m;
+  }
+  return undefined;
+}
+
+/** The constructible field names of a record decl.  For a value object / entity
+ *  part these are the declared `Property` members plus any `contains` members
+ *  (an entity part's nested collections/singletons are set at construction —
+ *  `Shipment { carrier: …, labels: [Label { … }] }`).  Derived / invariant /
+ *  function members are computed, not constructor inputs.  (`.filter(isProperty)`
+ *  over the union-of-member-arrays doesn't narrow, so gather explicitly.) */
+function recordFieldNames(decl: ValueObject | EntityPart | PayloadDecl): Set<string> {
+  if (isPayloadDecl(decl)) return new Set(decl.fields.map((f) => f.name));
+  const names = new Set<string>();
+  for (const m of decl.members) {
+    if (isProperty(m) || isContainment(m)) names.add(m.name);
+  }
+  return names;
+}
+
+/** The constructible fields of a record decl mapped to their declared TYPE —
+ *  the type-checking twin of `recordFieldNames`, consumed by the entry-VALUE
+ *  check (`checkConstructionArgTypes` in `statements.ts`, which has the lexical
+ *  `Env` to type each entry value).  A `Property` / payload field resolves via
+ *  `resolveTypeRef`; a `contains` member is its part type (an array when the
+ *  containment is a collection). */
+export function recordFieldTypes(
+  decl: ValueObject | EntityPart | PayloadDecl,
+): Map<string, DddType> {
+  const out = new Map<string, DddType>();
+  if (isPayloadDecl(decl)) {
+    for (const f of decl.fields) out.set(f.name, resolveTypeRef(f.type));
+    return out;
+  }
+  for (const m of decl.members) {
+    if (isProperty(m)) {
+      out.set(m.name, resolveTypeRef(m.type));
+    } else if (isContainment(m)) {
+      const part = m.partType?.ref;
+      const el: DddType = part ? { kind: "entity", ref: part } : T.unknown;
+      out.set(m.name, m.collection ? T.array(el) : el);
+    }
+  }
+  return out;
+}
+
+/** Reject a construction entry whose name isn't a declared field of the record. */
+export function checkConstructionFields(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "BuilderCall") continue;
+    const bc = node as BuilderCall;
+    const decl = resolveRecordDecl(bc, model);
+    if (!decl) continue; // not a record — primitive / component / unknown-type
+    const fields = recordFieldNames(decl);
+    for (const entry of bc.entries) {
+      // Positional entries (`Card { "hi" }`) carry no name — not a field ref.
+      if (typeof entry.name !== "string") continue;
+      if (!fields.has(entry.name)) {
+        accept(
+          "error",
+          `'${bc.type}' has no field '${entry.name}'.` +
+            (fields.size > 0 ? ` Declared fields: ${[...fields].join(", ")}.` : ""),
+          { node: entry, property: "name", code: "loom.unknown-construction-field" },
+        );
+      }
     }
   }
 }

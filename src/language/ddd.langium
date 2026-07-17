@@ -91,7 +91,7 @@ TableRename:
     fromTable=ID '->' toAggregate=[Aggregate:ID];
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability | FunctionDecl;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | TimerSource | Layout | Capability | FunctionDecl;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -1238,6 +1238,22 @@ ChannelSource:
         ('use' ':' use=[Storage:LooseName] ','?)?
     '}';
 
+// TimerSource — time as an event source (scheduling.md).  System-scope, the
+// clock twin of `channelSource`: `for:` names a plain event (a real cross-ref,
+// unlike channelSource's validator-resolved bare name) that the timer fires on a
+// wall-clock cadence; workflows react with the EXISTING `on(e)` / `create(e) by`
+// triggers — zero new workflow grammar.  EXACTLY ONE of `cron:` / `every:` sets
+// the cadence (`loom.timer-cadence`).  `in:` (timezone) and `overlap: allow`
+// parse in Phase 1 but are inert (deferred).
+TimerSource:
+    'timerSource' name=LooseName '{'
+        ('for'     ':' event=[EventDecl:ID] ','?)
+        ('cron'    ':' cron=STRING ','?)?
+        ('every'   ':' every=DURATION ','?)?
+        ('in'      ':' timezone=STRING ','?)?
+        ('overlap' ':' overlap?='allow' ','?)?
+    '}';
+
 // Payload — a structured-data carrier crossing a boundary.  `payload` is the
 // umbrella; the four sugar keywords carry intent (command / query / response
 // / error) but the same structural-record wire contract.  `event` keeps its
@@ -1266,6 +1282,7 @@ Repository:
 
 FindDecl:
     'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        ('requires' gate=Expression)?
         ('where' filter=Expression)?
         IgnoringClause?;
 
@@ -1472,6 +1489,7 @@ SeedRow:
 // where→SQL path the inline filter does today.
 Criterion:
     'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
+    ('as' alias=ID)?
     (
         '=' body=Expression
     );
@@ -2298,6 +2316,12 @@ terminal TEMPLATE_FULL:   /`(\\.|[^`\\{])*`/;
 terminal TEMPLATE_START:  /`(\\.|[^`\\{])*\{/;
 terminal TEMPLATE_MIDDLE: /\}(\\.|[^`\\{])*\{/;
 terminal TEMPLATE_END:    /\}(\\.|[^`\\{])*`/;
+// Duration literal — `<int><unit>`, unit ∈ {ms,s,m,h,d}.  Used by `timerSource`'s
+// `every:` cadence (scheduling.md).  Declared before INT so `15s` lexes as one
+// DURATION token, not INT `15` + ID `s`; a suffix-less number still falls through
+// to INT (the regex requires a unit).  Values are spaced in house style, so this
+// never captures an ordinary numeric literal.
+terminal DURATION: /[0-9]+(ms|s|m|h|d)/;
 terminal DECIMAL: /[0-9]+\.[0-9]+/;
 terminal INT returns number: /[0-9]+/;
 // Ticket-style trace identifier (`US-001`, `AC-001`, `SOL-001`).  Must

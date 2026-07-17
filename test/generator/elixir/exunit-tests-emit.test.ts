@@ -157,4 +157,33 @@ system G {
     expect(cs).toContain("|> validate_vo(:price, &VanApi.Selling.Money.new/1)");
     expect(cs).toContain("defp validate_vo(changeset, field, new_fun) do");
   });
+
+  it("vanilla: a shape it can't lower skips WITH the concrete reason (not a silent swallow)", async () => {
+    // `toThrow` over a plain local is a shape the pure-core emitter deliberately
+    // can't lower — it degrades to `@tag :skip`, but now carries the recorded
+    // reason so a human (and the no-silent-skip conformance gate) sees WHY.
+    const SRC = `
+system Van {
+  subdomain Sales { context Selling {
+    aggregate Order {
+      customer: string
+      invariant customer.length > 0
+      test "unlowerable toThrow" {
+        let n = 5
+        expect(n).toThrow()
+      }
+    }
+    repository Orders for Order { }
+  } }
+  api A from Sales
+  storage pg { type: postgres }
+  resource st { for: Selling, kind: state, use: pg }
+  deployable api { platform: elixir contexts: [Selling] dataSources: [st] serves: A port: 4000 }
+}
+`;
+    const src = findFile(await generateSystemFiles(SRC), /selling\/order_test\.exs$/);
+    expect(src).toContain("@tag :skip");
+    // The reason is surfaced in-band, not swallowed by a bare `catch {}`.
+    expect(src).toMatch(/Reason:\s*toThrow over a non-create\/op\/validatable-VO/);
+  });
 });

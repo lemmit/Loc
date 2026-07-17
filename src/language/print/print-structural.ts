@@ -198,6 +198,8 @@ export function printStructural(node: AstNode): string {
       return printChannel(node as import("../generated/ast.js").Channel);
     case "ChannelSource":
       return printChannelSource(node as import("../generated/ast.js").ChannelSource);
+    case "TimerSource":
+      return printTimerSource(node as import("../generated/ast.js").TimerSource);
     case "Repository":
       return printRepository(node as Repository);
     case "Workflow":
@@ -829,6 +831,17 @@ function printChannelSource(node: import("../generated/ast.js").ChannelSource): 
   return block(`channelSource ${node.name}`, items);
 }
 
+function printTimerSource(node: import("../generated/ast.js").TimerSource): string {
+  const items: string[] = [`for: ${node.event.$refText}`];
+  // STRING props (cron / timezone) had their delimiters stripped by Langium —
+  // re-quote on emission.  `every` is a DURATION token, printed verbatim.
+  if (node.cron) items.push(`cron: ${JSON.stringify(node.cron)}`);
+  if (node.every) items.push(`every: ${node.every}`);
+  if (node.timezone) items.push(`in: ${JSON.stringify(node.timezone)}`);
+  if (node.overlap) items.push(`overlap: allow`);
+  return block(`timerSource ${node.name}`, items);
+}
+
 function printRepository(node: Repository): string {
   return block(
     `repository ${node.name} for ${node.aggregate.$refText}`,
@@ -846,8 +859,9 @@ export function printIgnoringClause(node: { bypassAll?: boolean; bypass?: string
 
 function printFindDecl(node: FindDecl): string {
   const params = node.params.map(printParameter).join(", ");
+  const requires = node.gate ? ` requires ${printExpr(node.gate)}` : "";
   const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
-  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}${printIgnoringClause(node)}`;
+  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${requires}${where}${printIgnoringClause(node)}`;
 }
 
 /** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form
@@ -855,7 +869,8 @@ function printFindDecl(node: FindDecl): string {
  *  the same `body`). */
 function printCriterion(node: import("../generated/ast.js").Criterion): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
-  return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+  const alias = node.alias ? ` as ${node.alias}` : "";
+  return `criterion ${node.name}${params} of ${printTypeRef(node.target)}${alias} = ${printExpr(node.body)}`;
 }
 
 /** `domainService <Name> { operation … }` — a stateless container of

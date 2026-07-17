@@ -23,24 +23,29 @@ import {
 } from "../../_walker/walker-core.js";
 import {
   type AngularFieldArraySpec,
+  type AngularFieldGroupSpec,
   fieldArrayControlDecl,
   fieldArrayMembers,
+  fieldGroupControlDecl,
 } from "../form-fields.js";
 import { storeClassName, storeFileSlug } from "../store-builder.js";
 import { angularTarget } from "./angular-target.js";
 import { angularSink } from "./sink.js";
 
 /** The `new FormGroup({ … })` control body for a form spec — flat
- *  `FormControl`s plus any `FormArray` declarations for dynamic-row fields. */
+ *  `FormControl`s, any `FormArray` declarations for dynamic-row fields, and any
+ *  nested `FormGroup` declarations for value-object fields. */
 function formGroupBody(form: {
   controls: { name: string; init: string }[];
   fieldArrays?: AngularFieldArraySpec[];
+  fieldGroups?: AngularFieldGroupSpec[];
 }): string {
   const flat = form.controls.map(
     (c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`,
   );
   const arrays = (form.fieldArrays ?? []).map((fa) => fieldArrayControlDecl(fa));
-  return [...flat, ...arrays].join(", ");
+  const groups = (form.fieldGroups ?? []).map((fg) => fieldGroupControlDecl(fg));
+  return [...flat, ...arrays, ...groups].join(", ");
 }
 
 /** The getter + add/remove member lines a form's dynamic-row fields contribute

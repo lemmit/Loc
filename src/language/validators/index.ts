@@ -7,6 +7,7 @@ export { checkAuthBlock } from "./auth.js";
 export {
   checkBindableInputArgs,
   checkBuilderCallType,
+  checkConstructionFields,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
 export { checkChannels } from "./channel.js";
@@ -36,10 +37,12 @@ export { checkMigrations } from "./migration.js";
 export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
 export { checkPolicyFns } from "./policy-fn.js";
+export { checkRepositoryFinds } from "./repository.js";
 export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,
   checkCallStmt,
+  checkConstructionArgTypes,
   checkEmit,
   checkOperation,
   checkRetrievalLiteral,
@@ -59,6 +62,7 @@ export {
 export { checkTemplateHoles } from "./template.js";
 export { checkDurationConstructors } from "./temporal.js";
 export { checkOrgPathReferences, checkTenancyDecls } from "./tenancy.js";
+export { checkTimers } from "./timer.js";
 export { checkTopLevelFunctions } from "./toplevel-function.js";
 export { checkTraceability } from "./traceability.js";
 export {

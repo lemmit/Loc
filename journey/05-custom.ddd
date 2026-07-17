@@ -1,0 +1,221 @@
+// Stage 5 — "no excuses": the scaffold is gone. Every page is hand-written
+// from the closed page-primitive library (Stack/Toolbar/QueryView/Table/
+// Column/EnumBadge/Action/OperationForm/…), and the SAME custom `ui Board`
+// is served to TWO frontend frameworks (React + Vue) off ONE node backend.
+//
+// This is the promise's endpoint: the domain and the custom UI are both
+// fully spelled out, nothing is inferred, yet it's still one declarative
+// model — and it fans out to multiple frameworks for free.
+system Todo {
+
+  subdomain Core {
+    context Work {
+
+      enum Status { Open, InProgress, Done }
+      enum Priority { Low, Normal, High, Urgent }
+
+      event TaskCompleted { task: Task id, at: datetime }
+
+      aggregate Project with crudish {
+        name: string
+        archived: bool
+        invariant name.length > 0
+        derived display: string = name
+      }
+      repository Projects for Project { }
+
+      aggregate Task with crudish {
+        project: Project id
+        title: string
+        status: Status
+        priority: Priority
+
+        invariant title.length > 0
+        derived display: string = title
+        derived active: bool = status != Done
+
+        operation start() {
+          precondition status == Open
+          status := InProgress
+        }
+        operation complete() {
+          precondition status != Done
+          status := Done
+          emit TaskCompleted { task: id, at: now() }
+        }
+        operation reopen() {
+          precondition status == Done
+          status := Open
+        }
+      }
+      repository Tasks for Task { }
+    }
+  }
+
+  api WorkApi from Core
+
+  // Fully hand-written console — no `with scaffold`. Every region is explicit.
+  ui Board {
+    api Work: WorkApi
+
+    // Reusable component: instance-qualified action buttons. Each `Action`
+    // wires a `use<Op>Task(task.id)` mutation against the operation.
+    component TaskActions(task: Task) {
+      body: Toolbar {
+        Action { task.start },
+        Action { task.complete },
+        Action { task.reopen }
+      }
+    }
+
+    page Home {
+      route: "/"
+      title: "Todo board"
+      body: Stack {
+        Heading { "Todo", level: 1 },
+        Toolbar {
+          Button { "Board", to: "/board", testid: "nav-board" },
+          Button { "Projects", to: "/projects", testid: "nav-projects" }
+        },
+        testid: "home"
+      }
+    }
+
+    // Custom task board: a single query, a bespoke table, a status badge,
+    // and a per-row action toolbar bound to the domain operations.
+    page Board {
+      route: "/board"
+      title: "All tasks"
+      body: Stack {
+        Breadcrumbs {
+          Anchor { "Home", to: "/" },
+          Text { "Board" }
+        },
+        Toolbar {
+          Heading { "Task board", level: 2 },
+          Button { "New task", to: "/tasks/new", testid: "tasks-create" }
+        },
+        QueryView {
+          of: Work.Task.all,
+          loading: Skeleton { count: 5 },
+          error: Alert { "Couldn't load tasks" },
+          empty: Empty { "No tasks yet." },
+          data: rows => Paper {
+            Table {
+              rows: rows,
+              striped: true,
+              rowTestid: t => "task-row-" + t.id,
+              Column { "Task", t => Text { t.title } },
+              Column { "Status", t => EnumBadge { t.status } },
+              Column { "Priority", t => EnumBadge { t.priority } },
+              Column { "Actions", t => TaskActions(task: t) }
+            }
+          },
+          testid: "board-query"
+        },
+        testid: "board"
+      }
+    }
+
+    // Hand-written create page.
+    page TaskNew {
+      route: "/tasks/new"
+      title: "New task"
+      body: Stack {
+        Breadcrumbs {
+          Anchor { "Home", to: "/" },
+          Anchor { "Board", to: "/board" },
+          Text { "New" }
+        },
+        Heading { "Create task", level: 2 },
+        Card { CreateForm { of: Task, testid: "tasks-new" } },
+        testid: "tasks-new-page"
+      }
+    }
+
+    // Single-record console: load one task, show its fields, and mount the
+    // operation forms through the loaded record (`data.<op>`).
+    page TaskConsole(id: Task id) {
+      route: "/tasks/:id"
+      title: "Task"
+      body: QueryView {
+        of: Work.Task.byId(id),
+        single: true,
+        loading: Loader {},
+        error: Alert { "Couldn't load task" },
+        empty: Empty { "Task not found" },
+        data: t => Card {
+          Stack {
+            Heading { "Task detail", level: 2 },
+            KeyValueRow { "Title", Text { t.title } },
+            KeyValueRow { "Status", EnumBadge { t.status } },
+            KeyValueRow { "Priority", EnumBadge { t.priority } },
+            Divider {},
+            OperationForm { t.start },
+            OperationForm { t.complete },
+            OperationForm { t.reopen }
+          }
+        },
+        testid: "task-console"
+      }
+    }
+
+    // Custom project list.
+    page ProjectList {
+      route: "/projects"
+      title: "Projects"
+      body: Stack {
+        Breadcrumbs {
+          Anchor { "Home", to: "/" },
+          Text { "Projects" }
+        },
+        Heading { "Projects", level: 2 },
+        QueryView {
+          of: Work.Project.all,
+          loading: Skeleton { count: 3 },
+          error: Alert { "Couldn't load projects" },
+          empty: Empty { "No projects." },
+          data: rows => Paper {
+            Table {
+              rows: rows,
+              rowTestid: p => "project-row-" + p.id,
+              Column { "ID", p => IdLink { p.id, of: Project } },
+              Column { "Name", p => Text { p.name } },
+              Column { "Archived", p => Text { (p.archived ? "Yes" : "No") } }
+            }
+          },
+          testid: "projects-query"
+        },
+        testid: "projects-list"
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource appState { for: Work, kind: state, use: primary, index: [Task.project] }
+
+  deployable api {
+    platform: node,
+    contexts: [Work],
+    dataSources: [appState],
+    serves: WorkApi,
+    port: 3000
+  }
+
+  // Same custom `ui Board`, two frameworks — the "no excuses" fan-out.
+  deployable reactApp {
+    platform: react
+    targets: api
+    ui: Board { Work: api }
+    port: 3001
+    design: mantine
+  }
+
+  deployable vueApp {
+    platform: vue
+    targets: api
+    ui: Board { Work: api }
+    port: 3002
+    design: vuetify
+  }
+}

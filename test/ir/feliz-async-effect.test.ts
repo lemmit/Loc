@@ -1,10 +1,14 @@
-// Feliz `match await` async-effect shape classifier (M-T6.15).
+// Feliz `match await` async-effect shape classifier (M-T6.15 + the "harder
+// shapes" extension).
 //
 // `classifyFelizAsyncEffect` is the shared arbiter between the
 // `loom.feliz-async-effect-unsupported` validator gate and the Feliz generator —
-// a shape the generator renders is exactly a shape the gate lets through.  This
-// pins the supported v1 shape and each honest-gate reason, driven off the LOWERED
-// `variant-match` StmtIR (so it doubles as the variant-match-lowering check).
+// a shape the generator renders is exactly a shape the gate lets through.  It now
+// accepts an aggregate instance op with or without params, one OR MORE named arms
+// (success + error variants), and an OPTIONAL `else`; the only classifier-level
+// gate left is a subject that isn't an aggregate instance op (the routeless-host
+// gate lives in `store-checks.ts`).  Driven off the LOWERED `variant-match`
+// StmtIR, so it doubles as the variant-match-lowering check.
 
 import { describe, expect, it } from "vitest";
 import { lowerModel } from "../../src/ir/lower/lower.js";
@@ -30,11 +34,12 @@ async function variantMatch(src: string, page: string, action: string) {
 
 // A system whose detail page hosts a `match await` we vary per test.  `op` is the
 // op signature+body, `armsAndElse` the match arms.
-const sys = (op: string, armsAndElse: string) => `
+const sys = (op: string, armsAndElse: string, subject = "C.Order.reserve()") => `
 system Demo {
   subdomain S {
     context C {
       error OrderMissing { missingRef: string }
+      error Blocked { until: string }
       aggregate Order with crudish {
         customerId: string
         ${op}
@@ -48,7 +53,7 @@ system Demo {
       route: "/orders/:id"
       state { draftName: string = "" }
       action reserveNow() {
-        match await C.Order.reserve() {
+        match await ${subject} {
 ${armsAndElse}
         }
       }
@@ -62,12 +67,14 @@ ${armsAndElse}
 }`;
 
 const AGGS = new Set(["Order"]);
+const RESERVE =
+  "operation reserve(): Order or OrderMissing { return OrderMissing { missingRef: customerId } }";
 
-describe("classifyFelizAsyncEffect (M-T6.15)", () => {
+describe("classifyFelizAsyncEffect (M-T6.15 + harder shapes)", () => {
   it("accepts the v1 shape — 0-arg instance op, one aggregate SUCCESS arm + else", async () => {
     const { vm, apiParamNames } = await variantMatch(
       sys(
-        "operation reserve(): Order or OrderMissing { return OrderMissing { missingRef: customerId } }",
+        RESERVE,
         '          Order o => { draftName := o.customerId }\n          else    => { draftName := "x" }',
       ),
       "Detail",
@@ -78,17 +85,17 @@ describe("classifyFelizAsyncEffect (M-T6.15)", () => {
     if (cls.supported) {
       expect(cls.shape.opAggregate).toBe("Order");
       expect(cls.shape.op).toBe("reserve");
-      expect(cls.shape.successAggregate).toBe("Order");
-      expect(cls.shape.binding).toBe("o");
-      expect(cls.shape.successBody.length).toBeGreaterThan(0);
-      expect(cls.shape.elseBody.length).toBeGreaterThan(0);
+      expect(cls.shape.args).toHaveLength(0);
+      expect(cls.shape.arms).toHaveLength(1);
+      expect(cls.shape.arms[0]!.binding).toBe("o");
+      expect(cls.shape.elseBody?.length).toBeGreaterThan(0);
     }
   });
 
-  it("gates a genuine multi-variant union (>1 match arm)", async () => {
+  it("accepts a genuine multi-variant union (>1 match arm)", async () => {
     const { vm, apiParamNames } = await variantMatch(
       sys(
-        "operation reserve(): Order or OrderMissing { return OrderMissing { missingRef: customerId } }",
+        RESERVE,
         "          Order o        => { draftName := o.customerId }\n" +
           "          OrderMissing e => { draftName := e.missingRef }\n" +
           '          else           => { draftName := "x" }',
@@ -97,21 +104,33 @@ describe("classifyFelizAsyncEffect (M-T6.15)", () => {
       "reserveNow",
     );
     const cls = classifyFelizAsyncEffect(vm, apiParamNames, AGGS);
-    expect(cls.supported).toBe(false);
-    if (!cls.supported) expect(cls.reason).toMatch(/match arms/);
+    expect(cls.supported).toBe(true);
+    if (cls.supported) expect(cls.shape.arms).toHaveLength(2);
   });
 
-  it("gates an op with params (a non-0-arg awaited call)", async () => {
+  it("accepts an op with params (a non-0-arg awaited call) — args are captured", async () => {
     const { vm, apiParamNames } = await variantMatch(
       sys(
         "operation reserve(note: string): Order or OrderMissing { return OrderMissing { missingRef: note } }",
         '          Order o => { draftName := o.customerId }\n          else    => { draftName := "x" }',
-      ).replace("C.Order.reserve()", 'C.Order.reserve("hi")'),
+        'C.Order.reserve("hi")',
+      ),
       "Detail",
       "reserveNow",
     );
     const cls = classifyFelizAsyncEffect(vm, apiParamNames, AGGS);
-    expect(cls.supported).toBe(false);
-    if (!cls.supported) expect(cls.reason).toMatch(/0-argument/);
+    expect(cls.supported).toBe(true);
+    if (cls.supported) expect(cls.shape.args).toHaveLength(1);
+  });
+
+  it("accepts a missing `else` (elseBody is undefined)", async () => {
+    const { vm, apiParamNames } = await variantMatch(
+      sys(RESERVE, "          Order o => { draftName := o.customerId }"),
+      "Detail",
+      "reserveNow",
+    );
+    const cls = classifyFelizAsyncEffect(vm, apiParamNames, AGGS);
+    expect(cls.supported).toBe(true);
+    if (cls.supported) expect(cls.shape.elseBody).toBeUndefined();
   });
 });

@@ -187,6 +187,16 @@ export function renderStarter(opts: {
 
 system ${sys} {
 
+  // Authorization is opt-in in a fresh model.  When you wire real auth, prefer
+  // deny-by-default: every client-reachable command AND read (operations,
+  // creates, destroys, workflows, views, repository finds) must then declare a
+  // \`requires <expr>\` gate — \`requires true\` is the explicit "intentionally
+  // public" escape.  Mark the deployable \`auth: required\` to enforce it.
+  //   auth {
+  //     enforcement: denyByDefault
+  //     oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") }
+  //   }
+
 ${domain.source}
 
   ui WebApp with scaffold(subdomains: [Core]) {
