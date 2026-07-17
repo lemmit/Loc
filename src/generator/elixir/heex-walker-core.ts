@@ -1136,6 +1136,10 @@ export interface PrimitiveSpec {
    *  argument that's an array of children expressions is rendered
    *  as nested HEEx. */
   takesChildren?: boolean;
+  /** Static attributes always emitted on the tag (e.g. an a11y
+   *  `role="toolbar"` / `aria-label="Actions"` the primitive's contract
+   *  requires).  Rendered verbatim, after the derived named attributes. */
+  extraAttrs?: string[];
 }
 
 export function renderPrimitive(
@@ -1191,6 +1195,9 @@ export function renderPrimitive(
   // so it lands before any other attributes for predictable output.
   const styleHeexAttr = styleIrToHeex(expr);
   if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
+
+  // Contract-required static a11y attributes (e.g. Toolbar's role/name).
+  if (spec.extraAttrs) namedAttrs.push(...spec.extraAttrs);
 
   if (spec.tag === ".empty") {
     const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";

@@ -152,7 +152,9 @@ describe("HEEx primitive — Icon", () => {
       phoenixSystem(`Icon { svg: "<svg viewBox='0 0 24 24'><path d='M0,0'/></svg>" }`),
     );
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/<span class="loom-icon">/);
+    // Decorative-by-default: the wrapper is hidden from assistive tech (icon
+    // a11y contract) — an unlabelled glyph conveys nothing to a screen reader.
+    expect(heex).toMatch(/<span class="loom-icon" aria-hidden="true">/);
     expect(heex).toContain("<svg viewBox='0 0 24 24'>");
     expect(heex).toMatch(/<\/span>/);
   });
@@ -160,7 +162,16 @@ describe("HEEx primitive — Icon", () => {
   it("adds size class when size: is supplied", async () => {
     const files = await generateSystemFiles(phoenixSystem(`Icon { svg: "<svg/>", size: "lg" }`));
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/<span class="loom-icon loom-icon-lg">/);
+    expect(heex).toMatch(/<span class="loom-icon loom-icon-lg" aria-hidden="true">/);
+  });
+
+  it("a labelled icon becomes a named img instead of aria-hidden", async () => {
+    const files = await generateSystemFiles(
+      phoenixSystem(`Icon { svg: "<svg/>", label: "Search" }`),
+    );
+    const heex = findLandingHeex(files);
+    expect(heex).toMatch(/role="img" aria-label="Search"/);
+    expect(heex).not.toContain('aria-hidden="true"');
   });
 
   it("propagates testid:", async () => {

@@ -15,6 +15,7 @@
 import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
+import { iconA11yAttr } from "../_walker/a11y-emit.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
@@ -885,7 +886,12 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   // structure-derived rank), not through this generic spec table.
   Text: { tag: "p", takesChildren: true },
   Card: { tag: "div", staticAttrs: ["class"], takesChildren: true },
-  Toolbar: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Toolbar: {
+    tag: "div",
+    staticAttrs: ["class"],
+    takesChildren: true,
+    extraAttrs: ['role="toolbar"', 'aria-label="Actions"'],
+  },
   Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },
   Empty: { tag: ".empty", takesChildren: false },
   Badge: { tag: ".badge", takesChildren: true },
@@ -1396,6 +1402,8 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   let customSvg: string | undefined;
   let size: string | undefined;
   let testid = "";
+  let label: string | undefined;
+  let decorative = false;
   for (let i = 0; i < expr.args.length; i++) {
     const argName = expr.argNames?.[i];
     const arg = expr.args[i]!;
@@ -1403,6 +1411,9 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     else if (argName === "svg" && arg.kind === "literal") customSvg = arg.value;
     else if (argName === "size" && arg.kind === "literal") size = arg.value;
     else if (argName === "testid" && arg.kind === "literal") testid = arg.value;
+    else if (argName === "label" && arg.kind === "literal") label = arg.value;
+    else if (argName === "decorative" && arg.kind === "literal")
+      decorative = String(arg.value) === "true";
   }
   // User-supplied SVG wins; falls back to the builtin registry (same
   // precedence as the TSX emitter at `walker/primitives/icon.ts:32`).
@@ -1416,5 +1427,9 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   const svg = customSvg ?? "";
   const sizeClass = size ? ` loom-icon-${size}` : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
-  return `<span class="loom-icon${sizeClass}"${testidAttr}>${svg}</span>`;
+  // Decorative-by-default (icon a11y contract): hidden from assistive tech
+  // unless a `label:` gives it meaning.  Same fragment the JSX/markup packs
+  // render via `iconA11yAttr` — HEEx shares the HTML spelling.
+  const a11yAttr = iconA11yAttr({ label, decorative });
+  return `<span class="loom-icon${sizeClass}"${testidAttr}${a11yAttr}>${svg}</span>`;
 }

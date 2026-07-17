@@ -96,9 +96,11 @@ function primitiveGroup(c: Ctx): string {
 /** A children-container primitive (Stack/Group/Paper/Toolbar/Breadcrumbs) with a
  *  CSS class.  Same offside-safe children handling as `primitiveStack` (multi-
  *  line element lists are fine inside `[ … ]`; only offside-keywords aren't). */
-function containerEl(tag: string, className: string, c: Ctx): string {
+function containerEl(tag: string, className: string, c: Ctx, extraProps = ""): string {
+  // `extraProps` — additional leaf props (e.g. a11y `prop.role`/`prop.ariaLabel`)
+  // spliced after `className` (and any `data-testid`), each `;`-separated.
   const tid = testidProp(c);
-  const cls = `prop.className "${className}"${tid ? `; ${tid}` : ""}`;
+  const cls = [`prop.className "${className}"`, tid, extraProps].filter(Boolean).join("; ");
   if (!c.hasChildren) return `Html.${tag} [ ${cls} ]`;
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
@@ -114,9 +116,12 @@ function primitivePaper(c: Ctx): string {
   return containerEl("div", "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm", c);
 }
 
-/** Toolbar — a page-header row (space-between flex container). */
+/** Toolbar — a page-header row (space-between flex container).  Its a11y
+ *  contract makes it a labelled ARIA `toolbar` (default name "Actions"). */
 function primitiveToolbar(c: Ctx): string {
-  return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c);
+  const label = String(c.label ?? "").trim() || "Actions";
+  const a11y = `prop.role "toolbar"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"`;
+  return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c, a11y);
 }
 
 /** Breadcrumbs — a nav trail (daisyUI `breadcrumbs`). */
@@ -383,7 +388,16 @@ function primitiveIcon(c: Ctx): string {
           ? "h-8 w-8"
           : "h-5 w-5";
   const cls = `loom-icon inline-flex ${size} [&>svg]:h-full [&>svg]:w-full`;
-  return `Html.span [ prop.className "${cls}"; prop.dangerouslySetInnerHTML """${svg}""" ]`;
+  // Decorative-by-default (icon a11y contract): hide the glyph from assistive
+  // tech unless a `label:` gives it meaning, in which case it becomes a named
+  // `img`.  Feliz emits F# `prop.*` props rather than the HTML `a11yAttr`.
+  const label = String(c.label ?? "").trim();
+  const decorative = c.decorative === true || String(c.decorative) === "true";
+  const a11yProps =
+    label !== "" && !decorative
+      ? `prop.role "img"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"; `
+      : `prop.ariaHidden true; `;
+  return `Html.span [ prop.className "${cls}"; ${a11yProps}prop.dangerouslySetInnerHTML """${svg}""" ]`;
 }
 
 /** Tabs(Tab("A", …), Tab("B", …)) — daisyUI's CSS-only radio-tabs: one

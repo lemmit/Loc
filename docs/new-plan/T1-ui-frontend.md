@@ -59,8 +59,12 @@ Sources: [channels](../old/proposals/channels.md) realtime sections, global-plan
 Nothing exists. Phases 1–7 per the proposal pair: extraction skeleton → React runtime → `ddd i18n sync` (content-hash keys, D-I18N-KEY) → pack chrome catalogs → invariant `message:` keys → non-React backends → validator-message centralisation. Prereq: [i18n-strings](../old/proposals/i18n-strings.md) Phase 1 (template-literal → ICU lowering + `loom.user-visible-concat`).
 Sources: [i18n](../old/proposals/i18n.md), [i18n-strings](../old/proposals/i18n-strings.md).
 
-## M-T1.12 — Accessibility: from contract to emission — `partial` · **L** · P2 ⚠ verify-first
-`A11yContract` data + heading-level derivation + skip-link/landmark work landed (incl. Phoenix #1785); the rest of the proposal's Phases 2–5 (role/name/label association, Modal focus trap, live regions, author hints + `loom.a11y-*` codes, axe gate breadth, pack contrast gate) is open. Re-audit what shipped before scoping.
+## M-T1.12 — Accessibility: from contract to emission — `in-flight` · **L** · P2 ⚠ verify-first
+`A11yContract` data + heading-level derivation + skip-link/landmark work landed (incl. Phoenix #1785). **Audit 2026-07 (all 6 targets):** the per-primitive `a11y` contract was **inert at emit** — no codegen path read `def.a11y`; shipped ARIA was hardcoded per pack/target or free from the component library, so contract and emit could drift with zero signal. A contract→emit helper layer (`src/generator/_walker/a11y-emit.ts`) now begins closing that gap:
+- **Slice 1 — decorative-icon `aria-hidden` (all 6 targets).** `Icon` is decorative-by-default (its contract's `decorativeByDefault`): the wrapper carries `aria-hidden` unless a `label:` hint makes it a named `img` (`role="img"`/`aria-label`). Wired through the shared `emitIcon` + all 15 `primitive-icon.hbs` + HEEx `renderIcon` + Feliz `primitiveIcon`.
+- **Slice 2 — Toolbar `role="toolbar"` + accessible name (all 6 targets).** The cleanest ignored obligation (`{role:"toolbar",needsName}`): emits `role="toolbar"` + `aria-label` (default "Actions", overridable via `label:`) across all toolbar templates + Feliz + HEEx (via a new `PrimitiveSpec.extraAttrs`).
+
+Still open (proposal Phases 2–5): Loader/Skeleton `aria-busy`/live-region; `<footer>` landmark + Feliz app-shell landmarks/skip-link; icon-only Button/Action name derivation + `loom.a11y-icon-only-no-name`; field `aria-invalid`/`aria-describedby` on non-lib targets; Modal focus trap/`aria-modal` on non-lib targets; the `loom.a11y-pack-incomplete`/`-contract-missing` codes; axe-matrix breadth (add Feliz; HEEx e2e). Consolidated matrix in the M-T1.12 audit.
 Sources: [accessibility](../old/proposals/accessibility.md), `generated-a11y.yml`.
 
 ## M-T1.13 — Scaffolded navigation (menu reform) — `open` · **M** · P3
