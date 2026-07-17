@@ -3040,3 +3040,59 @@ NEVER trust local `main`: `git fetch origin main && git checkout -B main
 origin/main` (or branch straight off `origin/main`). Reflex after any merge:
 sync `origin/main` FIRST, then branch — the SessionStart hook's "N commits
 behind" warning is the tell.
+## 54. Silent-wrong codegen that compiles green — example-coincidence routing + regex-over-emitted-source (2026-07-17)
+
+Three fixes from a "is Loom real or shortcut-ridden?" audit. Verdict was *real*
+(the `_expr`/`_walker`/`_type` seams and the honest `loom.*-unsupported` gate
+discipline are load-bearing), but the audit surfaced a class of bug the per-PR
+*compile* gates are structurally blind to: output that compiles green on the
+corpus yet is wrong on an input the corpus never exercises.
+
+- **A generator that routes on an alias only works while the alias coincides
+  with the real thing.** HEEx `renderApiCall` emitted `<App>.<Handle>.<fn>(...)`
+  where `<Handle>` is the UI-local `api <handle>: <Api>` alias — correct *only*
+  because `acme.ddd` names the alias `Sales`, equal to the aggregate's context.
+  A UI that aliases the api to any other name emitted a path to a nonexistent
+  module → uncompilable Elixir, no validator blocking it. Fix routed through
+  `contextModuleByAggName` (the map every *other* Elixir site already used).
+  **Lesson:** when codegen derives a path from a name, prove it with a test
+  where the names *diverge* — a corpus where handle==context hides the bug
+  forever. (PR #1959.)
+
+- **Recovering structure by regex-scanning your own emitted source is a latent
+  bug generator.** The Python port file harvested import names with
+  `scan.match(/\b[A-Z][A-Za-z0-9]*Id\b/g)` and imported every `*Id` from
+  `app.domain.ids` — but a value object / enum named `…Id` lives in
+  `value_objects`, so an ordinary `.ddd` with such a type emitted an import for a
+  name that isn't there → `ImportError` at load. Targeted fix cross-checks the
+  regex hits against the *actually declared* ids (`<Aggregate>Id`/`<Part>Id`),
+  which is complete w.r.t. `ids.py`, so it can only *remove* broken imports.
+  **Remaining:** ~17 sites still do string-blank-then-`\b`word-test import
+  detection; the principled fix is a `used: Set<string>` populated *during*
+  emission, not a scan of the output. (PR #1961; full rework tracked in M-T9.8.)
+
+- **Near-duplicate per-backend validators collapse to one table — but watch the
+  one row that isn't identical.** The five `validate<Backend>StampSupport` were
+  byte-identical except a `platformFamily` guard, a `(platform <x>)` label, and
+  the code — *and*, for Elixir alone, `principal (request actor)` vs `principal`.
+  Folded to one `validateStampSupport(sys, diags, backend)` over a
+  `STAMP_BACKENDS` table (per-row `principalNoun` preserves Elixir's wording);
+  the five exports stay as thin wrappers so `validate.ts` is untouched.
+  Diagnostics byte-identical, ~160 lines gone. Broke `diagnostic-codes-
+  completeness.test.ts` (it source-scans each `diags.push` for a *literal*
+  `loom.*` code; the table-driven `code: backend.code` failed it) — broadened the
+  guard to accept a code *reference* while still failing a push with no `code:`
+  key. **Lesson:** a source-scanning meta-test encodes an assumption about *how*
+  the checked code is written; a legitimate refactor can trip it, and the fix is
+  to teach the test the new (still-valid) shape, not to un-refactor. Left
+  `validateDapper/MikroOrmSupport` alone — they share only a shape, not logic.
+  (PR #1964.)
+
+- **Still open (recorded so it isn't lost):** authorization/tenancy filters ride
+  as *sentinel* `ExprIR`s (`__loomDeepScope__`/`__loomDeny__`) that ~8 backend
+  filter translators pattern-match. Correct today (recognition, not
+  re-resolution — the decision is made once in enrichment), but there is **no
+  compile-time exhaustiveness**: a 6th backend that forgets the `deny` arm
+  emits nothing that enforces always-false → a *silent* tenant-data leak, not a
+  crash. The principled fix is a discriminated `FilterIR` node kind so a missing
+  arm is a `tsc` error. Tracked in M-T9.9.
