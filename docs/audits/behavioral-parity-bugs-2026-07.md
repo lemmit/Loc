@@ -27,7 +27,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | state-gate (`when` gate)      |  ✅  |  ✅  |   ✅   |   ✅   |  ⏳CI  |
 | sales (core CRUD/VO/assoc)    |  ✅  |  ✅  |   ✅   |   ✅   |  ⏳CI  |
 | payments (inheritance)        |  ✅  |  ✅  |   ✅   |🔴 B2   |  ⏳CI  |
-| ledger (event-sourcing)       |🔴 B1 |  ✅  |   ✅   |   ✅   |  ⏳CI  |
+| ledger (event-sourcing)       |✅ B1 |  ✅  |   ✅   |   ✅   |  ⏳CI  |
 | shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |🔴 B3   |  ⏳CI  |
 
 ⏳CI = elixir has no host toolchain (needs the `hexpm/elixir` docker image + the
@@ -36,22 +36,36 @@ once this branch's CI runs, and appended here.
 
 ---
 
-## B1 🔴 node — event-sourced `create` checks invariants before folding the create event
+## B1 ✅ node — event-sourced `create` checks invariants before folding the create event
 
-- **Where:** `src/generator/hono/` (node event-sourcing repository/aggregate path).
+- **Where:** `src/generator/typescript/emit/aggregate.ts` (the node/Hono
+  event-sourced `create` factory — shared TS emitter the Hono backend drives).
 - **Repro:** `test/behavioral/systems/ledger.ddd` on node —
   `POST /api/accounts { owner: "alice" }` → **400 "Invariant violated: balance >= 0"**.
 - **Expected (java, python pass):** `create(owner)` emits `Opened`; `apply(Opened)`
-  sets `balance := 0`; the `invariant balance >= 0` holds. node evaluates the
-  invariant BEFORE the create event folds initial state, so `balance` is unset/
+  sets `balance := 0`; the `invariant balance >= 0` holds. node evaluated the
+  invariant BEFORE the create event folded initial state, so `balance` was unset/
   negative at check time.
-- **Impact:** every event-sourced aggregate whose opening event establishes a
-  field an invariant guards is uncreatable on node. Silent until now because
-  event-sourcing behaviour was python-only in the behavioural tier.
-- **Interim:** `cases.mjs` skips `ledger` on node (documented, not silent).
-- **Fix sketch:** on node, fold the create-emitted events into initial state
-  *before* running invariants (match java/python order: emit → apply → validate).
-- **Status:** skip-listed; awaiting fix.
+- **Root cause:** the ES `create` factory built the empty shell with the
+  constructor's default `trustStore = false`, so the ctor ran
+  `_assertInvariants()` against the pre-fold (unset) state, before `_init`
+  emitted-and-folded the creation event. Java (no-arg JPA ctor) and Python
+  (`__new__`) build the shell without running the ctor check, so they fold first.
+- **Fix:** build the shell with `trustStore = true` and assert invariants ONCE
+  after `_init` folds the creation event(s) — the fold-then-check order Java/
+  Python already use. Node-only (`src/generator/typescript/emit/aggregate.ts`).
+- **Second bug this unmasked (harness):** with the 400 gone, the node
+  behavioural boot then 500'd on the event-log insert — `synthDDL`
+  (`web/src/runtime/ddl.ts`, the in-process PGlite DDL synth) rendered
+  `occurred_at timestamptz NOT NULL` but **dropped the `.defaultNow()` DEFAULT**,
+  and the repository omits that column so the row relies on the default. The
+  event-log table is the first corpus row to depend on a DB default; older cases
+  never exercised it. Fixed by rendering column `DEFAULT` clauses in `synthDDL`
+  (serial types skip — the type provides the sequence).
+- **Verification:** `node run.mjs ledger` → both e2e tests green; full node
+  suite `node run.mjs` → 20/20. Pinned by
+  `test/generator/typescript/typescript-eventsourced-creation.test.ts`.
+- **Status:** ✅ fixed; `ledger` re-armed (removed from `cases.mjs` node skips).
 
 ## B2 🔴 dotnet — inheritance (TPC/TPH) create 500s at runtime
 

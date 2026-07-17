@@ -103,8 +103,9 @@ export async function resetDatabase(pgUrl) {
  *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
 const BEHAVIOURAL_SKIP = {
   node: {
-    // B1 — node ES create checks the invariant before the create event folds state.
-    ledger: "B1: node ES create checks invariant before the create event folds initial state",
+    // B1 fixed (event-sourced create now folds events before asserting
+    // invariants — src/generator/typescript/emit/aggregate.ts).  `ledger`
+    // re-armed; no node skips remain.
   },
   dotnet: {
     // B2 — dotnet inheritance (TPH) create 500s at runtime.

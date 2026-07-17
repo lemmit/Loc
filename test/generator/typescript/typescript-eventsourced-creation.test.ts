@@ -24,6 +24,8 @@ context Accounts {
     owner: string
     balance: int
 
+    invariant balance >= 0
+
     create open(owner: string) {
       emit Opened { account: id, owner: owner }
     }
@@ -69,6 +71,19 @@ describe("Hono/Drizzle event-sourced creation (persistedAs: eventLog + create)",
     );
     // No field-based state-writing create factory.
     expect(domain).not.toContain("static create(input: { owner: string; balance: number })");
+  });
+
+  it("folds the creation event BEFORE asserting invariants (B1)", async () => {
+    const domain = (await generate()).get("domain/account.ts")!;
+    // The shell is built with `trustStore = true` so the constructor does NOT
+    // assert `balance >= 0` against the pre-fold (empty) state; invariants run
+    // ONCE after `_init` emits-and-folds the creation event.  Order:
+    //   new shell (trust) -> _init (emit+fold) -> _assertInvariants -> return
+    expect(domain).toMatch(
+      /const inst = new Account\(\{ id: Ids\.newAccountId\(\) \} as unknown as .+, true\);\s*inst\._init\(input\.owner\);\s*inst\._assertInvariants\(\);\s*return inst;/,
+    );
+    // Sanity: the invariant IS enforced (just after the fold, not before).
+    expect(domain).toContain("_assertInvariants(): void {");
   });
 
   it("wires the POST route to the create action's params (not the field set)", async () => {
