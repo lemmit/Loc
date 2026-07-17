@@ -120,6 +120,7 @@ For a context with aggregates `Order` (containing parts) and `Product`:
 ├── package.json                     # deps: hono, @hono/node-server, @hono/zod-openapi, zod, drizzle-orm, pg
 ├── tsconfig.json
 ├── index.ts                         # pg Pool → drizzle → createApp(db) → @hono/node-server.serve
+├── scheduler.ts                     # timerSource jobs (when the deployable owns any) — see "Timer sources"
 ├── drizzle.config.ts                # Drizzle Kit config (db:generate, db:migrate, db:push, db:studio)
 ├── Dockerfile                       # multi-stage node:22-alpine; runtime serves `node out/index.js`
 ├── .dockerignore
@@ -142,6 +143,28 @@ For a context with aggregates `Order` (containing parts) and `Product`:
     ├── order.routes.ts              # OpenAPIHono router with createRoute() + Zod request/response schemas
     └── product.routes.ts
 ```
+
+### Timer sources (`timerSource`)
+
+A system-scope `timerSource { for: <Event>, cron: "…" | every: <dur> }`
+(scheduling.md) fires a plain domain event on a wall-clock cadence; workflows
+react through the existing `on`/`create … by` triggers. When a deployable owns a
+timer (its subdomain is the for-event's `migrationsOwner`), the Hono backend
+emits `scheduler.ts` and wires it at boot:
+
+- **One job per timer.** `cron:` → `node-cron`; `every:` → a bare `setInterval`.
+- **Single-fire across replicas.** Each tick takes a `pg_try_advisory_lock`
+  keyed by an FNV-1a hash of the timer name; the loser skips (logged). A
+  `running` guard skips (does not queue) an overlapping tick.
+- **Dispatch.** The tick event is constructed (id fields minted, `at` stamped)
+  and dispatched through the same in-process dispatcher the sagas use, so an
+  `on`/`create` reactor fires with no new machinery.
+- **Observability.** `timer_fired` / `timer_skipped_overlap` /
+  `timer_lock_contended` / `timer_emit_failed` on the catalog.
+
+A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
+boot wiring — byte-identical to before. (`.NET` and the other backends are
+in-progress; see M-T4.1.)
 
 ### Per-aggregate detail
 
