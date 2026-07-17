@@ -1,0 +1,102 @@
+// Stage 2 — real domain, still scaffolded UI.
+// The todo grows a lifecycle: a status enum with guarded transitions,
+// priority, an optional due date, invariants, derived fields, domain
+// operations (not just CRUD), and events. Crucially `with crudish` still
+// composes with hand-written operations — you keep the free CRUD and add
+// domain behaviour on top.
+system Todo {
+
+  subdomain Core {
+    context Tasks {
+
+      enum Status { Open, InProgress, Done }
+      enum Priority { Low, Normal, High, Urgent }
+
+      event TaskStarted   { task: Task id, at: datetime }
+      event TaskCompleted { task: Task id, at: datetime }
+      event TaskReopened  { task: Task id, at: datetime }
+
+      aggregate Task with crudish {
+        title: string
+        status: Status
+        priority: Priority
+        due: datetime?
+        notes: string?
+        createdAt: datetime managed
+        completedAt: datetime?
+
+        invariant title.length > 0
+
+        // Reserved: gives the aggregate a user-facing label (used by
+        // Select pickers and `string(task)`).
+        derived display: string = title
+
+        function isOpen(): bool = status == Open
+        function isDone(): bool = status == Done
+
+        derived active: bool = status != Done
+
+        // Guarded lifecycle transitions — each a precondition gate + a
+        // state write + a domain event. This is the jump from "a row you
+        // edit" to "an aggregate that enforces its own rules".
+        operation start() {
+          precondition status == Open
+          status := InProgress
+          emit TaskStarted { task: id, at: now() }
+        }
+
+        operation complete() {
+          precondition status != Done
+          status := Done
+          completedAt := now()
+          emit TaskCompleted { task: id, at: now() }
+        }
+
+        operation reopen() {
+          precondition status == Done
+          status := Open
+          emit TaskReopened { task: id, at: now() }
+        }
+
+        test "a new task starts, then completes" {
+          let t = Task.create({ title: "write findings", status: Open,
+                                priority: High })
+          t.start()
+          expect(t.status).toBe(InProgress)
+          t.complete()
+          expect(t.status).toBe(Done)
+        }
+
+        test "cannot start a finished task" {
+          let t = Task.create({ title: "done already", status: Done,
+                                priority: Low })
+          expect(t.start()).toThrow()
+        }
+      }
+
+      repository Tasks for Task {
+        find byStatus(status: Status): Task[] where this.status == status
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Core]) { }
+
+  storage primary { type: postgres }
+  resource appState { for: Tasks, kind: state, use: primary, index: [Task.status] }
+
+  deployable api {
+    platform: node,
+    contexts: [Tasks],
+    dataSources: [appState],
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react,
+    targets: api,
+    ui: WebApp,
+    port: 3001,
+    design: mantine
+  }
+}

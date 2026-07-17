@@ -1,0 +1,149 @@
+// Stage 3 — a system, not a table. Tasks now live under Projects.
+// New surface exercised: a second aggregate, a cross-aggregate reference
+// (`Project id`), repository `find`s, a reusable `criterion`, a named
+// `retrieval`, a `view`, and a `workflow` that orchestrates across the
+// repository (page a query, mutate each element).
+system Todo {
+
+  subdomain Core {
+    context Work {
+
+      enum Status { Open, InProgress, Done }
+      enum Priority { Low, Normal, High, Urgent }
+
+      event TaskStarted   { task: Task id, at: datetime }
+      event TaskCompleted { task: Task id, at: datetime }
+      event TaskReopened  { task: Task id, at: datetime }
+      event ProjectArchived { project: Project id, at: datetime }
+
+      aggregate Project with crudish {
+        name: string
+        description: string?
+        archived: bool
+        createdAt: datetime managed
+
+        invariant name.length > 0
+        derived display: string = name
+
+        operation archive() {
+          precondition archived == false
+          archived := true
+          emit ProjectArchived { project: id, at: now() }
+        }
+        operation unarchive() {
+          precondition archived == true
+          archived := false
+        }
+      }
+
+      repository Projects for Project {
+        find active(): Project[] where this.archived == false
+      }
+
+      aggregate Task with crudish {
+        project: Project id
+        title: string
+        status: Status
+        priority: Priority
+        due: datetime?
+        notes: string?
+        createdAt: datetime managed
+        completedAt: datetime?
+
+        invariant title.length > 0
+        derived display: string = title
+        derived active: bool = status != Done
+
+        function isOpen(): bool = status == Open
+
+        operation start() {
+          precondition status == Open
+          status := InProgress
+          emit TaskStarted { task: id, at: now() }
+        }
+        operation complete() {
+          precondition status != Done
+          status := Done
+          completedAt := now()
+          emit TaskCompleted { task: id, at: now() }
+        }
+        operation reopen() {
+          precondition status == Done
+          status := Open
+          emit TaskReopened { task: id, at: now() }
+        }
+
+        test "complete then reopen round-trips" {
+          // NOTE: `createdAt` is `managed` (server-stamped) so it is NOT a
+          // member of the generated `.create()` input — passing it here
+          // compiles the .ddd fine but emits a test that fails `tsc`
+          // (FINDINGS Friction #4). Omit managed fields from `.create()`.
+          let t = Task.create({ project: "00000000-0000-0000-0000-000000000001",
+                                title: "ship it", status: Open, priority: High })
+          t.complete()
+          expect(t.status).toBe(Done)
+          t.reopen()
+          expect(t.status).toBe(Open)
+        }
+      }
+
+      // Reusable predicate (Specification pattern) — composable, testable,
+      // referenceable from retrievals and views.
+      // NOTE: a *parameterised* criterion is queryable inside a retrieval;
+      // a zero-arg one (`StillOpen()`) is currently mis-classified as a free
+      // call and rejected — see FINDINGS Friction #3 — so the open-check is
+      // inlined below rather than factored into its own criterion.
+      criterion InProject(projectId: Project id) of Task = this.project == projectId
+
+      repository Tasks for Task {
+        find byProject(projectId: Project id): Task[] where this.project == projectId
+        find openInProject(projectId: Project id): Task[]
+          where this.project == projectId && this.status != Done
+      }
+
+      // Named query bundle → a `runOpenByPriority` repo method + a
+      // GET /views route, filter + sort composed from a criterion.
+      retrieval OpenByPriority(projectId: Project id) of Task {
+        where: InProject(projectId) && this.status != Done
+        sort:  [priority desc, createdAt asc]
+      }
+
+      // Saved parameterless view.
+      view UnfinishedTasks = Task where status != Done
+
+      // Cross-aggregate orchestration: archiving a project completes every
+      // one of its still-open tasks, then archives the project itself.
+      workflow closeProject {
+        create(projectId: Project id) {
+          let open = Tasks.run(OpenByPriority(projectId), page: { offset: 0, limit: 500 })
+          for t in open {
+            t.complete()
+          }
+          let project = Projects.getById(projectId)
+          project.archive()
+        }
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Core]) { }
+
+  storage primary { type: postgres }
+  resource appState { for: Work, kind: state, use: primary,
+                      index: [Task.status, Task.project, Project.archived] }
+
+  deployable api {
+    platform: node,
+    contexts: [Work],
+    dataSources: [appState],
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react,
+    targets: api,
+    ui: WebApp,
+    port: 3001,
+    design: mantine
+  }
+}
