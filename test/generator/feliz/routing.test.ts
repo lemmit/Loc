@@ -85,7 +85,7 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain("| Inc");
     expect(app).toContain("| AllProductsLoaded of Result<Product list, string>");
     // init parses the URL; update re-parses on UrlChanged.
-    expect(app).toContain("CurrentPage = parseUrl (Router.currentUrl ())");
+    expect(app).toContain("CurrentPage = parseUrl (Router.currentPath ())");
     expect(app).toContain(
       "| UrlChanged segments -> { model with CurrentPage = parseUrl segments }, Cmd.none",
     );
@@ -97,6 +97,10 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain("let productsView (model: Model) (dispatch: Msg -> unit) =");
     expect(app).toContain("let view (model: Model) (dispatch: Msg -> unit) =");
     expect(app).toContain("React.router [");
+    // PATH-based routing (History API), not hash — the router runs in `pathMode`
+    // and the initial page parses from `Router.currentPath ()` (asserted above),
+    // so the generated SPA routes by `/products`, not `#/products`.
+    expect(app).toContain("router.pathMode");
     expect(app).toContain("router.onUrlChanged (UrlChanged >> dispatch)");
     expect(app).toContain("match model.CurrentPage with");
     expect(app).toContain("      | Home -> homeView model dispatch");
@@ -106,21 +110,33 @@ describe("feliz multi-page routing", () => {
   it("wraps the router in a persistent daisyUI navbar over the top-level pages", async () => {
     const app = await appFs(MULTI);
     // A persistent shell: the navbar sits above the route-swapping router.
-    expect(app).toContain('Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"');
+    // The bar is a real <nav> landmark with an accessible name (a11y contract).
+    expect(app).toContain(
+      'Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel "Primary navigation"',
+    );
     expect(app).toContain('Html.ul [ prop.className "menu menu-horizontal px-1"');
     // One menu item per top-level (static-route) page — the brand + both pages.
-    expect(app).toContain('prop.href "#/"; prop.text "Home"');
-    expect(app).toContain('prop.href "#/products"; prop.text "Products"');
+    expect(app).toContain('prop.href "/"; prop.text "Home"');
+    expect(app).toContain('prop.href "/products"; prop.text "Products"');
     // The brand is the humanised ui name.
     expect(app).toContain(
-      'prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "Web App"',
+      'prop.className "btn btn-ghost text-xl"; prop.href "/"; prop.text "Web App"',
     );
+  });
+
+  it("routed content is a <main> landmark reachable via a skip link", async () => {
+    const app = await appFs(MULTI);
+    // WCAG 2.4.1 Bypass Blocks — the skip link is the first focusable element,
+    // visually hidden until focused, and jumps past the nav to the <main>.
+    expect(app).toContain('prop.href "#main-content"; prop.text "Skip to content"');
+    // The route-swapping router lives inside the <main id="main-content">.
+    expect(app).toContain('Html.main [ prop.id "main-content"; prop.children [');
   });
 
   it("cross-page nav renders Router.navigate + fsproj pulls Feliz.Router", async () => {
     const app = await appFs(MULTI);
-    // Button(to: "/products") → Router.navigate("products").
-    expect(app).toContain('Router.navigate("products")');
+    // Button(to: "/products") → Router.navigatePath("products").
+    expect(app).toContain('Router.navigatePath("products")');
     expect(app).not.toContain('navigate("/products")'); // the old broken form
     const proj = await fsproj(MULTI);
     expect(proj).toContain('Include="Feliz.Router"');

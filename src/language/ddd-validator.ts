@@ -45,6 +45,7 @@ import {
   checkExpectMatcher,
   checkGenericCarriers,
   checkHandlerBodies,
+  checkIconOnlyButtonName,
   checkImageAltText,
   checkInheritance,
   checkIntrinsicCalls,
@@ -196,6 +197,10 @@ export class DddValidator {
     // readable text colour can't produce a WCAG-AA app — warn at compile time
     // (accessibility.md, `loom.a11y-theme-contrast`).
     guard("a11y-theme-contrast", model, () => checkThemeContrast(model, accept));
+    // Accessibility: an icon-only `Button` (a glyph with no visible text and no
+    // `label:`) has no accessible name — a screen reader announces the default
+    // "Button" (`loom.a11y-icon-only-no-name`, WCAG 4.1.2).
+    guard("a11y-icon-only-no-name", model, () => checkIconOnlyButtonName(model, accept));
     // Project composition: a top-level `subdomain` (declared outside any
     // `system { }`) folds into the project's single system — enforce that
     // exactly one system exists across the import graph.  See

@@ -4,6 +4,7 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { toolbarA11yAttr } from "../a11y-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   escapeJsxText,
@@ -289,6 +290,10 @@ export function emitToolbar(
     closeIndent,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
+    // role="toolbar" + accessible name (Toolbar a11y contract).  HTML/markup
+    // packs render the fragment; Feliz reads the raw `label` for its F# props.
+    a11yAttr: toolbarA11yAttr({ label: stringNamed(call, "label") }),
+    label: stringNamed(call, "label"),
   });
 }
 

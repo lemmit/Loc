@@ -80,7 +80,7 @@ export default function ProductDetail() {
       <Title order={2}>Product detail</Title>
       <>
         { productById.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 3 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

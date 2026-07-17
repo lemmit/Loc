@@ -41,6 +41,7 @@ import {
   classifyFelizAsyncEffect,
   type FelizAsyncEffectShape,
 } from "../../ir/util/feliz-async-effect.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
@@ -682,8 +683,12 @@ export function felizCreateForm(
     resultMsg: `${upperFirst(name)}Created`,
     route: `${API_BASE_PATH}/${snake(plural(name))}`,
     navigateSegs: snake(plural(name)).split("/"),
-    decoderExpr: `Decoders.${lowerFirst(name)}`,
-    resultType: upperFirst(name),
+    // The create endpoint returns the new record's identity envelope (`{ id }`),
+    // NOT the full aggregate — decode the id so the success handler can route to
+    // the new record's detail page (`/<coll>/<id>`).  (Decoding the whole
+    // aggregate would fail at runtime — the response has only `id`.)
+    decoderExpr: `(Decode.field "id" Decode.string)`,
+    resultType: "string",
     fields,
     fieldArrays: buildFieldArrays(
       formType,
@@ -858,10 +863,14 @@ export function collectPageReads(
   page: PageIR,
   apiParamNames: ReadonlySet<string>,
   aggregatesByName: ReadonlySet<string>,
+  nameCtx: PageNameCtx,
 ): FelizRead[] {
   if (!page.body) return [];
   const detCtx = { apiParamNames, aggregatesByName };
-  const pageCase = upperFirst(page.name);
+  // The byId read is keyed to the hosting page's `Page` case, which is the
+  // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
+  // name (`Detail`), which collides across aggregates (Fable error 37/39).
+  const pageCase = upperFirst(pageEmitName(page, nameCtx));
   const out: FelizRead[] = [];
   const seen = new Set<string>();
   for (const ofArg of queryViewOfArgs(page.body)) {
@@ -986,7 +995,9 @@ export function collectPageOperationForms(
     if (!op) continue;
     const form = felizOperationForm(agg, op, enumsByName, idLabels, vosByName);
     const key = form.formType;
-    if ((form.fields.length === 0 && form.fieldArrays.length === 0) || seen.has(key)) continue;
+    // Param-less ops (`confirm()`) ARE collected now — they wire a trigger +
+    // submit + empty-`{}` POST (no form record); `opHasForm` gates the record.
+    if (seen.has(key)) continue;
     seen.add(key);
     out.push(form);
   }
@@ -1790,13 +1801,24 @@ function renderCreateFn(f: FelizForm): (string | undefined)[] {
   ];
 }
 
+/** Whether an operation form carries any input — a form record is emitted only
+ *  for these.  A PARAM-LESS op (`confirm()`) has none: it is wired as a
+ *  trigger + submit (empty `{}` body), with no form state / encoder / record. */
+export function opHasForm(f: FelizOperationForm): boolean {
+  return f.fields.length > 0 || f.fieldArrays.length > 0;
+}
+
 /** One async operation function — CURRIED `(id) (form)`, POSTs the encoded body
- *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body). */
+ *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body).
+ *  A PARAM-LESS op takes `(id) ()` and posts an empty `{}` body (no form). */
 function renderOperationFn(f: FelizOperationForm): (string | undefined)[] {
+  const hasForm = opHasForm(f);
   return [
-    `  let ${f.apiFn} (id: string) (form: ${f.formType}) : Async<Result<unit, string>> =`,
+    `  let ${f.apiFn} (id: string) ${hasForm ? `(form: ${f.formType})` : "()"} : Async<Result<unit, string>> =`,
     "    async {",
-    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    hasForm
+      ? `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`
+      : '      let body = "{}"',
     "      let! response =",
     `        Http.request (sprintf "${f.route}/%s/${f.opPath}" id)`,
     "        |> Http.method POST",
@@ -2089,9 +2111,11 @@ export function renderViewModule(
   // (the codebase's convention for repeated view logic) instead of inlined at
   // every input.  Shows the message only for a touched field, else nothing.
   const fieldError = [
-    "  let fieldError (touched: Set<string>) (name: string) (err: string option) : ReactElement =",
+    "  let fieldError (touched: Set<string>) (name: string) (fieldId: string) (err: string option) : ReactElement =",
     "    match (Set.contains name touched, err) with",
-    '    | true, Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ]',
+    // The error carries the id the input's `aria-describedby` references, so a
+    // screen reader announces the message with the field (a11y).
+    '    | true, Some e -> Html.p [ prop.id fieldId; prop.className "text-error text-sm mt-1"; prop.text e ]',
     "    | _ -> Html.none",
   ];
   const idOptions = [

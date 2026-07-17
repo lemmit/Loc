@@ -638,7 +638,7 @@ function buildDataCardParts(
 ): { card: Expression; related: Expression[] } {
   const slug = snake(plural(agg.name));
   const rows: Array<{ name?: string; value: Expression }> = [];
-  for (const f of propertiesOf(agg.members)) {
+  for (const f of apiVisibleProperties(agg.members)) {
     if (f.type.array) continue;
     const name = String(f.name);
     const vo = valueObjectTarget(f.type);
@@ -837,7 +837,7 @@ function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Ex
  *  the type kinds it needs (id target, primitive name, enum-vs-VO) are all
  *  reachable through the post-link cross-references. */
 export function scalarColumnsForAggregate(agg: Aggregate): ScaffoldColumn[] {
-  return columnsFromProperties(propertiesOf(agg.members));
+  return columnsFromProperties(apiVisibleProperties(agg.members));
 }
 
 /** One `ScaffoldColumn` per displayable property — dispatched by type, skipping
@@ -853,6 +853,21 @@ function columnsFromProperties(props: readonly Property[]): ScaffoldColumn[] {
 
 function propertiesOf(members: readonly { $type: string }[]): Property[] {
   return members.filter((m): m is Property => m.$type === "Property");
+}
+
+/** The aggregate-root properties a scaffold LIST or DETAIL page may render.
+ *  The API-read wire shape excludes `internal`/`secret`-access fields
+ *  (`forApiRead`, src/ir/enrich/wire-projection.ts), so the client DTO never
+ *  carries them — a scaffold that displayed them would reference a column that
+ *  doesn't exist on the response type and fail `tsc`.  Capability mixins inject
+ *  exactly such fields (`tenantOwned` → `tenantId`/`dataKey` internal,
+ *  `softDeletable` → `isDeleted` internal), which is why a plain `with
+ *  scaffold` over a `tenantOwned`/`softDeletable` aggregate would otherwise
+ *  emit an uncompilable frontend.  (Views keep the wider set on purpose — an
+ *  admin view response may include `internal` — so this narrowing is applied
+ *  only at the crudish aggregate list/detail sites, not `viewColumnFields`.) */
+function apiVisibleProperties(members: readonly { $type: string }[]): Property[] {
+  return propertiesOf(members).filter((p) => p.access !== "internal" && p.access !== "secret");
 }
 
 /** Dispatch a field's display `kind` from its AST type.  Arrays never have a

@@ -175,11 +175,13 @@ function {{name}}Layout() {
 {{#if usesNavigate}}  const navigate = useNavigate();
 {{/if}}  return (
     <>
-{{#if hasHeader}}      {{{headerJsx}}}
-{{/if}}      <AppErrorBoundary>
-        <Outlet />
-      </AppErrorBoundary>
-{{#if hasFooter}}      {{{footerJsx}}}
+{{#if hasHeader}}      <header>{{{headerJsx}}}</header>
+{{/if}}      <main id="main-content">
+        <AppErrorBoundary>
+          <Outlet />
+        </AppErrorBoundary>
+      </main>
+{{#if hasFooter}}      <footer>{{{footerJsx}}}</footer>
 {{/if}}    </>
   );
 }

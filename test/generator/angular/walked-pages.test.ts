@@ -238,7 +238,7 @@ describe("angular generator — display + layout primitives", () => {
   it("walks each primitive to its pack markup", async () => {
     const page = await displayPage();
     expect(page).toContain('<div class="loom-container">');
-    expect(page).toContain('<div class="loom-toolbar">');
+    expect(page).toContain('<div class="loom-toolbar" role="toolbar" aria-label="Actions">');
     expect(page).toContain('<div class="loom-group">');
     expect(page).toContain('<div class="loom-paper">');
     expect(page).toContain('<span class="loom-badge">New</span>');
@@ -320,7 +320,8 @@ describe("angular generator — inline / media / layout primitives", () => {
 
   it("inlines the builtin Icon SVG and unrolls the multi-Skeleton via range", async () => {
     const page = await inlinePage();
-    expect(page).toContain('<span class="loom-icon loom-icon-md"><svg');
+    // Decorative-by-default: the wrapper is hidden from assistive tech.
+    expect(page).toContain('<span class="loom-icon loom-icon-md" aria-hidden="true"><svg');
     // count: 3 → three skeleton blocks unrolled at generation time.
     expect(page.match(/loom-skeleton" style="height: 20px"/g)?.length).toBe(3);
   });

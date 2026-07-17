@@ -139,17 +139,28 @@ function renderVueLayoutFile(
   void vueImports;
   void importLines;
 
+  // a11y: the header / routed-content / footer slots are wrapped in the
+  // matching landmark elements (<header>, <main id="main-content">, <footer>)
+  // so a named layout carries the same landmark set the auto DefaultLayout does.
   const body: string[] = [];
-  if (header) body.push(indentSlot(header.html));
+  if (header) {
+    body.push("    <header>");
+    body.push(indentSlot(header.html, "      "));
+    body.push("    </header>");
+  }
   if (sidebar) {
     body.push('    <div class="loom-layout-body">');
     body.push(indentSlot(sidebar.html, "      "));
-    body.push("      <router-view />");
+    body.push('      <main id="main-content"><router-view /></main>');
     body.push("    </div>");
   } else {
-    body.push("    <router-view />");
+    body.push('    <main id="main-content"><router-view /></main>');
   }
-  if (footer) body.push(indentSlot(footer.html));
+  if (footer) {
+    body.push("    <footer>");
+    body.push(indentSlot(footer.html, "      "));
+    body.push("    </footer>");
+  }
 
   // A named layout is a top-level routed component, so on Vuetify it must
   // carry the `<v-app>` root every Vuetify component needs for layout/theme

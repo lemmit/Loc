@@ -38,6 +38,14 @@
       "unit": false,
       "ui": true,
       "uiTier": "nightly"
+    },
+    {
+      "name": "sales-system-feliz",
+      "ddd": "web/src/examples/sales-system-feliz.ddd",
+      "api": false,
+      "unit": false,
+      "ui": true,
+      "uiTier": "nightly"
     }
   ]
 }

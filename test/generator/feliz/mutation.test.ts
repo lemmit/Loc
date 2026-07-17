@@ -77,7 +77,7 @@ describe("feliz delete mutations", () => {
     expect(app).toContain(
       "  | DeleteProduct id -> model, Cmd.OfAsync.perform Api.deleteProduct id ProductDeleted",
     );
-    expect(app).toContain('  | ProductDeleted (Ok ()) -> model, Cmd.navigate("products")');
+    expect(app).toContain('  | ProductDeleted (Ok ()) -> model, Cmd.navigatePath("products")');
     expect(app).toContain("  | ProductDeleted (Error _) -> model, Cmd.none");
   });
 
