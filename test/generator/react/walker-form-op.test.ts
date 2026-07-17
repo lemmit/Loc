@@ -143,3 +143,61 @@ describe("instance-qualified op-form inside a component", () => {
     expect(tsx!).toMatch(/await mut\.mutateAsync\(vals\)/);
   });
 });
+
+// A BARE `OperationForm(<instance>.<op>)` in a hand-written page body — NOT
+// wrapped in a `Modal { … }`. The page shell still emits the module-scope
+// form component (which references the pack modal shell: `modals`,
+// `notifications`, `Button`/`Group`, `applyServerErrors`), so those imports
+// must be registered by the op-form itself rather than by an enclosing Modal
+// that isn't there. Regression for the "bare op-form → un-imported modals"
+// codegen bug.
+const BARE_OPFORM_SRC = `
+  system S {
+    subdomain Sales {
+      context Sales {
+        aggregate Order {
+          customerId: string
+          derived display: string = customerId
+          operation confirm() { }
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderConsole(id: Order id) {
+        route: "/orders/:id"
+        body: QueryView {
+          of: Sales.Order.byId(id),
+          single: true,
+          empty: Empty { "not found" },
+          data: o => Card { OperationForm { o.confirm } }
+        }
+      }
+    }
+    deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
+    deployable web {
+      platform: static
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3001
+    }
+  }
+`;
+
+describe("bare op-form (no enclosing Modal) in a hand-written page", () => {
+  it("self-registers the modal-shell imports so the emitted component compiles", async () => {
+    const files = await buildAndGenerate(BARE_OPFORM_SRC);
+    const tsx = files.get("web/src/pages/order_console.tsx");
+    expect(tsx, "OrderConsole page is generated").toBeDefined();
+    // The module-scope form component is emitted...
+    expect(tsx!).toMatch(/function ConfirmForm\(/);
+    // ...so every identifier it references must be imported.
+    expect(tsx!).toMatch(/import \{ modals \} from "@mantine\/modals"/);
+    expect(tsx!).toMatch(/import \{ notifications \} from "@mantine\/notifications"/);
+    expect(tsx!).toMatch(/applyServerErrors.*from "\.\.\/lib\/apply-server-errors"/);
+    // Button + Group come from the mantine core import line.
+    expect(tsx!).toMatch(/import \{[^}]*\bButton\b[^}]*\bGroup\b[^}]*\} from "@mantine\/core"/);
+  });
+});
