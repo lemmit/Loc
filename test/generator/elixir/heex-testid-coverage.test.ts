@@ -132,6 +132,18 @@ describe("HEEx primitive — testid: emits data-testid (renderPrimitive)", () =>
   }
 });
 
+describe("HEEx Button — label: → aria-label (a11y accessible name)", () => {
+  it("emits aria-label from a Button label: hint, not a bogus label= attr", async () => {
+    const files = await generateSystemFiles(
+      phoenixSystem(`Button { icon: "trash", label: "Delete doc" }`),
+    );
+    const heex = findLandingHeex(files);
+    expect(heex).toMatch(/<\.button [^>]*aria-label="Delete doc"/);
+    // The generic renderPrimitive path must NOT leak a literal `label="…"`.
+    expect(heex).not.toMatch(/[^-]label="Delete doc"/);
+  });
+});
+
 describe("HEEx primitive — testid: on bespoke renderers", () => {
   it("Alert: data-testid on the alert div", async () => {
     const files = await generateSystemFiles(

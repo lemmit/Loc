@@ -53,6 +53,33 @@ export function checkImageAltText(model: Model, accept: ValidationAcceptor): voi
   }
 }
 
+/** A command `Button` whose only content is an `icon:` (no visible text, no
+ *  explicit `label:`) renders a bare glyph — a screen reader announces the
+ *  meaningless default "Button" text.  The button's a11y contract needs a name
+ *  (`{ role: "button", needsName: true }`); the name here is human content Loom
+ *  can't derive, so warn (`loom.a11y-icon-only-no-name`, WCAG 4.1.2 Name, Role,
+ *  Value).  Visible text (`Button { "Delete", icon: "trash" }`) or an explicit
+ *  `label: "Delete"` (emitted as `aria-label`) both satisfy it. */
+export function checkIconOnlyButtonName(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "BuilderCall") continue;
+    const bc = node as BuilderCall;
+    if (bc.type !== "Button") continue;
+
+    const hasIcon = hasEntry(bc, "icon") || hasEntry(bc, "iconSvg");
+    if (!hasIcon) continue;
+    // Visible positional text, or an explicit accessible name, satisfies it.
+    if (hasPositional(bc)) continue;
+    if (hasEntry(bc, "label")) continue;
+
+    accept(
+      "warning",
+      `Icon-only 'Button' has no accessible name — a screen reader announces the meaningless default "Button". Add visible text ('Button { "Delete", icon: "trash" }') or an accessible name ('label: "Delete"', emitted as aria-label). A control without a name fails WCAG 4.1.2.`,
+      { node: bc, property: "type", code: "loom.a11y-icon-only-no-name" },
+    );
+  }
+}
+
 // The `theme {}` colour roles that a pack renders as FILLED surfaces (buttons,
 // badges, alerts) or coloured text.  Each becomes a 10-shade ramp; the fill is
 // shade 6 (light scheme) / 5 (dark scheme) — the same indices the per-pack

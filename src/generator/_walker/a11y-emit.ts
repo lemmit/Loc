@@ -24,6 +24,15 @@ export function escapeHtmlAttr(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/** An ` aria-label="…"` attribute fragment, or the empty string when no name
+ *  is supplied.  Used by any primitive that accepts an explicit `label:` hint to
+ *  override or supply its accessible name (a command `Button`/`Action` whose
+ *  visible text is a glyph, an icon-only control, etc.). */
+export function ariaLabelAttr(label: string | undefined): string {
+  if (label === undefined || label === "") return "";
+  return ` aria-label="${escapeHtmlAttr(label)}"`;
+}
+
 /** The a11y attribute fragment for the `Toolbar` primitive.  Its contract
  *  (`{ role: "toolbar", needsName: true }`) makes it a labelled ARIA toolbar —
  *  a screen reader announces the grouped controls as a toolbar and can jump to

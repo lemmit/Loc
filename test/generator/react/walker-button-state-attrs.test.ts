@@ -106,5 +106,27 @@ describe("Button disabled: + loading: named args", () => {
     expect(content).toMatch(/<Button>Plain<\/Button>/);
     expect(content).not.toMatch(/disabled=/);
     expect(content).not.toMatch(/loading=/);
+    // a11y: a plain button gets no aria-label (its visible text is the name).
+    expect(content).not.toMatch(/aria-label=/);
+  });
+
+  it("Button { label: … } emits an aria-label accessible name (a11y)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        ${SCAFFOLD}
+        ui WebApp {
+          page X {
+            route: "/x"
+            body: Button { icon: "trash", label: "Delete order" }
+          }
+        }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/x.tsx")!;
+    // The `label:` hint becomes the button's aria-label (its accessible name);
+    // the glyph rides the rightSection icon slot.
+    expect(content).toMatch(/<Button[^>]*\baria-label="Delete order"/);
   });
 });

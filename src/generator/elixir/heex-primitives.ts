@@ -897,7 +897,7 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },
   Empty: { tag: ".empty", takesChildren: false },
   Badge: { tag: ".badge", takesChildren: true },
-  Button: { tag: ".button", takesChildren: true },
+  Button: { tag: ".button", takesChildren: true, labelAsAriaLabel: true },
   // --- inline-emphasis primitives — plain HTML inline elements, the
   //     Phoenix analogue of the TSX `<strong>`/`<em>`/`<code>` spans. ---
   Bold: { tag: "strong", takesChildren: true },

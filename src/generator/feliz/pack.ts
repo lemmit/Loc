@@ -301,6 +301,10 @@ function primitiveButton(c: Ctx): string {
   const tid = testidProp(c);
   if (tid) props.push(tid);
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
+  // `label:` supplies an explicit accessible name (the a11y contract's needsName)
+  // — emitted as prop.ariaLabel when the visible text is an unhelpful glyph.
+  const ariaLabel = String(c.ariaLabel ?? "").trim();
+  if (ariaLabel !== "") props.push(`prop.ariaLabel "${ariaLabel.replace(/"/g, '\\"')}"`);
   const label = String(c.label ?? "").trim();
   if (label.startsWith("Html.") || label.startsWith("(")) {
     props.push(`prop.children [ ${label} ]`);
