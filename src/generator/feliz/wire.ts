@@ -41,6 +41,7 @@ import {
   classifyFelizAsyncEffect,
   type FelizAsyncEffectShape,
 } from "../../ir/util/feliz-async-effect.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
@@ -858,10 +859,14 @@ export function collectPageReads(
   page: PageIR,
   apiParamNames: ReadonlySet<string>,
   aggregatesByName: ReadonlySet<string>,
+  nameCtx: PageNameCtx,
 ): FelizRead[] {
   if (!page.body) return [];
   const detCtx = { apiParamNames, aggregatesByName };
-  const pageCase = upperFirst(page.name);
+  // The byId read is keyed to the hosting page's `Page` case, which is the
+  // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
+  // name (`Detail`), which collides across aggregates (Fable error 37/39).
+  const pageCase = upperFirst(pageEmitName(page, nameCtx));
   const out: FelizRead[] = [];
   const seen = new Set<string>();
   for (const ofArg of queryViewOfArgs(page.body)) {

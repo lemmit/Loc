@@ -67,6 +67,20 @@ jobs:
           # matching the Hono route — was camelCase → 404).
           - frontend: angular
             case: sales-system-angular
+          # Feliz (F#/Fable/Elmish): the frontend now emits the full `data-testid`
+          # surface, so the SHARED testid-driven page objects + smoke spec + e2e
+          # config are wired in (feliz/index.ts), and run-ui.mjs builds it
+          # (`fable+vite→dist`) — needs dotnet (Fable is a dotnet tool), the gated
+          # setup-dotnet step below.  Verified locally: the multi-aggregate scaffold
+          # now COMPILES (two Fable-blocking codegen bugs fixed — colliding Page
+          # union cases + `pageCmd` byId arms, both now aggregate-qualified) and
+          # boots; 9/10 (all smoke `*loads`) pass.  STILL OPEN (a Feliz-hardening
+          # follow-up): Feliz routes by HASH (`#/products`) but the shared page
+          # objects navigate by PATH (`/products`), so the create→addLine→confirm
+          # round-trip can't reach the pages.  Flip to blocking once that lands.
+          - frontend: feliz
+            case: sales-system-feliz
+            experimental: true
     # Non-blocking for cells not yet locally verified; flip by dropping the flag.
     continue-on-error: ${{ matrix.experimental || false }}
     name: ${{ matrix.frontend }} → real Hono backend
@@ -77,6 +91,15 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      # Feliz builds via Fable, a dotnet tool (`dotnet tool restore && dotnet
+      # fable`), so the Feliz cell needs the .NET SDK on PATH.  Gated so the
+      # JSX-family cells don't pay for it.
+      - name: Set up .NET (Feliz/Fable only)
+        if: matrix.frontend == 'feliz'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
 
       - name: Install Loom toolchain
         run: npm ci

@@ -9,6 +9,7 @@
 
 import type {
   AggregateIR,
+  BoundedContextIR,
   DeployableIR,
   EnrichedBoundedContextIR,
   FieldIR,
@@ -18,11 +19,20 @@ import type {
   UserIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
+import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS,
+} from "../_frontend/e2e-harness.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import { walkBody } from "../_walker/walker-core.js";
+import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import {
   AUTH_MODULE_CLAIMS,
   FORBIDDEN_VIEW,
@@ -321,13 +331,18 @@ function externModuleFromPath(path: string): string {
 
 // --- Multi-page routing helpers (Feliz.Router) ----------------------------
 
-/** F# `Page` union case for a page (`page Products` → `Products`). */
-function pageCase(page: PageIR): string {
-  return upperFirst(page.name);
+/** F# `Page` union case for a page.  Uses the aggregate-qualified emit name
+ *  (`OrderList`), NOT the scaffold's role-scoped page name (`List`), which
+ *  collides across aggregates — three aggregates each scaffold a `List`/`New`/
+ *  `Detail`, so the bare name produced duplicate `Page` union cases + view fns
+ *  and Fable refused to compile. */
+function pageCase(page: PageIR, nameCtx: PageNameCtx): string {
+  return upperFirst(pageEmitName(page, nameCtx));
 }
-/** Per-page view function name (`page Products` → `productsView`). */
-function pageViewFn(page: PageIR): string {
-  return `${lowerFirst(page.name)}View`;
+/** Per-page view function name (`OrderList` → `orderListView`) — aggregate-
+ *  qualified for the same collision reason as {@link pageCase}. */
+function pageViewFn(page: PageIR, nameCtx: PageNameCtx): string {
+  return `${lowerFirst(pageEmitName(page, nameCtx))}View`;
 }
 /** A page carries a route param when its `route:` has a `:param` segment
  *  (`/products/:id`) — a detail page.  v1 binds only the FIRST such param, as
@@ -358,14 +373,17 @@ function routePattern(route: string | undefined): string {
  *  route param (a degenerate single-detail app), the fallback ctor takes an empty
  *  id (`ProductDetail ""`) so the match still returns a `Page`, not a partially-
  *  applied `string -> Page`. */
-function renderRouting(pages: readonly PageIR[]): string {
+function renderRouting(pages: readonly PageIR[], nameCtx: PageNameCtx): string {
   const caseDecl = (p: PageIR): string =>
-    hasRouteParam(p) ? `  | ${pageCase(p)} of string` : `  | ${pageCase(p)}`;
-  const ctor = (p: PageIR): string => (hasRouteParam(p) ? `${pageCase(p)} id` : pageCase(p));
+    hasRouteParam(p) ? `  | ${pageCase(p, nameCtx)} of string` : `  | ${pageCase(p, nameCtx)}`;
+  const ctor = (p: PageIR): string =>
+    hasRouteParam(p) ? `${pageCase(p, nameCtx)} id` : pageCase(p, nameCtx);
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
   const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
-  const fallbackCtor = hasRouteParam(fallback) ? `${pageCase(fallback)} ""` : pageCase(fallback);
+  const fallbackCtor = hasRouteParam(fallback)
+    ? `${pageCase(fallback, nameCtx)} ""`
+    : pageCase(fallback, nameCtx);
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
     `${arms.join("\n")}\n  | _ -> ${fallbackCtor}`;
@@ -407,11 +425,16 @@ function renderNavbar(pages: readonly PageIR[], brand: string): string {
   ].join("\n");
 }
 
-function renderRootView(pages: readonly PageIR[], fnName = "view", brand = ""): string {
+function renderRootView(
+  pages: readonly PageIR[],
+  nameCtx: PageNameCtx,
+  fnName = "view",
+  brand = "",
+): string {
   const arms = pages.map((p) =>
     hasRouteParam(p)
-      ? `        | ${pageCase(p)} id -> ${pageViewFn(p)} model dispatch id`
-      : `        | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`,
+      ? `        | ${pageCase(p, nameCtx)} id -> ${pageViewFn(p, nameCtx)} model dispatch id`
+      : `        | ${pageCase(p, nameCtx)} -> ${pageViewFn(p, nameCtx)} model dispatch`,
   );
   const navbar = renderNavbar(pages, brand);
   const router = [
@@ -450,10 +473,15 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   const aggregateNames = new Set<string>();
   for (const c of contexts) for (const a of c.aggregates) aggregateNames.add(a.name);
   const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregateNames],
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
   const seen = new Set<string>();
   const out: FelizRead[] = [];
   for (const page of ui.pages) {
-    for (const r of collectPageReads(page, apiParamNames, aggregateNames)) {
+    for (const r of collectPageReads(page, apiParamNames, aggregateNames, nameCtx)) {
       if (seen.has(r.field)) continue;
       seen.add(r.field);
       out.push(r);
@@ -690,6 +718,14 @@ function renderAppFs(
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  // Aggregate-qualified page-name context (`classifyPage` inputs) — the scaffold
+  // pages are role-scoped (`List`/`New`/`Detail`), so the `Page` union cases +
+  // view fn names must qualify by aggregate or they collide (Fable error 37).
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesByName.keys()],
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
   // One-click actions (`Action { instance.op }`) — the fieldless operation
   // buttons; their trigger/done Msg + POST Cmd + refetch wire like a mutation.
   const opActions: FelizAction[] = actionsForUi(ui, contexts);
@@ -879,7 +915,7 @@ function renderAppFs(
             ui,
             aggregatesByName,
             workflowsByName,
-            pageViewFn(p),
+            pageViewFn(p, nameCtx),
             hasRouteParam(p),
             bcByAggregate,
             bcByWorkflow,
@@ -892,7 +928,7 @@ function renderAppFs(
           ),
         ),
         "",
-        renderRootView(pages, rootFn, ui.name),
+        renderRootView(pages, nameCtx, rootFn, ui.name),
       ]
     : [
         renderPageView(
@@ -988,7 +1024,7 @@ function renderAppFs(
     (hasReads || hasFieldErrors) && renderViewModule(reads, hasIdSelect, hasFieldErrors),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
-    routed && renderRouting(pages),
+    routed && renderRouting(pages, nameCtx),
     "",
     model,
     "",
@@ -1256,5 +1292,47 @@ export function generateFelizForContexts(
   out.set("tailwind.config.js", TAILWIND_CONFIG(theme));
   out.set("postcss.config.js", POSTCSS_CONFIG);
   out.set("Dockerfile", DOCKERFILE);
+
+  // --- Playwright e2e harness (framework-neutral, testid-driven) ----------
+  // The page objects + smoke spec + e2e config are SHARED with every other
+  // frontend — they locate elements by `data-testid`, which the Feliz pack +
+  // form seams now emit (feliz testid-emission PR).  Feliz renders native
+  // `<select>`s, so the fill blocks drive choice fields via `selectOption`
+  // (`selectStyle: "native"`, like Svelte).  Walker page objects are disabled
+  // (`false`, like Angular): Feliz forms render through the `felizTarget` seams,
+  // not pack `field-input`/`form-of` templates, so driving the TSX walker
+  // against the procedural feliz pack would misfire — the scaffold-archetype
+  // page objects stay framework-neutral and emit regardless.  The `.ui.spec.ts`
+  // itself is emitted by the system orchestrator (`mountsUi`).  The page-object
+  // `import type { <Agg>Request }` lines point at a TS api module Feliz doesn't
+  // emit (its client is F#), but they are TYPE-only — esbuild (Playwright's
+  // loader) erases them at runtime, so the specs run against the built bundle.
+  const e2eAggregatesByName = new Map<string, AggregateIR>();
+  for (const c of contexts) for (const a of c.aggregates) e2eAggregatesByName.set(a.name, a);
+  const pageObjects = emitPageObjectsForUi(
+    ui,
+    {
+      sys,
+      deployable,
+      aggregatesByName: e2eAggregatesByName,
+      contextsByName: new Map<string, BoundedContextIR>(contexts.map((c) => [c.name, c])),
+      pack: felizPack(),
+      topLevelComponents: [],
+    },
+    /* walkerPageObjects */ false,
+    /* selectStyle */ "native",
+  );
+  for (const [p, content] of pageObjects) out.set(p, content);
+  const e2ePageNameCtx: PageNameCtx = {
+    aggregateNames: [...e2eAggregatesByName.keys()],
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui, e2ePageNameCtx));
+  out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
+  out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
+  out.set("e2e/package.json", E2E_PACKAGE_JSON);
+  out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
+
   return out;
 }
