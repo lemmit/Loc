@@ -683,8 +683,12 @@ export function felizCreateForm(
     resultMsg: `${upperFirst(name)}Created`,
     route: `${API_BASE_PATH}/${snake(plural(name))}`,
     navigateSegs: snake(plural(name)).split("/"),
-    decoderExpr: `Decoders.${lowerFirst(name)}`,
-    resultType: upperFirst(name),
+    // The create endpoint returns the new record's identity envelope (`{ id }`),
+    // NOT the full aggregate — decode the id so the success handler can route to
+    // the new record's detail page (`/<coll>/<id>`).  (Decoding the whole
+    // aggregate would fail at runtime — the response has only `id`.)
+    decoderExpr: `(Decode.field "id" Decode.string)`,
+    resultType: "string",
     fields,
     fieldArrays: buildFieldArrays(
       formType,

@@ -407,14 +407,15 @@ function renderNavbar(pages: readonly PageIR[], brand: string): string {
   if (navPages.length < 2) return "";
   const items = navPages
     .map((p) => {
-      const href = `#${p.route ?? "/"}`;
+      // PATH href (History API routing), not a `#/…` hash link.
+      const href = p.route ?? "/";
       return `          Html.li [ prop.children [ Html.a [ prop.href "${href}"; prop.text "${humanizeLabel(p.name)}" ] ] ]`;
     })
     .join("\n");
   return [
     '    Html.div [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.children [',
     '      Html.div [ prop.className "flex-1"; prop.children [',
-    `        Html.a [ prop.className "btn btn-ghost text-xl"; prop.href "#/"; prop.text "${humanizeLabel(brand)}" ]`,
+    `        Html.a [ prop.className "btn btn-ghost text-xl"; prop.href "/"; prop.text "${humanizeLabel(brand)}" ]`,
     "      ] ]",
     '      Html.div [ prop.className "flex-none"; prop.children [',
     '        Html.ul [ prop.className "menu menu-horizontal px-1"; prop.children [',
@@ -439,6 +440,11 @@ function renderRootView(
   const navbar = renderNavbar(pages, brand);
   const router = [
     "    React.router [",
+    // PATH-based routing (History API), NOT hash (`#/…`) — the generated SPA
+    // routes like every other Loom frontend, so the shared page objects (and any
+    // deep link) reach a page by its real path.  `pathMode` + `Router.currentPath`
+    // + `Router.navigatePath` / `Cmd.navigatePath` are the matched path-mode set.
+    "      router.pathMode",
     "      router.onUrlChanged (UrlChanged >> dispatch)",
     "      router.children [",
     "        match model.CurrentPage with",

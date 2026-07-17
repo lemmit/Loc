@@ -92,7 +92,7 @@ describe("feliz operation forms", () => {
       "  | SubmitRenameProductForm id -> model, Cmd.OfAsync.perform (Api.renameProduct id) model.RenameProductForm RenameProductDone",
     );
     expect(app).toContain(
-      '  | RenameProductDone (Ok ()) -> { model with RenameProductForm = emptyRenameProductForm }, Cmd.navigate("products")',
+      '  | RenameProductDone (Ok ()) -> { model with RenameProductForm = emptyRenameProductForm }, Cmd.navigatePath("products")',
     );
     expect(app).toContain("  | RenameProductDone (Error _) -> model, Cmd.none");
   });

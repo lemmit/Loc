@@ -67,17 +67,22 @@ describe("feliz create forms", () => {
     expect(app).toContain('"price", Encode.decimal (decimal form.price)');
   });
 
-  it("emits a create Api fn (encode + POST + decode response)", async () => {
+  it("emits a create Api fn (encode + POST + decode the `{ id }` envelope)", async () => {
     const app = await appFs(CREATE);
+    // The create endpoint returns the new record's id envelope (`{ id }`), NOT the
+    // full aggregate — the Api fn returns the id `string` so the success handler
+    // can route to the new record's detail page.
     expect(app).toContain(
-      "let createProduct (form: ProductForm) : Async<Result<Product, string>> =",
+      "let createProduct (form: ProductForm) : Async<Result<string, string>> =",
     );
     expect(app).toContain("let body = Encode.toString 0 (Encoders.productForm form)");
     expect(app).toContain("|> Http.method POST");
     expect(app).toContain("|> Http.content (BodyContent.Text body)");
     expect(app).toContain('|> Http.header (Headers.contentType "application/json")');
     expect(app).toContain("if response.statusCode = 200 || response.statusCode = 201 then");
-    expect(app).toContain("match Decode.fromString Decoders.product response.responseText with");
+    expect(app).toContain(
+      'match Decode.fromString (Decode.field "id" Decode.string) response.responseText with',
+    );
   });
 
   it("wires per-field Set Msgs + Submit + Created", async () => {
@@ -85,10 +90,11 @@ describe("feliz create forms", () => {
     expect(app).toContain("| SetProductFormName of string");
     expect(app).toContain("| SetProductFormPrice of string");
     expect(app).toContain("| SubmitProductForm");
-    expect(app).toContain("| ProductCreated of Result<Product, string>");
+    // Created carries the new record's id (from the `{ id }` response).
+    expect(app).toContain("| ProductCreated of Result<string, string>");
   });
 
-  it("wires the update arms (setters, submit Cmd, created navigate)", async () => {
+  it("wires the update arms (setters, submit Cmd, created → detail navigate)", async () => {
     const app = await appFs(CREATE);
     expect(app).toContain(
       "  | SetProductFormName v -> { model with ProductForm = { model.ProductForm with name = v } }, Cmd.none",
@@ -96,8 +102,10 @@ describe("feliz create forms", () => {
     expect(app).toContain(
       "  | SubmitProductForm -> model, Cmd.OfAsync.perform Api.createProduct model.ProductForm ProductCreated",
     );
+    // On success, reset the form and route to the NEW record's detail page
+    // (`/products/<id>`) using the id the create resolved.
     expect(app).toContain(
-      '  | ProductCreated (Ok _) -> { model with ProductForm = emptyProductForm }, Cmd.navigate("products")',
+      '  | ProductCreated (Ok created) -> { model with ProductForm = emptyProductForm }, Cmd.navigatePath("products", created)',
     );
     expect(app).toContain("  | ProductCreated (Error _) -> model, Cmd.none");
   });

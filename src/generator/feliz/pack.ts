@@ -168,16 +168,16 @@ function primitiveKeyValueRow(c: Ctx): string {
   return `Html.div [ ${tidPart}prop.className "flex flex-col gap-1 py-1 sm:flex-row sm:gap-4"; prop.children [ ${label}; ${value} ] ]`;
 }
 
-/** Anchor(label, to?) — a link.  With a `to:` route it hrefs the Feliz.Router
- *  hash path (`#/products`); without one it's a plain text span (breadcrumb
- *  leaf).  `to` is a JS expression (a quoted literal or a ref) — a literal
- *  folds into a static `"#/path"`, a ref concatenates at runtime. */
+/** Anchor(label, to?) — a link.  With a `to:` route it hrefs the History-API
+ *  PATH (`/products`), matching the path-mode router; without one it's a plain
+ *  text span (breadcrumb leaf).  `to` is a JS expression (a quoted literal or a
+ *  ref) — a literal folds into a static `"/path"`, a ref is used verbatim. */
 function primitiveAnchor(c: Ctx): string {
   const label = String(c.label ?? "");
   if (!c.hasTo) return `Html.span [ Html.text "${label}" ]`;
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
-  const href = lit ? `"#${lit[1]}"` : `("#" + ${to})`;
+  const href = lit ? `"${lit[1]}"` : `${to}`;
   return `Html.a [ prop.className "link link-primary"; prop.href ${href}; prop.text "${label}" ]`;
 }
 
@@ -217,11 +217,12 @@ function primitiveTable(c: Ctx): string {
 }
 
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
- *  Feliz.Router hash path (`#/products/<id>`); the id is the visible label. */
+ *  History-API PATH (`/products/<id>`), matching the path-mode router; the id is
+ *  the visible label. */
 function primitiveIdLink(c: Ctx): string {
   const idExpr = String(c.idExpr ?? '""');
   const prefix = String(c.pathPrefix ?? "/");
-  return `Html.a [ prop.className "link link-primary"; prop.href ("#${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
+  return `Html.a [ prop.className "link link-primary"; prop.href ("${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
 }
 
 /** Modal(trigger, form) — SUPERSEDED for Feliz by `felizTarget.renderModal`

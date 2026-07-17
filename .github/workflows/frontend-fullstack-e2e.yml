@@ -71,13 +71,15 @@ jobs:
           # surface, so the SHARED testid-driven page objects + smoke spec + e2e
           # config are wired in (feliz/index.ts), and run-ui.mjs builds it
           # (`fable+vite→dist`) — needs dotnet (Fable is a dotnet tool), the gated
-          # setup-dotnet step below.  Verified locally: the multi-aggregate scaffold
-          # now COMPILES (two Fable-blocking codegen bugs fixed — colliding Page
-          # union cases + `pageCmd` byId arms, both now aggregate-qualified) and
-          # boots; 9/10 (all smoke `*loads`) pass.  STILL OPEN (a Feliz-hardening
-          # follow-up): Feliz routes by HASH (`#/products`) but the shared page
-          # objects navigate by PATH (`/products`), so the create→addLine→confirm
-          # round-trip can't reach the pages.  Flip to blocking once that lands.
+          # setup-dotnet step below.  Verified locally (Node 24 + .NET 8 + Fable
+          # 4.29): the multi-aggregate scaffold COMPILES + boots, and the round-trip
+          # now drives PATH-based routing through product/customer/order create +
+          # addLine (Fable-blocking + runtime bugs fixed: aggregate-qualified Page
+          # cases, HASH→PATH routing, create→detail redirect, `{ id }` create
+          # decode).  STILL OPEN (a Feliz-hardening follow-up): PARAM-LESS operation
+          # forms (`confirm()`) — `collectPageOperationForms` skips no-field ops, so
+          # the confirm Modal/submit isn't wired; needs empty-form op support
+          # end-to-end.  Flip to blocking once that (and the read-back) land.
           - frontend: feliz
             case: sales-system-feliz
             experimental: true

@@ -67,15 +67,15 @@ describe("feliz scaffold primitives", () => {
     expect(app).toContain("Html.tbody [ prop.children [");
   });
 
-  it("emits IdLink cells + hash-route Anchors", async () => {
+  it("emits IdLink cells + path-route Anchors", async () => {
     const app = await appFs(SCAFFOLD);
-    // The id column links to the row's detail page (Feliz.Router hash path).
+    // The id column links to the row's detail page (History-API PATH, not a hash).
     expect(app).toMatch(
-      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("#\/products\/" \+ \w+\.id\)/,
+      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("\/products\/" \+ \w+\.id\)/,
     );
-    // Breadcrumb anchors fold a literal route into a static hash href.
+    // Breadcrumb anchors fold a literal route into a static PATH href.
     expect(app).toContain(
-      'Html.a [ prop.className "link link-primary"; prop.href "#/"; prop.text "Home" ]',
+      'Html.a [ prop.className "link link-primary"; prop.href "/"; prop.text "Home" ]',
     );
   });
 
