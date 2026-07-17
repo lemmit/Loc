@@ -25,6 +25,7 @@ import {
   isProperty,
   isValueObject,
 } from "../generated/ast.js";
+import { type DddType, resolveTypeRef, T } from "../type-system.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
 /** Bindable page-body inputs — they wire to a `state` field via `bind:`. */
@@ -143,7 +144,7 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
  *  not a `= A | B` union) — mirroring `checkBuilderCallType`'s record branches.
  *  Returns undefined for walker primitives, components, and unknown names (those
  *  aren't records; `checkBuilderCallType` owns their diagnostics). */
-function resolveRecordDecl(
+export function resolveRecordDecl(
   bc: BuilderCall,
   model: Model,
 ): ValueObject | EntityPart | PayloadDecl | undefined {
@@ -181,6 +182,32 @@ function recordFieldNames(decl: ValueObject | EntityPart | PayloadDecl): Set<str
     if (isProperty(m) || isContainment(m)) names.add(m.name);
   }
   return names;
+}
+
+/** The constructible fields of a record decl mapped to their declared TYPE —
+ *  the type-checking twin of `recordFieldNames`, consumed by the entry-VALUE
+ *  check (`checkConstructionArgTypes` in `statements.ts`, which has the lexical
+ *  `Env` to type each entry value).  A `Property` / payload field resolves via
+ *  `resolveTypeRef`; a `contains` member is its part type (an array when the
+ *  containment is a collection). */
+export function recordFieldTypes(
+  decl: ValueObject | EntityPart | PayloadDecl,
+): Map<string, DddType> {
+  const out = new Map<string, DddType>();
+  if (isPayloadDecl(decl)) {
+    for (const f of decl.fields) out.set(f.name, resolveTypeRef(f.type));
+    return out;
+  }
+  for (const m of decl.members) {
+    if (isProperty(m)) {
+      out.set(m.name, resolveTypeRef(m.type));
+    } else if (isContainment(m)) {
+      const part = m.partType?.ref;
+      const el: DddType = part ? { kind: "entity", ref: part } : T.unknown;
+      out.set(m.name, m.collection ? T.array(el) : el);
+    }
+  }
+  return out;
 }
 
 /** Reject a construction entry whose name isn't a declared field of the record. */

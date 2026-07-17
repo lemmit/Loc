@@ -7,6 +7,7 @@ import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Aggregate,
   AssignOrCallStmt,
+  BuilderCall,
   Create,
   Destroy,
   EmitStmt,
@@ -23,6 +24,7 @@ import {
   isFunctionDecl,
   isLetStmt,
   isMemberSuffix,
+  isModel,
   isNameRef,
   isOperation,
   isPostfixChain,
@@ -55,6 +57,7 @@ import {
   pathString,
   warnSensitivityDrop,
 } from "./_shared.js";
+import { recordFieldTypes, resolveRecordDecl } from "./builder-call.js";
 
 /** An aggregate action whose body reuses operation-body statement
  * rules: today's `operation`, plus the lifecycle `create` / `destroy`
@@ -181,6 +184,13 @@ export function checkStatement(
   env: Env,
   accept: ValidationAcceptor,
 ): Env {
+  // Type-check any record construction reachable from this statement's
+  // expressions (`price := Coin { amount: … }`, emit-field values, nested
+  // constructions) against the record's declared field types.  Every
+  // sub-expression of the statement shares this incoming env — a `let`'s own
+  // value can't reference the binding it introduces, and later statements get
+  // the extended env passed in.
+  checkConstructionArgTypes(stmt, env, accept);
   if (isPreconditionStmt(stmt)) {
     const t = typeOf(stmt.expr, env);
     if (t.kind !== "primitive" || t.name !== "bool") {
@@ -281,6 +291,55 @@ export function checkAssignOrCall(
       node: stmt,
       property: "value",
     });
+  }
+}
+
+/** Entry-VALUE type check for record construction (`X { field: value, … }`)
+ *  reachable from an operation / create / destroy body — the type-checking twin
+ *  of `checkConstructionFields` (which validates entry NAMES model-wide without
+ *  an env).  Value typing needs the lexical `Env`, so it hooks into the
+ *  statement walk here rather than at the model-stream level.  Streams every
+ *  `BuilderCall` descendant of the statement (nested constructions included) and
+ *  checks each named entry's value type against the record's declared field type,
+ *  mirroring `checkEmit`: suppress on `unknown` (a typo'd bare name is reported
+ *  once at its source by `checkUnknownNameRefs`, not doubly here) and admit
+ *  numeric-literal promotion (`amount: 5` into a `money`/`decimal` field) exactly
+ *  as `checkEmit` / `:=` do.  A construction inside a binding lambda types its
+ *  lambda-bound refs as `unknown` under this body env → suppressed (skipped, not
+ *  false-flagged). */
+export function checkConstructionArgTypes(
+  node: AstNode,
+  env: Env,
+  accept: ValidationAcceptor,
+): void {
+  for (const n of AstUtils.streamAst(node)) {
+    if (n.$type !== "BuilderCall") continue;
+    const bc = n as BuilderCall;
+    const model = AstUtils.getContainerOfType(bc, isModel);
+    if (!model) continue;
+    const decl = resolveRecordDecl(bc, model);
+    if (!decl) continue; // primitive / component / unknown — not a record
+    const types = recordFieldTypes(decl);
+    for (const entry of bc.entries) {
+      // Positional entries (no name) and unknown field NAMES are
+      // `checkConstructionFields`'s concern, not this value check.
+      if (typeof entry.name !== "string") continue;
+      const expected = types.get(entry.name);
+      if (!expected || expected.kind === "unknown") continue;
+      const actual = typeOf(entry.value, env);
+      if (
+        actual.kind !== "unknown" &&
+        !isAssignable(actual, expected) &&
+        !canPromoteLiteralTo(entry.value, expected)
+      ) {
+        accept(
+          "error",
+          `Field '${entry.name}' of '${bc.type}' expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          { node: entry, property: "value", code: "loom.construction-field-type" },
+        );
+      }
+      warnSensitivityDrop(actual, expected, accept, { node: entry, property: "value" });
+    }
   }
 }
 

@@ -33,22 +33,18 @@ const CODE = "loom.unknown-construction-field";
 describe("loom.unknown-construction-field (M-T6.18 slice 1)", () => {
   it("rejects an entry naming a field the value object doesn't declare", async () => {
     expect(
-      await codes(
-        'operation setp() { price := Coin { amount: money("5"), currency: "USD", bogus: 3 } }',
-      ),
+      await codes('operation setp() { price := Coin { amount: 5.0, currency: "USD", bogus: 3 } }'),
     ).toContain(CODE);
   });
 
   it("is CLEAN when every entry names a declared field", async () => {
     expect(
-      await codes('operation setp() { price := Coin { amount: money("5"), currency: "USD" } }'),
+      await codes('operation setp() { price := Coin { amount: 5.0, currency: "USD" } }'),
     ).not.toContain(CODE);
   });
 
   it("is CLEAN for a partial construction (an omitted field is not an unknown-field error)", async () => {
-    expect(await codes('operation setp() { price := Coin { amount: money("5") } }')).not.toContain(
-      CODE,
-    );
+    expect(await codes("operation setp() { price := Coin { amount: 5.0 } }")).not.toContain(CODE);
   });
 
   it("also covers ERROR / record-payload construction (exception-less returns)", async () => {
