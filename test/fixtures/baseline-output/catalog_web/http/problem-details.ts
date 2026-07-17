@@ -18,7 +18,7 @@ export const ProblemDetails = z.object({
   status: z.number().int().nullish(),
   detail: z.string().nullish(),
   instance: z.string().nullish(),
-  errors: z.array(z.object({ pointer: z.string(), message: z.string() })).nullish(),
+  errors: z.array(z.object({ pointer: z.string(), message: z.string(), code: z.string().nullish() })).nullish(),
 }).openapi("ProblemDetails");
 
 /** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty
@@ -44,12 +44,16 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *  for input-shape errors).  Domain-rule violations carried by
  *  DomainError continue to emit 400 via the router's `app.onError`
  *  catch-all (different fault class, different code). */
-export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }> } }, c: Context): Response | undefined {
+export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string; params?: { loomCode?: string } }> } }, c: Context): Response | undefined {
   if (result.success) return undefined;
   const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
   const errors = (result.error?.issues ?? []).map((issue) => ({
     pointer: pointerOf(issue.path),
     message: issue.message,
+    // A messaged invariant/precondition carries a stable content-hash code (via
+    // the refine's params.loomCode) so a client can localise the error;
+    // structural zod errors (type/min) have none.
+    ...(issue.params?.loomCode ? { code: issue.params.loomCode } : {}),
   }));
   return c.body(
     JSON.stringify({
