@@ -33,7 +33,12 @@ guards.
 > loads: […] }, page?)` — the call-site twin of a declared `retrieval`; `findAll`
 > and bare-criterion `run` stay the un-shaped spellings, shaping lives on the
 > (named or anonymous) retrieval.  Its `where:` is a criterion reference in this
-> release.  The
+> release.  **A wire-shaped *list* `find` on a repository is deprecated**
+> (`loom.repository-find-deprecated`, a warning): a `find byX(...): T[]` /
+> `T paged` is a bespoke list finder — pass a criterion to `run`
+> (`Repo.run(<Criterion>(args))`) or name a `retrieval` instead of accreting a
+> method per query.  A **unique-key reconstitution** find (returning a single
+> `T` / `T?` by identity) is *not* a list query and stays legal.  The
 > single-result `Repo.find(<Criterion>)` is **shipped on every backend** as the
 > source of an `if let` workflow statement — `if let x = Repo.find(<Criterion>)
 > { … } else { … }` — which binds the first match (non-null) in the then-branch
