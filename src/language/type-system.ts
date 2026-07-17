@@ -745,6 +745,28 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   return T.unknown;
 }
 
+/** The user `FunctionDecl` a free call `name(args)` resolves to, or `undefined`
+ *  when the call targets anything else — a value-object constructor, a criterion,
+ *  a policy function, a duration builtin, or an unresolved name.  Mirrors
+ *  `typeOfFreeCall`'s resolution ORDER exactly (same lookups, same shadowing) so
+ *  the arg-count/type validator and the type system can never disagree about
+ *  what a free call targets.  The validator uses this to arg-check ONLY the
+ *  unambiguous user-function case, leaving criteria / policy-fns / duration
+ *  builtins to their own gates. */
+export function freeCallFunction(name: string, env: Env): FunctionDecl | undefined {
+  const sym = env.resolve(name);
+  if (sym && isFunctionDecl(sym.origin)) return sym.origin;
+  if (sym && isValueObject(sym.origin)) return undefined; // VO constructor, not a function
+  const fn = lookupFunctionInScope(name, env);
+  if (fn) return fn;
+  if (lookupValueObjectByName(name, env)) return undefined; // VO shadows a top-level fn
+  if (lookupCriterionByName(name, env)) return undefined;
+  if (lookupPolicyFnByName(name, env)) return undefined;
+  const topFn = lookupTopLevelFunction(name, env);
+  if (topFn) return topFn;
+  return undefined; // duration builtin / unresolved — not the call-arg validator's concern
+}
+
 /**
  * True iff a free call to `name` is an A5 duration-constructor BUILTIN in
  * `env` — i.e. `name` is one of `days`/`hours`/`minutes` AND no
