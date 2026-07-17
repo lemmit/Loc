@@ -51,6 +51,7 @@ import {
   stepInto,
   stepIntoNode,
   T,
+  typeAfterSuffix,
   typeOf,
   typeToString,
   withTags,
@@ -348,28 +349,67 @@ export function checkConstructionArgTypes(
   }
 }
 
-/** Arity + type check for FREE calls in EXPRESSION position (`derived x =
- *  fee(a)`, `let y := compute(a, b)`, `precondition check(a)`, `emit E { f:
- *  fee(3) }`) — the expression-walk companion to `checkCallStmt`'s statement-call
- *  check (M-T6.18 gap #2).  Streams every free-call `PostfixChain` (a bare
- *  `NameRef` head with a leading `CallSuffix`) reachable from `node`; when the
- *  name resolves to a user `FunctionDecl` (via `freeCallFunction`, kept in
- *  lockstep with `typeOfFreeCall`) its args are checked through the shared
- *  `checkCallArgs`.  Everything else is deliberately skipped: value-object
- *  constructors, criteria, policy-fns, and duration builtins aren't free
- *  user-function calls (or have their own gates), and member calls
- *  (`recv.m(a)`) — a `MemberSuffix`, not a leading `CallSuffix` — are the
- *  follow-on slice.  Bare call STATEMENTS (`fee(5)` alone) are an `LValue`, not a
- *  `PostfixChain`, so they stay `checkCallStmt`'s job with no double report. */
+/** Arity + type check for calls in EXPRESSION position (`derived x = fee(a)`,
+ *  `let y := compute(a, b)`, `precondition check(a)`, `derived t = price.scaled(f)`)
+ *  — the expression-walk companion to `checkCallStmt`'s statement-call check
+ *  (M-T6.18 gap #2).  Streams every `PostfixChain` reachable from `node` and
+ *  covers two call shapes:
+ *
+ *   - **Free call** (`name(args)` — a bare `NameRef` head with a leading
+ *     `CallSuffix`): when the name resolves to a user `FunctionDecl` (via
+ *     `freeCallFunction`, kept in lockstep with `typeOfFreeCall`).  Value-object
+ *     constructors, criteria, policy-fns, and duration builtins resolve to
+ *     `undefined` and are skipped — they aren't free user-function calls / have
+ *     their own gates.
+ *   - **Member call** (`recv.method(args)`): walk the chain's running receiver
+ *     type and, at each `MemberSuffix` invocation, resolve the member via
+ *     `stepIntoNode`.  It returns a node only for function / operation members of
+ *     an entity / aggregate / value object receiver — so collection ops
+ *     (`.sum`/`.count`/`.filter` on arrays) and scalar intrinsics (primitive
+ *     receivers) resolve to `undefined` and are skipped, no false positives.
+ *
+ *  Both shapes check through the shared `checkCallArgs` (arity +
+ *  `unknown`-suppression + numeric-literal promotion).  Bare call STATEMENTS
+ *  (`fee(5)` / `o.f(5)` alone) are an `LValue`, not a `PostfixChain`, so they
+ *  stay `checkCallStmt`'s job with no double report. */
 export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcceptor): void {
   for (const n of AstUtils.streamAst(node)) {
     if (!isPostfixChain(n)) continue;
     const first = n.suffixes[0];
-    if (!first || !isCallSuffix(first) || !isNameRef(n.head)) continue;
-    const fn = freeCallFunction(n.head.name, env);
-    if (!fn) continue; // VO ctor / criterion / policy-fn / duration builtin / unresolved
-    const args = first.args.map((a) => a.value);
-    checkCallArgs(fn.params, args, env, `Function '${n.head.name}'`, first, accept);
+    if (first && isCallSuffix(first) && isNameRef(n.head)) {
+      // Free call at the front (`fee(args)`).  Member accesses on its return
+      // (`fee(x).bar`) are a niche running-type case we don't chase here.
+      const fn = freeCallFunction(n.head.name, env);
+      if (fn) {
+        checkCallArgs(
+          fn.params,
+          first.args.map((a) => a.value),
+          env,
+          `Function '${n.head.name}'`,
+          first,
+          accept,
+        );
+      }
+      continue;
+    }
+    // Member-call chain (`recv.method(args)`): thread the running receiver type.
+    let curType: DddType = typeOf(n.head, env);
+    for (const s of n.suffixes) {
+      if (isMemberSuffix(s) && s.call && curType.kind !== "unknown") {
+        const member = stepIntoNode(curType, s.member);
+        if (member && (isFunctionDecl(member) || isOperation(member))) {
+          checkCallArgs(
+            member.params,
+            s.args.map((a) => a.value),
+            env,
+            `'${s.member}'`,
+            s,
+            accept,
+          );
+        }
+      }
+      curType = typeAfterSuffix(curType, s, env);
+    }
   }
 }
 
