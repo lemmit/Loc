@@ -3,7 +3,7 @@
 {{headIndent}}<tr>{{#each columns}}<th>{{{this.header}}}</th>{{/each}}</tr>
 {{indent}}</thead>
 {{indent}}<tbody>
-{{bodyIndent}}@for ({{rowVar}} of {{{rowsExpr}}}; track {{{keyExpr}}}) {
+{{bodyIndent}}@for ({{rowVar}} of {{{rowsExpr}}}; track {{#if (eq keyExpr "idx")}}$index{{else}}{{{keyExpr}}}{{#if usesIdx}}; let idx = $index{{/if}}{{/if}}) {
 {{rowIndent}}<tr{{#if hasRowTestid}} [attr.data-testid]='{{{rowTestid}}}'{{/if}}>{{#each columns}}<td>{{{this.cellJsx}}}</td>{{/each}}</tr>
 {{bodyIndent}} }
 {{indent}}</tbody>

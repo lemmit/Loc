@@ -8,6 +8,7 @@ import { unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
+  EntityPartIR,
   EnumIR,
   FindIR,
   RepositoryIR,
@@ -15,6 +16,7 @@ import type {
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
+import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 
@@ -34,14 +36,17 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 //
 // Response types are plain TS interfaces derived from the aggregate's
 // `wireShape` (the same ordered field list every backend's DTO emitter
-// consumes).  Primitive + id fields map precisely.  RESPONSE-side value-object
-// and enum fields are typed precisely too — VO fields as `<VO>Response` (nested
-// interfaces emitted alongside), enum fields as a `<Enum>` string union — so a
-// detail/view that dereferences `x.price.amount` or narrows an enum compiles
-// under `ng build` (previously `unknown` → TS2571).  REQUEST-side fields
-// (create / op params / find queries) stay `unknown`: the reactive forms hold
-// them as `FormControl(null)`, which is assignable to `unknown` but not to the
-// precise type — request-side precise typing is a separate concern.
+// consumes).  Primitive + id fields map precisely.  RESPONSE-side value-object,
+// enum, and containment-part fields are typed precisely too — VO fields as
+// `<VO>Response`, enum fields as a `<Enum>` string union, containment parts as
+// `<Part>Response` (all emitted as nested interfaces alongside) — so a
+// detail/view that dereferences `x.price.amount`, narrows an enum, or walks
+// `order.lines[i].quantity` compiles under `ng build` (previously `unknown` →
+// TS2571).  REQUEST-side value-object / enum fields stay `unknown` (the reactive
+// form holds a VO field as a nested `FormGroup` and an enum as a `""` control,
+// both assignable to `unknown`); request-side precise typing is a separate
+// concern.  (Request-side `id` fields are always `string`, not `unknown` — the
+// FK Select binds the chosen id string.)
 // ---------------------------------------------------------------------------
 
 /** Map a wire `TypeIR` to a TS type string for an interface field.  `precise`
@@ -76,7 +81,11 @@ function wireTsType(t: TypeIR, precise = false): string {
     default:
       if (precise && t.kind === "valueobject") return `${t.name}Response`;
       if (precise && t.kind === "enum") return t.name;
-      // Nested entities (and request-side VO/enum) stay untyped.
+      // Containment parts peel to `entity { name }` — type them as the part's
+      // own `<Part>Response` interface (emitted from `agg.parts`) so a detail /
+      // view that walks `order.lines[i].quantity` compiles.  Request-side
+      // (`precise` off) stays `unknown`.
+      if (precise && t.kind === "entity") return `${t.name}Response`;
       return "unknown";
   }
 }
@@ -125,6 +134,22 @@ function emitVoResponseInterface(vo: ValueObjectIR): string[] {
   return [
     `export interface ${vo.name}Response {`,
     ...forApiRead(wireFieldsFor(vo)).map(
+      (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
+    ),
+    "}",
+    "",
+  ];
+}
+
+/** `export interface <Part>Response { … }` over a containment part's canonical
+ *  wire shape (its `id` + declared fields + nested containments + derived) — the
+ *  precise type an aggregate's `contains lines: OrderLine[]` field points at.
+ *  Nested containments in the part peel to their own `<Part>Response` too, so
+ *  the parts must be emitted children-first (`partsChildrenFirst`). */
+function emitPartResponseInterface(part: EntityPartIR): string[] {
+  return [
+    `export interface ${part.name}Response {`,
+    ...forApiRead(wireFieldsFor(part)).map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
     ),
     "}",
@@ -212,10 +237,24 @@ export function buildAngularApiModule(
 
   const fields = forApiRead(wireFieldsFor(agg));
   const createFields = createInputFields(agg);
+  // Containment parts → a `<Part>Response` interface each, children-first so a
+  // nested part is declared before the sibling that references it.  The
+  // aggregate's `contains` fields (and any nested part field) are typed against
+  // these precisely instead of `unknown[]`.
+  const parts = partsChildrenFirst(agg.parts);
   // VO / enum types referenced by the response field set — emitted before the
-  // response interface so its precise (non-`unknown`) field types resolve.
+  // response interface so its precise (non-`unknown`) field types resolve.  A
+  // VO / enum reached only through a containment part (e.g. `OrderLine.price:
+  // Money`) is collected too by seeding with each part's own response fields.
   const { vos: responseVos, enums: responseEnums } = collectResponseTypes(
-    fields.filter((f) => f.source !== "id").map((f) => f.type),
+    [
+      ...fields.filter((f) => f.source !== "id").map((f) => f.type),
+      ...parts.flatMap((p) =>
+        forApiRead(wireFieldsFor(p))
+          .filter((f) => f.source !== "id")
+          .map((f) => f.type),
+      ),
+    ],
     bc,
   );
 
@@ -238,7 +277,10 @@ export function buildAngularApiModule(
     return [
       "",
       `  ${op.name}(id: string, input: ${upperFirst(op.name)}${single}Request) {`,
-      `    return this.http.post<${respType}>(\`\${API_BASE_URL}/${tag}/\${id}/${op.name}\`, input);`,
+      // The REST path segment is the SNAKE-cased op name (`add_line`) — the
+      // convention the Hono route emitter registers (`POST /{id}/add_line`) and
+      // every other client posts to.  The TS method keeps its camelCase name.
+      `    return this.http.post<${respType}>(\`\${API_BASE_URL}/${tag}/\${id}/${snake(op.name)}\`, input);`,
       "  }",
     ];
   });
@@ -368,6 +410,9 @@ export function buildAngularApiModule(
     // enum unions) so a detail/view dereference compiles.
     ...responseEnums.map(emitEnumType).flatMap((l) => [l, ""]),
     ...responseVos.flatMap(emitVoResponseInterface),
+    // Containment-part response interfaces (children-first) — the precise types
+    // the aggregate's `contains` fields point at.
+    ...parts.flatMap(emitPartResponseInterface),
     `export interface ${responseName} {`,
     ...fields.map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
