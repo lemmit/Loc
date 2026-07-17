@@ -25,7 +25,12 @@ export {
   renderSnapshots,
 } from "./emit/document.js";
 export { renderRequestDtos, renderResponseDtos } from "./emit/dto.js";
-export { renderConfiguration, renderDbContext } from "./emit/efcore.js";
+export {
+  aggregateHasTableValueArray,
+  renderConfiguration,
+  renderDbContext,
+  renderOrdinalGenerator,
+} from "./emit/efcore.js";
 export { renderAbstractBaseEntity, renderEntity } from "./emit/entity.js";
 export { renderEnum, renderValueObject } from "./emit/enums-vos.js";
 export { renderEventRecordConfiguration, renderEventRecordPoco } from "./emit/event-store.js";

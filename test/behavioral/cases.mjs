@@ -107,13 +107,9 @@ const BEHAVIOURAL_SKIP = {
     ledger: "B1: node ES create checks invariant before the create event folds initial state",
   },
   dotnet: {
-    // B2 — dotnet inheritance (TPH) create 500s at runtime.
-    payments: "B2: dotnet inheritance create 500s",
-    tph: "B2: dotnet inheritance create 500s",
-    // B3 — dotnet document/embedded shape crashes on boot (EF).
-    shapes: "B3: dotnet document/embedded shape crashes on boot (EF)",
-    // B4 — dotnet inline value-object array create 500s.
-    "value-collections": "B4: dotnet inline VO array create 500s",
+    // B2/B3/B4 fixed — the TPH/shape/VO-array EF persistence bugs are resolved
+    // (schema-qualified secondary ToTable calls + jsonb owned-entity key/column
+    // mapping). No dotnet behavioural skips remain.
   },
 };
 

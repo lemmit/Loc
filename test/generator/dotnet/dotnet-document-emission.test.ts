@@ -66,8 +66,16 @@ describe(".NET document-persistence emission (normalised(false))", () => {
     )!;
     expect(cfg).toContain("IEntityTypeConfiguration<CartDocument>");
     expect(cfg).toContain('builder.ToTable("carts");');
-    expect(cfg).toContain('builder.Property(x => x.Data).HasColumnType("jsonb");');
-    expect(cfg).toContain("builder.Property(x => x.Version).IsConcurrencyToken();");
+    // Every property is mapped to the migration's snake_case column — EF's
+    // default PascalCase (`Id`/`Data`/`Version`) does not match the DDL, so an
+    // unqualified mapping yields `column c.Id does not exist` at runtime.
+    expect(cfg).toContain('builder.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();');
+    expect(cfg).toContain(
+      'builder.Property(x => x.Data).HasColumnName("data").HasColumnType("jsonb");',
+    );
+    expect(cfg).toContain(
+      'builder.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();',
+    );
   });
 
   it("emits snapshot records mirroring the entity tree (root + parts)", () => {
