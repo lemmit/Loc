@@ -66,7 +66,9 @@ describe("Toolbar + Empty in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Group justify="space-between" role="toolbar" aria-label="Actions" \/>/);
+    expect(content).toMatch(
+      /<Group justify="space-between" role="toolbar" aria-label="Actions" \/>/,
+    );
   });
 
   it('Empty { "No orders yet" } emits centered dimmed-text placeholder', async () => {

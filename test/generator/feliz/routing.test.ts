@@ -124,9 +124,7 @@ describe("feliz multi-page routing", () => {
     const app = await appFs(MULTI);
     // WCAG 2.4.1 Bypass Blocks — the skip link is the first focusable element,
     // visually hidden until focused, and jumps past the nav to the <main>.
-    expect(app).toContain(
-      'prop.href "#main-content"; prop.text "Skip to content"',
-    );
+    expect(app).toContain('prop.href "#main-content"; prop.text "Skip to content"');
     // The route-swapping router lives inside the <main id="main-content">.
     expect(app).toContain('Html.main [ prop.id "main-content"; prop.children [');
   });

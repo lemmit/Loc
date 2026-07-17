@@ -17,13 +17,13 @@ export default function CustomerList() {
         <Anchor component={RouterLink} to="/">Home</Anchor>
         <Text>Customers</Text>
       </Breadcrumbs>
-      <Group justify="space-between">
+      <Group justify="space-between" role="toolbar" aria-label="Actions">
         <Title order={2}>Customers</Title>
         <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create">New customer</Button>
       </Group>
       <>
         { customerAll.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

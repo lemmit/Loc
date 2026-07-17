@@ -174,7 +174,7 @@ export default function OrderDetail() {
       <Title order={2}>Order detail</Title>
       <>
         { orderById.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 3 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

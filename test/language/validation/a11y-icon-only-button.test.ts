@@ -34,8 +34,7 @@ system S {
 }
 `;
 
-const iconOnly = (msgs: string[]) =>
-  msgs.some((m) => /no accessible name|WCAG 4\.1\.2/.test(m));
+const iconOnly = (msgs: string[]) => msgs.some((m) => /no accessible name|WCAG 4\.1\.2/.test(m));
 
 describe("a11y — icon-only Button accessible name (loom.a11y-icon-only-no-name)", () => {
   it("warns on a Button with only an icon (no text, no label)", async () => {
