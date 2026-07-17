@@ -1136,6 +1136,14 @@ export interface PrimitiveSpec {
    *  argument that's an array of children expressions is rendered
    *  as nested HEEx. */
   takesChildren?: boolean;
+  /** Static attributes always emitted on the tag (e.g. an a11y
+   *  `role="toolbar"` / `aria-label="Actions"` the primitive's contract
+   *  requires).  Rendered verbatim, after the derived named attributes. */
+  extraAttrs?: string[];
+  /** When set, a `label:` named arg is emitted as an `aria-label` attribute
+   *  (the accessible name) rather than a literal `label=` attribute.  Used by
+   *  the command `Button` whose visible text can be an unhelpful glyph. */
+  labelAsAriaLabel?: boolean;
 }
 
 export function renderPrimitive(
@@ -1178,6 +1186,11 @@ export function renderPrimitive(
         // `testid=` attribute which no test harness recognises.
         const value = renderAttrValue(arg, ctx, false);
         namedAttrs.push(`data-testid=${value}`);
+      } else if (name === "label" && spec.labelAsAriaLabel) {
+        // A command button's `label:` is its accessible name (aria-label),
+        // not a literal `label=` attribute.
+        const value = renderAttrValue(arg, ctx, true);
+        namedAttrs.push(`aria-label=${value}`);
       } else {
         const value = renderAttrValue(arg, ctx, spec.staticAttrs?.includes(name) ?? false);
         namedAttrs.push(`${snake(name)}=${value}`);
@@ -1191,6 +1204,9 @@ export function renderPrimitive(
   // so it lands before any other attributes for predictable output.
   const styleHeexAttr = styleIrToHeex(expr);
   if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
+
+  // Contract-required static a11y attributes (e.g. Toolbar's role/name).
+  if (spec.extraAttrs) namedAttrs.push(...spec.extraAttrs);
 
   if (spec.tag === ".empty") {
     const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";

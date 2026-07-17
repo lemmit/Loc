@@ -11,7 +11,7 @@ export default function OrderSummaryView() {
       <Title order={2}>Order Summary</Title>
       <>
         { orderSummaryView.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

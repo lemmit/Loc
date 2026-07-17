@@ -45,6 +45,8 @@ describe("feliz scaffold primitives", () => {
   it("emits the container/leaf primitives with their daisyUI classes", async () => {
     const app = await appFs(SCAFFOLD);
     expect(app).toContain('prop.className "flex flex-row items-center justify-between gap-2 py-2"'); // toolbar
+    // Toolbar is a labelled ARIA toolbar (a11y contract).
+    expect(app).toContain('prop.role "toolbar"; prop.ariaLabel "Actions"');
     expect(app).toContain('prop.className "breadcrumbs text-sm"'); // nav trail
     expect(app).toContain(
       'prop.className "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm"',

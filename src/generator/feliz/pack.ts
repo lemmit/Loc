@@ -96,9 +96,11 @@ function primitiveGroup(c: Ctx): string {
 /** A children-container primitive (Stack/Group/Paper/Toolbar/Breadcrumbs) with a
  *  CSS class.  Same offside-safe children handling as `primitiveStack` (multi-
  *  line element lists are fine inside `[ … ]`; only offside-keywords aren't). */
-function containerEl(tag: string, className: string, c: Ctx): string {
+function containerEl(tag: string, className: string, c: Ctx, extraProps = ""): string {
+  // `extraProps` — additional leaf props (e.g. a11y `prop.role`/`prop.ariaLabel`)
+  // spliced after `className` (and any `data-testid`), each `;`-separated.
   const tid = testidProp(c);
-  const cls = `prop.className "${className}"${tid ? `; ${tid}` : ""}`;
+  const cls = [`prop.className "${className}"`, tid, extraProps].filter(Boolean).join("; ");
   if (!c.hasChildren) return `Html.${tag} [ ${cls} ]`;
   const indent = String(c.indent ?? "  ");
   const children = `${indent}${String(c.childrenBlock ?? "")}`;
@@ -114,9 +116,12 @@ function primitivePaper(c: Ctx): string {
   return containerEl("div", "rounded-box border border-base-300 bg-base-100 p-4 shadow-sm", c);
 }
 
-/** Toolbar — a page-header row (space-between flex container). */
+/** Toolbar — a page-header row (space-between flex container).  Its a11y
+ *  contract makes it a labelled ARIA `toolbar` (default name "Actions"). */
 function primitiveToolbar(c: Ctx): string {
-  return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c);
+  const label = String(c.label ?? "").trim() || "Actions";
+  const a11y = `prop.role "toolbar"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"`;
+  return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c, a11y);
 }
 
 /** Breadcrumbs — a nav trail (daisyUI `breadcrumbs`). */
@@ -153,9 +158,11 @@ function primitiveEmpty(c: Ctx): string {
   return `Html.div [ prop.className "flex min-h-40 flex-col items-center justify-center gap-2 text-center text-base-content/70"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
 }
 
-/** Skeleton — a loading placeholder (daisyUI `skeleton`; count/height v1-fixed). */
+/** Skeleton — a loading placeholder (daisyUI `skeleton`; count/height v1-fixed).
+ *  Decorative: hidden from assistive tech (the loading state is announced by a
+ *  Loader/status region, and the real content announces once it loads). */
 function primitiveSkeleton(_c: Ctx): string {
-  return `Html.div [ prop.className "skeleton h-24 w-full" ]`;
+  return `Html.div [ prop.className "skeleton h-24 w-full"; prop.ariaHidden true ]`;
 }
 
 /** KeyValueRow(label, value) — a detail-page field row (label + value cell).
@@ -298,6 +305,10 @@ function primitiveButton(c: Ctx): string {
   const tid = testidProp(c);
   if (tid) props.push(tid);
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
+  // `label:` supplies an explicit accessible name (the a11y contract's needsName)
+  // — emitted as prop.ariaLabel when the visible text is an unhelpful glyph.
+  const ariaLabel = String(c.ariaLabel ?? "").trim();
+  if (ariaLabel !== "") props.push(`prop.ariaLabel "${ariaLabel.replace(/"/g, '\\"')}"`);
   const label = String(c.label ?? "").trim();
   if (label.startsWith("Html.") || label.startsWith("(")) {
     props.push(`prop.children [ ${label} ]`);
@@ -387,7 +398,16 @@ function primitiveIcon(c: Ctx): string {
           ? "h-8 w-8"
           : "h-5 w-5";
   const cls = `loom-icon inline-flex ${size} [&>svg]:h-full [&>svg]:w-full`;
-  return `Html.span [ prop.className "${cls}"; prop.dangerouslySetInnerHTML """${svg}""" ]`;
+  // Decorative-by-default (icon a11y contract): hide the glyph from assistive
+  // tech unless a `label:` gives it meaning, in which case it becomes a named
+  // `img`.  Feliz emits F# `prop.*` props rather than the HTML `a11yAttr`.
+  const label = String(c.label ?? "").trim();
+  const decorative = c.decorative === true || String(c.decorative) === "true";
+  const a11yProps =
+    label !== "" && !decorative
+      ? `prop.role "img"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"; `
+      : `prop.ariaHidden true; `;
+  return `Html.span [ prop.className "${cls}"; ${a11yProps}prop.dangerouslySetInnerHTML """${svg}""" ]`;
 }
 
 /** Tabs(Tab("A", …), Tab("B", …)) — daisyUI's CSS-only radio-tabs: one
@@ -438,11 +458,35 @@ function inputLabel(labelText: string): string {
     : `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text"; prop.text "${labelText}" ] ] ]`;
 }
 
+/** A stable id for a field's inline error element, derived from its bound state
+ *  field (`name` → `name-error`) so the input can point `aria-describedby` at it.
+ *  Empty when the field isn't bound (an uncontrolled stub carries no error). */
+function fieldErrorId(c: Ctx): string {
+  const bind = String(c.bind ?? "").trim();
+  return bind === "" ? "" : `${bind}-error`;
+}
+
+/** The a11y props that link a raw input to its error state: `aria-invalid`
+ *  reflects the RUNTIME error (`errorExpr <> ""` — empty string means valid) and
+ *  `aria-describedby` points at the inline error element so a screen reader
+ *  announces the message with the field.  Empty (no leading `;`) when the field
+ *  has no error binding.  Each returned fragment starts with `; ` so it slots
+ *  straight into an existing Feliz prop list after the className. */
+function fieldAriaProps(c: Ctx): string {
+  if (!c.hasError) return "";
+  const invalid = `; prop.ariaInvalid (${String(c.error)} <> "")`;
+  const id = fieldErrorId(c);
+  return id === "" ? invalid : `${invalid}; prop.ariaDescribedBy "${id}"`;
+}
+
 /** The inline error line under an input — bound to the walked `error:` F#
- *  expression (empty string at runtime → an empty line, harmless). */
+ *  expression (empty string at runtime → an empty line, harmless).  Carries the
+ *  `id` the input's `aria-describedby` references (a11y). */
 function inputError(c: Ctx): string {
   if (!c.hasError) return "";
-  return `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text-alt text-error"; prop.text (${String(c.error)}) ] ] ]`;
+  const id = fieldErrorId(c);
+  const idProp = id === "" ? "" : `prop.id "${id}"; `;
+  return `Html.label [ ${idProp}prop.className "label"; prop.children [ Html.span [ prop.className "label-text-alt text-error"; prop.text (${String(c.error)}) ] ] ]`;
 }
 
 /** Wrap a controlled input element in a daisyUI `form-control` with its label +
@@ -469,8 +513,8 @@ function bindTargets(c: Ctx): { model: string; setMsg: string } | undefined {
 function primitiveField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full" ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)} ]`;
   return formControl(c, input);
 }
 
@@ -478,8 +522,8 @@ function primitiveField(c: Ctx): string {
 function primitiveMultilineField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.textarea [ prop.className "textarea textarea-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.textarea [ prop.className "textarea textarea-bordered w-full" ]`;
+    ? `Html.textarea [ prop.className "textarea textarea-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.textarea [ prop.className "textarea textarea-bordered w-full"${fieldAriaProps(c)} ]`;
   return formControl(c, input);
 }
 
@@ -487,8 +531,8 @@ function primitiveMultilineField(c: Ctx): string {
 function primitivePasswordField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.password ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.password; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.password ]`;
   return formControl(c, input);
 }
 
@@ -498,8 +542,8 @@ function primitivePasswordField(c: Ctx): string {
 function primitiveNumberField(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number; prop.value (string ${t.model}); prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "input input-bordered w-full"; prop.type'.number ]`;
+    ? `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.number; prop.value (string ${t.model}); prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "input input-bordered w-full"${fieldAriaProps(c)}; prop.type'.number ]`;
   return formControl(c, input);
 }
 
@@ -511,8 +555,8 @@ function primitiveSelectField(c: Ctx): string {
   const options = String(c.optionsExpr ?? "[]");
   const opts = `yield! (${options}) |> Seq.map (fun o -> Html.option [ prop.value o; prop.text o ])`;
   const input = t
-    ? `Html.select [ prop.className "select select-bordered w-full"; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)); prop.children [ ${opts} ] ]`
-    : `Html.select [ prop.className "select select-bordered w-full"; prop.children [ ${opts} ] ]`;
+    ? `Html.select [ prop.className "select select-bordered w-full"${fieldAriaProps(c)}; prop.value ${t.model}; prop.onChange (fun (v: string) -> dispatch (${t.setMsg} v)); prop.children [ ${opts} ] ]`
+    : `Html.select [ prop.className "select select-bordered w-full"${fieldAriaProps(c)}; prop.children [ ${opts} ] ]`;
   return formControl(c, input);
 }
 
@@ -522,8 +566,8 @@ function primitiveSelectField(c: Ctx): string {
 function primitiveToggle(c: Ctx): string {
   const t = bindTargets(c);
   const input = t
-    ? `Html.input [ prop.className "toggle"; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
-    : `Html.input [ prop.className "toggle"; prop.type'.checkbox ]`;
+    ? `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
+    : `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox ]`;
   const labelText = String(c.labelText ?? "");
   const span =
     labelText.trim() === ""

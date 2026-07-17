@@ -7,6 +7,7 @@ import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
+import { ariaLabelAttr } from "../a11y-emit.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
@@ -141,6 +142,10 @@ export function emitButton(
   const icon = stringNamed(call, "icon");
   const iconSvg = stringNamed(call, "iconSvg");
   const iconPosition = stringNamed(call, "iconPosition") ?? "right";
+  // `label:` supplies an explicit accessible name (aria-label) — the command's
+  // a11y contract needs a name, and the visible text can be an unhelpful glyph
+  // or the default "Button" when the button leads with an `icon:`.
+  const ariaLabel = stringNamed(call, "label");
   // Resolve a builtin icon name to its inline SVG so the template
   // doesn't need to know the registry.  Custom SVG passes through.
   let resolvedIconSvg: string | undefined = iconSvg;
@@ -160,6 +165,10 @@ export function emitButton(
     iconSvg: resolvedIconSvg,
     hasIcon: resolvedIconSvg !== undefined,
     iconPosition,
+    // HTML-ish frontends consume the ready-made ` aria-label="…"` fragment;
+    // Feliz (F#) reads the raw `ariaLabel` to build `prop.ariaLabel`.
+    a11yAttr: ariaLabelAttr(ariaLabel),
+    ariaLabel,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
@@ -242,6 +251,8 @@ export function emitAction(
     hasLoading: true,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
+    // Action button's visible text (the humanised op) is its accessible name.
+    a11yAttr: "",
   });
   // Action-button gating (D-AUTH-OIDC, the action-level mirror of the page
   // `requires` guard).  On an `auth: ui` frontend, hide the button at runtime

@@ -1,1 +1,1 @@
-{{#if isMulti}}<div class="loom-skeleton-group"{{{testidAttr}}}>{{#each (range count)}}<div class="loom-skeleton" style="height: {{../height}}px"></div>{{/each}}</div>{{else}}<div class="loom-skeleton" style="height: {{height}}px"{{{testidAttr}}}></div>{{/if}}
+{{#if isMulti}}<div class="loom-skeleton-group"{{{testidAttr}}} aria-hidden="true">{{#each (range count)}}<div class="loom-skeleton" style="height: {{../height}}px"></div>{{/each}}</div>{{else}}<div class="loom-skeleton" style="height: {{height}}px"{{{testidAttr}}} aria-hidden="true"></div>{{/if}}

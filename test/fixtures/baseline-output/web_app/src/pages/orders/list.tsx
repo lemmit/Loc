@@ -19,7 +19,7 @@ export default function OrderList() {
         <Anchor component={RouterLink} to="/">Home</Anchor>
         <Text>Orders</Text>
       </Breadcrumbs>
-      <Group justify="space-between">
+      <Group justify="space-between" role="toolbar" aria-label="Actions">
         <Title order={2}>Orders</Title>
         <Button onClick={() => navigate("/orders/new")} data-testid="orders-list-create">New order</Button>
       </Group>
@@ -28,7 +28,7 @@ export default function OrderList() {
       </Group>
       {((byCustomerCustomerId !== "")) ? (<>
           { orderByCustomer.isLoading && (
-            <Stack gap="xs">
+            <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }
@@ -69,7 +69,7 @@ export default function OrderList() {
           ) }
         </>) : <>
           { orderAll.isLoading && (
-            <Stack gap="xs">
+            <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

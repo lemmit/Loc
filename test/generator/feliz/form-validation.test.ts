@@ -60,12 +60,25 @@ describe("feliz per-field form validation", () => {
     // The input marks the field touched on blur.
     expect(app).toContain('prop.onBlur (fun _ -> dispatch (TouchProductForm "name"))');
     // The repeated touched+error matching is factored into a `View.fieldError`
-    // helper (beside View.remoteList) — not inlined at every input.
+    // helper (beside View.remoteList) — not inlined at every input.  It takes the
+    // error element's id (for the input's aria-describedby).
     expect(app).toContain(
-      "  let fieldError (touched: Set<string>) (name: string) (err: string option) : ReactElement =",
+      "  let fieldError (touched: Set<string>) (name: string) (fieldId: string) (err: string option) : ReactElement =",
     );
     expect(app).toContain(
-      '(View.fieldError model.ProductFormTouched "name" (Validation.productFormNameError model.ProductForm))',
+      '(View.fieldError model.ProductFormTouched "name" "ProductForm-name-error" (Validation.productFormNameError model.ProductForm))',
+    );
+    // The error <p> carries that id so a screen reader can associate it.
+    expect(app).toContain("Html.p [ prop.id fieldId;");
+  });
+
+  it("wires aria-invalid + aria-describedby on a validated input (a11y)", async () => {
+    const app = await appFs();
+    // The input marks itself invalid when the field is touched AND in error
+    // (the same condition that reveals the visible message), and points at the
+    // error element via aria-describedby.
+    expect(app).toContain(
+      'prop.ariaInvalid ((model.ProductFormTouched |> Set.contains "name") && (Validation.productFormNameError model.ProductForm |> Option.isSome)); prop.ariaDescribedBy "ProductForm-name-error"',
     );
   });
 

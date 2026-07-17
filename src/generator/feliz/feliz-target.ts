@@ -119,12 +119,21 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   const onBlur = validated
     ? `; prop.onBlur (fun _ -> dispatch (${formTouchMsg(formField)} "${fld.wireName}"))`
     : "";
+  // a11y: a validated input links to its error via `aria-describedby` and marks
+  // itself `aria-invalid` when the field is touched AND currently in error (the
+  // same condition that reveals the visible message).  Unvalidated fields carry
+  // no error binding, so no aria.
+  const errorId = `${formField}-${fld.wireName}-error`;
+  const aria = validated
+    ? `; prop.ariaInvalid ((model.${formTouchedField(formField)} |> Set.contains "${fld.wireName}") && (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField} |> Option.isSome)); prop.ariaDescribedBy "${errorId}"`
+    : "";
   const wrap = (input: string): string => {
     if (!validated) return input;
     // The touched-gated message goes through the `View.fieldError` helper (the
     // codebase's convention for repeated view logic, beside `View.remoteList`)
-    // rather than an inlined match at every input.
-    const errEl = `(View.fieldError model.${formTouchedField(formField)} "${fld.wireName}" (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField}))`;
+    // rather than an inlined match at every input.  It carries the `errorId` the
+    // input's `aria-describedby` references.
+    const errEl = `(View.fieldError model.${formTouchedField(formField)} "${fld.wireName}" "${errorId}" (Validation.${fieldErrorFn(formField, fld.wireName)} model.${formField}))`;
     return `Html.div [ prop.className "form-control"; prop.children [ ${input}; ${errEl} ] ]`;
   };
   if (fld.inputKind === "select") {
@@ -134,7 +143,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     // An optional enum can be "unset" → a leading blank option (encodes to null).
     const allOpts = fld.required ? opts : ['Html.option [ prop.value ""; prop.text "" ]', ...opts];
     return wrap(
-      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children [ ${allOpts.join("; ")} ] ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children [ ${allOpts.join("; ")} ] ]`,
     );
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
@@ -144,7 +153,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     const listField = `model.${readFieldName(fld.idTarget)}`;
     const label = fld.idLabelField ?? "id";
     return wrap(
-      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
+      `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children (Html.option [ prop.value ""; prop.text "" ] :: View.idOptions ${listField} (fun x -> x.id) (fun x -> x.${label})) ]`,
     );
   }
   const typeProp = fld.inputKind === "number" ? "prop.type'.number; " : "";
@@ -152,7 +161,7 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   // it into a JSON array); the placeholder hints the format.
   const placeholder = fld.isArray ? `${fld.wireName} (comma-separated)` : fld.wireName;
   return wrap(
-    `Html.input [ ${tidP}prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur} ]`,
+    `Html.input [ ${tidP}prop.className "input input-bordered w-full"; ${typeProp}prop.placeholder "${placeholder}"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria} ]`,
   );
 }
 

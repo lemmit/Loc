@@ -76,12 +76,14 @@ describe("shell primitives", () => {
   it("Skeleton {} emits a single Mantine <Skeleton> at default height", async () => {
     const tsx = await emit(`Skeleton {}`);
     expect(tsx).toMatch(/import \{[^}]*\bSkeleton\b/);
-    expect(tsx).toMatch(/<Skeleton height=\{ 28 \} radius="sm" \/>/);
+    // Decorative loading placeholder → hidden from assistive tech.
+    expect(tsx).toMatch(/<Skeleton height=\{ 28 \} radius="sm" aria-hidden="true" \/>/);
   });
 
   it("Skeleton { count: 5 } emits a stacked group of skeleton lines", async () => {
     const tsx = await emit(`Skeleton { count: 5 }`);
-    expect(tsx).toMatch(/<Stack gap="xs">/);
+    // The group container is aria-hidden (the whole placeholder is decorative).
+    expect(tsx).toMatch(/<Stack gap="xs" aria-hidden="true">/);
     expect(tsx).toMatch(/Array\.from\(\{ length: 5 \}\)\.map/);
     expect(tsx).toMatch(/<Skeleton key=\{i\} height=\{ 28 \} radius="sm" \/>/);
   });

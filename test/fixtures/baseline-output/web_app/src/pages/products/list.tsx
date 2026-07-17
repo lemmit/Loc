@@ -17,13 +17,13 @@ export default function ProductList() {
         <Anchor component={RouterLink} to="/">Home</Anchor>
         <Text>Products</Text>
       </Breadcrumbs>
-      <Group justify="space-between">
+      <Group justify="space-between" role="toolbar" aria-label="Actions">
         <Title order={2}>Products</Title>
         <Button onClick={() => navigate("/products/new")} data-testid="products-list-create">New product</Button>
       </Group>
       <>
         { productAll.isLoading && (
-          <Stack gap="xs">
+          <Stack gap="xs" aria-hidden="true">
     { Array.from({ length: 5 }).map((_, i) => (
     <Skeleton key={i} height={ 28 } radius="sm" />
     )) }

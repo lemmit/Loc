@@ -103,6 +103,20 @@ Inside `{{#each items}}`, `this` is the current item, `@last`/`@first`
 exist, and `../foo` reaches the parent context. `{{#with obj}}` rebinds
 context but obscures lookups; prefer property access.
 
+### Adding a `{{{var}}}` to a shared template? EVERY caller must pass it
+The design packs compile in **strict mode**, so `{{{a11yAttr}}}` **throws**
+`"a11yAttr" not defined` at render if the context omits the key — it does NOT
+render `""` like non-strict Handlebars. A shared partial like
+`primitive-button.hbs` has *several* emit callers (`emitButton`, `emitAction`,
+the shared/Vue `DestroyForm`, Angular `renderAction`). Adding an optional-attr
+variable to the template and threading it from only ONE caller ships a latent
+throw that only fires for the strict packs (e.g. `shadcnSvelte`) on the *other*
+callers' pages — the lead React pack (whichever compiled non-strict / hit the
+attr first) can stay green and hide it. **When you add `{{{fooAttr}}}` to a
+shared template, grep every `renderPrimitive(ctx, "<that-template>", …)` call
+site and pass `fooAttr` (default `""`) from all of them** — the same rule the
+existing `testidAttr`/`styleAttr` follow. (Retro: the M-T1.12 `a11yAttr` slice.)
+
 ---
 
 ## 3. IR design (the key win)

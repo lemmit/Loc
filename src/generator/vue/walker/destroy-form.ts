@@ -83,5 +83,7 @@ export function renderVueDestroyForm(
     hasLoading: true,
     testidAttr: ` data-testid="${testidNamespace}"`,
     styleAttr: "",
+    // Delete button's visible text is its accessible name — no aria-label.
+    a11yAttr: "",
   });
 }

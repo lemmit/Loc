@@ -2111,9 +2111,11 @@ export function renderViewModule(
   // (the codebase's convention for repeated view logic) instead of inlined at
   // every input.  Shows the message only for a touched field, else nothing.
   const fieldError = [
-    "  let fieldError (touched: Set<string>) (name: string) (err: string option) : ReactElement =",
+    "  let fieldError (touched: Set<string>) (name: string) (fieldId: string) (err: string option) : ReactElement =",
     "    match (Set.contains name touched, err) with",
-    '    | true, Some e -> Html.p [ prop.className "text-error text-sm mt-1"; prop.text e ]',
+    // The error carries the id the input's `aria-describedby` references, so a
+    // screen reader announces the message with the field (a11y).
+    '    | true, Some e -> Html.p [ prop.id fieldId; prop.className "text-error text-sm mt-1"; prop.text e ]',
     "    | _ -> Html.none",
   ];
   const idOptions = [

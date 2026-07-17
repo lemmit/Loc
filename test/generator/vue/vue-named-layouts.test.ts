@@ -56,6 +56,11 @@ describe("named layouts — Vue", () => {
     expect(layout).toContain("<router-view />");
     expect(layout).toContain("© Acme");
     expect(layout).toContain('data-testid="layout-marketing"');
+    // a11y: the slots are wrapped in landmark elements (parity with the auto
+    // DefaultLayout + the React/Svelte named layouts).
+    expect(layout).toContain("<header>");
+    expect(layout).toContain('<main id="main-content"><router-view /></main>');
+    expect(layout).toContain("<footer>");
   });
 
   it("restructures into nested routes (none top-level, named + default wrappers)", async () => {

@@ -1,5 +1,5 @@
-{{#if isMulti}}<Stack gap="xs"{{{testidAttr}}}>
+{{#if isMulti}}<Stack gap="xs"{{{testidAttr}}} aria-hidden="true">
 { Array.from({ length: {{count}} }).map((_, i) => (
 <Skeleton key={i} height={ {{height}} } radius="sm" />
 )) }
-</Stack>{{else}}<Skeleton height={ {{height}} } radius="sm"{{{testidAttr}}} />{{/if}}
+</Stack>{{else}}<Skeleton height={ {{height}} } radius="sm"{{{testidAttr}}} aria-hidden="true" />{{/if}}
