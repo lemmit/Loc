@@ -2,8 +2,8 @@
 
 *Weak-spot #4: nothing in the language schedules work — no timers, no jobs, no saga deadlines — and deployables are runtime islands (in-process dispatch + outbox, but no cross-service transport). The saga/workflow core is otherwise solid and at full 5-backend parity.*
 
-## M-T4.1 — `timerSource` (scheduling) — `open` · **XL** · P1 (design-first)
-The temporal hole. Time as an event source: a system-scope `timerSource` binding emitting tick events; workflows react via existing `on(e)`/`create(e) by` triggers — zero new workflow grammar (the `schedule every 5m {}` shape was explicitly rejected). Needs per-backend durable drivers (pg-cron/poller, Quartz, Oban, Hangfire-analogue, APScheduler) + saga-deadline sugar on top. Design now — cost grows with every backend.
+## M-T4.1 — `timerSource` (scheduling) — `in-flight` · **XL** · P1 (design-first)
+The temporal hole. Time as an event source: a system-scope `timerSource` binding emitting tick events; workflows react via existing `on(e)`/`create(e) by` triggers — zero new workflow grammar (the `schedule every 5m {}` shape was explicitly rejected). Needs per-backend durable drivers (pg-cron/poller, Quartz, Oban, Hangfire-analogue, APScheduler) + saga-deadline sugar on top. Design now — cost grows with every backend. **Phase 1 in flight** (branch `claude/unstarted-missions-docs-uyi8zl`): grammar + `TimerSourceIR` + `timerOwner` enrichment + validators + advisory-lock single-fire + Hono/.NET tick→dispatch. Phases 2 (remaining 3 backends + timezone) and 3 (durability) remain.
 Sources: [scheduling.md](../old/proposals/scheduling.md), weak-spots §4, completeness-audit Tier 1.
 
 ## M-T4.2 — `projection` read models — `partial` · **L** · P2
