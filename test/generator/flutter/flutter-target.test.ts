@@ -112,7 +112,7 @@ describe("flutterTarget — api seam", () => {
     );
   });
 
-  it("renderApiHoisting emits one deduped ref.watch per distinct read", () => {
+  it("renderApiHoisting emits one deduped ref.watch(<var>Provider) per distinct read", () => {
     const call: ApiCallSite = {
       apiHandle: "Sales",
       aggregateName: "Customer",
@@ -122,8 +122,23 @@ describe("flutterTarget — api seam", () => {
     };
     const lines = flutterTarget.renderApiHoisting([call, call]);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("ref.watch(customerAllProvider)");
-    expect(lines[0]).toContain("TODO(flutter): Riverpod async");
+    // A real AsyncValue binding the QueryView `.when` consumes (no TODO stub).
+    expect(lines[0]).toBe("    final customerAll = ref.watch(customerAllProvider);");
+    expect(lines[0]).not.toContain("TODO");
+  });
+
+  it("renderApiHoisting passes a byId read's args to the .family provider", () => {
+    const byId: ApiCallSite = {
+      apiHandle: "Sales",
+      aggregateName: "Customer",
+      operation: "byId",
+      kind: "query",
+      args: [],
+      varName: "customerById",
+      argsRendered: ["id"],
+    };
+    const lines = flutterTarget.renderApiHoisting([byId]);
+    expect(lines[0]).toBe("    final customerById = ref.watch(customerByIdProvider(id));");
   });
 
   it("renderRouteId binds the route `id` local", () => {

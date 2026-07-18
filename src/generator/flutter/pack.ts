@@ -49,6 +49,22 @@ function dartStr(s: string): string {
   return s;
 }
 
+/** Apply a text style to a walked text value that may arrive EITHER as raw
+ *  (walker-escaped) text OR as an already-built widget.  Flutter's
+ *  `renderInterpolation` wraps a non-literal (e.g. `p.name`) into `Text('…')`,
+ *  so a styled-text slot (`Heading`, `Card` title, `Stat`, …) can't blindly
+ *  `Text('${value}', style: …)` — that would double-wrap into
+ *  `Text('Text(…)', …)`.  If the value is already a widget, style it via
+ *  `DefaultTextStyle.merge` (a bare descendant `Text` inherits the default);
+ *  otherwise wrap the raw text directly. */
+function styledText(value: string, styleExpr: string): string {
+  const t = value.trim();
+  if (/^[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) {
+    return `DefaultTextStyle.merge(style: ${styleExpr}, child: ${t})`;
+  }
+  return `Text('${dartStr(t)}', style: ${styleExpr})`;
+}
+
 /** A walked branch that came back empty or as the missing-arg sentinel `"null"`
  *  must become an empty Flutter widget — Dart has no bare `null` child. */
 function asWidget(s: string | undefined): string {
@@ -180,8 +196,7 @@ function primitiveHeading(c: Ctx): string {
           ? "titleMedium"
           : "titleSmall";
   const text = String(c.text ?? "").trim();
-  const inner = /^[A-Za-z_][\w.]*\(/.test(text) ? `'\${${text}}'` : `'${dartStr(text)}'`;
-  return `Text(${inner}, style: Theme.of(context).textTheme.${style})`;
+  return styledText(text, `Theme.of(context).textTheme.${style}`);
 }
 
 function primitiveText(c: Ctx): string {
@@ -189,20 +204,20 @@ function primitiveText(c: Ctx): string {
 }
 
 function primitiveBold(c: Ctx): string {
-  return `Text('${dartStr(String(c.text ?? ""))}', style: const TextStyle(fontWeight: FontWeight.bold))`;
+  return styledText(String(c.text ?? ""), "const TextStyle(fontWeight: FontWeight.bold)");
 }
 function primitiveItalic(c: Ctx): string {
-  return `Text('${dartStr(String(c.text ?? ""))}', style: const TextStyle(fontStyle: FontStyle.italic))`;
+  return styledText(String(c.text ?? ""), "const TextStyle(fontStyle: FontStyle.italic)");
 }
 function primitiveInlineCode(c: Ctx): string {
-  return `Text('${dartStr(String(c.text ?? ""))}', style: const TextStyle(fontFamily: 'monospace'))`;
+  return styledText(String(c.text ?? ""), "const TextStyle(fontFamily: 'monospace')");
 }
 /** CodeBlock(source, language?, title?) — a monospace block in a tonal card. */
 function primitiveCodeBlock(c: Ctx): string {
   const source = String(c.source ?? "");
   const pre = `Container(width: double.infinity, padding: const EdgeInsets.all(16), color: Theme.of(context).colorScheme.surfaceContainerHighest, child: Text('${dartStr(source)}', style: const TextStyle(fontFamily: 'monospace', fontSize: 13)))`;
   if (!c.hasTitle) return pre;
-  const title = `Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Text('${dartStr(String(c.title ?? ""))}', style: Theme.of(context).textTheme.labelMedium))`;
+  const title = `Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: ${styledText(String(c.title ?? ""), "Theme.of(context).textTheme.labelMedium")})`;
   return `Card(clipBehavior: Clip.antiAlias, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${title}, ${pre}]))`;
 }
 
@@ -211,7 +226,7 @@ function primitiveCard(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle)
     kids.push(
-      `Text('${dartStr(String(c.titleText ?? ""))}', style: Theme.of(context).textTheme.titleMedium)`,
+      styledText(String(c.titleText ?? ""), "Theme.of(context).textTheme.titleMedium"),
     );
   if (c.hasContent) kids.push(asWidget(String(c.contentJsx ?? "")));
   const body =
@@ -249,7 +264,7 @@ function primitiveAlert(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle)
     kids.push(
-      `Text('${dartStr(String(c.title ?? ""))}', style: const TextStyle(fontWeight: FontWeight.bold))`,
+      styledText(String(c.title ?? ""), "const TextStyle(fontWeight: FontWeight.bold)"),
     );
   kids.push(asText(String(c.message ?? "")));
   const color = alertColor(String(c.color ?? "red"));
@@ -315,8 +330,8 @@ function primitiveEnumBadge(c: Ctx): string {
 
 /** Stat(label, value) — a labelled metric block. */
 function primitiveStat(c: Ctx): string {
-  const label = `Text('${dartStr(String(c.label ?? ""))}', style: Theme.of(context).textTheme.bodySmall)`;
-  const value = `Text('${dartStr(String(c.value ?? ""))}', style: Theme.of(context).textTheme.headlineSmall)`;
+  const label = styledText(String(c.label ?? ""), "Theme.of(context).textTheme.bodySmall");
+  const value = styledText(String(c.value ?? ""), "Theme.of(context).textTheme.headlineSmall");
   return `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${label}, ${value}])`;
 }
 
@@ -366,21 +381,35 @@ function primitiveTable(c: Ctx): string {
 }
 
 // --- QueryView (RemoteData match) ------------------------------------------
-/** QueryView — the async read match.  Rides the `LoomAsync` helper the Riverpod
- *  projector (Track D) emits: it takes the four branch builders (loading /
- *  error / empty / data) and dispatches on the provider's `AsyncValue`.  The
- *  `data:` builder binds the loaded value under the query's camelCase name,
- *  mirroring Feliz's `View.remoteList`.  `single: true` (a byId detail read)
- *  routes to `LoomAsync.one`; the default list read to `LoomAsync.list`. */
+/** A QueryView branch (loading / error / empty / data) is ALREADY a walked
+ *  widget string — the shared walker rendered it through this same pack.  Only
+ *  a missing branch (the walker's `"null"` sentinel / empty) needs the neutral
+ *  empty widget; everything else passes through verbatim (unlike `asWidget`,
+ *  which re-wraps a leading-`const` widget — `const Center(…)` — as text). */
+function branchWidget(s: string | undefined): string {
+  const t = (s ?? "").trim();
+  return t === "" || t === "null" ? "const SizedBox.shrink()" : t;
+}
+
+/** QueryView — the async read match.  Dispatches on the hoisted `AsyncValue`
+ *  (`ref.watch(<var>Provider)`, bound at the ConsumerWidget's build top) via
+ *  Riverpod's `AsyncValue.when`: a `loading:` / `error:` / `data:` triad, with
+ *  the `empty:` branch folded into `data:` (an empty `List<T>` — or a `null`
+ *  byId record — routes to the empty widget).  The `data:` callback binds the
+ *  loaded value under the query's camelCase name, so the walked `data:` body
+ *  (whose lambda param the target rebinds to that name) reads it directly —
+ *  mirroring Feliz's `| Loaded <binding> ->` arm. */
 function primitiveQueryView(c: Ctx): string {
   const field = String(c.queryExpr ?? "");
   const binding = lowerFirst(field) || "value";
-  const loading = asWidget(c.loadingJsx as string);
-  const error = asWidget(c.errorJsx as string);
-  const empty = asWidget(c.emptyJsx as string);
-  const data = asWidget(c.dataJsx as string);
-  const helper = c.single ? "one" : "list";
-  return `LoomAsync.${helper}(ref, '${dartStr(field)}', loading: (context) => ${loading}, error: (context, error, stack) => ${error}, empty: (context) => ${empty}, data: (context, ${binding}) => ${data})`;
+  const loading = branchWidget(c.loadingJsx as string);
+  const error = branchWidget(c.errorJsx as string);
+  const empty = branchWidget(c.emptyJsx as string);
+  const data = branchWidget(c.dataJsx as string);
+  // byId (single): the loaded value is `T?` — empty when `null`, else the
+  // flow-promoted record.  List: empty when the `List<T>` is empty.
+  const emptyGuard = c.single ? `${binding} == null` : `${binding}.isEmpty`;
+  return `${field}.when(loading: () => ${loading}, error: (error, stack) => ${error}, data: (${binding}) => ${emptyGuard} ? ${empty} : ${data})`;
 }
 
 /** Button — an `ElevatedButton`; the walker hands the label as raw text or an

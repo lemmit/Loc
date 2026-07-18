@@ -129,9 +129,12 @@ export const flutterTarget: WalkerTarget = {
   // The magic route `id` (`Order.byId(id)`) resolves to the local `id` the page
   // shell binds from its route arguments.
   renderRouteId: () => "id",
-  // Thin-but-real per-page hoist: one `ref.watch(<var>Provider)` per distinct
-  // read.  The full Riverpod async wiring (AsyncValue.when / loading / error) is
-  // Track D's; this names the binding the body references.
+  // Per-page hoist: one `ref.watch(<var>Provider)` per distinct read, yielding
+  // an `AsyncValue<…>` the QueryView widget dispatches on via `.when`.  A
+  // parameterised (byId) read watches the matching `.family` provider with its
+  // rendered args (`ref.watch(orderByIdProvider(id))`); a paramless list read
+  // watches the bare provider.  The provider itself (fetch + `fromJson`) is
+  // emitted by `reads-emit.ts`.
   renderApiHoisting: (uses: ApiCallSite[]) => {
     const seen = new Set<string>();
     const lines: string[] = [];
@@ -139,10 +142,24 @@ export const flutterTarget: WalkerTarget = {
       const v = u.varName ?? apiVarName(u.aggregateName, u.operation);
       if (seen.has(v)) continue;
       seen.add(v);
-      lines.push(`    final ${v} = ref.watch(${v}Provider); // TODO(flutter): Riverpod async`);
+      const args = (u.argsRendered ?? []).join(", ");
+      const watch = args ? `${v}Provider(${args})` : `${v}Provider`;
+      lines.push(`    final ${v} = ref.watch(${watch});`);
     }
     return lines;
   },
+  // A QueryView `data:` lambda param binds to the LOADED value the `.when(data:
+  // …)` callback yields — the `AsyncValue`'s var name (`orderAll` / `orderById`)
+  // shadowed inside the callback as the unwrapped `List<T>` / `T?`.  So the
+  // handle dereferences to that bare binding (no `.data` envelope), mirroring
+  // Feliz's match-arm binding.  The list provider already unwraps the paged
+  // `{items,…}` envelope to a `List<T>` (see `pagedDataIsList`), so `paged` /
+  // `autoPaged` are no-ops here.
+  renderQueryDataAccess: (handle: string) => lowerFirst(handle),
+  // The Flutter read provider decodes the paged `.all` envelope straight to a
+  // `List<T>` (pulls `items` out), so the binding IS the array — the scaffold's
+  // `rows.items` unwrap is a no-op the shared member walk strips (as on Feliz).
+  pagedDataIsList: true,
 
   // --- Match expression seam — Dart-3 guarded switch -----------------------
   renderMatch: (arms, elseArm) => dartPredicateSwitch(arms, elseArm),
@@ -152,11 +169,15 @@ export const flutterTarget: WalkerTarget = {
   // `For { each: coll, x => <markup> }` → `...coll.map((x) => <widget>)`, spliced
   // into the enclosing children list (Dart's collection spread).  An `empty:` arm
   // folds into a collection-`if`; the index binding is emitted only when used.
-  renderForEach: (coll, itemVar, indexVar, keyExpr, body, _depth, emptyBody) => {
+  renderForEach: (coll, itemVar, indexVar, _keyExpr, body, _depth, emptyBody) => {
     // Word-boundary match — a substring test would false-positive on a
-    // single-letter index (`i`) inside any identifier (`x.id`).
+    // single-letter index (`i`) inside any identifier (`x.id`).  Flutter's
+    // `.map` spread emits NO list key (unlike React's keyed Fragment), so the
+    // index binding is materialised ONLY when the item BODY reads it — the
+    // caller passes `indexVar` itself as `keyExpr`, so testing that would force
+    // the indexed form (and an unused `<item>Idx` local) on every `For`.
     const idxRe = new RegExp(`\\b${indexVar}\\b`);
-    const usesIndex = idxRe.test(keyExpr) || idxRe.test(body);
+    const usesIndex = idxRe.test(body);
     const mapped = usesIndex
       ? `...${coll}.asMap().entries.map((entry) { final ${indexVar} = entry.key; final ${itemVar} = entry.value; return ${body}; })`
       : `...${coll}.map((${itemVar}) => ${body})`;

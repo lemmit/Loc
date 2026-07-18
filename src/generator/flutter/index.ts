@@ -22,10 +22,12 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { walkBody } from "../_walker/walker-core.js";
+import type { ApiCallSite } from "../_walker/target.js";
+import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack } from "./pack.js";
+import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 
 export interface GenerateFlutterOptions {
@@ -52,6 +54,15 @@ export function generateFlutterForContexts(
   // Wire-model classes for every aggregate/VO/event reachable through this
   // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
   out.set("lib/models.dart", renderDartModels(contexts));
+
+  // Riverpod read providers — one `FutureProvider` per distinct QueryView read
+  // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
+  // only when the ui issues reads, alongside the `AppConfig` api-base helper.
+  const reads = collectFlutterReads(ui, contexts);
+  if (reads.length > 0) {
+    out.set("lib/reads.dart", renderReadProviders(reads));
+    out.set("lib/config.dart", renderAppConfig());
+  }
 
   // The aggregates reachable through this deployable — used for the fallback
   // home page when the ui declares no pages of its own.
@@ -107,7 +118,9 @@ function renderPage(
 
   let bodyWidget = "const Center(child: Text('Empty page'))";
   let usesState = false;
+  let usesRouteId = false;
   const usedActions = new Set<string>();
+  let usedApiHooks = new Map<string, ApiHookUse>();
   if (page.body) {
     const result = walkBody(
       page.body,
@@ -121,18 +134,38 @@ function renderPage(
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
     usesState = result.usesState;
+    usesRouteId = result.usesRouteId;
+    usedApiHooks = result.usedApiHooks;
     for (const a of result.usedActions ?? []) usedActions.add(a);
   }
 
-  // A page with `state {}` / `action`s the body actually references becomes a
-  // Riverpod `ConsumerWidget` bound to a projected Notifier (Track D); the
-  // display-only pages stay plain `StatelessWidget`s (Track A/B/C skeleton).
+  // A page becomes a Riverpod `ConsumerWidget` (bound to `ref`) when it either
+  // projects reactive state / actions (Track D) OR issues a QueryView read
+  // (this slice — `ref.watch(<var>Provider)`).  Display-only pages with neither
+  // stay plain `StatelessWidget`s (Track A/B/C skeleton).
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
-  const source = stateful
-    ? renderConsumerPage(page, className, usesState, usedActions, bodyWidget, contexts)
+  const consumer = stateful || usedApiHooks.size > 0;
+  const source = consumer
+    ? renderConsumerPage(
+        page,
+        className,
+        { usesState, usedActions, usedApiHooks, usesRouteId, stateful },
+        bodyWidget,
+        contexts,
+      )
     : renderStatelessPage(page, className, bodyWidget);
 
   return { fileBase, className, routePath, source };
+}
+
+/** What a `ConsumerWidget` page's `build` binds — reactive state/actions (Track
+ *  D) and/or QueryView read hoists (this slice). */
+interface ConsumerBindings {
+  usesState: boolean;
+  usedActions: ReadonlySet<string>;
+  usedApiHooks: ReadonlyMap<string, ApiHookUse>;
+  usesRouteId: boolean;
+  stateful: boolean;
 }
 
 /** Display-only page → a plain `StatelessWidget`.  The body references no
@@ -160,34 +193,61 @@ function renderStatelessPage(page: PageIR, className: string, bodyWidget: string
   )}\n`;
 }
 
-/** Stateful page → a Riverpod `ConsumerWidget`.  The projected state class +
- *  Notifier + provider precede the widget in the same file; the build binds the
- *  watched `state`, the `notifier`, and one tear-off per referenced action (so a
- *  button's `onClick: inc` resolves to the bound `inc()`).  Each binding is
- *  emitted only when USED, so an unused local never trips `flutter analyze`. */
+/** ConsumerWidget page → a Riverpod-bound widget.  The build binds, in order:
+ *  the route `id` (a byId read's family key, from the route arguments); one
+ *  `AsyncValue` per QueryView read (`ref.watch(<var>Provider)`, consumed by the
+ *  QueryView pack's `.when`); and — for a stateful page — the projected state
+ *  class + Notifier (preceding the widget in the same file), the watched
+ *  `state`, the `notifier`, and one tear-off per referenced action.  Each
+ *  binding + import is emitted only when USED, so an unused local / import never
+ *  trips `flutter analyze`. */
 function renderConsumerPage(
   page: PageIR,
   className: string,
-  usesState: boolean,
-  usedActions: ReadonlySet<string>,
+  b: ConsumerBindings,
   bodyWidget: string,
   contexts: EnrichedBoundedContextIR[],
 ): string {
-  const proj = renderRiverpod(page, contexts);
   const bindings: string[] = [];
-  if (usesState) bindings.push(`    final state = ref.watch(${proj.providerName});`);
-  if (usedActions.size > 0) {
-    bindings.push(`    final notifier = ref.read(${proj.providerName}.notifier);`);
-    for (const a of [...usedActions].sort()) {
-      bindings.push(`    final ${a} = notifier.${a};`);
+  // Route `id` first — a byId read's `ref.watch(<var>Provider(id))` reads it.
+  if (b.usesRouteId) {
+    bindings.push("    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';");
+  }
+  // QueryView read hoists (`final <var> = ref.watch(<var>Provider…);`).
+  if (b.usedApiHooks.size > 0) {
+    const uses: ApiCallSite[] = [...b.usedApiHooks.values()].map((h) => ({
+      apiHandle: "",
+      aggregateName: "",
+      operation: "",
+      kind: "query",
+      args: [],
+      varName: h.varName,
+      argsRendered: h.argsRendered,
+    }));
+    bindings.push(...flutterTarget.renderApiHoisting(uses));
+  }
+  // Reactive state / actions — only when the page projects them.
+  let projSource = "";
+  if (b.stateful) {
+    const proj = renderRiverpod(page, contexts);
+    projSource = proj.source;
+    if (b.usesState) bindings.push(`    final state = ref.watch(${proj.providerName});`);
+    if (b.usedActions.size > 0) {
+      bindings.push(`    final notifier = ref.read(${proj.providerName}.notifier);`);
+      for (const a of [...b.usedActions].sort()) {
+        bindings.push(`    final ${a} = notifier.${a};`);
+      }
     }
   }
-  return `${lines(
+  const imports = [
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
+  ];
+  if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
+  return `${lines(
+    ...imports,
     "",
-    proj.source,
-    "",
+    ...(projSource ? [projSource, ""] : []),
     `class ${className} extends ConsumerWidget {`,
     `  const ${className}({super.key});`,
     "",
