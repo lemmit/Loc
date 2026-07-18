@@ -215,11 +215,25 @@ and a list when it lands — never a native/web boolean.
 platform-neutral IR**. The Loomish treatment: the source names a *neutral
 intent* (a page *captures a photo*), and the **Flutter target** maps that to
 `NSCameraUsageDescription` / `<uses-permission>` / the plugin dep — the DSL
-never spells an OS permission. Permissions are therefore **derived from
-device-feature use**. And since the primitive library is closed with **no
-device primitives today**, **v1 has no permission surface at all** — the
-question only arises if/when a `Capture`-style primitive is proposed, and then
-it is derivation in the target, not a list in the source.
+never spells an OS permission. Permissions are therefore **fully implicit** — derived
+from device-feature use, never specified. And since the primitive library is
+closed with **no device primitives today**, **v1 has no permission surface at
+all** — the question only arises if/when a `Capture`-style primitive is
+proposed, and then it is derivation in the target, not a list in the source.
+
+Implicit here is not just less typing, it is **more correct**. A declared list
+is a cache with no invalidation (the `output:`/`app{}` failure mode again), and
+the drift has a concrete cost: declare `camera`, delete the feature, forget the
+line → a permission the app no longer uses, which App Store review flags.
+Derived-from-use **can't go stale** (the set is exactly what the app touches)
+and **can't over-request** (no use → no permission — over-asking is itself a
+common rejection and a privacy smell, made structurally impossible). This is
+the same derivation Loom already runs for migrations (from the model), OpenAPI
+(from the wire shape), and compose services (from deployables) — the native
+manifest is that pattern applied to mobile. *Lone caveat:* the OS
+usage-description **copy** (Apple's "why we need the camera" string) lives
+nowhere in the domain — the target emits a sensible default, and any custom
+copy is **target configuration** (a generated-file override), never grammar.
 
 **Explicitly deferred (scope control, not oversight):**
 
