@@ -154,8 +154,8 @@ and the emitted xUnit Tests project.
 | `Scrutor` | 5.0.2 | **7.0.0** | major — the `[ExternHandler]` assembly-scan API is unaffected |
 | `Cronos` | 0.8.4 | **0.13.0** | `CronExpression.Parse`/`GetNextOccurrence` unchanged |
 | `Microsoft.IdentityModel.JsonWebTokens` / `.Protocols.OpenIdConnect` | 8.0.1 | **8.19.2** | within major (OIDC verifier) |
-| `Mediator.SourceGenerator` / `.Abstractions` | 2.1.7 | 2.1.7 | **held** — 3.0.2 requires migrating the emitted `IPipelineBehavior.Handle` signature AND handling `MSG0005` (v3 rejects the handler-less domain-event notifications Loom emits by design). A runtime-affecting migration, not a bump; do as its own PR. |
-| `Swashbuckle.AspNetCore` | 6.9.0 | **8.1.4** | bumped to the newest version still on **Microsoft.OpenApi 1.x**. 9.0.0+ moves to Microsoft.OpenApi **2.0**, which rewrites the three emitted OpenAPI filters (`OpenApiSchema.Type`, `Nullable`, `OpenApiReference` → `IOpenApiSchema`/`JsonSchemaType`) and must be re-verified against the gated cross-backend OpenAPI parity — its own PR. |
+| `Mediator.SourceGenerator` / `.Abstractions` | 2.1.7 | **3.0.2** | major — migrated: the emitted `IPipelineBehavior.Handle` params reorder to `(message, next, cancellationToken)`, and `MSG0005` (v3 warns on the handler-less domain-event notifications Loom emits by design) is silenced via `<NoWarn>` |
+| `Swashbuckle.AspNetCore` | 6.9.0 | **10.2.3** | major — migrated to **Microsoft.OpenApi 2.0**: the three emitted OpenAPI filters now use `JsonSchemaType` / `IOpenApiSchema` / `OpenApiSchemaReference`. Output stays OpenAPI **3.0.4**; the emitted `/openapi.json` is byte-identical to 8.1.4 across every field the cross-backend parity gate compares (only a benign root `tags: []` array is added) |
 | `Microsoft.NET.Test.Sdk` | 17.11.1 | **18.8.1** | test project (major) |
 | `xunit` | 2.9.2 | **2.9.3** | test project |
 | `xunit.runner.visualstudio` | 2.8.2 | **3.1.5** | test project (major) |

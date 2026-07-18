@@ -145,12 +145,20 @@ Format: symptom → cause → fix → where it's pinned / who found it.
   Type` went from `string` to the `JsonSchemaType` flags enum, `Nullable` folded
   into it, and `OpenApiReference` + `ReferenceType.Schema` became
   `OpenApiSchemaReference`.
-- **Fix / current pin:** held at **8.1.4** (the newest version still on
-  Microsoft.OpenApi 1.x). Going to 10.x means porting all three filters to the
-  2.0 object model **and** re-verifying the output against `conformance-parity` —
-  these filters exist specifically to keep the .NET OpenAPI spec byte-aligned
-  with Hono/Phoenix, so a spec-shape drift is a parity regression, not just a
-  compile break. Do it as its own PR with the parity gate forced.
+- **Fix:** port all three filters to the 2.0 object model — `OpenApiSchema.Type`
+  string → the `JsonSchemaType` flags enum (`Nullable = true` → `| JsonSchemaType.
+  Null`, which the 3.0 writer serializes back to `nullable: true`);
+  `new OpenApiSchema { Reference = new OpenApiReference { ... } }` → a distinct
+  `new OpenApiSchemaReference(id, hostDoc)` node; `ISchemaFilter.Apply` takes
+  `IOpenApiSchema` (cast to the concrete `OpenApiSchema` to mutate
+  `Required`/`Properties`); property maps are keyed by `IOpenApiSchema`. Then
+  **boot the backend and diff `/openapi.json` against the pre-bump spec** —
+  these filters exist to keep the .NET spec byte-aligned with Hono/Phoenix, so a
+  shape drift is a parity regression, not just a compile break.
+- **Status: migrated** (Swashbuckle **10.2.3**, 2026-07-18). Output stays
+  OpenAPI 3.0.4; the diff vs 8.1.4 is a single benign root `tags: []` array that
+  the parity gate (`test/e2e/e2e.test.ts`) does not compare. Keep this entry as
+  the map for the **Microsoft.OpenApi 3.x** bump.
 - **Found by:** the 2026-07-18 .NET currency refresh.
 
 ## Mediator (martinothamar) 2 → 3 changes the pipeline signature and rejects handler-less notifications
@@ -164,12 +172,17 @@ Format: symptom → cause → fix → where it's pinned / who found it.
   notification with **no** registered handler a hard source-generator error —
   but Loom emits domain-event `INotification`s that nothing subscribes to by
   design.
-- **Fix / current pin:** held at **2.1.7** (already the newest 2.x). The bump is
-  a real migration: update the emitted `ValidationBehavior` + `Execution
-  ContextBehavior` signatures, and decide how handler-less events register (or
-  suppress MSG0005). It touches runtime event dispatch, so gate it with the
-  obs-e2e / behavioral leg, not just the compile. This matches the "defer" the
-  `.NET` row of `docs/audits/stack-versions-audit.md` already carried.
+- **Fix:** reorder the emitted `IPipelineBehavior.Handle` params to
+  `(TMessage message, MessageHandlerDelegate<TMessage, TResponse> next,
+  CancellationToken cancellationToken)` — the delegate call `next(message,
+  cancellationToken)` is unchanged — in `ValidationBehavior` (`validator-emit.ts`)
+  and both `ExecutionContextBehavior` variants (`emit/domain-log.ts`). For
+  MSG0005: it is a **warning** by default (only `/warnaserror` promotes it), and
+  the handler-less events are intentional (outbox / event log / external
+  consumers), so add `MSG0005` to the csproj `<NoWarn>` list.
+- **Status: migrated** (Mediator **3.0.2**, 2026-07-18). Compiles clean under
+  `/warnaserror` across the whole `test:dotnet` fixture set incl. the
+  event-sourcing example. Keep as the map for **Mediator 4**.
 - **Found by:** the 2026-07-18 .NET currency refresh.
 
 ## EF Core `.Relational` floats to the transitive floor in the sibling Tests project
