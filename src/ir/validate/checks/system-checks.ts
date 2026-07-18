@@ -1740,20 +1740,15 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           reject(where, "contains nested entity parts");
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
-        // upsert SET).  Principal-referencing stamp values stay rejected —
-        // no request-scoped principal accessor on the Dapper repository.
-        if (
-          (a.contextStamps ?? []).some((r) =>
-            r.assignments.some((asg) => exprUsesCurrentUser(asg.value)),
-          )
-        )
-          reject(where, "uses a principal-referencing stamp value");
-        // Non-principal capability filters are supported (spliced into every
-        // SELECT's WHERE by the Dapper emitter); principal-referencing ones
-        // (tenancy: currentUser.<field>) stay rejected — there is no
-        // request-scoped principal accessor on the Dapper repository.
-        if ((a.contextFilters ?? []).some((p) => exprUsesCurrentUser(p)))
-          reject(where, "uses a principal-referencing 'filter' capability predicate");
+        // upsert SET), INCLUDING principal-referencing stamp values — the
+        // Dapper repository reaches the request principal through the ambient
+        // `RequestContext.Current!.CurrentUser!` accessor (a bare `currentUser`
+        // → the principal id, `currentUser.<claim>` → the claim), exactly as
+        // the EF AuditableInterceptor.  A principal stamp on a no-auth
+        // deployable stays rejected by the category-A loom.dotnet-stamp-unsupported.
+        // Capability filters are supported too (spliced into every SELECT's
+        // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
+        // `@__cu_<claim>` Dapper param bound from the same ambient principal.
         for (const f of a.fields) {
           // Access modifiers (`managed` / `token` / `internal` / `secret`)
           // are wire-projection concerns handled by the shared Domain/CQRS

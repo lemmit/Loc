@@ -151,6 +151,49 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 1: the Dapper adapter's PRINCIPAL surface — principal-
+    // referencing lifecycle stamps (`createdBy := currentUser`,
+    // `tenantId := currentUser.tenantId`) + a principal `filter`
+    // (`this.tenantId == currentUser.tenantId`) on an auth deployable.  These
+    // had never build-compiled on Dapper (no stamp/principal-filter dapper
+    // fixture existed); this cell proves the ambient-RequestContext accessor +
+    // `@__cu_<claim>` param binding compile under /warnaserror, and that no EF
+    // SaveChangesInterceptor leaks onto the Dapper deployable.
+    it("system `persistence: dapper` (dotnet) — principal stamps + filters build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-tenancy-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-tenancy.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // No EF interceptor on the Dapper deployable (it would reference
+        // Microsoft.EntityFrameworkCore, absent here).
+        expect(
+          fs.existsSync(
+            path.join(proj, "Infrastructure", "Persistence", "AuditableInterceptor.cs"),
+          ),
+        ).toBe(false);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits the
     // generated OidcUserVerifier (JWKS validation + claims→User) + its NuGet
     // refs + the Program.cs registration.  This cell compiles the verifier

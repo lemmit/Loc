@@ -416,7 +416,13 @@ function emitProjectFromContexts(
   // a per-entity-type switch built from each aggregate's
   // `contextStamps` IR; a `currentUser` stamp resolves the principal
   // id from the ambient RequestContext (so `actorIdProp` is threaded).
-  emitStampingInterceptor(merged, ns, out, actorIdProp);
+  // Skipped for `persistence: dapper` — the EF SaveChangesInterceptor references
+  // Microsoft.EntityFrameworkCore (unavailable on the Dapper deployable) and
+  // Program.cs never registers it there; the Dapper repository applies the same
+  // stamps inline on save (onUpdate mutate / onCreate INSERT-only local).
+  if (system?.deployable.persistence !== "dapper") {
+    emitStampingInterceptor(merged, ns, out, actorIdProp);
+  }
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
   emitCriteria(merged, ns, out);
@@ -1107,6 +1113,16 @@ function emitAggregate(
   // byte-identical.
   const usingDapper = emitCtx?.deployable.persistence === "dapper";
   if (usingDapper) {
+    // The request principal's id property (PascalCased) — present only when the
+    // deployable carries auth.  Threaded to the Dapper repository so a bare
+    // `currentUser` lifecycle stamp resolves the principal id from the ambient
+    // RequestContext, exactly as the EF AuditableInterceptor does (index.ts's
+    // `actorIdProp` for the interceptor).  Undefined without auth (a principal
+    // stamp is then rejected upstream by loom.dotnet-stamp-unsupported).
+    const authed = !!(emitCtx?.deployable.auth?.required && emitCtx.sys.user);
+    const userFields = authed ? emitCtx?.sys.user?.fields : undefined;
+    const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
+    const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
     // Dapper event store (persistedAs(eventLog)) reuses the persistence-agnostic
     // domain fold + CQRS create chain; only the repository is Dapper-specific.
     // The `<agg>_events` table ships in DbSchema.cs (renderDapperSchema).
@@ -1115,7 +1131,7 @@ function emitAggregate(
       "repository-impl",
       isEs
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
-        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
+        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp),
       repoOrigin,
     );
   } else if (isEs) {
