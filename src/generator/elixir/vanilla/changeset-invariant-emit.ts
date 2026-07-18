@@ -29,6 +29,7 @@
 
 import type { AggregateIR, ExprIR, InvariantIR } from "../../../ir/types/loom-ir.js";
 import { pickErrorPath, singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
+import { messageCode } from "../../../util/message-code.js";
 import { snake } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
@@ -114,7 +115,13 @@ export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: stri
     const pred = renderExpr(inv.expr, rc);
     const field = snake(pickErrorPath(inv) ?? fallbackField);
     const msg = inv.message ? inv.message.text : `must satisfy: ${inv.source}`;
-    const violate = `add_error(changeset, :${field}, ${JSON.stringify(msg)})`;
+    // A messaged rule attaches the stable content-hash wire `code` (the i18n
+    // key) as `add_error` metadata (`loom_code:`), surfaced by the 422 handler;
+    // a message-less rule adds no metadata (byte-identical).
+    const codeOpt = inv.message
+      ? `, loom_code: ${JSON.stringify(messageCode(inv.message.text))}`
+      : "";
+    const violate = `add_error(changeset, :${field}, ${JSON.stringify(msg)}${codeOpt})`;
     const guarded = inv.guard
       ? `    changeset =
       if ${renderExpr(inv.guard, rc)} do
