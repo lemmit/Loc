@@ -2,7 +2,7 @@
 // cross-reference) and v2 legacy `Name(args)` rejection for VOs /
 // EntityParts.
 
-import { AstUtils, type ValidationAcceptor } from "langium";
+import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type { DddServices } from "../ddd-module.js";
 import type {
   Aggregate,
@@ -281,10 +281,12 @@ export function checkConstructionFields(model: Model, accept: ValidationAcceptor
   }
 }
 
-/** Resolve a bare `NameRef` at a factory-call head to the `Aggregate` it names —
+/** Resolve a bare name to the `Aggregate` it names, scoped from `from` —
  *  the enclosing context first (the common, single-context case), then any
- *  context in the model (a cross-context `Other id` link constructed inline). */
-function resolveAggregateByName(name: string, from: NameRef, model: Model): Aggregate | undefined {
+ *  context in the model (a cross-context `Other id` link constructed inline).
+ *  `from` is any node inside the scope (a factory-call `NameRef`, or a bare
+ *  `BuilderCall` whose type mis-uses the `{ }` literal on an aggregate). */
+function resolveAggregateByName(name: string, from: AstNode, model: Model): Aggregate | undefined {
   const ctx = AstUtils.getContainerOfType(from, isBoundedContext);
   for (const m of ctx?.members ?? []) {
     if (isAggregate(m) && m.name === name) return m;
@@ -472,6 +474,22 @@ export function checkBuilderCallType(
         }
       }
       if (workspaceTopLevel) continue;
+    }
+    // 5. The name IS a declared aggregate — the author reached for the value-
+    //    object `{ }` literal on an aggregate root.  An aggregate has identity
+    //    and invariants the factory enforces, so it is constructed through its
+    //    `create({ … })` factory, never the bare builder literal.  Special-case
+    //    the diagnostic (instead of the generic "unknown builder type" below,
+    //    which talks about walker primitives and misroutes the fix) so it names
+    //    the actual remedy.
+    if (resolveAggregateByName(name, bc, model)) {
+      accept(
+        "error",
+        `'${name}' is an aggregate — construct it with '${name}.create({ … })', not '${name} { … }'. ` +
+          `The '{ }' builder literal is for value objects and entity parts.`,
+        { node: bc, property: "type", code: "loom.aggregate-not-a-builder" },
+      );
+      continue;
     }
     accept(
       "error",
