@@ -1,5 +1,11 @@
 # Flutter — mobile as a new development axis
 
+> **Turned into an actionable build:** [`../plans/flutter-mobile-implementation.md`](../plans/flutter-mobile-implementation.md)
+> — a slice-by-slice plan (foundation → fan-out → integration) with an
+> agent-swarm execution strategy, grounded in a four-agent recon of the actual
+> seams. The sections below are the originating design rationale; the plan
+> supersedes the phasing where they differ.
+>
 > Status: **NOTE (exploratory).** Nothing here is implemented. This scopes
 > **Flutter** as Loom's first *mobile* target and argues it is a **new axis
 > of development**, deliberately **outside the T10 web-target-matrix freeze**
