@@ -6,10 +6,12 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EventIR,
   IdValueType,
   ProjectionIR,
   RepositoryIR,
   SystemIR,
+  TimerSourceIR,
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
@@ -124,6 +126,7 @@ import {
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
 import { renderExecutionContextFilter, renderRequestContext } from "./emit/request-context.js";
+import { javaTimerSchedulerPath, renderJavaTimerScheduler } from "./emit/scheduler.js";
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
@@ -915,6 +918,30 @@ function emitProjectFromContexts(
   // reference an auto-config type that isn't on the classpath.
   if (hasMigrations) {
     place("MigrationCatalogConfig.java", "config", renderMigrationCatalogCallback(basePkg));
+  }
+
+  // TimerSource scheduling (scheduling.md, M-T4.1).  A timer's emit owner is
+  // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
+  // for-event's context (single-fire lock owner == DB owner).  Filter the
+  // system's timers to the ones THIS deployable owns; a timer-free deployable
+  // stays byte-identical (no TimerScheduler.java, no @EnableScheduling, no new
+  // dep — spring-context / spring-tx / spring-jdbc are already on the classpath).
+  const ownedTimers: TimerSourceIR[] = system
+    ? (system.sys.timerSources ?? []).filter((ts) => {
+        const sub = system.sys.subdomains.find((s) =>
+          s.contexts.some((c) => c.name === ts.context),
+        );
+        return sub?.migrationsOwner === system.deployable.name;
+      })
+    : [];
+  if (ownedTimers.length > 0) {
+    const eventByName = new Map<string, EventIR>(
+      contexts.flatMap((c) => c.events).map((e) => [e.name, e]),
+    );
+    out.set(
+      javaTimerSchedulerPath(basePkg),
+      renderJavaTimerScheduler(ownedTimers, eventByName, basePkg),
+    );
   }
 
   // Project shell — stable from S1 on.
