@@ -316,6 +316,29 @@ export function pagePropDisplayName(typeName: string): string {
   }
 }
 
+/** `loom.blank-message` — reject an empty or whitespace-only `message "..."`
+ *  clause on an `invariant` / property `check` / `precondition`.  A blank
+ *  message renders an empty user-facing error string, which is useless and
+ *  almost always a typo (`message ""`).  (It also feeds the per-error wire
+ *  `code`, which is content-hashed from the message text per D-I18N-KEY, so a
+ *  blank message degenerates that key too — but the empty display string is
+ *  the real problem.)  `STRING` strips its delimiters, so `message ""` reaches
+ *  here as `""`.  Shared by `types.ts` (invariant / property check) and
+ *  `statements.ts` (precondition). */
+export function checkBlankMessage(
+  node: AstNode,
+  message: string | undefined,
+  accept: import("langium").ValidationAcceptor,
+): void {
+  if (message !== undefined && message.trim() === "") {
+    accept("error", "A 'message' clause must not be blank.", {
+      node,
+      property: "message",
+      code: "loom.blank-message",
+    });
+  }
+}
+
 // Used by derived-prop check on aggregates / value objects to test
 // the lvalue path's final segment.
 export type { DerivedProp };
