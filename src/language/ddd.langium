@@ -1782,7 +1782,7 @@ Apply:
     '}';
 
 Parameter:
-    name=LooseName ':' type=TypeRef;
+    name=LooseName ':' type=TypeRef ('=' default=Expression)?;
 
 // The soft keywords admitted as ordinary identifiers in EVERY "value"
 // position: a field name (`Property.name`), a parameter / object-field /
