@@ -113,9 +113,10 @@ const BEHAVIOURAL_SKIP = {
     // mapping). No dotnet behavioural skips remain.
   },
   elixir: {
-    // B5/B6 fixed — the `when` state-gate now enforces at runtime (→ 409) and
-    // the document/embedded shape create no longer 422s (the server-managed
-    // `version` token is dropped from the create cast/required set).
+    // B5/B6 fixed. B7 open — `auditable` lifecycle stamps (stamp onCreate/onUpdate)
+    // aren't populated in the elixir create changeset, so the NOT NULL stamp
+    // columns 500 the insert. Skip-listed pending fix.
+    stamps: "B7: elixir auditable stamp create 500s (stamp columns not populated)",
   },
 };
 

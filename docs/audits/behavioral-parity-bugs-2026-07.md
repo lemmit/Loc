@@ -31,6 +31,8 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |✅ B5   |
 | value-collections (`Money[]`) |  ✅  |  ✅  |   ✅   |✅ B4   |  ✅    |
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+| stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B7   |
+| paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -135,6 +137,18 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   its snake_case column (`.HasColumnName("id"|"data"|"version")`, `Id` also
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
+
+## B7 🔴 elixir — `auditable` lifecycle stamps 500 on create
+
+- **Where:** `src/generator/elixir/` (auditable / `stamp onCreate`/`onUpdate` path).
+- **Repro:** `test/fixtures/corpus/stamps.ddd` on elixir — `POST /api/orders` → **500**
+  (raw HTML crash). node/java/python/dotnet all round-trip. The `stamp onCreate {
+  createdAt := now() }` / `onUpdate { updatedAt := now() }` fields are `NOT NULL`
+  but the elixir create changeset doesn't populate them, so the Ecto insert
+  violates the not-null constraint.
+- **Impact:** any aggregate with an `auditable`-style stamp can't be created on
+  elixir at runtime. Found by the Slice-4 drain (batch: stamps/paged/criterion).
+- **Status:** confirmed 500; skip-listed pending fix.
 
 ## B6 ✅ elixir — `when` state-gate is not enforced at runtime
 
