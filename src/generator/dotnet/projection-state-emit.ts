@@ -69,7 +69,7 @@ export function emitProjectionRowPersistence(
  *  non-key state field as a NULLABLE public auto-property (the fold writes
  *  `state.<Prop>` via the `thisName: "state"` seam). */
 export function renderProjectionRowEntity(proj: ProjectionIR, ns: string): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const corrField = proj.stateFields.find((f) => f.name === corr);
   const props: string[] = [];
   // The correlation field is the key (NOT NULL) → non-nullable CLR + `= default!`.
@@ -105,7 +105,7 @@ export function renderProjectionRowEntity(proj: ProjectionIR, ns: string): strin
 /** The read-model row's EF configuration — `ToTable` / `HasKey(correlation)` /
  *  per-field `HasConversion` (id / enum), mirroring the saga-state config. */
 function renderProjectionRowConfiguration(proj: ProjectionIR, ns: string, schema?: string): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const cls = projectionRowClass(proj);
   const toTableArgs = schema
     ? `"${projectionRowTable(proj)}", "${schema}"`

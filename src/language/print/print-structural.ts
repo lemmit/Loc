@@ -963,12 +963,28 @@ function printOnDecl(node: OnDecl): string {
   return block(head, node.body.map(printStmt));
 }
 
-// `projection <Name> keyed by <field> { … }` read model (projection.md).
+// `projection <Name>[(params)] [keyed by <field>] { … }` read model
+// (projection.md + read-path-architecture.md rev.13).  The body is the state
+// fields + `on(e)` folds, then the optional query-time comprehension clauses
+// (`from`/`where`/`join`/`order by`/`select`).
 function printProjection(node: import("../generated/ast.js").Projection): string {
-  return block(
-    `projection ${node.name} keyed by ${node.key}`,
-    node.members.map((m) => (m.$type === "ProjectionOn" ? printProjectionOn(m) : printProperty(m))),
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  const keyed = node.key ? ` keyed by ${node.key}` : "";
+  const items: string[] = node.members.map((m) =>
+    m.$type === "ProjectionOn" ? printProjectionOn(m) : printProperty(m),
   );
+  if (node.source) {
+    items.push(`from ${node.source.$refText}${node.sourceAlias ? ` as ${node.sourceAlias}` : ""}`);
+  }
+  if (node.filter) items.push(`where ${printExpr(node.filter)}`);
+  for (const j of node.joins) {
+    items.push(`join ${j.aggregate.$refText} as ${j.alias} on ${printExpr(j.idRef)}`);
+  }
+  if (node.selects.length > 0) {
+    const sels = node.selects.map((s) => `${s.field} = ${printExpr(s.expr)}`).join(", ");
+    items.push(`select ${sels}`);
+  }
+  return block(`projection ${node.name}${params}${keyed}`, items);
 }
 
 // `on(e: Event) [by <expr>] { … }` pure fold member of a projection.

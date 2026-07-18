@@ -1389,12 +1389,51 @@ IsolationLevel returns string:
 // is a plain name (like `Channel`'s `key:`), resolved to a declared state
 // field by the validator (`loom.projection-key-*`).
 Projection:
-    'projection' name=ID 'keyed' 'by' key=ID '{'
+    'projection' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')?
+    ('keyed' 'by' key=LooseName)? '{'
         members+=ProjectionMember*
+        ProjectionQueryClauses
     '}';
 
 ProjectionMember:
     ProjectionOn | Property;
+
+// The query-time comprehension tail (read-path-architecture.md rev.13,
+// § "projection generalises").  All clauses are optional and fixed-order —
+// `from … as` pulls a query source (candidate `this`, or aliased), `where`
+// is a CRITERION position (composes named criteria over the source), each
+// `join <Aggregate> as <c> on <idRef>` is a by-id follow (the `auxiliaries`
+// machinery relocated from `lower-view`), and `select` fills the declared row
+// fields from the source (`this`/alias) and join aliases.  A projection with
+// NO query clause is today's folded read model (Property + `on(e)` folds
+// only).  `from`/`join`/`select` lead each clause; `join`/`select` stay SOFT
+// keywords (CommonSoftKeywords) so a field / value named `join` / `select`
+// keeps parsing.
+//
+// NOTE: the `order by` ordering clause (and its `loom.projection-paged-sort-
+// not-columnar` gate) lands WITH the per-backend query-time emit (PR-C):
+// reserving the pervasive domain word `order` needs a wider soft-keyword sweep
+// than this surface-only slice warrants, and ordering is only observable once
+// the read is actually emitted (paged reads).
+fragment ProjectionQueryClauses:
+    ('from' source=[Aggregate:ID] ('as' sourceAlias=ID)?)?
+    ('where' filter=Expression)?
+    (joins+=ProjectionJoin)*
+    ('select' selects+=ProjectionSelect (',' selects+=ProjectionSelect)*)?;
+
+// A by-id follow: resolve `<idRef>` (types to `<Aggregate> id`) to a loaded
+// aggregate bound under `<alias>`.  `on` is the referenced aggregate's
+// identity (`c.id == <idRef>`) — arbitrary join keys are rejected (by-id
+// only, boundary-respecting).
+ProjectionJoin:
+    'join' aggregate=[Aggregate:ID] 'as' alias=ID 'on' idRef=Expression;
+
+// One `select` projection — fills a declared row field from an expression in
+// the source's candidate-rooted language (field access, aggregations, join-
+// alias reads).  `field` is a LooseName so a row field named `select` etc.
+// keeps parsing.
+ProjectionSelect:
+    field=LooseName '=' expr=Expression;
 
 // A pure fold over one foreign event.  Mirrors the workflow `OnDecl` reactor
 // spelling; the body is an apply-style pure fold (`:=` + field-derivation only,
@@ -1742,10 +1781,10 @@ CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
       | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
-      | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money'
+      | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
-      | 'secret' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix'
+      | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix'
       | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 // LooseName — admissible identifiers in name positions that need to

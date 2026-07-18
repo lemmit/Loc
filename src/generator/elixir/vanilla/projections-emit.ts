@@ -72,7 +72,7 @@ function renderProjectionRowSchema(
   enumsByName: Map<string, EnumIR>,
   schema?: string,
 ): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const corrField = proj.stateFields.find((f) => f.name === corr);
   const pkType =
     corrField && corrField.type.kind === "id" ? ectoIdType(corrField.type.valueType) : ":string";

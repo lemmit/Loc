@@ -49,7 +49,12 @@ const REGISTERED: Ratchet[] = [
     file: "test/conformance/showcase-completeness.test.ts",
     name: "ALLOWLIST",
     kind: "set",
-    max: 12,
+    // 14: +ProjectionJoin +ProjectionSelect — the query-time projection
+    // comprehension grammar nodes (read-path-architecture.md rev.13).  Gated
+    // (`loom.projection-query-time-unsupported`) until the per-backend
+    // query-time emit lands, which owns draining these two (same lifecycle as
+    // the Projection/CommandHandler mid-flight entries).
+    max: 14,
   },
   // Walker primitives with a TSX renderer but no HEEx one (empty — no gap).
   {

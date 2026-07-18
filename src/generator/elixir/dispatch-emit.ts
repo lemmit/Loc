@@ -620,7 +620,7 @@ function renderProjectionFoldHandler(
   proj: ProjectionIR,
   on: ProjectionOnIR,
 ): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const rowMod = projectionRowModule(contextModule, proj);
   const renderCtx: RenderCtx = {
     thisName: "state",
