@@ -54,7 +54,20 @@ public sealed class DomainExceptionFilter : IExceptionFilter
                 Instance = context.HttpContext.Request.Path,
             };
             problem.Extensions["errors"] = fv.Errors
-                .Select(e => new { pointer = PointerOf(e.PropertyName), message = e.ErrorMessage })
+                .Select(e =>
+                {
+                    var err = new Dictionary<string, object>
+                    {
+                        ["pointer"] = PointerOf(e.PropertyName),
+                        ["message"] = e.ErrorMessage,
+                    };
+                    // A messaged rule's WithErrorCode("msg.<hash>") surfaces as the
+                    // stable content-hash wire code; a message-less rule's default
+                    // FluentValidation ErrorCode is omitted (byte-identical body).
+                    if (e.ErrorCode != null && e.ErrorCode.StartsWith("msg.", StringComparison.Ordinal))
+                        err["code"] = e.ErrorCode;
+                    return err;
+                })
                 .ToArray();
             _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
             context.HttpContext.Response.Headers["x-request-id"] = trace_id;
