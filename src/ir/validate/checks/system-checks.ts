@@ -1941,6 +1941,24 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         for (const f of a.fields) {
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
         }
+        // Per-operation / lifecycle `audited` writes a `provenance_records`-style
+        // history row inside the route's save transaction via the SHARED
+        // (drizzle-shaped) routes-builder — `db.transaction(...tx.insert(
+        // schema.auditRecords)...)`.  On mikroorm `db` is the EntityManager (no
+        // drizzle `.transaction`, no `schema` module), so that handler doesn't
+        // compile.  Porting the transactional flush to the EntityManager API is
+        // the same seam that gates provenanced fields (provenance-flush port,
+        // deferred wave-2 follow-up); until then, fail fast rather than emit a
+        // non-compiling handler.  NOTE: persist-time audit STAMPING (`auditable`
+        // / `with audit` → `stampInsert` in `em.upsert`) is unaffected and stays
+        // supported — this only gates the per-op/lifecycle `audited` FLAG.
+        const auditedOps = a.operations.filter((o) => o.audited).map((o) => o.name);
+        if (auditedOps.length > 0)
+          reject(where, `has 'audited' operation(s) ${auditedOps.join(", ")}`);
+        const auditedLifecycle = [...(a.creates ?? []), ...(a.destroys ?? [])].some(
+          (o) => o.audited,
+        );
+        if (auditedLifecycle) reject(where, "has an 'audited' create/destroy lifecycle action");
       }
     }
   }

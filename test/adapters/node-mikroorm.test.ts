@@ -508,6 +508,14 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
   });
+
+  // Per-op / lifecycle `audited` writes an audit_records history row through the
+  // SHARED (drizzle-shaped) routes-builder transaction (`db.transaction` +
+  // `tx.insert(schema.auditRecords)`), which doesn't compile on the EntityManager
+  // — fail fast until the flush is ported (same seam as provenanced fields).
+  // NOTE: persist-time audit STAMPING (`auditable`) stays supported (see below).
+  it("rejects a per-operation `audited` flag", () =>
+    rejects('status: string  operation ship() audited { status := "shipped" }', /audited/));
 });
 
 // ---------------------------------------------------------------------------
