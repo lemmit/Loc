@@ -2088,3 +2088,63 @@ manual `index:` hatch (D-INDEX-INFRA). Advisory, never an error; never changes
 emitted schema on its own.
 
 **Affects.** `uniqueness-and-indexes.md` §11 (canonical); `../resources.md`.
+
+## D-MIG-NO-DOWN — down migrations are no-op everywhere, by decision
+
+**Status:** PINNED.
+
+**Problem.** Every backend's migration mechanism has a down/rollback slot
+(EF `Down()`, Ecto `change/0` reversibility, Drizzle/Flyway/Python file
+pairs). Loom has always emitted no-op downs de facto; M-T2.3's data steps
+(backfills, raw SQL) forced the question, because a "down" of a backfill is
+a data-destroying drop.
+
+**Decision.** Down migrations are **no-op on every backend, permanently**.
+Operators roll forward; recovery is backup + roll-forward. The snapshot
+ledger re-derives forward state deterministically, so a bad migration is
+corrected by the *next* migration, not by rewinding.
+
+**Rationale.**
+
+- Down paths are untested-by-construction — nothing in the pipeline ever
+  executes them, so shipping them is shipping unverified code.
+- The "down" of a data step is destructive by definition (un-backfilling a
+  column is dropping its values), which contradicts the destructive gate's
+  whole posture.
+- Forward-only matches the seeding stance (D-SEED-IDEMPOTENCY) and the
+  documented practice of every backend's own community for production data.
+
+**Affects.** `../migrations.md` § Data migrations; `dotnet/emit/migrations.ts`
+(`Down()` comment); every backend's migration emitter.
+
+## D-MIG-DSL-STEPS — data migrations are DSL steps, not emitted stub files
+
+**Status:** PINNED.
+
+**Problem.** The original M-T2.3 sketch was "an emitted, history-tracked stub
+file the user fills (per backend's native mechanism)". A stub must survive
+regeneration (write-once machinery), exists five times (a Drizzle `.sql`, an
+EF class, an Ecto `.exs`, a Flyway file, a Python `.sql`) for one logical
+change, and breaks the "generated tree is disposable" invariant.
+
+**Decision.** Data migrations are **steps in the `migration` block** —
+backfill (`Agg.field = <expr>`) and raw `sql "…"` — validated, printed, and
+ledgered like every other step, rendered once through the two shared
+renderers (`sql-pg.ts`, Ecto `execute/1`). No generated file is ever
+user-edited. The raw step's exactly-once semantics live in the snapshot
+(`appliedDataMigrations`), not in a new history file — the same "the snapshot
+IS the applied-history record" property M-T2.1 pinned for renames.
+
+**Rationale.**
+
+- One source, five backends: the stub-file design duplicates the same DML per
+  backend and drifts.
+- The block already existed (M-T2.1) and was explicitly shaped for these
+  steps; a second surface would be permanent tech debt.
+- Procedural, app-level data migrations (beyond SQL) are a documented
+  non-goal for v1; the pressure valve is the raw `sql` step's full Postgres
+  expressiveness (CTEs, functions).
+
+**Affects.** `../migrations.md` § Data migrations;
+`../new-plan/missions/M-T2.3-data-migration-surface-design.md` (canonical);
+`src/system/migrations-builder.ts`.

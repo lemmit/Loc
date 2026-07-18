@@ -1,6 +1,7 @@
 # M-T2.3 — Data-migration surface (design + implementation plan)
 
-> **Status: design (PR #1983), scope trimmed to the crucial core per review.**
+> **Status: implemented (PR #1983 — design + slices S1–S4 in one PR, one
+> commit per slice), scope trimmed to the crucial core per review.**
 > v1 ships exactly two data steps — **backfill** and **raw `sql`** — plus the
 > destructive-gate fixes they unlock. Everything else (transforms,
 > `renameIndex`, the wider rename cascades, M-T2.4 reshape detection) is
@@ -256,10 +257,10 @@ it names the new column) with the field name raw, mirroring `ColumnRename`.
 
 | # | Slice | Size | Contents / gate |
 |---|---|---|---|
-| S1 | **Step vocabulary + renderers** | S | `backfillColumn` / `sqlExec` in `migrations-ir.ts`; `sql-pg.ts` + `elixir/migrations-emit.ts` arms; `renderSqlScalarExpr` + `sqlRenderableExpr` (absorbing `seedSqlLiteral`). Pure vocabulary — no producer, zero behavior change; a clean-repo regen stays byte-identical. Unit tests per arm, both renderers. |
-| S2 | **Grammar + IR + lowering + validators + print** | M | The two step alternatives; `sql` soft keyword + keyword-coverage snapshot + `langium:generate` committed; `BackfillIntentIR` / `SqlStepIR`; expr lowering in aggregate scope; the validator table above; `print-structural` arms (print-completeness gated); parsing + negative-validator + roundtrip tests. Ships with a temporary honest gate — `loom.migration-data-steps-unsupported` — lifted by S3, so a half-landed surface errors instead of silently no-oping. |
-| S3 | **Builder consumption** | M | `buildMigrations` threads the intents; backfill → non-destructive NOT-NULL sequence; NULL→NOT-NULL flip gating + backfill integration; `sqlExec` + `appliedDataMigrations` snapshot ledger; TPH discriminator arm in `resolveTableRenames`; upgraded `MigrationDestructiveError` message; lifts the S2 gate. Tests: `migrations-builder` e2e (two-generation ledger inertness, exactly-once `sql`, expand→contract recipe) + a boot-verified backfill round-trip (generated stack: migrate → insert rows → regen with a NOT-NULL+backfill field → migrate → assert values), per the generated-stack-verifier discipline. |
-| S4 | **Docs + decisions** | S | `migrations.md` gains a §Data migrations section (incl. the expand→migrate→contract recipe); `decisions.md` gains D-MIG-NO-DOWN + D-MIG-DSL-STEPS; tracker status updates. |
+| S1 ✅ | **Step vocabulary + renderers** | S | `backfillColumn` / `sqlExec` in `migrations-ir.ts`; `sql-pg.ts` + `elixir/migrations-emit.ts` arms; `renderSqlScalarExpr` + `sqlRenderableExpr` (absorbing `seedSqlLiteral`). Pure vocabulary — no producer, zero behavior change; a clean-repo regen stays byte-identical. Unit tests per arm, both renderers. |
+| S2 ✅ | **Grammar + IR + lowering + validators + print** | M | The two step alternatives; `sql` soft keyword + keyword-coverage snapshot + `langium:generate` committed; `BackfillIntentIR` / `SqlStepIR`; expr lowering in aggregate scope; the validator table above; `print-structural` arms (print-completeness gated); parsing + negative-validator + roundtrip tests. Ships with a temporary honest gate — `loom.migration-data-steps-unsupported` — lifted by S3, so a half-landed surface errors instead of silently no-oping. |
+| S3 ✅ | **Builder consumption** | M | `buildMigrations` threads the intents; backfill → non-destructive NOT-NULL sequence; NULL→NOT-NULL flip gating + backfill integration; `sqlExec` + `appliedDataMigrations` snapshot ledger; TPH discriminator arm in `resolveTableRenames`; upgraded `MigrationDestructiveError` message; lifts the S2 gate. Tests: `migrations-builder` e2e (two-generation ledger inertness, exactly-once `sql`, expand→contract recipe) + a boot-verified backfill round-trip (generated stack: migrate → insert rows → regen with a NOT-NULL+backfill field → migrate → assert values), per the generated-stack-verifier discipline. |
+| S4 ✅ | **Docs + decisions** | S | `migrations.md` gains a §Data migrations section (incl. the expand→migrate→contract recipe); `decisions.md` gains D-MIG-NO-DOWN + D-MIG-DSL-STEPS; tracker status updates. |
 
 Cross-cutting verification: fast suite + `pipeline-layering` per slice;
 langium drift gate on S2; the per-backend compile gates (`hono-build`,

@@ -143,15 +143,89 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
 - **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
   destructive → blocked unless `--allow-destructive`.
 - **Required-column adds.** A NOT-NULL `addColumn` with no default on a
-  previously-existing table fails on any populated table → blocked unless
-  `--allow-destructive`. Under the flag it is rewritten into the safe sequence:
-  add the column *nullable* → a `-- TODO backfill …` comment → `SET NOT NULL`
-  (`alterColumnNullable`). Fill in the backfill before applying to real data.
+  previously-existing table fails on any populated table → blocked unless a
+  **backfill step** covers it (see § Data migrations — the safe sequence with
+  a real `UPDATE`, no flag needed) or the run passes `--allow-destructive`.
+  Under the flag it is rewritten into the safe sequence with a
+  `-- TODO backfill …` comment in place of the `UPDATE`: add the column
+  *nullable* → TODO → `SET NOT NULL` (`alterColumnNullable`). Fill in the
+  backfill before applying to real data.
+- **NULL → NOT NULL flips** (M-T2.3). Making an existing column required
+  fails at apply time on any row holding NULL, so the flip is classified
+  destructive too — unless a backfill step covers the column, in which case
+  it becomes `UPDATE … WHERE … IS NULL` → `SET NOT NULL`, non-destructive.
 
 ```bash
 ddd generate system app.ddd -o out                       # aborts on a destructive delta
 ddd generate system app.ddd -o out --allow-destructive   # applies it (drops; NOT-NULL → 3-step)
 ```
+
+## Data migrations (M-T2.3)
+
+Structural DDL moves the *schema*; the `migration` block's **data steps** move
+the *data* — through the same migration chain, versioned and history-tracked
+like every DDL step. Two steps exist, both deliberately minimal:
+
+**Backfill — `Agg.field = <expr>`** (keyword-free, like the `->` rename). The
+expression is validated against a SQL-renderable subset (literals, enum
+values, sibling *scalar* fields as column refs, arithmetic/comparison/boolean
+operators, `?:`, `now()`; codes `loom.migration-expr-unsupported`,
+`loom.backfill-type-mismatch`, `loom.backfill-target-unsupported`) and fires
+whenever the diff adds that column or flips it NOT NULL:
+
+```ddd
+aggregate Order { placedAt: datetime  status: string }   // status added this generation
+migration "order-status" { Order.status = "pending" }
+```
+```sql
+ALTER TABLE "sales"."orders" ADD COLUMN "status" TEXT NULL;
+UPDATE "sales"."orders" SET "status" = 'pending' WHERE "status" IS NULL;
+ALTER TABLE "sales"."orders" ALTER COLUMN "status" SET NOT NULL;
+```
+
+Naturally **ledger-inert** like renames: once the column is baked into the
+baseline snapshot the step matches nothing. Backfills target single scalar
+columns only — value-object leaves are excluded (Phoenix stores a VO as one
+`:map` column, so a leaf UPDATE would not be portable).
+
+**Raw SQL — `sql "…"`** — the escape hatch for one-shot DML the backfill
+subset can't express. Emitted **exactly once**: the snapshot records each
+step's `"<block>#<index>"` key in `appliedDataMigrations` (raw SQL has no
+structural condition to be naturally inert against). Runs *after* the
+generation's structural steps, in declaration order. On Ecto both data steps
+render through `execute/1`; everywhere else they ride the same migration file
+as the DDL (`renderBackfillSql` is shared, so the DML is bit-identical).
+
+```ddd
+migration "clear-legacy-notes" { sql "UPDATE sales.orders SET note = '' WHERE note IS NULL" }
+```
+
+A raw step is pinned to the module its block's *other* steps name; a block
+with only `sql` steps targets the system's single owner module, and an
+ambiguous scope (a block spanning modules, or no affinity in a multi-module
+system) aborts with `MigrationSqlScopeError` — split the block per module.
+
+**No transform clause — expand→migrate→contract.** A type change with a value
+mapping needs no dedicated syntax, because backfills may reference sibling
+columns: generation 1 adds the new column and fills it from the old
+(`Order.totalCents = total * 100`); generation 2 drops the old column
+(destructive-gated, deliberate). An in-place `alterColumnType` keeps the
+blind `USING col::type` cast — Postgres fails loudly on impossible casts.
+
+**TPH concrete renames.** Renaming a TPH concrete changes no DDL, but its
+rows keep the old `kind` discriminator — the rename cascade emits a ledgered
+one-shot fix-up:
+
+```ddd
+migration "vendor-to-sponsor" { Vendor -> Sponsor }   // Vendor is TPH under Party
+```
+```sql
+UPDATE "parties" SET "kind" = 'Sponsor' WHERE "kind" = 'Vendor';
+```
+
+**Down migrations are no-op by decision** (D-MIG-NO-DOWN): operators roll
+forward; recovery is backup + roll-forward. And data steps live in the DSL,
+not in per-backend stub files (D-MIG-DSL-STEPS) — one source, five backends.
 
 ## Baseline safety — the `--allow-rebaseline` gate (M-T2.2)
 
