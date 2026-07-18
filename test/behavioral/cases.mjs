@@ -113,10 +113,9 @@ const BEHAVIOURAL_SKIP = {
     // mapping). No dotnet behavioural skips remain.
   },
   elixir: {
-    // B5/B6 fixed. B7 open — `auditable` lifecycle stamps (stamp onCreate/onUpdate)
-    // aren't populated in the elixir create changeset, so the NOT NULL stamp
-    // columns 500 the insert. Skip-listed pending fix.
-    stamps: "B7: elixir auditable stamp create 500s (stamp columns not populated)",
+    // B5/B6/B7 fixed — the `when` state gate (409), jsonb-shape create/op writes,
+    // and the `auditable` lifecycle stamps all round-trip. No elixir behavioural
+    // skips remain.
   },
 };
 

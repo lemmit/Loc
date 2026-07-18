@@ -71,14 +71,40 @@ export function stampUsesPrincipalFor(
   );
 }
 
+/** Is the aggregate's stamped field a second-precision `:utc_datetime` column?
+ *  Every vanilla datetime column maps to `:utc_datetime` (schema-emit's
+ *  `mapTypeToEcto`; the microsecond `occurred_at` event column is the sole
+ *  `:utc_datetime_usec`, and it is never a stamp target).  A DateTime VALUE at
+ *  microsecond precision — which `DateTime.utc_now()` produces — fails Ecto's
+ *  dump into a `:utc_datetime` column with an `ArgumentError`, which the
+ *  controller surfaces as a raw 500 on insert.  Such a value must be truncated
+ *  to second precision, exactly as `audit-emit`/`provenance-emit` already do for
+ *  their own `:utc_datetime` writes (`DateTime.utc_now() |> DateTime.truncate(:second)`). */
+function stampFieldIsDatetime(agg: AggregateIR, fieldName: string): boolean {
+  const f = agg.fields.find((x) => x.name === fieldName);
+  return f?.type.kind === "primitive" && f.type.name === "datetime";
+}
+
 /** Render one stamp assignment's value.  A bare `currentUser` ref resolves to
  *  the principal id read off the threaded `current_user` map — nil-safe as
  *  `current_user && current_user.<idKey>`, so an internal caller that didn't
  *  thread an actor (the `\\ nil` default) stamps `nil` rather than raising on a
  *  `nil.<idKey>` access (the write-side analogue of the tenancy-filter's
  *  fail-closed `^(current_user && current_user.f)`).  Everything else renders via
- *  the shared vanilla expression renderer (`now()` → `DateTime.utc_now()`). */
-function renderStampValue(value: ExprIR, ctx: RenderCtx, principalIdKey: string): string {
+ *  the shared vanilla expression renderer (`now()` → `DateTime.utc_now()`).
+ *
+ *  A value bound for a second-precision `:utc_datetime` column
+ *  (`isDatetimeColumn`) is truncated to `:second` — `DateTime.utc_now()` (and
+ *  any DateTime arithmetic) carries microsecond precision, which Ecto refuses to
+ *  dump into a `:utc_datetime` column.  This is the write-side seam that lets the
+ *  `auditable` `createdAt := now()` / `updatedAt := now()` stamps (and any other
+ *  datetime-valued stamp) round-trip instead of 500ing the insert (B7). */
+function renderStampValue(
+  value: ExprIR,
+  ctx: RenderCtx,
+  principalIdKey: string,
+  isDatetimeColumn: boolean,
+): string {
   if (value.kind === "ref" && value.refKind === "current-user") {
     return `current_user && current_user.${principalIdKey}`;
   }
@@ -93,7 +119,8 @@ function renderStampValue(value: ExprIR, ctx: RenderCtx, principalIdKey: string)
   ) {
     return `current_user && current_user.${snake(value.member)}`;
   }
-  return renderExpr(value, ctx);
+  const rendered = renderExpr(value, ctx);
+  return isDatetimeColumn ? `${rendered} |> DateTime.truncate(:second)` : rendered;
 }
 
 /** The `Ecto.Changeset.put_change` pipe lines for the given lifecycle event(s),
@@ -118,6 +145,7 @@ export function stampPutChanges(
           a.value,
           ctx,
           principalIdKey,
+          stampFieldIsDatetime(agg, a.field),
         )})`,
     );
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";

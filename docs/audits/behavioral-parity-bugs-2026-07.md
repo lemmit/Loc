@@ -31,7 +31,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |✅ B5   |
 | value-collections (`Money[]`) |  ✅  |  ✅  |   ✅   |✅ B4   |  ✅    |
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
-| stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B7   |
+| stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |✅ B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
@@ -138,17 +138,39 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
 
-## B7 🔴 elixir — `auditable` lifecycle stamps 500 on create
+## B7 ✅ elixir — `auditable` lifecycle stamps 500 on create
 
-- **Where:** `src/generator/elixir/` (auditable / `stamp onCreate`/`onUpdate` path).
+- **Where:** `src/generator/elixir/vanilla/stamp-emit.ts` (the `stampPutChanges`
+  changeset write seam).
 - **Repro:** `test/fixtures/corpus/stamps.ddd` on elixir — `POST /api/orders` → **500**
   (raw HTML crash). node/java/python/dotnet all round-trip. The `stamp onCreate {
-  createdAt := now() }` / `onUpdate { updatedAt := now() }` fields are `NOT NULL`
-  but the elixir create changeset doesn't populate them, so the Ecto insert
-  violates the not-null constraint.
-- **Impact:** any aggregate with an `auditable`-style stamp can't be created on
-  elixir at runtime. Found by the Slice-4 drain (batch: stamps/paged/criterion).
-- **Status:** confirmed 500; skip-listed pending fix.
+  createdAt := now() }` / `onUpdate { updatedAt := now() }` fields are `NOT NULL`.
+- **Root cause (NOT what the initial register note guessed):** the stamps ARE
+  wired into the create/update path — the repository `insert`/`update` already
+  `put_change`d `created_at`/`updated_at`. The 500 was a datetime-**precision**
+  mismatch: the stamp rendered `now()` as bare `DateTime.utc_now()` (microsecond
+  precision), but every vanilla datetime column maps to `:utc_datetime` (second
+  precision; `schema-emit`'s `mapTypeToEcto`). Ecto **refuses to dump** a
+  microsecond `DateTime` into a `:utc_datetime` column, raising an `ArgumentError`
+  at `Repo.insert` → the controller surfaces it as a raw HTML 500. `audit-emit`
+  and `provenance-emit` already write `DateTime.utc_now() |> DateTime.truncate(:second)`
+  into their own `:utc_datetime` columns; the stamp path was the one datetime
+  write that had skipped the truncate.
+- **Fix:** `renderStampValue` truncates a stamp value bound for a second-precision
+  `:utc_datetime` column to `:second` (`… |> DateTime.truncate(:second)`), gated on
+  the target field being a `datetime` primitive (`stampFieldIsDatetime`). Principal
+  stamps (`created_by`, `tenantId` — id/string columns) are untouched → byte-identical.
+- **Class:** this is the general "datetime capability-write must match the column
+  precision" seam, not a stamps-only special-case — it truncates ANY datetime-valued
+  stamp (`createdAt := now()`, a future `expiresAt := now() + 30.days`), keyed off the
+  Ecto column type rather than the specific `now()` literal. Unlike B5/B6 (capability
+  hooks that were entirely unwired into the elixir path), the stamp hook here was
+  already threaded — only its rendered datetime precision was wrong.
+- **Verification:** booted via `elixir:1.16-otp-26` + node 22 — `run-elixir.mjs
+  stamps` green (order create + read-back); `state-gate shapes sales ledger`
+  still green (no B5/B6/core regression). Pinned by
+  `test/generator/elixir/elixir-stamping.test.ts`.
+- **Status:** ✅ fixed — `stamps` re-armed (removed from `cases.mjs` elixir skips).
 
 ## B6 ✅ elixir — `when` state-gate is not enforced at runtime
 
