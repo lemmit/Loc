@@ -26,6 +26,7 @@ import { walkBody } from "../_walker/walker-core.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack } from "./pack.js";
+import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 
 export interface GenerateFlutterOptions {
   apiBaseUrl?: string;
@@ -105,6 +106,8 @@ function renderPage(
   const stateNames = new Set(page.state.map((s) => s.name));
 
   let bodyWidget = "const Center(child: Text('Empty page'))";
+  let usesState = false;
+  const usedActions = new Set<string>();
   if (page.body) {
     const result = walkBody(
       page.body,
@@ -117,13 +120,28 @@ function renderPage(
       aggregatesByName,
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
+    usesState = result.usesState;
+    for (const a of result.usedActions ?? []) usedActions.add(a);
   }
 
-  // NOTE: the display-only skeleton page body references no wire-model types, so
-  // it imports only material.dart — importing lib/models.dart here would be an
-  // `unused_import` under `flutter analyze`.  Full parity (data-bound pages) adds
-  // the models import at the point a page actually references a model class.
-  const src = `${lines(
+  // A page with `state {}` / `action`s the body actually references becomes a
+  // Riverpod `ConsumerWidget` bound to a projected Notifier (Track D); the
+  // display-only pages stay plain `StatelessWidget`s (Track A/B/C skeleton).
+  const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
+  const source = stateful
+    ? renderConsumerPage(page, className, usesState, usedActions, bodyWidget, contexts)
+    : renderStatelessPage(page, className, bodyWidget);
+
+  return { fileBase, className, routePath, source };
+}
+
+/** Display-only page → a plain `StatelessWidget`.  The body references no
+ *  wire-model types, so it imports only material.dart — importing
+ *  lib/models.dart here would be an `unused_import` under `flutter analyze`.
+ *  Full parity (data-bound pages) adds the models import at the point a page
+ *  actually references a model class. */
+function renderStatelessPage(page: PageIR, className: string, bodyWidget: string): string {
+  return `${lines(
     "import 'package:flutter/material.dart';",
     "",
     `class ${className} extends StatelessWidget {`,
@@ -140,8 +158,51 @@ function renderPage(
     "  }",
     "}",
   )}\n`;
+}
 
-  return { fileBase, className, routePath, source: src };
+/** Stateful page → a Riverpod `ConsumerWidget`.  The projected state class +
+ *  Notifier + provider precede the widget in the same file; the build binds the
+ *  watched `state`, the `notifier`, and one tear-off per referenced action (so a
+ *  button's `onClick: inc` resolves to the bound `inc()`).  Each binding is
+ *  emitted only when USED, so an unused local never trips `flutter analyze`. */
+function renderConsumerPage(
+  page: PageIR,
+  className: string,
+  usesState: boolean,
+  usedActions: ReadonlySet<string>,
+  bodyWidget: string,
+  contexts: EnrichedBoundedContextIR[],
+): string {
+  const proj = renderRiverpod(page, contexts);
+  const bindings: string[] = [];
+  if (usesState) bindings.push(`    final state = ref.watch(${proj.providerName});`);
+  if (usedActions.size > 0) {
+    bindings.push(`    final notifier = ref.read(${proj.providerName}.notifier);`);
+    for (const a of [...usedActions].sort()) {
+      bindings.push(`    final ${a} = notifier.${a};`);
+    }
+  }
+  return `${lines(
+    "import 'package:flutter/material.dart';",
+    "import 'package:flutter_riverpod/flutter_riverpod.dart';",
+    "",
+    proj.source,
+    "",
+    `class ${className} extends ConsumerWidget {`,
+    `  const ${className}({super.key});`,
+    "",
+    "  @override",
+    "  Widget build(BuildContext context, WidgetRef ref) {",
+    bindings,
+    "    return Scaffold(",
+    `      appBar: AppBar(title: const Text('${escapeDart(page.name)}')),`,
+    "      body: SingleChildScrollView(",
+    `        child: ${indentContinuation(bodyWidget, 8)},`,
+    "      ),",
+    "    );",
+    "  }",
+    "}",
+  )}\n`;
 }
 
 /** `main.dart` for a multi-page ui: a `MaterialApp` with named routes, the first
@@ -150,6 +211,7 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
   const home = pages[0];
   return `${lines(
     "import 'package:flutter/material.dart';",
+    "import 'package:flutter_riverpod/flutter_riverpod.dart';",
     "",
     pages.map((p) => `import 'pages/${p.fileBase}.dart';`),
     "",
@@ -162,14 +224,17 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
     "",
     "  @override",
     "  Widget build(BuildContext context) {",
-    "    return MaterialApp(",
+    // ProviderScope roots the Riverpod container for every stateful page's
+    // Notifier; nested in App.build (not around runApp) so `runApp(const App())`
+    // stays const-clean.
+    "    return ProviderScope(child: MaterialApp(",
     `      title: '${escapeDart(title)}',`,
     "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
     `      initialRoute: '${home.routePath}',`,
     "      routes: {",
     pages.map((p) => `        '${p.routePath}': (context) => const ${p.className}(),`),
     "      },",
-    "    );",
+    "    ));",
     "  }",
     "}",
   )}\n`;
@@ -188,6 +253,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0
+  flutter_riverpod: ^2.5.1
 
 dev_dependencies:
   flutter_test:
@@ -271,6 +337,7 @@ CMD ["nginx", "-g", "daemon off;"]
 
 function renderMain(title: string): string {
   return `import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pages/home_page.dart';
 
@@ -283,11 +350,11 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return ProviderScope(child: MaterialApp(
       title: '${escapeDart(title)}',
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
       home: const HomePage(),
-    );
+    ));
   }
 }
 `;
