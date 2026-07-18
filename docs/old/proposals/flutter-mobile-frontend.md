@@ -5,9 +5,11 @@
 > of development**, deliberately **outside the T10 web-target-matrix freeze**
 > ([`../../new-plan/T10-new-targets.md`](../../new-plan/T10-new-targets.md)) —
 > not a 6th SPA frontend competing in the frozen roster. The interesting
-> work is **not the emitter** (the shared `walkBody` engine already drives a
-> non-JSX target — Feliz); it is the **language/deployment layer**: a native
-> app is not a `docker compose` service, and the grammar has no word for it.
+> work is **neither the emitter** (the shared `walkBody` engine already drives
+> a non-JSX target — Feliz) **nor the grammar** (it comes to ~two enum values —
+> §4); it is the **composer/deployment layer**: one `platform: flutter`
+> deployable emits *per-surface* (a served web bundle *and* native artifacts
+> that join no network), which `src/system/` has never modelled.
 > Sibling of [`angular-frontend.md`](./angular-frontend.md) and
 > [`blazor-server-frontend.md`](./blazor-server-frontend.md) (the non-JSX
 > `WalkerTarget` precedents); its true novelty is closer to
@@ -29,11 +31,14 @@
    cross-tenant-leak risk). A mobile **client** re-lands *none* of that — it
    runs no domain logic, owns no DB, has no per-tenant query filter. Its cost
    profile is a *frontend's*, not a backend's.
-4. **The emitter is cheap; the language layer is the work** (§3–§4). One
+4. **The emitter is cheap, and so is the grammar** (§3–§4). One
    `FlutterWalkerTarget` on the shared engine + a Dart wire-model emitter is
-   well-trodden. What's *new* is a **mobile deployment unit** the compose/k8s
-   composer has never modelled, plus a small grammar surface for **app
-   identity** and **device capabilities/permissions**.
+   well-trodden. The **grammar delta is two enum values** (`framework:
+   flutter`, `platform: flutter`) — app identity, permissions, and native-vs-
+   web all **derive/reuse/defer** rather than adding syntax (§4). The real
+   novelty is in the **composer/deployment semantics**: one `platform:
+   flutter` deployable emits *per-surface* (served web bundle + native
+   artifacts), which `src/system/` has never modelled.
 
 ## 1. Flutter vs React Native — the short version
 
@@ -163,46 +168,58 @@ reopening of the web-frontend roster.)
   `ui`-against-Flutter → `integration_test`.
 - **The deployment unit** — see §4; this is the real novelty.
 
-## 4. The language layer — the part that needs design
+## 4. The language layer — smaller than it looks
 
-This is where mobile stops being "another frontend." The **page-content
-grammar is reusable wholesale** — `ui`, pages, and the primitive library are
-device-agnostic; the walker handles the Dart output. The new surface is the
-**deployment/device layer**, and it splits into one hard decision and two
-small additions.
+An earlier draft of this note invented three new constructs — an `output:`
+mode, an `app { … }` identity block, and a `capabilities: […]` permission
+list. **All three are un-Loomish and are retracted.** Held against Loom's own
+conventions (derive-don't-stamp, platform-neutral IR, reuse existing slots,
+add as few keywords as possible), the mobile grammar delta collapses to **two
+enum values**; everything else derives, reuses, or defers. This *sharpens* the
+thesis rather than weakening it: the real novelty is in the **composer /
+deployment semantics** (§4d), not in new surface syntax.
 
-**(a) The deployment unit — the hard decision.** Every current `deployable`
-composes into a `docker compose` service / k8s workload. A native app is a
-**build artifact (APK/IPA) that joins no network** — it has no service, no
-port, no place in `docker-compose.yml`. `src/system/` has never composed "a
-unit that produces an installable artifact and participates in no stack." The
-grammar needs a way to say it. Three shapes, in preference order:
+**(a) Page content — reused wholesale.** `ui`, pages, and the primitive
+library are device-agnostic; the walker handles the Dart output. `framework:
+flutter` (one `Framework` enum value) is the only addition, and it's the same
+slot `react`/`vue`/`svelte`/`angular`/`feliz` already occupy.
 
-1. **A `deployable` kind** — `deployable Mobile { kind: mobile, platforms:
-   [ios, android], targets: Backend }`. Reuses the `targets:` wire-binding
-   the SPA frontends already have; the composer learns one new kind that
-   emits a build target instead of a service. *Recommended* — smallest
-   grammar delta, largest reuse.
-2. **A device-host** — extend the `embedded-frontend-composition` `hosts:`
-   model with a "device host" (renders, serves nothing). Elegant if that
-   proposal lands first; couples this to it otherwise.
-3. **A new top-level `app` citizen** — cleanest conceptually, most grammar +
-   IR + validator + composer surface. Reserve for if mobile grows a large
-   dedicated feature set.
+**(b) The deployment unit — `platform: flutter`, one enum value.** The one
+genuinely-new *fact* is that a `platform: flutter` deployable produces
+**per-surface output**: the web surface is a served bundle (like `platform:
+static` — joins the stack), the native surfaces (iOS/Android/desktop) are
+build artifacts (join no network). That native-vs-served split is **derived by
+the composer from the platform**, not chosen by an `output:` toggle — Flutter
+is *one source → all surfaces*, so a mode knob would stamp a fact the platform
+already implies. Surface *narrowing* (ship iOS only) is a deferred refinement,
+and a list when it lands — never a native/web boolean.
 
-**(b) App identity — cheap declarative metadata.** `bundleId` /
-`applicationId`, version + build number, display name, icon, splash, min OS.
-Web bundles have none of this; native builds require all of it. A small
-metadata block on the mobile unit, no semantics — low risk.
+**(c) App identity — derived, not declared.** None of it needs a block:
+- **icon** → the existing **`favicon:`** clause on `deployable` (already
+  present). Not new.
+- **display name** → derived from the deployable/ui name (`naming.ts`
+  title-cases everywhere already).
+- **bundle id** → defaults `com.example.<system>.<deployable>` (reverse-DNS
+  convention). The *only* external datum is the DNS root — an optional,
+  **system-level `namespace:`** that isn't even mobile-specific (it would
+  inform JVM/.NET package names too), not a per-mobile-unit block.
+- **version** → not in `.ddd` at all; a release concern, injected at build
+  time (`ddd generate … --app-version`). Keeping non-domain metadata out of
+  the DSL is the Loomish call.
 
-**(c) Device capabilities / OS permissions — the axis most deserving
-dedicated grammar.** Camera, geolocation, biometrics, push, notifications,
-file access are **OS-permission-gated** and flow into `Info.plist` /
-`AndroidManifest.xml`; they are consent-relevant, not mere metadata. A
-`capabilities: [camera, location, push]` surface (declared, or inferred from
-primitive usage) is the one mobile concern that genuinely touches both the
-page body and the generated native manifests — the strongest candidate for a
-first-class grammar addition.
+**(d) Device permissions — derived from use, not a declared list.** A
+`capabilities: […]` clause fails twice: it **collides** with Loom's existing
+`capability` concept (the pure-mixin domain capabilities — `auditable` /
+`tenantOwned`, applied via `with` / `implements`), *and* naming
+`camera`/`location`/`push` in the source **leaks OS specifics into the
+platform-neutral IR**. The Loomish treatment: the source names a *neutral
+intent* (a page *captures a photo*), and the **Flutter target** maps that to
+`NSCameraUsageDescription` / `<uses-permission>` / the plugin dep — the DSL
+never spells an OS permission. Permissions are therefore **derived from
+device-feature use**. And since the primitive library is closed with **no
+device primitives today**, **v1 has no permission surface at all** — the
+question only arises if/when a `Capture`-style primitive is proposed, and then
+it is derivation in the target, not a list in the source.
 
 **Explicitly deferred (scope control, not oversight):**
 
@@ -210,8 +227,7 @@ first-class grammar addition.
   Loom assumes the UI reaches the domain *over the wire* (online). Offline-
   first (local SQLite/Drift store + conflict resolution + sync) is a **whole
   architectural axis**, not a knob. **v1 is online-only, exactly like the web
-  frontends.** Flag it as the biggest *future* language-layer question, not a
-  v1 blocker.
+  frontends.** The biggest *future* language-layer question — not a v1 blocker.
 - **Push notifications.** A natural consumer of domain events — hook the
   existing eventing/dispatch surface ([`channels.md`](./channels.md),
   [`dispatch-delivery-semantics.md`](./dispatch-delivery-semantics.md))
@@ -222,72 +238,47 @@ first-class grammar addition.
 
 ### Surface sketch (concrete)
 
-`ui:` and `targets:` are **existing** clauses — only three things are new
-(`framework: flutter`, `platform: flutter { output: … }`, and the mobile
-metadata: `app`/`buildFor`/`capabilities`):
+The whole surface: **two enum values plus one reused clause.** No `output:`,
+no `app { … }`, no `capabilities:`.
 
 ```
 // page content: the existing ui surface, verbatim
 ui TasksApp {
-  framework: flutter                       // NEW #1: Framework += 'flutter'
+  framework: flutter            // enum add #1: Framework += 'flutter'
   page TaskList area Tasks { List of Task { column Title; column Done } }
 }
 
 deployable TasksMobile {
-  platform: flutter { output: native }     // NEW #2: Platform += 'flutter';
-                                           //   realization axis  output: native | web
-  targets: ApiGateway                      // REUSED: wire binding (existing clause)
-  ui: TasksApp                             // REUSED: ui binding (existing clause)
-  buildFor: [ios, android]                 // NEW #3a: native build targets
-
-  app {                                    // NEW #3b: app-identity metadata
-    bundleId:    "com.acme.tasks"
-    displayName: "Acme Tasks"
-    version:     "1.4.0"  build: 42
-    icon:        "assets/icon.png"
-  }
-
-  capabilities: [camera, location, push]   // NEW #3c: OS permissions
+  platform: flutter             // enum add #2 — ONE source → ALL surfaces
+  targets: ApiGateway           // reused (wire binding)
+  ui: TasksApp                  // reused (ui binding)
+  favicon: "assets/icon.png"    // reused → becomes the app icon
 }
 ```
 
-**Refinement to §4a, driven by the repo's own *"derive, don't stamp"* rule:**
-drop the `kind: mobile` field. "This is an artifact that joins no network" is
-a pure function of `platform: flutter { output: native }`, so the composer
-*derives* it (as page-kind is derived from name+area, not stamped). `output:
-web` slots into the existing served-bundle model; `output: native` emits a
-build target, no compose service.
+**What the composer/target derives from this (no extra source):**
 
-**What each new clause generates:**
+- `platform: flutter` → a Flutter project emitting **every surface**: `flutter
+  build web` (served bundle, joins the stack) **and** `flutter build apk` /
+  `ipa` / desktop (artifacts, no `docker-compose.yml` service). The
+  native-vs-served split is derived, not declared.
+- **bundle id / display name** → derived from the system + deployable names
+  (`com.example.<system>.tasksmobile`, "Tasks Mobile"); **version** injected at
+  build time; **icon** from the reused `favicon:`.
+- **permissions** → none in v1 (no device primitives to derive from); a future
+  `Capture`-style primitive would let the Flutter target derive
+  `NSCameraUsageDescription` / `<uses-permission>` — the source stays neutral.
 
-- `platform: flutter { output: native }` + `targets: ApiGateway` → a Flutter
-  project + build script (`flutter build apk --dart-define=API_URL=…`; `ipa`
-  for iOS; web build for `output: web`), **no `docker-compose.yml` service**.
-- `app { … }` → `pubspec.yaml` (`version: 1.4.0+42`) + iOS `Info.plist`
-  (`CFBundleIdentifier`/`CFBundleShortVersionString`/`CFBundleVersion`) +
-  Android `build.gradle` (`applicationId`/`versionName`/`versionCode`). Pure
-  metadata, cheap.
-- `capabilities: [camera, location, push]` → the payoff line: one clause fans
-  out to three files — `Info.plist` usage-description keys +
-  `AndroidManifest.xml` `<uses-permission>` entries + the `pubspec.yaml`
-  plugin deps (`camera`/`geolocator`/`firebase_messaging`).
-
-**Grammar deltas (where each lands):**
+**Grammar deltas (the entire list):**
 
 | Surface | Grammar change | Enforcement |
 |---|---|---|
 | `framework: flutter` | `Framework += 'flutter'` | — |
 | `platform: flutter` | `Platform += 'flutter'` | `checkDeployable` (`deployable.ts`) — the `'react'`/`'phoenixLiveView'` pattern |
-| `output: native \| web` | new realization axis in the `platform { … }` sub-block (beside `persistence`/`directoryLayout`) | validator menu (the `design:` precedent — parser takes `LooseName`) |
-| `buildFor: [ios, android]` | one order-independent clause on `Deployable` | validator: only meaningful when `output: native` |
-| `app { … }` | new metadata block | validator: required when `output: native` |
-| `capabilities: […]` | one order-independent clause | validator-enforced menu → manifest/plugin table |
+| *(optional, non-mobile-specific)* `namespace:` on `System` | one clause on `System` | reverse-DNS default; informs package/bundle ids across targets |
 
-**Open design call — declared vs inferred capabilities.** Spelled *declared*
-here because the page-primitive library is closed and has no device
-primitives today (nothing to infer from). If a `Capture`/scanner primitive
-ever enters the walker, inference (`camera` auto-added when a page uses it)
-becomes possible; until then, declared is the pragmatic v1.
+Everything mobile beyond these lives in the **Flutter generator + the composer
+per-surface logic** — not the grammar.
 
 ## 5. A first slice
 
@@ -299,7 +290,8 @@ deployment unit (§4a) and the `integration_test` runtime gate (§3) — to slic
 2. That proves the `FlutterWalkerTarget` + Dart wire-model + `flutter analyze`
 gate end-to-end before any grammar change lands.
 
-**Open decisions to pin before slice 2:** the deployment-unit shape (§4a — a
-`deployable` kind is the recommendation), whether device capabilities are
-declared or inferred (§4c), and where the Dart wire-model emitter lives (a
+**Open decisions to pin before slice 2:** the composer's per-surface emission
+model (§4b/§4d — served web bundle *and* native artifacts from one `platform:
+flutter` deployable), the reverse-DNS bundle-id default vs an optional
+system-level `namespace:` (§4c), and where the Dart wire-model emitter lives (a
 Dart sibling of `_frontend/`, since it can't share the TS one).
