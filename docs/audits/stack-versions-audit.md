@@ -108,17 +108,20 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 
 ### Hono (TypeScript) — `src/platform/hono/v5/pins.ts` (default lane; v4 pinnable via `platform: node@v4`)
 
+_Node-target row refreshed **2026-07-18** — `@hono/node-server` 1→2 and `pino` 9→10 adopted (both drop Node 18 only; generated image runs `node:24`). TS held on 6._
+
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
-| `hono` | ^4.12.0 | 4.12 | same-major |
-| `@hono/node-server` | ^1.19.0 | latest 1.x | safe bump |
-| `@hono/zod-openapi` | ^1.0.0 | latest | v5 is on the 1.x line |
+| `hono` | ^4.12.0 | 4.12 | same-major (caret floats to latest 4.12.x) |
+| `@hono/node-server` | ^2.0.0 | 2.x | **bumped 1→2** — drops Node 18 + removes the unused `vercel` adapter; `serve({fetch,port})` unchanged |
+| `@hono/zod-openapi` | ^1.0.0 | latest 1.x | v5 is on the 1.x line |
 | `zod` | ^4.0.0 | 4.x | v5 default is zod 4 (v4 backend stays on zod 3) |
 | `drizzle-orm` | ^0.45.0 | 0.45+ | pre-1.0 — every minor is breaking; treat with care |
 | `drizzle-kit` | ^0.31.0 | latest | bump paired with drizzle-orm |
-| `pg` / `@types/pg` | ^8.13 / ^8.11 | 8.x | safe |
-| `typescript` (dev) | ^5.7 | 6.x | major bump |
-| `tsx` / `tsup` / `vitest` (dev) | recent | latest 4.x / 8.x / 2.x | safe |
+| `pg` / `@types/pg` | ^8.13 / ^8.11 | 8.x | safe (carets float to latest 8.x) |
+| `pino` / `pino-pretty` | ^10.3.0 / ^13.0.0 | 10.x / 13.x | **pino bumped 9→10** — drops Node 18 only, API unchanged |
+| `typescript` (dev) | ^6.0.0 | 7.x | on TS 6 (^6 floats to latest stable 6.0.x); **TS 7 native port deferred — its own major initiative, not a routine bump** |
+| `tsx` / `tsup` / `vitest` (dev) | recent | latest 4.x / 8.x / 4.x | safe |
 
 ### Phoenix LiveView (Elixir / Ash) — `src/generator/elixir/shell/project.ts:~67–93`
 
