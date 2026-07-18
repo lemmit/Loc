@@ -9,6 +9,7 @@
 
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
+import { redisChannelBindings } from "../../../generator/_channels/bindings.js";
 import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
 import type { SourceMapRecorder } from "../../../generator/_trace/sourcemap.js";
 import {
@@ -21,6 +22,7 @@ import {
   aggregateIsAudited,
   renderAuditStampHelper,
 } from "../../../generator/typescript/emit/audit-stamp.js";
+import { renderChannelsModule } from "../../../generator/typescript/emit/channels.js";
 import { renderDomainServices } from "../../../generator/typescript/emit/domain-service.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
@@ -365,19 +367,78 @@ export function generateTypeScriptForContexts(
   // Union the hosted contexts into one synthetic context (ambient enums / VOs
   // deduped by name — see src/ir/util/merge-contexts.ts) so the shared domain /
   // schema modules reflect the FULL set.
+  // Broker bindings (channels.md; M-T4.4 slice 2): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  Computed up front
+  // because they widen the merged vocabulary below — a consumer deployable
+  // need not HOST the channel's owning context to react to its events; the
+  // wired binding is what carries the routing knowledge across deployables.
+  const channelBindings =
+    system && system.deployable.persistence !== "mikroorm"
+      ? redisChannelBindings(system.deployable, system.sys)
+      : [];
+  const mergedBase = mergeContexts(contexts);
+  const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
+  // Wired-but-foreign channels join the carrier set as minimal ChannelIR
+  // stubs (slice-2 scope pins their knobs), so `deriveEventSubscriptions`
+  // routes a hosted reactor off a channel declared in a non-hosted context.
+  const wiredForeignChannels = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: "broadcast" as const,
+      retention: "ephemeral" as const,
+    }));
+  const mergedSubscriptions = deriveEventSubscriptions(
+    [...contexts.flatMap((c) => c.channels), ...wiredForeignChannels],
+    contexts.flatMap((c) => c.workflows),
+    contexts.flatMap((c) => c.projections ?? []),
+  );
+  // Foreign events a hosted workflow consumes through a wired channel join
+  // the deployable's event vocabulary: `domain/events.ts` needs the type
+  // (the reactor handler references it) and the DomainEvent union carries it.
+  const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
+  const foreignConsumedEvents = system
+    ? [...new Set(mergedSubscriptions.map((s) => s.event))]
+        .filter((name) => !knownEventNames.has(name))
+        .flatMap((name) => {
+          for (const sub of system.sys.subdomains) {
+            for (const c of sub.contexts) {
+              const ev = c.events.find((e) => e.name === name);
+              if (ev) return [ev];
+            }
+          }
+          return [];
+        })
+    : [];
   const merged: EnrichedBoundedContextIR = {
-    ...mergeContexts(contexts),
+    ...mergedBase,
+    events: [...mergedBase.events, ...foreignConsumedEvents],
     // Re-derive over the merged union so a reactor in one hosted context can
     // route off a channel declared in another — cross-context choreography
-    // within a single deployable (in-process dispatch slice).
-    eventSubscriptions: deriveEventSubscriptions(
-      contexts.flatMap((c) => c.channels),
-      contexts.flatMap((c) => c.workflows),
-      contexts.flatMap((c) => c.projections ?? []),
-    ),
+    // within a single deployable (in-process dispatch slice), extended by the
+    // wired broker channels for the cross-deployable case (M-T4.4).
+    eventSubscriptions: mergedSubscriptions,
   };
 
-  out.set("domain/ids.ts", renderIds(merged));
+  // Foreign id brands (M-T4.4): id targets referenced by broker-consumed
+  // foreign events (and the correlating workflow state fields) whose owning
+  // aggregate this deployable doesn't host.
+  const hostedIdNames = new Set(
+    merged.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]),
+  );
+  const foreignIdNames = [
+    ...new Set(
+      [
+        ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+        ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
+      ]
+        .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
+        .map((t) => t.targetName)
+        .filter((n) => !hostedIdNames.has(n)),
+    ),
+  ];
+  out.set("domain/ids.ts", renderIds(merged, foreignIdNames));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   const servicesFile = renderDomainServices(merged);
   if (servicesFile) out.set("domain/services.ts", servicesFile);
@@ -892,6 +953,20 @@ export function generateTypeScriptForContexts(
     out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName));
   }
 
+  // Broker transport (channels.md; M-T4.4 slice 2).  A deployable that wires
+  // a redis-bound broadcast channelSource via `channels:` gets the transport
+  // module (ChannelTransport seam + ioredis driver + producer tee + consumer
+  // loop); index.ts composes the tee into the dispatcher chain and starts the
+  // consumers.  A deployable with no wired bindings stays byte-identical.
+  const hasChannels = channelBindings.length > 0 && !usingMikro;
+  if (hasChannels) {
+    out.set("http/channels.ts", renderChannelsModule(channelBindings));
+  }
+  // Consumer side only when a hosted workflow actually subscribes (via a
+  // hosted OR wired channel); a pure producer skips the loop and the
+  // in-process dispatcher import.
+  const hasChannelConsumers = hasChannels && merged.eventSubscriptions.some((s) => !s.projection);
+
   const projectUsesMoney = contexts.some(contextUsesMoney);
   out.set(
     "package.json",
@@ -899,6 +974,7 @@ export function generateTypeScriptForContexts(
       withMoney: projectUsesMoney,
       withOidc: !!oidcAuth,
       withCronTimers: hasTimers && anyTimerUsesCron(ownedTimers),
+      withChannels: hasChannels,
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -949,6 +1025,11 @@ export function generateTypeScriptForContexts(
       // Timer scheduler (scheduling.md, M-T4.1): boot wires startTimerScheduler
       // into the same in-process dispatcher the outbox relay uses.
       hasTimers,
+      // Broker transport (M-T4.4 slice 2): boot creates the redis transports,
+      // wraps the app dispatcher in the publish tee, and starts the consumer
+      // loop feeding the in-process dispatcher.
+      hasChannels,
+      hasChannelConsumers,
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -1001,6 +1082,9 @@ function projectPackageJson(
      *  timerSource uses a real `cron:` expression (an `every:`-only deployable
      *  uses a bare setInterval and needs no dep). */
     withCronTimers?: boolean;
+    /** M-T4.4 slice 2 — the `ioredis` broker-client dep, added only when the
+     *  deployable wires a redis-bound channelSource via `channels:`. */
+    withChannels?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -1087,6 +1171,9 @@ function projectPackageJson(
           // Timer scheduler (scheduling.md) — node-cron parses real cron
           // expressions; an `every:`-only deployable stays on setInterval.
           ...(opts.withCronTimers ? { "node-cron": "^3.0.3" } : {}),
+          // Broker transport (M-T4.4 slice 2) — ioredis (MIT, design §6a)
+          // speaks RESP to the compose-provisioned Valkey sidecar.
+          ...(opts.withChannels ? { ioredis: "^5.4.0" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,
@@ -1220,6 +1307,8 @@ function renderProjectIndexTs(
   oidc = false,
   orgPathRegistryTable?: string,
   hasTimers = false,
+  hasChannels = false,
+  hasChannelConsumers = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -1241,7 +1330,12 @@ function renderProjectIndexTs(
   // boots out of the box (replace in production with a real verifier).
   // The in-process dispatcher is constructed once and shared by the outbox
   // relay and/or the timer scheduler (scheduling.md, M-T4.1).
-  const needsDispatcher = outboxRelay || hasTimers;
+  const needsDispatcher = outboxRelay || hasTimers || hasChannels;
+  // `createInProcessDispatcher` exists in http/workflows.ts only when the
+  // deployable has channel-routed workflow subscriptions.  A pure-producer
+  // deployable (wires a broker channel, hosts no reactors) falls back to the
+  // always-exported Noop as the tee's inner dispatcher.
+  const withInProcess = outboxRelay || hasTimers || hasChannelConsumers;
   const authStubImport = !userShape
     ? ""
     : oidc
@@ -1281,10 +1375,20 @@ ${
   // scheduler (scheduling.md) — import it (and the realtime tee) whenever
   // either is wired; the outbox-only helpers stay behind the outbox flag.
   needsDispatcher
-    ? `import { createInProcessDispatcher${
-        outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
-      } } from "./http/workflows";\n${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
+    ? `${
+        withInProcess
+          ? `import { createInProcessDispatcher${
+              outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
+            } } from "./http/workflows";\n`
+          : `import { NoopDomainEventDispatcher } from "./domain/events";\n`
+      }${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
         hasTimers ? `import { startTimerScheduler } from "./scheduler";\n` : ""
+      }${
+        hasChannels
+          ? `import { channelPublishTee, createChannelTransports${
+              hasChannelConsumers ? ", startChannelConsumers" : ", closeChannelTransports"
+            } } from "./http/channels";\n`
+          : ""
       }`
     : ""
 }${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";`;
@@ -1313,9 +1417,35 @@ ${effectiveMigCall}${seedCall}${authStubCall}${orgPathRegistration}${
           : `// In-process event dispatcher — shared with the timer scheduler
 // (scheduling.md): tick events dispatch through the same routing sagas use.
 `
-      }const inProcessEvents = ${hasRealtime ? "realtimeTee(createInProcessDispatcher(db))" : "createInProcessDispatcher(db)"};
-const app = ${outboxRelay ? "createApp(db, createOutboxDispatcher(db, inProcessEvents))" : "createApp(db)"};
-${outboxRelay ? "const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);\n" : ""}${
+      }const inProcessEvents = ${
+        withInProcess
+          ? hasRealtime
+            ? "realtimeTee(createInProcessDispatcher(db))"
+            : "createInProcessDispatcher(db)"
+          : hasRealtime
+            ? "realtimeTee(NoopDomainEventDispatcher)"
+            : "NoopDomainEventDispatcher"
+      };
+${
+  hasChannels
+    ? `// Broker transport (channels.md; M-T4.4): one shared redis connection set
+// per LOOM_CHANNEL_*_URL.  The publish tee routes broker-bound events to
+// the broker (co-located consumers receive them via the subscription, not
+// a local shortcut); the consumer loop feeds received envelopes into the
+// same in-process dispatcher local reactors use.
+const channelTransports = createChannelTransports();
+`
+    : ""
+}const app = ${
+        hasChannels
+          ? `createApp(db, channelPublishTee(channelTransports, ${
+              outboxRelay ? "createOutboxDispatcher(db, inProcessEvents)" : "inProcessEvents"
+            }))`
+          : outboxRelay
+            ? "createApp(db, createOutboxDispatcher(db, inProcessEvents))"
+            : "createApp(db)"
+      };
+${hasChannelConsumers ? "const stopChannelConsumers = startChannelConsumers(channelTransports, inProcessEvents);\n" : ""}${outboxRelay ? "const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);\n" : ""}${
   hasTimers
     ? `// Timer sources (scheduling.md): infrastructure fires tick events on a
 // wall-clock cadence, single-fire across replicas via a pg advisory lock.
@@ -1343,6 +1473,14 @@ async function shutdown(signal: string): Promise<void> {
       ? `
   stopTimers();`
       : ""
+  }${
+    hasChannelConsumers
+      ? `
+  await stopChannelConsumers();`
+      : hasChannels
+        ? `
+  await closeChannelTransports(channelTransports);`
+        : ""
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });

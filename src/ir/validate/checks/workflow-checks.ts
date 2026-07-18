@@ -8,6 +8,7 @@ import { verbsForKind } from "../../resource-verbs.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  EventIR,
   ExprIR,
   TypeIR,
   WorkflowIR,
@@ -136,7 +137,11 @@ export function validateEventChannelAmbiguous(
   }
 }
 
-export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+export function validateWorkflows(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  allEvents?: EventIR[],
+): void {
   // Reserved-name guard: workflows share the context namespace with
   // aggregates, value objects, enums, events, repositories.
   const namesUsed = new Map<string, string>();
@@ -167,7 +172,7 @@ export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]
       });
     }
     validateWorkflowBody(ctx, wf, diags);
-    validateWorkflowCorrelation(ctx, wf, diags);
+    validateWorkflowCorrelation(ctx, wf, diags, allEvents);
     validateWorkflowCreates(wf, diags, ctx.name);
     validateWorkflowFunctions(wf, diags, ctx.name);
   }
@@ -320,6 +325,7 @@ function validateWorkflowCorrelation(
   ctx: BoundedContextIR,
   wf: WorkflowIR,
   diags: LoomDiagnostic[],
+  allEvents?: EventIR[],
 ): void {
   // Unified event-consumer list: `on` reactors + event-triggered creates.  Each
   // carries the subscribed event, its optional `by <expr>` routing, and a label
@@ -385,7 +391,11 @@ function validateWorkflowCorrelation(
     } else {
       // Omitted `by` — route by name-match: the event must carry a field of
       // the correlation field's name.
-      const ev = ctx.events.find((e) => e.name === sub.event);
+      // Cross-context reactors (M-T4.4): a foreign event consumed through a
+      // wired channel isn't in ctx.events — fall back to the model-wide list.
+      const ev =
+        ctx.events.find((e) => e.name === sub.event) ??
+        allEvents?.find((e) => e.name === sub.event);
       const hasMatch = ev?.fields.some((f) => f.name === corr.name) ?? false;
       if (!hasMatch) {
         diags.push({

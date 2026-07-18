@@ -1,3 +1,7 @@
+import {
+  channelTransportStorageNames,
+  redisChannelBindings,
+} from "../generator/_channels/bindings.js";
 import { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import { E2E_FIXTURES_TS } from "../generator/react/emit-templates.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
@@ -775,9 +779,25 @@ function renderKeycloakRealm(sys: SystemIR): string {
 function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: string[] } {
   const services: string[][] = [];
   const volumes: string[] = [];
+  // Broker transports (channels.md; M-T4.4 slice 2): a redis-type storage
+  // that backs a channelSource some deployable actually wires gets a Valkey
+  // sidecar — valkey/valkey (BSD-3, redis-wire-compatible) rather than the
+  // relicensed redis: images (design §6a).  Cache-only redis storages (no
+  // wired channelSource) keep emitting no sidecar — byte-identical.
+  const transportStorages = channelTransportStorageNames(sys);
   for (const s of sys.storages) {
     const slug = serviceSlug(s.name);
-    if (s.type === "s3") {
+    if (s.type === "redis" && transportStorages.has(s.name)) {
+      services.push([
+        `${slug}:`,
+        `  image: valkey/valkey:8-alpine`,
+        `  healthcheck:`,
+        `    test: ["CMD", "valkey-cli", "ping"]`,
+        `    interval: 5s`,
+        `    timeout: 5s`,
+        `    retries: 10`,
+      ]);
+    } else if (s.type === "s3") {
       const volume = `${slug}-data`;
       volumes.push(volume);
       services.push([
@@ -836,10 +856,15 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   // (D-AUTH-OIDC §4.2).  These env vars satisfy the OIDC verifier's
   // `env(...)`-bound issuer/client; production overrides them.
   const oidc = !!(d.auth?.required && bundlesKeycloak(sys));
+  // Broker bindings (channels.md; M-T4.4 slice 2): the deployable's wired
+  // redis-bound channelSources — each injects its `LOOM_CHANNEL_<NAME>_URL`
+  // env below and orders startup after the Valkey sidecar's healthcheck.
+  const brokerBindings = redisChannelBindings(d, sys);
+  const brokerServices = [...new Set(brokerBindings.map((b) => serviceSlug(b.storageName)))];
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
-  if (shape.dependsOnDb || oidc) {
+  if (shape.dependsOnDb || oidc || brokerServices.length > 0) {
     lines.push(`  depends_on:`);
     if (shape.dependsOnDb) {
       lines.push(`    db:`);
@@ -848,6 +873,10 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     if (oidc) {
       lines.push(`    keycloak:`);
       lines.push(`      condition: service_started`);
+    }
+    for (const svc of brokerServices) {
+      lines.push(`    ${svc}:`);
+      lines.push(`      condition: service_healthy`);
     }
   }
   if (oidc) {
@@ -858,6 +887,9 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   }
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
+  for (const b of brokerBindings) {
+    lines.push(`    ${b.envVar}: ${JSON.stringify(`redis://${serviceSlug(b.storageName)}:6379`)}`);
+  }
   // CORS allowlist for a backend that a separate-origin frontend may call:
   // pin it to the frontend origins the topology declares (the generator knows
   // their host ports), so the backend restricts cross-origin access to exactly
