@@ -52,6 +52,8 @@ export function renderPgStep(step: MigrationStep): string {
       return renderAddIndex(step.index, step.schema);
     case "dropIndex":
       return `DROP INDEX ${qualified(step.schema, step.name)};`;
+    case "renameIndex":
+      return `${renderRenameIndexSql(step)};`;
     case "sqlComment":
       return `-- ${step.comment}`;
     case "backfillColumn":
@@ -77,6 +79,17 @@ export function renderBackfillSql(step: {
   const col = ident(step.column);
   const where = step.onlyNull ? ` WHERE ${col} IS NULL` : "";
   return `UPDATE ${target} SET ${col} = ${step.valueSql}${where}`;
+}
+
+/** `ALTER INDEX <schema>.<from> RENAME TO <to>` without its trailing
+ *  semicolon — shared with the Ecto emitter (which wraps it in `execute/1`,
+ *  Ecto having no native `rename index` DSL), so the DDL is bit-identical
+ *  cross-backend exactly like {@link renderBackfillSql}.  The source is
+ *  schema-qualified (a migration runner's `search_path` excludes context
+ *  schemas); the target is bare — Postgres keeps a renamed index in its
+ *  existing schema. */
+export function renderRenameIndexSql(step: { from: string; to: string; schema?: string }): string {
+  return `ALTER INDEX ${qualified(step.schema, step.from)} RENAME TO ${ident(step.to)}`;
 }
 
 function renderCreateTable(table: TableShape): string {
