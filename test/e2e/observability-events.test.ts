@@ -136,6 +136,25 @@ describe.skipIf(!ENABLED)(
         const r = await fetch(`http://127.0.0.1:${port}/health`);
         expect(r.status).toBe(200);
 
+        // Prometheus scrape (M-T7.1): /metrics exposes the default runtime
+        // metrics + the HTTP counter/histogram recorded for the /health
+        // request above, labelled by the matched route TEMPLATE (not the
+        // raw path) so cardinality stays bounded.
+        const m = await fetch(`http://127.0.0.1:${port}/metrics`);
+        expect(m.status).toBe(200);
+        expect(m.headers.get("content-type")).toMatch(/text\/plain/);
+        const metricsBody = await m.text();
+        // A default process/runtime metric is present (collectDefaultMetrics).
+        expect(metricsBody).toMatch(/process_cpu_seconds_total/);
+        // The HTTP counter recorded the /health request with the route
+        // template + status label.
+        expect(metricsBody).toMatch(
+          /http_requests_total\{method="GET",route="\/health",status="200"\}/,
+        );
+        // The duration histogram exists with its bucket + count series.
+        expect(metricsBody).toMatch(/http_request_duration_seconds_bucket\{/);
+        expect(metricsBody).toMatch(/http_request_duration_seconds_count\{/);
+
         // Give the request_end emission a moment to flush.
         await new Promise<void>((resolve) => setTimeout(resolve, 200));
 

@@ -1,9 +1,10 @@
 # T7 — Deployment & operations
 
-*Observability is logs-only (a good catalog, zero metrics/traces); the Helm chart is a correct scaffold an ops team must finish; networking/proxy designs are approved but unbuilt.*
+*Observability has a good log catalog + a first Prometheus `/metrics` slice on Hono (no traces, no cross-backend metrics yet); the Helm chart is a correct scaffold an ops team must finish; networking/proxy designs are approved but unbuilt.*
 
-## M-T7.1 — Metrics + OpenTelemetry — `open` · **L** · P1
-No `/metrics`, no traces anywhere. Additive at the same seams the log catalog uses: (a) Prometheus-style counters/histograms per request/operation on each backend; (b) OTel spans threaded on the execution-context backbone (`correlationId`/`scopeId` already exist — they become span/trace ids); (c) compose/k8s wiring for a collector. Extend the obs-e2e gates to assert both.
+## M-T7.1 — Metrics + OpenTelemetry — `partial` · **L** · P1
+Additive at the same seams the log catalog uses: (a) Prometheus-style counters/histograms per request/operation on each backend; (b) OTel spans threaded on the execution-context backbone (`correlationId`/`scopeId` already exist — they become span/trace ids); (c) compose/k8s wiring for a collector. Extend the obs-e2e gates to assert both.
+Landed: slice 1 — Hono `GET /metrics` (Prometheus). Platform-neutral metric catalog (`src/generator/_obs/metrics.ts`, the log-catalog pattern applied to metrics) → `http_requests_total` + `http_request_duration_seconds` (RED, route-template labels) + `collectDefaultMetrics()` runtime series, recorded at the request-id-middleware seam; Hono obs-e2e scrapes it. Remaining: per-backend renderers (.NET/Phoenix/Java/Python) + their obs-e2e gates; per-operation/domain-fault counters; OTel spans; compose/k8s collector wiring.
 Sources: [observability](../old/proposals/observability.md), [observability.md](../observability.md), weak-spots §3, [execution-context](../old/proposals/execution-context.md).
 
 ## M-T7.2 — k8s production hardening — `partial` · **M** · P2
