@@ -352,6 +352,9 @@ export interface LayoutCtx {
   /** Capture immutable `.loom/snapshots/*.loomsnap.json` for the current
    *  source — the playground's `ddd snapshot`. */
   runCaptureSnapshot: () => void;
+  /** Download the generated project tree as a single `.zip` — the bridge out
+   *  of the browser for backends/frontends the preview can't boot. */
+  runDownloadZip: () => void;
 
   /** Full pipeline cascade — Generate → Bundle → Boot.  On a clean
    *  end, jumps the mobile shell to Preview (if a React deployable

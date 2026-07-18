@@ -47,6 +47,7 @@ import {
   type HashLoad,
 } from "./util/share";
 import { fnv1a32 } from "./util/hash";
+import { downloadBytes, makeZip } from "./util/zip";
 import { usePersistedState } from "./util/usePersistedState";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
@@ -1359,6 +1360,21 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Download the generated project tree as a single .zip — the bridge out of
+  // the browser for the backends/frontends the preview can't boot (.NET,
+  // Phoenix, Java, Python, Vue, Svelte).  The files are already in memory
+  // (the flag-off generate, byte-identical to `ddd generate system`), so this
+  // is a pure client-side archive + download — no worker round-trip.
+  function runDownloadZip(): void {
+    const genFiles = generateSuccess?.files ?? [];
+    if (genFiles.length === 0) return;
+    const entries = genFiles.map((f) => ({ path: f.path, content: f.content }));
+    const base =
+      workspace.activeName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") ||
+      "loom-project";
+    downloadBytes(makeZip(entries), `${base}.zip`);
+  }
+
   // Capture immutable provenance rule snapshots — the playground's `ddd
   // snapshot`.  Deliberate (like `ef migrations add`): the user clicks, we
   // don't auto-run it.  The returned files are timestamped+GUID and shown
@@ -1528,6 +1544,7 @@ export default function App(): JSX.Element {
     snapshotResult,
     snapshotRunning,
     runCaptureSnapshot: () => void runCaptureSnapshot(),
+    runDownloadZip,
   };
 
   return (
