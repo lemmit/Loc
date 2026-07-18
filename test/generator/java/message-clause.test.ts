@@ -40,18 +40,20 @@ async function gen() {
 }
 
 describe("java — messaged rule → wire validator + domain floor text", () => {
-  it("surfaces the author text on the wire validator", async () => {
+  it("surfaces the author text + a content-hash wire code on the wire validator", async () => {
     const { validators } = await gen();
+    // messaged rule → 3-arg error() carrying the "msg.<hash>" wire code (i18n key)
     expect(validators).toContain(
-      'errors.add(WireValidationException.error("/name", "Name must be 2-120 characters"))',
+      'errors.add(WireValidationException.error("/name", "Name must be 2-120 characters", "msg.j985f2"))',
     );
     expect(validators).toContain(
-      'errors.add(WireValidationException.error("/sku", "SKU is required"))',
+      'errors.add(WireValidationException.error("/sku", "SKU is required", "msg.u3w71r"))',
     );
   });
 
-  it("keeps a message-LESS invariant on the derived default", async () => {
+  it("keeps a message-LESS invariant on the derived default with no wire code", async () => {
     const { validators } = await gen();
+    // 2-arg error() → no code (byte-identical)
     expect(validators).toContain(
       'errors.add(WireValidationException.error("/sku", "Invariant violated: sku.length > 0"))',
     );
