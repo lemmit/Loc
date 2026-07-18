@@ -254,11 +254,21 @@ and rides `ParamIR.default`. Generated create-form seed (React):
 useForm<CancelShipmentRequest>({ defaultValues: { reason: "customer request" } })
 ```
 
-Seeding is best-effort over the **client-evaluable** subset — constants and enum
-members always seed. A **`this.<field>`** default seeds from the loaded record
-(`record.<field>`) on an **instance-qualified** op form (`OperationForm { order.<op> }`,
-where the instance is in scope) rendered by a pack that threads the record into
-its op-form component (`seedsOpFormRecord` — mantine today):
+Seeding is best-effort over the **client-evaluable** subset — compile-time
+constants and enum members. These seed on **React** (all packs), **Svelte**,
+**Angular**, and **Feliz**, in both create forms (field defaults) and operation
+forms (param defaults). (Vue's generated forms are a pending slice and don't
+seed yet.) A mistyped default is rejected at the source, exactly like a field
+default (`operation cancel(reason: int = "x")` → validation error).
+
+A **`this.<field>`** default additionally seeds from the loaded record
+(`record.<field>`) on a **hand-written instance-qualified** op form
+(`OperationForm { order.<op> }`, where the instance is in scope) rendered by a
+React pack that threads the record into its op-form component (`seedsOpFormRecord`
+— **mantine, shadcn, mui, and chakra**). The **scaffolded** Detail page uses the
+by-name form (`OperationForm { of:, op: }` — id from the route, no record in
+scope), so its op modals seed constants but fall back to type-zero for a
+`this.<field>` default.
 
 ```tsx
 // operation note(memo: string = this.customerId) → mantine op-form component
@@ -267,10 +277,12 @@ function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … })
 ```
 
 Everything else falls back to the type-zero seed: a `this.<field>` on the
-by-name op form (`OperationForm { of:, op: }` — no record in scope, e.g. the
-scaffolded Detail page) or on a non-threading pack, and any ambient / lookup
-source (`now()`, `currentUser.*`, a sequence, a cross-aggregate read). The
-default is still carried in the IR for backends that consume it.
+by-name op form (`OperationForm { of:, op: }` — no record in scope) or on a
+non-threading pack (Vue / Svelte / Angular / Feliz), and any ambient / lookup
+source (`now()`, `currentUser.*`, a sequence, a cross-aggregate read) — the
+server-`prepare`-endpoint tier. `ParamIR.default` is still carried in the IR for
+a future backend that applies it server-side (today none do — op params are
+required on the wire and the form always seeds + sends them).
 
 ## Further reading
 

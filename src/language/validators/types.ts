@@ -15,6 +15,7 @@ import type {
   Invariant,
   MemberSuffix,
   Model,
+  Parameter,
   PostfixChain,
   PrimitiveConversion,
   Property,
@@ -617,6 +618,31 @@ export function checkPropertyDefault(p: Property, env: Env, accept: ValidationAc
     );
   }
   warnSensitivityDrop(actual, declared, accept, { node: p, property: "default" });
+}
+
+/** Type-check a parameter default (`operation cancel(reason: string = "x")`) —
+ *  the param analogue of {@link checkPropertyDefault}, so a mistyped default is
+ *  rejected at the source instead of silently seeding a wrong-typed form value.
+ *  `env` binds `this` (the enclosing aggregate) so a this-relative default
+ *  (`reschedule(to: datetime = this.eta)`) resolves. */
+export function checkParameterDefault(p: Parameter, env: Env, accept: ValidationAcceptor): void {
+  if (!p.default) return;
+  checkConstructionArgTypes(p.default, env, accept);
+  checkExprCallArgs(p.default, env, accept);
+  const declared = resolveTypeRef(p.type);
+  const actual = typeOf(p.default, env);
+  if (
+    declared.kind !== "unknown" &&
+    actual.kind !== "unknown" &&
+    !isAssignable(actual, declared) &&
+    !canPromoteLiteralTo(p.default, declared)
+  ) {
+    accept(
+      "error",
+      `Default for parameter '${p.name}' has type '${typeToString(actual)}' but the parameter is declared '${typeToString(declared)}'.`,
+      { node: p, property: "default" },
+    );
+  }
 }
 
 export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAcceptor): void {

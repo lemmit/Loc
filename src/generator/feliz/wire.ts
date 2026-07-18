@@ -417,6 +417,26 @@ function inputKindFor(
   return "text"; // id / unresolved enum (string name) / everything else
 }
 
+/** The BARE string a constant/enum `= default` seeds into the all-string Feliz
+ *  form model (`Model.<field> = "<seed>"`), or `undefined` when the default is
+ *  outside the client-evaluable subset (money/now/this-relative/ref → the field
+ *  keeps its `emptyValue`).  The Feliz form stores every field as a string that
+ *  `encodeExprFor` parses back (`int "3"`, `decimal "1.5"`, `bool = "true"`,
+ *  string/enum verbatim), so the seed is the value's raw string — the analogue
+ *  of `renderDefaultSeed` for the JS-family frontends, minus the quoting. */
+function felizDefaultString(e: ExprIR | undefined): string | undefined {
+  if (!e) return undefined;
+  if (e.kind === "literal") {
+    // string / int / long / decimal / bool carry their value as the state
+    // string; money / now / null need a runtime carrier or are ambient.
+    if (["string", "int", "long", "decimal", "bool"].includes(e.lit)) return e.value;
+    return undefined;
+  }
+  // `status: Status = Draft` — the enum member's wire form is its bare name.
+  if (e.kind === "ref" && e.refKind === "enum-value") return e.name;
+  return undefined;
+}
+
 /** Build one flat `FelizFormField` — the record field `wireName` (bound to an
  *  input), encoding to `jsonKey` (inside `objectKey`'s group when set). */
 function buildField(
@@ -427,6 +447,7 @@ function buildField(
   optional: boolean,
   enumsByName: ReadonlyMap<string, string[]>,
   idLabels: ReadonlyMap<string, string>,
+  defaultExpr?: ExprIR,
   objectKey?: string,
 ): FelizFormField {
   const base = scalarBase(type);
@@ -440,9 +461,10 @@ function buildField(
   // — text/number/checkbox, an idselect (its list loads at runtime), a VO
   // sub-field, and an OPTIONAL enum (empty = null) — is "".
   const emptyValue =
-    inputKind === "select" && !optional && enumValues && enumValues.length > 0
+    felizDefaultString(defaultExpr) ??
+    (inputKind === "select" && !optional && enumValues && enumValues.length > 0
       ? enumValues[0]!
-      : "";
+      : "");
   return {
     wireName,
     setMsg: `Set${formType}${upperFirst(wireName)}`,
@@ -467,7 +489,7 @@ function buildField(
  *  Reused by create + operation + workflow forms. */
 function formFieldsFrom(
   formType: string,
-  fields: readonly { name: string; type: TypeIR; optional?: boolean }[],
+  fields: readonly { name: string; type: TypeIR; optional?: boolean; default?: ExprIR }[],
   enumsByName: ReadonlyMap<string, string[]> = new Map(),
   idLabels: ReadonlyMap<string, string> = new Map(),
   vosByName: ReadonlyMap<string, readonly FieldIR[]> = new Map(),
@@ -492,12 +514,15 @@ function formFieldsFrom(
             subOptional,
             enumsByName,
             idLabels,
+            sub.default,
             f.name,
           );
         });
     }
     const optional = f.optional === true || f.type.kind === "optional";
-    return [buildField(formType, f.name, f.name, f.type, optional, enumsByName, idLabels)];
+    return [
+      buildField(formType, f.name, f.name, f.type, optional, enumsByName, idLabels, f.default),
+    ];
   });
 }
 
