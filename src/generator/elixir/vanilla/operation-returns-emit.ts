@@ -174,7 +174,7 @@ export function opHasGuards(op: OperationIR): boolean {
  *  status mapping to the vanilla workflow (`workflow-execution-emit.ts`) and
  *  ES-command (`eventsourced-emit.ts`) renderers, so every guard path across the
  *  Phoenix backend maps to the same HTTP status. */
-export function renderOpGuardClause(
+function renderOpGuardClause(
   s: Extract<StmtIR, { kind: "requires" | "precondition" }>,
   rc: RenderCtx,
 ): string {
@@ -196,7 +196,7 @@ export function opHasWhenGate(op: OperationIR): boolean {
  *  `{:error, :disallowed}`, which the controller maps to 409 Conflict — parity
  *  with Hono/​.NET/​Java/​Python's `DisallowedError` → 409.  Rendered FIRST in the
  *  guard chain so the state gate precedes any `precondition`. */
-export function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
+function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
   return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, :disallowed)`;
 }
 
