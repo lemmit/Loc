@@ -1297,7 +1297,12 @@ export function buildMigrations(
     // + owned-child cascade, plus the FK-column renames the cascade implies.
     // The column renames join the column-rename list; the table renames feed
     // `diffSchema` so a renamed table pairs with its new self.
-    const tableRenamePlan = resolveTableRenames(m, options.tableRenameIntents ?? [], schemaOf);
+    const tableRenamePlan = resolveTableRenames(
+      m,
+      options.tableRenameIntents ?? [],
+      schemaOf,
+      contextSchemaOf,
+    );
     const allRenames = [...renames, ...tableRenamePlan.columnRenames];
     // Backfills (M-T2.3): woven into the policy pass so a NOT-NULL add /
     // flip with a declared backfill is the safe sequence, not a gate trip.
@@ -1475,6 +1480,12 @@ function resolveTableRenames(
   module: EnrichedSubdomainIR,
   intents: readonly TableRenameIntentIR[],
   schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined,
+  /** Context-schema resolver (the same one `schemaFromModule` stamps on the
+   *  per-context `<ctx>_events` log) — needed to schema-qualify the eventLog
+   *  `stream_type` fix-up, since that table is context-owned, not tied to the
+   *  renamed aggregate's own dataSource.  Defaults to `() => undefined` so the
+   *  many schema-less unit callers keep the unqualified output. */
+  contextSchemaOf: (ctx: EnrichedBoundedContextIR) => string | undefined = () => undefined,
 ): {
   tableRenames: ResolvedTableRename[];
   columnRenames: TableColumnRename[];
@@ -1511,6 +1522,25 @@ function resolveTableRenames(
       dataFixups.push({
         key: `${ri.migration}#tph:${ri.fromAggregate}->${ri.toAggregate}`,
         sql: `UPDATE ${target} SET "kind" = '${ri.toAggregate}' WHERE "kind" = '${ri.fromAggregate}'`,
+      });
+      continue;
+    }
+
+    // Event-sourced (`persistedAs(eventLog)`): no owned table either — the
+    // aggregate's stream lives in the shared per-context `<ctx>_events` log,
+    // discriminated by `stream_type = "<Agg>"` (the emitters stamp the exact
+    // aggregate NAME — every backend: hono/dotnet/java/python/elixir).  A rename
+    // strands those rows under the old name, the same *silent*-corruption shape
+    // as the TPH `kind` discriminator, so emit the ledgered UPDATE and skip the
+    // (empty) structural cascade.  The events table is context-owned, hence the
+    // context schema (not the aggregate's).
+    if (agg.persistedAs === "eventLog") {
+      const eventsTable = `${snake(ctx.name)}_events`;
+      const ctxSchema = contextSchemaOf(ctx);
+      const target = ctxSchema ? `"${ctxSchema}"."${eventsTable}"` : `"${eventsTable}"`;
+      dataFixups.push({
+        key: `${ri.migration}#eventlog:${ri.fromAggregate}->${ri.toAggregate}`,
+        sql: `UPDATE ${target} SET "stream_type" = '${ri.toAggregate}' WHERE "stream_type" = '${ri.fromAggregate}'`,
       });
       continue;
     }

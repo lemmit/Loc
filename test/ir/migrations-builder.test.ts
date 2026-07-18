@@ -1712,3 +1712,154 @@ migration "vendor-to-sponsor" { Vendor -> Sponsor }
     expect(gen2.steps).toEqual([]);
   });
 });
+
+describe("buildMigrations — shape-coverage rename cascade (M-T2.1 c)", () => {
+  // Baseline built from the OLD-named model, next from the NEW-named model +
+  // migration block — the on-disk names are exactly what the schema emitter
+  // produced, so the cascade is exercised against a real prior snapshot.
+  const buildRename = async (src: (name: string) => string, from: string, to: string) => {
+    const oldLoom = await buildLoomModel(src(from));
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(oldLoom.systems[0]!.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const newLoom = await buildLoomModel(`${src(to)}\nmigration "reshape" { ${from} -> ${to} }`);
+    const module = newLoom.systems[0]!.subdomains[0]!.name;
+    const out = buildMigrations(newLoom.systems[0]!, memorySnapshotStore({ [module]: baseline }), {
+      tableRenameIntents: newLoom.tableRenameIntents,
+    });
+    return out[0]!;
+  };
+  const noDestructive = (steps: MigrationStep[]) =>
+    steps.some(
+      (s) =>
+        s.op === "dropTable" ||
+        s.op === "dropColumn" ||
+        (s.op === "addColumn" && !s.column.nullable && s.column.default === undefined),
+    );
+
+  it("TPC concrete: renames its own table, no discriminator fix-up, non-destructive", async () => {
+    const TPC = (name: string) => `
+system Fleet {
+  subdomain Reg {
+    context Reg {
+      abstract aggregate Vehicle inheritanceUsing: ownTable { name: string }
+      aggregate ${name} extends Vehicle { doors: int }
+      aggregate Truck extends Vehicle { axles: int }
+      repository Cars for ${name} { }
+      repository Trucks for Truck { }
+    }
+  }
+  deployable api { platform: node, contexts: [Reg], port: 3000 }
+}`;
+    const mig = await buildRename(TPC, "Car", "Sedan");
+    expect(
+      mig.steps.some((s) => s.op === "renameTable" && s.from === "cars" && s.to === "sedans"),
+    ).toBe(true);
+    // TPC has no `kind` discriminator — no ledgered sqlExec fix-up.
+    expect(mig.steps.some((s) => s.op === "sqlExec")).toBe(false);
+    expect(noDestructive(mig.steps)).toBe(false);
+    expect(mig.steps.some((s) => s.op === "createTable")).toBe(false);
+  });
+
+  it("document root: renames the (id, data, version) table, non-destructive", async () => {
+    const DOC = (name: string) => `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate ${name} shape: document { customer: Customer id  total: int }
+      aggregate Customer { name: string }
+      repository Carts for ${name} { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}`;
+    const mig = await buildRename(DOC, "Cart", "Basket");
+    expect(
+      mig.steps.some((s) => s.op === "renameTable" && s.from === "carts" && s.to === "baskets"),
+    ).toBe(true);
+    expect(noDestructive(mig.steps)).toBe(false);
+    expect(mig.steps.some((s) => s.op === "createTable")).toBe(false);
+  });
+
+  it("embedded root: renames the queryable root table + its FK index, non-destructive", async () => {
+    const EMB = (name: string) => `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate ${name} shape: embedded {
+        customer: Customer id
+        total: int
+        contains lines: Line[]
+        entity Line { qty: int }
+      }
+      aggregate Customer { name: string }
+      repository Carts for ${name} { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}`;
+    const mig = await buildRename(EMB, "Cart", "Basket");
+    expect(
+      mig.steps.some((s) => s.op === "renameTable" && s.from === "carts" && s.to === "baskets"),
+    ).toBe(true);
+    // The embedded root's FK column keeps its derived index — renamed in place.
+    expect(
+      mig.steps.some(
+        (s) =>
+          s.op === "renameIndex" &&
+          s.from === "carts_customer_idx" &&
+          s.to === "baskets_customer_idx",
+      ),
+    ).toBe(true);
+    expect(noDestructive(mig.steps)).toBe(false);
+  });
+
+  it("eventLog aggregate: rewrites stranded stream_type rows via a ledgered sqlExec (exactly once)", async () => {
+    const ES = (name: string) => `
+system Tally {
+  subdomain Core {
+    context Core {
+      event Bumped { tally: ${name} id, by: int }
+      aggregate ${name} persistedAs: eventLog {
+        total: int
+        operation bump(by: int) { emit Bumped { tally: id, by: by } }
+        apply(e: Bumped) { total += e.by }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource coreLog { for: Core, kind: eventLog, use: pg }
+  resource coreState { for: Core, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Core], dataSources: [coreLog, coreState], port: 4000 }
+}`;
+    const oldLoom = await buildLoomModel(ES("Counter"));
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(oldLoom.systems[0]!.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const newLoom = await buildLoomModel(
+      `${ES("Tally")}\nmigration "rename-tally" { Counter -> Tally }`,
+    );
+    const gen1 = buildMigrations(newLoom.systems[0]!, memorySnapshotStore({ Core: baseline }), {
+      tableRenameIntents: newLoom.tableRenameIntents,
+    })[0]!;
+    // The events table is context-owned → context schema `core`; the fix-up
+    // rewrites the aggregate-name discriminator, schema-qualified per the raw-SQL
+    // gotcha.
+    expect(gen1.steps).toEqual([
+      {
+        op: "sqlExec",
+        sql: `UPDATE "core"."core_events" SET "stream_type" = 'Tally' WHERE "stream_type" = 'Counter'`,
+      },
+    ]);
+    expect(gen1.next.appliedDataMigrations).toEqual(["rename-tally#eventlog:Counter->Tally"]);
+    // Exactly once — the next generation is a no-op.
+    const gen2 = buildMigrations(newLoom.systems[0]!, memorySnapshotStore({ Core: gen1.next }), {
+      tableRenameIntents: newLoom.tableRenameIntents,
+    })[0]!;
+    expect(gen2.steps).toEqual([]);
+  });
+});
