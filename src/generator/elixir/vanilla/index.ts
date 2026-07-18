@@ -58,6 +58,7 @@ import {
 import { emitVanillaProvenance } from "./provenance-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
+import { emitVanillaScheduler } from "./scheduler-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
 import { emitVanillaValueCollectionSchemas } from "./value-collection-schema-emit.js";
@@ -391,6 +392,22 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     out.set(path, content);
   }
 
+  // timerSource scheduling (scheduling.md, M-T4.1) — one GenServer per owned
+  // timer under `lib/<app>/scheduler/<timer>.ex`, added to the supervision tree.
+  // A `cron:` timer rides a `crontab` hex dep; an `every:`-only (or timer-free)
+  // deployable stays byte-identical (no module, no dep, no supervision child).
+  const { schedulerChildren, usesCron } = emitVanillaScheduler(
+    appName,
+    appModule,
+    contexts,
+    deployable,
+    sys,
+    out,
+  );
+  const hexDeps = usesCron
+    ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"' }
+    : resourceEmission.hexDeps;
+
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
   // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
@@ -399,7 +416,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     appModule,
     out,
     apiRoutes,
-    resourceEmission.hexDeps,
+    hexDeps,
     authEnabled,
     !!sys.auth?.oidc,
     liveRoutes,
@@ -408,6 +425,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // via Plug.Static and the router adds the `/app/*` deep-link fallback
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
+    schedulerChildren,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto

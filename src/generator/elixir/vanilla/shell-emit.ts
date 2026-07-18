@@ -50,6 +50,10 @@ export function emitVanillaShellFiles(
   // the byte-identical shell (no SPA static plug, no fallback).  Mutually
   // exclusive with LiveView (an embedded-SPA deployable emits no HEEx pages).
   hasEmbeddedSpa = false,
+  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer GenServer
+  // module names, appended to the supervision tree in `renderApplication`.
+  // Empty ⇒ byte-identical.
+  schedulerChildren: string[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   out.set(
@@ -64,7 +68,10 @@ export function emitVanillaShellFiles(
   // `${appModule}.Telemetry`, `${appModule}Web.Endpoint` — vanilla
   // emits each of those (Telemetry is at lib/<app>/telemetry.ex,
   // not lib/<app>_web/telemetry.ex).
-  out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
+  out.set(
+    `lib/${appName}/application.ex`,
+    renderApplication(appName, appModule, schedulerChildren),
+  );
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON
   // line per Logger event preserving the catalog metadata (event,
