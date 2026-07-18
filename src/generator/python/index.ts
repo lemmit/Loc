@@ -55,6 +55,7 @@ import {
   MIGRATE_PY,
 } from "./emit/migrations.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
+import { renderPythonMetricsFile } from "./emit/metrics.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
@@ -235,6 +236,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/obs/__init__.py", "");
   out.set("app/obs/log.py", OBS_LOG_PY);
   out.set("app/obs/middleware.py", OBS_MIDDLEWARE_PY);
+  // app/obs/metrics.py — Prometheus registry (default process/GC collectors
+  // + the catalog's HTTP counter/histogram), served at GET /metrics and
+  // recorded from the observability middleware's request_end seam.
+  out.set("app/obs/metrics.py", renderPythonMetricsFile());
   const routedAggs = args.contexts.flatMap((c) =>
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
@@ -843,6 +848,7 @@ function renderMain(
     pyDevClaims ? "from typing import Any" : null,
     "",
     `from fastapi import FastAPI${authRequired && !oidc ? ", Request" : ""}`,
+    "from fastapi import Response",
     "from fastapi.middleware.cors import CORSMiddleware",
     hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
     "from sqlalchemy import text",
@@ -881,6 +887,7 @@ function renderMain(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
     "from app.obs.log import log",
+    "from app.obs.metrics import render_metrics",
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
     "",
@@ -1037,6 +1044,15 @@ function renderMain(
     "    async with engine.connect() as conn:",
     `        await conn.execute(text("SELECT 1"))`,
     `    return {"status": "ready"}`,
+    "",
+    "",
+    `@app.get("/metrics")`,
+    "async def metrics() -> Response:",
+    `    """Prometheus scrape target — the text exposition of the default`,
+    "    registry (process/GC collectors + the HTTP counter/histogram recorded",
+    '    by the observability middleware)."""',
+    "    body, content_type = render_metrics()",
+    "    return Response(content=body, media_type=content_type)",
     "",
     ...(hasEmbeddedSpa
       ? [

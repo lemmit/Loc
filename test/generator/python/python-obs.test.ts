@@ -62,10 +62,32 @@ describe("python observability", () => {
     expect(mw).toContain('or request.headers.get("x-request-id")');
     expect(mw).toContain("or new_id()");
     expect(mw).toContain('log("info", "request_start", method=method, path=path)');
-    expect(mw).toContain("duration_ms=int((time.monotonic() - started) * 1000)");
+    expect(mw).toContain("duration_ms = int((time.monotonic() - started) * 1000)");
+    // Metrics recorded at the same seam as request_end (M-T7.1).
+    expect(mw).toContain("from app.obs.metrics import record_http_request");
+    expect(mw).toContain("record_http_request(method, _route_template(scope, path)");
     // Correlation echoed via the ASGI response-start headers (MutableHeaders).
     expect(mw).toContain('headers["x-request-id"] = correlation');
     expect(mw).toContain('headers["x-correlation-id"] = correlation');
+  });
+
+  it("emits the Prometheus metrics module + /metrics route (M-T7.1)", async () => {
+    const files = await build(FIXTURE);
+    const metrics = files.get("api/app/obs/metrics.py")!;
+    expect(metrics).toBeDefined();
+    // Catalog-driven names/labels — the neutral src/generator/_obs/metrics.ts.
+    expect(metrics).toContain('"http_requests_total"');
+    expect(metrics).toContain('"http_request_duration_seconds"');
+    expect(metrics).toContain('["method", "route", "status"]');
+    expect(metrics).toContain(
+      "def record_http_request(method: str, route: str, status: int, duration_ms: float) -> None:",
+    );
+    expect(metrics).toContain("def render_metrics() -> tuple[bytes, str]:");
+    // The route is mounted in main.py, serving the exposition.
+    const main = files.get("api/app/main.py")!;
+    expect(main).toContain("from app.obs.metrics import render_metrics");
+    expect(main).toContain('@app.get("/metrics")');
+    expect(main).toContain("return Response(content=body, media_type=content_type)");
   });
 
   it("emits the RequestContext carrier (subsumes the request-id contextvar)", async () => {
