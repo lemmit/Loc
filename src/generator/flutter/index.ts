@@ -77,11 +77,6 @@ export function generateFlutterForContexts(
   // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
   // only when the ui issues reads, alongside the `AppConfig` api-base helper.
   const reads = collectFlutterReads(ui, contexts);
-  // `AppConfig`/`apiUri` is shared by both the read providers AND the form
-  // widgets — emit it when either is present.
-  if (reads.length > 0 || forms.length > 0) {
-    out.set("lib/config.dart", renderAppConfig());
-  }
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }
@@ -98,6 +93,14 @@ export function generateFlutterForContexts(
     page,
     ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate),
   }));
+
+  // `AppConfig`/`apiUri` is shared by the read providers, the form widgets, AND
+  // `Action(<instance>.<op>)` buttons (which POST inline via `apiUri(`).  Emit it
+  // when any of the three is present, so no page's import dangles.
+  const usesActionHttp = rendered.some((r) => r.source.includes("apiUri("));
+  if (reads.length > 0 || forms.length > 0 || usesActionHttp) {
+    out.set("lib/config.dart", renderAppConfig());
+  }
 
   if (rendered.length > 0) {
     for (const r of rendered) {
@@ -239,6 +242,11 @@ function renderStatelessPage(
 ): string {
   const imports = ["import 'package:flutter/material.dart';"];
   if (opts.hostsForm) imports.push("import '../forms.dart';");
+  // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
+  // page-body reference to it — so import http + the base-URL helper on demand.
+  if (bodyWidget.includes("apiUri(")) {
+    imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
+  }
   const idBinding = opts.usesRouteId
     ? ["    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';"]
     : [];
@@ -314,6 +322,11 @@ function renderConsumerPage(
   ];
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
+  // `Action(<instance>.<op>)` buttons POST inline via `apiUri(` — import http +
+  // the base-URL helper when the body references it.
+  if (bodyWidget.includes("apiUri(")) {
+    imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
+  }
   return `${lines(
     ...imports,
     "",
