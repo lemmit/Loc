@@ -243,7 +243,15 @@ ${responseFns}
         String.replace(acc, "%{#{key}}", error_opt_to_string(value))
       end)
 
-    %{pointer: pointer_of([field]), message: interpolated}
+    base = %{pointer: pointer_of([field]), message: interpolated}
+
+    # A messaged rule carries a "loom_code" metadata key (the stable
+    # content-hash wire code / i18n key) on the changeset error; a message-less
+    # rule has none, so the code field is omitted (byte-identical body).
+    case Keyword.get(opts, :loom_code) do
+      nil -> base
+      code -> Map.put(base, :code, code)
+    end
   end
 
   defp render_changeset_error(_), do: nil

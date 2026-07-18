@@ -54,3 +54,46 @@ describe("elixir/vanilla — messaged rule → Ecto message: option", () => {
     expect(cs).toContain("|> validate_length(:sku, min: 1)\n");
   });
 });
+
+// A messaged CROSS-FIELD rule routes through the `validate_invariants/1`
+// residual carrier, whose `add_error` carries the stable content-hash wire
+// `code` as `loom_code:` metadata; the 422 handler surfaces it as
+// `errors[].code`. (Single-field messaged rules stay on native Ecto validators,
+// which can't carry a custom metadata key — so they get the message but no
+// code; that's a documented Elixir limitation.)
+const CROSS = `
+system S {
+  subdomain Sales {
+    context Cat {
+      aggregate Account with crudish {
+        handle: string
+        email: string
+        invariant handle.length > 0
+        invariant handle != email message "Handle and email must differ"
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api CatApi from Sales
+  storage db { type: postgres }
+  resource st { for: Cat, kind: state, use: db }
+  deployable api { platform: elixir contexts: [Cat] dataSources: [st] serves: CatApi port: 8080 }
+}
+`;
+
+describe("elixir/vanilla — messaged cross-field rule → wire code", () => {
+  it("attaches loom_code metadata on the validate_invariants add_error", async () => {
+    const all = await generateSystemFiles(CROSS);
+    const cs = all.get([...all.keys()].find((k) => k.endsWith("cat/account_changeset.ex"))!)!;
+    expect(cs).toContain(
+      'add_error(changeset, :handle, "Handle and email must differ", loom_code: "msg.ggmd6x")',
+    );
+  });
+
+  it("the 422 handler surfaces loom_code as errors[].code", async () => {
+    const all = await generateSystemFiles(CROSS);
+    const problem = all.get([...all.keys()].find((k) => k.endsWith("problem_details.ex"))!)!;
+    expect(problem).toContain("case Keyword.get(opts, :loom_code) do");
+    expect(problem).toContain("code -> Map.put(base, :code, code)");
+  });
+});
