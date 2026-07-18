@@ -35,7 +35,7 @@ const wrap = (persistence: string, aggBody: string, repoBody: string) => `
 `;
 
 describe("find-predicate adapter support (P0)", () => {
-  it("rejects a unary-NOT find predicate on MikroORM (whereToMikroFilter is comparisons + &&/|| only)", async () => {
+  it("admits a unary-NOT find predicate on MikroORM (wave 1 — `$not` / boolean-false entry)", async () => {
     const errs = await findPredicateErrors(
       wrap(
         "node { persistence: mikroorm }",
@@ -43,10 +43,10 @@ describe("find-predicate adapter support (P0)", () => {
         "find inactive(): Order[] where !this.active",
       ),
     );
-    expect(errs.some((m) => /persistence: mikroorm/.test(m) && /unary/.test(m))).toBe(true);
+    expect(errs).toEqual([]);
   });
 
-  it("rejects a bare-boolean-column find predicate on MikroORM", async () => {
+  it("admits a bare-boolean-column find predicate on MikroORM (wave 1 — `{ col: true }`)", async () => {
     const errs = await findPredicateErrors(
       wrap(
         "node { persistence: mikroorm }",
@@ -54,7 +54,27 @@ describe("find-predicate adapter support (P0)", () => {
         "find live(): Order[] where this.active",
       ),
     );
-    expect(errs.some((m) => /persistence: mikroorm/.test(m))).toBe(true);
+    expect(errs).toEqual([]);
+  });
+
+  it("still rejects a `currentUser.<field>` find predicate on MikroORM (no principal accessor)", async () => {
+    const errs = await findPredicateErrors(`
+      system S {
+        user { id: guid  name: string }
+        subdomain M {
+          context C {
+            aggregate Order {
+              ownerId: guid
+            }
+            repository Orders for Order {
+              find mine(): Order[] where this.ownerId == currentUser.id
+            }
+          }
+        }
+        deployable api { platform: node { persistence: mikroorm }, contexts: [C], port: 3000, auth: required }
+      }
+    `);
+    expect(errs.some((m) => /persistence: mikroorm/.test(m) && /currentUser/.test(m))).toBe(true);
   });
 
   it("admits the same MikroORM predicate when it is a plain comparison", async () => {

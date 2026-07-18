@@ -32,6 +32,7 @@
 
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
+  AssociationIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EventIR,
@@ -41,11 +42,13 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { joinColumnName, joinTableConstName } from "../emit.js";
+import { isRefCollection } from "../repository-associations-builder.js";
 import {
   deserializeField,
   docFieldType,
@@ -68,6 +71,12 @@ const rowClassOf = (aggName: string): string => `${aggName}Row`;
  *  (`<Ctx>EventRow`) — one table for every `persistedAs(eventLog)` aggregate in
  *  the context, discriminated by `streamType`. */
 const eventRowClassOf = (ctxName: string): string => `${upperFirst(ctxName)}EventRow`;
+
+/** Pivot Row-entity class for an `Id[]` reference-collection association
+ *  (`trainer_party` join table → `TrainerPartyRow`).  A plain composite-PK
+ *  pivot, mirroring the drizzle many-to-many join table. */
+const joinRowClassOf = (assoc: AssociationIR): string =>
+  `${upperFirst(joinTableConstName(assoc))}Row`;
 
 // ---------------------------------------------------------------------------
 // Column model — one entry per persisted column, matching the drizzle schema's
@@ -164,7 +173,40 @@ function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): Mik
     nullable: false,
     primary: true,
   };
-  return [id, ...agg.fields.flatMap((f) => fieldColumns(f, ctx))];
+  // `Id[]` reference collections persist as pivot tables (join-Row entities),
+  // not columns on the aggregate row — skip them here.
+  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  return [id, ...scalarFields.flatMap((f) => fieldColumns(f, ctx))];
+}
+
+/** Render one pivot Row entity class + EntitySchema for an association. */
+function renderJoinRowEntity(assoc: AssociationIR): { block: string; schemaName: string } {
+  const cls = joinRowClassOf(assoc);
+  const schemaName = `${cls}Schema`;
+  const ownerProp = joinColumnName(assoc.ownerFk);
+  const targetProp = joinColumnName(assoc.targetFk);
+  return {
+    schemaName,
+    block: lines(
+      `export class ${cls} {`,
+      `  ${ownerProp}!: string;`,
+      `  ${targetProp}!: string;`,
+      `}`,
+      "",
+      `export const ${schemaName} = new EntitySchema<${cls}>({`,
+      `  class: ${cls},`,
+      `  tableName: "${assoc.joinTable}",`,
+      `  properties: {`,
+      // Composite PK over (owner, target) — the whole row IS the set membership
+      // (no payload); the default underscore naming maps `${ownerProp}` → the
+      // `${assoc.ownerFk}` column, matching the drizzle join table.
+      `    ${ownerProp}: { type: "string", primary: true },`,
+      `    ${targetProp}: { type: "string", primary: true },`,
+      `  },`,
+      `});`,
+      "",
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +256,13 @@ export function renderMikroEntities(
         "",
       ),
     );
+    // `Id[]` reference-collection associations persist as pivot Row entities
+    // (composite-PK join tables), one per declared collection field.
+    for (const assoc of agg.associations ?? []) {
+      const { block, schemaName: joinSchema } = renderJoinRowEntity(assoc);
+      schemaNames.push(joinSchema);
+      blocks.push(block);
+    }
   }
   if (hasEventLog) {
     const cls = eventRowClassOf(ctx.name);
@@ -374,56 +423,234 @@ function filterValue(e: ExprIR): string {
   }
 }
 
-/** Conjunctions merge into one object; `||` becomes `$or`. */
-function whereToMikroFilter(e: ExprIR): string {
-  if (e.kind === "paren") return whereToMikroFilter(e.inner);
-  if (e.kind === "binary") {
-    if (e.op === "&&") {
-      const entries = [...flattenAnd(e)].map((c) => comparisonEntry(c));
-      return `{ ${entries.join(", ")} }`;
-    }
-    if (e.op === "||") {
-      return `{ $or: [${orBranches(e)
-        .map((b) => `{ ${comparisonEntry(b)} }`)
-        .join(", ")}] }`;
-    }
-    return `{ ${comparisonEntry(e)} }`;
-  }
-  throw new Error(`mikroorm: unsupported find expression '${e.kind}'`);
+/** `this.<field>` where field is a boolean column → the column name, else
+ *  null.  MikroORM lowers a bare boolean column to `{ col: true }` (and
+ *  `!this.col` to `{ col: false }`), the FilterQuery analogue of drizzle's
+ *  `col = true`. */
+function booleanColumnName(e: ExprIR): string | null {
+  const inner = e.kind === "paren" ? e.inner : e;
+  if (
+    inner.kind === "member" &&
+    inner.receiver.kind === "this" &&
+    inner.memberType.kind === "primitive" &&
+    inner.memberType.name === "bool"
+  )
+    return inner.member;
+  if (
+    inner.kind === "ref" &&
+    inner.refKind === "this-prop" &&
+    inner.type?.kind === "primitive" &&
+    inner.type.name === "bool"
+  )
+    return inner.name;
+  return null;
 }
 
-function flattenAnd(e: Extract<ExprIR, { kind: "binary" }>): Extract<ExprIR, { kind: "binary" }>[] {
-  const out: Extract<ExprIR, { kind: "binary" }>[] = [];
+/** One conjunct → a single FilterQuery entry (`key: value`).  Handles
+ *  comparisons (`col <op> value`), bare boolean columns (`this.active` →
+ *  `active: true`), negated boolean columns (`!this.active` → `active:
+ *  false`), and a general `!<compound>` (→ `$not: {...}`). */
+function predicateEntry(e: ExprIR): string {
+  const inner = e.kind === "paren" ? e.inner : e;
+  const boolCol = booleanColumnName(inner);
+  if (boolCol) return `${boolCol}: true`;
+  if (inner.kind === "unary" && inner.op === "!") {
+    const negCol = booleanColumnName(inner.operand);
+    if (negCol) return `${negCol}: false`;
+    return `$not: ${whereToMikroFilter(inner.operand)}`;
+  }
+  if (inner.kind === "binary" && (inner.op === "==" || FILTER_OP[inner.op] !== undefined)) {
+    return comparisonEntry(inner);
+  }
+  throw new Error(`mikroorm: unsupported find predicate '${inner.kind}'`);
+}
+
+/** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
+ *  columns and unary `!` are lowered via `predicateEntry`. */
+function whereToMikroFilter(e: ExprIR): string {
+  const inner = e.kind === "paren" ? e.inner : e;
+  if (inner.kind === "binary" && inner.op === "&&") {
+    const entries = flattenAnd(inner).map((c) => predicateEntry(c));
+    return `{ ${entries.join(", ")} }`;
+  }
+  if (inner.kind === "binary" && inner.op === "||") {
+    return `{ $or: [${orBranches(inner)
+      .map((b) => whereToMikroFilter(b))
+      .join(", ")}] }`;
+  }
+  return `{ ${predicateEntry(inner)} }`;
+}
+
+/** Split a `&&` chain into its conjuncts (each rendered by `predicateEntry`). */
+function flattenAnd(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
+  const out: ExprIR[] = [];
   const visit = (n: ExprIR): void => {
     const inner = n.kind === "paren" ? n.inner : n;
     if (inner.kind === "binary" && inner.op === "&&") {
       visit(inner.left);
       visit(inner.right);
-    } else if (inner.kind === "binary") {
-      out.push(inner);
     } else {
-      throw new Error("mikroorm: unsupported conjunct in find");
+      out.push(inner);
     }
   };
   visit(e);
   return out;
 }
 
-function orBranches(e: Extract<ExprIR, { kind: "binary" }>): Extract<ExprIR, { kind: "binary" }>[] {
-  const out: Extract<ExprIR, { kind: "binary" }>[] = [];
+/** Split a `||` chain into its disjuncts (each a full FilterQuery object). */
+function orBranches(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
+  const out: ExprIR[] = [];
   const visit = (n: ExprIR): void => {
     const inner = n.kind === "paren" ? n.inner : n;
     if (inner.kind === "binary" && inner.op === "||") {
       visit(inner.left);
       visit(inner.right);
-    } else if (inner.kind === "binary") {
-      out.push(inner);
     } else {
-      throw new Error("mikroorm: unsupported disjunct in find");
+      out.push(inner);
     }
   };
   visit(e);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Capability `filter` predicates (`filter <expr>` → AggregateIR.contextFilters).
+//
+// MikroORM has no global query filter (EF Core's `HasQueryFilter`), so — like
+// drizzle — the repository ANDs each capability predicate into every root read.
+// Principal-referencing filters (`currentUser.<field>`) are rejected on Hono at
+// validate time, so only closed predicates reach here; each lowers to a
+// FilterQuery object via `whereToMikroFilter` (guaranteed in-subset by
+// `validateFindPredicateAdapterSupport`).  A read's `ignoring *` / `ignoring
+// <Cap>` bypass drops the capability-origin predicates it names.
+// ---------------------------------------------------------------------------
+
+interface FilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** The applicable capability filters for an aggregate as MikroORM FilterQuery
+ *  object-literal strings, honoring a read's `ignoring` bypass. */
+function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): string[] {
+  const filters = agg.contextFilters ?? [];
+  const origins = agg.contextFilterOrigins ?? [];
+  const out: string[] = [];
+  filters.forEach((pred, i) => {
+    if (exprUsesCurrentUser(pred)) return; // principal — validator-rejected on Hono
+    const origin = origins[i];
+    // Only capability-origin (`undefined` = bare/hand-written) filters are
+    // bypassable; `ignoring *` drops every origin, a named `ignoring` the match.
+    if (origin !== undefined && (bypass?.bypassAll || (bypass?.bypassCaps ?? []).includes(origin)))
+      return;
+    out.push(whereToMikroFilter(pred));
+  });
+  return out;
+}
+
+/** Merge a base FilterQuery object-literal with the aggregate's applicable
+ *  capability filters (`$and`).  No filters → the base unchanged (byte-
+ *  identical to the pre-filter output); a `{}` base is dropped from the AND. */
+function withContextFilters(base: string, caps: string[]): string {
+  if (caps.length === 0) return base;
+  const parts = base === "{}" ? caps : [base, ...caps];
+  return parts.length === 1 ? parts[0]! : `{ $and: [${parts.join(", ")}] }`;
+}
+
+// ---------------------------------------------------------------------------
+// `Id[]` reference-collection associations (many-to-many pivot tables).  The
+// domain aggregate carries the collection as a bare `<field>` in `_rehydrate`
+// (hydrateRootExpr emits `${f.name}`), so each read loads the target-id list
+// from the pivot table into that local; the save does a full-list replace (set
+// semantics — delete every owner row, insert the current list).  Mirrors the
+// drizzle join-table path; no FK (MikroORM owns the schema via updateSchema),
+// so the aggregate delete also clears the owner's pivot rows.
+// ---------------------------------------------------------------------------
+
+/** Bulk-load lines: each association → a `<field>ByOwner` map keyed by owner
+ *  id, read from the pivot table for the `rootIds` in scope. */
+function assocMapLoadLines(agg: EnrichedAggregateIR, emVar: string, indent: string): string[] {
+  return (agg.associations ?? []).flatMap((a) => {
+    const jc = joinRowClassOf(a);
+    const oc = joinColumnName(a.ownerFk);
+    const tc = joinColumnName(a.targetFk);
+    const rows = `${a.fieldName}JoinRows`;
+    const map = `${a.fieldName}ByOwner`;
+    return [
+      `${indent}const ${rows} = rootIds.length === 0 ? [] : await ${emVar}.find(${jc}, { ${oc}: { $in: rootIds } }, { orderBy: { ${oc}: "asc", ${tc}: "asc" } });`,
+      `${indent}const ${map} = new Map<string, Ids.${a.targetAgg}Id[]>();`,
+      `${indent}for (const jr of ${rows}) {`,
+      `${indent}  const list = ${map}.get(jr.${oc}) ?? [];`,
+      `${indent}  list.push(Ids.${a.targetAgg}Id(jr.${tc}));`,
+      `${indent}  ${map}.set(jr.${oc}, list);`,
+      `${indent}}`,
+    ];
+  });
+}
+
+/** Per-row `const <field> = <field>ByOwner.get(row.id) ?? [];` decls. */
+function assocRowDeclLines(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
+  return (agg.associations ?? []).map(
+    (a) => `${indent}const ${a.fieldName} = ${a.fieldName}ByOwner.get(${rowVar}.id) ?? [];`,
+  );
+}
+
+/** Inline single-owner association loads (findById) — `const <field> = (await
+ *  em.find(pivot, { owner: id })).map(jr => Id(jr.target));`. */
+function assocInlineLoadLines(
+  agg: EnrichedAggregateIR,
+  emVar: string,
+  ownerIdExpr: string,
+  indent: string,
+): string[] {
+  return (agg.associations ?? []).map((a) => {
+    const jc = joinRowClassOf(a);
+    const oc = joinColumnName(a.ownerFk);
+    const tc = joinColumnName(a.targetFk);
+    return `${indent}const ${a.fieldName} = (await ${emVar}.find(${jc}, { ${oc}: ${ownerIdExpr} }, { orderBy: { ${tc}: "asc" } })).map((jr) => Ids.${a.targetAgg}Id(jr.${tc}));`;
+  });
+}
+
+/** Full-list-replace save of every association's pivot rows (set semantics). */
+function assocSaveLines(agg: EnrichedAggregateIR, emVar: string, indent: string): string[] {
+  return (agg.associations ?? []).flatMap((a) => {
+    const jc = joinRowClassOf(a);
+    const oc = joinColumnName(a.ownerFk);
+    const tc = joinColumnName(a.targetFk);
+    return [
+      `${indent}// Full-list replace of the '${a.fieldName}' reference set.`,
+      `${indent}await ${emVar}.nativeDelete(${jc}, { ${oc}: aggregate.id as string });`,
+      `${indent}for (const t of aggregate.${a.fieldName}) {`,
+      `${indent}  await ${emVar}.insert(${jc}, { ${oc}: aggregate.id as string, ${tc}: t as string });`,
+      `${indent}}`,
+    ];
+  });
+}
+
+/** The array-hydration statement(s) binding `rows` → `${targetVar}`.  With
+ *  associations it bulk-loads the pivot maps and assembles each row's list in a
+ *  block; without, it stays the byte-identical single `.map(...)`. */
+function assocHydrateBind(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  emVar: string,
+  targetVar: string,
+  keyword: "const" | "return",
+  indent: string,
+): string[] {
+  const hy = hydrateRootExpr(agg, "row", ctx);
+  const head = keyword === "return" ? "return" : `const ${targetVar} =`;
+  if ((agg.associations ?? []).length === 0) {
+    return [`${indent}${head} rows.map((row) => ${hy});`];
+  }
+  return [
+    `${indent}const rootIds = rows.map((r) => r.id);`,
+    ...assocMapLoadLines(agg, emVar, indent),
+    `${indent}${head} rows.map((row) => {`,
+    ...assocRowDeclLines(agg, "row", `${indent}  `),
+    `${indent}  return ${hy};`,
+    `${indent}});`,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -437,12 +664,21 @@ export function renderMikroRepository(
 ): string {
   const row = rowClassOf(agg.name);
   const hydrate = (rowVar: string) => hydrateRootExpr(agg, rowVar, ctx);
+  // Capability `filter` predicates AND into every root read.  `baseFilters` is
+  // the no-`ignoring` set (findById / findManyByIds / retrievals); each find
+  // recomputes with its own `ignoring` bypass.  Empty when the aggregate has no
+  // `filter` capability, so the read FilterQuery stays byte-identical.
+  const baseFilters = mikroContextFilters(agg);
+  // `Id[]` reference collections persist in pivot tables, not columns, so they
+  // are excluded from the aggregate-row save projection (synced separately).
+  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  const hasAssocs = (agg.associations ?? []).length > 0;
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
   const saveProjection = projectionObject("aggregate", [
     { fieldName: "id", expr: "aggregate.id as string" },
-    ...agg.fields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
+    ...scalarFields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
   ]);
 
   // Persist-time audit stamping (node-persist-time-auditing): on an audited
@@ -476,7 +712,7 @@ export function renderMikroRepository(
   // the caller's `expectedVersion` (threaded from the route's `If-Match`) falling
   // back to the just-loaded `aggregate.version`.
   const versioned = aggregateIsVersioned(agg);
-  const nonVersionEntries = agg.fields
+  const nonVersionEntries = scalarFields
     .filter((f) => f.name !== "version")
     .flatMap((f) => projectFieldEntries(f, "aggregate", ctx));
   const insertProjection = projectionObject("aggregate", [
@@ -512,7 +748,10 @@ export function renderMikroRepository(
     const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
     let filter: string;
     try {
-      filter = f.filter ? whereToMikroFilter(f.filter) : "{}";
+      // The find's own `where`, AND-ed with the aggregate's capability filters
+      // (dropping the ones this read's `ignoring` clause bypasses).
+      const caps = mikroContextFilters(agg, { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps });
+      filter = withContextFilters(f.filter ? whereToMikroFilter(f.filter) : "{}", caps);
     } catch {
       return lines(
         `  async ${name}(${paged ? `${params}${params ? ", " : ""}page: number, pageSize: number, sort: string, dir: string` : params}): Promise<${paged ? `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }` : ret}> {`,
@@ -549,7 +788,7 @@ export function renderMikroRepository(
         `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
         `    const rows = await em.find(${row}, ${filter}, { limit: pageSize, offset: (page - 1) * pageSize, orderBy });`,
         dbg(f.name, "rows.length"),
-        `    const items = rows.map((row) => ${hydrate("row")});`,
+        ...assocHydrateBind(agg, ctx, "em", "items", "const", "    "),
         `    return { items, page, pageSize, total, totalPages };`,
         `  }`,
       );
@@ -560,7 +799,20 @@ export function renderMikroRepository(
         `    const em = this.em.fork();`,
         `    const rows = await em.find(${row}, ${filter});`,
         dbg(f.name, "rows.length"),
-        `    return rows.map((row) => ${hydrate("row")});`,
+        ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
+        `  }`,
+      );
+    }
+    // Single-row find: load the associations inline (owner id known) then
+    // hydrate, mirroring findById.
+    if (hasAssocs) {
+      return lines(
+        `  async ${name}(${params}): Promise<${agg.name} | null> {`,
+        `    const em = this.em.fork();`,
+        `    const row = await em.findOne(${row}, ${filter});`,
+        `    if (row === null) return null;`,
+        ...assocInlineLoadLines(agg, "em", "row.id", "    "),
+        `    return ${hydrate("row")};`,
         `  }`,
       );
     }
@@ -579,9 +831,10 @@ export function renderMikroRepository(
   // oracle a find uses (so the same subset is supported; an out-of-subset
   // predicate emits a runtime-throwing stub).  `sort` → `em.find` `orderBy`, and
   // a call-site `page` → `limit`/`offset` (never part of the declaration —
-  // mirrors the drizzle path).  MikroORM aggregates are flat (the validator gates
-  // parts/associations/non-relational off this adapter), so the hydrate is the
-  // same flat `hydrateRootExpr` the finds use — no bulk-load of containments.
+  // mirrors the drizzle path).  The validator gates parts/non-relational off
+  // this adapter, so the hydrate is the flat `hydrateRootExpr` the finds use;
+  // `Id[]` reference collections (associations) bulk-load from their pivot
+  // tables via `assocHydrateBind`, same as an array find.
   const retrievalMethods = (ctx.retrievals ?? [])
     .filter(
       (r): r is RetrievalIR => r.targetType.kind === "entity" && r.targetType.name === agg.name,
@@ -592,7 +845,9 @@ export function renderMikroRepository(
       const params = [...baseParams, "page?: { offset?: number; limit?: number }"].join(", ");
       let filter: string;
       try {
-        filter = whereToMikroFilter(r.where);
+        // Retrievals read the aggregate table, so the capability filters AND in
+        // too (no `ignoring` surface on retrievals — the no-bypass `baseFilters`).
+        filter = withContextFilters(whereToMikroFilter(r.where), baseFilters);
       } catch {
         return lines(
           `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
@@ -612,17 +867,30 @@ export function renderMikroRepository(
         `    const em = this.em.fork();`,
         `    const rows = await em.find(${row}, ${filter}, { limit: page?.limit, offset: page?.offset${orderBy} });`,
         dbg(r.name, "rows.length"),
-        `    return rows.map((row) => ${hydrate("row")});`,
+        ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
         `  }`,
       );
     });
 
   const deleteMethod = agg.canonicalDestroy
-    ? lines(
-        `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
-        `    await this.em.fork().nativeDelete(${row}, { id: id as string });`,
-        `  }`,
-      )
+    ? hasAssocs
+      ? lines(
+          `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
+          `    const em = this.em.fork();`,
+          // No FK cascade (MikroORM owns the schema), so clear the owner's
+          // pivot rows before the root delete.
+          ...(agg.associations ?? []).map(
+            (a) =>
+              `    await em.nativeDelete(${joinRowClassOf(a)}, { ${joinColumnName(a.ownerFk)}: id as string });`,
+          ),
+          `    await em.nativeDelete(${row}, { id: id as string });`,
+          `  }`,
+        )
+      : lines(
+          `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
+          `    await this.em.fork().nativeDelete(${row}, { id: id as string });`,
+          `  }`,
+        )
     : "";
 
   const body = lines(
@@ -641,11 +909,12 @@ export function renderMikroRepository(
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
     `    const em = this.em.fork();`,
-    `    const row = await em.findOne(${row}, { id: id as string });`,
+    `    const row = await em.findOne(${row}, ${withContextFilters("{ id: id as string }", baseFilters)});`,
     `    if (row === null) {`,
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
     `      return null;`,
     `    }`,
+    ...assocInlineLoadLines(agg, "em", "id as string", "    "),
     `    const loaded = ${hydrate("row")};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -660,8 +929,8 @@ export function renderMikroRepository(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
     `    const em = this.em.fork();`,
-    `    const rows = await em.find(${row}, { id: { $in: ids as string[] } });`,
-    `    return rows.map((row) => ${hydrate("row")});`,
+    `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
+    ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
     `  }`,
     "",
     versioned
@@ -669,6 +938,7 @@ export function renderMikroRepository(
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
     `    const em = this.em.fork();`,
     ...(versioned ? versionedSaveLines : [upsertCall]),
+    ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -712,7 +982,8 @@ export function renderMikroRepository(
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
-      `import { ${row} } from "../entities";`,
+      // The aggregate Row + every `Id[]` association's pivot Row entity.
+      `import { ${[row, ...(agg.associations ?? []).map(joinRowClassOf)].join(", ")} } from "../entities";`,
       // Persist-time audit stamping helper — pulled in only when this
       // aggregate's `save()` stamps (audited).  Stamps the audit columns from
       // the ambient request principal at the upsert (db/audit-stamp.ts).

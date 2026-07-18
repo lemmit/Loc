@@ -194,21 +194,290 @@ describe("mikroorm — context retrievals (DEBT-17)", () => {
     expect(repo).toContain("Order._rehydrate({");
   });
 
-  it("cleanly rejects an out-of-subset retrieval predicate (loom.find-predicate-unsupported)", async () => {
-    // A bare boolean column (`this.active`) is a valid retrieval `where`
-    // generally, but it's outside the MikroORM FilterQuery comparison subset.
-    // `validateFindPredicateAdapterSupport` already iterates retrievals, so it's
-    // rejected at validate time (not a runtime stub) — better than the Dapper
-    // path.  (The emitter still carries a defensive try/catch stub, mirroring
-    // the find path, in case the two subset notions ever diverge.)
+  it("lowers a bare-boolean retrieval `where` to `{ col: true }` (wave 1 widening)", async () => {
+    // A bare boolean column (`this.active`) is now inside the MikroORM
+    // FilterQuery subset — it lowers to `{ active: true }` (drizzle's `col =
+    // true` analogue), so the retrieval is accepted and emits a real run method.
     const src = RETRIEVAL_SRC.replace(
       "where: this.status == Status.Confirmed && this.quantity >= min",
       "where: this.active",
     ).replace("BulkOrders(min: int)", "Active()");
-    const { errors } = await emit(src);
-    expect(
-      errors.some((e) => /persistence: mikroorm/.test(e) && /cannot lower to SQL/.test(e)),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("await em.find(OrderRow, { active: true }, ");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// find-predicate subset widening (wave 1) — `whereToMikroFilter` now lowers
+// bare boolean columns (`{ col: true }`), negated boolean columns (`{ col:
+// false }`) and unary `!` (via `$not` / a `false` entry), in addition to the
+// original comparisons + &&/||.  `currentUser` + refColl `contains` stay gated.
+// ---------------------------------------------------------------------------
+describe("mikroorm — widened find predicates (bare boolean / unary NOT)", () => {
+  const BOOL_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        active: bool
+        archived: bool
+      }
+      repository Orders for Order {
+        find live(): Order[] where this.active
+        find inactive(): Order[] where !this.active
+        find liveOrArchived(): Order[] where this.active || this.archived
+        find complex(): Order[] where this.active && !this.archived
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("lowers bare boolean / negated boolean / ||-of-booleans to FilterQuery", async () => {
+    const { files, errors } = await emit(BOOL_SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("await em.find(OrderRow, { active: true })");
+    expect(repo).toContain("await em.find(OrderRow, { active: false })");
+    expect(repo).toContain(
+      "await em.find(OrderRow, { $or: [{ active: true }, { archived: true }] })",
+    );
+    expect(repo).toContain("await em.find(OrderRow, { active: true, archived: false })");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `filter` capability predicates (wave 1) — MikroORM has no global query
+// filter, so the repository ANDs each non-principal predicate (a FilterQuery)
+// into every root read via `$and`, honoring a read's `ignoring` bypass.
+// ---------------------------------------------------------------------------
+describe("mikroorm — `filter` capability predicates", () => {
+  const FILTER_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum Status { Active, Archived }
+      aggregate Order with crudish {
+        customer: string
+        status: Status
+        deleted: bool
+        filter this.status == Status.Active
+        filter !this.deleted
+      }
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a filter capability", async () => {
+    const { errors } = await emit(FILTER_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("ANDs the filters into findById / findManyByIds / find / findAll", async () => {
+    const { files } = await emit(FILTER_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // findById — the `{ id }` base joined with both filters under `$and`.
+    expect(repo).toContain(
+      'await em.findOne(OrderRow, { $and: [{ id: id as string }, { status: "Active" }, { deleted: false }] });',
+    );
+    // findManyByIds — the `$in` base joined too.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ id: { $in: ids as string[] } }, { status: "Active" }, { deleted: false }] });',
+    );
+    // A declared find — its own `where` joined with the filters.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ customer: customer }, { status: "Active" }, { deleted: false }] });',
+    );
+    // The auto-`findAll` (paged, empty base) — the `{}` base is dropped.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ status: "Active" }, { deleted: false }] }, { limit: pageSize,',
+    );
+  });
+
+  it("honors `ignoring <Cap>` / `ignoring *` on a read (softDeletable capability)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish, softDeletable {
+        customer: string
+      }
+      repository Orders for Order {
+        find active(customer: string): Order[] where this.customer == customer
+        find withDeleted(customer: string): Order[] where this.customer == customer ignoring softDeletable
+        find reallyAll(customer: string): Order[] where this.customer == customer ignoring *
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // The softDeletable filter (`!this.isDeleted` → `{ isDeleted: false }`) is
+    // applied to the plain read…
+    expect(repo).toContain(
+      "async active(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { $and: [{ customer: customer }, { isDeleted: false }] });",
+    );
+    // …and dropped when the read bypasses it by name or with `*`.
+    expect(repo).toContain(
+      "async withDeleted(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+    );
+    expect(repo).toContain(
+      "async reallyAll(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `Id[]` reference-collection associations (wave 1) — persist as composite-PK
+// pivot Row entities (the MikroORM analogue of the drizzle join table): bulk-
+// loaded on read, full-list-replaced on save, pivot rows cleared on delete.
+// ---------------------------------------------------------------------------
+describe("mikroorm — reference-collection associations (Id[] pivot tables)", () => {
+  const ASSOC_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Pokemon with crudish {
+        name: string
+      }
+      aggregate Trainer with crudish {
+        name: string
+        party: Pokemon id[]
+      }
+      repository Pokemons for Pokemon { }
+      repository Trainers for Trainer {
+        find byName(name: string): Trainer[] where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for an Id[] association", async () => {
+    const { errors } = await emit(ASSOC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits a composite-PK pivot Row entity for the association", async () => {
+    const { files } = await emit(ASSOC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class TrainerPartyRow");
+    expect(entities).toContain('tableName: "trainer_party"');
+    expect(entities).toContain('trainerId: { type: "string", primary: true }');
+    expect(entities).toContain('pokemonId: { type: "string", primary: true }');
+    // The pivot schema joins the entities registry.
+    expect(entities).toContain("TrainerPartyRowSchema]");
+  });
+
+  it("bulk-loads on read, full-replaces on save, and clears pivot rows on delete", async () => {
+    const { files } = await emit(ASSOC_SRC);
+    const repo = files.get("api/db/repositories/trainer-repository.ts")!;
+    // findById — inline load of the target-id list.
+    expect(repo).toContain(
+      'const party = (await em.find(TrainerPartyRow, { trainerId: id as string }, { orderBy: { pokemonId: "asc" } })).map((jr) => Ids.PokemonId(jr.pokemonId));',
+    );
+    // Array read — bulk-load into a per-owner map.
+    expect(repo).toContain("const partyByOwner = new Map<string, Ids.PokemonId[]>();");
+    expect(repo).toContain("const party = partyByOwner.get(row.id) ?? [];");
+    // Save — full-list replace (delete owner rows, insert the current set).
+    expect(repo).toContain(
+      "await em.nativeDelete(TrainerPartyRow, { trainerId: aggregate.id as string });",
+    );
+    expect(repo).toContain(
+      "await em.insert(TrainerPartyRow, { trainerId: aggregate.id as string, pokemonId: t as string });",
+    );
+    // Delete — clear pivot rows (no FK cascade) then the root.
+    expect(repo).toContain("await em.nativeDelete(TrainerPartyRow, { trainerId: id as string });");
+    // The `party` column is NOT on the aggregate Row (it lives in the pivot).
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("party:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `seed` data (wave 1) — the mikro seed path threads the same dataset
+// functions (domain `create` → `<Agg>Repository.save`) through the
+// EntityManager, with raw INSERTs + the `__loom_seed` marker via
+// `em.getConnection().execute`.
+// ---------------------------------------------------------------------------
+describe("mikroorm — `seed` data", () => {
+  const SEED_SRC = `system M {
+  api A from S
+  subdomain S {
+    context Catalog {
+      enum Tier { Free, Pro }
+      aggregate Widget with crudish {
+        name: string
+        size: int
+        tier: Tier
+      }
+      aggregate Gadget with crudish {
+        widgetId: Widget id
+        label: string
+      }
+      repository Widgets for Widget { }
+      repository Gadgets for Gadget { }
+      seed default {
+        Widget { name: "Alpha", size: 1, tier: Free }
+      }
+      seed wired raw {
+        Widget { id: "11111111-1111-1111-1111-111111111111", name: "Anchor", size: 4, tier: Free }
+        Gadget { id: "22222222-2222-2222-2222-222222222222", widgetId: "11111111-1111-1111-1111-111111111111", label: "g1" }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Catalog, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [Catalog]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a seed block", async () => {
+    const { errors } = await emit(SEED_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits an EntityManager-typed db/seed.ts + mikro seed-cli", async () => {
+    const { files } = await emit(SEED_SRC);
+    const seed = files.get("api/db/seed.ts")!;
+    expect(seed).toBeDefined();
+    // EntityManager-typed, no drizzle.
+    expect(seed).toContain('import { EntityManager } from "@mikro-orm/postgresql";');
+    expect(seed).not.toContain("drizzle");
+    expect(seed).toContain("type Db = EntityManager;");
+    // Domain-`create` path via the mikro repository.
+    expect(seed).toContain(
+      "const widgetRepo = new WidgetRepository(db, NoopDomainEventDispatcher);",
+    );
+    expect(seed).toContain(
+      'await widgetRepo.save(Widget.create({ name: "Alpha", size: 1, tier: Tier.Free }));',
+    );
+    // Raw path + the __loom_seed marker via the connection.
+    expect(seed).toContain('await db.getConnection().execute("INSERT INTO \\"widgets\\"');
+    expect(seed).toContain('db.getConnection().execute(\'SELECT 1 FROM "__loom_seed"');
+    // Mikro CLI inits the ORM + applies the schema before seeding.
+    const cli = files.get("api/db/seed-cli.ts")!;
+    expect(cli).toContain('import { MikroORM } from "@mikro-orm/postgresql";');
+    expect(cli).toContain("await orm.schema.updateSchema();");
+    expect(cli).toContain("await runSeeds(orm.em);");
+    // Boot path runs the seeds after schema update.
+    expect(files.get("api/index.ts")).toContain("await runSeeds(db);");
   });
 });
 
@@ -239,11 +508,46 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
   });
+});
 
-  // A NON-stamp server-managed field (token access) still trips the gate — the
-  // managed-access relaxation is scoped to audit-stamp targets only.
-  it("still rejects a non-stamp server-managed (token) field", () =>
-    rejects("token apiKey: string", /server-managed access 'token'/));
+// ---------------------------------------------------------------------------
+// Server-managed access fields (token / internal / secret) on mikroorm — the
+// access modifier shapes only the API wire surface, so the data-mapper stores
+// the field as an ordinary column that round-trips through the shared save /
+// hydrate seams (like drizzle).  No longer gated (wave 1).
+// ---------------------------------------------------------------------------
+describe("mikroorm — server-managed access fields round-trip as columns", () => {
+  const MANAGED_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        token apiKey: string
+        internal note2: string
+        secret pin: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("accepts a token / internal / secret field (no loom.mikroorm-unsupported)", async () => {
+    const { files, errors } = await emit(MANAGED_SRC);
+    expect(errors).toEqual([]);
+    // Each server-managed field is a real persisted column on the Row entity…
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("apiKey!: string");
+    expect(entities).toContain("note2!: string");
+    expect(entities).toContain("pin!: string");
+    // …and rides the save projection + hydrate seam.
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("apiKey: aggregate.apiKey");
+    expect(repo).toContain("apiKey: row.apiKey");
+  });
 });
 
 // ---------------------------------------------------------------------------

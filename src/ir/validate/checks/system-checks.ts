@@ -51,7 +51,6 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
-import { aggregateIsVersioned } from "../../util/versioned-capability.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 import { validateE2ETest } from "./test-checks.js";
@@ -1824,15 +1823,16 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
 // ambient request principal (`stampInsert`, db/audit-stamp.ts), keeping
-// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.  So
-// the stamp-target fields' `managed` access is no longer rejected, and an
-// `auditable` aggregate is accepted.  Other server-managed fields
-// (token / internal / secret) and provenanced fields stay gated.
+// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.
+//
+// Server-managed access (`managed` / `token` / `internal` / `secret`) is NO
+// LONGER gated either: the data-mapper stores such a field as an ordinary
+// column that round-trips through the shared save/hydrate seams (the access
+// modifier shapes only the API wire surface).  Provenanced fields stay gated.
 // ---------------------------------------------------------------------------
 export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
 
   for (const dep of sys.deployables) {
     if (dep.persistence !== "mikroorm") continue;
@@ -1856,11 +1856,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
       // emits a runtime-throwing stub at codegen (same as a find predicate), so
       // there's no validate-time gate here — mirrors the .NET Dapper v1 path.
-      if ((ctx.seeds ?? []).length > 0)
-        reject(
-          `context '${ctxName}'`,
-          "declares 'seed' data (the MikroORM seed path is not wired)",
-        );
+      // `seed` data IS supported: `emitMikroSeeds` threads the same dataset
+      // functions (domain `create` → `<Agg>Repository.save`) through the
+      // EntityManager, with raw INSERTs + the `__loom_seed` marker via
+      // `em.getConnection().execute`.  The mikro seed CLI inits the ORM +
+      // `updateSchema()` before running; the boot path runs it after schema
+      // update — so no gate here.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
@@ -1873,27 +1874,34 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
-        if ((a.associations ?? []).length > 0)
-          reject(where, "has reference-collection associations (Id[] join tables)");
+        // `Id[]` reference-collection associations ARE supported on a state
+        // aggregate: each persists as a composite-PK pivot Row entity, bulk-
+        // loaded on read and full-list-replaced on save (the MikroORM analogue
+        // of the drizzle join table).  Event-sourced aggregates reconstruct
+        // from their event stream (no pivot sync), so associations there stay
+        // gated until that path is wired.
+        if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
+          reject(where, "has reference-collection associations on an event-sourced aggregate");
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
-        if ((a.contextFilters ?? []).length > 0)
-          reject(where, "uses a 'filter' capability predicate");
-        // Audit-stamp targets are filled by the save-layer stamp (`stampInsert`
-        // injected into `em.upsert`), so their `managed` access is fine; skip
-        // them when gating server-managed access below.
-        const stampFields = new Set(
-          (a.contextStamps ?? []).flatMap((r) => r.assignments.map((x) => x.field)),
-        );
-        // The default-on `version` token (M-T3.4) is supported: the MikroORM
-        // save emits a guarded `nativeUpdate` version-CAS on it, so it is NOT an
-        // unfillable server-managed field — skip it before the managed gate.
-        const aggVersioned = aggregateIsVersioned(a);
+        // `filter` capability predicates ARE supported: the repository ANDs each
+        // non-principal predicate (a MikroORM FilterQuery) into every root read
+        // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
+        // analogue of drizzle's per-read predicate).  A predicate outside the
+        // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
+        // (which already iterates contextFilters), and principal-referencing
+        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
+        // — so only closed, lowerable predicates reach codegen.
+        // Server-managed access (`managed` / `token` / `internal` / `secret`)
+        // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
+        // a field as an ordinary column that round-trips through the shared
+        // save-projection / hydrate seams (the access modifier only shapes the
+        // API wire surface, not persistence).  Audit-stamp targets are filled by
+        // the persist-time stamp (`stampInsert` in `em.upsert`) and the default-
+        // on `version` token by the guarded version-CAS `nativeUpdate` — both
+        // already supported.
         for (const f of a.fields) {
-          if (aggVersioned && f.name === "version" && f.access === "token") continue;
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-          else if (f.access && MANAGED_ACCESS.has(f.access) && !stampFields.has(f.name))
-            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
         }
       }
     }
