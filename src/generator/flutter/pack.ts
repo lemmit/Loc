@@ -225,9 +225,7 @@ function primitiveCodeBlock(c: Ctx): string {
 function primitiveCard(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle)
-    kids.push(
-      styledText(String(c.titleText ?? ""), "Theme.of(context).textTheme.titleMedium"),
-    );
+    kids.push(styledText(String(c.titleText ?? ""), "Theme.of(context).textTheme.titleMedium"));
   if (c.hasContent) kids.push(asWidget(String(c.contentJsx ?? "")));
   const body =
     kids.length > 0
@@ -263,9 +261,7 @@ function alertColor(color: string): string {
 function primitiveAlert(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle)
-    kids.push(
-      styledText(String(c.title ?? ""), "const TextStyle(fontWeight: FontWeight.bold)"),
-    );
+    kids.push(styledText(String(c.title ?? ""), "const TextStyle(fontWeight: FontWeight.bold)"));
   kids.push(asText(String(c.message ?? "")));
   const color = alertColor(String(c.color ?? "red"));
   return `Container(width: double.infinity, padding: const EdgeInsets.all(12), decoration: BoxDecoration(border: Border.all(color: ${color}), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}]))`;
