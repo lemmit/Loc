@@ -374,52 +374,90 @@ function filterValue(e: ExprIR): string {
   }
 }
 
-/** Conjunctions merge into one object; `||` becomes `$or`. */
-function whereToMikroFilter(e: ExprIR): string {
-  if (e.kind === "paren") return whereToMikroFilter(e.inner);
-  if (e.kind === "binary") {
-    if (e.op === "&&") {
-      const entries = [...flattenAnd(e)].map((c) => comparisonEntry(c));
-      return `{ ${entries.join(", ")} }`;
-    }
-    if (e.op === "||") {
-      return `{ $or: [${orBranches(e)
-        .map((b) => `{ ${comparisonEntry(b)} }`)
-        .join(", ")}] }`;
-    }
-    return `{ ${comparisonEntry(e)} }`;
-  }
-  throw new Error(`mikroorm: unsupported find expression '${e.kind}'`);
+/** `this.<field>` where field is a boolean column → the column name, else
+ *  null.  MikroORM lowers a bare boolean column to `{ col: true }` (and
+ *  `!this.col` to `{ col: false }`), the FilterQuery analogue of drizzle's
+ *  `col = true`. */
+function booleanColumnName(e: ExprIR): string | null {
+  const inner = e.kind === "paren" ? e.inner : e;
+  if (
+    inner.kind === "member" &&
+    inner.receiver.kind === "this" &&
+    inner.memberType.kind === "primitive" &&
+    inner.memberType.name === "bool"
+  )
+    return inner.member;
+  if (
+    inner.kind === "ref" &&
+    inner.refKind === "this-prop" &&
+    inner.type?.kind === "primitive" &&
+    inner.type.name === "bool"
+  )
+    return inner.name;
+  return null;
 }
 
-function flattenAnd(e: Extract<ExprIR, { kind: "binary" }>): Extract<ExprIR, { kind: "binary" }>[] {
-  const out: Extract<ExprIR, { kind: "binary" }>[] = [];
+/** One conjunct → a single FilterQuery entry (`key: value`).  Handles
+ *  comparisons (`col <op> value`), bare boolean columns (`this.active` →
+ *  `active: true`), negated boolean columns (`!this.active` → `active:
+ *  false`), and a general `!<compound>` (→ `$not: {...}`). */
+function predicateEntry(e: ExprIR): string {
+  const inner = e.kind === "paren" ? e.inner : e;
+  const boolCol = booleanColumnName(inner);
+  if (boolCol) return `${boolCol}: true`;
+  if (inner.kind === "unary" && inner.op === "!") {
+    const negCol = booleanColumnName(inner.operand);
+    if (negCol) return `${negCol}: false`;
+    return `$not: ${whereToMikroFilter(inner.operand)}`;
+  }
+  if (inner.kind === "binary" && (inner.op === "==" || FILTER_OP[inner.op] !== undefined)) {
+    return comparisonEntry(inner);
+  }
+  throw new Error(`mikroorm: unsupported find predicate '${inner.kind}'`);
+}
+
+/** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
+ *  columns and unary `!` are lowered via `predicateEntry`. */
+function whereToMikroFilter(e: ExprIR): string {
+  const inner = e.kind === "paren" ? e.inner : e;
+  if (inner.kind === "binary" && inner.op === "&&") {
+    const entries = flattenAnd(inner).map((c) => predicateEntry(c));
+    return `{ ${entries.join(", ")} }`;
+  }
+  if (inner.kind === "binary" && inner.op === "||") {
+    return `{ $or: [${orBranches(inner)
+      .map((b) => whereToMikroFilter(b))
+      .join(", ")}] }`;
+  }
+  return `{ ${predicateEntry(inner)} }`;
+}
+
+/** Split a `&&` chain into its conjuncts (each rendered by `predicateEntry`). */
+function flattenAnd(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
+  const out: ExprIR[] = [];
   const visit = (n: ExprIR): void => {
     const inner = n.kind === "paren" ? n.inner : n;
     if (inner.kind === "binary" && inner.op === "&&") {
       visit(inner.left);
       visit(inner.right);
-    } else if (inner.kind === "binary") {
-      out.push(inner);
     } else {
-      throw new Error("mikroorm: unsupported conjunct in find");
+      out.push(inner);
     }
   };
   visit(e);
   return out;
 }
 
-function orBranches(e: Extract<ExprIR, { kind: "binary" }>): Extract<ExprIR, { kind: "binary" }>[] {
-  const out: Extract<ExprIR, { kind: "binary" }>[] = [];
+/** Split a `||` chain into its disjuncts (each a full FilterQuery object). */
+function orBranches(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
+  const out: ExprIR[] = [];
   const visit = (n: ExprIR): void => {
     const inner = n.kind === "paren" ? n.inner : n;
     if (inner.kind === "binary" && inner.op === "||") {
       visit(inner.left);
       visit(inner.right);
-    } else if (inner.kind === "binary") {
-      out.push(inner);
     } else {
-      throw new Error("mikroorm: unsupported disjunct in find");
+      out.push(inner);
     }
   };
   visit(e);

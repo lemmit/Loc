@@ -194,21 +194,60 @@ describe("mikroorm — context retrievals (DEBT-17)", () => {
     expect(repo).toContain("Order._rehydrate({");
   });
 
-  it("cleanly rejects an out-of-subset retrieval predicate (loom.find-predicate-unsupported)", async () => {
-    // A bare boolean column (`this.active`) is a valid retrieval `where`
-    // generally, but it's outside the MikroORM FilterQuery comparison subset.
-    // `validateFindPredicateAdapterSupport` already iterates retrievals, so it's
-    // rejected at validate time (not a runtime stub) — better than the Dapper
-    // path.  (The emitter still carries a defensive try/catch stub, mirroring
-    // the find path, in case the two subset notions ever diverge.)
+  it("lowers a bare-boolean retrieval `where` to `{ col: true }` (wave 1 widening)", async () => {
+    // A bare boolean column (`this.active`) is now inside the MikroORM
+    // FilterQuery subset — it lowers to `{ active: true }` (drizzle's `col =
+    // true` analogue), so the retrieval is accepted and emits a real run method.
     const src = RETRIEVAL_SRC.replace(
       "where: this.status == Status.Confirmed && this.quantity >= min",
       "where: this.active",
     ).replace("BulkOrders(min: int)", "Active()");
-    const { errors } = await emit(src);
-    expect(
-      errors.some((e) => /persistence: mikroorm/.test(e) && /cannot lower to SQL/.test(e)),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("await em.find(OrderRow, { active: true }, ");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// find-predicate subset widening (wave 1) — `whereToMikroFilter` now lowers
+// bare boolean columns (`{ col: true }`), negated boolean columns (`{ col:
+// false }`) and unary `!` (via `$not` / a `false` entry), in addition to the
+// original comparisons + &&/||.  `currentUser` + refColl `contains` stay gated.
+// ---------------------------------------------------------------------------
+describe("mikroorm — widened find predicates (bare boolean / unary NOT)", () => {
+  const BOOL_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        active: bool
+        archived: bool
+      }
+      repository Orders for Order {
+        find live(): Order[] where this.active
+        find inactive(): Order[] where !this.active
+        find liveOrArchived(): Order[] where this.active || this.archived
+        find complex(): Order[] where this.active && !this.archived
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("lowers bare boolean / negated boolean / ||-of-booleans to FilterQuery", async () => {
+    const { files, errors } = await emit(BOOL_SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("await em.find(OrderRow, { active: true })");
+    expect(repo).toContain("await em.find(OrderRow, { active: false })");
+    expect(repo).toContain(
+      "await em.find(OrderRow, { $or: [{ active: true }, { archived: true }] })",
+    );
+    expect(repo).toContain("await em.find(OrderRow, { active: true, archived: false })");
   });
 });
 

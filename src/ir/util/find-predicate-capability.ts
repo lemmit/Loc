@@ -115,16 +115,18 @@ const DAPPER_SUBSET: FindPredicateCapability = (e) => {
   return walk(e);
 };
 
-/** MikroORM (`whereToMikroFilter`): the narrowest subset — a PREDICATE
- *  position must be a comparison (`col <op> value`) or an `&&` / `||` of
- *  predicate positions.  No `!` (NOT), no bare-boolean column standing alone,
- *  no reference-collection membership, no `currentUser.<field>`.  This is
- *  position-sensitive: a bool column is fine as a comparison OPERAND
- *  (`this.active == true`) but not as a whole predicate (`this.active`), so
- *  the walk distinguishes predicate positions from comparison operands. */
+/** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value`), bare
+ *  boolean columns (`this.active` → `{ active: true }`), unary `!` (NOT — via
+ *  FilterQuery `$not` / a `false` boolean entry), and `&&` / `||` of predicate
+ *  positions.  It still does NOT lower the reference-collection membership
+ *  subquery or a `currentUser.<field>` principal reference (no join / no
+ *  principal accessor on the find path), so those two shapes are the only
+ *  remaining narrowings versus the EF Core / drizzle baseline. */
 const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
-  const NOT_COMPARISON = "MikroORM v1 lowers only comparisons (col <op> value) and &&/|| of them";
-  // Walk a PREDICATE position.  Only comparisons / `&&` / `||` are valid here.
+  const NOT_SUPPORTED =
+    "MikroORM v1 lowers comparisons (col <op> value), bare boolean columns, unary '!' and &&/|| of them";
+  // Walk a PREDICATE position.  Comparisons / `&&` / `||` / `!` / bare boolean
+  // columns are valid here.
   const walkPredicate = (n: ExprIR): string | null => {
     const inner = n.kind === "paren" ? n.inner : n;
     if (inner.kind === "binary") {
@@ -136,14 +138,13 @@ const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
         // adapter-wide rejected shapes (currentUser, contains) can hide there.
         return walkValue(inner.left) ?? walkValue(inner.right);
       }
-      return `arithmetic '${inner.op}' — ${NOT_COMPARISON}`;
+      return `arithmetic '${inner.op}' — ${NOT_SUPPORTED}`;
     }
-    if (inner.kind === "unary" && inner.op === "!") return `unary '!' (NOT) — ${NOT_COMPARISON}`;
+    if (inner.kind === "unary" && inner.op === "!") return walkPredicate(inner.operand);
     if (isContainsMembership(inner))
-      return `'this.<refColl>.contains(x)' membership — ${NOT_COMPARISON}`;
-    if (isBareBooleanColumn(inner))
-      return `a bare boolean column in a boolean position — MikroORM v1 needs an explicit comparison (e.g. \`this.isActive == true\`)`;
-    return `${inner.kind} — ${NOT_COMPARISON}`;
+      return `'this.<refColl>.contains(x)' membership — ${NOT_SUPPORTED}`;
+    if (isBareBooleanColumn(inner)) return null;
+    return `${inner.kind} — ${NOT_SUPPORTED}`;
   };
   // Walk a comparison OPERAND (value) position — only the adapter-wide
   // rejected references matter here.
