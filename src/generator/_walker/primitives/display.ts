@@ -107,7 +107,7 @@ export function emitBreadcrumbs(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-breadcrumbs", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
@@ -130,7 +130,7 @@ export function emitPaper(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-paper", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     hasPadding: padding !== undefined,
     padding: padding !== undefined ? JSON.stringify(padding) : "",
     indent,

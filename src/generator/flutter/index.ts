@@ -114,10 +114,12 @@ function renderPage(
     bodyWidget = result.tsx.trim() || bodyWidget;
   }
 
+  // NOTE: the display-only skeleton page body references no wire-model types, so
+  // it imports only material.dart — importing lib/models.dart here would be an
+  // `unused_import` under `flutter analyze`.  Full parity (data-bound pages) adds
+  // the models import at the point a page actually references a model class.
   const src = `${lines(
     "import 'package:flutter/material.dart';",
-    "",
-    "import '../models.dart';",
     "",
     `class ${className} extends StatelessWidget {`,
     `  const ${className}({super.key});`,

@@ -1,0 +1,124 @@
+name: Generated Flutter build
+
+# Generate the Flutter (Dart/Material) mobile frontend from a .ddd, then prove
+# the emitted Dart actually COMPILES: `flutter analyze` (errors) + `flutter build
+# web`.  The analogue of generated-feliz-build.yml (which Fable-compiles the
+# emitted F#) — Flutter is structurally a Feliz clone (a non-JSX WalkerTarget
+# riding the shared walkBody engine), so this gate catches generator drift that
+# lowers cleanly to IR but emits non-compiling Dart — invisible to the fast
+# vitest suite (which only asserts emitted-string shape; no local Flutter SDK).
+#
+# WALKING SKELETON gate: display path (Stack/Heading/Card/Text/Button) only —
+# forms/workflows/match-await and the native (non-web) surface are deferred to
+# full parity and this gate grows with them.  `analyze` runs errors-only for now
+# (`--no-fatal-warnings --no-fatal-infos`) so lint-nits don't block the first
+# compile signal; `flutter build web` is the load-bearing "is the Dart real"
+# check.  The .ddd is embedded here (not under examples/) so the other
+# example-globbing gates never pick up a flutter-only source.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/flutter/**'
+      - 'src/generator/_walker/**'
+      - 'src/generator/_packs/required-primitives.ts'
+      - 'src/platform/flutter.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-flutter-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/generator/flutter/**'
+      - 'src/generator/_walker/**'
+      - 'src/generator/_packs/required-primitives.ts'
+      - 'src/platform/flutter.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-flutter-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install + build the toolchain
+        run: npm ci
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate the Flutter skeleton system
+        run: |
+          mkdir -p ci-flutter
+          # Two-page routed app exercising the display path: Stack/Column layout,
+          # Heading (→ Text), Card, Text, Button (navigation), and multi-page
+          # named routing.  No forms/data-binding — the walking skeleton's scope.
+          cat > ci-flutter/skeleton.ddd <<'DDD'
+          system Storefront {
+            api ShopApi from Catalog
+
+            subdomain Catalog {
+              context Cat {
+                aggregate Product {
+                  name:  string
+                  price: money
+                }
+                repository Products for Product { }
+              }
+            }
+
+            storage db { type: postgres }
+            resource catState { for: Cat, kind: state, use: db }
+
+            ui MobileApp {
+              framework: flutter
+              page Home {
+                route: "/"
+                body: Stack {
+                  Heading { "Storefront", level: 1 },
+                  Text { "Welcome to the shop" },
+                  Card { "Featured",
+                    Text { "Today's pick" }
+                  },
+                  Button { "Browse products", to: "/products" }
+                }
+              }
+              page Products {
+                route: "/products"
+                body: Stack {
+                  Heading { "Products", level: 1 },
+                  Text { "Product catalogue" },
+                  Button { "Back home", to: "/" }
+                }
+              }
+            }
+
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable app { platform: flutter targets: api ui: MobileApp port: 3006 }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter/skeleton.ddd -o ci-flutter/out
+      - name: Locate the emitted Flutter project
+        id: proj
+        run: echo "dir=$(dirname "$(find ci-flutter/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: flutter pub get
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter pub get
+      - name: flutter analyze (errors)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+      - name: flutter build web (the real compile gate)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter build web --release

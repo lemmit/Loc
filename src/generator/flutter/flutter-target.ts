@@ -88,6 +88,11 @@ function dartPredicateSwitch(
 export const flutterTarget: WalkerTarget = {
   framework: "flutter",
 
+  // Dart `<Widget>[ … ]` list literals are comma-separated — the shared walker
+  // joins container children with `\n<indent>` and no token, so without this the
+  // emitted `Column(children: […])` would be a syntax error.
+  interChildSeparator: ",",
+
   // --- State seam — Riverpod projected-state reads + Notifier writes --------
   // Reads dereference the projected immutable state record the view holds
   // (`state.<field>`); the field keeps its source (camelCase) name.

@@ -34,9 +34,19 @@ import type { LoadedPack } from "../_packs/loader.js";
 
 type Ctx = Record<string, string | number | boolean | undefined>;
 
-/** Escape a raw string for a single-quoted Dart string literal. */
+/** Prepare a string for a single-quoted Dart string literal body.
+ *
+ *  IDENTITY BY CONTRACT: every value the pack wraps in `Text('…')` is a walker
+ *  Ctx field (`c.text`, `c.label`, `c.title`, `col.header`, …) that the shared
+ *  walker ALREADY escaped through the `flutterTarget.escapeText` seam (see
+ *  `_walker/primitives/*.ts` — `unwrapTextLiteral(x, ctx.target.escapeText)`).
+ *  Re-escaping here would double every backslash/quote (`Today's` →
+ *  `Today\\\'s`).  This matches the cross-framework contract: the walker escapes
+ *  via the target seam, the pack inserts as-is (the mantine/vuetify packs never
+ *  re-escape either).  Kept as a named seam so the intent is explicit at each
+ *  wrap site. */
 function dartStr(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$").replace(/\n/g, "\\n");
+  return s;
 }
 
 /** A walked branch that came back empty or as the missing-arg sentinel `"null"`
