@@ -15,13 +15,24 @@
 
 import { EmptyFileSystem, type LangiumDocument, URI } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
-import type { GenerateReport, Outline, ValidateReport } from "../diagnostics/contract.js";
+import type {
+  GenerateReport,
+  ModelAggregate,
+  ModelView,
+  Outline,
+  PrimitiveCatalog,
+  ValidateReport,
+} from "../diagnostics/contract.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
+import { wireFieldsForAggregate } from "../ir/enrich/wire-projection.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
+import type { EnrichedBoundedContextIR } from "../ir/types/loom-ir.js";
+import { typeLabel } from "../ir/util/type-label.js";
 import { type LoomDiagnostic, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { buildOutline } from "../language/print/index.js";
+import { WALKER_LAYOUT_PRIMITIVES, WALKER_SUB_PRIMITIVES } from "../util/walker-primitive-names.js";
 import {
   buildGenerateReport,
   buildValidateReport,
@@ -36,11 +47,17 @@ export type {
   GenerateReport,
   HoverResult,
   JsonDiagnostic,
+  ModelAggregate,
+  ModelDeployable,
+  ModelSystem,
+  ModelView,
+  ModelWireField,
   NavError,
   NavLocation,
   NavSymbol,
   NavTextEdit,
   Outline,
+  PrimitiveCatalog,
   QuickfixResult,
   ReferencesResult,
   RenameResult,
@@ -172,4 +189,69 @@ export async function generate(
     diagnostics: [...langiumJson, ...irJson],
     deployables,
   });
+}
+
+/** Project a bounded context's aggregates to their resolved wire shape. */
+function aggregatesOf(ctx: EnrichedBoundedContextIR): ModelAggregate[] {
+  return ctx.aggregates.map((agg) => ({
+    name: agg.name,
+    context: ctx.name,
+    // The canonical wire shape is DERIVED on demand (never stamped) — the same
+    // `wireFieldsForAggregate` every backend's DTO emitter consumes.
+    wire: wireFieldsForAggregate(agg).map((f) => ({
+      name: f.name,
+      type: typeLabel(f.type),
+      optional: f.optional,
+      source: f.source,
+    })),
+  }));
+}
+
+/**
+ * The resolved model view — the ENRICHED IR projected to the wire contract an
+ * agent reasons about: each system's deployable manifest plus every aggregate's
+ * canonical `wireShape` (id → properties → containments → derived, with each
+ * field's rendered type / optionality / provenance).  This is the semantic
+ * layer the AST-level {@link outline} deliberately omits.  Runs lower + enrich
+ * (like {@link generate}); returns an empty view when the source can't lower.
+ */
+export async function readModel(source: string): Promise<ModelView> {
+  const { model, diagnostics } = await parseSource(source);
+  if (!model || hasParseError(diagnostics)) return { systems: [], contexts: [] };
+  let loom: ReturnType<typeof enrichLoomModel>;
+  try {
+    loom = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
+  } catch {
+    return { systems: [], contexts: [] };
+  }
+  return {
+    systems: loom.systems.map((sys) => ({
+      name: sys.name,
+      deployables: sys.deployables.map((d) => ({
+        name: d.name,
+        platform: d.platform,
+        port: d.port,
+      })),
+      // A system's contexts live under its subdomains (top-level members fold
+      // into the lone system as subdomains during lowering).
+      aggregates: sys.subdomains.flatMap((sd) => sd.contexts).flatMap(aggregatesOf),
+    })),
+    // Top-level loose contexts (single-deployable legacy shape) keep their
+    // per-context grouping.
+    contexts: loom.contexts.map((ctx) => ({ name: ctx.name, aggregates: aggregatesOf(ctx) })),
+  };
+}
+
+/**
+ * The closed page-body primitive vocabulary the UI walker admits — the exact
+ * set an agent may use as `BuilderCall` types in a `page`/component body
+ * without declaring a domain type.  Static (no source input): sourced from the
+ * walker registry's admissibility sets, so it can't drift from what the
+ * validator accepts.  Sorted for stable output.
+ */
+export function listPrimitives(): PrimitiveCatalog {
+  return {
+    layout: [...WALKER_LAYOUT_PRIMITIVES].sort(),
+    sub: [...WALKER_SUB_PRIMITIVES].sort(),
+  };
 }

@@ -27,6 +27,7 @@ import type {
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
+import { typeLabel } from "../../util/type-label.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // View-effect builtins (`navigate(…)`, `toast(…)`) lower to bare
@@ -328,25 +329,6 @@ function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
 }
 
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
-function typeLabel(t: TypeIR): string {
-  switch (t.kind) {
-    case "optional":
-      return `${typeLabel(t.inner)}?`;
-    case "primitive":
-      return t.name;
-    case "id":
-      return `${t.targetName} id`;
-    case "enum":
-    case "valueobject":
-    case "entity":
-      return t.name;
-    case "array":
-      return `${typeLabel(t.element)}[]`;
-    default:
-      return t.kind;
-  }
-}
-
 interface BodyCheckCtx {
   aggByName: Map<string, AggregateIR>;
   /** Receiver-root names the walker resolves to an api / view / workflow-
