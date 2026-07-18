@@ -46,6 +46,7 @@ import {
   GUARD_RESCUE,
   isReturningOperation,
   opHasGuards,
+  opHasWhenGate,
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
@@ -301,21 +302,30 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
           ? cuBind
           : "    current_user = Map.get(conn.assigns, :current_user)\n";
       const opCallActor = opActor ? ", current_user" : "";
-      // A guarded op's context fn short-circuits to `{:error, :forbidden}` (403)
-      // or `{:error, :precondition_failed}` (422) — the typed denials that
-      // replaced `raise(ArgumentError, …)` (→ 500).  Emit the matching `else`
-      // arms only when the op has a guard (else they'd be unreachable clauses —
-      // `--warnings-as-errors`).  Same status + ProblemDetails body as the
-      // ES-command controller.
-      const denialArms = opHasGuards(op)
+      // A guarded op's context fn short-circuits to a typed denial tuple — the
+      // `when` state gate to `{:error, :disallowed}` (409), a `requires` to
+      // `{:error, :forbidden}` (403), a `precondition` to `{:error,
+      // :precondition_failed}` (422) — the denials that replaced `raise(
+      // ArgumentError, …)` (→ 500).  Emit each `else` arm only when the op has the
+      // matching guard (else it'd be an unreachable clause — `--warnings-as-
+      // errors`).  Same status + ProblemDetails body as the ES-command controller.
+      const whenArm = opHasWhenGate(op)
         ? `
+
+      {:error, :disallowed} ->
+        ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")`
+        : "";
+      const denialArms =
+        whenArm +
+        (opHasGuards(op)
+          ? `
 
       {:error, :forbidden} ->
         ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
 
       {:error, :precondition_failed} ->
         ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`
-        : "";
+          : "");
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
@@ -610,6 +620,10 @@ ${((): string => {
         headVar: "row",
         bind: "    record = row.data",
         idExpr: "row.id",
+        // `version` lives on the root row (`field :version`), not the `:data`
+        // embed — read it off `row`, not the rehydrated `record` (which no longer
+        // carries it; B5).
+        versionExpr: "row.version",
         contextModule: facadeMod,
       })
     : renderWireSerialize(agg, ctx, { contextModule: facadeMod });

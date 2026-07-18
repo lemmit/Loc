@@ -53,3 +53,51 @@ describe("vanilla named-op persistence (force_change)", () => {
     expect(inc).toContain("|> Api.Shop.CartRepository.persist_change()");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The embed analogue of the `force_change` bug above (B5).  An op that mutates
+// an EMBEDDED containment (`items += Item{…}` on an `embeds_many` jsonb field)
+// rebinds `record.<field>` in the body, then persists via `put_embed`.
+// `put_embed`, like `put_change`, DROPS the change when the new embed equals the
+// changeset DATA — and the data is the ALREADY-mutated `record`, so the write is
+// silently lost.  Embeds have no `force_change`, so the persist changeset is
+// built off the ORIGINAL (pre-mutation) struct `record_before` to give
+// `put_embed` a real diff.  Boot-verified (behavioral `shapes`): an embedded
+// Wishlist `addItem` now round-trips (`items.length` 1, was 0).
+// ---------------------------------------------------------------------------
+const EMBED_SRC = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Wishlist shape: embedded {
+        label: string
+        contains items: WishItem[]
+        create(label: string) { label := label }
+        operation addItem(sku: string) { items += WishItem { sku: sku } }
+        entity WishItem { sku: string }
+      }
+      repository Wishlists for Wishlist { }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+describe("vanilla named-op persistence (embedded containment put_embed)", () => {
+  it("builds the persist changeset off the pre-mutation struct so put_embed sees a diff", async () => {
+    const facade = file(await generateSystemFiles(EMBED_SRC), "/shop.ex");
+    const add = facade.slice(facade.indexOf("def add_item_wishlist("));
+    // The original struct is captured BEFORE the body rebinds record.items…
+    expect(add).toContain("record_before = record");
+    expect(add).toContain(
+      "record = %{record | items: (record.items || []) ++ [%Api.Shop.WishItem{sku: sku}]}",
+    );
+    // …and the changeset is built off that original, so put_embed(:items, <new>)
+    // is a real diff against the OLD embed (a `record`-based base would drop it).
+    expect(add).toContain("record_before\n    |> Ecto.Changeset.change(%{})");
+    expect(add).toContain("|> Ecto.Changeset.put_embed(:items, record.items)");
+  });
+});

@@ -63,8 +63,8 @@ import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import {
+  collectOpGuardClauses,
   type OpFragment,
-  renderOpGuardClause,
   renderReturningStmt,
   returningOpHasSuccessPath,
   returningOpPersistsChangeset,
@@ -86,7 +86,17 @@ export function isVanillaDocAgg(agg: AggregateIR, ctx: BoundedContextIR, sys?: S
  *  field stays in (cast like any column). */
 function docFields(agg: AggregateIR): FieldIR[] {
   const managedTs = managedTimestampNames(agg);
-  return agg.fields.filter((f) => f.name !== "id" && !managedTs.has(f.name));
+  // Drop `token`-access fields (the optimistic-concurrency `version`): the
+  // document row stores `version` on the ROOT schema (`field :version`,
+  // stamped by `document_changeset`), NOT inside the `:data` jsonb blob.  If it
+  // leaked into the `<Agg>.Data` embed it would be `cast` + `validate_required`
+  // there while `document_changeset` only stamps the root — so create (which
+  // never supplies `version`) fails the embed's `validate_required(:version)`,
+  // surfacing as a 422 with an empty top-level `errors` array (the nested embed
+  // carries the error).  B5.
+  return agg.fields.filter(
+    (f) => f.name !== "id" && !managedTs.has(f.name) && f.access !== "token",
+  );
 }
 
 /** Ecto type atom for a schemaless `cast/3` types map.  Simpler than the
@@ -535,11 +545,7 @@ function docOpStructBody(
   const params = usedParams.map(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
-  const guardStmts = op.statements.filter(
-    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
-      s.kind === "requires" || s.kind === "precondition",
-  );
-  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, rc));
+  const guardClauses = collectOpGuardClauses(op, rc);
   const lastIdx = op.statements.length - 1;
   const bodyStmts = op.statements.filter(
     (s, i) =>
@@ -772,12 +778,14 @@ export function renderDocReturningOpFunction(
     // Non-committing: a fall-through returns the in-memory wire projection off the
     // (possibly mutated but uncommitted) embed; an explicit `return` renders inline
     // in `body`.  Byte-identical to the pre-#1774 doc path for these shapes.
-    tailLines = fallThrough ? [`    {:ok, ${docWireMap(agg, "row.id", "record")}}`] : [];
+    tailLines = fallThrough
+      ? [`    {:ok, ${docWireMap(agg, "row.id", "record", "row.version")}}`]
+      : [];
   } else if (aggregateSuccess) {
     // Mutating success (fall-through OR normalized trailing `return this`): persist,
     // then project the aggregate wire off the SAVED embed.
     tailLines = persistThen([
-      `      {:ok, saved} -> {:ok, ${docWireMap(agg, "saved.id", "saved.data")}}`,
+      `      {:ok, saved} -> {:ok, ${docWireMap(agg, "saved.id", "saved.data", "saved.version")}}`,
     ]);
   } else {
     // Shape C: a mutating body ending in a NON-aggregate success return
@@ -840,10 +848,21 @@ ${bodyContent}
  *  response matches `GET /<plural>/:id`.  `idExpr` supplies the id (off the root
  *  row / saved row — the embed carries none, `@primary_key false`); `recvExpr` is
  *  the struct the fields read off (`record` in-memory, `saved.data` post-commit). */
-function docWireMap(agg: AggregateIR, idExpr: string, recvExpr: string): string {
+function docWireMap(
+  agg: AggregateIR,
+  idExpr: string,
+  recvExpr: string,
+  versionExpr: string,
+): string {
+  // `version` is a token column on the ROOT row, not the `:data` embed
+  // (`docFields` excludes it — B5), so it reads off `versionExpr` (the root), not
+  // `recvExpr`.  Present iff the aggregate carries the (default-on) concurrency
+  // token, so the op-response wire shape matches `GET /<plural>/:id`.
+  const hasVersion = agg.fields.some((f) => f.name === "version" && f.access === "token");
   const entries = [
     `"id" => ${idExpr}`,
     ...docFields(agg).map((f) => `${JSON.stringify(f.name)} => ${recvExpr}.${snake(f.name)}`),
+    ...(hasVersion ? [`"version" => ${versionExpr}`] : []),
   ];
   return `%{${entries.join(", ")}}`;
 }

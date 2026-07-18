@@ -24,11 +24,11 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 
 | System (feature)              | node | java | python | dotnet | elixir |
 |-------------------------------|:----:|:----:|:------:|:------:|:------:|
-| state-gate (`when` gate)      |  ✅  |  ✅  |   ✅   |   ✅   |🔴 B6   |
+| state-gate (`when` gate)      |  ✅  |  ✅  |   ✅   |   ✅   |✅ B6   |
 | sales (core CRUD/VO/assoc)    |  ✅  |  ✅  |   ✅   |   ✅   |  ✅    |
 | payments (inheritance)        |  ✅  |  ✅  |   ✅   |✅ B2   |  ✅    |
 | ledger (event-sourcing)       |✅ B1 |  ✅  |   ✅   |   ✅   |  ✅    |
-| shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |🔴 B5   |
+| shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |✅ B5   |
 | value-collections (`Money[]`) |  ✅  |  ✅  |   ✅   |✅ B4   |  ✅    |
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
@@ -136,31 +136,72 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
 
-## B6 🔴 elixir — `when` state-gate is not enforced at runtime
+## B6 ✅ elixir — `when` state-gate is not enforced at runtime
 
-- **Where:** `src/generator/elixir/` (operation `when` canCommand guard).
+- **Where:** `src/generator/elixir/vanilla/` (operation `when` canCommand guard).
 - **Repro:** `test/fixtures/corpus/state-gate.ddd` on elixir —
   `POST /api/orders/{id}/cancel` on a **Shipped** order should be rejected 409 (the
-  `when this.status != Shipped …` gate), but on elixir the call **resolves** ("the
-  call resolved, expected it to reject"). node/java/python/dotnet all return 409.
+  `when this.status != Shipped …` gate), but on elixir the call **resolved**. node/
+  java/python/dotnet all return 409.
 - **Impact:** a **correctness/consistency control silently not enforced** — every
-  `operation … when <guard>` runs unconditionally on elixir, so state-gated
-  commands execute in states they should be blocked in.
-- **Status:** confirmed (op resolves instead of 409); the `when` predicate check
-  is missing from the elixir operation path.
+  `operation … when <guard>` ran unconditionally on elixir, so state-gated
+  commands executed in states they should be blocked in.
+- **Root cause:** the elixir op emitters hoisted only `requires`/`precondition`
+  statements into the `with :ok <- ensure(...)` guard chain — the `op.when`
+  predicate field was never rendered at all (the `loom.when-unsupported` validator
+  had already added elixir to the supported set, so it generated + booted but
+  silently skipped the gate).
+- **Fix:** a shared `collectOpGuardClauses(op, rc)` (`operation-returns-emit.ts`)
+  prepends `:ok <- ensure(<when-pred>, :disallowed)` to the guard chain of EVERY
+  op path (relational named / returning / extern, document, ES command), so the
+  predicate evaluates against the loaded aggregate BEFORE the body; a false
+  predicate short-circuits to `{:error, :disallowed}`, which every controller maps
+  to a **409 Conflict** ProblemDetails (parity with Hono/​.NET/​Java/​Python's
+  DisallowedError → 409).  `ensure/2` emission + the controller denial arm gate on
+  `opHasWhenGate` so a `when`-free op stays byte-identical.
+- **Status:** ✅ fixed — `state-gate` green on elixir (Shipped order → 409); pinned
+  by `test/generator/elixir/vanilla-when-gate.test.ts`.
 
-## B5 🔴 elixir — `shape: document` / `shape: embedded` create 422s
+## B5 ✅ elixir — `shape: document` create 422s / `shape: embedded` op write is lost
 
-- **Where:** `src/generator/elixir/` (jsonb shape → Ecto changeset/schema).
+- **Where:** `src/generator/elixir/vanilla/` (jsonb shape → Ecto changeset/schema
+  + embed persist).
 - **Repro:** `test/behavioral/systems/shapes.ddd` on elixir (booted via the
-  `elixir:1.16-otp-26` docker image + node 22) — `POST /api/carts` (document) and
-  `POST /api/wishlists` (embedded) → **422 "Validation failed"** with an EMPTY
-  `errors` array. node/java/python pass; dotnet crashes on boot (B3) — elixir
-  fails differently (changeset rejects the create with no field error).
-- **Impact:** document/embedded aggregates can't be created on elixir at runtime.
-  ES `ledger` PASSES on elixir (contrast node B1), so this is shape-specific.
-- **Status:** confirmed 422; the Ecto changeset/cast for the jsonb shape is the
-  suspect (empty errors ⇒ a top-level cast/validation rejects before field checks).
+  `elixir:1.16-otp-26` docker image + node 22) — TWO distinct bugs (the audit's
+  "both 422" was imprecise; only the document create 422'd):
+  1. **document** `POST /api/carts` → **422 "Validation failed"** with an EMPTY
+     `errors` array.
+  2. **embedded** `POST /api/wishlists` **succeeded**, but the follow-up
+     `addItem` (`items += WishItem{…}`) did NOT round-trip — the read-back
+     `items.length` was `0`, not `1`.
+- **Impact:** document aggregates couldn't be created; embedded-shape contained-part
+  mutations were silently dropped on write.
+- **Root cause (document create 422):** the default-on `versioned` capability
+  splices a `version` **token** field onto every non-ES aggregate.  For a document
+  aggregate the row stores `version` on the ROOT schema (`field :version`, stamped
+  by `document_changeset`), but the emitter also included it in the `<Agg>.Data`
+  **embed** — so the embed's `changeset/2` `validate_required(:version)`'d a value
+  create never supplies.  The failure lived on the nested `:data` embed changeset,
+  so the parent's top-level `errors` was empty (→ 422 with `errors: []`).
+- **Fix (document create):** `docFields` drops `access: "token"` fields from the
+  `Data` embed (schema + cast + required); the two document serializers
+  (`renderWireSerialize` via a new `versionExpr` opt, and `docWireMap`) read
+  `version` off the ROOT row (`row.version` / `saved.version`) instead of the
+  embed, so the wire shape is unchanged.
+- **Root cause (embedded op write lost):** an op that mutates an embedded
+  containment rebinds `record.<field>` in the body, then persists via
+  `put_embed(:<field>, record.<field>)`.  `put_embed`, like `put_change`, DROPS a
+  change equal to the changeset DATA — and the base was the ALREADY-mutated
+  `record`, so `Repo.update` ran no SQL.  This is the embed analogue of the
+  documented scalar `force_change` trap; embeds have no `force_` variant.
+- **Fix (embedded op write):** `renderNamedOpFunction` captures the pre-mutation
+  struct as `record_before` and builds the persist changeset off it (gated on
+  embedded-containment mutation → byte-identical otherwise), so `put_embed` sees a
+  real diff.
+- **Status:** ✅ fixed — `shapes` green on elixir (document Cart create + jsonb
+  round-trip; embedded Wishlist `addItem` → `items.length` 1).  Pinned by
+  `test/generator/elixir/vanilla-document.test.ts` (version out of the embed) +
+  `vanilla-op-persist.test.ts` (embedded `put_embed` base).
 
 <!-- Note the asymmetry: dotnet's event-sourced `ledger` PASSES (node's B1 fails);
      node's `payments`/`shapes` PASS (dotnet's B2/B3 fail). Each backend has its
