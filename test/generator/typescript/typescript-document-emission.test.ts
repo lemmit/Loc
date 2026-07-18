@@ -110,9 +110,15 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
       "const items = ((row.items ?? []) as WishItemDoc[]).map((x) => wishItemFromDoc(x));",
     );
     expect(repo).toContain("Wishlist._rehydrate({ id: Ids.WishlistId(row.id)");
-    // Save writes root columns + items jsonb in one upsert.
+    // Save writes root columns + items jsonb, CAS-guarded on the expected
+    // version (versioned is default-on) — a lost race raises ConcurrencyError,
+    // so the crudish `update` route's `repo.save(agg, expectedVersion)` type-checks.
+    expect(repo).toContain("async save(aggregate: Wishlist, expectedVersion?: number)");
     expect(repo).toContain("items: aggregate.items.map((e) => wishItemToDoc(e))");
-    expect(repo).toContain(".onConflictDoUpdate({ target: schema.wishlists.id");
+    expect(repo).toContain(
+      ".where(and(eq(schema.wishlists.id, aggregate.id), eq(schema.wishlists.version, expected)))",
+    );
+    expect(repo).toContain('throw new ConcurrencyError("Wishlist", aggregate.id as string)');
     // byCustomer is a real indexed SQL WHERE on the root column — NOT in-memory.
     expect(repo).toContain(".where(eq(schema.wishlists.customerId, customerId))");
     expect(repo).not.toContain("FromDoc(row.data");
