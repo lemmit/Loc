@@ -736,6 +736,17 @@ export interface OperationFormState extends FormStateBase {
    *  public op) — `false` for the rest.  Platform-neutral emphasis
    *  token; each pack's template maps it to its button vocabulary. */
   triggerPrimary: boolean;
+  /** In-scope record variable (the op-form's instance receiver, e.g.
+   *  `data` on a Detail page) when the active pack threads the record into
+   *  its op-form component (`manifest.seedsOpFormRecord`).  Set ⇒ a
+   *  `this.<field>` param default was seeded as `<recordVar>.<field>` in
+   *  `defaultValuesTs`, and the trigger/component must pass the record prop.
+   *  Undefined ⇒ no record threaded (this-relative defaults fell back). */
+  recordVar?: string;
+  /** Type of the threaded record (the aggregate's response type,
+   *  `<Agg>Response`) — the `record` prop annotation.  Present iff
+   *  `recordVar` is. */
+  recordType?: string;
 }
 
 /** Rewrite a detected user-FIND hook's rendered args from positional to

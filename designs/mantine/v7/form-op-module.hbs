@@ -1,11 +1,11 @@
-function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>): void {
+function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>{{#if recordVar}}, record: {{recordType}}{{/if}}): void {
   modals.open({
     title: "{{humanOp}}",
-    children: <{{opPascal}}Form mut={mut} onClose={() => modals.closeAll()} />,
+    children: <{{opPascal}}Form mut={mut}{{#if recordVar}} record={record}{{/if}} onClose={() => modals.closeAll()} />,
   });
 }
 
-function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>; onClose: () => void }) {
+function {{opPascal}}Form({ mut,{{#if recordVar}} record,{{/if}} onClose }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>;{{#if recordVar}} record: {{recordType}};{{/if}} onClose: () => void }) {
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
 {{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
     resolver: zodResolver({{opPascal}}{{aggregateName}}Request),

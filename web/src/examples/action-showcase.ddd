@@ -18,6 +18,9 @@ system ActionShowcase {
         status: string
         operation confirm() { }
         operation cancel() { }
+        // A this-relative param default: the op form seeds `memo` from the
+        // loaded record (`record.customerId`) on packs that thread it.
+        operation note(memo: string = this.customerId) { status := memo }
         derived display: string = customerId
       }
       repository Orders for Order { }
@@ -35,7 +38,8 @@ system ActionShowcase {
     component OrderActions(order: Order) {
       body: Toolbar {
         Action { order.confirm, then: navigate(Home) },
-        Action { order.cancel }
+        Action { order.cancel },
+        Modal { OperationForm { order.note }, trigger: Button { "Add note" }, title: "Add note" }
       }
     }
 
