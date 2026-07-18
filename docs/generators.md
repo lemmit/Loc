@@ -834,6 +834,29 @@ consuming the wire shape only, it supplies its own F# expression leaves
 
 Known frontier (M-T1.16): modal open-state, typed in-flight form state, enum DU wire decoder, per-page sub-models, multi-param routes; and the interactive-`Table` sort/pagination/filter seams degrade (Elmish needs Set-Msg/update plumbing) rather than emit.
 
+## Flutter mobile (`platform: flutter`, `framework: flutter`)
+
+The **mobile axis** — a new development branch outside the web-target matrix, not
+a sixth web SPA.  `src/generator/flutter/` emits a **Dart/Flutter (Material 3)
+app on Riverpod** per flutter deployable.  Like Feliz it is **self-hosting** (own
+SDK build — `flutter build web`, not the vite static pipeline) so it hosts only
+its own `framework: flutter` UI.  Structurally Flutter is a **Feliz clone**: a
+non-JSX, function-call-tree target (`Column(children: [ … ])`) that rides the
+**same shared markup walker** (`walker-core.ts`) through `flutter-target.ts` +
+a Dart expression-leaf table, and — like Feliz — supplies its own `interChildSeparator`
+seam because Dart list literals are comma-separated.
+
+| Concern | Emission |
+|---|---|
+| Architecture | **Riverpod** — each page with `state {}`/actions projects an immutable `<Page>State` + a `<Page>Notifier extends Notifier<State>` (`riverpod-emit.ts`); named actions become notifier methods (`state = state.copyWith(…)`), and the page is a `ConsumerWidget` binding `ref.watch`/`ref.read`.  App root wraps `ProviderScope`. |
+| Wire models | `lib/models.dart` — a Dart class + `fromJson`/`toJson` per aggregate/VO/event; discriminated payload unions emit a **Dart-3 `sealed class`** + tag-switching factory (exhaustive `switch`, the analogue of Loom's `match`). |
+| Data / reads | `QueryView` resolves to a Riverpod `FutureProvider` (`reads-emit.ts`) that `GET`s the collection (unwrapping the paged `{items}` envelope) or a `FutureProvider.family` for byId; the widget renders `AsyncValue.when(loading/error/data)` with `empty:` folded in.  `For` lowers to `.map(...).toList()`. |
+| Forms | `CreateForm`/`OperationForm`/`DestroyForm` render self-contained `StatefulWidget`s in `lib/forms.dart` (`forms-emit.ts`) — typed field widgets by wire type (`TextFormField`/`SwitchListTile`/`DropdownButtonFormField`/`showDatePicker`, value objects flattened), `GlobalKey<FormState>` validation, `http` POST/PUT/DELETE via `apiUri`, pop-on-success. |
+| Design | The procedural **flutterMaterial** pack (`src/generator/flutter/pack.ts`, Feliz-`pack.ts` model — emits Material widget trees, no `.hbs`). |
+| CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). |
+
+Known frontier: foreign-key `X id` form fields degrade to a raw-id `TextFormField` (no Riverpod-loaded `<select>` yet); scalar/value-object array inputs, `WorkflowForm`/`Modal`/`Action`/`UserComponent`, inline `:=` view writes, `match await` async effects, and the native (non-web) build surface are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
+
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
 `generate system` for deployables marked `platform: elixir`.

@@ -25,6 +25,7 @@ versioning works.
 | `vue` | `src/platform/vue.ts` | 3003 | ✗ | ✓ |
 | `svelte` | `src/platform/svelte.ts` | 3002 | ✗ | ✓ |
 | `angular` | `src/platform/angular.ts` | 3004 | ✗ | ✓ |
+| `flutter` (mobile axis — Dart/Flutter + Riverpod, self-hosting `flutter build web`) | `src/platform/flutter.ts` | 3006 | ✗ | ✓ (hosts only `framework: flutter`) |
 | `static` | aliased to `react.ts` | 3001 | ✗ | ✓ |
 
 - **Needs DB** — the system orchestrator (`src/system/index.ts`)
@@ -32,10 +33,20 @@ versioning works.
   `CREATE DATABASE` line in `db-init/00-create-databases.sql` and
   wire a `depends_on: db` healthcheck in `docker-compose.yml`.
 - **Mounts UI** — whether the deployable validator allows a `ui:`
-  binding on this platform.  `react` / `vue` / `svelte` / `angular` / `static`
-  always mount; `dotnet`, `java` and `python` are
+  binding on this platform.  `react` / `vue` / `svelte` / `angular` /
+  `flutter` / `static` always mount; `dotnet`, `java` and `python` are
   dual-mode (mount when `ui:` is declared, otherwise backend-only);
   `elixir` always mounts (fullstack LiveView); `node` never does.
+
+> **`flutter` is the mobile axis, not a sixth web SPA.**  Like Feliz it is a
+> self-hosting frontend (own SDK build — `flutter build web`, not a vite static
+> bundle), so it hosts only its own `framework: flutter` UI and dispatches
+> through `src/generator/flutter/`.  It emits a Dart/Flutter (Material 3) app on
+> Riverpod: wire models (`sealed class` for payload unions), `ConsumerWidget`
+> pages, `Notifier` state + actions, `FutureProvider` reads for `QueryView`, and
+> `StatefulWidget` forms (`CreateForm` / `OperationForm` / `DestroyForm`).  The
+> emitted Dart is compiled per-PR by `generated-flutter-build.yml`
+> (`flutter analyze` + `flutter build web`).
 
 ## Resolving a `platform:` value
 

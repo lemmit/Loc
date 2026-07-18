@@ -8,11 +8,12 @@ name: Generated Flutter build
 # lowers cleanly to IR but emits non-compiling Dart — invisible to the fast
 # vitest suite (which only asserts emitted-string shape; no local Flutter SDK).
 #
-# WALKING SKELETON gate: display path (Stack/Heading/Card/Text/Button) only —
-# forms/workflows/match-await and the native (non-web) surface are deferred to
-# full parity and this gate grows with them.  `analyze` runs errors-only for now
-# (`--no-fatal-warnings --no-fatal-infos`) so lint-nits don't block the first
-# compile signal; `flutter build web` is the load-bearing "is the Dart real"
+# Covers the full shipped interactive surface — display + Riverpod state/actions
+# + data reads (QueryView) + forms (Create/Operation/Destroy) + named routing.
+# Workflows/match-await and the native (non-web) surface remain deferred to
+# later parity and this gate grows with them.  `analyze` runs errors-only
+# (`--no-fatal-warnings --no-fatal-infos`) so lint-nits (prefer_const infos)
+# don't block; `flutter build web` is the load-bearing "is the Dart real"
 # check.  The .ddd is embedded here (not under examples/) so the other
 # example-globbing gates never pick up a flutter-only source.
 
@@ -59,39 +60,44 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Generate the Flutter skeleton system
+      - name: Generate the Flutter showcase system
         run: |
           mkdir -p ci-flutter
-          # Two-page routed app exercising the display path: Stack/Column layout,
-          # Heading (→ Text), Card, Text, Button (navigation), and multi-page
-          # named routing.  No forms/data-binding — the walking skeleton's scope.
-          cat > ci-flutter/skeleton.ddd <<'DDD'
+          # Full interactive showcase — exercises every shipped tier:
+          #   • Riverpod state + actions (Home's counter: state{count} + inc())
+          #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
+          #   • forms (NewProduct's CreateForm; ProductAdmin's OperationForm +
+          #     DestroyForm on a :id route) over every field kind (string/int/bool/
+          #     enum/datetime/optional + a Money value object)
+          #   • display + multi-page named routing + navigation buttons
+          # This is the load-bearing "does the emitted Dart compile" gate.
+          cat > ci-flutter/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
-
             subdomain Catalog {
               context Cat {
+                enum Status { active inactive archived }
+                valueobject Money { amount: int  currency: string }
                 aggregate Product {
-                  name:  string
-                  price: money
+                  name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
+                  operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }
               }
             }
-
             storage db { type: postgres }
             resource catState { for: Cat, kind: state, use: db }
-
             ui MobileApp {
               framework: flutter
+              api Shop: ShopApi
               page Home {
                 route: "/"
+                state { count: int = 0 }
+                action inc() { count := count + 1 }
                 body: Stack {
                   Heading { "Storefront", level: 1 },
-                  Text { "Welcome to the shop" },
-                  Card { "Featured",
-                    Text { "Today's pick" }
-                  },
+                  Text { "Taps: " + count },
+                  Button { "+", onClick: inc },
                   Button { "Browse products", to: "/products" }
                 }
               }
@@ -99,17 +105,24 @@ jobs:
                 route: "/products"
                 body: Stack {
                   Heading { "Products", level: 1 },
-                  Text { "Product catalogue" },
-                  Button { "Back home", to: "/" }
+                  QueryView {
+                    of: Shop.Product.all,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No products yet." },
+                    data: rows => Stack { For { each: rows, p => Card { p.name, Text { p.price } } } }
+                  },
+                  Button { "Add product", to: "/products/new" }
                 }
               }
+              page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              page ProductAdmin { route: "/products/:id"  body: Stack {
+                Heading { "Admin", level: 1 }, OperationForm { of: Product, op: rename }, DestroyForm { of: Product }
+              } }
             }
-
             deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
-            deployable app { platform: flutter targets: api ui: MobileApp port: 3006 }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
           }
           DDD
-          node bin/cli.js generate system ci-flutter/skeleton.ddd -o ci-flutter/out
+          node bin/cli.js generate system ci-flutter/showcase.ddd -o ci-flutter/out
       - name: Locate the emitted Flutter project
         id: proj
         run: echo "dir=$(dirname "$(find ci-flutter/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
