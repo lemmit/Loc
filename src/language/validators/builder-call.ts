@@ -8,6 +8,7 @@ import type {
   Aggregate,
   BuilderCall,
   EntityPart,
+  Expression,
   Model,
   NameRef,
   PayloadDecl,
@@ -32,7 +33,6 @@ import {
   isStateField,
   isValueObject,
 } from "../generated/ast.js";
-import type { Expression } from "../generated/ast.js";
 import { type DddType, resolveTypeRef, T } from "../type-system.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
