@@ -128,6 +128,13 @@ export function generateFlutterForContexts(
   // target, not a modelling mode — both are always available.
   out.set("Makefile", renderMakefile(pkg));
   out.set("README.md", renderReadme(title, pkg));
+  // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
+  // the real app and asserts it renders.  Unlike an `integration_test` (needs a
+  // device/emulator) this runs under plain `flutter test` on any host, so it
+  // gates "does the app actually RUN", not just compile.  Data reads fire on
+  // mount and settle to their loading/error branch with no backend — the tree
+  // still builds, which is exactly what the smoke proves.
+  out.set("test/widget_test.dart", renderWidgetSmokeTest(pkg));
 
   return out;
 }
@@ -424,6 +431,26 @@ analyze:
 
 clean:
 	flutter clean
+`;
+}
+
+/** `test/widget_test.dart` — headless runtime smoke.  Pumps the real `App`
+ *  (which roots its own `ProviderScope`) once and asserts a `MaterialApp`
+ *  mounted.  A single `pump()` (not `pumpAndSettle`) is deliberate: reads fire
+ *  a `FutureProvider` on mount whose future never completes without a backend,
+ *  so settling would hang — the first frame already proves the app boots. */
+function renderWidgetSmokeTest(pkg: string): string {
+  return `import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:${pkg}/main.dart';
+
+void main() {
+  testWidgets('app boots and renders a MaterialApp', (WidgetTester tester) async {
+    await tester.pumpWidget(const App());
+    await tester.pump();
+    expect(find.byType(MaterialApp), findsOneWidget);
+  });
+}
 `;
 }
 
