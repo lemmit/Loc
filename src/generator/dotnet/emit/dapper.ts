@@ -1466,9 +1466,12 @@ export function renderDapperSchema(
 ): string {
   // Event-sourced aggregates own no per-aggregate table — their stream lives in
   // the shared per-context `<ctx>_events` log emitted after this map.  Document
-  // aggregates own one `(id, data, version)` blob table.
+  // aggregates own one `(id, data, version)` blob table.  An ABSTRACT base owns
+  // no table of its own: a TPC (`ownTable`) base's rows live in each concrete's
+  // standalone table (with the merged base fields), so it emits no DDL.  (A TPH
+  // base WOULD own the shared table, but TPH stays validator-gated on Dapper.)
   const stateTables = aggs
-    .filter((agg) => agg.persistedAs !== "eventLog")
+    .filter((agg) => agg.persistedAs !== "eventLog" && !agg.isAbstract)
     .map((agg) => {
       // Document shape: the whole aggregate is one JSONB `data` column.  No
       // per-field columns, no child/join tables — the graph folds into the blob.

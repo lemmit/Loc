@@ -1,0 +1,47 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's TPC
+// (`ownTable`) AGGREGATE INHERITANCE surface (M-T6.9 wave 3).  Each concrete
+// subtype is a standalone table carrying the MERGED base + own fields (a normal
+// Dapper repository hydrating through `_Create(State)`); the abstract base owns
+// no table; the polymorphic `find all <Base>` base reader is persistence-
+// agnostic (it delegates to each concrete's `All()`).  Build under
+// `dotnet build /warnaserror`.
+
+system DapperTpc {
+  api PartyApi from Registry
+
+  subdomain Registry {
+    context Parties {
+      // Abstract TPC base — owns no table; its fields merge into each concrete.
+      abstract aggregate Party inheritanceUsing: ownTable {
+        name:  string
+        email: string
+      }
+
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+
+      aggregate Vendor extends Party with crudish {
+        rating: int
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource partiesState { for: Parties, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Parties]
+    dataSources: [partiesState]
+    serves: PartyApi
+    port: 8080
+  }
+}

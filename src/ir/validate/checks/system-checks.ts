@@ -45,6 +45,7 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {
   dataSourceKindForAggregate,
@@ -1796,8 +1797,15 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           shape !== "embedded"
         )
           reject(where, `is persisted as shape(${shape})`);
-        if (a.isAbstract || a.extendsAggregate)
-          reject(where, "participates in aggregate inheritance");
+        // Aggregate inheritance: TPC (`ownTable`) IS supported — each concrete
+        // is a standalone table with the merged base fields (a normal Dapper
+        // repository), and the polymorphic `find all <Base>` base reader is
+        // persistence-agnostic (it delegates to each concrete's `All()`).  TPH
+        // (`sharedTable` — one shared table + `kind` discriminator hydration)
+        // stays gated: the discriminator-switch construction seam isn't wired on
+        // the Dapper repository yet.
+        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates))
+          reject(where, "participates in TPH (sharedTable) aggregate inheritance");
         if (isDocShape) continue;
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every

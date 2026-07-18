@@ -588,6 +588,66 @@ system D {
   });
 });
 
+// TPC (`ownTable`) aggregate inheritance on Dapper (M-T6.9 wave 3): each
+// concrete is a standalone table carrying the MERGED base fields (a normal
+// Dapper repository); the abstract base owns no table; the polymorphic
+// `find all <Base>` base reader is persistence-agnostic (it delegates to each
+// concrete's `All()`).  TPH (`sharedTable`) stays gated.
+describe("dapper TPC (ownTable) aggregate inheritance", () => {
+  const TPC = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: ownTable {
+        name: string
+        email: string
+      }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+      aggregate Vendor extends Party with crudish { rating: int }
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects TPC inheritance; each concrete gets a standalone merged-field table", async () => {
+    const { files, errors } = await emit(TPC);
+    expect(errors).toEqual([]); // the dapper TPC inheritance gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // Standalone concrete tables carry base + own columns; the abstract base
+    // owns NO table.
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS vendors");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS parties");
+    const customer = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // The concrete's Map hydrates the merged (inherited + own) State fields.
+    expect(customer).toContain("Name = r.name,");
+    expect(customer).toContain("Email = r.email,");
+    expect(customer).toContain("CreditLimit = r.credit_limit,");
+    // The polymorphic base reader delegates to each concrete's All().
+    const base = files.get("api/Infrastructure/Repositories/PartyRepository.cs")!;
+    expect(base).toContain("result.AddRange(await _customerRepo.All(cancellationToken));");
+    expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
+  });
+
+  it("still rejects TPH (sharedTable) inheritance", async () => {
+    const src = TPC.replace("inheritanceUsing: ownTable", "inheritanceUsing: sharedTable");
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
+      true,
+    );
+  });
+});
+
 // Capability filters on Dapper: a non-principal `filter <expr>` is spliced
 // into every SELECT's WHERE (Dapper has no EF HasQueryFilter); the gate only
 // rejects principal-referencing predicates (no request-scoped principal
