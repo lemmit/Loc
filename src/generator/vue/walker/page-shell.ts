@@ -55,6 +55,24 @@ function renderInitLiteral(e: ExprIR): string | undefined {
   return undefined;
 }
 
+// A `this.<param>` op-default seeds `defaultValuesTs` as `record.<field>` (the
+// shared walker's `seedsOpFormRecord` convention — `record` is React's threaded
+// prop name).  Vue inlines the op-form in `<script setup>`, where the loaded
+// aggregate is the in-scope component prop, already spelled by the resolved
+// id expression as `<recordExpr>.id`.  Re-point the seed's `record.` token at
+// that expression so the value binds at setup — no prop/reset plumbing needed.
+// Guarded on the `.id` suffix so the by-name / render-lambda case (`id ?? ""`,
+// record not in `<script setup>` scope) is left as the type-zero seed.
+function recordQualifiedSeed(
+  defaultValuesTs: string,
+  recordVar: string | undefined,
+  resolvedIdExpr: string,
+): string {
+  if (!recordVar || !resolvedIdExpr.endsWith(".id")) return defaultValuesTs;
+  const recordExpr = resolvedIdExpr.slice(0, -".id".length);
+  return defaultValuesTs.replace(/\brecord\./g, `${recordExpr}.`);
+}
+
 // ---------------------------------------------------------------------------
 // Vue page shell — assembles a generated `.vue` SFC around a walked
 // page body.  The Vue analogue of `react/walker/page-shell.ts`, v1
@@ -387,7 +405,7 @@ export function renderVuePage(input: VuePageShellInput): string {
     vueImports.add("ref");
     opFormLines.push(`const ${openFn} = (_mut: unknown) => { ${opCamel}Open.value = true; };`);
     opFormLines.push(
-      `const ${opCamel}Form = useLoomForm(${opPascal}${agg}Request, ${state.defaultValuesTs});`,
+      `const ${opCamel}Form = useLoomForm(${opPascal}${agg}Request, ${recordQualifiedSeed(state.defaultValuesTs, state.recordVar, state.idExpr)});`,
     );
     // Field markup was walked with the create-form instance name
     // (`form.`) — re-point it at this dialog's instance.  Provisional
@@ -1095,7 +1113,7 @@ export function renderVueComponentFile(
     vueImports.add("ref");
     formLines.push(`const ${openFn} = (_mut: unknown) => { ${opCamel}Open.value = true; };`);
     formLines.push(
-      `const ${opCamel}Form = useLoomForm(${opPascal}${agg}Request, ${st.defaultValuesTs});`,
+      `const ${opCamel}Form = useLoomForm(${opPascal}${agg}Request, ${recordQualifiedSeed(st.defaultValuesTs, st.recordVar, rewriteScript(st.idExpr))});`,
     );
     const fields = st.fieldHtmls
       .map((h) => h.replaceAll("form.values.", `${opCamel}Form.values.`))
