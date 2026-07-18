@@ -625,7 +625,7 @@ function emitProjectFromContexts(
   // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
   // adds the `Seed.RunSeeds(...)` startup call after `Database.Migrate()`.
   if (merged.seeds.length > 0) {
-    emitDotnetSeeds(merged, ns, out);
+    emitDotnetSeeds(merged, ns, out, usingDapper);
   }
   const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet

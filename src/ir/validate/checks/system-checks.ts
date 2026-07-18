@@ -1708,8 +1708,9 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
       // mirroring the find path.  No gate.
-      if ((ctx.seeds ?? []).length > 0)
-        reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      // `seed` data is now supported — the Dapper seeder (Seed.cs) frames the
+      // marker table / raw inserts on Npgsql+Dapper while reusing the
+      // persistence-agnostic domain-`Create` path (I<Agg>Repository.SaveAsync).
       // Workflow event subscriptions (and therefore channels/outbox): the
       // saga handlers + outbox dispatcher/relay inject the EF AppDbContext,
       // which a Dapper deployable does not emit — the project would not

@@ -237,6 +237,47 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
 
   it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
 
+  it("no longer rejects seed data; emits a Dapper-framed Seed.cs", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Customer with crudish { name: string  active: bool }
+      repository Customers for Customer { }
+      seed default { Customer { name: "Acme", active: true } }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the dapper seed gate is lifted
+    const seed = files.get("api/Infrastructure/Persistence/Seed.cs")!;
+    expect(seed).toBeDefined();
+    // Framed on Npgsql+Dapper, not the EF AppDbContext.
+    expect(seed).toContain(
+      "public static async Task RunSeeds(NpgsqlDataSource db, IServiceProvider sp",
+    );
+    expect(seed).toContain("using Dapper;");
+    expect(seed).not.toContain("AppDbContext");
+    expect(seed).not.toContain("Microsoft.EntityFrameworkCore");
+    // Marker table + idempotency go through Dapper's conn.ExecuteAsync.
+    expect(seed).toContain('CREATE TABLE IF NOT EXISTS \\"__loom_seed\\"');
+    expect(seed).toContain('INSERT INTO \\"__loom_seed\\" (\\"dataset\\") VALUES (@dataset)');
+    // Domain-`Create` path is persistence-agnostic (repository SaveAsync).
+    expect(seed).toContain(
+      'await customerRepo.SaveAsync(Customer.Create(name: "Acme", active: true), cancellationToken);',
+    );
+    // Program.cs resolves the singleton NpgsqlDataSource from a scope (which
+    // also resolves the scoped I<Agg>Repository the domain path uses).
+    const program = files.get("api/Program.cs")!;
+    expect(program).toContain(
+      "var seedDb = seedScope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();",
+    );
+  });
+
   it("rejects workflow event subscriptions (saga handlers + outbox need the EF AppDbContext)", async () => {
     const src = `
       system D {

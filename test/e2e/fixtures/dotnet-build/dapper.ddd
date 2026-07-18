@@ -48,6 +48,16 @@ system DapperNet {
       // rendering under the dapper-build `/warnaserror` gate.
       criterion NameIs(n: string) of Customer = name == n
       retrieval ByNameSorted(n: string) of Customer { where: NameIs(n) sort: [name asc] }
+
+      // First-boot seed data on Dapper (database-seeding.md) — the Dapper
+      // seeder frames the marker table + idempotency on Npgsql+Dapper and
+      // reuses the domain-`Create` path (I<Agg>Repository.SaveAsync).
+      seed default {
+        Customer { name: "Acme", active: true }
+      }
+      seed demo {
+        Customer { name: "Globex", active: false }
+      }
     }
   }
 
