@@ -86,7 +86,8 @@ export function renderJavaController(
       // An id param binds as its raw value type (see findRoutes), so pull the
       // raw type's import — not `renderJavaType`'s `<Agg>Id` wrapper (which never
       // mentions UUID).
-      const rendered = p.type.kind === "id" ? javaValueTypeForId(p.type.valueType) : renderJavaType(p.type);
+      const rendered =
+        p.type.kind === "id" ? javaValueTypeForId(p.type.valueType) : renderJavaType(p.type);
       if (rendered.includes("BigDecimal")) imports.add("java.math.BigDecimal");
       if (rendered.includes("Instant")) imports.add("java.time.Instant");
       if (rendered.includes("UUID")) imports.add("java.util.UUID");
