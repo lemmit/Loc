@@ -156,6 +156,52 @@ describe("deployable channels: wiring (M-T4.4 slice 1)", () => {
     expect(await channelCodes(src)).toContain("loom.deployable-channel-unrelated");
   });
 
+  it("resolves a CROSS-context event on a `create(e: X)` starter, correlation typed via the foreign event", async () => {
+    // M-T4.4 slice 2: an event-triggered create is a subscription position
+    // like `on(e: X)` — the event resolves system-wide (the scope widening),
+    // its members type from the foreign declaration (findEventByName's
+    // system-wide fallback), and the correlation validator sees the
+    // model-wide event list.  This is exactly the shape the channels-e2e
+    // fixture boots.
+    const src = `
+      system Acme {
+        subdomain Sales {
+          context Orders {
+            aggregate Order { customerId: string }
+            repository Orders for Order {}
+            event OrderPlaced { order: Order id, at: datetime }
+            channel Lifecycle { carries: OrderPlaced }
+          }
+          context Shipping {
+            aggregate Shipment {
+              orderRef: Order id
+              status: string
+            }
+            repository Shipments for Shipment {}
+            workflow Fulfil {
+              orderId: Order id
+              create(p: OrderPlaced) by p.order {
+                let s = Shipment.create({ orderRef: p.order, status: "Pending" })
+              }
+            }
+          }
+        }
+        storage bus { type: redis }
+        channelSource lifecycleBus { for: Lifecycle, use: bus }
+        deployable salesApi { platform: node contexts: [Orders] channels: [lifecycleBus] port: 3000 }
+        deployable shipApi  { platform: node contexts: [Shipping] channels: [lifecycleBus] port: 3001 }
+      }
+    `;
+    const loom = await buildLoomModel(src); // throws on any validation error
+    const wf = allContexts(loom)
+      .find((c) => c.name === "Shipping")!
+      .workflows.find((w) => w.name === "Fulfil")!;
+    const starter = wf.creates.find((c) => c.triggerKind === "event")!;
+    expect(starter.eventRef).toBe("OrderPlaced");
+    expect(starter.correlation).toBeDefined();
+    expect(await channelCodes(src)).toEqual([]);
+  });
+
   it("surfaces the wiring in the AsyncAPI artifact (wiredBy)", async () => {
     const loom = await buildLoomModel(
       wiredSrc("channels: [lifecycleBus]", "channels: [lifecycleBus]"),

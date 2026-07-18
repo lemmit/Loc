@@ -154,6 +154,40 @@ describe("schemaFromModule", () => {
     ]);
   });
 
+  it("drops the FK (keeps column + index) for a CROSS-context `Target id` reference", async () => {
+    // M-T4.4: an FK is schema-qualified with the REFERENCING table's schema,
+    // so a cross-context reference would point at a table that doesn't exist
+    // there — and once contexts split across deployables the target lives in
+    // another database entirely.  The id column and its index stay: linkage
+    // is id-only, per the cross-aggregate contract.
+    const src = `
+      system Acme {
+        subdomain Sales {
+          context Orders {
+            aggregate Order { customerId: string }
+            repository Orders for Order { }
+          }
+          context Shipping {
+            aggregate Shipment { orderRef: Order id }
+            repository Shipments for Shipment { }
+          }
+        }
+        deployable api { platform: node, contexts: [Orders, Shipping], port: 3000 }
+      }
+    `;
+    const loom = await buildLoomModel(src);
+    // The binding-aware resolver `buildMigrations` passes lands each context's
+    // tables in its own schema — that per-context split is what makes the FK
+    // cross-schema, so mirror it here.
+    const shipments = schemaFromModule(loom.systems[0]!.subdomains[0]!, undefined, (_agg, ctx) =>
+      ctx.name.toLowerCase(),
+    ).tables.find((t) => t.name === "shipments")!;
+    const orderRef = shipments.columns.find((c) => c.name === "order_ref")!;
+    expect(orderRef.type).toEqual({ kind: "uuid" });
+    expect(shipments.foreignKeys).toEqual([]);
+    expect(shipments.indexes.map((i) => i.name)).toContain("shipments_order_ref_idx");
+  });
+
   it("emits part tables with a parent FK and cascade delete", async () => {
     const { module } = await loadShop();
     const lines = schemaFromModule(module).tables.find((t) => t.name === "order_lines")!;

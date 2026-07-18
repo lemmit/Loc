@@ -209,11 +209,26 @@ export class DddScopeProvider extends DefaultScopeProvider {
       inWorkflowCommandParam(context.container) || inUnionVariant(context.container);
     const aggregate = enclosingAggregate(context.container);
     const defaultScope = super.getScope(context);
+    // Event-triggered `create(e: X)` is a subscription position like `on(e: X)`
+    // — its event resolves system-wide (M-T4.4 cross-deployable choreography:
+    // a Shipping starter reacts to Orders' event received over a wired broker
+    // channel).  Events aren't globally exported, so widen here with the same
+    // targeted-arm shape as the OnDecl/ProjectionOn/timerSource arms; the
+    // local (same-document) declaration still wins via the default scope.
+    // Payloads (`handle` commands) deliberately stay context-local.
+    const systemEventDescs = (): AstNodeDescription[] => {
+      if (!allowTransport) return [];
+      const system = AstUtils.getContainerOfType(context.container, isSystem);
+      if (!system) return [];
+      return [...AstUtils.streamAllContents(system).filter(isEventDecl)].map((e) =>
+        this.descriptions.createDescription(e, e.name),
+      );
+    };
     if (!aggregate) {
       // Outside an aggregate (operation-param-on-page, event field, workflow
       // command param, etc.): restrict to enums + value-objects + aggregates
       // from the default scope.  Entity parts are not addressable from there.
-      return this.filterScope(
+      const filtered = this.filterScope(
         defaultScope,
         (d) =>
           d.type === "EnumDecl" ||
@@ -221,6 +236,10 @@ export class DddScopeProvider extends DefaultScopeProvider {
           d.type === "Aggregate" ||
           (allowTransport && isTransportType(d.type)),
       );
+      // Only names the filtered scope can't already resolve — a same-document
+      // event stays the winner; the widening adds the foreign ones.
+      const extra = systemEventDescs().filter((d) => !filtered.getElement(d.name));
+      return extra.length > 0 ? this.createScope(extra, filtered) : filtered;
     }
     // Inside an aggregate: filter out entity-parts owned by *other*
     // aggregates.  Same-aggregate parts and all enums/VOs/aggregates pass.
