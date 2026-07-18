@@ -34,7 +34,7 @@ Sources: [phoenix-event-delivery-s5a](../old/plans/phoenix-event-delivery-s5a.md
 
 ## M-T4.6 — Day-one batteries: `job`, `email`, object `storage` — `partial` · **L** · P1
 The ~100%-of-apps integrations: an email adapter (resource kind — smtp/ses/sendgrid), object-storage `File`/`Upload` surface, and `job` (folds into M-T4.1 timers). **Object-storage `File` slice 1 shipped** (PR #2007, tracked under M-T1.2): the `File` field type + `FileRef` wire contract on all five backends + a dependency-free `localDisk` store + Hono `POST /files`/`GET /files/:key` endpoints. (The `files.put/get/signedUrl` workflow-body verbs already rendered; this adds the declarative field type they hang off.) Remaining here: `email`, `job`, and the File follow-ons (other-backend endpoints, s3 presign, the `FileUpload` UI primitive) tracked under M-T1.2.
-Sources: [quickstart-and-day-one-batteries](../old/proposals/quickstart-and-day-one-batteries.md) §5, completeness-audit Tier 1.
+Sources: [quickstart-and-day-one-batteries](../old/proposals/quickstart-and-day-one-batteries.md) §5, completeness-audit Tier 1; email slice plan: [email-resource-kind](../old/proposals/email-resource-kind.md).
 
 ## M-T4.7 — Workflow family v2 — `open` · **L** · P3
 Deferred reframes: workflow-as-aggregate `on(...)` handler surface; snapshots (aggregate + saga state); the sagas compensation contract; `repo-let` arrays/nullables (gated); ES workflow instance *pages* (list/detail — the one open slice from workflow-debt parity).
