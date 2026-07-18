@@ -96,6 +96,12 @@ describe("phoenix (ash) — ViewsController agrees with view run/1 return shape"
     expect(ctrl).not.toContain("{:ok, records}");
     // The fix: each action binds the list and maps over it.
     expect(ctrl).toContain(".run(current_user)");
+    // B13: the view route returns a BARE array (`json(conn, data)`), matching
+    // the declared `type: :array` OrderListResponse and every other backend —
+    // NOT an `%{data: data}` envelope (which made `bigs.length` undefined and
+    // diverged the wire shape from node/java/python/dotnet).
+    expect(ctrl).toContain("json(conn, data)");
+    expect(ctrl).not.toContain("json(conn, %{data: data})");
   });
 
   it("a shared serialize/1 handles structs (shorthand) and maps (full-form) uniformly", async () => {
