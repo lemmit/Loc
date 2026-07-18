@@ -3,7 +3,7 @@ system RU {
   subdomain D {
     context Shop {
       error NotFound { resource: string }
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         reserved: bool
         operation reject(): string or NotFound { return NotFound { resource: code } }
@@ -21,5 +21,11 @@ system RU {
     dataSources: [st]
     serves: A
     port: 4000
+  }
+
+  test e2e "exception-less op: reject returns the NotFound error (404)" against d {
+    let o = api.orders.create({ code: "OR1", reserved: false })
+    api.orders.accept(o)
+    expect(api.orders.reject(o)).toThrow(404)
   }
 }
