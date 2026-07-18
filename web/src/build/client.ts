@@ -1,6 +1,7 @@
 import type {
   BuildRpcRequest,
   BuildRpcResponse,
+  EvolutionResult,
   GenerateResult,
   SnapshotResult,
   VfsEntry,
@@ -14,6 +15,7 @@ import type {
 type AnyResult =
   | GenerateResult
   | SnapshotResult
+  | EvolutionResult
   | VfsWriteResult
   | VfsDeleteResult;
 
@@ -139,6 +141,15 @@ export class LoomBuildClient {
 
   snapshotFromPath(entryPath: string): Promise<SnapshotResult> {
     return this.call("snapshot", { entryPath }) as Promise<SnapshotResult>;
+  }
+
+  /** Derive the migration + wire-contract delta between a pinned baseline
+   *  source and the live edit — the playground's window onto the evolution
+   *  lifecycle the stateless regen otherwise hides.  Both sources are
+   *  lowered in the worker; the result is plain DTOs (rendered SQL steps +
+   *  classified contract changes).  Single-entry text only (v1). */
+  evolution(baselineText: string, currentText: string): Promise<EvolutionResult> {
+    return this.call("evolution", { baselineText, currentText }) as Promise<EvolutionResult>;
   }
 
   /** Push one or more files into the worker's VFS.  Returns the

@@ -399,6 +399,29 @@ export class GitStore {
     return new TextDecoder().decode(blob);
   }
 
+  /** Read a `/workspace/...` file as it existed at `ref` (default `HEAD`) —
+   *  the last-committed baseline, ignoring uncommitted working-tree edits.
+   *  Since the playground auto-commits on save, `HEAD` is the last saved
+   *  state, so the evolution diff (live source vs this) is the "changes
+   *  since I last saved" view.  Returns `undefined` when the ref or path
+   *  is absent — an empty repo with no commits yet, or a file that exists
+   *  only in the working tree — which the caller reads as "no baseline". */
+  async readFileAtRef(path: VfsPath, ref = "HEAD"): Promise<string | undefined> {
+    const norm = normalizePath(path);
+    try {
+      const oid = await git.resolveRef({ fs: this.fsc, dir: this.dir, ref });
+      const { blob } = await git.readBlob({
+        fs: this.fsc,
+        dir: this.dir,
+        oid,
+        filepath: REPO_RELATIVE(norm),
+      });
+      return new TextDecoder().decode(blob);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The `/workspace` files a commit changed relative to its first parent
    *  (added / modified / removed).  A root commit (no parent) reports
    *  every file as `added`.  Read-only: walks the two commit trees and

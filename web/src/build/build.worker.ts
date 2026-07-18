@@ -13,6 +13,26 @@ import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 // `web-bundle-boundary.test.ts` pins this.  (The Hono "ts" path below stays a
 // static import — it runs in-browser with no chunk fetch.)
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
+// Evolution-diff cores — all pure/browser-safe siblings of `system/index`
+// (NOT `system/index` itself, so the bundle-boundary test stays green):
+// the schema-migration deriver, its Postgres-SQL renderer, the wire-spec
+// builder, and the new semantic wire-contract differ.  They let the
+// playground surface the migration + contract delta a source change
+// implies — the "previous version" the stateless regen otherwise loses.
+import {
+  buildMigrations,
+  MigrationDestructiveError,
+} from "../../../src/system/migrations-builder.js";
+// NB: `memorySnapshotStore` is NOT imported from `system/snapshot.js` — that
+// module pulls `node:fs` (for `fsSnapshotStore`), which would drag it into the
+// MAIN worker bundle's static graph.  The in-memory store is trivial, so we
+// inline it here (`SnapshotStore` is a type-only import → no runtime edge) and
+// keep the main bundle fs-free, same discipline as the `system/index` split.
+import type { SnapshotStore } from "../../../src/system/snapshot.js";
+import type { SchemaSnapshot } from "../../../src/ir/types/migrations-ir.js";
+import { renderPgStep } from "../../../src/generator/sql-pg.js";
+import { buildWireSpec } from "../../../src/system/wire-spec.js";
+import { diffWireSpec } from "../../../src/system/wire-spec-diff.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the
 // playground legacy single-context build targets the default Hono
 // backend and supplies that package's pins (B2.1).
@@ -26,9 +46,12 @@ import type {
   BuildDiagnostic,
   BuildRpcRequest,
   BuildRpcResponse,
+  EvolutionResult,
   GenerateResult,
+  MigrationView,
   SnapshotResult,
   VirtualFile,
+  WireChangeView,
 } from "./protocol.js";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -359,6 +382,166 @@ function snapshotFromLoom(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Evolution diff — the migration + wire-contract delta between a pinned
+// baseline source and the live edit.  Both sources are lowered here (the
+// worker is where the compiler lives); every diff rides a shipped PURE core,
+// so this is faithful to what `ddd generate system` would derive on disk.
+// v1 is single-entry text only — a multi-file/import baseline would need
+// both trees seeded into the worker VFS (tracked in M-T8.11).
+// ---------------------------------------------------------------------------
+
+const BUCKET_LABEL: Record<string, string> = {
+  aggregates: "aggregate",
+  parts: "part",
+  valueObjects: "value object",
+};
+
+/** In-memory snapshot store — the browser twin of `fsSnapshotStore`,
+ *  inlined to keep `node:fs` out of the main worker bundle (see the import
+ *  note above).  Matches `memorySnapshotStore`'s contract exactly. */
+function memStore(initial: Record<string, SchemaSnapshot> = {}): SnapshotStore {
+  return { read: (module: string) => initial[module] ?? null };
+}
+
+async function handleEvolution(
+  baselineText: string,
+  currentText: string,
+): Promise<EvolutionResult> {
+  // Parse the CURRENT source first — its diagnostics are what the user acts
+  // on.  A broken current source can't be diffed; a broken/empty baseline is
+  // just "no previous version" (everything reads Initial).
+  const cur = await parse(currentText);
+  if (!cur.model) return { ok: false, diagnostics: cur.diagnostics };
+  let curLoom: EnrichedLoomModel;
+  try {
+    curLoom = enrichLoomModel(lowerModel(cur.model));
+  } catch (err) {
+    return { ok: false, diagnostics: [loweringDiag(err)] };
+  }
+  if (curLoom.systems.length === 0) {
+    return {
+      ok: true,
+      hasBaseline: false,
+      migrations: [],
+      wireChanges: [],
+      breaking: false,
+      diagnostics: [
+        {
+          severity: "warning",
+          message:
+            "Source has no `system` block — schema migrations and the wire contract are derived per system, so there is nothing to evolve yet.",
+          source: "loom-evolve",
+        },
+      ],
+    };
+  }
+
+  const base = await parse(baselineText);
+  let baseSystemsByName = new Map<string, EnrichedLoomModel["systems"][number]>();
+  if (base.model) {
+    try {
+      const baseLoom = enrichLoomModel(lowerModel(base.model));
+      baseSystemsByName = new Map(baseLoom.systems.map((s) => [s.name, s]));
+    } catch {
+      // A baseline that no longer lowers (e.g. a since-removed feature) is
+      // treated as absent rather than failing the whole diff.
+      baseSystemsByName = new Map();
+    }
+  }
+  const hasBaseline = baseSystemsByName.size > 0;
+
+  const migrations: MigrationView[] = [];
+  const wireChanges: WireChangeView[] = [];
+  let breaking = false;
+
+  for (const curSys of curLoom.systems) {
+    const baseSys = baseSystemsByName.get(curSys.name) ?? null;
+
+    // -- schema migration ---------------------------------------------------
+    // Seed a memory snapshot store from the baseline's stamped `.next`
+    // snapshots (an empty store ⇒ the baseline itself would be "Initial"),
+    // then derive the current source against it: the steps that come back
+    // ARE the pending migration.
+    const seed: Record<string, SchemaSnapshot> = {};
+    if (baseSys) {
+      for (const bm of buildMigrations(baseSys, memStore())) {
+        seed[bm.module] = bm.next;
+      }
+    }
+    const store = memStore(seed);
+    const destructiveByModule = new Map<string, string>();
+    let migs: ReturnType<typeof buildMigrations>;
+    try {
+      migs = buildMigrations(curSys, store);
+    } catch (err) {
+      if (err instanceof MigrationDestructiveError) {
+        destructiveByModule.set(err.module, err.message);
+        breaking = true;
+        // Re-derive with the gate OFF so the user still sees the (safe-
+        // sequence) steps the change implies, not just the refusal.
+        migs = buildMigrations(curSys, store, { allowDestructive: true });
+      } else {
+        return { ok: false, diagnostics: [...cur.diagnostics, migrationDiag(err)] };
+      }
+    }
+    for (const mig of migs) {
+      if (mig.steps.length === 0) continue; // clean regen ⇒ no-op, don't list
+      const isDestructive = destructiveByModule.has(mig.module);
+      migrations.push({
+        module: mig.module,
+        name: mig.name,
+        version: mig.version,
+        steps: mig.steps.map((s) => ({ op: s.op, sql: renderPgStep(s) })),
+        destructive: isDestructive,
+        destructiveMessage: destructiveByModule.get(mig.module),
+      });
+    }
+
+    // -- wire contract ------------------------------------------------------
+    // Only meaningful against a real baseline; with none, every shape is
+    // "new" and the contract diff would be noise.
+    if (baseSys) {
+      const diff = diffWireSpec(buildWireSpec(baseSys), buildWireSpec(curSys));
+      if (diff.breaking) breaking = true;
+      for (const c of diff.changes) {
+        wireChanges.push({
+          entity: `${BUCKET_LABEL[c.bucket] ?? c.bucket} ${c.entity}`,
+          field: c.field,
+          kind: c.kind,
+          breaking: c.breaking,
+          detail: c.detail,
+        });
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    hasBaseline,
+    migrations,
+    wireChanges,
+    breaking,
+    diagnostics: cur.diagnostics,
+  };
+}
+
+function loweringDiag(err: unknown): BuildDiagnostic {
+  return {
+    severity: "error",
+    message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
+    source: "loom-ir",
+  };
+}
+
+function migrationDiag(err: unknown): BuildDiagnostic {
+  return {
+    severity: "error",
+    message: `Migration derivation failed: ${err instanceof Error ? err.message : String(err)}`,
+    source: "loom-evolve",
+  };
+}
+
 /** Disambiguate `generate` / `snapshot` callers' two input forms.
  *  Exactly one of `text` or `entryPath` must be set.  Returning the
  *  shape lets the worker dispatch to the multi-file project loader
@@ -397,6 +580,13 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
           src.kind === "text"
             ? await handleSnapshotFromText(src.text)
             : await handleSnapshotFromPath(src.entryPath);
+        break;
+      }
+      case "evolution": {
+        response.result = await handleEvolution(
+          req.params.baselineText,
+          req.params.currentText,
+        );
         break;
       }
       case "vfs.write": {

@@ -15,7 +15,13 @@ import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
 import type { RuntimeDispatcher, RuntimeEngine } from "../engine";
 import type { Diagnostic } from "../lsp/protocol";
-import type { GenerateOk, GenerateResult, VirtualFile } from "../build/protocol";
+import type {
+  EvolutionResult,
+  GenerateOk,
+  GenerateResult,
+  SnapshotResult,
+  VirtualFile,
+} from "../build/protocol";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
 import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
@@ -330,6 +336,27 @@ export interface LayoutCtx {
   runResetData: () => void;
   runWipe: () => void;
   runDispatch: () => void;
+
+  // Evolution lifecycle (the Migrations dock tab) — the migration + wire-
+  // contract delta the live edit implies vs the last-committed baseline,
+  // plus on-demand provenance snapshot capture.  Null until the user runs
+  // the diff / captures a snapshot (both are deliberate, not auto-run).
+  /** Result of the last migration + wire-contract diff, or null. */
+  evolution: EvolutionResult | null;
+  evolutionRunning: boolean;
+  /** Diff the live source against the baseline at `ref` (default `HEAD`,
+   *  i.e. the last save) — any commit oid pins an earlier baseline. */
+  runEvolutionDiff: (ref?: string) => void;
+  /** Result of the last provenance-snapshot capture, or null. */
+  snapshotResult: SnapshotResult | null;
+  snapshotRunning: boolean;
+  /** Capture immutable `.loom/snapshots/*.loomsnap.json` for the current
+   *  source — the playground's `ddd snapshot`. */
+  runCaptureSnapshot: () => void;
+  /** Download the generated project tree as a single `.zip` — the bridge out
+   *  of the browser for backends/frontends the preview can't boot. */
+  runDownloadZip: () => void;
+
   /** Full pipeline cascade — Generate → Bundle → Boot.  On a clean
    *  end, jumps the mobile shell to Preview (if a React deployable
    *  exists) or Backend (if Hono-only).  Used by the mobile header's

@@ -1,4 +1,4 @@
-import { Box, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
+import { Box, Button, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
@@ -197,12 +197,28 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     />
                   </Box>
                   {explorerMode === "generated" ? (
-                    <ExplorerTree
-                      nodes={tree.children}
-                      selectedPath={generatedSelection}
-                      onActivateFile={onPickGenerated}
-                      emptyHint="No files yet — click Generate."
-                    />
+                    <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                      {files.length > 0 && (
+                        <Box px="xs" py={4} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+                          <Button
+                            size="compact-xs"
+                            variant="light"
+                            fullWidth
+                            leftSection={<span aria-hidden>↓</span>}
+                            onClick={() => ctx.runDownloadZip()}
+                            data-testid="download-zip"
+                          >
+                            Download .zip
+                          </Button>
+                        </Box>
+                      )}
+                      <ExplorerTree
+                        nodes={tree.children}
+                        selectedPath={generatedSelection}
+                        onActivateFile={onPickGenerated}
+                        emptyHint="No files yet — click Generate."
+                      />
+                    </Box>
                   ) : (
                     // The single source-file explorer: create / rename /
                     // delete via right-click or the per-row kebab, and a

@@ -3,6 +3,7 @@ import { AuthConfigPanel, authStubDot } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
+import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import { type LayoutCtx } from "./ctx";
 
@@ -14,7 +15,7 @@ import { type LayoutCtx } from "./ctx";
 // behind a single Output tab (a stream Select); the interactive Backend
 // tester and Tests runner keep their own tabs.  Each tab carries a
 // status dot so the user sees where the red is without opening it.
-export type DockTab = "output" | "backend" | "tests" | "history" | "auth";
+export type DockTab = "output" | "backend" | "tests" | "migrations" | "history" | "auth";
 
 interface Props {
   ctx: LayoutCtx;
@@ -33,6 +34,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
     { id: "output", label: "Output", dot: outputAggregateDot(ctx) },
     { id: "backend", label: "Runtime", dot: backendDot },
     { id: "tests", label: "Tests", dot: null },
+    { id: "migrations", label: "Migrations", dot: migrationsDot(ctx) },
     { id: "history", label: "History", dot: null },
     { id: "auth", label: "Auth", dot: authStubDot(ctx) },
   ];
@@ -95,6 +97,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         )}
         {tab === "backend" && <BackendBody ctx={ctx} />}
         {tab === "tests" && <TestsBody ctx={ctx} />}
+        {tab === "migrations" && <MigrationsBody ctx={ctx} />}
         {tab === "history" && <HistoryBody ctx={ctx} />}
         {tab === "auth" && <AuthConfigPanel ctx={ctx} />}
       </Box>

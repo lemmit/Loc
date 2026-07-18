@@ -7,7 +7,14 @@ import type { Diagnostic } from "./lsp/protocol";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
-import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
+import type {
+  EvolutionResult,
+  GenerateOk,
+  GenerateResult,
+  SnapshotResult,
+  VfsEntry,
+  VirtualFile,
+} from "./build/protocol";
 import { inlineSourcemapArtifacts, overlaySourcemapArtifacts } from "./build/strip-sourcemap";
 import type { BundleOk } from "./bundle/protocol";
 import {
@@ -40,6 +47,7 @@ import {
   type HashLoad,
 } from "./util/share";
 import { fnv1a32 } from "./util/hash";
+import { downloadBytes, makeZip } from "./util/zip";
 import { usePersistedState } from "./util/usePersistedState";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
@@ -253,6 +261,13 @@ export default function App(): JSX.Element {
   const [pathParamValues, setPathParamValues] = useState<Record<string, string>>({});
   const [queryParamValues, setQueryParamValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  // Evolution-lifecycle surfaces (the Migrations dock tab): the derived
+  // migration + wire-contract delta between the last-committed baseline
+  // and the live edit, and the on-demand provenance snapshot capture.
+  const [evolution, setEvolution] = useState<EvolutionResult | null>(null);
+  const [evolutionRunning, setEvolutionRunning] = useState(false);
+  const [snapshotResult, setSnapshotResult] = useState<SnapshotResult | null>(null);
+  const [snapshotRunning, setSnapshotRunning] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const liveModeRef = useRef(liveMode);
   liveModeRef.current = liveMode;
@@ -1310,6 +1325,83 @@ export default function App(): JSX.Element {
     [files],
   );
 
+  // Derive the migration + wire-contract delta the live edit implies vs the
+  // last-committed baseline (`HEAD:/workspace/main.ddd`).  The heavy lowering
+  // of BOTH sources happens in the build worker; here we only fetch the
+  // baseline blob and thread the two texts through.  v1 is single-file only —
+  // a multi-file/import baseline would need both trees seeded into the worker
+  // VFS (M-T8.11), so the panel gates on `sourceFiles.size`.
+  async function runEvolutionDiff(ref = "HEAD"): Promise<void> {
+    const client = buildClientRef.current;
+    if (!client) return;
+    setEvolutionRunning(true);
+    try {
+      const current = sourceRef.current;
+      // Baseline = the active file at `ref` — `HEAD` (last save) by default,
+      // or any commit the user pins from History.  Absent store (ephemeral
+      // session) or no such commit ⇒ empty baseline, which the worker reads
+      // as "no previous version" (everything Initial).
+      const baseline =
+        (await workspace.store?.readFileAtRef("/workspace/main.ddd", ref)) ?? "";
+      const result = await client.evolution(baseline, current);
+      setEvolution(result);
+    } catch (err) {
+      setEvolution({
+        ok: false,
+        diagnostics: [
+          {
+            severity: "error",
+            message: `Evolution diff failed: ${err instanceof Error ? err.message : String(err)}`,
+            source: "loom-evolve",
+          },
+        ],
+      });
+    } finally {
+      setEvolutionRunning(false);
+    }
+  }
+
+  // Download the generated project tree as a single .zip — the bridge out of
+  // the browser for the backends/frontends the preview can't boot (.NET,
+  // Phoenix, Java, Python, Vue, Svelte).  The files are already in memory
+  // (the flag-off generate, byte-identical to `ddd generate system`), so this
+  // is a pure client-side archive + download — no worker round-trip.
+  function runDownloadZip(): void {
+    const genFiles = generateSuccess?.files ?? [];
+    if (genFiles.length === 0) return;
+    const entries = genFiles.map((f) => ({ path: f.path, content: f.content }));
+    const base =
+      workspace.activeName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") ||
+      "loom-project";
+    downloadBytes(makeZip(entries), `${base}.zip`);
+  }
+
+  // Capture immutable provenance rule snapshots — the playground's `ddd
+  // snapshot`.  Deliberate (like `ef migrations add`): the user clicks, we
+  // don't auto-run it.  The returned files are timestamped+GUID and shown
+  // in the Migrations tab's Snapshots section.
+  async function runCaptureSnapshot(): Promise<void> {
+    const client = buildClientRef.current;
+    if (!client) return;
+    setSnapshotRunning(true);
+    try {
+      setSnapshotResult(await client.snapshot(sourceRef.current));
+    } catch (err) {
+      setSnapshotResult({
+        ok: false,
+        diagnostics: [
+          {
+            severity: "error",
+            message: `Snapshot capture failed: ${err instanceof Error ? err.message : String(err)}`,
+            source: "loom-snapshot",
+          },
+        ],
+      });
+    } finally {
+      setSnapshotRunning(false);
+    }
+  }
+
   // Bundle every piece of state + every action into a single ctx
   // object that the shell + its panes consume.  Children destructure
   // what they need; no React context, no prop drilling.
@@ -1447,6 +1539,13 @@ export default function App(): JSX.Element {
     runWipe: () => void runWipe(),
     runDispatch: () => void runDispatch(),
     runFull: () => void runFull(),
+    evolution,
+    evolutionRunning,
+    runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
+    snapshotResult,
+    snapshotRunning,
+    runCaptureSnapshot: () => void runCaptureSnapshot(),
+    runDownloadZip,
   };
 
   return (

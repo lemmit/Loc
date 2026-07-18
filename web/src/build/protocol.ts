@@ -57,6 +57,72 @@ export interface SnapshotFail {
 
 export type SnapshotResult = SnapshotOk | SnapshotFail;
 
+// -- evolution diff --------------------------------------------------------
+// The playground regenerates statelessly, so schema migrations, wire-
+// contract drift, and provenance all lose their "previous version" and
+// become invisible side effects.  `evolution` restores the baseline: it
+// lowers TWO sources (a pinned git baseline + the live edit), derives the
+// migration the change implies (`buildMigrations` over a `memorySnapshot-
+// Store` seeded from the baseline), and classifies the wire-contract delta
+// (`diffWireSpec`) — the same pure cores the CLI runs, wrapped as plain
+// serialisable DTOs so nothing compiler-internal crosses the worker edge.
+
+/** One derived schema-migration a source change implies, per owning
+ *  module.  `steps` are rendered to Postgres DDL for display (the exact
+ *  SQL the TS/EF migration emitters share).  `destructive` is true when
+ *  the non-destructive gate tripped — a drop/narrowing the operator must
+ *  acknowledge; the steps are still shown (re-derived with the gate off)
+ *  alongside `destructiveMessage`. */
+export interface MigrationView {
+  module: string;
+  /** `"Initial"` when the baseline is empty, else the derived PascalCase
+   *  name (`"AddOrderStatus"`). */
+  name: string;
+  version: string;
+  steps: { op: string; sql: string }[];
+  destructive: boolean;
+  destructiveMessage?: string;
+}
+
+/** One wire-contract change, classified breaking vs additive by
+ *  `diffWireSpec`. */
+export interface WireChangeView {
+  /** Bucket + entity, e.g. `aggregate Order` / `valueObject Money`. */
+  entity: string;
+  field?: string;
+  kind: string;
+  breaking: boolean;
+  detail: string;
+}
+
+export interface EvolutionOk {
+  ok: true;
+  /** False when the baseline parses to no system (first commit / brand-new
+   *  source) — the current source is then the initial version, and every
+   *  migration reads `"Initial"`. */
+  hasBaseline: boolean;
+  migrations: MigrationView[];
+  wireChanges: WireChangeView[];
+  /** Any breaking wire change OR any destructive migration. */
+  breaking: boolean;
+  diagnostics: BuildDiagnostic[];
+}
+
+export interface EvolutionFail {
+  ok: false;
+  diagnostics: BuildDiagnostic[];
+}
+
+export type EvolutionResult = EvolutionOk | EvolutionFail;
+
+/** `evolution` lowers two whole sources and diffs the derived artifacts.
+ *  Single-entry text only (v1) — a multi-file/import baseline would need
+ *  both trees seeded into the worker VFS; see M-T8.11. */
+export interface EvolutionParams {
+  baselineText: string;
+  currentText: string;
+}
+
 /** A single VFS entry shipped over the wire — file entries carry
  *  `content`, directory entries carry only their `path`.  Re-exports
  *  the in-process VFS tagged union so the protocol and the
@@ -101,6 +167,7 @@ export interface GenerateParams {
 export type BuildRpcRequest =
   | { id: number; method: "generate"; params: GenerateParams }
   | { id: number; method: "snapshot"; params: GenerateParams }
+  | { id: number; method: "evolution"; params: EvolutionParams }
   | { id: number; method: "vfs.write"; params: { entries: VfsEntry[] } }
   | { id: number; method: "vfs.delete"; params: { paths: string[] } };
 
@@ -109,6 +176,7 @@ export interface BuildRpcResponse {
   result?:
     | GenerateResult
     | SnapshotResult
+    | EvolutionResult
     | VfsWriteResult
     | VfsDeleteResult;
   error?: { message: string };
