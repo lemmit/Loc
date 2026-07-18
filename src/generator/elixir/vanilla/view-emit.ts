@@ -546,7 +546,7 @@ function renderViewAction(ctx: BoundedContextIR, view: ViewIR, appModule: string
       )})
     else
       data = ${viewModule}.run(current_user) |> Enum.map(&serialize/1)
-      json(conn, %{data: data})
+      json(conn, data)
     end
   end`;
   }
@@ -554,6 +554,6 @@ function renderViewAction(ctx: BoundedContextIR, view: ViewIR, appModule: string
   def ${viewSnake}(conn, _params) do
     current_user = Map.get(conn.assigns, :current_user)
     data = ${viewModule}.run(current_user) |> Enum.map(&serialize/1)
-    json(conn, %{data: data})
+    json(conn, data)
   end`;
 }

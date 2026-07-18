@@ -39,14 +39,22 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ✅    |
 | inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+| views (where-filtered)        |  ✅  |  ✅  |   ✅   |  ✅    |✅ B13  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
 `Object.groupBy`; host apt ships only Elixir 1.14, and the 1.16 binary download is
-org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11) is
+org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11/B13) is
 now fixed; all corpus cases boot green on all five backends.
 
 ---
+
+## B13 ✅ elixir — where-filtered view route returns a `{data: […]}` envelope, not a bare array
+
+- **Where:** `src/generator/elixir/vanilla/view-emit.ts` (the `ViewsController` action bodies).
+- **Repro:** `test/fixtures/corpus/views.ddd` on elixir — `GET /api/views/big_orders` returns `{"data": [...]}`, so the e2e `bigs.length` is `undefined` (`expected undefined to be 1`). Every other backend returns a **bare array** `[...]`, and elixir's OWN declared response schema is `OrderListResponse` = `type: :array` — so the controller contradicted both its OpenAPI and the cross-backend wire.
+- **Impact:** any client reading a view off the elixir backend gets a differently-shaped body than off node/java/python/dotnet — a silent wire-parity break (found the moment a view was booted behaviourally on elixir).
+- **Fix:** both `ViewsController` action bodies (auth-gated + plain) now emit `json(conn, data)` instead of `json(conn, %{data: data})`. Pinned by `test/generator/elixir/view-controller-shape.test.ts`. Verified: `run-elixir.mjs views` green (was `expected undefined to be 1`); node/java/python/dotnet already green. (The `projections-emit.ts` / `workflow-instances-emit.ts` sites still envelope — those are the workflow-sourced-view path, deferred to the `workflow-view` drain where a real boot will confirm the target shape.)
 
 ## B12 ✅ dotnet — `with crudish` on a `shape: document` aggregate won't compile
 
