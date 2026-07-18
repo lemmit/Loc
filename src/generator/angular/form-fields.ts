@@ -23,6 +23,11 @@ export interface AngularFormControlSpec {
   name: string;
   /** JS literal for the control's initial value (`""`, `0`, `false`, …). */
   init: string;
+  /** Explicit control generic — when set, the control emits as
+   *  `new FormControl<${tsType}>(${init})` (nullable, no `nonNullable`).  A
+   *  `File` field uses `FileRef | null` so the uploaded ref + the `null` seed
+   *  both assign (a `nonNullable` string control rejects the FileRef). */
+  tsType?: string;
 }
 
 /** A `useAll<X>()` query the page-shell hoists so an `X id` form field can
@@ -170,6 +175,8 @@ export function formButton(
 export function registerFileUploadImports(ctx: WalkContext): void {
   addNg(ctx, "@angular/forms", "AbstractControl");
   addNg(ctx, "../../api/client", "api");
+  // The File FormControl is typed `FormControl<FileRef | null>`.
+  addNg(ctx, "../../api/client", "FileRef");
 }
 
 /** The shared `onFileUpload` component method a form with ≥1 `File` field emits
@@ -589,10 +596,17 @@ export function partitionAngularFields(
     // still edit it); non-evaluable defaults (money/now/this-relative/ref) and
     // no default fall back to the type-zero init.  A nonNullable control needs a
     // non-null literal, and `renderDefaultSeed` yields exactly that.
-    flatControls: flat.map((f) => ({
-      name: f.name,
-      init: (f.default ? renderDefaultSeed(f.default) : null) ?? controlInit(f.type),
-    })),
+    flatControls: flat.map((f) => {
+      const u = unwrapOpt(f.type);
+      if (u.kind === "primitive" && u.name === "File") {
+        // A File control holds a nullable FileRef, not a nonNullable string.
+        return { name: f.name, init: "null", tsType: "FileRef | null" };
+      }
+      return {
+        name: f.name,
+        init: (f.default ? renderDefaultSeed(f.default) : null) ?? controlInit(f.type),
+      };
+    }),
     flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx, undefined, formVar)),
     flatNames: flat.map((f) => f.name),
     // A value-object sub-field that is itself an `X id` needs the target's

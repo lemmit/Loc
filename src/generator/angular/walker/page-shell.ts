@@ -24,6 +24,7 @@ import {
 import {
   type AngularFieldArraySpec,
   type AngularFieldGroupSpec,
+  type AngularFormControlSpec,
   fieldArrayControlDecl,
   fieldArrayMembers,
   fieldGroupControlDecl,
@@ -37,12 +38,14 @@ import { angularSink } from "./sink.js";
  *  `FormControl`s, any `FormArray` declarations for dynamic-row fields, and any
  *  nested `FormGroup` declarations for value-object fields. */
 function formGroupBody(form: {
-  controls: { name: string; init: string }[];
+  controls: AngularFormControlSpec[];
   fieldArrays?: AngularFieldArraySpec[];
   fieldGroups?: AngularFieldGroupSpec[];
 }): string {
-  const flat = form.controls.map(
-    (c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`,
+  const flat = form.controls.map((c) =>
+    c.tsType
+      ? `${c.name}: new FormControl<${c.tsType}>(${c.init})`
+      : `${c.name}: new FormControl(${c.init}, { nonNullable: true })`,
   );
   const arrays = (form.fieldArrays ?? []).map((fa) => fieldArrayControlDecl(fa));
   const groups = (form.fieldGroups ?? []).map((fg) => fieldGroupControlDecl(fg));
