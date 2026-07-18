@@ -1302,10 +1302,19 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
-        errors = [
-            {"pointer": _pointer(tuple(e["loc"])), "message": str(e["msg"])}
-            for e in err.errors()
-        ]
+        errors = []
+        for e in err.errors():
+            entry: dict[str, str] = {
+                "pointer": _pointer(tuple(e["loc"])),
+                "message": str(e["msg"]),
+            }
+            # A messaged rule raises PydanticCustomError with a "msg.<hash>"
+            # type — the stable content-hash wire code (i18n key). A message-less
+            # rule's default Pydantic type is omitted (byte-identical body).
+            code = str(e.get("type", ""))
+            if code.startswith("msg."):
+                entry["code"] = code
+            errors.append(entry)
         return problem(request, 422, "Unprocessable Entity", "Request validation failed.", errors)
 
     @app.exception_handler(Exception)
