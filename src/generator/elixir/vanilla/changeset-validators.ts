@@ -16,30 +16,35 @@ import { elixirRegexBody, snake } from "../../../util/naming.js";
 
 /** Map a recognised single-field invariant pattern to the idiomatic Ecto
  *  changeset validator pipe line (4-space-indented, ready for a `|>` pipe). */
-export function ectoValidator(field: string, p: SingleFieldPattern): string {
+export function ectoValidator(field: string, p: SingleFieldPattern, message?: string): string {
+  // An author `message "..."` rides along as Ecto's own `message:` option, so a
+  // messaged single-field rule keeps its native `validate_*` enforcement AND
+  // surfaces the author text (VOs have no residual carrier to route to). A
+  // message-less rule is byte-identical.
+  const m = message ? `, message: ${JSON.stringify(message)}` : "";
   switch (p.kind) {
     case "min":
       // Exclusive (`weight > 0.5` on a decimal/money field) → Ecto's strict
       // `greater_than:`; inclusive keeps `greater_than_or_equal_to:`.
       return p.exclusive
-        ? `    |> validate_number(:${field}, greater_than: ${p.n})`
-        : `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n})`;
+        ? `    |> validate_number(:${field}, greater_than: ${p.n}${m})`
+        : `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n}${m})`;
     case "max":
       return p.exclusive
-        ? `    |> validate_number(:${field}, less_than: ${p.n})`
-        : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n})`;
+        ? `    |> validate_number(:${field}, less_than: ${p.n}${m})`
+        : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
     case "between":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi})`;
+      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
     case "len-min":
-      return `    |> validate_length(:${field}, min: ${p.n})`;
+      return `    |> validate_length(:${field}, min: ${p.n}${m})`;
     case "len-max":
-      return `    |> validate_length(:${field}, max: ${p.n})`;
+      return `    |> validate_length(:${field}, max: ${p.n}${m})`;
     case "len-eq":
-      return `    |> validate_length(:${field}, is: ${p.n})`;
+      return `    |> validate_length(:${field}, is: ${p.n}${m})`;
     case "len-range":
-      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi})`;
+      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi}${m})`;
     case "regex":
-      return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/)`;
+      return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/${m})`;
   }
 }
 
@@ -47,10 +52,11 @@ export function ectoValidator(field: string, p: SingleFieldPattern): string {
  *  (only those whose pattern targets one of the VO's own fields). */
 export function voConstraintLines(vo: ValueObjectIR): string[] {
   const fieldNames = new Set(vo.fields.map((f) => snake(f.name)));
-  return (vo.invariants ?? [])
-    .flatMap((inv) => singleFieldConstraints(inv) ?? [])
-    .filter((c) => fieldNames.has(snake(c.field)))
-    .map((c) => ectoValidator(snake(c.field), c.pattern));
+  return (vo.invariants ?? []).flatMap((inv) =>
+    (singleFieldConstraints(inv) ?? [])
+      .filter((c) => fieldNames.has(snake(c.field)))
+      .map((c) => ectoValidator(snake(c.field), c.pattern, inv.message?.text)),
+  );
 }
 
 /** True iff the value object declares at least one single-field-constraint

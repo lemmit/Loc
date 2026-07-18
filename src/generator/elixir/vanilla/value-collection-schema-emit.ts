@@ -148,10 +148,11 @@ function renderChildSchema(
   // real create/update path, not just in tests) — the same single-field
   // classifier Zod / FluentValidation / the aggregate changeset consume.
   const voFieldNames = new Set(vo.fields.map((f) => snake(f.name)));
-  const validatorLines = (vo.invariants ?? [])
-    .flatMap((inv) => singleFieldConstraints(inv) ?? [])
-    .filter((c) => voFieldNames.has(snake(c.field)))
-    .map((c) => ectoValidator(snake(c.field), c.pattern));
+  const validatorLines = (vo.invariants ?? []).flatMap((inv) =>
+    (singleFieldConstraints(inv) ?? [])
+      .filter((c) => voFieldNames.has(snake(c.field)))
+      .map((c) => ectoValidator(snake(c.field), c.pattern, inv.message?.text)),
+  );
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
   const requiredBlock = requiredCols ? `\n    |> validate_required([${requiredCols}])` : "";
 
