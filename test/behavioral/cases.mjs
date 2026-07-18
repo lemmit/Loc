@@ -108,9 +108,8 @@ const BEHAVIOURAL_SKIP = {
     // re-armed; no node skips remain.
   },
   dotnet: {
-    // B2/B3/B4 fixed. B8 open — single (non-collection) `contains` crashes the
-    // dotnet app on boot (EF owned-entity model, same class as B3).
-    "single-containment": "B8: dotnet single-containment boot crash (EF owned entity)",
+    // B2/B3/B4/B8 fixed — no dotnet skips remain. (B8: single-containment
+    // relational owned-entity EF model + optional-nav; efcore.ts.)
   },
   elixir: {
     // B5/B6 fixed. B7 open — `auditable` lifecycle stamps (stamp onCreate/onUpdate)
