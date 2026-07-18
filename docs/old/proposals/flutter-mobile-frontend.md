@@ -220,6 +220,75 @@ first-class grammar addition.
   `area` with a mobile interpretation (areas → bottom tabs); revisit only if
   it doesn't map.
 
+### Surface sketch (concrete)
+
+`ui:` and `targets:` are **existing** clauses — only three things are new
+(`framework: flutter`, `platform: flutter { output: … }`, and the mobile
+metadata: `app`/`buildFor`/`capabilities`):
+
+```
+// page content: the existing ui surface, verbatim
+ui TasksApp {
+  framework: flutter                       // NEW #1: Framework += 'flutter'
+  page TaskList area Tasks { List of Task { column Title; column Done } }
+}
+
+deployable TasksMobile {
+  platform: flutter { output: native }     // NEW #2: Platform += 'flutter';
+                                           //   realization axis  output: native | web
+  targets: ApiGateway                      // REUSED: wire binding (existing clause)
+  ui: TasksApp                             // REUSED: ui binding (existing clause)
+  buildFor: [ios, android]                 // NEW #3a: native build targets
+
+  app {                                    // NEW #3b: app-identity metadata
+    bundleId:    "com.acme.tasks"
+    displayName: "Acme Tasks"
+    version:     "1.4.0"  build: 42
+    icon:        "assets/icon.png"
+  }
+
+  capabilities: [camera, location, push]   // NEW #3c: OS permissions
+}
+```
+
+**Refinement to §4a, driven by the repo's own *"derive, don't stamp"* rule:**
+drop the `kind: mobile` field. "This is an artifact that joins no network" is
+a pure function of `platform: flutter { output: native }`, so the composer
+*derives* it (as page-kind is derived from name+area, not stamped). `output:
+web` slots into the existing served-bundle model; `output: native` emits a
+build target, no compose service.
+
+**What each new clause generates:**
+
+- `platform: flutter { output: native }` + `targets: ApiGateway` → a Flutter
+  project + build script (`flutter build apk --dart-define=API_URL=…`; `ipa`
+  for iOS; web build for `output: web`), **no `docker-compose.yml` service**.
+- `app { … }` → `pubspec.yaml` (`version: 1.4.0+42`) + iOS `Info.plist`
+  (`CFBundleIdentifier`/`CFBundleShortVersionString`/`CFBundleVersion`) +
+  Android `build.gradle` (`applicationId`/`versionName`/`versionCode`). Pure
+  metadata, cheap.
+- `capabilities: [camera, location, push]` → the payoff line: one clause fans
+  out to three files — `Info.plist` usage-description keys +
+  `AndroidManifest.xml` `<uses-permission>` entries + the `pubspec.yaml`
+  plugin deps (`camera`/`geolocator`/`firebase_messaging`).
+
+**Grammar deltas (where each lands):**
+
+| Surface | Grammar change | Enforcement |
+|---|---|---|
+| `framework: flutter` | `Framework += 'flutter'` | — |
+| `platform: flutter` | `Platform += 'flutter'` | `checkDeployable` (`deployable.ts`) — the `'react'`/`'phoenixLiveView'` pattern |
+| `output: native \| web` | new realization axis in the `platform { … }` sub-block (beside `persistence`/`directoryLayout`) | validator menu (the `design:` precedent — parser takes `LooseName`) |
+| `buildFor: [ios, android]` | one order-independent clause on `Deployable` | validator: only meaningful when `output: native` |
+| `app { … }` | new metadata block | validator: required when `output: native` |
+| `capabilities: […]` | one order-independent clause | validator-enforced menu → manifest/plugin table |
+
+**Open design call — declared vs inferred capabilities.** Spelled *declared*
+here because the page-primitive library is closed and has no device
+primitives today (nothing to infer from). If a `Capture`/scanner primitive
+ever enters the walker, inference (`camera` auto-added when a page uses it)
+becomes possible; until then, declared is the pragmatic v1.
+
 ## 5. A first slice
 
 **Flutter *web*, Material pack only, Riverpod state, `match`→Dart-3 `switch`,
