@@ -1386,7 +1386,7 @@ describe(".NET generator", () => {
     // Reflects the primary ctor's [Required] params and adds the camelCase
     // property name to schema.Required.
     expect(filter).toMatch(/GetCustomAttribute<RequiredAttribute>\(\)/);
-    expect(filter).toMatch(/schema\.Required\.Add\(key\)/);
+    expect(filter).toMatch(/s\.Required\.Add\(key\)/);
     expect(filter).toMatch(/JsonNamingPolicy\.CamelCase\.ConvertName/);
     // Registered as a Swashbuckle schema filter, after the NRT support call.
     const program = files.get("Program.cs")!;
@@ -1925,7 +1925,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const csprojKey = [...files.keys()].find((k) => k.endsWith(".csproj"))!;
       const csproj = files.get(csprojKey)!;
-      expect(csproj).toMatch(/<PackageReference Include="FluentValidation" Version="11\.10\.0"/);
+      expect(csproj).toMatch(/<PackageReference Include="FluentValidation" Version="12\.1\.1"/);
       expect(csproj).toMatch(
         /<PackageReference Include="FluentValidation\.DependencyInjectionExtensions"/,
       );

@@ -852,8 +852,7 @@ export function renderProblemDetailsFilter(ns: string): string {
   return `// Auto-generated.
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.OpenApi.Any;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ${ns}.Api;
@@ -864,12 +863,14 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     {
         var schema = context.SchemaGenerator.GenerateSchema(typeof(ProblemDetails), context.SchemaRepository);
         AugmentProblemDetailsSchema(context.SchemaRepository);
+        if (operation.Responses is null) return;
         foreach (var (code, response) in operation.Responses)
         {
-            if (code.Length == 3 && (code[0] == '4' || code[0] == '5'))
+            if (code.Length == 3 && (code[0] == '4' || code[0] == '5') && response is OpenApiResponse resp)
             {
-                response.Content.Clear();
-                response.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
+                resp.Content ??= new Dictionary<string, OpenApiMediaType>();
+                resp.Content.Clear();
+                resp.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
             }
         }
     }
@@ -881,23 +882,28 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     // Consumed by the frontend ACL's \`applyServerErrors\`.  Idempotent;
     // safe to run per operation.  See
     // docs/old/proposals/validation-error-extension.md (Phase D).
+    // Microsoft.OpenApi 2.0: schema type is the \`JsonSchemaType\` flags enum
+    // (nullability folded in as \`| JsonSchemaType.Null\`, which the 3.0 writer
+    // serializes back to \`nullable: true\`); property maps are keyed by the
+    // \`IOpenApiSchema\` interface.
     private static void AugmentProblemDetailsSchema(SchemaRepository repo)
     {
-        if (!repo.Schemas.TryGetValue("ProblemDetails", out var problem)) return;
+        if (!repo.Schemas.TryGetValue("ProblemDetails", out var problemSchema)) return;
+        if (problemSchema is not OpenApiSchema problem) return;
+        problem.Properties ??= new Dictionary<string, IOpenApiSchema>();
         if (problem.Properties.ContainsKey("errors")) return;
 
         problem.Properties["errors"] = new OpenApiSchema
         {
-            Type = "array",
-            Nullable = true,
+            Type = JsonSchemaType.Array | JsonSchemaType.Null,
             Items = new OpenApiSchema
             {
-                Type = "object",
+                Type = JsonSchemaType.Object,
                 Required = new HashSet<string> { "pointer", "message" },
-                Properties = new Dictionary<string, OpenApiSchema>
+                Properties = new Dictionary<string, IOpenApiSchema>
                 {
-                    ["pointer"] = new OpenApiSchema { Type = "string" },
-                    ["message"] = new OpenApiSchema { Type = "string" },
+                    ["pointer"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                    ["message"] = new OpenApiSchema { Type = JsonSchemaType.String },
                 },
             },
         };
@@ -926,7 +932,7 @@ ${pairs.map((p) => `        ("${p.element}", "${p.wrapper}"),`).join("\n")}
     }`;
   return `// Auto-generated.
 using System;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ${ns}.Api;
@@ -943,34 +949,44 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
         // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
         // Hono / Phoenix backends omit it too (an unreferenced wrapper never
         // enters their spec), so adding it unconditionally would drift parity.
+        //
+        // Microsoft.OpenApi 2.0: an array's Type is the JsonSchemaType flags
+        // enum, a $ref schema is a distinct OpenApiSchemaReference node (not an
+        // OpenApiSchema with a Reference property), and Components.Schemas is
+        // keyed by IOpenApiSchema.
+        if (swaggerDoc.Paths is null) return;
         foreach (var path in swaggerDoc.Paths.Values)
-        foreach (var operation in path.Operations.Values)
-        foreach (var response in operation.Responses.Values)
-        foreach (var media in response.Content.Values)
         {
-            var schema = media.Schema;
-            if (schema?.Type == "array" && schema.Items?.Reference?.Id is string elementId)
+            if (path.Operations is null) continue;
+            foreach (var operation in path.Operations.Values)
             {
-                foreach (var (element, wrapper) in Wrappers)
+                if (operation.Responses is null) continue;
+                foreach (var response in operation.Responses.Values)
                 {
-                    if (element == elementId)
+                    if (response.Content is null) continue;
+                    foreach (var media in response.Content.Values)
                     {
-                        if (!swaggerDoc.Components.Schemas.ContainsKey(wrapper))
+                        if (media.Schema is not OpenApiSchema schema) continue;
+                        if (schema.Type is not { } t || !t.HasFlag(JsonSchemaType.Array)) continue;
+                        if (schema.Items is not OpenApiSchemaReference itemRef) continue;
+                        if (itemRef.Reference?.Id is not string elementId) continue;
+                        foreach (var (element, wrapper) in Wrappers)
                         {
-                            swaggerDoc.Components.Schemas[wrapper] = new OpenApiSchema
+                            if (element == elementId)
                             {
-                                Type = "array",
-                                Items = new OpenApiSchema
+                                if (swaggerDoc.Components?.Schemas is { } schemas
+                                    && !schemas.ContainsKey(wrapper))
                                 {
-                                    Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
+                                    schemas[wrapper] = new OpenApiSchema
+                                    {
+                                        Type = JsonSchemaType.Array,
+                                        Items = new OpenApiSchemaReference(element, swaggerDoc),
+                                    };
                                 }
-                            };
+                                media.Schema = new OpenApiSchemaReference(wrapper, swaggerDoc);
+                                break;
+                            }
                         }
-                        media.Schema = new OpenApiSchema
-                        {
-                            Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = wrapper }
-                        };
-                        break;
                     }
                 }
             }
@@ -1004,21 +1020,26 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
 export function renderRequiredFromCtorParamFilter(ns: string): string {
   return `// Auto-generated.
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ${ns}.Api;
 
 public sealed class RequiredFromCtorParamFilter : ISchemaFilter
 {
-    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    // Microsoft.OpenApi 2.0: the filter receives the IOpenApiSchema interface;
+    // mutating Required/Properties needs the concrete OpenApiSchema.
+    public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
     {
+        if (schema is not OpenApiSchema s) return;
         var type = context.Type;
-        if (schema.Properties is null || schema.Properties.Count == 0) return;
+        if (s.Properties is null || s.Properties.Count == 0) return;
+        s.Required ??= new HashSet<string>();
 
         // Paged carrier (M-T2.6): the generic Paged<T> record's members
         // (items/page/pageSize/total/totalPages) are all non-optional, but
@@ -1029,7 +1050,7 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         if (type.IsGenericType
             && type.GetGenericTypeDefinition().Name.StartsWith("Paged", StringComparison.Ordinal))
         {
-            foreach (var key in schema.Properties.Keys) schema.Required.Add(key);
+            foreach (var key in s.Properties.Keys) s.Required.Add(key);
             return;
         }
 
@@ -1049,10 +1070,10 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
             // the app uses camelCase (PropertyNamingPolicy.CamelCase), so
             // match on camelCase first, then fall back to the exact key.
             var camel = JsonNamingPolicy.CamelCase.ConvertName(p.Name);
-            var key = schema.Properties.ContainsKey(camel)
+            var key = s.Properties.ContainsKey(camel)
                 ? camel
-                : (schema.Properties.ContainsKey(p.Name) ? p.Name : null);
-            if (key is not null) schema.Required.Add(key);
+                : (s.Properties.ContainsKey(p.Name) ? p.Name : null);
+            if (key is not null) s.Required.Add(key);
         }
     }
 }

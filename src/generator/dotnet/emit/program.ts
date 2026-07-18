@@ -780,22 +780,29 @@ export function renderCsproj(
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
   // block.
   const oidcRefs = oidc
-    ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.0.1" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.0.1" />`
+    ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
     : "";
   // Persistence package set — Dapper + raw Npgsql for `persistence: dapper`,
   // otherwise the EF Core 10 + Npgsql.EntityFrameworkCore stack.
   const persistenceRefs = usingDapper
     ? DAPPER_PROJECT_DEPS.join("\n")
-    : `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+    : `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <!-- Pin Relational to the same version as the base package: the Design/Tools
+         refs below are PrivateAssets (build-time only, not flowed to the sibling
+         Tests project), so without an explicit ref the Relational version floats
+         to the transitive floor of Npgsql.EFCore / Ardalis.Specification.EFCore
+         (< the base), splitting the EF Core set and breaking the Tests project's
+         reference unification (MSB3277). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />`;
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`;
   // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
@@ -805,13 +812,13 @@ export function renderCsproj(
   // Scrutor only ships when the project actually scans for
   // [ExternHandler]-decorated classes.
   const scrutorRef = hasExtern
-    ? `\n    <!-- Scrutor — assembly scan for [ExternHandler]-decorated classes -->\n    <PackageReference Include="Scrutor" Version="5.0.2" />`
+    ? `\n    <!-- Scrutor — assembly scan for [ExternHandler]-decorated classes -->\n    <PackageReference Include="Scrutor" Version="7.0.0" />`
     : "";
   // FluentValidation only ships when at least one wire-translatable
   // invariant or precondition exists.  AspNetCore meta-package gives
   // `AddValidatorsFromAssembly` + DI integration in one ref.
   const validatorRef = usesValidators
-    ? `\n    <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="11.10.0" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />`
+    ? `\n    <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="12.1.1" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />`
     : "";
   // Ardalis Specification — reified `criterion`/`retrieval` query objects.
   // EF-Core-only: the evaluator runs against `IQueryable`, which the Dapper
@@ -825,7 +832,7 @@ export function renderCsproj(
   // (scheduling.md, M-T4.1).  Ships only when an owned timer uses a real cron
   // cadence (an `every:`-only deployable uses PeriodicTimer and needs no dep).
   const cronosRef = withCronTimers
-    ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.8.4" />`
+    ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.13.0" />`
     : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
@@ -860,8 +867,13 @@ export function renderCsproj(
          CA1304 + CA1311: the EF-query position MUST spell case mapping as
          the parameterless ToUpper()/ToLower() (the only forms EF Core
          translates — the Invariant forms throw at query compile); they
-         execute as SQL upper()/lower(), so no culture ever applies. -->
-    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311</NoWarn>
+         execute as SQL upper()/lower(), so no culture ever applies.
+         MSG0005: Mediator 3's source generator warns on any IMessage with no
+         registered handler.  Loom emits domain-event notifications that have
+         no in-process subscriber by design (they exist for the outbox / event
+         log / external consumers), so this fires on every such event — it's a
+         false positive for this codegen model, not a missing handler. -->
+    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311;MSG0005</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/${ns}.Tests project -->
@@ -871,13 +883,13 @@ export function renderCsproj(
   <ItemGroup>
 ${persistenceRefs}
     <!-- Source-generated Mediator (https://github.com/martinothamar/Mediator) -->
-    <PackageReference Include="Mediator.SourceGenerator" Version="2.1.7">
+    <PackageReference Include="Mediator.SourceGenerator" Version="3.0.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
+    <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${oidcRefs}${resourceRefs}
   </ItemGroup>
 </Project>
 `;
@@ -895,15 +907,15 @@ export function renderTestCsproj(ns: string): string {
     <RootNamespace>${ns}.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <!-- AwesomeAssertions: OSS continuation of FluentAssertions; backs the
          generated Should().Be / BeGreaterThan / etc. test matchers. -->
-    <PackageReference Include="AwesomeAssertions" Version="8.0.0" />
+    <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../${ns}.csproj" />

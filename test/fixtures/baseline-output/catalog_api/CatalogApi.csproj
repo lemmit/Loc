@@ -31,8 +31,13 @@
          CA1304 + CA1311: the EF-query position MUST spell case mapping as
          the parameterless ToUpper()/ToLower() (the only forms EF Core
          translates — the Invariant forms throw at query compile); they
-         execute as SQL upper()/lower(), so no culture ever applies. -->
-    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311</NoWarn>
+         execute as SQL upper()/lower(), so no culture ever applies.
+         MSG0005: Mediator 3's source generator warns on any IMessage with no
+         registered handler.  Loom emits domain-event notifications that have
+         no in-process subscriber by design (they exist for the outbox / event
+         log / external consumers), so this fires on every such event — it's a
+         false positive for this codegen model, not a missing handler. -->
+    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311;MSG0005</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/CatalogApi.Tests project -->
@@ -40,26 +45,33 @@
     <None Remove="Tests/**" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <!-- Pin Relational to the same version as the base package: the Design/Tools
+         refs below are PrivateAssets (build-time only, not flowed to the sibling
+         Tests project), so without an explicit ref the Relational version floats
+         to the transitive floor of Npgsql.EFCore / Ardalis.Specification.EFCore
+         (< the base), splitting the EF Core set and breaking the Tests project's
+         reference unification (MSB3277). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- Source-generated Mediator (https://github.com/martinothamar/Mediator) -->
-    <PackageReference Include="Mediator.SourceGenerator" Version="2.1.7">
+    <PackageReference Include="Mediator.SourceGenerator" Version="3.0.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
+    <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->
-    <PackageReference Include="FluentValidation" Version="11.10.0" />
-    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
   </ItemGroup>
 </Project>

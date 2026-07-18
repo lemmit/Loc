@@ -28,8 +28,8 @@ public sealed class ValidationBehavior<TRequest, TResponse>
 
     public async ValueTask<TResponse> Handle(
         TRequest message,
-        CancellationToken cancellationToken,
-        MessageHandlerDelegate<TRequest, TResponse> next)
+        MessageHandlerDelegate<TRequest, TResponse> next,
+        CancellationToken cancellationToken)
     {
         if (_validators.Any())
         {

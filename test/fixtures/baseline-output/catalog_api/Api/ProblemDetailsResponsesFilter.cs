@@ -1,8 +1,7 @@
 // Auto-generated.
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.OpenApi.Any;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace CatalogApi.Api;
@@ -13,12 +12,14 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     {
         var schema = context.SchemaGenerator.GenerateSchema(typeof(ProblemDetails), context.SchemaRepository);
         AugmentProblemDetailsSchema(context.SchemaRepository);
+        if (operation.Responses is null) return;
         foreach (var (code, response) in operation.Responses)
         {
-            if (code.Length == 3 && (code[0] == '4' || code[0] == '5'))
+            if (code.Length == 3 && (code[0] == '4' || code[0] == '5') && response is OpenApiResponse resp)
             {
-                response.Content.Clear();
-                response.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
+                resp.Content ??= new Dictionary<string, OpenApiMediaType>();
+                resp.Content.Clear();
+                resp.Content["application/problem+json"] = new OpenApiMediaType { Schema = schema };
             }
         }
     }
@@ -30,23 +31,28 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     // Consumed by the frontend ACL's `applyServerErrors`.  Idempotent;
     // safe to run per operation.  See
     // docs/old/proposals/validation-error-extension.md (Phase D).
+    // Microsoft.OpenApi 2.0: schema type is the `JsonSchemaType` flags enum
+    // (nullability folded in as `| JsonSchemaType.Null`, which the 3.0 writer
+    // serializes back to `nullable: true`); property maps are keyed by the
+    // `IOpenApiSchema` interface.
     private static void AugmentProblemDetailsSchema(SchemaRepository repo)
     {
-        if (!repo.Schemas.TryGetValue("ProblemDetails", out var problem)) return;
+        if (!repo.Schemas.TryGetValue("ProblemDetails", out var problemSchema)) return;
+        if (problemSchema is not OpenApiSchema problem) return;
+        problem.Properties ??= new Dictionary<string, IOpenApiSchema>();
         if (problem.Properties.ContainsKey("errors")) return;
 
         problem.Properties["errors"] = new OpenApiSchema
         {
-            Type = "array",
-            Nullable = true,
+            Type = JsonSchemaType.Array | JsonSchemaType.Null,
             Items = new OpenApiSchema
             {
-                Type = "object",
+                Type = JsonSchemaType.Object,
                 Required = new HashSet<string> { "pointer", "message" },
-                Properties = new Dictionary<string, OpenApiSchema>
+                Properties = new Dictionary<string, IOpenApiSchema>
                 {
-                    ["pointer"] = new OpenApiSchema { Type = "string" },
-                    ["message"] = new OpenApiSchema { Type = "string" },
+                    ["pointer"] = new OpenApiSchema { Type = JsonSchemaType.String },
+                    ["message"] = new OpenApiSchema { Type = JsonSchemaType.String },
                 },
             },
         };

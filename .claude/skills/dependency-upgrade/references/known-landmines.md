@@ -132,6 +132,80 @@ Format: symptom → cause → fix → where it's pinned / who found it.
 
 ---
 
+## Swashbuckle.AspNetCore 9.0.0+ → Microsoft.OpenApi 2.0 rewrites the emitted filters
+
+- **Symptom:** bumping `Swashbuckle.AspNetCore` past 8.1.4 fails the generated
+  .NET build with `CS0234` (`Microsoft.OpenApi.Models` / `Microsoft.OpenApi.Any`
+  namespaces gone) and `CS0535` on the three emitted filters
+  (`ProblemDetailsResponsesFilter`, `ListResponseWrapperFilter`,
+  `RequiredFromCtorParamFilter` in `src/generator/dotnet/emit/api.ts`) —
+  `ISchemaFilter.Apply` now takes `IOpenApiSchema`, not `OpenApiSchema`.
+- **Cause:** Swashbuckle **9.0.0** moved to **Microsoft.OpenApi 2.0**. That is a
+  breaking rewrite of the object model the filters build by hand: `OpenApiSchema.
+  Type` went from `string` to the `JsonSchemaType` flags enum, `Nullable` folded
+  into it, and `OpenApiReference` + `ReferenceType.Schema` became
+  `OpenApiSchemaReference`.
+- **Fix:** port all three filters to the 2.0 object model — `OpenApiSchema.Type`
+  string → the `JsonSchemaType` flags enum (`Nullable = true` → `| JsonSchemaType.
+  Null`, which the 3.0 writer serializes back to `nullable: true`);
+  `new OpenApiSchema { Reference = new OpenApiReference { ... } }` → a distinct
+  `new OpenApiSchemaReference(id, hostDoc)` node; `ISchemaFilter.Apply` takes
+  `IOpenApiSchema` (cast to the concrete `OpenApiSchema` to mutate
+  `Required`/`Properties`); property maps are keyed by `IOpenApiSchema`. Then
+  **boot the backend and diff `/openapi.json` against the pre-bump spec** —
+  these filters exist to keep the .NET spec byte-aligned with Hono/Phoenix, so a
+  shape drift is a parity regression, not just a compile break.
+- **Status: migrated** (Swashbuckle **10.2.3**, 2026-07-18). Output stays
+  OpenAPI 3.0.4; the diff vs 8.1.4 is a single benign root `tags: []` array that
+  the parity gate (`test/e2e/e2e.test.ts`) does not compare. Keep this entry as
+  the map for the **Microsoft.OpenApi 3.x** bump.
+- **Found by:** the 2026-07-18 .NET currency refresh.
+
+## Mediator (martinothamar) 2 → 3 changes the pipeline signature and rejects handler-less notifications
+
+- **Symptom:** bumping `Mediator.SourceGenerator` / `Mediator.Abstractions` to
+  3.x fails the generated .NET build with `MSG0005: MediatorGenerator found
+  message without any registered handler` on every domain event, plus `CS0535`
+  on `ValidationBehavior` (`IPipelineBehavior.Handle` no longer matches).
+- **Cause:** Mediator 3.0 (a) changed the `IPipelineBehavior<TRequest,
+  TResponse>.Handle(...)` / `MessageHandlerDelegate` signature, and (b) made a
+  notification with **no** registered handler a hard source-generator error —
+  but Loom emits domain-event `INotification`s that nothing subscribes to by
+  design.
+- **Fix:** reorder the emitted `IPipelineBehavior.Handle` params to
+  `(TMessage message, MessageHandlerDelegate<TMessage, TResponse> next,
+  CancellationToken cancellationToken)` — the delegate call `next(message,
+  cancellationToken)` is unchanged — in `ValidationBehavior` (`validator-emit.ts`)
+  and both `ExecutionContextBehavior` variants (`emit/domain-log.ts`). For
+  MSG0005: it is a **warning** by default (only `/warnaserror` promotes it), and
+  the handler-less events are intentional (outbox / event log / external
+  consumers), so add `MSG0005` to the csproj `<NoWarn>` list.
+- **Status: migrated** (Mediator **3.0.2**, 2026-07-18). Compiles clean under
+  `/warnaserror` across the whole `test:dotnet` fixture set incl. the
+  event-sourcing example. Keep as the map for **Mediator 4**.
+- **Found by:** the 2026-07-18 .NET currency refresh.
+
+## EF Core `.Relational` floats to the transitive floor in the sibling Tests project
+
+- **Symptom:** the generated `<Ns>.Tests` project fails `dotnet build` with
+  `MSB3277: conflicts between different versions of
+  Microsoft.EntityFrameworkCore.Relational` (e.g. 10.0.4 vs 10.0.10), even though
+  the main backend builds clean.
+- **Cause:** the main csproj pins the EF Core *base* package but gets `.Relational`
+  lifted to the base version only via `.Design`/`.Tools`, which are
+  `PrivateAssets=all` — so that lift does **not** flow across the `ProjectReference`
+  to the Tests project, where `.Relational` falls back to the transitive floor of
+  `Npgsql.EntityFrameworkCore.PostgreSQL` + `Ardalis.Specification.EntityFramework
+  Core`.
+- **Fix:** pin `Microsoft.EntityFrameworkCore.Relational` **explicitly** (non-private)
+  at the base version in `renderCsproj` / `efcore-persistence.ts`, so it flows to
+  Tests. Landed in the 2026-07-18 refresh. Re-check the pin whenever the EF Core
+  base version moves.
+- **Found by:** the 2026-07-18 .NET currency refresh (the emitted Tests project is
+  not CI-gated, so this stayed latent).
+
+---
+
 ## Watch-list (no incident yet, but check on the relevant major)
 
 - **Node 24 / Vite 8 / Elixir 1.18** (#1422 currency batch) — base-image and

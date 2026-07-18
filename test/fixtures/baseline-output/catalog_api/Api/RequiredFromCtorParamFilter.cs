@@ -1,20 +1,25 @@
 // Auto-generated.
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace CatalogApi.Api;
 
 public sealed class RequiredFromCtorParamFilter : ISchemaFilter
 {
-    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    // Microsoft.OpenApi 2.0: the filter receives the IOpenApiSchema interface;
+    // mutating Required/Properties needs the concrete OpenApiSchema.
+    public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
     {
+        if (schema is not OpenApiSchema s) return;
         var type = context.Type;
-        if (schema.Properties is null || schema.Properties.Count == 0) return;
+        if (s.Properties is null || s.Properties.Count == 0) return;
+        s.Required ??= new HashSet<string>();
 
         // Paged carrier (M-T2.6): the generic Paged<T> record's members
         // (items/page/pageSize/total/totalPages) are all non-optional, but
@@ -25,7 +30,7 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         if (type.IsGenericType
             && type.GetGenericTypeDefinition().Name.StartsWith("Paged", StringComparison.Ordinal))
         {
-            foreach (var key in schema.Properties.Keys) schema.Required.Add(key);
+            foreach (var key in s.Properties.Keys) s.Required.Add(key);
             return;
         }
 
@@ -45,10 +50,10 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
             // the app uses camelCase (PropertyNamingPolicy.CamelCase), so
             // match on camelCase first, then fall back to the exact key.
             var camel = JsonNamingPolicy.CamelCase.ConvertName(p.Name);
-            var key = schema.Properties.ContainsKey(camel)
+            var key = s.Properties.ContainsKey(camel)
                 ? camel
-                : (schema.Properties.ContainsKey(p.Name) ? p.Name : null);
-            if (key is not null) schema.Required.Add(key);
+                : (s.Properties.ContainsKey(p.Name) ? p.Name : null);
+            if (key is not null) s.Required.Add(key);
         }
     }
 }

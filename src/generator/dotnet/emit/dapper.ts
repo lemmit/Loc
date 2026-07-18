@@ -1126,7 +1126,7 @@ export function renderDapperSchema(
 /** Dapper `<PackageReference>` rows for the deployable's csproj (replaces the
  *  EF Core package set). */
 export const DAPPER_PROJECT_DEPS: readonly string[] = [
-  `    <PackageReference Include="Dapper" Version="2.1.35" />`,
+  `    <PackageReference Include="Dapper" Version="2.1.79" />`,
   `    <PackageReference Include="Npgsql" Version="10.0.3" />`,
 ];
 
