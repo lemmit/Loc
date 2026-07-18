@@ -137,6 +137,11 @@ function packId(p: PackSpec): string {
 interface Case {
   ddd: string;
   reactDir: string;
+  /** Additional emitted React project dirs to type-check (not vite-build) in
+   *  the same case — used to compile a SECOND web deployable (e.g. a scaffold
+   *  UI) that the single `reactDir` gate would otherwise never touch.  Built
+   *  once, on the first pack cell (see the loop guard below). */
+  extraReactDirs?: readonly string[];
   pack: PackSpec;
 }
 
@@ -166,7 +171,12 @@ describe.skipIf(!ENABLED)(
   () => {
     it.each(
       cases.map((c) => ({ ...c, packLabel: packId(c.pack) })),
-    )("$ddd × $packLabel → $reactDir type-checks and bundles", ({ ddd, reactDir, pack }) => {
+    )("$ddd × $packLabel → $reactDir type-checks and bundles", ({
+      ddd,
+      reactDir,
+      extraReactDirs,
+      pack,
+    }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
         // Always materialise a mutated copy with `design: <pack>` set
@@ -220,6 +230,30 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 120_000,
         });
+        // Extra web deployables (e.g. a scaffold UI): install + `tsc --noEmit`
+        // only — the tsc pass is what catches an off-wire field reference; a
+        // second vite build would add cost without new coverage.  Built once,
+        // on the first pack cell, because injectDesign only rewrites the
+        // primary (console_web) design slot — every extra dir builds
+        // identically under every pack, so ×N packs would be pure redundancy.
+        const isFirstPackCell = packId(pack) === packId(PACKS[0]);
+        if (isFirstPackCell) {
+          for (const extra of extraReactDirs ?? []) {
+            const extraDir = path.join(outDir, extra);
+            if (!fs.existsSync(extraDir)) {
+              throw new Error(
+                `Expected extra React project at ${extraDir} after generating ${ddd}`,
+              );
+            }
+            stubFrontendExterns(extraDir);
+            execSync(`npm install --silent --no-audit --no-fund`, {
+              cwd: extraDir,
+              stdio: "inherit",
+              timeout: 240_000,
+            });
+            execSync(`npx tsc --noEmit`, { cwd: extraDir, stdio: "inherit", timeout: 90_000 });
+          }
+        }
         expect(true).toBe(true);
       } finally {
         try {

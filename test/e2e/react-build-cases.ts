@@ -16,7 +16,17 @@ export const reactBuildExamples = [
   // (exercises every walker primitive).  injectDesign rewrites its
   // `design:` slot — the first in the source — so this cell tests the
   // full primitive surface compiling under each pack.
-  { ddd: "examples/showcase.ddd", reactDir: "console_web" },
+  //
+  // `extraReactDirs` type-checks the SECOND web deployable too: `admin_web`
+  // is a `with scaffold(...)` UI over the `Accounts` subdomain, whose `Squad`
+  // is `softDeletable` (an `internal` field).  A scaffold that rendered that
+  // off-wire field emits TSX the client DTO can't satisfy — a bug that shipped
+  // undetected precisely because the gate only ever compiled the FIRST
+  // deployable per example (console_web, hand-written).  Building admin_web
+  // locks in that the scaffold honours the API-read projection.  Compiled once
+  // (on the first pack cell) since injectDesign only rewrites console_web's
+  // slot — admin_web builds identically under every pack.
+  { ddd: "examples/showcase.ddd", reactDir: "console_web", extraReactDirs: ["admin_web"] },
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },
