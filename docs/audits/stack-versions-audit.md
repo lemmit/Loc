@@ -134,17 +134,32 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 | `bandit` | `~> 1.5` | latest | safe |
 | `postgrex` | `~> 0.20` | 0.20.x | **DONE** — tightened from the old `">= 0.0.0"` loose-peer range |
 
-### .NET — `src/generator/dotnet/emit/program.ts` (`renderCsproj`, ~:585–700)
+### .NET — `src/generator/dotnet/emit/program.ts` (`renderCsproj`, `renderTestCsproj`)
 
-TFM is `net10.0` (program.ts:632/677).
+TFM is `net10.0` (`DOTNET_TFM`). NuGet pins refreshed **2026-07-18** to newest
+stable, each verified by a `dotnet build /warnaserror` (sdk:10.0) of the
+representative generated projects — showcase (multi-context), dapper, byfeature
+(extern/Scrutor), the auth-oidc verifier, the 13 single-context gate fixtures,
+and the emitted xUnit Tests project.
 
-| package | pinned | latest | notes |
+| package | was | now | notes |
 | --- | --- | --- | --- |
-| `Microsoft.EntityFrameworkCore` (suite) | 10.0.9 | 10.0.x | on net10.0 (was deferred-on-net8 in the original snapshot) |
-| `Npgsql.EntityFrameworkCore.PostgreSQL` | 10.0.2 | 10.0.x | within major |
-| `MediatR` (in code: `Mediator.SourceGenerator`) | 2.1.7 | 14.1 | defer |
-| `FluentValidation` | 11.10.0 | 12.1 | defer |
-| `Ardalis.Specification` (+ EF Core) | 9.3.1 | latest | criterion query objects |
+| `Microsoft.EntityFrameworkCore` (+ `.Design`/`.Tools`) | 10.0.9 | **10.0.10** | within major |
+| `Microsoft.EntityFrameworkCore.Relational` | *(transitive)* | **10.0.10** | now pinned explicitly — `Design`/`Tools` are `PrivateAssets` so without this the Relational version floats to the transitive floor (10.0.4) in the sibling Tests project and MSB3277-conflicts with the base |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | 10.0.2 | **10.0.3** | within major |
+| `Npgsql` (dapper path) | 10.0.3 | 10.0.3 | already latest |
+| `Dapper` | 2.1.35 | **2.1.79** | within major |
+| `Ardalis.Specification` (+ EF Core) | 9.3.1 | 9.3.1 | already latest |
+| `FluentValidation` (+ `.DependencyInjectionExtensions`) | 11.10.0 | **12.1.1** | major — builds clean; the emitted `AbstractValidator`/`ValidationBehavior` surface is unaffected |
+| `Scrutor` | 5.0.2 | **7.0.0** | major — the `[ExternHandler]` assembly-scan API is unaffected |
+| `Cronos` | 0.8.4 | **0.13.0** | `CronExpression.Parse`/`GetNextOccurrence` unchanged |
+| `Microsoft.IdentityModel.JsonWebTokens` / `.Protocols.OpenIdConnect` | 8.0.1 | **8.19.2** | within major (OIDC verifier) |
+| `Mediator.SourceGenerator` / `.Abstractions` | 2.1.7 | 2.1.7 | **held** — 3.0.2 requires migrating the emitted `IPipelineBehavior.Handle` signature AND handling `MSG0005` (v3 rejects the handler-less domain-event notifications Loom emits by design). A runtime-affecting migration, not a bump; do as its own PR. |
+| `Swashbuckle.AspNetCore` | 6.9.0 | **8.1.4** | bumped to the newest version still on **Microsoft.OpenApi 1.x**. 9.0.0+ moves to Microsoft.OpenApi **2.0**, which rewrites the three emitted OpenAPI filters (`OpenApiSchema.Type`, `Nullable`, `OpenApiReference` → `IOpenApiSchema`/`JsonSchemaType`) and must be re-verified against the gated cross-backend OpenAPI parity — its own PR. |
+| `Microsoft.NET.Test.Sdk` | 17.11.1 | **18.8.1** | test project (major) |
+| `xunit` | 2.9.2 | **2.9.3** | test project |
+| `xunit.runner.visualstudio` | 2.8.2 | **3.1.5** | test project (major) |
+| `AwesomeAssertions` | 8.0.0 | **9.4.0** | test project (major) |
 
 ## Playground itself (`web/package.json`)
 

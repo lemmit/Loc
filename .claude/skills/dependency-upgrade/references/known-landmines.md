@@ -132,6 +132,67 @@ Format: symptom → cause → fix → where it's pinned / who found it.
 
 ---
 
+## Swashbuckle.AspNetCore 9.0.0+ → Microsoft.OpenApi 2.0 rewrites the emitted filters
+
+- **Symptom:** bumping `Swashbuckle.AspNetCore` past 8.1.4 fails the generated
+  .NET build with `CS0234` (`Microsoft.OpenApi.Models` / `Microsoft.OpenApi.Any`
+  namespaces gone) and `CS0535` on the three emitted filters
+  (`ProblemDetailsResponsesFilter`, `ListResponseWrapperFilter`,
+  `RequiredFromCtorParamFilter` in `src/generator/dotnet/emit/api.ts`) —
+  `ISchemaFilter.Apply` now takes `IOpenApiSchema`, not `OpenApiSchema`.
+- **Cause:** Swashbuckle **9.0.0** moved to **Microsoft.OpenApi 2.0**. That is a
+  breaking rewrite of the object model the filters build by hand: `OpenApiSchema.
+  Type` went from `string` to the `JsonSchemaType` flags enum, `Nullable` folded
+  into it, and `OpenApiReference` + `ReferenceType.Schema` became
+  `OpenApiSchemaReference`.
+- **Fix / current pin:** held at **8.1.4** (the newest version still on
+  Microsoft.OpenApi 1.x). Going to 10.x means porting all three filters to the
+  2.0 object model **and** re-verifying the output against `conformance-parity` —
+  these filters exist specifically to keep the .NET OpenAPI spec byte-aligned
+  with Hono/Phoenix, so a spec-shape drift is a parity regression, not just a
+  compile break. Do it as its own PR with the parity gate forced.
+- **Found by:** the 2026-07-18 .NET currency refresh.
+
+## Mediator (martinothamar) 2 → 3 changes the pipeline signature and rejects handler-less notifications
+
+- **Symptom:** bumping `Mediator.SourceGenerator` / `Mediator.Abstractions` to
+  3.x fails the generated .NET build with `MSG0005: MediatorGenerator found
+  message without any registered handler` on every domain event, plus `CS0535`
+  on `ValidationBehavior` (`IPipelineBehavior.Handle` no longer matches).
+- **Cause:** Mediator 3.0 (a) changed the `IPipelineBehavior<TRequest,
+  TResponse>.Handle(...)` / `MessageHandlerDelegate` signature, and (b) made a
+  notification with **no** registered handler a hard source-generator error —
+  but Loom emits domain-event `INotification`s that nothing subscribes to by
+  design.
+- **Fix / current pin:** held at **2.1.7** (already the newest 2.x). The bump is
+  a real migration: update the emitted `ValidationBehavior` + `Execution
+  ContextBehavior` signatures, and decide how handler-less events register (or
+  suppress MSG0005). It touches runtime event dispatch, so gate it with the
+  obs-e2e / behavioral leg, not just the compile. This matches the "defer" the
+  `.NET` row of `docs/audits/stack-versions-audit.md` already carried.
+- **Found by:** the 2026-07-18 .NET currency refresh.
+
+## EF Core `.Relational` floats to the transitive floor in the sibling Tests project
+
+- **Symptom:** the generated `<Ns>.Tests` project fails `dotnet build` with
+  `MSB3277: conflicts between different versions of
+  Microsoft.EntityFrameworkCore.Relational` (e.g. 10.0.4 vs 10.0.10), even though
+  the main backend builds clean.
+- **Cause:** the main csproj pins the EF Core *base* package but gets `.Relational`
+  lifted to the base version only via `.Design`/`.Tools`, which are
+  `PrivateAssets=all` — so that lift does **not** flow across the `ProjectReference`
+  to the Tests project, where `.Relational` falls back to the transitive floor of
+  `Npgsql.EntityFrameworkCore.PostgreSQL` + `Ardalis.Specification.EntityFramework
+  Core`.
+- **Fix:** pin `Microsoft.EntityFrameworkCore.Relational` **explicitly** (non-private)
+  at the base version in `renderCsproj` / `efcore-persistence.ts`, so it flows to
+  Tests. Landed in the 2026-07-18 refresh. Re-check the pin whenever the EF Core
+  base version moves.
+- **Found by:** the 2026-07-18 .NET currency refresh (the emitted Tests project is
+  not CI-gated, so this stayed latent).
+
+---
+
 ## Watch-list (no incident yet, but check on the relevant major)
 
 - **Node 24 / Vite 8 / Elixir 1.18** (#1422 currency batch) — base-image and
