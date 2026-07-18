@@ -39,7 +39,7 @@ Three rules:
 | `ui` | Top-level block; `SystemMember`, peer to `subdomain`, `deployable`, `theme`, `user`. |
 | `page` | Declares a route + body. |
 | `component` | Parameterised region tree — typed function from params (and optional state) to a body expression. |
-| `scaffold` | Single fixed multi-page rewrite from a domain selector to pages. |
+| `scaffold` | Single fixed multi-page rewrite from a domain selector to pages.  Mix it with hand-written pages via override-by-name / unfold — see [`customization-gradient.md`](customization-gradient.md). |
 | `state` | Block of reactive local fields. |
 | `menu` | Optional `ui`-level block declaring sidebar structure. |
 

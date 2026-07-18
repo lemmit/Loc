@@ -125,7 +125,9 @@ without seeing its generated body — reach for it when you're writing
 something bespoke anyway.  [Unfolding](#composability) instead
 materialises the scaffolded body as real `.ddd` source so you can *edit*
 it — reach for it when the default is 90% right and you want to tweak,
-not rewrite.
+not rewrite.  Both rungs, and where they sit on the path from all-scaffold
+to all-custom, are walked in
+[`customization-gradient.md`](customization-gradient.md).
 
 ## `crudish`
 

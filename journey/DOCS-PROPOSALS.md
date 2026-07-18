@@ -5,7 +5,9 @@ Everything below is grounded in the five-stage journey (`journey/*.ddd`,
 work today but aren't taught where you'd look for them. Each item says what's
 wrong or missing, where it lives, the fix, and status.
 
-Two are already shipped (marked **DONE**) — listed so the record is complete.
+**Status: all items shipped.** DR1 + DC1 landed in `b0bc9ca`; DR2, DC2, DC3,
+DC4, WF1, PC1, and META landed in the follow-up docs pass on this branch. This
+file is kept as the rationale record.
 
 ---
 
@@ -125,14 +127,23 @@ link as the long-form companion.
 
 ---
 
-## Suggested order
+## What shipped (final)
 
-1. **DR2** (stale, actively misleading — one edit).
-2. **DC3** (the payload-projection table — highest leverage; kills the #4/#5
-   class of surprise).
-3. **DC2** + **WF1** (small, high-value mental-model notes).
-4. **META** (the gradient guide — the narrative capstone; can link everything
-   above).
-5. **DC4**, **PC1** (nice-to-haves; PC1 ideally becomes a grammar fix, not a doc).
-
-DR1 and DC1 already shipped in `b0bc9ca`.
+- **DR1** — `docs/scaffold-macros.md` crudish create/update/destroy (`b0bc9ca`).
+- **DR2** — `web/src/examples/auth-capabilities.ddd` header corrected: all five
+  backends compile the capability query filters today.
+- **DC1** — `docs/scaffold-macros.md` "Overriding a scaffolded page" (`b0bc9ca`).
+- **DC2** — `docs/language.md` "Constructing values vs. aggregates" (`X { }` vs
+  `X.create({ })`).
+- **DC3** — refined the existing access-modifier matrix in `docs/language.md`:
+  precise `token`-on-update cell, tied each column to its `wire-projection.ts`
+  function, added the managed/internal/secret gotcha callout. (The table already
+  existed — the proposal over-scoped this as "no table"; the real gap was
+  precision + a findable gotcha, now fixed.)
+- **DC4** — `docs/criterion.md` "Advisories" section (`loom.repository-find-deprecated`,
+  `loom.index-suggestion`).
+- **WF1** — `docs/tools.md` "parse green ≠ model valid" clarification.
+- **PC1** — `docs/language.md` lexical-structure separator note (aggregate
+  newline-only, event both, deployable brace-binding flip).
+- **META** — new `docs/customization-gradient.md`, cross-linked from
+  `README.md`, `page-metamodel.md`, `scaffold-macros.md`.

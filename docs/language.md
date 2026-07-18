@@ -19,6 +19,16 @@ and tooling see [`tools.md`](tools.md).
 - **String literals**: double-quoted, standard backslash escapes.
 - **Number literals**: `INT` (`/[0-9]+/`) and `DECIMAL` (`/[0-9]+\.[0-9]+/`).
 - **Whitespace** and comments are ignored between tokens.
+- **Member separators are not uniform** across constructs — a known wart
+  (tracked for grammar reconciliation):
+  - `aggregate` / `entity` members are **newline-separated**; a comma is
+    rejected (`Expecting token of type '}' but found ','`).
+  - `event` members accept **either** commas or newlines.
+  - `deployable` fields are normally comma-separated, but once a field uses
+    the **brace api-binding form** (`ui: Board { Work: api }`) the trailing
+    comma is rejected — switch that deployable to newline-separated fields.
+
+  When in doubt, **use newlines**: they are accepted everywhere.
 
 Reserved keywords:
 
@@ -325,6 +335,29 @@ Inside an aggregate or an `entity` part:
 Entity parts may declare any of the above except `operation` and `test`
 (those live on the root).
 
+##### Constructing values vs. aggregates
+
+Two things you declare are instantiated two different ways, and mixing them
+up is the first off-happy-path surprise:
+
+| You built a… | Construct it with | Why |
+|---|---|---|
+| `valueobject` / `entity` part | `Money { amount: 1, currency: "USD" }` — a **brace literal** | A plain immutable record; the `{ … }` is the whole value. |
+| `aggregate` root | `Order.create({ … })` — the **`create` factory** | An aggregate has identity + invariants; construction must run the `create` action so those are enforced and the create wire shape (not the raw field set) is honoured. |
+
+```ddd
+test "build them" {
+  let m = Money { amount: 5, currency: "USD" }      // value object — brace literal
+  let o = Order.create({ customerId: "c1", total: m })  // aggregate — factory call
+}
+```
+
+Writing `Order { … }` in an expression position is an error — since #2005 the
+diagnostic points you at `Order.create({ … })` rather than the older generic
+"unknown builder type". The factory input follows the **create-input** column
+of the [access-modifier matrix](#field-access-modifiers): a `managed` field
+like `createdAt` is off it, so `Order.create({ createdAt: … })` is rejected.
+
 #### Event sourcing — `persistedAs(eventLog)` + `apply(...)`
 
 An aggregate marked `persistedAs(eventLog)` in its header is **event-sourced**:
@@ -431,9 +464,23 @@ the implicit `editable`) form this matrix:
 | `editable` *(default)* | ✓ | ✓ | ✓ | ✓ |
 | `immutable` | ✓ | ✓ | ✗ (server rejects) | ✓ |
 | `managed` | ✓ | ✗ (server owns it) | ✗ | ✓ |
-| `token` | ✓ | ✗ | ✓ (echoed unchanged, like `id`/`version`) | ✓ |
+| `token` | ✓ | ✗ | ✗ body — sent as an optimistic-concurrency *precondition* (like `id`/`version`) | ✓ |
 | `internal` | ✗ (never exposed via API) | ✗ | ✗ | ✓ (views may project it) |
 | `secret` | ✗ (never disclosed) | ✓ | ✓ (write-only) | ✗ |
+
+This table is not prose that can drift from behaviour — each column is a
+projection function in `src/ir/enrich/wire-projection.ts` that every backend
+shares: **Client read** = `forApiRead`, **create input** = `forCreateInput`,
+**update input** = `forUpdateInput` (with `token` fields split out by
+`forPreconditionInput`), **view payloads** = `forUiRead`. If a generated
+`create({ … })` / read DTO surprises you, this is the authority.
+
+> **Common gotcha.** Passing a `managed` field into `.create({ … })` (e.g.
+> `Task.create({ createdAt: now() })`) is rejected — `managed` is server-owned
+> and off the create input. Likewise a scaffolded/custom page that renders an
+> `internal` or `secret` field (`row.isDeleted`, `row.tenantId`) won't type-check
+> against the API-read DTO, which omits them. Both are the same rule read off the
+> two ✗ columns above.
 
 Examples:
 

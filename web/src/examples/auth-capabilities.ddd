@@ -1,11 +1,12 @@
 // Auth + capabilities — the authorization and cross-aggregate-behaviour
 // surface that no other playground example exercises.  Targets a single
-// .NET deployable, because audit/softDelete capability emission and the
-// `auth: required` middleware are wired through to runtime on .NET today
-// (Hono/Phoenix carry the IR but don't yet compile the query filters —
-// see docs/capabilities.md).  Files-only in the playground (.NET doesn't
-// boot in-browser); open the generated tree to read Auth/*.cs, the
-// EF query filters, and the AuditableInterceptor.
+// .NET deployable so the generated tree reads concretely as EF Core
+// artifacts — named query filters, Auth/*.cs, the AuditableInterceptor.
+// (All five backends compile the capability query filters today — .NET,
+// Hono, Java, Phoenix, and Python; see docs/capabilities.md.  .NET is
+// just the most legible to browse as static files.)  Files-only in the
+// playground (.NET doesn't boot in-browser); open the generated tree to
+// read Auth/*.cs, the EF query filters, and the AuditableInterceptor.
 //
 // Demonstrates, end to end:
 //   • system `user { ... }` JWT claim shape + `currentUser` magic id.
