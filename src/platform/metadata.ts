@@ -210,6 +210,20 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     hostableFrameworks: new Set(["feliz"]),
     reservedRepositoryFindNames: new Set(),
   },
+  // Flutter (Dart/Material) mobile+web target — a self-hosting frontend built
+  // by the Flutter SDK (`flutter build web`), NOT the vite-only static
+  // pipeline, so (like Feliz) it hosts only its own framework and is absent
+  // from STATIC_BUNDLE_FRAMEWORKS.  Same deployable contract as `react`
+  // (targets a backend, owns no DB).
+  flutter: {
+    name: "flutter",
+    defaultPort: 3006,
+    needsDb: false,
+    mountsUi: true,
+    isFrontend: true,
+    hostableFrameworks: new Set(["flutter"]),
+    reservedRepositoryFindNames: new Set(),
+  },
   elixir: {
     name: "elixir",
     defaultPort: 4000,

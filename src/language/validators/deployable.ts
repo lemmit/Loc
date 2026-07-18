@@ -74,7 +74,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'static', 'elixir', 'dotnet', 'java'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'flutter', 'static', 'elixir', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "hosts",
@@ -244,7 +244,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'angular', 'feliz', 'static', 'elixir', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'angular', 'feliz', 'flutter', 'static', 'elixir', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }

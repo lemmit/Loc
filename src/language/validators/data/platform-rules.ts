@@ -37,6 +37,7 @@ export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set([
   "vue",
   "angular",
   "feliz",
+  "flutter",
   "static",
 ]);
 
@@ -120,6 +121,7 @@ export function expectedFrameworkFor(
   if (fam === "vue") return "vue";
   if (fam === "angular") return "angular";
   if (fam === "feliz") return "feliz";
+  if (fam === "flutter") return "flutter";
   if (fam === "elixir") return "phoenixLiveView";
   // dotnet and java are dual-mode: backend-only without `ui:`, embedded
   // React SPA host with it.

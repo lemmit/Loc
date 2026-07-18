@@ -3450,6 +3450,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "flutter"
+          },
+          {
+            "$type": "Keyword",
             "value": "phoenixLiveView"
           }
         ]
@@ -3492,6 +3496,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "feliz"
+          },
+          {
+            "$type": "Keyword",
+            "value": "flutter"
           },
           {
             "$type": "Keyword",
