@@ -65,16 +65,17 @@ export const efcorePersistenceAdapter: PersistenceAdapter = {
     // lets the future orchestrator collect deps from every adapter
     // without `renderCsproj` keeping a closed list.
     return [
-      `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />`,
-      `    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">`,
+      `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />`,
+      `    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />`,
+      `    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">`,
       `      <PrivateAssets>all</PrivateAssets>`,
       `      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>`,
       `    </PackageReference>`,
-      `    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9">`,
+      `    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.10">`,
       `      <PrivateAssets>all</PrivateAssets>`,
       `      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>`,
       `    </PackageReference>`,
-      `    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />`,
+      `    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`,
     ];
   },
 };

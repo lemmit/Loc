@@ -1925,7 +1925,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const csprojKey = [...files.keys()].find((k) => k.endsWith(".csproj"))!;
       const csproj = files.get(csprojKey)!;
-      expect(csproj).toMatch(/<PackageReference Include="FluentValidation" Version="11\.10\.0"/);
+      expect(csproj).toMatch(/<PackageReference Include="FluentValidation" Version="12\.1\.1"/);
       expect(csproj).toMatch(
         /<PackageReference Include="FluentValidation\.DependencyInjectionExtensions"/,
       );
