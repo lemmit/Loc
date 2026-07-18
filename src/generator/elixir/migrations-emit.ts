@@ -132,6 +132,37 @@ export function emitMigrations(
   }
 }
 
+/** Topologically order the top-level (non-part, non-join) tables so a table
+ *  referenced by another's FK is created FIRST.  The shared `MigrationsIR`
+ *  already emits `createTable` steps in FK-topological order, but this emitter
+ *  splits them into parent/part/join tiers and re-derives sequential timestamps
+ *  per tier — a plain alphabetical sort here reversed a cross-aggregate reference
+ *  (`Gadget { widgetId: Widget id }` sorts `gadgets` before `widgets`), so
+ *  `ecto.migrate` hit `relation "<schema>.widgets" does not exist` when
+ *  `create_gadgets`' inline `references(:widgets)` ran first (B10).  A parent whose
+ *  FK targets another PARENT (a cross-aggregate `X id` reference, `on_delete:
+ *  :restrict`) is emitted after its target; independent tables keep alphabetical
+ *  order for stable, deterministic timestamps.  Best-effort on a cycle (falls back
+ *  to alphabetical) — mirrors `orderTablesByFkDependency` in `migrations-builder`. */
+function orderParentTablesByFk(tables: TableShape[]): TableShape[] {
+  const names = new Set(tables.map((t) => t.name));
+  const remaining = [...tables].sort((a, b) => a.name.localeCompare(b.name));
+  const emitted = new Set<string>();
+  const order: TableShape[] = [];
+  while (remaining.length > 0) {
+    let idx = remaining.findIndex((t) =>
+      t.foreignKeys.every(
+        (fk) => fk.refTable === t.name || !names.has(fk.refTable) || emitted.has(fk.refTable),
+      ),
+    );
+    if (idx === -1) idx = 0; // cycle — best effort, keep alphabetical head
+    const [t] = remaining.splice(idx, 1);
+    order.push(t!);
+    emitted.add(t!.name);
+  }
+  return order;
+}
+
 function emitInitial(
   m: MigrationsIR,
   appModule: string,
@@ -165,9 +196,9 @@ function emitInitial(
   const partTables = allTables.filter(
     (t) => !joinTables.includes(t) && (isPartTable(t) || t.valueCollection),
   );
-  const parentTables = allTables
-    .filter((t) => !joinTables.includes(t) && !partTables.includes(t))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const parentTables = orderParentTablesByFk(
+    allTables.filter((t) => !joinTables.includes(t) && !partTables.includes(t)),
+  );
 
   // Parents — base + i.
   for (let i = 0; i < parentTables.length; i++) {

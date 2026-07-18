@@ -112,12 +112,11 @@ const BEHAVIOURAL_SKIP = {
     // relational owned-entity EF model + optional-nav; efcore.ts.)
   },
   elixir: {
-    // B5/B6/B7 fixed. B9/B10 open (found when the batch-3 elixir boot finally ran):
-    // B9 — single (non-collection) `contains` emits an undefined `__put_assoc_parts/1`.
-    "single-containment": "B9: elixir single-containment emits undefined __put_assoc_parts/1",
-    // B10 — seeding's migration references a table before it exists (relation
-    //       "<ctx>.widgets" does not exist during ecto.migrate).
-    seeding: "B10: elixir seeding migrate fails — relation does not exist (ordering)",
+    // B5/B6/B7/B9/B10 fixed — no elixir skips remain. (B9: single `contains`
+    // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
+    // handles a single `has_one` struct; context-emit.ts. B10: parent-table
+    // migrations ordered FK-topologically so a cross-aggregate reference target
+    // is created first; migrations-emit.ts.)
   },
 };
 

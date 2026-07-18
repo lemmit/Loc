@@ -476,9 +476,15 @@ function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
 }
 
 /** Does any non-CRUD named operation in the context mutate a RELATIONAL
- *  containment (`lines += Line{…}` / `-=` on a `has_many` child-table aggregate,
- *  §11c)?  Gates the shared `__put_assoc_parts/1` helper emission — relational
- *  containments persist via `put_assoc(..., __put_assoc_parts(record.f))`. */
+ *  containment?  Gates the shared `__put_assoc_parts/1` helper emission —
+ *  relational containments persist via `put_assoc(..., __put_assoc_parts(record.f))`.
+ *  TWO mutation shapes reach that persist tail (see `operation-returns-emit.ts`),
+ *  so BOTH must arm the helper or the emitted call is undefined:
+ *    - COLLECTION (`has_many`): `lines += Line{…}` / `-=` (`add`/`remove`).
+ *    - SINGLE (`has_one`): `shipment := Shipment{…}` (`assign`).
+ *  MUST mirror the persist-tail condition (any assign/add/remove whose target is a
+ *  relational-containment field) exactly — else the helper is either emitted-but-
+ *  unused (`--warnings-as-errors`) or called-but-undefined (the B9 compile error). */
 function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: SystemIR): boolean {
   return ctx.aggregates.some((agg) => {
     if (isEventSourced(agg)) return false;
@@ -490,8 +496,7 @@ function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: System
         !CRUD_RESERVED_NAMES.has(op.name) &&
         op.statements.some(
           (s) =>
-            (s.kind === "add" || s.kind === "remove") &&
-            s.collection &&
+            (s.kind === "assign" || s.kind === "add" || s.kind === "remove") &&
             containNames.has(snake(s.target.segments[0] ?? "")),
         ),
     );
@@ -507,36 +512,38 @@ function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: System
  *  timestamps / the unloaded `belongs_to` / nil fields keeps existing rows on
  *  their PK and lets new ones insert cleanly (`on_replace: :delete` rewrites). */
 function renderPutAssocPartsHelper(): string {
-  // The sole call site passes `record.<field>` AFTER the op body rebound it to
-  // `(record.<field> || []) ++ [<new part struct>]` — always a concrete list —
-  // so a single `is_list` clause covers every call (a `%Ecto.Association.NotLoaded{}`
-  // / catch-all clause is provably unreachable and trips `--warnings-as-errors`
-  // with "this clause is never used").  Per-element it still tolerates the three
-  // forms a mutated list can hold: an already-built changeset, a part struct, or
-  // a bare map.
-  return `  # Normalise a relational-containment value (a \`has_many\` of part structs,
-  # mixing loaded existing rows with freshly-built ones) to \`put_assoc\`-ready
-  # maps — a bare struct with a nil PK would NOT be inserted by \`put_assoc\`
-  # (Ecto reads a struct as an already-persisted row → empty changeset), but a
-  # map WITHOUT \`id\` inserts and one WITH \`id\` is kept/updated.
-  defp __put_assoc_parts(list) when is_list(list) do
-    Enum.map(list, fn
-      %Ecto.Changeset{} = cs ->
-        cs
+  // Two call shapes reach this helper (see `contextMutatesRelationalContainment`):
+  //   - COLLECTION (`has_many`): `record.<field>` is a LIST — the op body rebound
+  //     it to `(record.<field> || []) ++ [<new part struct>]`.
+  //   - SINGLE (`has_one`): `record.<field>` is a SINGLE part struct — the op body
+  //     bound `record = %{record | <field>: %Part{…}}` (B9).
+  // So the helper is multi-clause: the `is_list` clause maps the collection form
+  // element-wise back through the SAME per-element clauses (recursion), and the
+  // per-element clauses ALSO handle a single `has_one` value directly.  A bare
+  // struct with a nil PK would NOT be inserted by `put_assoc` (Ecto reads a struct
+  // as an already-persisted row → empty changeset), but a map WITHOUT `id` inserts
+  // and one WITH `id` is kept/updated.  Every clause is reachable given the live
+  // call sites, so `--warnings-as-errors` stays quiet.
+  return `  # Normalise a relational-containment value to \`put_assoc\`-ready maps.
+  # Accepts either a \`has_many\` LIST of part structs (collection containment) or a
+  # single \`has_one\` part struct/changeset (single containment) — a bare struct
+  # with a nil PK would NOT be inserted by \`put_assoc\` (Ecto reads a struct as an
+  # already-persisted row → empty changeset), but a map WITHOUT \`id\` inserts and
+  # one WITH \`id\` is kept/updated.
+  defp __put_assoc_parts(list) when is_list(list), do: Enum.map(list, &__put_assoc_parts/1)
+  defp __put_assoc_parts(%Ecto.Changeset{} = cs), do: cs
 
-      %{__struct__: _} = part ->
-        part
-        |> Map.from_struct()
-        |> Map.drop([:__meta__, :inserted_at, :updated_at])
-        |> Enum.reject(fn {_k, v} ->
-          match?(%Ecto.Association.NotLoaded{}, v) or is_nil(v)
-        end)
-        |> Map.new()
-
-      other ->
-        other
+  defp __put_assoc_parts(%{__struct__: _} = part) do
+    part
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :inserted_at, :updated_at])
+    |> Enum.reject(fn {_k, v} ->
+      match?(%Ecto.Association.NotLoaded{}, v) or is_nil(v)
     end)
-  end`;
+    |> Map.new()
+  end
+
+  defp __put_assoc_parts(other), do: other`;
 }
 
 /** The two private helpers a context module emits when a named op mutates a
