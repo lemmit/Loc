@@ -35,7 +35,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
-| operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |🔴 B11  |
+| operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |✅ B11  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -44,9 +44,10 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
 
 ---
 
-## B11 🔴 elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
+## B11 ✅ elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
 
-- **Where:** `src/generator/elixir/` (union-return payload schema module naming).
+- **Where:** `src/generator/elixir/vanilla/openapi-emit.ts` (union-return OpenApiSpex
+  schema module naming).
 - **Repro:** `test/fixtures/corpus/operation-returns.ddd` on elixir — `mix ecto.create`
   (compile) fails: **`invalid module name: …DWeb.Api.Schemas.stringOrNotFound`**.
   The op `reject(): string or NotFound` has a union return whose success arm is the
@@ -55,8 +56,30 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   round-trip (`reject` → the NotFound error → 404).
 - **Impact:** any exception-less op returning `<primitive> or <Error>` breaks
   elixir codegen. (A union over an aggregate/record success type — the common case
-  — likely works; the primitive success arm is the gap.) Found by the Slice-4 drain.
-- **Status:** confirmed compile error; skip-listed pending fix.
+  — works; only the primitive success arm was the gap.) Found by the Slice-4 drain.
+- **Root cause:** the union DTO name is `unionInstanceName(variants)` — a join of
+  each variant's `variantTag`. A primitive variant tags by its own **lowercase**
+  name (`string`), so a union whose FIRST variant is a primitive yields a
+  lower-camel stem (`stringOrNotFound`). That is a valid class name on every other
+  backend — Java emits it as a lowercase `sealed interface`, TS as a const — but an
+  Elixir module alias MUST be uppercase-first, so `defmodule …Schemas.stringOrNotFound`
+  is rejected at compile. The elixir emitter fed the raw `unionInstanceName` straight
+  into the alias.
+- **Fix:** a local `unionSchemaAlias(variants)` = `upperFirst(unionInstanceName(…))`
+  supplies the module segment at all three emit sites (the schema `defmodule` +
+  `title`, the schemas-file name, and the op's 200-response `schema:` reference) —
+  `…Schemas.StringOrNotFound`. Only the Elixir alias is uppercased; the wire `type`
+  discriminator tags (`string`, `NotFound`) still come from `variantTag`, so the
+  serialized union is byte-identical to every other backend. Union-*find* returns
+  are unaffected (their success arm is always the aggregate → already PascalCase).
+- **Verification:** booted via `elixir:1.16-otp-26` + node 22 — `run-elixir.mjs
+  operation-returns` green (`reject` → NotFound → 404; app compiles clean); the
+  `sales ledger payments shapes state-gate stamps single-containment seeding`
+  regression set still green (record/aggregate-typed unions + the other elixir
+  fixes unaffected). Pinned by `test/generator/elixir/vanilla-openapi-spec.test.ts`
+  (the primitive-success-arm alias case).
+- **Status:** ✅ fixed — `operation-returns` re-armed (removed from the elixir
+  behavioural skips).
 
 ## B1 ✅ node — event-sourced `create` checks invariants before folding the create event
 
