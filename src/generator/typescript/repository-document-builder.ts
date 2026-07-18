@@ -12,6 +12,7 @@ import {
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -55,6 +56,13 @@ export function buildDocumentRepositoryFile(
   const principalBind = usesPrincipalFilter
     ? `    const currentUser = requireCurrentUser();`
     : null;
+  // `save` grows the optimistic-concurrency overload + a `delete` method under
+  // the SAME gates the relational builder + routes-builder use, so a document
+  // aggregate with a reachable `destroy` / a `versioned` capability (e.g. via
+  // `crudish`) compiles: the routes call `repo.delete(id)` and
+  // `repo.save(agg, expectedVersion)` regardless of saving shape.
+  const versioned = aggregateIsVersioned(agg);
+  const emitsDelete = !!agg.canonicalDestroy;
 
   const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
 
@@ -108,13 +116,27 @@ export function buildDocumentRepositoryFile(
     `    return rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc))${capX ? `.filter((x) => ${capX})` : ""};`,
     `  }`,
     "",
-    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    // Versioned: the UPDATE is CAS-guarded on the expected version (from the
+    // route's `If-Match`, falling back to the loaded version) and a 0-row
+    // update is a lost race → `ConcurrencyError` (409).  Non-versioned keeps
+    // the unconditional write.  Mirrors repository-save-builder.ts.
+    versioned
+      ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+      : `  async save(aggregate: ${agg.name}): Promise<void> {`,
     `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
+    ...(versioned ? [`    const expected = expectedVersion ?? aggregate.version;`] : []),
     `    const existing = await this.db.select({ version: schema.${tableName}.version }).from(schema.${tableName}).where(eq(schema.${tableName}.id, aggregate.id));`,
     `    if (existing.length === 0) {`,
     `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, data, version: 1 });`,
     `    } else {`,
-    `      await this.db.update(schema.${tableName}).set({ data, version: existing[0]!.version + 1 }).where(eq(schema.${tableName}.id, aggregate.id));`,
+    ...(versioned
+      ? [
+          `      const updated = await this.db.update(schema.${tableName}).set({ data, version: expected + 1 }).where(and(eq(schema.${tableName}.id, aggregate.id), eq(schema.${tableName}.version, expected))).returning({ id: schema.${tableName}.id });`,
+          `      if (updated.length === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+        ]
+      : [
+          `      await this.db.update(schema.${tableName}).set({ data, version: existing[0]!.version + 1 }).where(eq(schema.${tableName}.id, aggregate.id));`,
+        ]),
     `    }`,
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `    for (const event of aggregate.pullEvents()) {`,
@@ -123,6 +145,17 @@ export function buildDocumentRepositoryFile(
     `    }`,
     `  }`,
     "",
+    // Hard-delete the single document row.  Contained parts / references live
+    // inside the jsonb, so there's nothing to cascade.  Gated on a reachable
+    // `destroy` (the routes only call `repo.delete` then).
+    ...(emitsDelete
+      ? [
+          `  async delete(id: ${idVar}): Promise<void> {`,
+          `    await this.db.delete(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+          `  }`,
+          "",
+        ]
+      : []),
     ...findMethods.flatMap((m) => [m, ""]),
     toWireMethod(agg, ctx),
     "",
@@ -167,13 +200,17 @@ export function buildDocumentRepositoryFile(
     // Domain-side repository PORT this concrete implements (audit S7).
     repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { eq, inArray } from "drizzle-orm";`,
+    versioned
+      ? `import { and, eq, inArray } from "drizzle-orm";`
+      : `import { eq, inArray } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,
     `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
+    versioned
+      ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
+      : `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     // A principal-referencing capability filter (tenancy) binds
     // `requireCurrentUser()` into the in-app document predicate (DEBT-02 Slice

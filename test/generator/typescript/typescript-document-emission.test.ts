@@ -61,8 +61,14 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     expect(repo).toContain(
       "unitPrice: new Money(Number(d.unitPrice.amount), d.unitPrice.currency)",
     );
-    // version is bumped on update.
-    expect(repo).toContain("version: existing[0]!.version + 1");
+    // version is CAS-bumped on update (versioned is default-on): the guarded
+    // UPDATE conditions on the expected version and a lost race (0 rows) raises
+    // ConcurrencyError — matching the relational repo, so `repo.save(agg,
+    // expectedVersion)` from the versioned `update` route type-checks.
+    expect(repo).toContain("async save(aggregate: Cart, expectedVersion?: number)");
+    expect(repo).toContain("const expected = expectedVersion ?? aggregate.version;");
+    expect(repo).toContain("version: expected + 1");
+    expect(repo).toContain('throw new ConcurrencyError("Cart", aggregate.id as string)');
   });
 
   it("finds evaluate in-memory over rehydrated documents", () => {
