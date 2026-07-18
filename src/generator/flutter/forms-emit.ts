@@ -39,6 +39,7 @@ import type {
   OperationIR,
   TypeIR,
   UiIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -62,6 +63,11 @@ export function operationFormWidgetName(aggregate: string, op: string): string {
 /** `Product` → `DeleteProductForm` (the destroy-form widget class). */
 export function destroyFormWidgetName(aggregate: string): string {
   return `Delete${upperFirst(aggregate)}Form`;
+}
+
+/** `placeOrder` → `PlaceOrderWorkflowForm` (the workflow-run-form widget class). */
+export function workflowFormWidgetName(workflow: string): string {
+  return `${upperFirst(workflow)}WorkflowForm`;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +316,29 @@ export function flutterDestroyForm(aggName: string): FlutterFormSpec {
   };
 }
 
+/** Build the `FlutterFormSpec` for a `WorkflowForm(runs: wf)`.  Structurally a
+ *  create form — a plain POST of the workflow params as a JSON body — but the
+ *  endpoint is the command route `/workflows/<wf>` (matching every backend's
+ *  workflow-command emit).  Reuses the `"create"` widget shape (POST + body +
+ *  `GlobalKey<FormState>`, no route id). */
+export function flutterWorkflowForm(
+  wf: WorkflowIR,
+  bc: EnrichedBoundedContextIR | undefined,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FlutterFormSpec {
+  const fields = prepareFields(wf.params, enumsFromBc(bc), vosFromBc(bc), aggregatesByName);
+  return {
+    widgetName: workflowFormWidgetName(wf.name),
+    kind: "create",
+    aggregate: wf.name,
+    needsId: false,
+    pathExpr: `/workflows/${snake(wf.name)}`,
+    submitLabel: `Run ${humanize(wf.name)}`,
+    fields,
+    destructive: false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Collection — scan a ui's pages for the form primitives they host
 // ---------------------------------------------------------------------------
@@ -419,6 +448,63 @@ export function collectFlutterForms(
   for (const page of ui.pages ?? []) {
     if (!page.body) continue;
     collectBodyForms(page.body, aggregatesByName, bcByAggregate, out, seen);
+  }
+  return out;
+}
+
+/** Walk a page body building a workflow-form spec per `WorkflowForm(runs: <wf>)`
+ *  it hosts, deduped by widget name.  A `runs:` that doesn't resolve to a
+ *  reachable workflow is skipped (the seam then emits a comment). */
+function collectBodyWorkflowForms(
+  body: ExprIR,
+  workflowsByName: ReadonlyMap<string, WorkflowIR>,
+  bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+  out: FlutterFormSpec[],
+  seen: Set<string>,
+): void {
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call" && e.name === "WorkflowForm") {
+      const runsArg = namedArg(e, "runs");
+      const wf = runsArg?.kind === "ref" ? workflowsByName.get(runsArg.name) : undefined;
+      if (wf && !seen.has(workflowFormWidgetName(wf.name))) {
+        seen.add(workflowFormWidgetName(wf.name));
+        out.push(flutterWorkflowForm(wf, bcByWorkflow.get(wf.name), aggregatesByName));
+      }
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(body);
+}
+
+/** Collect every workflow-run form a single page hosts (drives the page's forms
+ *  import alongside the aggregate forms). */
+export function collectPageWorkflowForms(
+  body: ExprIR | undefined,
+  workflowsByName: ReadonlyMap<string, WorkflowIR>,
+  bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FlutterFormSpec[] {
+  if (!body) return [];
+  const out: FlutterFormSpec[] = [];
+  collectBodyWorkflowForms(body, workflowsByName, bcByWorkflow, aggregatesByName, out, new Set());
+  return out;
+}
+
+/** Collect every distinct workflow-run form a ui's pages host — deduped by
+ *  widget name across the whole ui (appended to the `lib/forms.dart` set). */
+export function collectFlutterWorkflowForms(
+  ui: UiIR | undefined,
+  workflowsByName: ReadonlyMap<string, WorkflowIR>,
+  bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FlutterFormSpec[] {
+  if (!ui) return [];
+  const out: FlutterFormSpec[] = [];
+  const seen = new Set<string>();
+  for (const page of ui.pages ?? []) {
+    if (!page.body) continue;
+    collectBodyWorkflowForms(page.body, workflowsByName, bcByWorkflow, aggregatesByName, out, seen);
   }
   return out;
 }

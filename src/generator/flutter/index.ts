@@ -20,6 +20,7 @@ import type {
   PageIR,
   SystemIR,
   UiIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -27,7 +28,13 @@ import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
-import { collectFlutterForms, collectPageForms, renderFormsFile } from "./forms-emit.js";
+import {
+  collectFlutterForms,
+  collectFlutterWorkflowForms,
+  collectPageForms,
+  collectPageWorkflowForms,
+  renderFormsFile,
+} from "./forms-emit.js";
 import { flutterPack } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -62,16 +69,26 @@ export function generateFlutterForContexts(
   // BC's enums / value objects) and the form projector.
   const aggregatesByName = new Map<string, EnrichedAggregateIR>();
   const bcByAggregate = new Map<string, EnrichedBoundedContextIR>();
+  const workflowsByName = new Map<string, WorkflowIR>();
+  const bcByWorkflow = new Map<string, EnrichedBoundedContextIR>();
   for (const c of contexts) {
     for (const a of c.aggregates) {
       aggregatesByName.set(a.name, a);
       bcByAggregate.set(a.name, c);
     }
+    for (const w of c.workflows) {
+      workflowsByName.set(w.name, w);
+      bcByWorkflow.set(w.name, c);
+    }
   }
 
   // Form widgets — one self-contained `StatefulWidget` per CreateForm /
-  // OperationForm / DestroyForm a page hosts (POST/DELETE over package:http).
-  const forms = collectFlutterForms(ui, aggregatesByName, bcByAggregate);
+  // OperationForm / DestroyForm a page hosts (POST/DELETE over package:http),
+  // plus one per WorkflowForm(runs:) (POST the workflow params to /workflows/<wf>).
+  const forms = [
+    ...collectFlutterForms(ui, aggregatesByName, bcByAggregate),
+    ...collectFlutterWorkflowForms(ui, workflowsByName, bcByWorkflow, aggregatesByName),
+  ];
 
   // Riverpod read providers — one `FutureProvider` per distinct QueryView read
   // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
@@ -91,7 +108,10 @@ export function generateFlutterForContexts(
   const pages = ui?.pages ?? [];
   const rendered = pages.map((page) => ({
     page,
-    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate),
+    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate, {
+      workflowsByName,
+      bcByWorkflow,
+    }),
   }));
 
   // `AppConfig`/`apiUri` is shared by the read providers, the form widgets, AND
@@ -158,7 +178,12 @@ function renderPage(
   contexts: EnrichedBoundedContextIR[],
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR>,
+  workflows: {
+    workflowsByName: ReadonlyMap<string, WorkflowIR>;
+    bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>;
+  },
 ): Omit<RenderedPage, "page"> {
+  const { workflowsByName, bcByWorkflow } = workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -167,9 +192,11 @@ function renderPage(
   const stateNames = new Set(page.state.map((s) => s.name));
 
   // Does this page host a form widget?  Its build references the generated
-  // widget class (`CreateAggForm()` / `DeleteAggForm(id: id)`), so the page
-  // imports `../forms.dart`.
-  const hostsForm = collectPageForms(page.body, aggregatesByName, bcByAggregate).length > 0;
+  // widget class (`CreateAggForm()` / `DeleteAggForm(id: id)` / `<Wf>WorkflowForm()`),
+  // so the page imports `../forms.dart`.
+  const hostsForm =
+    collectPageForms(page.body, aggregatesByName, bcByAggregate).length > 0 ||
+    collectPageWorkflowForms(page.body, workflowsByName, bcByWorkflow, aggregatesByName).length > 0;
 
   let bodyWidget = "const Center(child: Text('Empty page'))";
   let usesState = false;
@@ -187,6 +214,8 @@ function renderPage(
       ui.apiParams,
       aggregatesByName,
       bcByAggregate, // form seams resolve enum / value-object types here
+      workflowsByName, // WorkflowForm(runs:) resolves the workflow's params here
+      bcByWorkflow, // …and its owning BC for enum / value-object resolution
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
     usesState = result.usesState;

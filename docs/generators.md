@@ -855,9 +855,9 @@ seam because Dart list literals are comma-separated.
 | Design | The procedural **flutterMaterial** pack (`src/generator/flutter/pack.ts`, Feliz-`pack.ts` model — emits Material widget trees, no `.hbs`). |
 | CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). |
 
-`Modal { trigger: Button(…), OperationForm(of:, op:) }` renders as a trigger `ElevatedButton` whose `onPressed` opens an `AlertDialog` wrapping the op-form widget (`showDialog`); the op-form pops its own route on success, dismissing the dialog.
+`Modal { trigger: Button(…), OperationForm(of:, op:) }` renders as a trigger `ElevatedButton` whose `onPressed` opens an `AlertDialog` wrapping the op-form widget (`showDialog`); the op-form pops its own route on success, dismissing the dialog.  `WorkflowForm(runs: <wf>)` renders as a `StatefulWidget` (like `CreateForm`) that POSTs the workflow params to the command route `/workflows/<wf>`.
 
-Known frontier: scalar/value-object array inputs, `WorkflowForm`/`UserComponent`, inline `:=` view writes, and `match await` async effects are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
+Known frontier: scalar/value-object array inputs, `UserComponent`, inline `:=` view writes, and `match await` async effects are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
