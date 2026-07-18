@@ -1200,7 +1200,8 @@ function printTestCase(node: TestCase): string {
 // ---------------------------------------------------------------------------
 
 function printParameter(node: Parameter): string {
-  return `${node.name}: ${printTypeRef(node.type)}`;
+  const base = `${node.name}: ${printTypeRef(node.type)}`;
+  return node.default ? `${base} = ${printExpr(node.default)}` : base;
 }
 
 function printTypeRef(node: TypeRef): string {
