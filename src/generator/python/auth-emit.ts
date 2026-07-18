@@ -315,7 +315,7 @@ function renderAuthMiddleware(
   // reachable without a verified principal — bypass them.  /auth/me is NOT
   // bypassed (the guard reads the verified user).
   const bypass = oidc
-    ? `("/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout")`
+    ? `("/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout", "${AUTH_BASE_PATH}/refresh")`
     : '("/health", "/ready", "/openapi.json", "/swagger")';
   // The per-request registry `data_key` resolver (hierarchy only).  A fresh
   // session per lookup; `SELECT data_key … WHERE id = :claim LIMIT 1`; a
@@ -481,7 +481,11 @@ function renderOidcModule(user: UserIR, auth: AuthIR): string {
   const clientSecretExpr = auth.oidc.clientSecret
     ? pyAuthValue(auth.oidc.clientSecret)
     : `os.environ.get("OIDC_CLIENT_SECRET")`;
-  const scopes = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).join(" ");
+  // `offline_access` asks the IdP for a refresh token so /refresh can rotate
+  // it (M-T3.5).  Idempotent.
+  const scopeList = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).slice();
+  if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
+  const scopes = scopeList.join(" ");
   const buildUser = renderBuildUserKwargs(user, auth);
   return `"""Generated OIDC verifier + redirect handshake (D-AUTH-OIDC).  Auto-generated.
 
@@ -491,6 +495,8 @@ issues the HttpOnly \`session\` cookie the verifier reads.  Loom owns no auth
 runtime beyond "validate a token / drive the redirect" — the IdP owns the rest.
 """
 
+import base64
+import hashlib
 import json
 import os
 import secrets
@@ -595,10 +601,19 @@ def register_oidc_verifier() -> None:
 router = APIRouter(prefix="${AUTH_BASE_PATH}", tags=["auth"])
 
 
+def _base64url(raw: bytes) -> str:
+    """Base64url with no padding — PKCE (RFC 7636) verifier + challenge."""
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
 @router.get("/login", include_in_schema=False)
 async def login() -> RedirectResponse:
     authorize = cast(str, _discovery()["authorization_endpoint"])
     state = secrets.token_urlsafe(16)
+    # PKCE (RFC 7636): mint a verifier, send only its S256 challenge to the IdP,
+    # stash the verifier in an HttpOnly cookie for /callback.
+    verifier = _base64url(secrets.token_bytes(32))
+    challenge = _base64url(hashlib.sha256(verifier.encode("ascii")).digest())
     query = urllib.parse.urlencode(
         {
             "response_type": "code",
@@ -606,10 +621,13 @@ async def login() -> RedirectResponse:
             "redirect_uri": _redirect_uri(),
             "scope": _SCOPES,
             "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
         }
     )
     response = RedirectResponse(authorize + "?" + query)
     response.set_cookie("oidc_state", state, httponly=True, samesite="lax")
+    response.set_cookie("oidc_verifier", verifier, httponly=True, samesite="lax")
     return response
 
 
@@ -617,31 +635,62 @@ async def login() -> RedirectResponse:
 async def callback(request: Request) -> Response:
     code = request.query_params.get("code")
     state = request.query_params.get("state")
-    if not code or not state or state != request.cookies.get("oidc_state"):
+    verifier = request.cookies.get("oidc_verifier")
+    if not code or not state or state != request.cookies.get("oidc_state") or not verifier:
         return JSONResponse({"error": "invalid_state"}, status_code=400)
-    token = _exchange_code(code)
-    if token is None:
+    tokens = _exchange_code(code, verifier)
+    if tokens is None:
         return JSONResponse({"error": "token_exchange_failed"}, status_code=401)
     response: Response = RedirectResponse(_post_login())
-    response.set_cookie("session", token, httponly=True, samesite="lax")
+    _store_tokens(response, tokens)
     response.delete_cookie("oidc_state")
+    response.delete_cookie("oidc_verifier")
     return response
+
+
+@router.post("/refresh", include_in_schema=False)
+async def refresh(request: Request) -> Response:
+    """Silent renewal — exchange the stored refresh token for a fresh access
+    token WITHOUT another IdP round-trip, and ROTATE it (the IdP returns a new
+    refresh token; _store_tokens overwrites the cookie → single-use)."""
+    token = request.cookies.get("refresh")
+    if not token:
+        return JSONResponse({"error": "no_refresh_token"}, status_code=401)
+    tokens = _exchange_refresh(token)
+    if tokens is None:
+        # Spent or revoked — clear both cookies so the SPA falls back to a full
+        # /login instead of looping on a dead token.
+        response: Response = JSONResponse({"error": "refresh_failed"}, status_code=401)
+        response.delete_cookie("session")
+        response.delete_cookie("refresh")
+        return response
+    ok: Response = JSONResponse({"ok": True})
+    _store_tokens(ok, tokens)
+    return ok
 
 
 @router.get("/logout", include_in_schema=False)
 async def logout() -> RedirectResponse:
     response = RedirectResponse(_post_login())
     response.delete_cookie("session")
+    response.delete_cookie("refresh")
     return response
 
 
-def _exchange_code(code: str) -> str | None:
-    form: dict[str, str] = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": _redirect_uri(),
-        "client_id": _client_id(),
-    }
+def _store_tokens(response: Response, tokens: dict[str, Any]) -> None:
+    """Persist the access token as the session cookie and the refresh token
+    (when granted) for /refresh.  Both HttpOnly — the SPA never sees them."""
+    access = tokens.get("access_token")
+    response.set_cookie(
+        "session", access if isinstance(access, str) else "", httponly=True, samesite="lax"
+    )
+    refresh_token = tokens.get("refresh_token")
+    if isinstance(refresh_token, str) and refresh_token:
+        response.set_cookie("refresh", refresh_token, httponly=True, samesite="lax")
+
+
+def _token_request(form: dict[str, str]) -> dict[str, Any] | None:
+    """POST a form-urlencoded token request; None on any failure."""
     secret = _client_secret()
     if secret:
         form["client_secret"] = secret
@@ -652,10 +701,30 @@ def _exchange_code(code: str) -> str | None:
     )
     try:
         with urllib.request.urlopen(token_request) as resp:
-            doc = cast(dict[str, Any], json.loads(resp.read()))
+            return cast(dict[str, Any], json.loads(resp.read()))
     except Exception:
         return None
-    access = doc.get("access_token")
-    return access if isinstance(access, str) else None
+
+
+def _exchange_code(code: str, verifier: str) -> dict[str, Any] | None:
+    return _token_request(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": _redirect_uri(),
+            "client_id": _client_id(),
+            "code_verifier": verifier,
+        }
+    )
+
+
+def _exchange_refresh(refresh_token: str) -> dict[str, Any] | None:
+    return _token_request(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": _client_id(),
+        }
+    )
 `;
 }

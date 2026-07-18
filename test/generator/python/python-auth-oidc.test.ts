@@ -86,9 +86,23 @@ describe("python OIDC verifier + handshake", () => {
     expect(oidc).toContain('@router.get("/callback"');
     expect(oidc).toContain('@router.get("/logout"');
     expect(oidc).toContain('"grant_type": "authorization_code"');
-    expect(oidc).toContain('response.set_cookie("session"');
+    expect(oidc).toContain('response.set_cookie(\n        "session"');
     // /auth/me probe (always present under auth) reads the verified user.
     expect(files.get("api/app/auth/routes.py")!).toContain('@router.get("/me"');
+  });
+
+  it("drives login with PKCE and rotates refresh tokens", async () => {
+    const oidc = (await build({ oidc: true })).get("api/app/auth/oidc.py")!;
+    // PKCE (RFC 7636): S256 challenge, verifier cookie, code_verifier on exchange.
+    expect(oidc).toContain("hashlib.sha256");
+    expect(oidc).toContain('"code_challenge_method": "S256"');
+    expect(oidc).toContain('response.set_cookie("oidc_verifier"');
+    expect(oidc).toContain('"code_verifier": verifier');
+    // Refresh rotation: offline_access scope, POST /refresh, refresh cookie.
+    expect(oidc).toContain("offline_access");
+    expect(oidc).toContain('@router.post("/refresh"');
+    expect(oidc).toContain('"grant_type": "refresh_token"');
+    expect(oidc).toContain('response.set_cookie("refresh"');
   });
 
   it("auto-registers the OIDC verifier (not the dev stub) + mounts both routers", async () => {
