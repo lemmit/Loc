@@ -769,6 +769,26 @@ export function renderDocumentRepositoryImpl(
       "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",
       "    }",
+      // Hard delete — gated on a canonical `destroy` (declared or via `crudish`),
+      // exactly like the relational impl.  The DbSet holds `<Agg>Document` rows
+      // (one JSONB column keyed by the raw id value), so load the row by id and
+      // `Remove` it; a missing row is a no-op.  Without this, a document-shaped
+      // aggregate with `crudish` fails CS0535 — the interface declares
+      // `DeleteAsync` but the impl wouldn't provide it.
+      ...(agg.canonicalDestroy
+        ? [
+            "",
+            `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
+            "    {",
+            `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
+            "        if (__existing != null)",
+            "        {",
+            `            _db.${setName}.Remove(__existing);`,
+            "            await _db.SaveChangesAsync(cancellationToken);",
+            "        }",
+            "    }",
+          ]
+        : []),
       ...findMethodLines,
       "}",
     ) + "\n"

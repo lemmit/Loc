@@ -108,10 +108,10 @@ const BEHAVIOURAL_SKIP = {
     // re-armed; no node skips remain.
   },
   dotnet: {
-    // B2/B3/B4/B8 fixed. B12 open — `with crudish` on a `shape: document`
-    // aggregate: the repo interface declares DeleteAsync but the document-shape
-    // repo impl doesn't provide it (CS0535 interface/impl mismatch).
-    document: "B12: dotnet crudish+document — ArticleRepository missing DeleteAsync",
+    // B2/B3/B4/B8/B12 fixed — no dotnet behavioural skips remain. (B12: the
+    // document-shape repo impl now emits `DeleteAsync` when the aggregate has a
+    // canonical `destroy` (via `crudish`), matching the interface it implements —
+    // repository.ts `renderDocumentRepositoryImpl`.)
   },
   elixir: {
     // B11 open — a `T or Error` union whose success type is a PRIMITIVE (e.g.

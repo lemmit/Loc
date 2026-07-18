@@ -37,7 +37,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
 | operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |🔴 B11  |
 | core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
-| document (crudish)            |  ✅  |  ✅  |   ✅   |🔴 B12  |  ⏳    |
+| document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ⏳    |
 | inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
@@ -47,12 +47,14 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
 
 ---
 
-## B12 🔴 dotnet — `with crudish` on a `shape: document` aggregate won't compile
+## B12 ✅ dotnet — `with crudish` on a `shape: document` aggregate won't compile
 
-- **Where:** `src/generator/dotnet/` (crudish repo interface vs document-shape repo impl).
-- **Repro:** `test/fixtures/corpus/document.ddd` with `aggregate Article shape: document, with crudish` on dotnet — `dotnet build` fails **CS0535: `ArticleRepository` does not implement `IArticleRepository.DeleteAsync(Article, …)`**. The `crudish` capability adds `DeleteAsync` to the repo interface, but the document-shape repository emitter doesn't emit a `DeleteAsync` body (the two paths — crudish interface, document impl — disagree). node/java/python compile + round-trip.
-- **Impact:** you can't add CRUD (needed to create/delete) to a document-shaped aggregate on dotnet. Found by the Slice-4 drain (needed crudish for a create path to test document behaviourally).
-- **Status:** confirmed build error; skip-listed pending fix.
+- **Where:** `src/generator/dotnet/emit/repository.ts` (`renderDocumentRepositoryImpl`).
+- **Repro:** `test/fixtures/corpus/document.ddd` with `aggregate Article shape: document, with crudish` on dotnet — `dotnet build` fails **CS0535: `ArticleRepository` does not implement `IArticleRepository.DeleteAsync(Article, …)`**. The `crudish` capability adds a canonical `destroy` → `DeleteAsync` on the repo INTERFACE (and the relational impl already emits it, gated on `agg.canonicalDestroy`), but `renderDocumentRepositoryImpl` never emitted a `DeleteAsync` body — the interface path and the document-shape impl path disagreed on the method set. node/java/python compile + round-trip (Java emits `delete()` on its document store; Python's document repo has no explicit interface, so a missing method doesn't fail its build).
+- **Root cause:** `renderDocumentRepositoryImpl` emitted only `GetByIdAsync`/`FindManyByIdsAsync`/`SaveAsync` + finds — it had no `canonicalDestroy`-gated `DeleteAsync` arm like the relational `renderRepositoryImpl` does.
+- **Fix:** add a `DeleteAsync` arm to `renderDocumentRepositoryImpl`, gated on `agg.canonicalDestroy` (same gate as interface + relational impl). Because the DbSet holds `<Agg>Document` rows (JSONB, keyed by the raw id value) rather than the tracked aggregate, it loads the document row by `id.Value` and `Remove`s it (missing row = no-op), rather than the relational path's bare `_db.Set.Remove(aggregate)`.
+- **Verification:** `run-dotnet.mjs document` → green (create Article → addSection → read the jsonb tree); `sales shapes payments value-collections tph single-containment state-gate` → 12/12 (no regression); `LOOM_DOTNET_BUILD=1 LOOM_CORPUS_DOTNET_CASE=document` → `dotnet build /warnaserror` clean (0 warnings). Pinned by `test/generator/dotnet/crudish-document.test.ts`.
+- **Status:** ✅ fixed — `document` re-armed (removed from the dotnet behavioural skips).
 
 ## B11 🔴 elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
 
