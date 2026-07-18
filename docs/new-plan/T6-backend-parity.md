@@ -36,8 +36,26 @@ Fixed on `main`: `src/generator/typescript/repository-find-builder.ts:587` combi
 Update/mutating-op request DTOs now carry the SAME field-level wire constraints as create — mirrored from `agg.invariants`, filtered to `op.params` (invariants over fields the op doesn't take are dropped, exactly as the create path does). Landed on the four backends that lacked it: TS/Hono (`src/platform/hono/v4/routes-builder.ts:306` op-DTO `emitWireSchema`), .NET FluentValidation (`src/generator/dotnet/validator-emit.ts:77` `renderOperationValidator`), Java (`src/generator/java/emit/validator.ts:56` op loop), Python pydantic (`src/generator/python/routes-builder.ts` `opRequestModel` → `Field(...)` + `@model_validator`). **Phoenix was already at parity** (`update` routes through `base_changeset`'s `validatorBlock`) — lock-in test only. Also mirrored onto the client schemas (`src/generator/_frontend/api-module.ts:120`, `src/generator/svelte/api-builder.ts:78`). Applied uniformly to every public mutating op (closes the identical gap on custom mutators, not just `update`). One generator test per backend + Phoenix lock-in + frontend-client test; `page-emitter-equivalence` baseline re-captured (4 new `UpdateCommandValidator.cs` + 4 constrained routes/client files). Full fast suite green. Kept briefly as the record; delete next refresh.
 Sources: [generated-code-review-2026-06-30](../audits/generated-code-review-2026-06-30.md) SYS-1.
 
-## M-T6.9 — Adapter subsets: Dapper/MikroORM — `partial` · **L** · P3
-Both alternates reject big model slices (inheritance, nested parts, non-relational shapes, filters/provenance on mikroorm; seeds/subscriptions on dapper) and Dapper emits `NotImplementedException` stubs for out-of-subset predicates. Either drain the biggest rejections or declare the v1 subsets final (D-tag + docs), stopping the drip. The removed style/transport/runtime registries (2026-07-12) already resolved DEBT-21/22/25 — don't resurrect.
+## M-T6.9 — Adapter subsets: Dapper/MikroORM → FULL PARITY (drain) — `in-progress` · **XL** · P3
+**DECIDED 2026-07-18: DRAIN to full parity** (owner call — the v1 subsets should be fully supported, not declared final). Both alternates get widened until `loom.dapper-unsupported` / `loom.mikroorm-unsupported` reject nothing a full model throws at them; the gates then survive only as fail-fast for genuinely-impossible shapes (like the stamp gates). Landed incrementally, one feature × one adapter per slice, each behind its own `dotnet-build` / node build+e2e fixture; the shared `find-predicate-unsupported` subset-widening rides along per feature.
+
+Source-grounded rejection worklist (`validateDapperSupport` `system-checks.ts:1686`, `validateMikroOrmSupport` `:1786`), verified 2026-07-18:
+
+| Feature to drain | Dapper (.NET, vs efcore) | MikroORM (Node, vs drizzle) |
+|---|---|---|
+| `seed` data | ✗ reject | ✗ reject |
+| non-relational `shape(embedded)`/`shape(document)` | ✗ | ✗ |
+| aggregate inheritance (`abstract`/`extends`) | ✗ | ✗ |
+| nested entity parts (`contains`) | ✗ | ✗ |
+| reference-collection associations (`Id[]`) | ✓ already | ✗ |
+| `filter` capability predicates | ✓ non-principal; ✗ principal | ✗ all |
+| principal-referencing stamp values | ✗ | ✓ already (persist-time) |
+| provenanced fields | ✗ | ✗ |
+| server-managed access (`token`/`internal`/`secret`) | ✓ already | ✗ (except stamp/version) |
+| workflow event subscriptions / outbox | ✗ | (drizzle path) verify |
+| find-predicate SQL subset (`whereToSql`/`whereToMikroFilter`) | narrower than efcore | narrower than drizzle |
+
+MikroORM is a full data-mapper (native STI inheritance, embeddables, collections) so several of its slices are cheaper than the raw-SQL Dapper equivalents. Slice ordering + per-feature reference impls: [`docs/audits/target-gate-inventory-2026-07-18.md`](../audits/target-gate-inventory-2026-07-18.md) → drain plan. Don't resurrect the removed style/transport/runtime registries (2026-07-12, DEBT-21/22/25).
 Sources: DEBT-17/18, parity register adapter sub-matrix.
 
 ## M-T6.10 — Vanilla as a first-class adapter + `resolvePersistence()` — `done` · **M** · P3

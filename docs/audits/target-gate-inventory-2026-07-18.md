@@ -34,16 +34,43 @@ re-checked against the emitters/validators as they ship today.
 |---|---|
 | `feliz-async-effect-unsupported` | M-T6.15 (`done`) — async effects on the Feliz/Elmish frontend are *honestly gated by design*, with a clear "drive the op through a form primitive" message (`store-checks.ts:365`). The gate **is** the deliverable, not a missing feature. |
 
-### C. Deliberate subset-ORM policy — decision pending, **not a bug**
+### C. Subset-ORM gates — **DECIDED 2026-07-18: DRAIN to full parity**
 
 | Gate | Disposition |
 |---|---|
-| `dapper-unsupported` (.NET) | M-T6.9 — Dapper is a **v1 subset** alternate to the default EF Core: relational, state-based, flat aggregates. Rejects (loudly, at validate time) anything outside the subset. |
-| `mikroorm-unsupported` (**Node**, not .NET) | M-T6.9 — MikroORM is the **Node** subset alternate to the default Drizzle; rejects inheritance / nested parts / non-relational shapes / filters / provenance. |
+| `dapper-unsupported` (.NET) | M-T6.9 — Dapper is the **v1 subset** alternate to the default EF Core. **Being drained to full parity.** |
+| `mikroorm-unsupported` (**Node**, not .NET) | M-T6.9 — MikroORM is the **Node** subset alternate to the default Drizzle. **Being drained to full parity.** |
 
-> Decision owed (M-T6.9): *drain the biggest rejections, or declare the v1 subsets
-> final (D-tag + docs) and stop the drip.* Both default ORMs (EF Core, Drizzle) carry
-> the full surface, so neither backend is degraded by keeping these subsets.
+The owner's call: fully support both, don't declare them final. After draining, each gate
+survives only as a fail-fast for genuinely-impossible shapes (like the category-A stamp
+gates), not as a subset boundary. See the **Drain plan** below.
+
+#### Drain plan (M-T6.9 → `in-progress`)
+
+Source-grounded rejection worklist (`validateDapperSupport` `system-checks.ts:1686`,
+`validateMikroOrmSupport` `:1786`):
+
+| Feature | Dapper (.NET) | MikroORM (Node) |
+|---|:--:|:--:|
+| `seed` data | drain | drain |
+| non-relational `shape(embedded)`/`shape(document)` | drain | drain |
+| aggregate inheritance (`abstract`/`extends`) | drain | drain |
+| nested entity parts (`contains`) | drain | drain |
+| reference-collection associations (`Id[]`) | ✓ done | drain |
+| `filter` capability predicates | principal only | all |
+| principal-referencing stamp values | drain | ✓ done |
+| provenanced fields | drain | drain |
+| server-managed access (`token`/`internal`/`secret`) | ✓ done | drain (except stamp/version) |
+| workflow event subscriptions / outbox | drain | verify |
+| find-predicate SQL subset | widen `whereToSql` | widen `whereToMikroFilter` |
+
+Sequencing principle: land **one feature × one adapter per slice**, each behind its own
+`dotnet-build` (Dapper) or node build+e2e (MikroORM) fixture, easiest/highest-value first,
+architecturally-hard raw-SQL cases (Dapper `shape(document)` jsonb, TPH/TPC inheritance)
+last. MikroORM is a full data-mapper (native STI, embeddables, collections), so several of
+its slices are cheaper than the raw-SQL Dapper equivalents. Detailed per-feature reference
+impls + final slice order are being mapped (two scoping passes over the emitters) and will
+be appended here before the first implementation slice lands.
 
 ### D. Genuine closeable feature gaps — **tracked**
 
@@ -74,8 +101,8 @@ The list of *genuinely* actionable items is short — the honest-gate discipline
    generated `lib/*.ex` files carry lines over the 98-col default. Emitter formatting
    cleanup across the vanilla + shell `lines(...)` callers first, then activate the
    `LOOM_PHOENIX_FORMAT` gate. Size **M**.
-3. **M-T6.9 (subset-ORM decision)** — make the call on Dapper/MikroORM (drain vs
-   declare-final) so the gate set stops reading as accidental debt.
+3. **M-T6.9 (subset-ORM drain)** — DECIDED: drain Dapper/MikroORM to full parity. Large
+   multi-slice track (see Drain plan above); land one feature × one adapter per slice.
 4. **M-T6.5 / M-T6.2 residuals** — proceed as already sequenced; all narrow, all with
    documented workarounds, none blocking.
 5. **No action** on category A (correct guards) or B (deliberate limits). Do **not**
