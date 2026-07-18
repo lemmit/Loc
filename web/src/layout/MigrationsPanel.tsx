@@ -50,9 +50,10 @@ export function MigrationsBody({
   const canDiff = ctx.buildClient != null;
 
   // Baseline ref the diff runs against — `HEAD` (last save) by default, or any
-  // commit the user pins from the picker.  Extends the diff from "changes
-  // since I last saved" to "changes since <any milestone>".
-  const [baselineRef, setBaselineRef] = useState("HEAD");
+  // commit pinned from the picker OR the History tab.  Lives on the ctx (not
+  // panel-local) so History's "diff as baseline" can drive it; extends the
+  // diff from "changes since I last saved" to "changes since <any milestone>".
+  const baselineRef = ctx.evolutionBaselineRef;
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const store = ctx.workspace.store;
 
@@ -80,8 +81,7 @@ export function MigrationsBody({
 
   const pickBaseline = (ref: string | null): void => {
     if (!ref) return;
-    setBaselineRef(ref);
-    ctx.runEvolutionDiff(ref);
+    ctx.pinEvolutionBaseline(ref);
   };
 
   // `HEAD` (last save) plus the recent commits, newest first.  The newest

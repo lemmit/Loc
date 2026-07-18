@@ -68,6 +68,7 @@ import {
   DEFAULT_AUTH_STUB,
   devClaimsHeader,
   formatUnsupportedDeployables,
+  type DockTab,
   type LayoutCtx,
   type MobileCodeView,
   type MobileTab,
@@ -266,6 +267,9 @@ export default function App(): JSX.Element {
   // and the live edit, and the on-demand provenance snapshot capture.
   const [evolution, setEvolution] = useState<EvolutionResult | null>(null);
   const [evolutionRunning, setEvolutionRunning] = useState(false);
+  // Baseline ref the Migrations tab diffs against — shared (not panel-local)
+  // so the History tab can pin a milestone as the baseline in one click.
+  const [evolutionBaselineRef, setEvolutionBaselineRef] = useState("HEAD");
   const [snapshotResult, setSnapshotResult] = useState<SnapshotResult | null>(null);
   const [snapshotRunning, setSnapshotRunning] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
@@ -291,6 +295,19 @@ export default function App(): JSX.Element {
       : activeTabRaw === "problems"
         ? "output"
         : activeTabRaw;
+
+  // Desktop bottom-dock tab — lifted from DesktopShell so a panel inside
+  // the dock (History) can reveal a sibling (Migrations) with a pinned
+  // baseline.  Coerce values persisted before Problems/Generator/Bundler
+  // were folded into the consolidated Output panel.
+  const [dockTabRaw, setDockTabRaw] = usePersistedState<
+    DockTab | "problems" | "generator" | "bundler"
+  >("loom.desktop.dockTab", "output");
+  const dockTab: DockTab =
+    dockTabRaw === "problems" || dockTabRaw === "generator" || dockTabRaw === "bundler"
+      ? "output"
+      : dockTabRaw;
+  const setDockTab = (t: DockTab): void => setDockTabRaw(t);
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
@@ -1381,6 +1398,17 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Pin `ref` as the evolution baseline, reveal the Migrations dock tab, and
+  // run the diff — the one-click "diff against this milestone" wired from the
+  // History tab (and the Migrations tab's own baseline picker).  Desktop-only
+  // navigation (the Migrations tab lives in the desktop dock); on mobile the
+  // baseline still pins and the diff still runs.
+  function pinEvolutionBaseline(ref: string): void {
+    setEvolutionBaselineRef(ref);
+    setDockTab("migrations");
+    void runEvolutionDiff(ref);
+  }
+
   // Download the generated project tree as a single .zip — the bridge out of
   // the browser for the backends/frontends the preview can't boot (.NET,
   // Phoenix, Java, Python, Vue, Svelte).  The files are already in memory
@@ -1538,6 +1566,8 @@ export default function App(): JSX.Element {
     setLiveMode,
     activeTab,
     setActiveTab,
+    dockTab,
+    setDockTab,
     codeView,
     setCodeView,
     testResults,
@@ -1562,6 +1592,8 @@ export default function App(): JSX.Element {
     evolution,
     evolutionRunning,
     runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
+    evolutionBaselineRef,
+    pinEvolutionBaseline,
     snapshotResult,
     snapshotRunning,
     runCaptureSnapshot: () => void runCaptureSnapshot(),

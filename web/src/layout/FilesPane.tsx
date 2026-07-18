@@ -1,4 +1,4 @@
-import { Box, Group, ScrollArea, Stack, Text } from "@mantine/core";
+import { Box, Button, Group, ScrollArea, Stack, Text } from "@mantine/core";
 import { FileTree } from "../preview/FileTree";
 import { FileViewer } from "../preview/FileViewer";
 import type { LayoutCtx } from "./ctx";
@@ -21,6 +21,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
     generateResult,
     honoBundleResult,
     reactBundleResult,
+    runDownloadZip,
   } = ctx;
 
   const treeNode = (
@@ -95,10 +96,25 @@ export function FilesPane({ ctx }: Props): JSX.Element {
         </Box>
       )}
       <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <Group px="sm" py={4} bg="dark.7" gap="xs">
-          <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"}>
+        <Group px="sm" py={4} bg="dark.7" gap="xs" wrap="nowrap" justify="space-between">
+          <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"} truncate>
             {selectedFile?.path ?? "no file selected"}
           </Text>
+          {/* Mobile counterpart of DesktopShell's Download .zip — the bridge
+              out of the browser for the backends/frontends the preview can't
+              boot.  Shown once there's a generated tree to export. */}
+          {files.length > 0 && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              leftSection={<span aria-hidden>↓</span>}
+              onClick={() => runDownloadZip()}
+              style={{ flexShrink: 0 }}
+              data-testid="download-zip-mobile"
+            >
+              .zip
+            </Button>
+          )}
         </Group>
         {/* Monaco's `automaticLayout` ResizeObserver needs a parent
             with a definite 2D size on first paint, otherwise it

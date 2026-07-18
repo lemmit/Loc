@@ -116,6 +116,11 @@ export type MobileCodeView =
   | "requirements"
   | "generated";
 
+/** Identifiers for the desktop bottom dock's tabs.  Defined here (rather
+ *  than in DevToolsDock) so `LayoutCtx` can carry the active-tab state
+ *  without a ctx→DevToolsDock→ctx import cycle; DevToolsDock re-exports it. */
+export type DockTab = "output" | "backend" | "tests" | "migrations" | "history" | "auth";
+
 export interface LayoutCtx {
   isDesktop: boolean;
 
@@ -318,6 +323,12 @@ export interface LayoutCtx {
   activeTab: MobileTab;
   setActiveTab: (t: MobileTab) => void;
 
+  // Desktop bottom-dock tab — lifted from DesktopShell so a panel inside
+  // the dock (e.g. History) can navigate to a sibling (Migrations) with
+  // context.  Persisted by App.tsx.  Mobile has no dock and ignores it.
+  dockTab: DockTab;
+  setDockTab: (t: DockTab) => void;
+
   // Sub-view of the consolidated mobile Code tab (source / builder /
   // model / generated). Persisted by App.tsx.
   codeView: MobileCodeView;
@@ -347,6 +358,14 @@ export interface LayoutCtx {
   /** Diff the live source against the baseline at `ref` (default `HEAD`,
    *  i.e. the last save) — any commit oid pins an earlier baseline. */
   runEvolutionDiff: (ref?: string) => void;
+  /** The baseline ref the Migrations tab currently diffs against — `HEAD`
+   *  by default, or a commit oid.  Shared (not panel-local) so the History
+   *  tab can pin a milestone as the baseline. */
+  evolutionBaselineRef: string;
+  /** Pin `ref` as the evolution baseline, reveal the Migrations dock tab,
+   *  and run the diff — the one-click "diff against this milestone" from
+   *  the History tab (and the Migrations tab's own baseline picker). */
+  pinEvolutionBaseline: (ref: string) => void;
   /** Result of the last provenance-snapshot capture, or null. */
   snapshotResult: SnapshotResult | null;
   snapshotRunning: boolean;

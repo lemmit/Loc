@@ -5,17 +5,12 @@ import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
 import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
-import { type LayoutCtx } from "./ctx";
+import { type DockTab, type LayoutCtx } from "./ctx";
 
-// Identifiers for the consolidated bottom dock.  The playground used
-// to scatter status across the IDE — LSP diagnostics in one panel, the
-// backend tester in another, bundle errors hidden at the foot of the
-// Files pane, generator errors only counted in the footer, boot errors
-// inside the Backend body.  The read-only diagnostic/log views now live
-// behind a single Output tab (a stream Select); the interactive Backend
-// tester and Tests runner keep their own tabs.  Each tab carries a
-// status dot so the user sees where the red is without opening it.
-export type DockTab = "output" | "backend" | "tests" | "migrations" | "history" | "auth";
+// `DockTab` (the consolidated bottom-dock tab ids) is defined in ctx.ts so
+// LayoutCtx can carry the active-tab state; re-exported here so existing
+// importers (`DesktopShell`) keep resolving it from DevToolsDock.
+export type { DockTab };
 
 interface Props {
   ctx: LayoutCtx;

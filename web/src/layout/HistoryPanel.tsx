@@ -221,6 +221,22 @@ export function HistoryBody({
                         ))}
                       </Stack>
                     )}
+                    {/* One-click "diff against this milestone": pin this
+                        commit as the evolution baseline and jump to the
+                        Migrations tab.  Desktop-only — the Migrations tab
+                        lives in the desktop dock. */}
+                    {ctx.isDesktop && (
+                      <Box mt={6}>
+                        <Button
+                          size="compact-xs"
+                          variant="light"
+                          onClick={() => ctx.pinEvolutionBaseline(c.oid)}
+                          data-testid="history-diff-baseline"
+                        >
+                          Diff as baseline
+                        </Button>
+                      </Box>
+                    )}
                     {c.oid !== headOid && (
                       <Box mt={6}>
                         {confirmOid === c.oid ? (
