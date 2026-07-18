@@ -288,7 +288,7 @@ function pagedRunStmt(
 function renderPagedQueryRecord(
   h: Handler,
   ns: string,
-  ctx: EnrichedBoundedContextIR,
+  _ctx: EnrichedBoundedContextIR,
   agg: string,
 ): string {
   const params = [

@@ -207,6 +207,7 @@ describe("e2e harness — bearer-token forwarding", () => {
     // The token is read from the env and only becomes an Authorization header
     // when present (auth-less runs send nothing).
     expect(e2e).toContain("const token = process.env.E2E_BEARER_TOKEN;");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(e2e).toContain("return token ? { authorization: `Bearer ${token}` } : {};");
     // POST merges the auth header alongside content-type; GET carries it too.
     expect(e2e).toContain('headers: { "content-type": "application/json", ...__authHeaders() }');

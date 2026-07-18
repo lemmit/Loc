@@ -24,7 +24,6 @@ import {
   buildWorkflowsApiModule,
   hasAnyWorkflow,
 } from "../_frontend/workflows-module.js";
-import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";

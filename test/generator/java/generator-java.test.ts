@@ -68,6 +68,7 @@ describe("java generator — project shell (S1)", () => {
 
   it("application.yml reads the compose-provided datasource env with local fallbacks", async () => {
     const yml = (await files()).get("shop_api/src/main/resources/application.yml")!;
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(yml).toContain("url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/shopapi}");
     expect(yml).toContain("ddl-auto: none");
     expect(yml).toContain("open-in-view: false");

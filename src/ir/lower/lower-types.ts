@@ -381,7 +381,7 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
     if (target && isAggregate(target)) {
       valueType = "guid" as IdValueType;
     } else if (target && isEntityPart(target)) {
-      const owner = ancestorAggregate(target);
+      const _owner = ancestorAggregate(target);
       valueType = "guid" as IdValueType;
     } else if (!target && env) {
       // Unresolved ref (a macro- / capability-emitted plain `{ $refText }` ref —

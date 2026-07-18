@@ -582,15 +582,19 @@ describe("validation", () => {
       `);
       expect(errors).toEqual([]);
       // Sanity check: one List page (deduped), not two.
-      const { isPage, isSystem, isUi } = await import("../../../src/language/generated/ast.js");
+      const { isArea, isPage, isSystem, isUi } = await import(
+        "../../../src/language/generated/ast.js"
+      );
+      type Page = import("../../../src/language/generated/ast.js").Page;
+      type Node = import("langium").AstNode;
       const sys = (model.members ?? []).find(isSystem);
       const ui = (sys?.members ?? []).find(isUi);
       // Pages nest in the scaffold's per-aggregate `area`, so collect recursively.
-      const collectPages = (members: any[]): any[] =>
-        (members ?? []).flatMap((m: any) =>
-          isPage(m) ? [m] : m?.$type === "Area" ? collectPages(m.members) : [],
+      const collectPages = (members: readonly Node[]): Page[] =>
+        (members ?? []).flatMap((m) =>
+          isPage(m) ? [m] : isArea(m) ? collectPages(m.members) : [],
         );
-      const orderListPages = collectPages(ui?.members ?? []).filter((p: any) => p.name === "List");
+      const orderListPages = collectPages(ui?.members ?? []).filter((p) => p.name === "List");
       expect(orderListPages.length).toBe(1);
     });
 

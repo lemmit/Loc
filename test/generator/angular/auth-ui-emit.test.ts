@@ -48,9 +48,12 @@ describe("angular auth: ui guard — emission", () => {
 
     const service = find(files, "web/src/app/auth/session.service.ts");
     // Probes /auth/me with credentials and reuses the shared API_BASE_URL.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(service).toContain("${API_BASE_URL}/auth/me");
     expect(service).toContain("withCredentials: true");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(service).toContain("${API_BASE_URL}/auth/login");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(service).toContain("${API_BASE_URL}/auth/logout");
     // Exposes the verified user signal a future page guard reads.
     expect(service).toContain("readonly user = signal<SessionUser | null>(null)");

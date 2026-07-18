@@ -40,7 +40,7 @@ async function parseFresh(src: string): Promise<{
 
 function uiOf(model: Model, name: string): Ui {
   const sys = (model.members ?? []).find((m) => m.$type === "System");
-  if (!sys || sys.$type !== "System") throw new Error("no system");
+  if (sys?.$type !== "System") throw new Error("no system");
   const ui = (sys.members ?? []).find((m): m is Ui => m.$type === "Ui" && m.name === name);
   if (!ui) throw new Error(`ui '${name}' not found`);
   return ui;

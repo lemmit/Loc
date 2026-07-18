@@ -216,7 +216,7 @@ function storeZeroForType(type: TypeIR): string {
  *  them as plain strings).  Byte-for-byte with React's `moneyFieldNames`.
  *  Nested money (inside an array/entity) is a documented v1 limitation of the
  *  persisted/URL tiers. */
-function moneyFieldNames(store: StoreIR): string[] {
+function _moneyFieldNames(store: StoreIR): string[] {
   return store.state
     .filter((f) => f.type.kind === "primitive" && f.type.name === "money")
     .map((f) => f.name);

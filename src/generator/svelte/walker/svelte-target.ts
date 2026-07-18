@@ -18,7 +18,7 @@
 //   - comments are HTML comments; the style attr is a CSS string
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {

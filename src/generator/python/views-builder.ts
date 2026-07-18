@@ -256,7 +256,7 @@ export function buildPyViewsFile(
   );
 }
 
-function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: string): string {
+function viewRoute(view: ViewIR, _ctx: EnrichedBoundedContextIR, dispatcherExpr: string): string {
   const src = view.source.name;
   const fn = snake(view.name);
   const opId = camelId(opView(view.name));

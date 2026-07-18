@@ -34,14 +34,7 @@ import { joinRefPath, mapVarForPath } from "./id-follow.js";
 import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
 import { lowerStatement } from "./lower-stmt.js";
-import {
-  type Env,
-  findEntityByName,
-  inAggregate,
-  inProjection,
-  lowerType,
-  withLocal,
-} from "./lower-types.js";
+import { type Env, inAggregate, inProjection, lowerType, withLocal } from "./lower-types.js";
 import { originFor } from "./origin.js";
 
 /** Lower a `projection <Name>[(params)] [keyed by <field>] { … }` declaration.

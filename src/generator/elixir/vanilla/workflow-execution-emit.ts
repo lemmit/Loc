@@ -101,7 +101,7 @@ export interface VanillaWorkflowExecResult {
 }
 
 export function emitVanillaWorkflowExecution(
-  appName: string,
+  _appName: string,
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,

@@ -55,7 +55,7 @@ export function esWorkflowCorrIdClass(wf: WorkflowIR): string {
   const corr = wf.correlationField as string;
   const f = (wf.stateFields ?? []).find((x) => x.name === corr);
   const t = f && f.type.kind === "optional" ? f.type.inner : f?.type;
-  if (!t || t.kind !== "id") {
+  if (t?.kind !== "id") {
     throw new Error(`java es-workflow: correlation field of '${wf.name}' must be id-typed`);
   }
   return `${t.targetName}Id`;

@@ -758,6 +758,7 @@ describe("angular generator — CreateForm typed Reactive Forms", () => {
     expect(page).toContain(
       "const out = await this.orderCreate.mutateAsync(this.orderForm.getRawValue());",
     );
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(page).toContain("this.router.navigateByUrl(`/orders/${out.id}`);");
   });
 
@@ -846,6 +847,7 @@ describe("angular generator — byId single-record reads", () => {
     const all = await generateSystemFiles(DETAIL_SOURCE);
     const api = all.get("web/src/api/order.ts")!;
     expect(api).toContain("findById(id: string) {");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(api).toContain("this.http.get<OrderResponse>(`${API_BASE_URL}/orders/${id}`)");
     expect(api).toContain("export function useOrderById(id: string | undefined) {");
     // TanStack injectQuery: keyed by [record, id], idle until the id resolves.
@@ -1326,6 +1328,7 @@ describe("angular generator — DestroyForm confirm-delete", () => {
     const all = await generateSystemFiles(DESTROY_SOURCE);
     const api = all.get("web/src/api/order.ts")!;
     expect(api).toContain("delete(id: string) {");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(api).toContain("return this.http.delete<void>(`${API_BASE_URL}/orders/${id}`);");
     expect(api).toContain("export function useDeleteOrder() {");
     expect(api).toContain("mutationFn: (id: string) => firstValueFrom(service.delete(id)),");

@@ -192,7 +192,7 @@ export function emitAction(
   const override = ctx.target.renderAction?.(call, ctx, depth);
   if (override != null) return override;
   const opRef = positionalArgs(call)[0];
-  if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
+  if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") {
     return ctx.target.renderComment(
       `Action: first argument must be <instance>.<operation> (e.g. order.confirm)`,
     );
@@ -364,7 +364,7 @@ function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undef
  *  false, so they keep bare-array semantics. */
 function queryIsPaged(ofArg: ExprIR, ctx: WalkContext): boolean {
   const detected = tryDetectApiHook(ofArg, ctx);
-  if (!detected || detected.kind !== "aggregate") return false;
+  if (detected?.kind !== "aggregate") return false;
   const bc = ctx.bcByAggregate.get(detected.aggregateName);
   const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
   const find = repo?.finds.find((f) => f.name === detected.operation);

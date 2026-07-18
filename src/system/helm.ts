@@ -67,7 +67,7 @@ function renderHelpers(sys: SystemIR): string {
   ].join("\n");
 }
 
-function renderValues(sys: SystemIR, workloads: WorkloadModel[]): string {
+function renderValues(_sys: SystemIR, workloads: WorkloadModel[]): string {
   const lines: string[] = [];
   lines.push("# Auto-generated chart values.  Override per environment with");
   lines.push("# `--set key=value` or `-f values.prod.yaml`.");

@@ -33,7 +33,7 @@ export function renderExpectStmt(expr: ExprIR, render: (e: ExprIR) => string): s
 function renderExplicitValueMatcher(expr: ExprIR, render: (e: ExprIR) => string): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
-  if (!sig || sig.on !== "value") return null;
+  if (sig?.on !== "value") return null;
 
   // The matcher's receiver is the asserted expression — usually wrapped in
   // parens as authored (`expect(<inner>).toBe(…)`), and optionally preceded

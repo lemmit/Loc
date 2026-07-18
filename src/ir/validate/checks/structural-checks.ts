@@ -431,7 +431,7 @@ function containsUnion(type: TypeIR): boolean {
 export function validateUnionFindShapes(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
-  backendPlatforms: Set<string>,
+  _backendPlatforms: Set<string>,
 ): void {
   // The elixir (plain Ecto) backend emits the absence producer
   // (`find-controller.ts`), so every backend runs the union-find shape check.
@@ -1155,7 +1155,7 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
       if (e.kind !== "match" || !e.subject) return;
       const subjectType = e.subjectType;
       // Non-union subject — the scrutinee must resolve to an `or`-union.
-      if (!subjectType || subjectType.kind !== "union") {
+      if (subjectType?.kind !== "union") {
         diags.push({
           severity: "error",
           code: "loom.match-non-union-subject",

@@ -402,7 +402,7 @@ function buildAggregateNewPageObject(
 // ---------------------------------------------------------------------------
 
 function buildAggregateDetailPageObject(
-  page: PageIR,
+  _page: PageIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
   emitName: string,

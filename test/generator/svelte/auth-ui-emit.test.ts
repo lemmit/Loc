@@ -48,6 +48,7 @@ describe("svelte auth: ui guard — emission", () => {
 
     const session = find(files, "web/src/lib/auth/session.ts");
     expect(session).toContain('api.get("/auth/me")');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(session).toContain("${API_BASE_URL}/auth/login");
 
     const gate = find(files, "web/src/lib/auth/AuthGate.svelte");

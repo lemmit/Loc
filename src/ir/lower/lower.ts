@@ -92,7 +92,6 @@ import {
   isTestCase,
   isTestE2E,
   isThemeBlock,
-  isTimerSource,
   isUi,
   isUnique,
   isUserBlock,
