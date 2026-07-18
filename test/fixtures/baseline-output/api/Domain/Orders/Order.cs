@@ -79,6 +79,7 @@ public sealed class Order
         public OrderStatus Status { get; init; } = default!;
         public DateTime PlacedAt { get; init; } = default!;
         public int Version { get; init; } = default!;
+        public IReadOnlyList<OrderLine>? Lines { get; init; }
     }
 
     public static Order _Create(State s)
@@ -89,6 +90,7 @@ public sealed class Order
         e.Status = s.Status;
         e.PlacedAt = s.PlacedAt;
         e.Version = s.Version;
+        if (s.Lines != null) e._lines.AddRange(s.Lines);
         e.AssertInvariants();
         return e;
     }

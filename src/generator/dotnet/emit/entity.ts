@@ -654,21 +654,20 @@ export function renderEntity(
   for (const f of provFields) {
     stateLines.push(`        public ProvLineage? ${upperFirst(f.name)}Provenance { get; init; }`);
   }
-  // A PART with its OWN nested containments accepts those children as optional
-  // State slots (`new Shipment.State { …, Labels = [...] }`); `_Create` seeds the
-  // collection so a cascade save writes them (EF stamps the owned FK from graph
-  // position).  Root-only: the aggregate's own containments load via EF, not the
-  // State/_Create path, and `new` only constructs parts — so the root is
-  // byte-identical.  Part-in-part nesting only exists in nested models, so a
-  // plain part is byte-identical too.
-  if (!isRoot) {
-    for (const c of entity.contains) {
-      stateLines.push(
-        c.collection
-          ? `        public IReadOnlyList<${c.partName}>? ${upperFirst(c.name)} { get; init; }`
-          : `        public ${c.partName}? ${upperFirst(c.name)} { get; init; }`,
-      );
-    }
+  // Containment State slots.  A PART with its OWN nested containments accepts
+  // those children as optional State slots (`new Shipment.State { …, Labels =
+  // [...] }`); `_Create` seeds the collection so a cascade save writes them (EF
+  // stamps the owned FK from graph position).  The ROOT'S own containments also
+  // get slots — the Dapper relational repository hydrates a root's children
+  // through `_Create` (EF instead loads them via navigation and never calls
+  // `_Create` for the root, so the slots are inert on the EF path, exactly like
+  // the provenance slots above).
+  for (const c of entity.contains) {
+    stateLines.push(
+      c.collection
+        ? `        public IReadOnlyList<${c.partName}>? ${upperFirst(c.name)} { get; init; }`
+        : `        public ${c.partName}? ${upperFirst(c.name)} { get; init; }`,
+    );
   }
   stateLines.push("    }");
 
@@ -687,17 +686,16 @@ export function renderEntity(
       `        e.${upperFirst(f.name)}Provenance = s.${upperFirst(f.name)}Provenance;`,
     );
   }
-  // Seed nested containment children supplied at construction into the owned
-  // collections — parts only (see the State note above); byte-identical for a
-  // part with no containments and for the root.
-  if (!isRoot) {
-    for (const c of entity.contains) {
-      createInternalLines.push(
-        c.collection
-          ? `        if (s.${upperFirst(c.name)} != null) e._${c.name}.AddRange(s.${upperFirst(c.name)});`
-          : `        if (s.${upperFirst(c.name)} != null) e.${upperFirst(c.name)} = s.${upperFirst(c.name)};`,
-      );
-    }
+  // Seed containment children supplied at construction into the owned
+  // collections.  Null-guarded, so a caller that omits the slot (EF's root
+  // navigation load, or a part with no nested containments) is byte-identical;
+  // only the Dapper relational repository fills these on a root `_Create`.
+  for (const c of entity.contains) {
+    createInternalLines.push(
+      c.collection
+        ? `        if (s.${upperFirst(c.name)} != null) e._${c.name}.AddRange(s.${upperFirst(c.name)});`
+        : `        if (s.${upperFirst(c.name)} != null) e.${upperFirst(c.name)} = s.${upperFirst(c.name)};`,
+    );
   }
   // Hydration path — repository's _Create.  Under --trace, label as
   // `"<init>"` so the invariant_evaluated lines for ctor / hydration

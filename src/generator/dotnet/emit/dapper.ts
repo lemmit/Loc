@@ -21,7 +21,9 @@
 
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
+  ContainmentIR,
   EnrichedAggregateIR,
+  EntityPartIR,
   ExprIR,
   FieldIR,
   IdValueType,
@@ -31,6 +33,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -121,12 +124,14 @@ function idColumn(agg: EnrichedAggregateIR): DapperColumn {
 }
 
 /** Map a supported field to its column.  Throws on an unsupported field kind —
- *  the validator gates these out, so reaching the throw means a gating gap. */
-function fieldColumn(f: FieldIR): DapperColumn {
+ *  the validator gates these out, so reaching the throw means a gating gap.
+ *  `accBase` is the C# object the SAVE expression reads off (`aggregate` for a
+ *  root field, the per-child loop variable for a contained part's field). */
+function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
   const { type, nullable } = unwrapOptional(f.type);
   const col = snake(f.name);
   const prop = upperFirst(f.name);
-  const acc = `aggregate.${prop}`;
+  const acc = `${accBase}.${prop}`;
   switch (type.kind) {
     case "primitive": {
       const { sql, cs } = primTypes(type.name);
@@ -216,9 +221,120 @@ function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
   const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
   return [
     idColumn(agg),
-    ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn),
+    ...agg.fields.filter((f) => !assocFields.has(f.name)).map((f) => fieldColumn(f)),
     // One co-located `<field>_provenance` lineage column per provenanced field.
     ...agg.fields.filter((f) => f.provenanced).map(provColumn),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Nested entity parts (`contains lineItems: LineItem[]`).  Each root-level
+// containment persists as one FLAT child table (`id` PK + `<agg>_id` FK + the
+// part's scalar/enum/vo/id columns), bulk-loaded on every read and hydrated
+// through the root's `_Create(State)` seam, full-list-replaced on save, and
+// cascade-deleted.  Part-in-part, part reference collections, and containments
+// on event-sourced aggregates stay validator-gated (v1 scope).
+// ---------------------------------------------------------------------------
+
+interface PartChild {
+  cont: ContainmentIR;
+  part: EntityPartIR;
+  /** Child table (`line_items`) and owner FK column (`order_id`). */
+  table: string;
+  parentFk: string;
+  /** C# / SQL types for the owner FK and the part's own `id`. */
+  parentIdCs: string;
+  partIdCs: string;
+  parentIdSql: string;
+  partIdSql: string;
+  /** The per-child loop variable the SAVE block reads off — unique per
+   *  containment so two save blocks in the one `SaveAsync` don't collide
+   *  (`__lineItemsChild`, `__shippingChild`). */
+  childVar: string;
+  /** The part's field columns (save expressions read off `childVar`; hydrate
+   *  expressions read off the child `r` row). */
+  fieldCols: DapperColumn[];
+}
+
+function partChildrenOf(agg: EnrichedAggregateIR): PartChild[] {
+  return (agg.contains ?? []).map((cont): PartChild => {
+    const part = (agg.parts ?? []).find((p) => p.name === cont.partName)!;
+    const childVar = `__${cont.name}Child`;
+    return {
+      cont,
+      part,
+      table: plural(snake(part.name)),
+      parentFk: `${snake(agg.name)}_id`,
+      parentIdCs: idTypes(agg.idValueType).cs,
+      partIdCs: idTypes(part.parentIdValueType).cs,
+      parentIdSql: idTypes(agg.idValueType).sql,
+      partIdSql: idTypes(part.parentIdValueType).sql,
+      childVar,
+      fieldCols: part.fields.map((f) => fieldColumn(f, childVar)),
+    };
+  });
+}
+
+/** Per-child Row DTO class + its `Map<Part>` static hydrator, plus the private
+ *  `HydrateAsync` that bulk-loads every containment for a page of root rows and
+ *  reconstructs each root through `_Create(State)` with its children in place. */
+function containmentMembers(agg: EnrichedAggregateIR, children: PartChild[]): string[] {
+  const rootStateBody = columnsOf(agg).map((c) => `                ${c.stateProp} = ${c.hydrate},`);
+  const rowClasses = children.map((pc) => {
+    const rowCols = [
+      `        public ${pc.partIdCs} id { get; set; }`,
+      `        public ${pc.parentIdCs} ${pc.parentFk} { get; set; }`,
+      ...pc.fieldCols.map(
+        (c) =>
+          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+      ),
+    ];
+    return lines(
+      `    private sealed class ${pc.part.name}Row`,
+      "    {",
+      ...rowCols,
+      "    }",
+      "",
+      `    private static ${pc.part.name} Map${pc.part.name}(${pc.part.name}Row r) =>`,
+      `        ${pc.part.name}._Create(new ${pc.part.name}.State`,
+      "        {",
+      `            Id = new ${pc.part.name}Id(r.id),`,
+      `            ParentId = new ${agg.name}Id(r.${pc.parentFk}),`,
+      ...pc.fieldCols.map((c) => `            ${c.stateProp} = ${c.hydrate},`),
+      "        });",
+    );
+  });
+  const loadBlocks = children.flatMap((pc) => {
+    const cols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
+    const rowsVar = `__${pc.cont.name}Rows`;
+    const byOwner = `__${pc.cont.name}ByOwner`;
+    return [
+      `        var ${rowsVar} = (await conn.QueryAsync<${pc.part.name}Row>(new CommandDefinition("SELECT ${cols} FROM ${pc.table} WHERE ${pc.parentFk} = ANY(@ids) ORDER BY ${pc.parentFk}, id", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
+      pc.cont.collection
+        ? `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => (IReadOnlyList<${pc.part.name}>)g.Select(Map${pc.part.name}).ToList());`
+        : `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => Map${pc.part.name}(g.First()));`,
+    ];
+  });
+  const slotLines = children.map((pc) => {
+    const byOwner = `__${pc.cont.name}ByOwner`;
+    const local = `__${pc.cont.name}`;
+    return pc.cont.collection
+      ? `                ${upperFirst(pc.cont.name)} = ${byOwner}.TryGetValue(r.id, out var ${local}) ? ${local} : new List<${pc.part.name}>(),`
+      : `                ${upperFirst(pc.cont.name)} = ${byOwner}.TryGetValue(r.id, out var ${local}) ? ${local} : null,`;
+  });
+  return [
+    ...rowClasses.flatMap((m) => [m, ""]),
+    `    private static async Task<List<${agg.name}>> HydrateAsync(NpgsqlConnection conn, List<Row> rows, CancellationToken cancellationToken)`,
+    "    {",
+    `        if (rows.Count == 0) return new List<${agg.name}>();`,
+    "        var __ids = rows.Select(r => r.id).ToArray();",
+    ...loadBlocks,
+    `        return rows.Select(r => ${agg.name}._Create(new ${agg.name}.State`,
+    "            {",
+    ...rootStateBody,
+    ...slotLines,
+    "            })).ToList();",
+    "    }",
   ];
 }
 
@@ -238,17 +354,53 @@ const SQL_BINOP: Record<string, string> = {
   "||": "OR",
 };
 
-function whereToSql(e: ExprIR): string {
+/** Optional context threaded into `whereToSql` so a
+ *  `this.<refColl>.contains(x)` membership predicate can resolve its
+ *  AssociationIR and correlate the EXISTS subquery on the owner table's
+ *  `id`.  Absent for callers with no reference collections (byte-identical). */
+interface WhereSqlCtx {
+  agg: EnrichedAggregateIR;
+  table: string;
+}
+
+function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
   switch (e.kind) {
     case "paren":
-      return `(${whereToSql(e.inner)})`;
+      return `(${whereToSql(e.inner, sqlCtx)})`;
     case "unary":
-      if (e.op === "!") return `(NOT ${whereToSql(e.operand)})`;
+      if (e.op === "!") return `(NOT ${whereToSql(e.operand, sqlCtx)})`;
       throw new Error("dapper: unsupported unary in find");
     case "binary": {
       const op = SQL_BINOP[e.op];
       if (!op) throw new Error(`dapper: unsupported operator '${e.op}' in find`);
-      return `(${whereToSql(e.left)} ${op} ${whereToSql(e.right)})`;
+      return `(${whereToSql(e.left, sqlCtx)} ${op} ${whereToSql(e.right, sqlCtx)})`;
+    }
+    case "method-call": {
+      // `this.<refColl>.contains(x)` → EXISTS join subquery, the raw-SQL
+      // mirror of EF's `_db.<JoinDbSet>.Any(__j => __j.owner == x.Id && …)`.
+      // Detection is structural (receiverType `array<id>`, `this.<field>`
+      // receiver resolving to an AssociationIR) so a regular collection
+      // `.contains` never reaches here — those aren't queryable predicates.
+      if (
+        e.member === "contains" &&
+        e.receiverType.kind === "array" &&
+        e.receiverType.element.kind === "id" &&
+        e.args.length === 1 &&
+        sqlCtx
+      ) {
+        const fieldName = refCollectionFieldName(e.receiver);
+        const assoc = fieldName
+          ? sqlCtx.agg.associations.find((a) => a.fieldName === fieldName)
+          : undefined;
+        if (assoc) {
+          const arg = whereToSql(e.args[0]!, sqlCtx);
+          return (
+            `EXISTS (SELECT 1 FROM ${assoc.joinTable} __j ` +
+            `WHERE __j.${assoc.ownerFk} = ${sqlCtx.table}.id AND __j.${assoc.targetFk} = ${arg})`
+          );
+        }
+      }
+      throw new Error(`dapper: unsupported method-call '${e.member}' in find`);
     }
     case "member":
       // `this.<field>` → column.
@@ -385,6 +537,7 @@ export function renderDapperRepository(
   actorIdProp?: string,
 ): string {
   const table = tableOf(agg.name);
+  const sqlCtx: WhereSqlCtx = { agg, table };
   const cols = columnsOf(agg);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
@@ -495,7 +648,7 @@ export function renderDapperRepository(
       ? capabilityFilters
           .map((p) => {
             try {
-              return whereToSql(p);
+              return whereToSql(p, sqlCtx);
             } catch {
               throw new Error(
                 `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
@@ -568,6 +721,43 @@ export function renderDapperRepository(
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
   );
 
+  // Nested entity parts (`contains lineItems: LineItem[]`).  Reads funnel every
+  // root through `HydrateAsync` (loads each child table + reconstructs the root
+  // with its children in State); saves full-list-replace each child table;
+  // deletes cascade the children first.  `hasContains` and reference-collection
+  // associations are mutually exclusive on the same aggregate (validator-gated),
+  // so the two hydrate paths never overlap.
+  const partChildren = partChildrenOf(agg);
+  const hasContains = partChildren.length > 0;
+  const containSaveLines = partChildren.flatMap((pc) => {
+    const insertCols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
+    const insertVals = [
+      "@id",
+      "@" + pc.parentFk,
+      ...pc.fieldCols.map((c) => `@${c.col}${c.cast}`),
+    ].join(", ");
+    const insertParams = [
+      `id = ${pc.childVar}.Id.Value`,
+      `${pc.parentFk} = aggregate.Id.Value`,
+      ...pc.fieldCols.map((c) => `${c.col} = ${c.save}`),
+    ].join(", ");
+    const iter = pc.cont.collection
+      ? `        foreach (var ${pc.childVar} in aggregate.${upperFirst(pc.cont.name)})`
+      : `        if (aggregate.${upperFirst(pc.cont.name)} is { } ${pc.childVar})`;
+    return [
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+      iter,
+      "        {",
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${pc.table} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, cancellationToken: cancellationToken));`,
+      "        }",
+    ];
+  });
+  const containDeleteLines = partChildren.map(
+    (pc) =>
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+  );
+  const containMembers = hasContains ? containmentMembers(agg, partChildren) : [];
+
   // Provenance flush (provenance.md): drain the per-write lineage buffer and
   // append one `provenance_records` row per write, on the SAME connection as
   // the aggregate upsert (the .NET Dapper mirror of the EF repository's
@@ -620,7 +810,7 @@ export function renderDapperRepository(
     const paramObj = allFindParams.length > 0 ? `, new { ${allFindParams.join(", ")} }` : "";
     let where = "";
     try {
-      where = f.filter ? ` WHERE ${whereToSql(f.filter)}` : "";
+      where = f.filter ? ` WHERE ${whereToSql(f.filter, sqlCtx)}` : "";
     } catch {
       // Unsupported predicate — emit a compile-safe stub.
       return lines(
@@ -650,8 +840,12 @@ export function renderDapperRepository(
         `        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) ${fromClause}"${paramObj}, cancellationToken: cancellationToken));`,
         `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${findPrincSuffix} }, cancellationToken: cancellationToken));`,
-        `        var items = rows.Select(Map).ToList();`,
-        ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
+        ...(hasContains
+          ? [`        var items = await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
+          : [
+              `        var items = rows.Select(Map).ToList();`,
+              ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
+            ]),
         `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
         `    }`,
       );
@@ -662,13 +856,15 @@ export function renderDapperRepository(
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
-        ...(hasAssoc
-          ? [
-              `        var __roots = rows.Select(Map).ToList();`,
-              `        await LoadRefsAsync(conn, __roots, cancellationToken);`,
-              `        return __roots;`,
-            ]
-          : [`        return rows.Select(Map).ToList();`]),
+        ...(hasContains
+          ? [`        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
+          : hasAssoc
+            ? [
+                `        var __roots = rows.Select(Map).ToList();`,
+                `        await LoadRefsAsync(conn, __roots, cancellationToken);`,
+                `        return __roots;`,
+              ]
+            : [`        return rows.Select(Map).ToList();`]),
         `    }`,
       );
     }
@@ -677,14 +873,20 @@ export function renderDapperRepository(
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
-      ...(hasAssoc
+      ...(hasContains
         ? [
             `        if (r is null) return null;`,
-            `        var __one = new List<${agg.name}> { Map(r) };`,
-            `        await LoadRefsAsync(conn, __one, cancellationToken);`,
+            `        var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);`,
             `        return __one[0];`,
           ]
-        : [`        return r is null ? null : Map(r);`]),
+        : hasAssoc
+          ? [
+              `        if (r is null) return null;`,
+              `        var __one = new List<${agg.name}> { Map(r) };`,
+              `        await LoadRefsAsync(conn, __one, cancellationToken);`,
+              `        return __one[0];`,
+            ]
+          : [`        return r is null ? null : Map(r);`]),
       `    }`,
     );
   });
@@ -697,7 +899,7 @@ export function renderDapperRepository(
     const name = upperFirst(r.name);
     let whereSql: string;
     try {
-      whereSql = whereToSql(r.where);
+      whereSql = whereToSql(r.where, sqlCtx);
     } catch {
       return lines(
         `    public Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
@@ -737,7 +939,9 @@ export function renderDapperRepository(
       `            if (pg.offset is { } off) { sql += " OFFSET @__off"; p.Add("__off", off); }`,
       `        }`,
       `        var rows = await conn.QueryAsync<Row>(new CommandDefinition(sql, p, cancellationToken: cancellationToken));`,
-      `        return rows.Select(Map).ToList();`,
+      hasContains
+        ? `        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`
+        : `        return rows.Select(Map).ToList();`,
       `    }`,
     );
   });
@@ -748,6 +952,7 @@ export function renderDapperRepository(
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         ...assocDeleteLines,
+        ...containDeleteLines,
         `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
         `    }`,
       )
@@ -797,24 +1002,38 @@ export function renderDapperRepository(
       ),
       "    }",
       "",
-      `    private static ${agg.name} Map(Row r) =>`,
-      `        ${agg.name}._Create(new ${agg.name}.State`,
-      "        {",
-      ...mapBody,
-      "        });",
-      "",
+      // When the aggregate has containments, every read reconstructs the root
+      // through `HydrateAsync` (which builds the State inline with its children),
+      // so the flat `Map` helper is unused — skip it to keep `/warnaserror`
+      // clean.  Otherwise the flat root mapper stands.
+      ...(hasContains
+        ? []
+        : [
+            `    private static ${agg.name} Map(Row r) =>`,
+            `        ${agg.name}._Create(new ${agg.name}.State`,
+            "        {",
+            ...mapBody,
+            "        });",
+            "",
+          ]),
       `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value${princSuffix} }, cancellationToken: cancellationToken));`,
-      ...(hasAssoc
+      ...(hasContains
         ? [
             "        if (r is null) return null;",
-            "        var __one = new List<" + agg.name + "> { Map(r) };",
-            "        await LoadRefsAsync(conn, __one, cancellationToken);",
+            `        var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);`,
             "        return __one[0];",
           ]
-        : ["        return r is null ? null : Map(r);"]),
+        : hasAssoc
+          ? [
+              "        if (r is null) return null;",
+              "        var __one = new List<" + agg.name + "> { Map(r) };",
+              "        await LoadRefsAsync(conn, __one, cancellationToken);",
+              "        return __one[0];",
+            ]
+          : ["        return r is null ? null : Map(r);"]),
       "    }",
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
@@ -822,13 +1041,15 @@ export function renderDapperRepository(
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray()${princSuffix} }, cancellationToken: cancellationToken));`,
-      ...(hasAssoc
-        ? [
-            "        var __roots = rows.Select(Map).ToList();",
-            "        await LoadRefsAsync(conn, __roots, cancellationToken);",
-            "        return __roots;",
-          ]
-        : ["        return rows.Select(Map).ToList();"]),
+      ...(hasContains
+        ? ["        return await HydrateAsync(conn, rows.ToList(), cancellationToken);"]
+        : hasAssoc
+          ? [
+              "        var __roots = rows.Select(Map).ToList();",
+              "        await LoadRefsAsync(conn, __roots, cancellationToken);",
+              "        return __roots;",
+            ]
+          : ["        return rows.Select(Map).ToList();"]),
       "    }",
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
@@ -836,6 +1057,7 @@ export function renderDapperRepository(
       ...stampLines,
       ...saveUpsertLines,
       ...assocSaveLines,
+      ...containSaveLines,
       ...provFlushLines,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
@@ -846,6 +1068,7 @@ export function renderDapperRepository(
       deleteMethod || null,
       loadRefsMethod ? "" : null,
       loadRefsMethod || null,
+      ...(hasContains ? ["", ...containMembers] : []),
       ...findMethods.flatMap((m) => ["", m]),
       ...retrievalMethods.flatMap((m) => ["", m]),
       "}",
@@ -1048,7 +1271,26 @@ export function renderDapperSchema(
           ");",
         ].join("\n"),
       );
-      return [root, ...joins].join("\n\n");
+      // One child table per nested containment (`contains lineItems:
+      // LineItem[]`): `id` PK + `<agg>_id` owner FK (indexed) + the part's own
+      // scalar/enum/vo/id columns.  Cascade-delete keeps the raw-SQL delete
+      // path trivial (the repository also deletes children first defensively).
+      const childTables = partChildrenOf(agg).map((pc) => {
+        const fieldCols = pc.fieldCols.map(
+          (c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`,
+        );
+        return [
+          `CREATE TABLE IF NOT EXISTS ${pc.table} (`,
+          [
+            `    id ${pc.partIdSql} primary key`,
+            `    ${pc.parentFk} ${pc.parentIdSql} not null references ${tableOf(agg.name)} (id) on delete cascade`,
+            ...fieldCols,
+          ].join(",\n"),
+          ");",
+          `CREATE INDEX IF NOT EXISTS ${pc.table}_${pc.parentFk}_idx ON ${pc.table} (${pc.parentFk});`,
+        ].join("\n");
+      });
+      return [root, ...joins, ...childTables].join("\n\n");
     });
   // The single per-context event log `<ctx>_events` (event-log-architecture.md):
   // seq cursor + stream_type discriminator + PK (stream_type, stream_id,

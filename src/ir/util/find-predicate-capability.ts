@@ -84,36 +84,14 @@ const COMPARE_OPS: ReadonlySet<string> = new Set(["==", "!=", "<", "<=", ">", ">
 const FULL_SUBSET: FindPredicateCapability = () => null;
 
 /** Dapper (`whereToSql`): comparisons, `&&`/`||`, unary `!`, `this.<field>`,
- *  params, this-prop / enum-value refs, literals, AND `currentUser.<claim>`
+ *  params, this-prop / enum-value refs, literals, `currentUser.<claim>`
  *  (lowered to a `@__cu_<claim>` param bound from the ambient request
- *  principal — same accessor the capability-filter path uses).  It does NOT
- *  emit the reference-collection membership subquery.  That shape can appear at
- *  any node, so a plain node-by-node walk of the queryable structural arms
- *  suffices. */
-const DAPPER_SUBSET: FindPredicateCapability = (e) => {
-  const reject = (n: ExprIR): string | null => {
-    if (isContainsMembership(n))
-      return "'this.<refColl>.contains(x)' membership (no join subquery on Dapper)";
-    return null;
-  };
-  const walk = (n: ExprIR): string | null => {
-    const here = reject(n);
-    if (here) return here;
-    switch (n.kind) {
-      case "paren":
-        return walk(n.inner);
-      case "unary":
-        return walk(n.operand);
-      case "binary":
-        return walk(n.left) ?? walk(n.right);
-      case "method-call":
-        return n.args.length === 1 ? walk(n.args[0]!) : null;
-      default:
-        return null;
-    }
-  };
-  return walk(e);
-};
+ *  principal — same accessor the capability-filter path uses), AND
+ *  `this.<refColl>.contains(x)` membership (M-T6.9 wave 2 — lowered to an
+ *  EXISTS join subquery correlated on the owner row's `id`, the raw-SQL mirror
+ *  of EF's `_db.<JoinDbSet>.Any(...)`).  Dapper now matches the full queryable
+ *  subset, so it narrows nothing versus the EF Core / drizzle baseline. */
+const DAPPER_SUBSET: FindPredicateCapability = FULL_SUBSET;
 
 /** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value`), bare
  *  boolean columns (`this.active` → `{ active: true }`), unary `!` (NOT — via

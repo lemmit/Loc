@@ -1,0 +1,57 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's NESTED
+// ENTITY PARTS surface (M-T6.9 wave 2).  A state aggregate with a collection
+// containment and a single optional containment persists as one FLAT child
+// table each (`id` PK + `<agg>_id` FK + the part's scalar/enum/vo/id columns),
+// bulk-loaded + hydrated through the root's `_Create(State)` seam, full-list-
+// replaced on save, and cascade-deleted.  Build under `dotnet build /warnaserror`.
+
+system DapperParts {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      enum LineKind { Physical, Digital }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Order with crudish {
+        customer: string
+        placedAt: datetime
+        contains lineItems: LineItem[]
+        contains shipping:  ShipInfo?
+
+        entity LineItem {
+          sku:   string
+          price: Money
+          qty:   int
+          kind:  LineKind
+          note:  string?
+        }
+
+        entity ShipInfo {
+          address: string
+          zip:     string
+        }
+      }
+
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}
