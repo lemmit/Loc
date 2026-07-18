@@ -7,11 +7,14 @@ import {
   Group,
   Loader,
   ScrollArea,
+  Select,
   Stack,
   Text,
 } from "@mantine/core";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import type { CommitInfo } from "../workspace/git";
 import type { EvolutionOk, MigrationView } from "../build/protocol";
+import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 import type { LayoutCtx } from "./ctx";
 
 // "Migrations" dock tab — the evolution lifecycle, made visible.
@@ -47,25 +50,74 @@ export function MigrationsBody({
   const multiFile = ctx.sourceFiles.size > 1;
   const canDiff = ctx.buildClient != null && !multiFile;
 
+  // Baseline ref the diff runs against — `HEAD` (last save) by default, or any
+  // commit the user pins from the picker.  Extends the diff from "changes
+  // since I last saved" to "changes since <any milestone>".
+  const [baselineRef, setBaselineRef] = useState("HEAD");
+  const [commits, setCommits] = useState<CommitInfo[]>([]);
+  const store = ctx.workspace.store;
+
+  useEffect(() => {
+    if (!active || !store) return;
+    let cancelled = false;
+    void store
+      .log(50)
+      .then((c) => !cancelled && setCommits(c))
+      .catch(() => !cancelled && setCommits([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [active, store]);
+
   // Auto-run once when the tab is opened with no result yet, so the panel
   // isn't a cold "click to compute" wall.  Re-run stays a manual button —
   // the diff re-lowers two whole sources, so we don't fire it on every keystroke.
   useEffect(() => {
     if (active && canDiff && ctx.evolution == null && !ctx.evolutionRunning) {
-      ctx.runEvolutionDiff();
+      ctx.runEvolutionDiff(baselineRef);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, canDiff]);
+
+  const pickBaseline = (ref: string | null): void => {
+    if (!ref) return;
+    setBaselineRef(ref);
+    ctx.runEvolutionDiff(ref);
+  };
+
+  // `HEAD` (last save) plus the recent commits, newest first.  The newest
+  // commit IS `HEAD`, so it's labelled as such and the rest offer earlier
+  // milestones; autosaves are de-emphasised but still selectable.
+  const baselineOptions = [
+    { value: "HEAD", label: "Last save (HEAD)" },
+    ...commits.slice(1).map((c) => ({
+      value: c.oid,
+      label: `${classifyCommit(c.message) === "autosave" ? "autosave" : "milestone"} · ${shortOid(
+        c.oid,
+      )} · ${formatRelativeTime(c.timestamp)}`,
+    })),
+  ];
 
   const e = ctx.evolution;
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <Group px="sm" py={4} justify="space-between" wrap="nowrap" style={{ flexShrink: 0 }}>
-        <Group gap={8} wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            live source vs last save
+        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+            live vs
           </Text>
+          <Select
+            size="xs"
+            value={baselineRef}
+            onChange={pickBaseline}
+            data={baselineOptions}
+            disabled={!canDiff || store == null}
+            allowDeselect={false}
+            comboboxProps={{ withinPortal: true }}
+            style={{ width: 210 }}
+            data-testid="evolution-baseline"
+          />
           {e?.ok && e.breaking && (
             <Badge size="xs" color="red" variant="filled" data-testid="evolution-breaking">
               breaking
@@ -77,7 +129,7 @@ export function MigrationsBody({
           variant="light"
           loading={ctx.evolutionRunning}
           disabled={!canDiff}
-          onClick={() => ctx.runEvolutionDiff()}
+          onClick={() => ctx.runEvolutionDiff(baselineRef)}
           data-testid="evolution-refresh"
         >
           Refresh diff

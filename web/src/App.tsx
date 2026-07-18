@@ -1331,17 +1331,18 @@ export default function App(): JSX.Element {
   // baseline blob and thread the two texts through.  v1 is single-file only —
   // a multi-file/import baseline would need both trees seeded into the worker
   // VFS (M-T8.11), so the panel gates on `sourceFiles.size`.
-  async function runEvolutionDiff(): Promise<void> {
+  async function runEvolutionDiff(ref = "HEAD"): Promise<void> {
     const client = buildClientRef.current;
     if (!client) return;
     setEvolutionRunning(true);
     try {
       const current = sourceRef.current;
-      // Baseline = the active file as last committed.  Absent store
-      // (ephemeral session) or no commit yet ⇒ empty baseline, which the
-      // worker reads as "no previous version" (everything Initial).
+      // Baseline = the active file at `ref` — `HEAD` (last save) by default,
+      // or any commit the user pins from History.  Absent store (ephemeral
+      // session) or no such commit ⇒ empty baseline, which the worker reads
+      // as "no previous version" (everything Initial).
       const baseline =
-        (await workspace.store?.readFileAtRef("/workspace/main.ddd")) ?? "";
+        (await workspace.store?.readFileAtRef("/workspace/main.ddd", ref)) ?? "";
       const result = await client.evolution(baseline, current);
       setEvolution(result);
     } catch (err) {
@@ -1540,7 +1541,7 @@ export default function App(): JSX.Element {
     runFull: () => void runFull(),
     evolution,
     evolutionRunning,
-    runEvolutionDiff: () => void runEvolutionDiff(),
+    runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
     snapshotResult,
     snapshotRunning,
     runCaptureSnapshot: () => void runCaptureSnapshot(),

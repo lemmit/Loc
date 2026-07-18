@@ -24,6 +24,10 @@ test("Migrations tab derives the evolution diff and captures snapshots", async (
   // The panel mounts and auto-runs the diff on open.
   await expect(page.getByTestId("migrations-panel")).toBeVisible();
 
+  // The baseline picker is present (defaults to "Last save (HEAD)"; earlier
+  // commits can be pinned as the baseline).
+  await expect(page.getByTestId("evolution-baseline")).toBeVisible();
+
   // The schema-migration section resolves (auto-diff completed) — with the
   // unedited example the live source matches the baseline, so no migration
   // cards, but the section itself renders.

@@ -344,8 +344,9 @@ export interface LayoutCtx {
   /** Result of the last migration + wire-contract diff, or null. */
   evolution: EvolutionResult | null;
   evolutionRunning: boolean;
-  /** Diff the live source against `HEAD:/workspace/main.ddd`. */
-  runEvolutionDiff: () => void;
+  /** Diff the live source against the baseline at `ref` (default `HEAD`,
+   *  i.e. the last save) — any commit oid pins an earlier baseline. */
+  runEvolutionDiff: (ref?: string) => void;
   /** Result of the last provenance-snapshot capture, or null. */
   snapshotResult: SnapshotResult | null;
   snapshotRunning: boolean;
