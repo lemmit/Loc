@@ -1827,8 +1827,14 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
-        if ((a.associations ?? []).length > 0)
-          reject(where, "has reference-collection associations (Id[] join tables)");
+        // `Id[]` reference-collection associations ARE supported on a state
+        // aggregate: each persists as a composite-PK pivot Row entity, bulk-
+        // loaded on read and full-list-replaced on save (the MikroORM analogue
+        // of the drizzle join table).  Event-sourced aggregates reconstruct
+        // from their event stream (no pivot sync), so associations there stay
+        // gated until that path is wired.
+        if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
+          reject(where, "has reference-collection associations on an event-sourced aggregate");
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
         // `filter` capability predicates ARE supported: the repository ANDs each

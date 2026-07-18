@@ -342,6 +342,75 @@ describe("mikroorm — `filter` capability predicates", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// `Id[]` reference-collection associations (wave 1) — persist as composite-PK
+// pivot Row entities (the MikroORM analogue of the drizzle join table): bulk-
+// loaded on read, full-list-replaced on save, pivot rows cleared on delete.
+// ---------------------------------------------------------------------------
+describe("mikroorm — reference-collection associations (Id[] pivot tables)", () => {
+  const ASSOC_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Pokemon with crudish {
+        name: string
+      }
+      aggregate Trainer with crudish {
+        name: string
+        party: Pokemon id[]
+      }
+      repository Pokemons for Pokemon { }
+      repository Trainers for Trainer {
+        find byName(name: string): Trainer[] where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for an Id[] association", async () => {
+    const { errors } = await emit(ASSOC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits a composite-PK pivot Row entity for the association", async () => {
+    const { files } = await emit(ASSOC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class TrainerPartyRow");
+    expect(entities).toContain('tableName: "trainer_party"');
+    expect(entities).toContain('trainerId: { type: "string", primary: true }');
+    expect(entities).toContain('pokemonId: { type: "string", primary: true }');
+    // The pivot schema joins the entities registry.
+    expect(entities).toContain("TrainerPartyRowSchema]");
+  });
+
+  it("bulk-loads on read, full-replaces on save, and clears pivot rows on delete", async () => {
+    const { files } = await emit(ASSOC_SRC);
+    const repo = files.get("api/db/repositories/trainer-repository.ts")!;
+    // findById — inline load of the target-id list.
+    expect(repo).toContain(
+      'const party = (await em.find(TrainerPartyRow, { trainerId: id as string }, { orderBy: { pokemonId: "asc" } })).map((jr) => Ids.PokemonId(jr.pokemonId));',
+    );
+    // Array read — bulk-load into a per-owner map.
+    expect(repo).toContain("const partyByOwner = new Map<string, Ids.PokemonId[]>();");
+    expect(repo).toContain("const party = partyByOwner.get(row.id) ?? [];");
+    // Save — full-list replace (delete owner rows, insert the current set).
+    expect(repo).toContain(
+      "await em.nativeDelete(TrainerPartyRow, { trainerId: aggregate.id as string });",
+    );
+    expect(repo).toContain(
+      "await em.insert(TrainerPartyRow, { trainerId: aggregate.id as string, pokemonId: t as string });",
+    );
+    // Delete — clear pivot rows (no FK cascade) then the root.
+    expect(repo).toContain("await em.nativeDelete(TrainerPartyRow, { trainerId: id as string });");
+    // The `party` column is NOT on the aggregate Row (it lives in the pivot).
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("party:");
+  });
+});
+
 describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   const rejects = async (body: string, needle: RegExp) => {
     const { errors } = await emit(sys("mikroorm", body));
