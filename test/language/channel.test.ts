@@ -44,7 +44,7 @@ describe("channel + channelSource — parse / validation", () => {
   });
 
   it("rejects a channelSource binding an incompatible storage type", async () => {
-    // broadcast/log needs kafka or nats; redis can't realise it.
+    // broadcast/log needs kafka; redis can't realise it.
     const src = `
       system S {
         subdomain M { context C {
@@ -68,6 +68,55 @@ describe("channel + channelSource — parse / validation", () => {
         }}
         storage durable { type: kafka }
         channelSource bus { for: Ch, use: durable }
+      }
+    `;
+    const { errors } = await parseString(src);
+    expect(errors).toEqual([]);
+  });
+
+  // M-T4.4 pinned decision: the broker line-up is redis/rabbitmq/kafka —
+  // `nats` parses as a storage type but is not a channel transport.
+  it("rejects nats as a channel transport (loom.channelsource-unsupported-transport)", async () => {
+    const src = `
+      system S {
+        subdomain M { context C {
+          event E { order: string }
+          channel Ch { carries: E }
+        }}
+        storage bus { type: nats }
+        channelSource b { for: Ch, use: bus }
+      }
+    `;
+    const { errors } = await parseString(src);
+    expect(errors.some((e) => /is not a channel transport/.test(e))).toBe(true);
+  });
+
+  it("rejects redis for queue/work (post-NATS matrix: rabbitmq or kafka)", async () => {
+    const src = `
+      system S {
+        subdomain M { context C {
+          event E { order: string }
+          channel Ch { carries: E  delivery: queue  retention: work }
+        }}
+        storage cache { type: redis }
+        channelSource b { for: Ch, use: cache }
+      }
+    `;
+    const { errors } = await parseString(src);
+    expect(errors.some((e) => /can't realise it.*rabbitmq, kafka/.test(e))).toBe(true);
+  });
+
+  // M-T4.4 slice 1: the deployable `channels:` wiring clause.
+  it("parses a deployable channels: clause referencing a channelSource", async () => {
+    const src = `
+      system S {
+        subdomain M { context C {
+          event E { order: string }
+          channel Ch { carries: E }
+        }}
+        storage bus { type: redis }
+        channelSource chBus { for: Ch, use: bus }
+        deployable api { platform: node contexts: [C] channels: [chBus] port: 3000 }
       }
     `;
     const { errors } = await parseString(src);

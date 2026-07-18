@@ -92,6 +92,14 @@
   "chakra": [],
   "channel": [],
   "channelSource": [],
+  "channels": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "check": [],
   "claims": [],
   "clickhouse": [],

@@ -2998,6 +2998,13 @@ export interface DeployableIR {
    *  Empty for frontend-only deployables.  Validator enforces that
    *  every listed dataSource's `for:` is one of `contextNames`. */
   dataSourceNames: string[];
+  /** Names of channelSource declarations the deployable wires up — the
+   *  messaging twin of `dataSourceNames` (channels.md §"Surface — transport
+   *  binding", M-T4.4 slice 1).  Listing a binding routes the channel's
+   *  events over its broker for this deployable (producer and/or consumer
+   *  side is derived from the hosted contexts).  Empty ⇒ the channel's
+   *  events reach this deployable only via in-process dispatch. */
+  channelSourceNames: string[];
   /** HTTP port the deployable's web server listens on. */
   port: number;
   /** Backend deployable this frontend talks to.  Set only when

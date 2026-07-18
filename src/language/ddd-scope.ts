@@ -149,6 +149,23 @@ export class DddScopeProvider extends DefaultScopeProvider {
       if (!system) return EMPTY_SCOPE;
       return this.createScopeForNodes(AstUtils.streamAllContents(system).filter(isEventDecl));
     }
+    // Reactor / projection-fold event subscriptions — `on(e: OrderPlaced)` in a
+    // workflow or projection resolves system-wide, not context-local (M-T4.4
+    // slice 1; channels.md cross-context choreography: a Shipping reactor
+    // consumes Orders' OrderPlaced).  Same targeted-scope shape as the
+    // timerSource arm above: events stay unexported globally, so the widening
+    // applies ONLY in these two subscription positions.  Within one deployable
+    // the in-process dispatcher already merges hosted contexts' channels ∪
+    // workflows (`deriveEventSubscriptions`); across deployables delivery
+    // needs a broker binding — gated by `loom.channel-consumer-unwired`.
+    if (
+      (context.container.$type === "OnDecl" || context.container.$type === "ProjectionOn") &&
+      context.property === "event"
+    ) {
+      const system = AstUtils.getContainerOfType(context.container, isSystem);
+      if (!system) return super.getScope(context); // context-local fallback outside a system
+      return this.createScopeForNodes(AstUtils.streamAllContents(system).filter(isEventDecl));
+    }
     // `menu { link Orders.List }` — a page link resolves within the enclosing
     // ui, by BOTH the page's bare name (`Home`, a unique top-level page) AND its
     // area-qualified dotted name (`Orders.List`, `Sales.Orders.List`).  The

@@ -40,6 +40,7 @@ import {
   validateAuditedOperationSupport,
   validateAuth,
   validateAuthUiFramework,
+  validateChannelWiring,
   validateComposeUniqueness,
   validateContextFilterSupport,
   validateDapperSupport,
@@ -138,6 +139,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDuplicateTables(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateFileFieldObjectStorage(sys, diags);
+    validateChannelWiring(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
     validateElixirOpSelfCallPosition(sys, diags);

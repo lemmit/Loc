@@ -23,6 +23,7 @@ import type {
   ConfigEntryIR,
   ConfigValueIR,
   DataSourceIR,
+  DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
@@ -461,6 +462,138 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
         `more than case / punctuation).`,
       source: sys.name,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Channel wiring (channels.md §"Surface — transport binding", M-T4.4 slice 1).
+// Cross-file/system-level twins of the AST-level channelSource matrix checks:
+//
+//   - `loom.channelsource-unbound` (warning) — a channelSource no deployable
+//     lists in `channels:`.  Declared but inert: no broker is provisioned and
+//     no client emitted for it.  Only fires when the system declares
+//     deployables at all (legacy single-project generation has nowhere to
+//     wire a binding).
+//   - `loom.deployable-channel-unrelated` (warning) — a deployable lists a
+//     channelSource but neither hosts the channel's owning context (producer
+//     side) nor consumes any carried event via a reactor / event-triggered
+//     create / projection fold in a hosted context.  Dead wiring.
+//   - `loom.channel-consumer-unwired` (error) — a deployable consumes a
+//     channel's events, some deployable binds that channel to a broker, but
+//     this consumer doesn't list the binding: once the channel's traffic
+//     rides the broker, this consumer would silently never receive it.
+//     (The producer side stays a local re-entry fallback, so only the
+//     consumer gap is a delivery hole — M-T4.4 design §5.)
+// ---------------------------------------------------------------------------
+export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  if ((sys.channelSources ?? []).length === 0) return;
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  // channel name -> owning context (channels are context members; bare names
+  // are system-unique per the channelSource resolution rule).
+  const channelOwner = new Map<string, { ctxName: string; carries: string[] }>();
+  for (const m of sys.subdomains)
+    for (const c of m.contexts)
+      for (const ch of c.channels ?? [])
+        channelOwner.set(ch.name, { ctxName: c.name, carries: ch.carries });
+  const csByName = new Map(sys.channelSources.map((cs) => [cs.name, cs]));
+
+  // The event names a deployable's hosted contexts consume (reactor `on`,
+  // event-triggered `create … by`, projection folds) — the same trigger set
+  // `deriveEventSubscriptions` wires for in-process dispatch.
+  const consumedEventsOf = (dep: DeployableIR): Set<string> => {
+    const consumed = new Set<string>();
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const wf of ctx.workflows ?? []) {
+        for (const on of wf.subscriptions ?? []) consumed.add(on.event);
+        for (const create of wf.creates ?? []) {
+          if (create.triggerKind === "event" && create.eventRef) consumed.add(create.eventRef);
+        }
+      }
+      for (const proj of ctx.projections ?? [])
+        for (const on of proj.handlers) consumed.add(on.event);
+    }
+    return consumed;
+  };
+
+  // 1. Unbound channelSource.
+  if (sys.deployables.length > 0) {
+    const wired = new Set(sys.deployables.flatMap((d) => d.channelSourceNames ?? []));
+    for (const cs of sys.channelSources) {
+      if (wired.has(cs.name)) continue;
+      diags.push({
+        severity: "warning",
+        code: "loom.channelsource-unbound",
+        message:
+          `channelSource '${cs.name}' (channel '${cs.channelName}') is listed by no ` +
+          `deployable's 'channels:' clause — the binding is declared but inert: no broker ` +
+          `is provisioned and events stay on in-process dispatch. Add it to a deployable ` +
+          `that produces or consumes '${cs.channelName}', or remove it.`,
+        source: `${sys.name}/${cs.name}`,
+      });
+    }
+  }
+
+  // channel name -> the channelSource names some deployable actually wires.
+  const activeBindings = new Map<string, string[]>();
+  for (const dep of sys.deployables) {
+    for (const csName of dep.channelSourceNames ?? []) {
+      const cs = csByName.get(csName);
+      if (!cs) continue;
+      const list = activeBindings.get(cs.channelName) ?? [];
+      if (!list.includes(cs.name)) list.push(cs.name);
+      activeBindings.set(cs.channelName, list);
+    }
+  }
+
+  for (const dep of sys.deployables) {
+    const consumed = consumedEventsOf(dep);
+    const hosted = new Set(dep.contextNames);
+    const listed = new Set(dep.channelSourceNames ?? []);
+
+    // 2. Unrelated listing.
+    for (const csName of dep.channelSourceNames ?? []) {
+      const cs = csByName.get(csName);
+      if (!cs) continue;
+      const owner = channelOwner.get(cs.channelName);
+      if (!owner) continue; // unresolved channel name — AST/linker reports it
+      const produces = hosted.has(owner.ctxName);
+      const consumes = owner.carries.some((e) => consumed.has(e));
+      if (!produces && !consumes) {
+        diags.push({
+          severity: "warning",
+          code: "loom.deployable-channel-unrelated",
+          message:
+            `Deployable '${dep.name}' lists channelSource '${cs.name}', but it neither ` +
+            `hosts channel '${cs.channelName}'\`s owning context ('${owner.ctxName}') nor ` +
+            `consumes any event it carries (${owner.carries.join(", ") || "none"}). ` +
+            `This wiring routes nothing — remove it, or host a producing/consuming context.`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+
+    // 3. Consumer unwired while the channel is broker-bound elsewhere.
+    if (!platformOwnsBackend(dep.platform)) continue; // frontends consume via M-T1.10 realtime
+    for (const [chName, csNames] of activeBindings) {
+      const owner = channelOwner.get(chName);
+      if (!owner) continue;
+      if (!owner.carries.some((e) => consumed.has(e))) continue;
+      if (csNames.some((n) => listed.has(n))) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.channel-consumer-unwired",
+        message:
+          `Deployable '${dep.name}' consumes events of channel '${chName}' ` +
+          `(${owner.carries.filter((e) => consumed.has(e)).join(", ")}), which is bound to a ` +
+          `broker via channelSource '${csNames[0]}' on another deployable — but '${dep.name}' ` +
+          `doesn't list the binding. Once traffic rides the broker this consumer would ` +
+          `silently receive nothing. Add \`channels: [${csNames[0]}]\` to '${dep.name}'.`,
+        source: `${sys.name}/${dep.name}`,
+      });
+    }
   }
 }
 

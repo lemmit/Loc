@@ -91,6 +91,7 @@ export type DddKeywordNames =
     | "chakra"
     | "channel"
     | "channelSource"
+    | "channels"
     | "check"
     | "claims"
     | "clickhouse"
@@ -944,10 +945,10 @@ export function isCommandHandler(item: unknown): item is CommandHandler {
     return reflection.isInstance(item, CommandHandler.$type);
 }
 
-export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
+export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 export function isCommonSoftKeywords(item: unknown): item is CommonSoftKeywords {
-    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
+    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'channels' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
 }
 
 export interface Component extends langium.AstNode {
@@ -1122,6 +1123,7 @@ export interface Deployable extends langium.AstNode {
     readonly $container: Model | System;
     readonly $type: 'Deployable';
     auth?: AuthMode;
+    channelRefs: Array<langium.Reference<ChannelSource>>;
     contextRefs: Array<langium.Reference<BoundedContext>>;
     dataSourceRefs: Array<langium.Reference<Resource>>;
     design?: DesignPack;
@@ -1141,6 +1143,7 @@ export interface Deployable extends langium.AstNode {
 export const Deployable = {
     $type: 'Deployable',
     auth: 'auth',
+    channelRefs: 'channelRefs',
     contextRefs: 'contextRefs',
     dataSourceRefs: 'dataSourceRefs',
     design: 'design',
@@ -5137,6 +5140,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             properties: {
                 auth: {
                     name: Deployable.auth,
+                    optional: true
+                },
+                channelRefs: {
+                    name: Deployable.channelRefs,
+                    defaultValue: [],
+                    referenceType: ChannelSource.$type,
                     optional: true
                 },
                 contextRefs: {
