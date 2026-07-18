@@ -113,16 +113,12 @@ const BEHAVIOURAL_SKIP = {
     "single-containment": "B8: dotnet single-containment boot crash (EF owned entity)",
   },
   elixir: {
-    // B5/B6 fixed. B7 open — `auditable` lifecycle stamps (stamp onCreate/onUpdate)
-    // aren't populated in the elixir create changeset, so the NOT NULL stamp
-    // columns 500 the insert. Skip-listed pending fix.
-    stamps: "B7: elixir auditable stamp create 500s (stamp columns not populated)",
-    // UNVERIFIED on elixir (docker-image contention with the in-flight B7 fix
-    // agent blocked a local boot). node/java/python/dotnet pass both; elixir
-    // handles plain containment + crudish elsewhere, so these are expected green.
-    // Re-verify + remove when the B7 fix lands.
-    "single-containment": "unverified on elixir (docker contention); expected green — verify post-B7",
-    seeding: "unverified on elixir (docker contention); expected green — verify post-B7",
+    // B5/B6/B7 fixed. single-containment/seeding are UNVERIFIED on elixir (docker
+    // contention during the B7 fix blocked a local boot) — node/java/python/dotnet
+    // pass both, and elixir handles plain containment + crudish elsewhere, so
+    // they're expected green. Verify + remove next (the B7 image is now free).
+    "single-containment": "unverified on elixir (docker contention); expected green — verify next",
+    seeding: "unverified on elixir (docker contention); expected green — verify next",
   },
 };
 
