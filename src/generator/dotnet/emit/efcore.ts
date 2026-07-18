@@ -1055,6 +1055,13 @@ function containmentConfigLines(
         ...idSetupLines,
         ...partFieldLines,
         `${indent}});`,
+        // An OPTIONAL single containment folds into a NULLABLE jsonb column
+        // (unset at create, filled by an operation).  Without `IsRequired(false)`
+        // EF treats the non-nullable CLR nav as a required owned entity and
+        // throws materialising the null JSON cell.  Mirrors the relational path.
+        ...(c.optional
+          ? [`${indent}${builderVar}.Navigation(x => x.${upperFirst(c.name)}).IsRequired(false);`]
+          : []),
       ];
     }
     return [

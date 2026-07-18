@@ -64,6 +64,13 @@ function hydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent: string)
       out.push(
         `${indent}const ${c.name} = ((${rowVar}.${c.name} ?? []) as ${c.partName}Doc[]).map((x) => ${fromDoc}(x));`,
       );
+    } else if (c.optional) {
+      // Optional single containment: the jsonb cell is NULL when unset, so guard
+      // the deserialiser — a null hydrates to `null`, not a `<Part>FromDoc(null)`
+      // crash (parity with the nullable column emitted in emit/schema.ts).
+      out.push(
+        `${indent}const ${c.name} = ${rowVar}.${c.name} == null ? null : ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`,
+      );
     } else {
       out.push(`${indent}const ${c.name} = ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`);
     }

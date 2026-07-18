@@ -427,10 +427,17 @@ export function projectEntityArgs(
         .find((p) => p.name === containmentPartName(wf.type));
       if (!part) continue;
       const accessor = `${domainExpr}.${upperFirst(wf.name)}`;
+      // An OPTIONAL single containment may be unset (the owned nav is null), so
+      // guard the projection — `found.Note.Id.Value` on a null nav throws a
+      // NullReferenceException.  A collection never nulls; a required single
+      // containment is defaulted, so both project unguarded.
+      const single = !wireTypeInfo(wf.type, "response").isCollection;
       args.push(
         wireTypeInfo(wf.type, "response").isCollection
           ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`
-          : projectEntityExpr(accessor, part, ctx),
+          : single && wf.optional
+            ? `${accessor} is null ? null : ${projectEntityExpr(accessor, part, ctx)}`
+            : projectEntityExpr(accessor, part, ctx),
       );
     } else {
       args.push(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx));
@@ -541,7 +548,15 @@ function responseRecordParams(
     if (wf.source === "id") {
       parts.push(dtoParam(csIdValueClrType(idValueType), "Id"));
     } else {
-      parts.push(dtoParam(wireType(wf.type, ctx, "response"), upperFirst(wf.name)));
+      // A containment's wire type is a bare `entity` (its optionality rides the
+      // WireField `optional` flag, not the type), so an OPTIONAL single
+      // containment needs the `?` appended explicitly — otherwise the response
+      // record declares it `[Required] MemoResponse` and the read of an unset
+      // (null) containment fails.  Scalar/VO fields already carry their own
+      // nullability in the type, so the `endsWith("?")` guard keeps this idempotent.
+      let csType = wireType(wf.type, ctx, "response");
+      if (wf.optional && !csType.endsWith("?")) csType = `${csType}?`;
+      parts.push(dtoParam(csType, upperFirst(wf.name)));
     }
   }
   // Provenance (provenance.md): expose each provenanced field's current lineage

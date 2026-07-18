@@ -41,23 +41,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | views (where-filtered)        |  ✅  |  ✅  |   ✅   |  ✅    |✅ B13  |
 | embedded (containment fold)   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
-
-### Deferred — optional single containment on `shape: embedded`
-
-Booting `embedded` with an OPTIONAL single containment (`contains note: Memo?`)
-left unset surfaced a cross-backend gap: a null single-containment jsonb cell is
-not uniformly null-safe. node's drizzle schema hardcoded `.notNull()` on the
-containment column (disagreeing with the migration's `JSONB NULL`) and fed a
-null cell into `memoFromDoc(...)` on load; .NET declared the response field
-`[Required] MemoResponse` (non-nullable) and dereferenced `found.Note` unguarded.
-The ROOT is how `wireShape` represents an optional containment (the wire field
-doesn't carry the optional wrapper, so per-backend emitters can't see it). This
-is a multi-backend fix (node + dotnet + likely elixir) tracked as a dedicated
-follow-up; the `embedded` behavioural case above deliberately exercises the
-COLLECTION containment fold (the feature's core, green everywhere) and the
-`money` primitive, and leaves optional-single-containment to that slice. (java
-rejects `shape(embedded)` + a reference collection outright — a declared
-limitation pinned by `generator-java-shapes.test.ts` — so the case omits `tags`.)
+| embedded-optional (`Memo?`)   |✅ B14|  ✅  |   ✅   |✅ B14  |  ✅    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -66,6 +50,20 @@ org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11/B1
 now fixed; all corpus cases boot green on all five backends.
 
 ---
+
+## B14 ✅ node + dotnet — an OPTIONAL single containment on `shape: embedded` isn't null-safe
+
+- **Where:** `src/generator/typescript/emit/schema.ts` + `repository-embedded-builder.ts` (node); `src/generator/dotnet/dto-mapping.ts` + `emit/efcore.ts` (dotnet).
+- **Repro:** `test/fixtures/corpus/embedded-optional.ddd` — a `shape: embedded` aggregate with `contains note: Memo?` left unset (null jsonb cell). A COLLECTION containment (`contains lines: LineItem[]`) folds fine everywhere (defaults `[]`), but the OPTIONAL SINGLE containment breaks node + dotnet because the null cell isn't handled. **java, python, elixir already pass** — used as the reference.
+- **Root cause:** the wire shape DOES carry the optionality (`wireFieldsForAggregate` sets `optional: !!c.optional && !c.collection` on the containment `WireField`), but the containment's wire *type* stays a bare `entity` (optionality rides the flag, not the type). Several emitters read the type / iterate `agg.contains` and hardcoded non-null, ignoring `c.optional`:
+  - **node (1)** `emitEmbeddedTable` hardcoded `.notNull()` on every containment jsonb column → an unset `note` fails the NOT-NULL constraint on `INSERT` (`500`, `null value in column "note"`). The shared migration DDL already emits the column `nullable: true`, so the Drizzle schema was the one out of step.
+  - **node (2)** `hydrateLocals` loaded a single containment as `const note = memoFromDoc(row.note as MemoDoc)` with no null guard → `memoFromDoc(null)` crash on read of an unset containment.
+  - **dotnet (1)** `responseRecordParams` declared the containment response field `[property: Required] MemoResponse Note` (non-nullable) — reading an unset containment couldn't satisfy the required schema.
+  - **dotnet (2)** `projectEntityArgs` projected `new MemoResponse(found.Note.Id.Value, …)` unguarded → `NullReferenceException` dereferencing the null owned nav.
+  - **dotnet (3)** the embedded `.ToJson(...)` `OwnsOne` owned nav lacked `IsRequired(false)` — EF treats the non-nullable CLR nav as required and throws materialising the null JSON cell (same class as B8's relational path, which already had the fix).
+- **Fix:** derive nullability from `c.optional` / `WireField.optional` at each site. node: `emitEmbeddedTable` drops `.notNull()` for an optional single containment (collection stays `.notNull()`); `hydrateLocals` guards `row.note == null ? null : memoFromDoc(...)`. dotnet: `responseRecordParams` appends `?` when `wf.optional` (idempotent `endsWith("?")` guard); `projectEntityArgs` guards `found.Note is null ? null : new MemoResponse(...)`; the embedded `OwnsOne` appends `builder.Navigation(x => x.Note).IsRequired(false)` when `c.optional`. **No enrichment/wireShape change** — the wire shape was already correct, so java/python/elixir (which already consult the flag / carry a nil guard) were untouched.
+- **Verification:** all five backends boot `embedded-optional` green via the behavioural harness (node PGlite; java host JDK; python/dotnet on postgres; elixir `loom-elx:node22` docker). Pinned by `test/generator/typescript/embedded-optional-containment.test.ts`, `test/generator/dotnet/embedded-optional-containment.test.ts`, `test/generator/elixir/vanilla-embed-optional.test.ts` (the elixir one pins the already-null-safe `embeds_one` + `serialize_<part>(nil)` guard against regression).
+- **Status:** ✅ fixed — `embedded-optional` added to the corpus (`backends: ALL`), green on all five.
 
 ## B13 ✅ elixir — where-filtered view route returns a `{data: […]}` envelope, not a bare array
 

@@ -531,7 +531,12 @@ function emitEmbeddedTable(
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
   }
   for (const c of agg.contains) {
-    lines.push(`  ${c.name}: jsonb("${snake(c.name)}").notNull(),`);
+    // A collection containment defaults to `[]` (never null), so it stays
+    // `.notNull()`.  An OPTIONAL single containment (`contains note: Memo?`)
+    // may be unset at runtime → the jsonb cell is NULL, so its column must be
+    // nullable, matching the shared migration DDL (`JSONB NULL`).
+    const not = c.optional && !c.collection ? "" : ".notNull()";
+    lines.push(`  ${c.name}: jsonb("${snake(c.name)}")${not},`);
   }
   const indexEntries = [...indexedColumns].map(
     (col) =>

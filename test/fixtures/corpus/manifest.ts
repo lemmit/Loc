@@ -40,6 +40,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "value-collections", title: "value-object array (`Money[]`) stored inline", doc: "language", backends: ALL },
   { id: "document", title: "`shape: document` — whole aggregate in one jsonb column", doc: "language", backends: ALL },
   { id: "embedded", title: "`shape: embedded` — containments fold into jsonb columns", doc: "language", backends: ALL },
+  { id: "embedded-optional", title: "shape: embedded — optional single containment (nullable jsonb)", doc: "language", backends: ALL },
   { id: "inheritance", title: "aggregate inheritance — TPH (sharedTable) + TPC (ownTable)", doc: "inheritance", backends: ALL },
   { id: "tph", title: "TPH-only (sharedTable) hierarchy — Vehicle/Car/Truck canonical fixture", doc: "inheritance", backends: ALL },
   { id: "event-sourcing", title: "`persistedAs: eventLog` — append-only stream + appliers", doc: "workflow", backends: ALL },

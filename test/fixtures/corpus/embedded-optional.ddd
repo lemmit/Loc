@@ -1,0 +1,35 @@
+// shape: embedded with an OPTIONAL single containment (`contains note: Memo?`)
+// left unset — the null jsonb cell must round-trip on every backend.
+system EmbOpt {
+  subdomain Shop {
+    context Shop {
+      aggregate Order shape: embedded, with crudish {
+        customer: string
+        contains lines: LineItem[]
+        contains note: Memo?
+        entity LineItem { sku: string  qty: int }
+        entity Memo { text: string }
+        operation addLine(sku: string, qty: int) { lines += LineItem { sku: sku, qty: qty } }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api ShopApi from Shop
+  storage primary { type: postgres }
+  resource shopState { for: Shop, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 4000
+  }
+
+  test e2e "embedded aggregate with an unset optional single containment round-trips" against d {
+    let o = api.orders.create({ customer: "acme" })
+    api.orders.addLine(o, { sku: "A1", qty: 3 })
+    let read = api.orders.getById(o)
+    expect(read.customer).toBe("acme")
+    expect(read.lines.length).toBe(1)
+  }
+}
