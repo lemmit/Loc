@@ -132,7 +132,21 @@ describe("java generator — /auth/* handshake + /auth/me (D-AUTH-OIDC)", () => 
     // CSRF state cookie + authorization-code exchange.
     expect(c).toContain("oidc_state");
     expect(c).toContain("grant_type=authorization_code");
-    expect(c).toContain('response.addCookie(sessionCookie("session", accessToken))');
+    expect(c).toContain('sessionCookie("session"');
+  });
+
+  it("drives login with PKCE and rotates refresh tokens", async () => {
+    const c = (await generateSystemFiles(OIDC_SRC)).get(`${ROOT}/auth/AuthController.java`)!;
+    // PKCE (RFC 7636): S256 challenge, verifier cookie, code_verifier on exchange.
+    expect(c).toContain('MessageDigest.getInstance("SHA-256")');
+    expect(c).toContain("code_challenge_method=S256");
+    expect(c).toContain('stateCookie("oidc_verifier"');
+    expect(c).toContain("&code_verifier=");
+    // Refresh rotation: offline_access scope, POST /refresh, refresh cookie.
+    expect(c).toContain("offline_access");
+    expect(c).toContain('@PostMapping("/api/auth/refresh")');
+    expect(c).toContain("grant_type=refresh_token");
+    expect(c).toContain('sessionCookie("refresh"');
   });
 
   it("bypasses the handshake paths but keeps /auth/me protected", async () => {
@@ -140,6 +154,7 @@ describe("java generator — /auth/* handshake + /auth/me (D-AUTH-OIDC)", () => 
     expect(filter).toContain('"/api/auth/login",');
     expect(filter).toContain('"/api/auth/callback",');
     expect(filter).toContain('"/api/auth/logout",');
+    expect(filter).toContain('"/api/auth/refresh",');
     // /api/auth/me must NOT be bypassed — it is the protected session probe.
     expect(filter).not.toContain('"/api/auth/me"');
   });
