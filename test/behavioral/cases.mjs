@@ -108,19 +108,14 @@ const BEHAVIOURAL_SKIP = {
     // re-armed; no node skips remain.
   },
   dotnet: {
-    // B2/B3/B4/B8 fixed. B12 open — `with crudish` on a `shape: document`
-    // aggregate: the repo interface declares DeleteAsync but the document-shape
-    // repo impl doesn't provide it (CS0535 interface/impl mismatch).
-    document: "B12: dotnet crudish+document — ArticleRepository missing DeleteAsync",
+    // B2/B3/B4/B8/B12 fixed — no dotnet skips remain. (B12: `crudish` on a
+    // `shape: document` aggregate now emits a matching `DeleteAsync` on the
+    // document-repo impl, so the interface/impl method sets agree; repository.ts.)
   },
   elixir: {
-    // B5/B6/B7/B9/B10/B11 fixed. (B11: `T or <primitive>` union return now mints a
-    // valid PascalCase elixir module alias; openapi-emit.ts.)  Still UNVERIFIED on
-    // elixir (docker contention) — node/java/python(+dotnet, minus document B12) pass;
-    // boot elixir and resolve each of these three.
-    "core-domain": "unverified on elixir (docker contention) — boot + verify",
-    document: "unverified on elixir (docker contention) — boot + verify",
-    inheritance: "unverified on elixir (docker contention) — boot + verify",
+    // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
+    // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
+    // now mints a valid PascalCase module alias; openapi-emit.ts.)
     // (B9: single `contains`
     // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
     // handles a single `has_one` struct; context-emit.ts. B10: parent-table

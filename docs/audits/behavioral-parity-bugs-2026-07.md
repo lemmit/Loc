@@ -36,23 +36,24 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
 | operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |✅ B11  |
-| core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
-| document (crudish)            |  ✅  |  ✅  |   ✅   |🔴 B12  |  ⏳    |
-| inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
+| core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+| document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ✅    |
+| inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
 `Object.groupBy`; host apt ships only Elixir 1.14, and the 1.16 binary download is
-org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
+org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11) is
+now fixed; all corpus cases boot green on all five backends.
 
 ---
 
-## B12 🔴 dotnet — `with crudish` on a `shape: document` aggregate won't compile
+## B12 ✅ dotnet — `with crudish` on a `shape: document` aggregate won't compile
 
-- **Where:** `src/generator/dotnet/` (crudish repo interface vs document-shape repo impl).
+- **Where:** `src/generator/dotnet/emit/repository.ts` (crudish repo interface vs document-shape repo impl).
 - **Repro:** `test/fixtures/corpus/document.ddd` with `aggregate Article shape: document, with crudish` on dotnet — `dotnet build` fails **CS0535: `ArticleRepository` does not implement `IArticleRepository.DeleteAsync(Article, …)`**. The `crudish` capability adds `DeleteAsync` to the repo interface, but the document-shape repository emitter doesn't emit a `DeleteAsync` body (the two paths — crudish interface, document impl — disagree). node/java/python compile + round-trip.
 - **Impact:** you can't add CRUD (needed to create/delete) to a document-shaped aggregate on dotnet. Found by the Slice-4 drain (needed crudish for a create path to test document behaviourally).
-- **Status:** confirmed build error; skip-listed pending fix.
+- **Fix:** added a `canonicalDestroy`-gated `DeleteAsync` arm to `renderDocumentRepositoryImpl`, mirroring the relational impl's placement. Since the DbSet holds `<Agg>Document` (JSONB) rows keyed by the raw id value, it loads the row by `id.Value` via `FirstOrDefaultAsync` and `Remove`s it (missing row = no-op) — not the relational path's bare `_db.Set.Remove(aggregate)`. Verified: `run-dotnet.mjs document` green; `LOOM_DOTNET_BUILD=1` corpus build clean; `test/generator/dotnet/crudish-document.test.ts` pins both the interface declaration and the impl body.
 
 ## B11 ✅ elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
 
