@@ -455,11 +455,16 @@ ${rootApiLines}
       return `      live ${JSON.stringify(r.route)}, ${local}`;
     })
     .join("\n");
+  // OIDC only: seed the Phoenix session's `current_user` from the verified
+  // `session` cookie so LiveAuth.on_mount can gate LiveViews (the `auth: ui`
+  // frontend guard).  Runs right after `:fetch_session`.  The dev stub needs
+  // none — LiveAuth's dev_user fallback grants LiveViews out of the box.
+  const browserAuthPlug = authEnabled && oidc ? `\n    plug ${webModule}.BrowserAuth` : "";
   const browserPipeline = hasLiveView
     ? `
   pipeline :browser do
     plug :accepts, ["html"]
-    plug :fetch_session
+    plug :fetch_session${browserAuthPlug}
     plug :fetch_live_flash
     plug :put_root_layout, html: {${webModule}.Layouts, :root}
     plug :protect_from_forgery
@@ -467,12 +472,19 @@ ${rootApiLines}
   end
 `
     : "";
+  // Under auth, LiveAuth.on_mount runs FIRST — it gates the LiveView (halting +
+  // redirecting to the login handshake when the session carries no principal)
+  // and assigns `@current_user`; Nav then adds `@current_path`.  Without auth,
+  // Nav alone.  This is the `auth: ui` guard for the Phoenix-LiveView frontend.
+  const liveOnMount = authEnabled
+    ? `[${webModule}.LiveAuth, ${webModule}.Nav]`
+    : `[${webModule}.Nav]`;
   const liveScope = hasLiveView
     ? `
   scope "/", ${webModule} do
     pipe_through :browser
 
-    live_session :default, on_mount: [${webModule}.Nav] do
+    live_session :default, on_mount: ${liveOnMount} do
 ${liveLines}
     end
   end
@@ -488,6 +500,7 @@ ${liveLines}
     ? `
     get "/login", AuthController, :login
     get "/callback", AuthController, :callback
+    post "/refresh", AuthController, :refresh
     get "/logout", AuthController, :logout`
     : "";
   const authScope = authEnabled

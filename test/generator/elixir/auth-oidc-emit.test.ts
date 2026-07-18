@@ -72,6 +72,72 @@ function source(opts: { oidc: boolean }): string {
 }`;
 }
 
+// A phoenixLiveView deployable that also mounts a HEEx `ui:` — so the router
+// emits a `live_session` and the `auth: ui` LiveView guard wiring applies.
+function sourceWithUi(opts: { oidc: boolean }): string {
+  return `system Helpdesk {${USER_AUTH}${opts.oidc ? OIDC_BLOCK : ""}
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish {
+        subject: string
+        open: bool
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+  api SupportApi from Support
+  ui WebApp {
+    api Support: SupportApi
+    page Home { route: "/" body: Heading { "Home" } }
+  }
+  deployable api {
+    platform: elixir
+    contexts: [Tickets]
+    serves: SupportApi
+    dataSources: [ticketState]
+    ui: WebApp { Support: api }
+    port: 4000
+    auth: required
+  }
+}`;
+}
+
+describe("Phoenix LiveView auth: ui guard (D-AUTH-OIDC, M-T3.5)", () => {
+  it("gates the live_session with LiveAuth + seeds the session via BrowserAuth (OIDC)", async () => {
+    const files = await build(sourceWithUi({ oidc: true }));
+    const router = files.get("api/lib/api_web/router.ex")!;
+    // LiveAuth runs FIRST in the on_mount chain (gates), Nav second.
+    expect(router).toContain("on_mount: [ApiWeb.LiveAuth, ApiWeb.Nav]");
+    // The :browser pipeline seeds the session from the verified cookie.
+    expect(router).toContain("plug ApiWeb.BrowserAuth");
+    // The plug module + its session-seeding call.
+    const browserAuth = files.get("api/lib/api_web/browser_auth.ex")!;
+    expect(browserAuth).toContain("defmodule ApiWeb.BrowserAuth");
+    expect(browserAuth).toContain("ApiWeb.Auth.session_user(conn)");
+    expect(browserAuth).toContain('put_session(conn, "current_user", user)');
+    // Auth module exposes session_user/1 (reads + verifies the session cookie).
+    expect(files.get("api/lib/api_web/auth.ex")!).toContain("def session_user(conn)");
+    // A gated LiveView bounces to the real login handshake, not a bare /login.
+    expect(files.get("api/lib/api_web/live_auth.ex")!).toContain(
+      'Phoenix.LiveView.redirect(socket, to: "/api/auth/login")',
+    );
+  });
+
+  it("dev stub: LiveAuth still gates (dev_user fallback), no BrowserAuth plug", async () => {
+    const files = await build(sourceWithUi({ oidc: false }));
+    const router = files.get("api/lib/api_web/router.ex")!;
+    // LiveAuth is wired even for the dev stub (assigns @current_user), but no
+    // BrowserAuth plug — the dev_user fallback needs no session seeding.
+    expect(router).toContain("on_mount: [ApiWeb.LiveAuth, ApiWeb.Nav]");
+    expect(router).not.toContain("plug ApiWeb.BrowserAuth");
+    expect(files.has("api/lib/api_web/browser_auth.ex")).toBe(false);
+    // The dev-stub LiveAuth grants the built-in admin rather than redirecting.
+    expect(files.get("api/lib/api_web/live_auth.ex")!).toContain("ApiWeb.Auth.dev_user()");
+  });
+});
+
 describe("Phoenix OIDC verifier emission", () => {
   it("emits a real JOSE/JWKS verifier when an auth { oidc } block is present", async () => {
     const files = await build(source({ oidc: true }));
@@ -138,7 +204,7 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(ctrl).toContain("def login(conn, _params)");
     expect(ctrl).toContain('def callback(conn, %{"code" => code, "state" => state})');
     expect(ctrl).toContain("def logout(conn, _params)");
-    expect(ctrl).toContain('put_resp_cookie("session", access_token');
+    expect(ctrl).toContain('put_resp_cookie(conn, "session", Map.get(tokens, "access_token"');
     expect(ctrl).toContain('"grant_type" => "authorization_code"');
     // Routed.
     const router = files.get("api/lib/api_web/router.ex")!;
@@ -153,6 +219,26 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(auth).toContain('defp bypass_path?("/api/auth/logout"), do: true');
     expect(auth).toContain("defp extract_token(conn)");
     expect(auth).toContain('conn.cookies["session"]');
+  });
+
+  it("drives login with PKCE and rotates refresh tokens under OIDC", async () => {
+    const files = await build(source({ oidc: true }));
+    const ctrl = files.get("api/lib/api_web/controllers/auth_controller.ex")!;
+    // PKCE (RFC 7636): S256 challenge, verifier cookie, code_verifier on exchange.
+    expect(ctrl).toContain(":crypto.hash(:sha256, verifier)");
+    expect(ctrl).toContain('"code_challenge_method" => "S256"');
+    expect(ctrl).toContain('put_resp_cookie("oidc_verifier", verifier');
+    expect(ctrl).toContain('"code_verifier" => verifier');
+    // Refresh rotation: offline_access scope, refresh action, refresh cookie.
+    expect(ctrl).toContain("offline_access");
+    expect(ctrl).toContain("def refresh(conn, _params)");
+    expect(ctrl).toContain('"grant_type" => "refresh_token"');
+    expect(ctrl).toContain('put_resp_cookie(conn, "refresh"');
+    // Routed + bypassed (no valid access token yet).
+    const router = files.get("api/lib/api_web/router.ex")!;
+    expect(router).toContain('post "/refresh", AuthController, :refresh');
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    expect(auth).toContain('defp bypass_path?("/api/auth/refresh"), do: true');
   });
 
   it("emits NO handshake on the dev-stub path (auth required, no oidc)", async () => {

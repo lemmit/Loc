@@ -56,6 +56,10 @@ describe("react auth: ui guard — emission", () => {
 
     const client = find(files, "web/src/api/client.ts");
     expect(client).toContain('credentials: "include"');
+    // Silent renewal: a 401 triggers one POST /auth/refresh + retry.
+    expect(client).toContain('rawFetch("/auth/refresh", { method: "POST" })');
+    expect(client).toContain("async function request(");
+    expect(client).toContain("err.status === 401");
   });
 
   // Every React design pack must wrap <App/> in <AuthGate> (the wrap lives
@@ -81,5 +85,8 @@ describe("react auth: ui guard — emission", () => {
     expect(main).not.toContain("AuthGate");
     const client = find(files, "web/src/api/client.ts");
     expect(client).not.toContain('credentials: "include"');
+    // No silent-renewal machinery without auth: ui — api.* calls rawFetch directly.
+    expect(client).not.toContain("/auth/refresh");
+    expect(client).toContain("const request = rawFetch;");
   });
 });

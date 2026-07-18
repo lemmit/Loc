@@ -264,7 +264,7 @@ function rootOrgOf(orgPath: string): string {
   // the frontend guard reads) is deliberately NOT bypassed, so the
   // middleware populates `currentUser` or rejects with 401.
   const bypass = oidc
-    ? `["/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout"]`
+    ? `["/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout", "${AUTH_BASE_PATH}/refresh"]`
     : '["/health", "/ready", "/openapi.json", "/swagger"]';
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
@@ -475,17 +475,30 @@ ${meRoute}
     ? `const CLIENT_SECRET = ${authValueExpr(auth.oidc.clientSecret)};\n`
     : "";
   const secretBodyLine = hasSecret ? '\n    body.set("client_secret", CLIENT_SECRET);' : "";
+  const refreshSecretLine = hasSecret ? '\n    body.set("client_secret", CLIENT_SECRET);' : "";
   const scopes = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).join(" ");
+  // `offline_access` asks the IdP for a refresh token; add it (idempotently)
+  // so the /refresh rotation below has something to rotate.  Confidential and
+  // public clients both benefit — refresh rotation is the "session depth"
+  // this handshake was missing (M-T3.5).
+  const scopeList = scopes.split(/\s+/).filter(Boolean);
+  if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
+  const finalScopes = scopeList.join(" ");
   return `// Auto-generated.
-import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { type Context, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 const ISSUER = ${issuerExpr};
 const CLIENT_ID = ${clientIdExpr};
-${clientSecretConst}const SCOPES = ${JSON.stringify(scopes)};
+${clientSecretConst}const SCOPES = ${JSON.stringify(finalScopes)};
 const REDIRECT_URI = process.env.OIDC_REDIRECT_URI ?? "http://localhost:3000${AUTH_BASE_PATH}/callback";
 const POST_LOGIN = process.env.OIDC_POST_LOGIN_REDIRECT ?? "/";
+
+// HttpOnly cookie options shared by the session + refresh + transient PKCE
+// cookies.  SameSite=Lax so the IdP's cross-site redirect back to /callback
+// still carries them.
+const COOKIE = { httpOnly: true, sameSite: "Lax", path: "/" } as const;
 
 interface Endpoints {
   authorization_endpoint: string;
@@ -505,22 +518,53 @@ async function disco(): Promise<Endpoints> {
   return discoPromise;
 }
 
+/** Base64url with no padding — the encoding PKCE (RFC 7636) mandates for the
+ *  verifier and the challenge. */
+function base64url(buf: Buffer): string {
+  return buf.toString("base64").replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
+
+/** The tokens an authorization-code / refresh exchange returns.  \`refresh_token\`
+ *  is present only when the IdP grants one (the \`offline_access\` scope). */
+interface TokenResponse {
+  access_token: string;
+  refresh_token?: string;
+}
+
+/** Persist the access token as the browser session and the refresh token (when
+ *  present) for the /refresh rotation.  Both are HttpOnly — the SPA never sees
+ *  the raw tokens, it only rides the session cookie as a Bearer. */
+function storeTokens(c: Context, tokens: TokenResponse): void {
+  setCookie(c, "session", tokens.access_token, COOKIE);
+  if (tokens.refresh_token) setCookie(c, "refresh", tokens.refresh_token, COOKIE);
+}
+
 /** The /auth/* redirect handshake + session probe.  Mounted at "/auth"
  *  by createApp. */
 export function authRoutes(): Hono {
   const app = new Hono();
 
   // Start the authorization-code flow — redirect to the IdP's login page.
+  // PKCE (RFC 7636): mint a per-login code verifier, send only its SHA-256
+  // challenge to the IdP, and stash the verifier in an HttpOnly cookie so the
+  // /callback exchange can prove possession.  Unconditional (OAuth 2.1 makes
+  // PKCE mandatory) — it costs nothing for confidential clients and closes the
+  // authorization-code-interception hole for public ones.
   app.get("/login", async (c) => {
     const { authorization_endpoint } = await disco();
     const state = randomUUID();
-    setCookie(c, "oidc_state", state, { httpOnly: true, sameSite: "Lax", path: "/" });
+    const verifier = base64url(randomBytes(32));
+    const challenge = base64url(createHash("sha256").update(verifier).digest());
+    setCookie(c, "oidc_state", state, COOKIE);
+    setCookie(c, "oidc_verifier", verifier, COOKIE);
     const url = new URL(authorization_endpoint);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("client_id", CLIENT_ID);
     url.searchParams.set("redirect_uri", REDIRECT_URI);
     url.searchParams.set("scope", SCOPES);
     url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
     return c.redirect(url.toString());
   });
 
@@ -528,7 +572,8 @@ export function authRoutes(): Hono {
   app.get("/callback", async (c) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
-    if (!code || !state || state !== getCookie(c, "oidc_state")) {
+    const verifier = getCookie(c, "oidc_verifier");
+    if (!code || !state || state !== getCookie(c, "oidc_state") || !verifier) {
       return c.json({ error: "invalid_state" }, 400);
     }
     const { token_endpoint } = await disco();
@@ -537,6 +582,7 @@ export function authRoutes(): Hono {
       code,
       redirect_uri: REDIRECT_URI,
       client_id: CLIENT_ID,
+      code_verifier: verifier,
     });${secretBodyLine}
     const res = await fetch(token_endpoint, {
       method: "POST",
@@ -544,18 +590,52 @@ export function authRoutes(): Hono {
       body,
     });
     if (!res.ok) return c.json({ error: "token_exchange_failed" }, 401);
-    const tokens = (await res.json()) as { access_token: string };
+    const tokens = (await res.json()) as TokenResponse;
     // Session: stash the access token in an HttpOnly cookie; the SPA
-    // forwards it as a Bearer that auth/oidc.ts verifies.
-    setCookie(c, "session", tokens.access_token, { httpOnly: true, sameSite: "Lax", path: "/" });
+    // forwards it as a Bearer that auth/oidc.ts verifies.  The refresh
+    // token (when granted) rides its own HttpOnly cookie for /refresh.
+    storeTokens(c, tokens);
     deleteCookie(c, "oidc_state", { path: "/" });
+    deleteCookie(c, "oidc_verifier", { path: "/" });
     return c.redirect(POST_LOGIN);
+  });
+
+  // Silent renewal — exchange the stored refresh token for a fresh access
+  // token WITHOUT another IdP round-trip, and ROTATE the refresh token (the
+  // IdP hands back a new one; storeTokens overwrites the cookie so a stolen
+  // token is single-use).  The SPA calls this on a 401 to extend the session.
+  // Bypassed by the auth middleware — the caller has no valid access token yet.
+  app.post("/refresh", async (c) => {
+    const refresh = getCookie(c, "refresh");
+    if (!refresh) return c.json({ error: "no_refresh_token" }, 401);
+    const { token_endpoint } = await disco();
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refresh,
+      client_id: CLIENT_ID,
+    });${refreshSecretLine}
+    const res = await fetch(token_endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!res.ok) {
+      // The refresh token is spent or revoked — clear both cookies so the
+      // SPA falls back to a full /login rather than looping on a dead token.
+      deleteCookie(c, "session", { path: "/" });
+      deleteCookie(c, "refresh", { path: "/" });
+      return c.json({ error: "refresh_failed" }, 401);
+    }
+    const tokens = (await res.json()) as TokenResponse;
+    storeTokens(c, tokens);
+    return c.json({ ok: true });
   });
 
   // Clear the local session.  The IdP's own session is ended at its
   // end-session endpoint, which the SPA can link to directly.
   app.get("/logout", (c) => {
     deleteCookie(c, "session", { path: "/" });
+    deleteCookie(c, "refresh", { path: "/" });
     return c.redirect(POST_LOGIN);
   });
 

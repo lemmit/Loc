@@ -54,6 +54,46 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   log.debug(`<- ${r.status} ${method} ${path} (${ms}ms)`);
   return body;
 }
+{{#if hasAuthUi}}
+// Silent renewal (auth: ui): a 401 usually means the access-token cookie
+// expired, so POST /auth/refresh once to rotate it (the backend swaps the
+// HttpOnly session + refresh cookies) and retry the original request.  A single
+// shared in-flight promise coalesces concurrent 401s into ONE refresh; the
+// refresh POST goes through rawFetch directly so it can never recurse, and the
+// retry runs at most once — a still-401 (no/spent refresh token) surfaces the
+// original error, so the guard falls back to the login handshake.
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = rawFetch("/auth/refresh", { method: "POST" })
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function request(path: string, init?: RequestInit): Promise<unknown> {
+  try {
+    return await rawFetch(path, init);
+  } catch (err) {
+    if (
+      err instanceof ApiError &&
+      err.status === 401 &&
+      path !== "/auth/refresh" &&
+      (await refreshSession())
+    ) {
+      return rawFetch(path, init);
+    }
+    throw err;
+  }
+}
+{{else}}
+const request = rawFetch;
+{{/if}}
 
 // Multipart upload variant of `rawFetch`.  Sends a `FormData` body and,
 // crucially, does NOT set `content-type` — the browser adds it with the
@@ -88,11 +128,11 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
 }
 
 export const api = {
-  get: (path: string) => rawFetch(path, { method: "GET" }),
+  get: (path: string) => request(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
-    rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+    request(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   upload: (path: string, form: FormData) => rawUpload(path, form),
 {{#if hasDelete}}
-  delete: (path: string) => rawFetch(path, { method: "DELETE" }),
+  delete: (path: string) => request(path, { method: "DELETE" }),
 {{/if}}
 };

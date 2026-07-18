@@ -50,7 +50,10 @@ describe("React canonical-destroy → useDelete hook", () => {
   it("adds the api.delete helper to the shared client", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const client = files.get("web/src/api/client.ts");
-    expect(client).toContain('delete: (path: string) => rawFetch(path, { method: "DELETE" })');
+    // Routes through `request` (aliased to rawFetch without auth: ui, the
+    // 401-refresh wrapper under it) — same shape as get/post.
+    expect(client).toContain('delete: (path: string) => request(path, { method: "DELETE" })');
+    expect(client).toContain("const request = rawFetch;");
   });
 
   it("does NOT emit useDelete for a plain aggregate (gating)", async () => {

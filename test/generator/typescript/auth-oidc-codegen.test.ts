@@ -120,6 +120,32 @@ describe("hono OIDC turnkey auth — codegen", () => {
     expect(hs).toContain("export function authRoutes()");
   });
 
+  it("drives the login with PKCE (S256 challenge, verifier cookie, code_verifier on exchange)", async () => {
+    const files = await generateSystemFiles(OIDC);
+    const hs = findFile(files, /auth\/handshake\.ts$/);
+    // Login mints a verifier + sends only the SHA-256 challenge.
+    expect(hs).toContain('createHash("sha256")');
+    expect(hs).toContain('url.searchParams.set("code_challenge_method", "S256")');
+    expect(hs).toContain('setCookie(c, "oidc_verifier"');
+    // The callback proves possession with the stored verifier.
+    expect(hs).toContain("code_verifier: verifier");
+  });
+
+  it("rotates refresh tokens: offline_access scope, /refresh endpoint, both cookies stored", async () => {
+    const files = await generateSystemFiles(OIDC);
+    const hs = findFile(files, /auth\/handshake\.ts$/);
+    // Ask the IdP for a refresh token, then expose the rotation endpoint.
+    expect(hs).toContain("offline_access");
+    expect(hs).toContain('app.post("/refresh"');
+    expect(hs).toContain('grant_type: "refresh_token"');
+    // Rotation overwrites the refresh cookie (single-use), and logout clears it.
+    expect(hs).toContain('setCookie(c, "refresh"');
+    expect(hs).toContain('deleteCookie(c, "refresh"');
+    // /refresh must be reachable without a valid access token.
+    const mw = findFile(files, /auth\/middleware\.ts$/);
+    expect(mw).toContain('"/api/auth/refresh"');
+  });
+
   it("adds the jose dependency", async () => {
     const files = await generateSystemFiles(OIDC);
     const pkg = JSON.parse(findFile(files, /package\.json$/)) as {
