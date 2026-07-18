@@ -113,7 +113,7 @@ export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: stri
   const checks = residuals.map((inv) => {
     const pred = renderExpr(inv.expr, rc);
     const field = snake(pickErrorPath(inv) ?? fallbackField);
-    const msg = `must satisfy: ${inv.source}`;
+    const msg = inv.message ? inv.message.text : `must satisfy: ${inv.source}`;
     const violate = `add_error(changeset, :${field}, ${JSON.stringify(msg)})`;
     const guarded = inv.guard
       ? `    changeset =

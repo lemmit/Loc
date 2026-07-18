@@ -89,7 +89,7 @@ describe("Hono validation-error extension — emission", () => {
     // cross-backend parity gate stays green).  See
     // docs/old/proposals/validation-error-extension.md.
     expect(src).toMatch(
-      /errors:\s*z\.array\(z\.object\(\{\s*pointer:\s*z\.string\(\),\s*message:\s*z\.string\(\)\s*\}\)\)\.nullish\(\)/,
+      /errors:\s*z\.array\(z\.object\(\{\s*pointer:\s*z\.string\(\),\s*message:\s*z\.string\(\),\s*code:\s*z\.string\(\)\.nullish\(\)\s*\}\)\)\.nullish\(\)/,
     );
   });
 

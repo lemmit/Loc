@@ -65,6 +65,7 @@ function lowerStatementInner(stmt: Statement, env: Env): { stmt: StmtIR; envAfte
         kind: "precondition",
         expr: lowerExpr(stmt.expr, env),
         source: cstText(stmt.expr),
+        message: stmt.message ? { text: stmt.message } : undefined,
       },
       envAfter: env,
     };

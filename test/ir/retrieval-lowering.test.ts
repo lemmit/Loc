@@ -69,3 +69,37 @@ describe("lowering — retrieval", () => {
     if (air.where.kind === "binary") expect(air.where.op).toBe("&&");
   });
 });
+
+// A zero-argument criterion declared WITH empty parens (`Cheap()`) and CALLED
+// with parens (`where: Cheap()`) must inline to its queryable boolean body, the
+// same as the bare form (`Cheap`).  Previously a parameterless criterion was
+// eagerly inlined by `resolveNameRef` and the trailing `()` collapsed the
+// already-inlined body into a spurious free `call`, which the queryable-subset
+// classifier rejected ("call to '<expr>' (free)").
+describe("lowering — zero-arg criterion called with parens is queryable", () => {
+  const PAREN_SRC = `
+    context Sales {
+      aggregate Product { price: decimal  name: string }
+      repository Products for Product { }
+
+      criterion Cheap() of Product = price < 10
+      criterion Named(n: string) of Product = name == n
+
+      retrieval CheapOnes() of Product { where: Cheap() }
+      retrieval CheapNamed(n: string) of Product { where: Cheap() && Named(n) }
+    }
+  `;
+
+  it("inlines `where: Cheap()` to the comparison body (no free call, no validation error)", async () => {
+    const loom = await buildLoomModel(PAREN_SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    const cheap = ctx.retrievals.find((r) => r.name === "CheapOnes")!;
+    // Inlined predicate `price < 10` — a queryable comparison, not a `call`.
+    expect(cheap.where.kind).toBe("binary");
+    if (cheap.where.kind === "binary") expect(cheap.where.op).toBe("<");
+    // Composed with a parameterised criterion via `&&`.
+    const named = ctx.retrievals.find((r) => r.name === "CheapNamed")!;
+    expect(named.where.kind).toBe("binary");
+    if (named.where.kind === "binary") expect(named.where.op).toBe("&&");
+  });
+});

@@ -1,4 +1,4 @@
-import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, MessageIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeTsIdent } from "../../util/naming.js";
 import { collectLeaves } from "../_stmt/leaves.js";
 import type { ChunkMark } from "../_trace/sourcemap.js";
@@ -142,7 +142,7 @@ function renderTsStatement(
 ): string {
   switch (s.kind) {
     case "precondition":
-      return precondition(s.expr, s.source, index, traceCtx);
+      return precondition(s.expr, s.source, s.message, index, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 via the route-level
       // ForbiddenError catch in the per-aggregate routes file.
@@ -213,8 +213,17 @@ function renderTsStatement(
 /** Render a precondition — plain throw when trace is off; under
  *  `--trace`, bind the boolean to a temp first so the result can be
  *  logged (both pass and fail) before the conditional throw. */
-function precondition(expr: ExprIR, source: string, index: number, traceCtx: TraceCtx): string {
-  const thrown = `throw new DomainError(${JSON.stringify(`Precondition failed: ${source}`)})`;
+function precondition(
+  expr: ExprIR,
+  source: string,
+  message: MessageIR | undefined,
+  index: number,
+  traceCtx: TraceCtx,
+): string {
+  // Author `message "..."` becomes the domain-floor detail; otherwise the
+  // derived "Precondition failed: <src>" default.
+  const detail = message ? message.text : `Precondition failed: ${source}`;
+  const thrown = `throw new DomainError(${JSON.stringify(detail)})`;
   if (!traceCtx.emitTrace) {
     return `${INDENT}if (!(${renderTsExpr(expr)})) ${thrown};`;
   }

@@ -8,6 +8,7 @@ export {
   checkBindableInputArgs,
   checkBuilderCallType,
   checkConstructionFields,
+  checkFactoryCreateFields,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
 export { checkChannels } from "./channel.js";

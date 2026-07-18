@@ -607,7 +607,8 @@ export function renderEntity(
   // comes from the `__op` parameter on the trace-on AssertInvariants
   // signature.
   const invariantLines = entity.invariants.flatMap((inv, i) => {
-    const thrown = `throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
+    // Author `message "..."` becomes the domain-floor detail; else the default.
+    const thrown = `throw new DomainException(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`;
     if (!emitTrace) {
       const check = inv.guard
         ? `if ((${renderCsExpr(inv.guard, renderCtx)}) && !(${renderCsExpr(inv.expr, renderCtx)}))`

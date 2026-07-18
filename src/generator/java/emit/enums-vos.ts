@@ -72,7 +72,7 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
     const check = inv.guard
       ? `if ((${renderJavaExpr(inv.guard, ctorCtx)}) && !(${renderJavaExpr(inv.expr, ctorCtx)}))`
       : `if (!(${renderJavaExpr(inv.expr, ctorCtx)}))`;
-    return `        ${check} throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+    return `        ${check} throw new DomainException(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)});`;
   });
   const derivedLines = vo.derived.flatMap((d) => [
     `    public ${renderJavaType(d.type)} ${d.name}() {`,

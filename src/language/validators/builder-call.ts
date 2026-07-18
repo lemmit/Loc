@@ -5,11 +5,14 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { DddServices } from "../ddd-module.js";
 import type {
+  Aggregate,
   BuilderCall,
   EntityPart,
   Model,
   NameRef,
   PayloadDecl,
+  PostfixChain,
+  Property,
   Ui,
   ValueObject,
 } from "../generated/ast.js";
@@ -20,6 +23,9 @@ import {
   isComponent,
   isContainment,
   isEntityPart,
+  isMemberSuffix,
+  isNameRef,
+  isObjectLit,
   isPayloadDecl,
   isPostfixChain,
   isProperty,
@@ -210,7 +216,30 @@ export function recordFieldTypes(
   return out;
 }
 
-/** Reject a construction entry whose name isn't a declared field of the record. */
+/** The REQUIRED constructor fields of a record decl — a declared `Property`
+ *  that is non-optional (`T`, not `T?`), has no `= default`, and isn't
+ *  `provenanced` (those are auto-filled at construction).  `contains` members
+ *  auto-default to empty and are never required, so only `Property` members are
+ *  considered.  Consumed by the completeness check. */
+function requiredFieldNames(decl: ValueObject | EntityPart | PayloadDecl): Set<string> {
+  const req = new Set<string>();
+  const consider = (p: Property) => {
+    if (p.type?.optional || p.default || p.provenanced) return;
+    req.add(p.name);
+  };
+  if (isPayloadDecl(decl)) {
+    for (const f of decl.fields) consider(f);
+    return req;
+  }
+  for (const m of decl.members) if (isProperty(m)) consider(m);
+  return req;
+}
+
+/** Reject a construction entry whose name isn't a declared field of the record
+ *  (`loom.unknown-construction-field`), and a construction that OMITS a required
+ *  field (`loom.construction-missing-field`, M-T6.18 — completes the record
+ *  construction gap: name + value type + presence).  Both are pure name-set
+ *  checks over the model stream, so no lexical env is needed. */
 export function checkConstructionFields(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "BuilderCall") continue;
@@ -218,15 +247,119 @@ export function checkConstructionFields(model: Model, accept: ValidationAcceptor
     const decl = resolveRecordDecl(bc, model);
     if (!decl) continue; // not a record — primitive / component / unknown-type
     const fields = recordFieldNames(decl);
+    const provided = new Set<string>();
+    let hasPositional = false;
     for (const entry of bc.entries) {
       // Positional entries (`Card { "hi" }`) carry no name — not a field ref.
-      if (typeof entry.name !== "string") continue;
+      if (typeof entry.name !== "string") {
+        hasPositional = true;
+        continue;
+      }
+      provided.add(entry.name);
       if (!fields.has(entry.name)) {
         accept(
           "error",
           `'${bc.type}' has no field '${entry.name}'.` +
             (fields.size > 0 ? ` Declared fields: ${[...fields].join(", ")}.` : ""),
           { node: entry, property: "name", code: "loom.unknown-construction-field" },
+        );
+      }
+    }
+    // Completeness: every required field must be supplied.  Skip when the
+    // construction mixes in a positional entry — the provided-set can't be read
+    // by name, so requiring fields would risk a false positive.
+    if (!hasPositional) {
+      const missing = [...requiredFieldNames(decl)].filter((n) => !provided.has(n));
+      if (missing.length > 0) {
+        accept(
+          "error",
+          `'${bc.type}' construction is missing required field${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
+          { node: bc, property: "type", code: "loom.construction-missing-field" },
+        );
+      }
+    }
+  }
+}
+
+/** Resolve a bare `NameRef` at a factory-call head to the `Aggregate` it names —
+ *  the enclosing context first (the common, single-context case), then any
+ *  context in the model (a cross-context `Other id` link constructed inline). */
+function resolveAggregateByName(name: string, from: NameRef, model: Model): Aggregate | undefined {
+  const ctx = AstUtils.getContainerOfType(from, isBoundedContext);
+  for (const m of ctx?.members ?? []) {
+    if (isAggregate(m) && m.name === name) return m;
+  }
+  for (const top of model.members) {
+    if (isBoundedContext(top)) {
+      for (const m of top.members) {
+        if (isAggregate(m) && m.name === name) return m;
+      }
+    }
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// `loom.create-unknown-field` / `loom.create-server-field` — validate the
+// object-literal argument of an aggregate's crudish factory call
+// `Agg.create({ … })`.  The generated factory input is the aggregate's
+// create-input contract — declared `Property` members whose access is NOT
+// `managed`/`token`/`internal` (the same `forCreateInput` matrix the wire DTO
+// and every backend's `create(...)` derive from).  Passing a server-owned
+// field (`Task.create({ createdAt: now() })` where `createdAt` is `managed`,
+// or a capability-injected `tenantId`/`version`) or a typo'd key parses + emits
+// clean, then fails the emitted project's OWN `tsc`/`vitest` (the field isn't
+// on the factory input type).  This closes that gap at the call site — the
+// factory twin of `loom.unknown-construction-field` for record builders.
+//
+// Only the crudish RECORD factory form is checked: a single `{ … }`
+// object-literal argument.  A custom positional creator (`create(a, b)`) has a
+// different arg surface owned by the domain-call-argument gate.
+// ---------------------------------------------------------------------------
+
+const SERVER_OWNED_ACCESS: ReadonlySet<string> = new Set(["managed", "token", "internal"]);
+
+export function checkFactoryCreateFields(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const head = chain.head;
+    if (!isNameRef(head)) continue;
+    const first = chain.suffixes[0];
+    // `Agg.create( … )` — first suffix is a call to member `create`.
+    if (!first || !isMemberSuffix(first) || !first.call || first.member !== "create") continue;
+    // Crudish record factory form only: exactly one object-literal argument.
+    if (first.args.length !== 1) continue;
+    const argVal = first.args[0]?.value;
+    if (!argVal || !isObjectLit(argVal)) continue;
+    const agg = resolveAggregateByName(head.name, head, model);
+    if (!agg) continue; // head isn't an aggregate (api client, store, …) — skip
+
+    const createInput = new Set<string>();
+    const serverOwned = new Map<string, string>();
+    for (const m of agg.members) {
+      if (!isProperty(m)) continue;
+      const access = typeof m.access === "string" ? m.access : "";
+      if (SERVER_OWNED_ACCESS.has(access)) serverOwned.set(m.name, access);
+      else createInput.add(m.name);
+    }
+
+    for (const entry of argVal.fields) {
+      const name = typeof entry.name === "string" ? entry.name : String(entry.name);
+      if (createInput.has(name)) continue;
+      if (serverOwned.has(name)) {
+        accept(
+          "error",
+          `'${agg.name}.create' can't set '${name}' — it's a server-owned (${serverOwned.get(name)}) field, ` +
+            `populated automatically and absent from the factory input. Remove it.`,
+          { node: entry, property: "name", code: "loom.create-server-field" },
+        );
+      } else {
+        accept(
+          "error",
+          `'${agg.name}' has no create-input field '${name}'.` +
+            (createInput.size > 0 ? ` Create inputs: ${[...createInput].join(", ")}.` : ""),
+          { node: entry, property: "name", code: "loom.create-unknown-field" },
         );
       }
     }

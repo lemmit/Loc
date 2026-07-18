@@ -6,6 +6,7 @@ import {
   type SingleFieldPattern,
   singleFieldShape,
 } from "../ir/validate/invariant-classify.js";
+import { messageCode } from "../util/message-code.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +
@@ -80,14 +81,27 @@ export function takeSingleFieldChain(
  *  emitter consumes them via `takeSingleFieldChain` first. */
 export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string | null {
   if (!classifyForWire(inv, ctx)) return null;
-  if (takeSingleFieldChain(inv, ctx)) return null;
+  // A messaged single-field invariant is deliberately kept OUT of the native
+  // chain (which has no message slot) so its refine survives — only suppress the
+  // refine for a message-less shape the chain already absorbed.
+  if (!inv.message && takeSingleFieldChain(inv, ctx)) return null;
   const body = renderRefineExpr(inv.expr);
   const guarded = inv.guard ? `!(${renderRefineExpr(inv.guard)}) || (${body})` : body;
-  const message = JSON.stringify(`Invariant violated: ${inv.source}`);
+  // Author `message "..."` wins over the derived "Invariant violated: <src>"
+  // default; when present it also carries a stable content-hash `loomCode` in the
+  // zod issue `params` so the route's `defaultHook` can surface it on
+  // `errors[].code` (a runtime-body extension — not part of the OpenAPI
+  // component schema, so cross-backend OpenAPI parity is unaffected).
+  const message = JSON.stringify(
+    inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+  );
+  const code = inv.message
+    ? `, params: { loomCode: ${JSON.stringify(messageCode(inv.message.text))} }`
+    : "";
   const path = pickErrorPath(inv);
   const opts = path
-    ? `{ path: [${JSON.stringify(path)}], message: ${message} }`
-    : `{ message: ${message} }`;
+    ? `{ path: [${JSON.stringify(path)}], message: ${message}${code} }`
+    : `{ message: ${message}${code} }`;
   return `.refine((data) => ${guarded}, ${opts})`;
 }
 

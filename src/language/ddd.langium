@@ -1620,7 +1620,10 @@ Property:
     // one is declared; for now it lowers onto the FieldIR and downstream
     // phases may consume it.
     ('=' default=Expression)?
-    ('check' check=Expression)?;
+    // `check <expr>` is a per-field validation predicate; an optional trailing
+    // `message "..."` (nested so it only parses with a check) gives it the same
+    // author-written message the invariant clause does.
+    ('check' check=Expression ('message' message=STRING)?)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
@@ -1642,8 +1645,15 @@ DerivedProp:
 // only runs in the domain `AssertInvariants()` floor.  Useful for
 // rules the user doesn't want disclosed via OpenAPI (sensitive
 // uniqueness checks, internal-only consistency rules).
+// A trailing `message "..."` clause attaches an author-written, user-facing
+// validation message to the rule.  When present, the rule renders through the
+// wire/refine carrier (never the native-chain optimisation) so the message
+// reaches the frontend inline error, the wire 422 `errors[]`, and the domain
+// floor; the message string doubles as the i18n key (content-hashed per
+// D-I18N-KEY).  Omitted → today's derived "Invariant violated: <src>" default,
+// byte-identical.
 Invariant:
-    (serverOnly?='private')? 'invariant' expr=Expression ('when' guard=Expression)?;
+    (serverOnly?='private')? 'invariant' expr=Expression ('when' guard=Expression)? ('message' message=STRING)?;
 
 // A uniqueness invariant.  `unique (a, b)` declares a natural-key / identity
 // rule — no two rows may share the listed tuple.  It is a set-level invariant
@@ -1732,7 +1742,7 @@ CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
       | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
-      | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'migration' | 'money'
+      | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
       | 'secret' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix'
@@ -1927,7 +1937,7 @@ ForIterable infers Expression:
     NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 PreconditionStmt:
-    'precondition' expr=Expression;
+    'precondition' expr=Expression ('message' message=STRING)?;
 
 // Authorization gate.  Semantically `requires` reads as "this caller
 // is allowed to invoke this op / workflow" — a declarative

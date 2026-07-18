@@ -615,7 +615,9 @@ function renderEntity(
   const stampMethods = [...stampMethod("create"), ...stampMethod("update")];
 
   const invariantLines = e.invariants.flatMap((inv, idx) => {
-    const msg = JSON.stringify(`Invariant violated: ${inv.source}`);
+    const msg = JSON.stringify(
+      inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+    );
     // Under --trace, evaluate into a temp, emit `invariant_evaluated`
     // (op label = the threaded `__op`), then check — matching Hono/.NET.
     if (emitTrace) {

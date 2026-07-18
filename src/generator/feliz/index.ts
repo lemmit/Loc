@@ -475,7 +475,12 @@ function renderRootView(
     // Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element, visually
     // hidden until focused, jumps past the nav to the <main> landmark.
     '      Html.a [ prop.className "sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 btn btn-sm"; prop.href "#main-content"; prop.text "Skip to content" ]',
-    navbar,
+    // `renderNavbar` emits at a 4-space base; here it is a sibling of the
+    // skip link + <main> at 6 spaces, so re-indent it +2 to keep all three
+    // list elements on the SAME offside column — F# keys a newline-separated
+    // list by each element's first-token column, and a mismatch makes the
+    // skip link parse as a function applied to the nav ("not a function").
+    indentBlock(navbar, 2),
     '      Html.main [ prop.id "main-content"; prop.children [',
     ...router,
     "      ] ]",

@@ -708,7 +708,7 @@ export function renderJavaEntity(
 
   // --- invariants -----------------------------------------------------------------
   const invariantLines = entity.invariants.flatMap((inv, i) => {
-    const thrown = `throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
+    const thrown = `throw new DomainException(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`;
     if (!emitTrace) {
       const check = inv.guard
         ? `if ((${renderJavaExpr(inv.guard, renderCtx)}) && !(${renderJavaExpr(inv.expr, renderCtx)}))`

@@ -450,6 +450,11 @@ function createFieldConstraints(
   const byField = new Map<string, SingleFieldPattern[]>();
   for (const inv of invariants) {
     if (!classifyForWire(inv, { available })) continue;
+    // A messaged rule carries author text, so it routes through the
+    // `@model_validator` refine carrier (which has a message slot) rather
+    // than a native `Field(...)` constraint (whose message is Pydantic's
+    // default) — mirroring the .NET/Hono carriers.
+    if (inv.message) continue;
     const cons = singleFieldConstraints(inv);
     if (!cons) continue;
     for (const { field, pattern } of cons) {
@@ -533,7 +538,8 @@ function createModelValidator(
   cls: string,
 ): string | null {
   const refines = invariants.filter(
-    (inv) => classifyForWire(inv, { available }) && !singleFieldConstraints(inv),
+    (inv) =>
+      classifyForWire(inv, { available }) && (inv.message != null || !singleFieldConstraints(inv)),
   );
   if (refines.length === 0) return null;
   const checks = refines.map((inv) => {
@@ -543,7 +549,7 @@ function createModelValidator(
       : pred;
     return lines(
       `        if not (${ok}):`,
-      `            raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`,
+      `            raise ValueError(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`,
     );
   });
   return lines(
@@ -635,7 +641,7 @@ function opRequestModel(
 function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
   const out: InvariantIR[] = [];
   for (const s of op.statements) {
-    if (s.kind === "precondition") out.push({ expr: s.expr, source: s.source });
+    if (s.kind === "precondition") out.push({ expr: s.expr, source: s.source, message: s.message });
   }
   return out;
 }

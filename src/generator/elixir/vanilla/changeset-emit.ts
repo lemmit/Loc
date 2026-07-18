@@ -168,10 +168,11 @@ function renderChangeset(
   // invariants return null and keep their domain-level enforcement.  Only fields
   // that are actually cast (`@all_fields`) get a validator.
   const castFields = new Set(allFields.map((f) => snake(f.name)));
-  const validatorLines = (agg.invariants ?? [])
-    .flatMap((inv) => singleFieldConstraints(inv) ?? [])
-    .filter((c) => castFields.has(snake(c.field)))
-    .map((c) => ectoValidator(snake(c.field), c.pattern));
+  const validatorLines = (agg.invariants ?? []).flatMap((inv) =>
+    (singleFieldConstraints(inv) ?? [])
+      .filter((c) => castFields.has(snake(c.field)))
+      .map((c) => ectoValidator(snake(c.field), c.pattern, inv.message?.text)),
+  );
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 
   // Containments round-trip via `cast_embed` (embedded jsonb) or `cast_assoc`

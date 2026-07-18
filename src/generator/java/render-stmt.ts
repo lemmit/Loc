@@ -95,7 +95,7 @@ function renderJavaStatement(
 ): string {
   switch (s.kind) {
     case "precondition":
-      return precondition(s.expr, s.source, index, ctx, traceCtx);
+      return precondition(s.expr, s.source, s.message?.text, index, ctx, traceCtx);
     case "requires":
       // Authorization gate — ForbiddenException maps to 403 in the
       // controller advice.
@@ -182,11 +182,12 @@ function orderedEventArgs(s: Extract<StmtIR, { kind: "emit" }>, ctx: JavaRenderC
 function precondition(
   expr: ExprIR,
   source: string,
+  message: string | undefined,
   index: number,
   ctx: JavaRenderContext,
   traceCtx: JavaTraceCtx,
 ): string {
-  const thrown = `throw new DomainException(${JSON.stringify(`Precondition failed: ${source}`)})`;
+  const thrown = `throw new DomainException(${JSON.stringify(message ?? `Precondition failed: ${source}`)})`;
   if (!traceCtx.emitTrace) {
     return `${INDENT}if (!(${renderJavaExpr(expr, ctx)})) ${thrown};`;
   }

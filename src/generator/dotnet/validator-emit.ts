@@ -116,7 +116,10 @@ function renderValidatorFile(args: {
   const remaining: InvariantIR[] = [];
   for (const inv of invariants) {
     if (!classifyForWire(inv, ctx)) continue;
-    const single = singleFieldShape(inv);
+    // A messaged invariant is kept OUT of the native single-field chain (whose
+    // `.MinimumLength(N)` etc. carry FluentValidation's default message) so it
+    // renders through the `.Must(...).WithMessage(<text>)` carrier below.
+    const single = inv.message ? null : singleFieldShape(inv);
     if (single && available.has(single.field)) {
       const list = chainsByField.get(single.field) ?? [];
       list.push(single.pattern);
@@ -145,7 +148,9 @@ function renderValidatorFile(args: {
       ? `!(${renderFluentPredicate(inv.guard)}) || (${predicate})`
       : predicate;
     const path = pickErrorPath(inv);
-    const message = csStringLiteral(`Invariant violated: ${inv.source}`);
+    const message = csStringLiteral(
+      inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+    );
     const nameClause = path ? `\n            .WithName("${upperFirst(path)}")` : "";
     ruleLines.push(
       `        RuleFor(x => x).Must(x => ${guarded})${nameClause}\n            .WithMessage(${message});`,

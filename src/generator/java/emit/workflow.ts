@@ -206,7 +206,7 @@ export function javaWorkflowStmtTarget(
     precondition: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
       return [
-        `${indent}if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new DomainException(${JSON.stringify(`Precondition failed: ${s.source}`)});`,
+        `${indent}if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new DomainException(${JSON.stringify(s.message ? s.message.text : `Precondition failed: ${s.source}`)});`,
       ];
     },
     requires: (s, indent) => {

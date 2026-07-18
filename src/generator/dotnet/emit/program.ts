@@ -93,6 +93,11 @@ export function renderProgram(
      *  `currentUser.orgPath` from the registry's `data_key`.  Implies
      *  `authRequired`. */
     orgPathResolver?: boolean;
+    /** TimerSource scheduling (scheduling.md, M-T4.1): fully-qualified
+     *  `<Pascal>TimerService` type names to register as hosted services (one
+     *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
+     *  a timer-free deployable's Program.cs stays byte-identical. */
+    timerServices?: string[];
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -113,6 +118,17 @@ export function renderProgram(
       : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
+  // TimerSource scheduling (scheduling.md, M-T4.1): one hosted
+  // `<Pascal>TimerService` per owned timer, each ticking on its cadence and
+  // dispatching through the in-process dispatcher above.  Empty ⇒ no lines, so
+  // a timer-free deployable's Program.cs stays byte-identical.
+  const timerServices = options?.timerServices ?? [];
+  const timerRegistrations =
+    timerServices.length > 0
+      ? `\n// TimerSource schedulers (scheduling.md) — one hosted BackgroundService per\n// owned timer; each takes a transaction-scoped advisory lock (single-fire\n// across replicas) and dispatches its tick through the in-process dispatcher.\n${timerServices
+          .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
+          .join("\n")}`
+      : "";
   const seedBlock = hasSeeds
     ? `
 // Apply first-boot seed data after migrations (database-seeding.md).
@@ -400,7 +416,7 @@ builder.Services.AddScoped(
 `
     : ""
 }
-${dispatcherRegistration}
+${dispatcherRegistration}${timerRegistrations}
 
 ${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
 ${authDi}
@@ -743,6 +759,7 @@ export function renderCsproj(
   usingDapper: boolean = false,
   usesSpecifications: boolean = false,
   oidc: boolean = false,
+  withCronTimers: boolean = false,
 ): string {
   // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
@@ -789,6 +806,12 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
+  // Cronos — cron-expression parsing for `timerSource … cron:` BackgroundServices
+  // (scheduling.md, M-T4.1).  Ships only when an owned timer uses a real cron
+  // cadence (an `every:`-only deployable uses PeriodicTimer and needs no dep).
+  const cronosRef = withCronTimers
+    ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.8.4" />`
+    : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
@@ -839,7 +862,7 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${oidcRefs}${resourceRefs}
   </ItemGroup>
 </Project>
 `;
