@@ -41,7 +41,7 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -465,6 +465,50 @@ function orBranches(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
 }
 
 // ---------------------------------------------------------------------------
+// Capability `filter` predicates (`filter <expr>` → AggregateIR.contextFilters).
+//
+// MikroORM has no global query filter (EF Core's `HasQueryFilter`), so — like
+// drizzle — the repository ANDs each capability predicate into every root read.
+// Principal-referencing filters (`currentUser.<field>`) are rejected on Hono at
+// validate time, so only closed predicates reach here; each lowers to a
+// FilterQuery object via `whereToMikroFilter` (guaranteed in-subset by
+// `validateFindPredicateAdapterSupport`).  A read's `ignoring *` / `ignoring
+// <Cap>` bypass drops the capability-origin predicates it names.
+// ---------------------------------------------------------------------------
+
+interface FilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** The applicable capability filters for an aggregate as MikroORM FilterQuery
+ *  object-literal strings, honoring a read's `ignoring` bypass. */
+function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): string[] {
+  const filters = agg.contextFilters ?? [];
+  const origins = agg.contextFilterOrigins ?? [];
+  const out: string[] = [];
+  filters.forEach((pred, i) => {
+    if (exprUsesCurrentUser(pred)) return; // principal — validator-rejected on Hono
+    const origin = origins[i];
+    // Only capability-origin (`undefined` = bare/hand-written) filters are
+    // bypassable; `ignoring *` drops every origin, a named `ignoring` the match.
+    if (origin !== undefined && (bypass?.bypassAll || (bypass?.bypassCaps ?? []).includes(origin)))
+      return;
+    out.push(whereToMikroFilter(pred));
+  });
+  return out;
+}
+
+/** Merge a base FilterQuery object-literal with the aggregate's applicable
+ *  capability filters (`$and`).  No filters → the base unchanged (byte-
+ *  identical to the pre-filter output); a `{}` base is dropped from the AND. */
+function withContextFilters(base: string, caps: string[]): string {
+  if (caps.length === 0) return base;
+  const parts = base === "{}" ? caps : [base, ...caps];
+  return parts.length === 1 ? parts[0]! : `{ $and: [${parts.join(", ")}] }`;
+}
+
+// ---------------------------------------------------------------------------
 // Per-aggregate repository — a drop-in for the drizzle `<Agg>Repository`.
 // ---------------------------------------------------------------------------
 
@@ -475,6 +519,11 @@ export function renderMikroRepository(
 ): string {
   const row = rowClassOf(agg.name);
   const hydrate = (rowVar: string) => hydrateRootExpr(agg, rowVar, ctx);
+  // Capability `filter` predicates AND into every root read.  `baseFilters` is
+  // the no-`ignoring` set (findById / findManyByIds / retrievals); each find
+  // recomputes with its own `ignoring` bypass.  Empty when the aggregate has no
+  // `filter` capability, so the read FilterQuery stays byte-identical.
+  const baseFilters = mikroContextFilters(agg);
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
@@ -550,7 +599,10 @@ export function renderMikroRepository(
     const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
     let filter: string;
     try {
-      filter = f.filter ? whereToMikroFilter(f.filter) : "{}";
+      // The find's own `where`, AND-ed with the aggregate's capability filters
+      // (dropping the ones this read's `ignoring` clause bypasses).
+      const caps = mikroContextFilters(agg, { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps });
+      filter = withContextFilters(f.filter ? whereToMikroFilter(f.filter) : "{}", caps);
     } catch {
       return lines(
         `  async ${name}(${paged ? `${params}${params ? ", " : ""}page: number, pageSize: number, sort: string, dir: string` : params}): Promise<${paged ? `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }` : ret}> {`,
@@ -630,7 +682,9 @@ export function renderMikroRepository(
       const params = [...baseParams, "page?: { offset?: number; limit?: number }"].join(", ");
       let filter: string;
       try {
-        filter = whereToMikroFilter(r.where);
+        // Retrievals read the aggregate table, so the capability filters AND in
+        // too (no `ignoring` surface on retrievals — the no-bypass `baseFilters`).
+        filter = withContextFilters(whereToMikroFilter(r.where), baseFilters);
       } catch {
         return lines(
           `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
@@ -679,7 +733,7 @@ export function renderMikroRepository(
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
     `    const em = this.em.fork();`,
-    `    const row = await em.findOne(${row}, { id: id as string });`,
+    `    const row = await em.findOne(${row}, ${withContextFilters("{ id: id as string }", baseFilters)});`,
     `    if (row === null) {`,
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
     `      return null;`,
@@ -698,7 +752,7 @@ export function renderMikroRepository(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
     `    const em = this.em.fork();`,
-    `    const rows = await em.find(${row}, { id: { $in: ids as string[] } });`,
+    `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
     `    return rows.map((row) => ${hydrate("row")});`,
     `  }`,
     "",

@@ -251,6 +251,97 @@ describe("mikroorm — widened find predicates (bare boolean / unary NOT)", () =
   });
 });
 
+// ---------------------------------------------------------------------------
+// `filter` capability predicates (wave 1) — MikroORM has no global query
+// filter, so the repository ANDs each non-principal predicate (a FilterQuery)
+// into every root read via `$and`, honoring a read's `ignoring` bypass.
+// ---------------------------------------------------------------------------
+describe("mikroorm — `filter` capability predicates", () => {
+  const FILTER_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum Status { Active, Archived }
+      aggregate Order with crudish {
+        customer: string
+        status: Status
+        deleted: bool
+        filter this.status == Status.Active
+        filter !this.deleted
+      }
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a filter capability", async () => {
+    const { errors } = await emit(FILTER_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("ANDs the filters into findById / findManyByIds / find / findAll", async () => {
+    const { files } = await emit(FILTER_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // findById — the `{ id }` base joined with both filters under `$and`.
+    expect(repo).toContain(
+      'await em.findOne(OrderRow, { $and: [{ id: id as string }, { status: "Active" }, { deleted: false }] });',
+    );
+    // findManyByIds — the `$in` base joined too.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ id: { $in: ids as string[] } }, { status: "Active" }, { deleted: false }] });',
+    );
+    // A declared find — its own `where` joined with the filters.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ customer: customer }, { status: "Active" }, { deleted: false }] });',
+    );
+    // The auto-`findAll` (paged, empty base) — the `{}` base is dropped.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { $and: [{ status: "Active" }, { deleted: false }] }, { limit: pageSize,',
+    );
+  });
+
+  it("honors `ignoring <Cap>` / `ignoring *` on a read (softDeletable capability)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish, softDeletable {
+        customer: string
+      }
+      repository Orders for Order {
+        find active(customer: string): Order[] where this.customer == customer
+        find withDeleted(customer: string): Order[] where this.customer == customer ignoring softDeletable
+        find reallyAll(customer: string): Order[] where this.customer == customer ignoring *
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // The softDeletable filter (`!this.isDeleted` → `{ isDeleted: false }`) is
+    // applied to the plain read…
+    expect(repo).toContain(
+      "async active(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { $and: [{ customer: customer }, { isDeleted: false }] });",
+    );
+    // …and dropped when the read bypasses it by name or with `*`.
+    expect(repo).toContain(
+      "async withDeleted(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+    );
+    expect(repo).toContain(
+      "async reallyAll(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+    );
+  });
+});
+
 describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   const rejects = async (body: string, needle: RegExp) => {
     const { errors } = await emit(sys("mikroorm", body));

@@ -1831,8 +1831,14 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           reject(where, "has reference-collection associations (Id[] join tables)");
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
-        if ((a.contextFilters ?? []).length > 0)
-          reject(where, "uses a 'filter' capability predicate");
+        // `filter` capability predicates ARE supported: the repository ANDs each
+        // non-principal predicate (a MikroORM FilterQuery) into every root read
+        // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
+        // analogue of drizzle's per-read predicate).  A predicate outside the
+        // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
+        // (which already iterates contextFilters), and principal-referencing
+        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
+        // — so only closed, lowerable predicates reach codegen.
         // Server-managed access (`managed` / `token` / `internal` / `secret`)
         // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
         // a field as an ordinary column that round-trips through the shared
