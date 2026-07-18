@@ -130,6 +130,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // bindings the deployable hosts.
   const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
+  const channelSourceNames = (d.channelRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   // D-REALIZATION-AXES: normalize the three realization axes.  Backends fill
   // every axis with a concrete value (an absent knob → the platform default);
   // frontends (`react`/`static`) carry none — `defaultsFor` is undefined for
@@ -153,6 +154,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     platformRef,
     contextNames,
     dataSourceNames,
+    channelSourceNames,
     port: d.port ?? defaultPortFor(platform),
     targetName: d.targets?.ref?.name,
     auth,

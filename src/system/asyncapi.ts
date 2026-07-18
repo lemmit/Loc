@@ -26,8 +26,23 @@ export function renderAsyncApi(sys: SystemIR): string {
 
   // channelSource bindings, indexed by channel name (Slice 1: bare names).
   const bindingByChannel = new Map<string, string>();
+  const csNameByChannel = new Map<string, string>();
   for (const cs of sys.channelSources) {
-    if (cs.channelName) bindingByChannel.set(cs.channelName, cs.storageName);
+    if (cs.channelName) {
+      bindingByChannel.set(cs.channelName, cs.storageName);
+      csNameByChannel.set(cs.channelName, cs.name);
+    }
+  }
+  // Deployables wiring each channel's binding via `channels:` (M-T4.4 slice 1).
+  const wiredByChannel = new Map<string, string[]>();
+  for (const dep of sys.deployables ?? []) {
+    for (const csName of dep.channelSourceNames ?? []) {
+      const cs = sys.channelSources.find((c) => c.name === csName);
+      if (!cs) continue;
+      const list = wiredByChannel.get(cs.channelName) ?? [];
+      list.push(dep.name);
+      wiredByChannel.set(cs.channelName, list);
+    }
   }
 
   const contexts = sys.subdomains.flatMap((s) => s.contexts);
@@ -75,6 +90,12 @@ export function renderAsyncApi(sys: SystemIR): string {
     // transport is DECLARED, not wired.  Say so until brokers actually land,
     // rather than implying `transport: hotCache` is a live redis hop.
     if (storage) out.push('      transportStatus: "declared, not provisioned"');
+    // Deployables that wire the binding via `channels:` (M-T4.4 slice 1) — a
+    // reviewer sees who joins/leaves a channel's transport in the PR diff.
+    const wired = wiredByChannel.get(ch.name);
+    if (wired && wired.length > 0) {
+      out.push(`      wiredBy: [${wired.map(yamlStr).join(", ")}]`);
+    }
   }
 
   if (subscriptionEntries.length > 0) {

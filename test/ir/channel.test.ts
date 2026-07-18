@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { renderAsyncApi } from "../../src/system/asyncapi.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
@@ -68,5 +69,98 @@ describe("channel lowering", () => {
     // emitted or compose-provisioned) — the artifact must say so, not imply
     // a live hop.
     expect(yaml).toContain('transportStatus: "declared, not provisioned"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-T4.4 slice 1 — the deployable `channels:` wiring clause + the
+// system-level wiring validators.
+// ---------------------------------------------------------------------------
+
+/** Producer deployable (hosts Orders, which owns the channel) + consumer
+ *  deployable (hosts Shipping, whose workflow reacts to a carried event).
+ *  `producerChannels` / `consumerChannels` inject the `channels:` clause. */
+function wiredSrc(producerChannels: string, consumerChannels: string): string {
+  return `
+    system Acme {
+      subdomain Sales {
+        context Orders {
+          event OrderPlaced { orderId: string }
+          channel Lifecycle { carries: OrderPlaced }
+        }
+        context Shipping {
+          workflow Fulfil {
+            orderId: string
+            on(e: OrderPlaced) { let x = e.orderId }
+          }
+        }
+      }
+      storage bus { type: redis }
+      channelSource lifecycleBus { for: Lifecycle, use: bus }
+      deployable salesApi { platform: node contexts: [Orders] ${producerChannels} port: 3000 }
+      deployable shipApi  { platform: node contexts: [Shipping] ${consumerChannels} port: 3001 }
+    }
+  `;
+}
+
+async function channelCodes(src: string): Promise<string[]> {
+  const loom = await buildLoomModel(src);
+  return validateLoomModel(loom)
+    .map((d) => d.code ?? "")
+    .filter((c) => c.startsWith("loom.channel") || c.startsWith("loom.deployable-channel"));
+}
+
+describe("deployable channels: wiring (M-T4.4 slice 1)", () => {
+  it("lowers the channels: clause onto DeployableIR.channelSourceNames", async () => {
+    const loom = await buildLoomModel(wiredSrc("channels: [lifecycleBus]", ""));
+    const dep = loom.systems[0].deployables.find((d) => d.name === "salesApi")!;
+    expect(dep.channelSourceNames).toEqual(["lifecycleBus"]);
+    const other = loom.systems[0].deployables.find((d) => d.name === "shipApi")!;
+    expect(other.channelSourceNames).toEqual([]);
+  });
+
+  it("warns loom.channelsource-unbound when no deployable wires the binding", async () => {
+    expect(await channelCodes(wiredSrc("", ""))).toContain("loom.channelsource-unbound");
+  });
+
+  it("errors loom.channel-consumer-unwired when the consumer misses a broker-bound channel", async () => {
+    const codes = await channelCodes(wiredSrc("channels: [lifecycleBus]", ""));
+    expect(codes).toContain("loom.channel-consumer-unwired");
+  });
+
+  it("is quiet when producer and consumer both wire the binding", async () => {
+    const codes = await channelCodes(
+      wiredSrc("channels: [lifecycleBus]", "channels: [lifecycleBus]"),
+    );
+    expect(codes).toEqual([]);
+  });
+
+  it("warns loom.deployable-channel-unrelated on a deployable with no stake in the channel", async () => {
+    const src = `
+      system Acme {
+        subdomain Sales {
+          context Orders {
+            event OrderPlaced { orderId: string }
+            channel Lifecycle { carries: OrderPlaced }
+          }
+          context Billing {
+            event InvoiceSent { invoiceId: string }
+          }
+        }
+        storage bus { type: redis }
+        channelSource lifecycleBus { for: Lifecycle, use: bus }
+        deployable ordersApi  { platform: node contexts: [Orders] channels: [lifecycleBus] port: 3000 }
+        deployable billingApi { platform: node contexts: [Billing] channels: [lifecycleBus] port: 3001 }
+      }
+    `;
+    expect(await channelCodes(src)).toContain("loom.deployable-channel-unrelated");
+  });
+
+  it("surfaces the wiring in the AsyncAPI artifact (wiredBy)", async () => {
+    const loom = await buildLoomModel(
+      wiredSrc("channels: [lifecycleBus]", "channels: [lifecycleBus]"),
+    );
+    const yaml = renderAsyncApi(loom.systems[0]);
+    expect(yaml).toContain('wiredBy: ["salesApi", "shipApi"]');
   });
 });

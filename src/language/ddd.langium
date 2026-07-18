@@ -282,6 +282,13 @@ Deployable:
             // (c) every aggregate's required kind has a matching dataSource for
             // its hosting context.
           | ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)
+            // The deployable's channelSource bindings — the messaging twin of
+            // `dataSources:` (channels.md §"Surface — transport binding",
+            // M-T4.4).  Each ref points at a system-level `channelSource`
+            // declaration; listing one wires this deployable onto that
+            // channel's broker transport (producer and/or consumer side —
+            // derived from hosted contexts, not declared).
+          | ('channels' ':' '[' channelRefs+=[ChannelSource:LooseName] (',' channelRefs+=[ChannelSource:LooseName])* ','? ']' ','?)
           | ('targets' ':' targets=[Deployable:LooseName] ','?)
             // Explicit api composition. Backend deployables declare which
             // contracts they serve via `serves:`.
@@ -1797,7 +1804,7 @@ Parameter:
 // the factoring is byte-identical, and a keyword with a HARD position in one of
 // the three rules stays a per-rule extra, NOT here.
 CommonSoftKeywords returns string:
-      'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection'
+      'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
       | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
       | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
