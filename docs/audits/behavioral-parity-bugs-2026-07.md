@@ -33,8 +33,8 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |✅ B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
-| single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |🔴 B9   |
-| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B10  |
+| single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
+| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -140,25 +140,67 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
 
-## B9 🔴 elixir — single (non-collection) `contains` emits an undefined function
+## B9 ✅ elixir — single (non-collection) `contains` emits an undefined function
 
-- **Where:** `src/generator/elixir/vanilla/` (single-containment persist path).
+- **Where:** `src/generator/elixir/vanilla/context-emit.ts`
+  (`contextMutatesRelationalContainment` gate + `renderPutAssocPartsHelper`).
 - **Repro:** `test/fixtures/corpus/single-containment.ddd` on elixir — `mix ecto.create`
   (compile) fails: **`undefined function __put_assoc_parts/1`**. node/java/python/dotnet
-  round-trip. The single (non-collection) `contains shipment: Shipment` path emits a
-  call to a helper the module never defines (the collection path defines it; the
-  single path was missed).
-- **Status:** confirmed compile error; skip-listed. Sibling of B8/B3 (single vs
-  collection containment) but on the elixir side.
+  round-trip.
+- **Root cause:** TWO bugs on the single (`has_one`) containment path. (1) The
+  persist tail (`operation-returns-emit.ts`) emits
+  `put_assoc(:<f>, __put_assoc_parts(record.<f>))` for ANY relational containment
+  field it sees assigned — collection OR single. But the helper-emission gate
+  `contextMutatesRelationalContainment` only fired for `add`/`remove` **collection**
+  mutations (`lines += Line{…}`), never the `assign` a single containment uses
+  (`shipment := Shipment{…}`). So the call was emitted but the `defp` never was →
+  compile error. (2) Even once defined, the helper's sole `when is_list(list)`
+  clause couldn't take a lone `has_one` struct (the single-value call passes
+  `record.shipment`, one struct, not a list).
+- **Fix:** (1) the gate now matches `assign`/`add`/`remove` against any
+  relational-containment field (dropping the collection-only requirement), mirroring
+  the persist-tail emission condition exactly, so a single-containment mutation arms
+  the helper. (2) `renderPutAssocPartsHelper` is now multi-clause: the `is_list`
+  clause maps a `has_many` list element-wise back through the shared per-element
+  clauses (`Enum.map(list, &__put_assoc_parts/1)`), and those per-element clauses
+  (`%Ecto.Changeset{}` / `%{__struct__: _}` / catch-all) ALSO normalise a single
+  `has_one` struct directly. Every clause stays reachable given the live call sites,
+  so `--warnings-as-errors` stays quiet (verified: generated app compiles clean).
+- **Verification:** booted via `elixir:1.16-otp-26` + node 22 — `run-elixir.mjs
+  single-containment` green (create → ship → read-back `shipment.carrier` = "UPS");
+  `sales ledger payments shapes state-gate stamps` still 12/12 (the collection
+  `put_assoc` path — `sales` add-line-to-order — unaffected). Pinned by
+  `test/generator/elixir/vanilla-relational-parts.test.ts` (single-containment case)
+  + the updated helper-text assertion. Sibling of B8 (dotnet single-containment).
+- **Status:** ✅ fixed — `single-containment` re-armed (removed from the elixir
+  behavioural skips).
 
-## B10 🔴 elixir — `seed` migration references a table before it exists
+## B10 ✅ elixir — migration references a table before it exists (FK order)
 
-- **Where:** `src/generator/elixir/vanilla/` (seed → migration ordering).
+- **Where:** `src/generator/elixir/migrations-emit.ts` (`emitInitial` parent-table
+  ordering).
 - **Repro:** `test/fixtures/corpus/seeding.ddd` on elixir — `mix ecto.migrate` fails:
-  **`relation "catalog.widgets" does not exist`**. node/java/python/dotnet apply the
-  seed fine. The generated seed runs (or is ordered) before the table-creating
-  migration, so the INSERT hits a missing relation.
-- **Status:** confirmed migrate failure; skip-listed.
+  **`relation "catalog.widgets" does not exist`**. node/java/python/dotnet apply fine.
+- **Root cause (NOT a seed bug — a MIGRATION-ORDERING bug).** The seeding system has
+  two PARENT aggregates where `Gadget { widgetId: Widget id }` is a cross-aggregate
+  `X id` reference → an inline `references(:widgets)` FK (`on_delete: :restrict`).
+  The shared `MigrationsIR` already orders its `createTable` steps FK-topologically
+  (`orderTablesByFkDependency` in `migrations-builder.ts` — widgets before gadgets),
+  but the elixir emitter splits the steps into parent/part/join tiers and re-derives
+  sequential timestamps per tier, sorting parent tables **alphabetically**
+  (`a.name.localeCompare(b.name)`). `gadgets` < `widgets`, so `create_gadgets` got
+  the earlier timestamp and ran first — its inline `references(:widgets)` hit a table
+  that didn't exist yet. (Elixir emits no `seeds.exs`, so no seed INSERT is even
+  involved; the audit's "seed references a table" framing was imprecise.)
+- **Fix:** a local `orderParentTablesByFk` topological sort replaces the alphabetical
+  one — a parent whose FK targets another parent (a cross-aggregate reference) is
+  emitted after its target; FK-independent tables keep alphabetical order for stable
+  timestamps; best-effort on a cycle. Mirrors the IR-level `orderTablesByFkDependency`.
+- **Verification:** `run-elixir.mjs seeding` green (`create_widgets` → BASE+0,
+  `create_gadgets` → BASE+1; `mix ecto.migrate` applies, create/getById round-trips).
+  Pinned by `test/generator/elixir/phoenix-migrations-emit.test.ts` (parent-table
+  FK-topological ordering case).
+- **Status:** ✅ fixed — `seeding` re-armed (removed from the elixir behavioural skips).
 
 ## B8 ✅ dotnet — single (non-collection) `contains` crashes on boot (EF)
 
