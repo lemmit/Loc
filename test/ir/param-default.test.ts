@@ -32,9 +32,7 @@ system S {
 
 async function lowerOp(src: string) {
   const doc = await parse(src, { validation: true });
-  const errors = (doc.diagnostics ?? [])
-    .filter((d) => d.severity === 1)
-    .map((d) => d.message);
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
   const agg = lowerModel(doc.parseResult.value).systems[0]!.subdomains[0]!.contexts[0]!
     .aggregates[0]!;
   return { errors, ops: agg.operations };
