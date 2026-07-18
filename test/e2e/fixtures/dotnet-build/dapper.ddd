@@ -25,6 +25,10 @@ system DapperNet {
         active: bool
       }
 
+      aggregate Tag with crudish {
+        label: string
+      }
+
       aggregate Order with crudish {
         customerId: Customer id
         status:     Status
@@ -32,15 +36,22 @@ system DapperNet {
         placedAt:   datetime
         quantity:   int
         note:       string?
+        // Reference collection (`X id[]`) → one join table; a
+        // `this.tags.contains(x)` find lowers to an EXISTS join subquery.
+        tags:       Tag id[]
       }
 
       repository Customers for Customer {
         find byName(name: string): Customer[] where this.name == name
       }
 
+      repository Tags for Tag { }
+
       repository Orders for Order {
         find byCustomer(customerId: Customer id): Order[] where this.customerId == customerId
         find byQuantity(quantity: int): Order[] where this.quantity >= quantity
+        // Reference-collection membership → EXISTS subquery over order_tags.
+        find withTag(tag: Tag id): Order[] where this.tags.contains(tag)
       }
 
       // Retrieval bundle on Dapper — Run<Name>Async as parameterised SQL

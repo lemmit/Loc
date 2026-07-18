@@ -214,6 +214,42 @@ system D {
     expect(repo).not.toContain("ordinal");
   });
 
+  it("lowers a `this.<refColl>.contains(x)` find to an EXISTS join subquery", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Tag with crudish { label: string  derived display: string = this.label }
+      aggregate Order with crudish {
+        customer: string
+        tags: Tag id[]
+      }
+      repository Orders for Order {
+        find withTag(tag: Tag id): Order[] where this.tags.contains(tag)
+      }
+      repository Tags for Tag { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // no longer rejected by the find-predicate gate
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // The membership predicate becomes an EXISTS subquery over the join table,
+    // correlated on the owner row's id (the raw-SQL mirror of EF's `.Any(...)`).
+    expect(repo).toContain(
+      "WHERE EXISTS (SELECT 1 FROM order_tags __j WHERE __j.order_id = orders.id AND __j.tag_id = @tag)",
+    );
+    // The id param binds its wrapped `.Value` (Dapper has no strongly-typed id
+    // handler), exactly like every other id-typed find param.
+    expect(repo).toContain("new { tag = tag.Value }");
+    // No runtime stub — the predicate is fully lowered.
+    expect(repo).not.toContain("Dapper v1 does not support this find's predicate");
+  });
+
   it("accepts managed-access fields (wire-projection concern, no gate)", async () => {
     const { files, errors } = await emit(
       sys("dapper", "passwordHash: string secret\n        version: int token"),

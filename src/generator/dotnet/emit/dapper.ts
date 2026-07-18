@@ -31,6 +31,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -238,17 +239,53 @@ const SQL_BINOP: Record<string, string> = {
   "||": "OR",
 };
 
-function whereToSql(e: ExprIR): string {
+/** Optional context threaded into `whereToSql` so a
+ *  `this.<refColl>.contains(x)` membership predicate can resolve its
+ *  AssociationIR and correlate the EXISTS subquery on the owner table's
+ *  `id`.  Absent for callers with no reference collections (byte-identical). */
+interface WhereSqlCtx {
+  agg: EnrichedAggregateIR;
+  table: string;
+}
+
+function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
   switch (e.kind) {
     case "paren":
-      return `(${whereToSql(e.inner)})`;
+      return `(${whereToSql(e.inner, sqlCtx)})`;
     case "unary":
-      if (e.op === "!") return `(NOT ${whereToSql(e.operand)})`;
+      if (e.op === "!") return `(NOT ${whereToSql(e.operand, sqlCtx)})`;
       throw new Error("dapper: unsupported unary in find");
     case "binary": {
       const op = SQL_BINOP[e.op];
       if (!op) throw new Error(`dapper: unsupported operator '${e.op}' in find`);
-      return `(${whereToSql(e.left)} ${op} ${whereToSql(e.right)})`;
+      return `(${whereToSql(e.left, sqlCtx)} ${op} ${whereToSql(e.right, sqlCtx)})`;
+    }
+    case "method-call": {
+      // `this.<refColl>.contains(x)` → EXISTS join subquery, the raw-SQL
+      // mirror of EF's `_db.<JoinDbSet>.Any(__j => __j.owner == x.Id && …)`.
+      // Detection is structural (receiverType `array<id>`, `this.<field>`
+      // receiver resolving to an AssociationIR) so a regular collection
+      // `.contains` never reaches here — those aren't queryable predicates.
+      if (
+        e.member === "contains" &&
+        e.receiverType.kind === "array" &&
+        e.receiverType.element.kind === "id" &&
+        e.args.length === 1 &&
+        sqlCtx
+      ) {
+        const fieldName = refCollectionFieldName(e.receiver);
+        const assoc = fieldName
+          ? sqlCtx.agg.associations.find((a) => a.fieldName === fieldName)
+          : undefined;
+        if (assoc) {
+          const arg = whereToSql(e.args[0]!, sqlCtx);
+          return (
+            `EXISTS (SELECT 1 FROM ${assoc.joinTable} __j ` +
+            `WHERE __j.${assoc.ownerFk} = ${sqlCtx.table}.id AND __j.${assoc.targetFk} = ${arg})`
+          );
+        }
+      }
+      throw new Error(`dapper: unsupported method-call '${e.member}' in find`);
     }
     case "member":
       // `this.<field>` → column.
@@ -385,6 +422,7 @@ export function renderDapperRepository(
   actorIdProp?: string,
 ): string {
   const table = tableOf(agg.name);
+  const sqlCtx: WhereSqlCtx = { agg, table };
   const cols = columnsOf(agg);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
@@ -495,7 +533,7 @@ export function renderDapperRepository(
       ? capabilityFilters
           .map((p) => {
             try {
-              return whereToSql(p);
+              return whereToSql(p, sqlCtx);
             } catch {
               throw new Error(
                 `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
@@ -620,7 +658,7 @@ export function renderDapperRepository(
     const paramObj = allFindParams.length > 0 ? `, new { ${allFindParams.join(", ")} }` : "";
     let where = "";
     try {
-      where = f.filter ? ` WHERE ${whereToSql(f.filter)}` : "";
+      where = f.filter ? ` WHERE ${whereToSql(f.filter, sqlCtx)}` : "";
     } catch {
       // Unsupported predicate — emit a compile-safe stub.
       return lines(
@@ -697,7 +735,7 @@ export function renderDapperRepository(
     const name = upperFirst(r.name);
     let whereSql: string;
     try {
-      whereSql = whereToSql(r.where);
+      whereSql = whereToSql(r.where, sqlCtx);
     } catch {
       return lines(
         `    public Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
