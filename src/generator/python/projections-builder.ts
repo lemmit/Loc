@@ -1,4 +1,4 @@
-import type { EnrichedBoundedContextIR, ProjectionIR, WireField } from "../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";

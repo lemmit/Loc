@@ -68,7 +68,7 @@ export function renderAngularAction(
   if (call.kind !== "call") return null;
 
   const opRef = positionalArgs(call)[0];
-  if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") return null;
+  if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") return null;
   const instanceName = opRef.receiver.name;
   const opName = opRef.member;
   const aggName = ctx.paramTypes?.get(instanceName);

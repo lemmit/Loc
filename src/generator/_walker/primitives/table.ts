@@ -10,7 +10,6 @@ import {
   actionHandlerName,
   actionRefArg,
   boolNamed,
-  escapeJsxText,
   lambdaArg,
   namedArgValue,
   numericNamed,

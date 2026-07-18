@@ -658,7 +658,7 @@ function checkActionParams(
   diags: LoomDiagnostic[],
 ): void {
   const arg0 = call.args[0];
-  if (!arg0 || arg0.kind !== "member") return;
+  if (arg0?.kind !== "member") return;
   const recv = arg0.receiver;
   // The instance ref carries its declared aggregate type.
   if (recv.kind !== "ref" || recv.type?.kind !== "entity") return;
@@ -779,7 +779,7 @@ function checkHandlerSlotRefs(
 ): void {
   for (const slot of ACTION_HANDLER_SLOTS) {
     const arg = namedArg(call, slot);
-    if (!arg || arg.kind !== "ref" || arg.refKind !== "unknown") continue;
+    if (arg?.kind !== "ref" || arg.refKind !== "unknown") continue;
     if (
       ctx.actionsByName.has(arg.name) ||
       ctx.handles.has(arg.name) ||
@@ -810,7 +810,7 @@ function checkMethodCallReceiver(
 ): void {
   const root = rootRef(call.receiver);
   // The receiver root is well-resolved unless it's an `unknown` ref.
-  if (!root || root.refKind !== "unknown") return;
+  if (root?.refKind !== "unknown") return;
   // `unknown` is fine when the root is a resolvable handle (api / view /
   // aggregate / workflow — `Sales.Customer.create(…)`, `Customer.byId(…)`,
   // `Views.x`) or an in-scope lambda param / form shell-local.

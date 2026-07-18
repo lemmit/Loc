@@ -16,6 +16,7 @@ async function seed(page: any, role: string): Promise<void> {
   // every gate.  Set BEFORE goto so the first render already sees the user.
   // Scope to the `/api/` base so the mock never shadows a same-named SPA page
   // route (e.g. the `/jobs/:id` page vs the `/api/jobs/:id` data call).
+  // biome-ignore lint/suspicious/noExplicitAny: Playwright Route typing kept loose for portability.
   await page.route("**/api/auth/me", (route: any) =>
     route.fulfill({
       status: 200,
@@ -25,6 +26,7 @@ async function seed(page: any, role: string): Promise<void> {
   );
   // Mock the Job byId read so the `/jobs/:id` detail renders (and with it the
   // role-gated Approve button) without a real backend.
+  // biome-ignore lint/suspicious/noExplicitAny: Playwright Route typing kept loose for portability.
   await page.route("**/api/jobs/*", (route: any) =>
     route.fulfill({
       status: 200,

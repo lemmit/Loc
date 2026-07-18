@@ -22,12 +22,7 @@
 
 import type { AggregateIR, FieldIR } from "../../../ir/types/loom-ir.js";
 import {
-  baseOf,
   discriminatorValue,
-  isTpcBase,
-  isTpcConcrete,
-  isTphBase,
-  isTphConcrete,
   ownFieldsOf,
   tableOwnerName,
   tphConcretesOf,

@@ -724,7 +724,7 @@ function externModuleFromPath(path: string): string {
  *  hoisted to the host page's LiveView by the emitter. */
 export function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const opRef = expr.args.find((_, i) => !expr.argNames?.[i]);
-  if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
+  if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") {
     return `<!-- Action: expected <instance>.<operation> -->`;
   }
   const instanceName = opRef.receiver.name;
@@ -1106,7 +1106,7 @@ function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContex
   // failure, not a per-target rendering decision.
   const target = expr.args[0];
   const params = expr.args[1];
-  if (!target || target.kind !== "ref") {
+  if (target?.kind !== "ref") {
     return `push_navigate(socket, to: "/")`;
   }
   const routePath = `/${snake(target.name)}`;

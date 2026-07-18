@@ -107,7 +107,7 @@ export function emitDestroyForm(
   if (override != null) return override;
   void depth;
   const ofArg = namedArgValue(call, "of");
-  if (!ofArg || ofArg.kind !== "ref") {
+  if (ofArg?.kind !== "ref") {
     return ctx.target.renderComment(`DestroyForm: expected (of: <Agg>)`);
   }
   const agg = ctx.aggregatesByName.get(ofArg.name);
@@ -666,7 +666,7 @@ function emitControlledModal(
   depth: number,
 ): string | undefined {
   const openArg = namedArgValue(call, "open");
-  if (!openArg || openArg.kind !== "ref" || !ctx.stateNames.has(openArg.name)) return undefined;
+  if (openArg?.kind !== "ref" || !ctx.stateNames.has(openArg.name)) return undefined;
   if (!ctx.pack.templates.has("primitive-modal-controlled")) return undefined;
   ctx.usesState = true;
   const stateName = openArg.name;

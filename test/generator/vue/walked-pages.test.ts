@@ -132,6 +132,7 @@ describe("vue walker — scaffold pages", () => {
     // create-then-redirect body (success toast then redirect), single-
     // quoted handler attr.
     expect(newPage).toContain(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
       "@submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); pushToast(\"Customer created\"); navigate(`/customers/${out.id}`); })($event)'",
     );
     expect(newPage).toContain('v-model="form.values.name"');

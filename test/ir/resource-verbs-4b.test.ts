@@ -48,7 +48,7 @@ async function firstCall(body: string): Promise<Extract<ExprIR, { kind: "call" }
     (s: WorkflowStmtIR) => s.kind === "resource-call" || s.kind === "expr-let",
   );
   const e = st?.kind === "resource-call" ? st.call : st?.kind === "expr-let" ? st.expr : undefined;
-  if (!e || e.kind !== "call") throw new Error("no resource-op call");
+  if (e?.kind !== "call") throw new Error("no resource-op call");
   return e;
 }
 

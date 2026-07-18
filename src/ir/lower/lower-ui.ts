@@ -7,7 +7,6 @@
 import type {
   ActionDecl,
   Component,
-  DerivedProp,
   Layout,
   LayoutNamedSlot,
   MenuBlock,

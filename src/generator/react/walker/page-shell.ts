@@ -950,7 +950,7 @@ export function renderUserComponentFile(
   if (usesMemo) reactSpecifiers.push("useMemo");
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
-  const decimalImport =
+  const _decimalImport =
     usesState && state.some((f) => typeUsesMoney(f.type))
       ? `import Decimal from "decimal.js";\n`
       : "";

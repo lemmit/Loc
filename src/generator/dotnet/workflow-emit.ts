@@ -1,6 +1,5 @@
 import { createInputFields, createOmissionValue } from "../../ir/enrich/wire-projection.js";
 import {
-  type AggregateIR,
   type EnrichedBoundedContextIR,
   type EventSubscriptionIR,
   type ExprIR,

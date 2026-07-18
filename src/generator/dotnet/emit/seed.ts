@@ -27,7 +27,6 @@ import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
-  ExprIR,
   SeedRowIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";

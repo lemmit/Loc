@@ -52,7 +52,7 @@ export function renderAngularDestroyForm(
 ): string | null {
   if (call.kind !== "call") return null;
   const ofArg = namedArgValue(call, "of");
-  if (!ofArg || ofArg.kind !== "ref") {
+  if (ofArg?.kind !== "ref") {
     return ctx.target.renderComment("DestroyForm: expected (of: <Agg>)");
   }
   const agg = ctx.aggregatesByName.get(ofArg.name);

@@ -7,7 +7,6 @@ import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,
-  escapeJsxText,
   namedArgValue,
   numericNamed,
   positionalArgs,

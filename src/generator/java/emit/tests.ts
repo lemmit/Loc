@@ -121,7 +121,7 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR, imports: Set<string>
   if (e.kind !== "method-call" || e.member !== "create" || e.args.length !== 1) return null;
   const objArg = e.args[0];
   const receiver = e.receiver;
-  if (!objArg || objArg.kind !== "object" || receiver.kind !== "ref") return null;
+  if (objArg?.kind !== "object" || receiver.kind !== "ref") return null;
   const agg = ctx.aggregates.find((a) => a.name === receiver.name);
   if (!agg) return null;
   const byName = new Map(objArg.fields.map((f) => [f.name, f.value]));
@@ -147,7 +147,7 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR, imports: Set<string>
 function renderExplicitMatcher(expr: ExprIR, imports: Set<string>): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
-  if (!sig || sig.on !== "value") return null;
+  if (sig?.on !== "value") return null;
   let receiver = expr.receiver;
   let negate = false;
   if (receiver.kind === "member" && receiver.member === "not" && sig.negatable) {

@@ -7,7 +7,6 @@ import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { toolbarA11yAttr } from "../a11y-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
-  escapeJsxText,
   namedArgValue,
   numericNamed,
   positionalArgs,
@@ -94,7 +93,7 @@ function gridColsArg(
   const scalar = numericNamed(call, "cols");
   if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
   const raw = namedArgValue(call, "cols");
-  if (!raw || raw.kind !== "list") return undefined;
+  if (raw?.kind !== "list") return undefined;
   const intElements: number[] = [];
   for (const el of raw.elements) {
     if (el.kind === "literal" && el.lit === "int") {

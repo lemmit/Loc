@@ -21,7 +21,7 @@
 //   defaultInitFor    — walker/page-shell.ts:705-725 (zeroValueForType)
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {

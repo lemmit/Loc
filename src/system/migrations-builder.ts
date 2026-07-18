@@ -2059,7 +2059,7 @@ function findPrimaryStorageBinding(
   const contextNames = new Set(m.contexts.map((c) => c.name));
   for (const dsName of d.dataSourceNames) {
     const ds = sys.dataSources.find((x) => x.name === dsName);
-    if (!ds || ds.kind !== "state") continue;
+    if (ds?.kind !== "state") continue;
     if (contextNames.has(ds.contextName)) return ds.storageName;
   }
   return null;

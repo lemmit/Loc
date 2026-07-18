@@ -40,7 +40,7 @@ async function diagnostics(workflowBody: string, opts?: { transactional?: boolea
 
 const asCall = (s: WorkflowStmtIR | undefined): Extract<ExprIR, { kind: "call" }> => {
   const e = s?.kind === "resource-call" ? s.call : s?.kind === "expr-let" ? s.expr : undefined;
-  if (!e || e.kind !== "call") throw new Error(`not a call stmt: ${s?.kind}`);
+  if (e?.kind !== "call") throw new Error(`not a call stmt: ${s?.kind}`);
   return e;
 };
 
