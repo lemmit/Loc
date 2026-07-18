@@ -12,6 +12,7 @@
     "@electric-sql/pglite": "0.4.5",
     "@hono/node-server": "^1.14.0",
     "@hono/zod-openapi": "^1.0.0",
+    "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.0",
     "esbuild": "^0.24.0",
     "hono": "^4.12.0",
