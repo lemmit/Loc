@@ -56,7 +56,8 @@ export function renderJavaValidators(
   for (const op of agg.operations) {
     const preconditions: InvariantIR[] = [];
     for (const s of op.statements) {
-      if (s.kind === "precondition") preconditions.push({ expr: s.expr, source: s.source });
+      if (s.kind === "precondition")
+        preconditions.push({ expr: s.expr, source: s.source, message: s.message });
     }
     specs.push({
       methodName: op.name,
@@ -145,7 +146,7 @@ function methodBody(
           single.field,
           single.pattern,
           typeOf(single.field),
-          inv.source,
+          inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
           imports,
           regexFields,
         ),
@@ -167,7 +168,7 @@ function methodBody(
     }
     const predicate = renderJavaExpr(inv.expr, { thisName: "this", bareProps: true, regexFields });
     checks.push(
-      `        if (!(${predicate})) errors.add(WireValidationException.error("/${path}", ${JSON.stringify(`Invariant violated: ${inv.source}`)}));`,
+      `        if (!(${predicate})) errors.add(WireValidationException.error("/${path}", ${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)}));`,
     );
   }
   if (checks.length === 0) return null;
@@ -182,7 +183,9 @@ function patternCheck(
   field: string,
   pattern: SingleFieldPattern,
   type: TypeIR | undefined,
-  source: string,
+  // The fully-resolved failure message — the author's `message "..."` text
+  // when present, else the derived `Invariant violated: <source>` default.
+  message: string,
   imports: Set<string>,
   regexFields: Map<string, string>,
 ): string[] {
@@ -193,7 +196,7 @@ function patternCheck(
       ? `${field}.compareTo(new java.math.BigDecimal("${n}")) ${op} 0`
       : `${field} ${op} ${n}`;
   const fail = (cond: string): string =>
-    `        if (!(${cond})) errors.add(WireValidationException.error("/${field}", ${JSON.stringify(`Invariant violated: ${source}`)}));`;
+    `        if (!(${cond})) errors.add(WireValidationException.error("/${field}", ${JSON.stringify(message)}));`;
   switch (pattern.kind) {
     case "min":
       // Exclusive (`weight > 0.5` on a decimal/money field) → strict `>`; the
