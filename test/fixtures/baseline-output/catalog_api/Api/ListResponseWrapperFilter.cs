@@ -1,6 +1,6 @@
 // Auto-generated.
 using System;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace CatalogApi.Api;
@@ -21,34 +21,44 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
         // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
         // Hono / Phoenix backends omit it too (an unreferenced wrapper never
         // enters their spec), so adding it unconditionally would drift parity.
+        //
+        // Microsoft.OpenApi 2.0: an array's Type is the JsonSchemaType flags
+        // enum, a $ref schema is a distinct OpenApiSchemaReference node (not an
+        // OpenApiSchema with a Reference property), and Components.Schemas is
+        // keyed by IOpenApiSchema.
+        if (swaggerDoc.Paths is null) return;
         foreach (var path in swaggerDoc.Paths.Values)
-        foreach (var operation in path.Operations.Values)
-        foreach (var response in operation.Responses.Values)
-        foreach (var media in response.Content.Values)
         {
-            var schema = media.Schema;
-            if (schema?.Type == "array" && schema.Items?.Reference?.Id is string elementId)
+            if (path.Operations is null) continue;
+            foreach (var operation in path.Operations.Values)
             {
-                foreach (var (element, wrapper) in Wrappers)
+                if (operation.Responses is null) continue;
+                foreach (var response in operation.Responses.Values)
                 {
-                    if (element == elementId)
+                    if (response.Content is null) continue;
+                    foreach (var media in response.Content.Values)
                     {
-                        if (!swaggerDoc.Components.Schemas.ContainsKey(wrapper))
+                        if (media.Schema is not OpenApiSchema schema) continue;
+                        if (schema.Type is not { } t || !t.HasFlag(JsonSchemaType.Array)) continue;
+                        if (schema.Items is not OpenApiSchemaReference itemRef) continue;
+                        if (itemRef.Reference?.Id is not string elementId) continue;
+                        foreach (var (element, wrapper) in Wrappers)
                         {
-                            swaggerDoc.Components.Schemas[wrapper] = new OpenApiSchema
+                            if (element == elementId)
                             {
-                                Type = "array",
-                                Items = new OpenApiSchema
+                                if (swaggerDoc.Components?.Schemas is { } schemas
+                                    && !schemas.ContainsKey(wrapper))
                                 {
-                                    Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = element }
+                                    schemas[wrapper] = new OpenApiSchema
+                                    {
+                                        Type = JsonSchemaType.Array,
+                                        Items = new OpenApiSchemaReference(element, swaggerDoc),
+                                    };
                                 }
-                            };
+                                media.Schema = new OpenApiSchemaReference(wrapper, swaggerDoc);
+                                break;
+                            }
                         }
-                        media.Schema = new OpenApiSchema
-                        {
-                            Reference = new OpenApiReference { Type = ReferenceType.Schema, Id = wrapper }
-                        };
-                        break;
                     }
                 }
             }

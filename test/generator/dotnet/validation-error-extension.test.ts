@@ -176,16 +176,18 @@ describe(".NET validation-error extension — DomainExceptionFilter emission", (
     expect(filter).toMatch(/AugmentProblemDetailsSchema/);
     // The augmentation runs on the SchemaRepository so it's idempotent
     // across operations and survives Swashbuckle's $ref deduplication.
-    expect(filter).toMatch(/repo\.Schemas\.TryGetValue\("ProblemDetails", out var problem\)/);
+    expect(filter).toMatch(/repo\.Schemas\.TryGetValue\("ProblemDetails", out var problemSchema\)/);
     expect(filter).toMatch(/problem\.Properties\.ContainsKey\("errors"\)/);
     expect(filter).toMatch(/problem\.Properties\["errors"\] = new OpenApiSchema/);
     // Array of { pointer, message } — the locked frontend-ACL wire shape.
-    expect(filter).toMatch(/Type = "array"/);
+    // Microsoft.OpenApi 2.0: schema type is the JsonSchemaType flags enum
+    // (the null flag serializes back to `nullable: true` in the 3.0 writer).
+    expect(filter).toMatch(/Type = JsonSchemaType\.Array \| JsonSchemaType\.Null/);
     expect(filter).toMatch(/Required = new HashSet<string> \{ "pointer", "message" \}/);
-    expect(filter).toMatch(/\["pointer"\] = new OpenApiSchema \{ Type = "string" \}/);
-    expect(filter).toMatch(/\["message"\] = new OpenApiSchema \{ Type = "string" \}/);
+    expect(filter).toMatch(/\["pointer"\] = new OpenApiSchema \{ Type = JsonSchemaType\.String \}/);
+    expect(filter).toMatch(/\["message"\] = new OpenApiSchema \{ Type = JsonSchemaType\.String \}/);
     // Imports the namespace it now needs (Phase D-specific).
     expect(filter).toMatch(/using System\.Collections\.Generic;/);
-    expect(filter).toMatch(/using Microsoft\.OpenApi\.Any;/);
+    expect(filter).toMatch(/using Microsoft\.OpenApi;/);
   });
 });
