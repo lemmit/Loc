@@ -44,11 +44,10 @@ export function MigrationsBody({
   ctx: LayoutCtx;
   active?: boolean;
 }): JSX.Element {
-  // Multi-file / import baselines aren't supported yet — the diff lowers a
-  // single entry text on both sides (see M-T8.11).  Gate rather than emit a
-  // confusing unresolved-import parse error.
-  const multiFile = ctx.sourceFiles.size > 1;
-  const canDiff = ctx.buildClient != null && !multiFile;
+  // Multi-file / import baselines are supported: the diff ships both whole
+  // `.ddd` trees to the worker and lowers them through the project loader
+  // (M-T8.11), so imports resolve the same as a generate.
+  const canDiff = ctx.buildClient != null;
 
   // Baseline ref the diff runs against — `HEAD` (last save) by default, or any
   // commit the user pins from the picker.  Extends the diff from "changes
@@ -138,13 +137,7 @@ export function MigrationsBody({
       <Divider />
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <Stack gap="md" p="sm" data-testid="migrations-panel">
-          {multiFile ? (
-            <Text c="dimmed" size="sm">
-              The migration &amp; contract diff currently supports single-file
-              workspaces. This workspace has {ctx.sourceFiles.size} source files —
-              multi-file baselines are a follow-up (M-T8.11).
-            </Text>
-          ) : ctx.evolutionRunning && e == null ? (
+          {ctx.evolutionRunning && e == null ? (
             <Group gap="xs" py="sm">
               <Loader size="xs" />
               <Text size="sm" c="dimmed">

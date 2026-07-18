@@ -46,13 +46,16 @@ import type {
   BuildDiagnostic,
   BuildRpcRequest,
   BuildRpcResponse,
+  EvolutionParams,
   EvolutionResult,
+  EvolutionTree,
   GenerateResult,
   MigrationView,
   SnapshotResult,
   VirtualFile,
   WireChangeView,
 } from "./protocol.js";
+import type { VfsEntry, VfsPath } from "../vfs/types.js";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -384,11 +387,12 @@ function snapshotFromLoom(
 
 // ---------------------------------------------------------------------------
 // Evolution diff — the migration + wire-contract delta between a pinned
-// baseline source and the live edit.  Both sources are lowered here (the
-// worker is where the compiler lives); every diff rides a shipped PURE core,
-// so this is faithful to what `ddd generate system` would derive on disk.
-// v1 is single-entry text only — a multi-file/import baseline would need
-// both trees seeded into the worker VFS (tracked in M-T8.11).
+// baseline and the live edit.  Both sides are whole `.ddd` source TREES:
+// each is seeded into the worker VFS under an isolated prefix and lowered
+// through the project loader (`loadProjectFromVfs` → `lowerProject`), so
+// multi-file / import baselines resolve exactly as `ddd generate system`
+// would on disk (M-T8.11).  A single-file source is just the one-entry case.
+// The compiler lives in the worker, and every diff rides a shipped PURE core.
 // ---------------------------------------------------------------------------
 
 const BUCKET_LABEL: Record<string, string> = {
@@ -397,6 +401,13 @@ const BUCKET_LABEL: Record<string, string> = {
   valueObjects: "value object",
 };
 
+// Isolated VFS/URI prefixes the two diff sides load under — kept distinct
+// from the generate flow's `/workspace/...` tree and from each other so a
+// re-seed never clobbers live workspace state.  Both `inmemory:///…`
+// document URIs derive from these (see `docUriPrefix`).
+const CUR_PREFIX = "/evolution/current";
+const BASE_PREFIX = "/evolution/baseline";
+
 /** In-memory snapshot store — the browser twin of `fsSnapshotStore`,
  *  inlined to keep `node:fs` out of the main worker bundle (see the import
  *  note above).  Matches `memorySnapshotStore`'s contract exactly. */
@@ -404,21 +415,74 @@ function memStore(initial: Record<string, SchemaSnapshot> = {}): SnapshotStore {
   return { read: (module: string) => initial[module] ?? null };
 }
 
-async function handleEvolution(
-  baselineText: string,
-  currentText: string,
-): Promise<EvolutionResult> {
-  // Parse the CURRENT source first — its diagnostics are what the user acts
-  // on.  A broken current source can't be diffed; a broken/empty baseline is
-  // just "no previous version" (everything reads Initial).
-  const cur = await parse(currentText);
-  if (!cur.model) return { ok: false, diagnostics: cur.diagnostics };
-  let curLoom: EnrichedLoomModel;
-  try {
-    curLoom = enrichLoomModel(lowerModel(cur.model));
-  } catch (err) {
-    return { ok: false, diagnostics: [loweringDiag(err)] };
+/** Re-root an evolution tree's entries under `prefix` so both diff sides
+ *  live in disjoint VFS namespaces.  Relative imports resolve within the
+ *  re-rooted tree because every path is shifted by the same prefix. */
+function rerootEntries(prefix: VfsPath, files: VfsEntry[]): VfsEntry[] {
+  return files.map((e) =>
+    e.kind === "file"
+      ? { kind: "file", path: prefix + e.path, content: e.content }
+      : { kind: "dir", path: prefix + e.path },
+  );
+}
+
+/** The `inmemory:///…` document-URI prefix that `loadProjectFromVfs`
+ *  assigns to files under a VFS `prefix` — mirrors its `vfsPathToUri`
+ *  (`/evolution/current` → `inmemory:///evolution/current`). */
+function docUriPrefix(prefix: VfsPath): string {
+  return `inmemory:///${prefix.replace(/^\/+/, "")}`;
+}
+
+/** Drop every worker-VFS file and Langium document under `prefix` — run
+ *  before seeding a side so a stale file/doc from a prior diff (e.g. a
+ *  source the new tree removed) can't linger and pollute name resolution. */
+function clearEvolutionPrefix(prefix: VfsPath): void {
+  for (const p of workerVfs.listAll(prefix)) workerVfs.delete(p); // file-only; dirs are inert
+  const uriPrefix = docUriPrefix(prefix);
+  for (const doc of [...documents.all]) {
+    if (doc.uri.toString().startsWith(uriPrefix)) documents.deleteDocument(doc.uri);
   }
+}
+
+/** Load one diff side into an isolated VFS prefix and lower it to an
+ *  enriched IR.  Returns either the lowered model or the parse/import/
+ *  lowering diagnostics that stopped it — never throws. */
+async function loadEvolutionTree(
+  tree: EvolutionTree,
+  prefix: VfsPath,
+): Promise<
+  { loom: EnrichedLoomModel; diagnostics: BuildDiagnostic[] } | { error: BuildDiagnostic[] }
+> {
+  clearEvolutionPrefix(prefix);
+  workerVfs.hydrate(rerootEntries(prefix, tree.files));
+  try {
+    const { all } = await loadProjectFromVfs(
+      prefix + tree.entryPath,
+      services.shared,
+      workerVfs,
+    );
+    const diagnostics = collectDiagnostics(all);
+    if (diagnostics.some((d) => d.severity === "error")) return { error: diagnostics };
+    const loom = enrichLoomModel(lowerProject(all.map((d) => d.parseResult?.value as Model)));
+    return { loom, diagnostics };
+  } catch (err) {
+    // Missing import / cycle (from the loader) or a lowering throw.
+    return { error: [loweringDiag(err)] };
+  }
+}
+
+async function handleEvolution(params: EvolutionParams): Promise<EvolutionResult> {
+  // Load the CURRENT tree first and fully lower it — its diagnostics are what
+  // the user acts on, and a broken current source can't be diffed.  We dispose
+  // its documents before loading the baseline so the two versions (which share
+  // aggregate/system names) can't cross-pollute Langium's global scope: one
+  // tree's docs live in the workspace at a time, mirroring the old single-file
+  // same-URI trick.  `curLoom` is a fully-resolved IR, independent of the docs.
+  const curLoaded = await loadEvolutionTree(params.current, CUR_PREFIX);
+  if ("error" in curLoaded) return { ok: false, diagnostics: curLoaded.error };
+  const curLoom = curLoaded.loom;
+  const curDiags = curLoaded.diagnostics;
+  clearEvolutionPrefix(CUR_PREFIX);
   if (curLoom.systems.length === 0) {
     return {
       ok: true,
@@ -437,17 +501,16 @@ async function handleEvolution(
     };
   }
 
-  const base = await parse(baselineText);
   let baseSystemsByName = new Map<string, EnrichedLoomModel["systems"][number]>();
-  if (base.model) {
-    try {
-      const baseLoom = enrichLoomModel(lowerModel(base.model));
-      baseSystemsByName = new Map(baseLoom.systems.map((s) => [s.name, s]));
-    } catch {
-      // A baseline that no longer lowers (e.g. a since-removed feature) is
-      // treated as absent rather than failing the whole diff.
-      baseSystemsByName = new Map();
+  if (params.baseline && params.baseline.files.length > 0) {
+    const baseLoaded = await loadEvolutionTree(params.baseline, BASE_PREFIX);
+    if (!("error" in baseLoaded)) {
+      baseSystemsByName = new Map(baseLoaded.loom.systems.map((s) => [s.name, s]));
     }
+    // A baseline that no longer loads/lowers (a since-removed feature, a
+    // missing import at that ref) is treated as absent rather than failing
+    // the whole diff — everything then reads Initial.
+    clearEvolutionPrefix(BASE_PREFIX);
   }
   const hasBaseline = baseSystemsByName.size > 0;
 
@@ -482,7 +545,7 @@ async function handleEvolution(
         // sequence) steps the change implies, not just the refusal.
         migs = buildMigrations(curSys, store, { allowDestructive: true });
       } else {
-        return { ok: false, diagnostics: [...cur.diagnostics, migrationDiag(err)] };
+        return { ok: false, diagnostics: [...curDiags, migrationDiag(err)] };
       }
     }
     for (const mig of migs) {
@@ -522,7 +585,7 @@ async function handleEvolution(
     migrations,
     wireChanges,
     breaking,
-    diagnostics: cur.diagnostics,
+    diagnostics: curDiags,
   };
 }
 
@@ -583,10 +646,7 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
         break;
       }
       case "evolution": {
-        response.result = await handleEvolution(
-          req.params.baselineText,
-          req.params.currentText,
-        );
+        response.result = await handleEvolution(req.params);
         break;
       }
       case "vfs.write": {

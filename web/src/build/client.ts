@@ -1,6 +1,7 @@
 import type {
   BuildRpcRequest,
   BuildRpcResponse,
+  EvolutionParams,
   EvolutionResult,
   GenerateResult,
   SnapshotResult,
@@ -144,12 +145,14 @@ export class LoomBuildClient {
   }
 
   /** Derive the migration + wire-contract delta between a pinned baseline
-   *  source and the live edit — the playground's window onto the evolution
-   *  lifecycle the stateless regen otherwise hides.  Both sources are
-   *  lowered in the worker; the result is plain DTOs (rendered SQL steps +
-   *  classified contract changes).  Single-entry text only (v1). */
-  evolution(baselineText: string, currentText: string): Promise<EvolutionResult> {
-    return this.call("evolution", { baselineText, currentText }) as Promise<EvolutionResult>;
+   *  and the live edit — the playground's window onto the evolution
+   *  lifecycle the stateless regen otherwise hides.  Both sides are whole
+   *  `.ddd` source TREES (multi-file / import projects supported): the
+   *  worker seeds each into its VFS and lowers via the project loader,
+   *  then returns plain DTOs (rendered SQL steps + classified contract
+   *  changes).  `baseline` is `null` for a source with no prior version. */
+  evolution(params: EvolutionParams): Promise<EvolutionResult> {
+    return this.call("evolution", params) as Promise<EvolutionResult>;
   }
 
   /** Push one or more files into the worker's VFS.  Returns the

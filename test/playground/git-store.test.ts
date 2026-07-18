@@ -155,6 +155,40 @@ describe("GitStore: git ops", () => {
     expect(again).toBeUndefined();
     expect(await store.log()).toHaveLength(1);
   });
+
+  it("readTreeAtRef returns every committed .ddd source, sorted", async () => {
+    await store.writeFile("/workspace/main.ddd", 'import "./shared/kernel.ddd"\nsystem X {}');
+    await store.writeFile("/workspace/shared/kernel.ddd", "valueobject Money {}");
+    // A committed generated artifact must be excluded (only .ddd is a diff input).
+    await store.writeFile("/workspace/generated/http/index.ts", "export {}");
+    await commitOnSave(store, "initial");
+
+    const tree = await store.readTreeAtRef("/workspace", "HEAD");
+    expect(tree.map((e) => e.path)).toEqual([
+      "/workspace/main.ddd",
+      "/workspace/shared/kernel.ddd",
+    ]);
+    expect(tree.every((e) => e.kind === "file")).toBe(true);
+    expect(tree[1].content).toBe("valueobject Money {}");
+  });
+
+  it("readTreeAtRef reads the tree at an EARLIER commit, not the working tree", async () => {
+    await store.writeFile("/workspace/main.ddd", "system X {}");
+    const first = await commitOnSave(store, "v1");
+    await store.writeFile("/workspace/main.ddd", "system X { module M {} }");
+    await commitOnSave(store, "v2");
+
+    // Pin the first commit — its blob, not HEAD's, not the working tree.
+    const atFirst = await store.readTreeAtRef("/workspace", first as string);
+    expect(atFirst).toHaveLength(1);
+    expect(atFirst[0].content).toBe("system X {}");
+  });
+
+  it("readTreeAtRef returns [] when the ref has no commits yet", async () => {
+    await store.writeFile("/workspace/main.ddd", "system X {}");
+    // Nothing committed — resolveRef throws, caller reads "no baseline".
+    expect(await store.readTreeAtRef("/workspace", "HEAD")).toEqual([]);
+  });
 });
 
 describe("GitStore: notifier", () => {
