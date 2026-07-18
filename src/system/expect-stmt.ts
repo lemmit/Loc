@@ -45,7 +45,18 @@ function renderExplicitValueMatcher(expr: ExprIR, render: (e: ExprIR) => string)
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const args = expr.args.map((a) => render(a)).join(", ");
   const prefix = negate ? "not." : "";
+
+  // `toBeSameInstant` is temporal equality: compare the two timestamps as
+  // instants (epoch ms) so wire-format differences (`…00.0000000Z` vs `…00Z`)
+  // don't fail the assertion, but a real difference in time still does. Lowers
+  // to a plain vitest `toBe` on `Date.getTime()` — no custom-matcher runtime.
+  if (expr.member === "toBeSameInstant") {
+    const actual = `new Date(${render(inner)}).getTime()`;
+    const expected = `new Date(${render(expr.args[0]!)}).getTime()`;
+    return `expect(${actual}).${prefix}toBe(${expected});`;
+  }
+
+  const args = expr.args.map((a) => render(a)).join(", ");
   return `expect(${render(inner)}).${prefix}${expr.member}(${args});`;
 }

@@ -1,6 +1,6 @@
 // RST-8 behavioral-tier fixture — aggregate INHERITANCE (TPH / sharedTable),
 // retargeted from web/src/examples/inheritance-system.ddd to a single
-// `platform: python` (FastAPI) backend (no UI). Exercises the Python DTO
+// `platform: __PLATFORM__` (FastAPI) backend (no UI). Exercises the Python DTO
 // emitter's inheritance path — a concrete subtype's wire shape is
 // `id → base fields → own fields`, folded into one `payment_methods` table
 // with a `kind` discriminator.
@@ -12,7 +12,7 @@
 // The divergence from plain CRUD: the create/read cross the TPH base+subtype
 // DTO split, so a mis-emitted base-field projection surfaces here.
 
-system PaymentsPy {
+system Payments {
 
   subdomain Wallet {
     context Wallet {
@@ -52,7 +52,7 @@ system PaymentsPy {
   resource walletState { for: Wallet, kind: state, use: primary }
 
   deployable api {
-    platform: python
+    platform: __PLATFORM__
     contexts: [Wallet]
     dataSources: [walletState]
     port: 8000

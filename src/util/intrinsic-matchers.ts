@@ -25,6 +25,13 @@ const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
   { name: "toBeGreaterThanOrEqual", arity: 1, on: "value", negatable: true },
   { name: "toBeLessThan", arity: 1, on: "value", negatable: true },
   { name: "toBeLessThanOrEqual", arity: 1, on: "value", negatable: true },
+  // `expect(actual).toBeSameInstant(expected)` — temporal equality that compares
+  // two ISO-8601 timestamps as INSTANTS, not strings: it forgives wire-format
+  // differences (e.g. .NET's `…00.0000000Z` vs the canonical `…00Z`) while still
+  // catching a real difference in the point in time.  Wire-serialization is only
+  // observable at the HTTP boundary, so `checkExpectMatcher` restricts it to
+  // `test e2e` bodies (a domain unit test compares in-memory values with `toBe`).
+  { name: "toBeSameInstant", arity: 1, on: "value", negatable: true },
   { name: "toHaveText", arity: 1, on: "locator", negatable: true },
   { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
   { name: "toBeVisible", arity: 0, on: "locator", negatable: true },

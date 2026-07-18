@@ -75,8 +75,15 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
     // onCreate + onUpdate stamps both apply on insert (NOT-NULL updated_at on
     // create); onUpdate-only on update.
     expect(repo).toContain("def insert(attrs) when is_map(attrs) do");
-    expect(repo).toContain("|> Ecto.Changeset.put_change(:created_at, DateTime.utc_now())");
-    expect(repo).toContain("|> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now())");
+    // B7: a `now()` stamp into a `:utc_datetime` column truncates to second
+    // precision — `DateTime.utc_now()` is microsecond precision, which Ecto
+    // refuses to dump into `:utc_datetime` (→ 500 on insert).
+    expect(repo).toContain(
+      "|> Ecto.Changeset.put_change(:created_at, DateTime.utc_now() |> DateTime.truncate(:second))",
+    );
+    expect(repo).toContain(
+      "|> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now() |> DateTime.truncate(:second))",
+    );
     expect(repo).toContain("|> Repo.insert()");
     // A non-principal stamp threads no actor (byte-identical seam).
     expect(repo).not.toContain("current_user");

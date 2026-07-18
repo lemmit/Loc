@@ -1,6 +1,0 @@
-{
-  "comment": "Corpus for the RST-3 Java behavioral tier (run-java.mjs). Each case is generated, its `platform: java` (Spring Boot + JPA) deployable built with `gradle bootJar` and booted against a real Postgres (SPRING_DATASOURCE_URL), and its emitted `test e2e` api suite HTTP-dispatched at the booted server. Like the .NET/Python tiers, Java has no in-process Postgres, so this needs a real DB — see docs/old/plans/runtime-semantics-tier-followups.md (RST-3).",
-  "cases": [
-    { "name": "sales", "ddd": "test/behavioral/corpus-java/sales.ddd" }
-  ]
-}

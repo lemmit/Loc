@@ -21,4 +21,11 @@ system Billing {
     serves: InvoicingApi
     port: 4000
   }
+
+  test e2e "value-object array survives round-trip" against d {
+    let inv = api.invoices.create({ reference: "INV-1", lineItems: [{ amount: 9.99, currency: "USD" }, { amount: 5.00, currency: "USD" }] })
+    let read = api.invoices.getById(inv)
+    expect(read.reference).toBe("INV-1")
+    expect(read.lineItems.length).toBe(2)
+  }
 }

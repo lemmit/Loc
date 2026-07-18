@@ -31,4 +31,11 @@ system TPH {
     serves: A
     port: 4000
   }
+
+  test e2e "TPH concrete create round-trips" against d {
+    let c = api.cars.create({ name: "Sedan", capacity: 5, doors: 4 })
+    let read = api.cars.getById(c)
+    expect(read.name).toBe("Sedan")
+    expect(read.doors).toBe(4)
+  }
 }

@@ -5,7 +5,7 @@ system Crit {
     context Orders {
       criterion Active of Order = !this.archived
       criterion InRegion(region: string) of Order = this.region == region
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         region: string
         archived: bool
@@ -26,5 +26,14 @@ system Crit {
     dataSources: [ordersState]
     serves: OrdersApi
     port: 4000
+  }
+
+  test e2e "recent excludes archived orders" against d {
+    let a = api.orders.create({ code: "C1", region: "EU", archived: false })
+    let read = api.orders.getById(a)
+    expect(read.code).toBe("C1")
+    api.orders.create({ code: "C2", region: "EU", archived: true })
+    let list = api.orders.recent()
+    expect(list.length).toBe(1)
   }
 }

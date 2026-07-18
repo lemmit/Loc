@@ -655,6 +655,14 @@ function renderEntity(
   // after `create(...)` the instance holds the folded state AND carries the
   // creation event for the repository to append.  Input is the create
   // action's params (the command shape), not the field set.
+  //
+  // The shell is built with `trustStore = true` so the constructor does NOT
+  // assert invariants against the still-empty, pre-fold state (that check
+  // races the fold and 400s a valid create — e.g. `invariant balance >= 0`
+  // before `apply(Opened)` sets `balance := 0`).  Invariants are asserted
+  // ONCE after `_init` has emitted-and-folded the creation event(s), so they
+  // guard the initial folded state — matching the fold-then-check order the
+  // Java/Python backends use.
   const esCreate = e.creates?.[0];
   const esCreateFactory =
     e.isRoot && e.eventSourced && esCreate
@@ -666,8 +674,11 @@ function renderEntity(
               .join("; ")} }`,
             e.name,
           ),
-          `    const inst = ${newSelf(`{ id: Ids.new${e.name}Id() } as unknown as ${stateLiteral}`)};`,
+          `    const inst = ${newSelf(`{ id: Ids.new${e.name}Id() } as unknown as ${stateLiteral}, true`)};`,
           `    inst._init(${esCreate.params.map((p) => `input.${p.name}`).join(", ")});`,
+          emitTrace
+            ? `    inst._assertInvariants(${JSON.stringify(esCreate.name)});`
+            : `    inst._assertInvariants();`,
           `    return inst;`,
           `  }`,
           "",

@@ -28,6 +28,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -148,13 +149,22 @@ async function runCase(c) {
   mkdirSync(workDir, { recursive: true });
   let server;
   try {
-    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", join(REPO, c.ddd), "-o", genDir], { stdio: "pipe" });
+    const srcPath = join(workDir, "system.ddd");
+    writeFileSync(srcPath, c.source);
+    execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", srcPath, "-o", genDir], { stdio: "pipe" });
     const deplDir = findJavaDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
     if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <java>`)");
 
     if (!EXTERNAL_BASE) {
+      // Clean schema per case: each case emits its own migrations at a fixed
+      // version, so a shared DB would fail Flyway validation on the 2nd case.
+      const pgUrl = DATASOURCE_URL.replace(
+        /^jdbc:postgresql:\/\//,
+        `postgresql://${DATASOURCE_USERNAME}:${DATASOURCE_PASSWORD}@`,
+      );
+      await resetDatabase(pgUrl);
       // Build the runnable jar, then boot it. Flyway migrations auto-apply at
       // startup (before the server listens), so a listening port already
       // implies a migrated schema.
@@ -203,7 +213,9 @@ async function runCase(c) {
 }
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
-const corpus = JSON.parse(readFileSync(join(HERE, "corpus-java.json"), "utf8")).cases.filter(
+// Manifest-derived corpus features (java) + the shared tokenized systems — the
+// same two sources every backend runner uses. No per-backend allowlist.
+const corpus = [...(await featureCases("java", "java", WORK)), ...sharedSystemCases("java")].filter(
   (c) => only.length === 0 || only.includes(c.name),
 );
 
@@ -211,7 +223,7 @@ let pass = 0;
 let fail = 0;
 let errored = 0;
 for (const c of corpus) {
-  process.stdout.write(`\n▶ ${c.name}  (${c.ddd})  [java → ${BASE}]\n`);
+  process.stdout.write(`\n▶ ${c.name}  [java → ${BASE}]\n`);
   let results;
   try {
     results = await runCase(c);

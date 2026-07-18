@@ -1,6 +1,6 @@
 // RST-8 behavioral-tier fixture — EVENT-SOURCED aggregate
 // (`persistedAs: eventLog`), retargeted from web/src/examples/event-sourcing.ddd
-// to a single `platform: python` (FastAPI) backend. The aggregate's truth is
+// to a single `platform: __PLATFORM__` (FastAPI) backend. The aggregate's truth is
 // its append-only event stream (`account_events`); the `create`/`operation`
 // bodies `emit`, and the `apply(...)` bodies fold events back into state on
 // read. A wholly different persistence emitter path from the CRUD/relational
@@ -12,7 +12,7 @@
 //         `balance` (a mutation-via-op round-trip, event-sourced flavor).
 //   RS-3  no persistence-internal columns leak (read key-set == wireShape).
 
-system LedgerPy {
+system Ledger {
 
   subdomain Core {
     context Accounts {
@@ -64,7 +64,7 @@ system LedgerPy {
   resource accountsLog { for: Accounts, kind: eventLog, use: primary }
 
   deployable api {
-    platform: python
+    platform: __PLATFORM__
     contexts: [Accounts]
     dataSources: [accountsLog]
     port: 8000

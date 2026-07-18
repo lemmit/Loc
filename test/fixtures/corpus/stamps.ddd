@@ -27,4 +27,10 @@ system Stamped {
     serves: A
     port: 4000
   }
+
+  test e2e "auditable order round-trips" against d {
+    let o = api.orders.create({ code: "S1" })
+    let read = api.orders.getById(o)
+    expect(read.code).toBe("S1")
+  }
 }

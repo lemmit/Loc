@@ -408,6 +408,7 @@ export function renderConfiguration(
         false,
         agg.name,
         versioned && f.name === "version",
+        options.schema,
       ),
     );
   // Table + key + id-conversion live on the table-owning config: a standalone
@@ -778,13 +779,19 @@ function fieldConfigLines(
   /** Mark this (plain-scalar) property as EF's native concurrency token —
    *  set only for the `versioned` capability's synthetic `version` field. */
   concurrencyToken = false,
+  /** The owning aggregate's Postgres schema (the owning context's schema, from
+   *  the resolved dataSource).  Threaded so the owned VO-array child table's
+   *  `ToTable` is schema-qualified to match the migration DDL — an unqualified
+   *  `ToTable("invoice_line_items")` while the migration created
+   *  `"invoicing"."invoice_line_items"` yields `relation … does not exist`. */
+  schema?: string,
 ): string[] {
   // Value-object array (`charges: Money[]`): an owned collection mapped to
   // the id-less child table — the migration's `order_charges` (owner FK +
   // `ordinal` + flattened VO columns).  EF maps `List<Money>` into that
   // table rather than inventing a convention-named one.
   if (voLookup && ownerName && !embedded && isValueCollectionType(f.type)) {
-    return ownedVoArrayLines(f, ownerName, voLookup, indent, builder);
+    return ownedVoArrayLines(f, ownerName, voLookup, indent, builder, schema);
   }
   // Column name = the migration's snake_case (`created_at`, `external_id`).
   // EF's default is the PascalCase CLR property name, which does NOT match
@@ -879,6 +886,70 @@ function ownedVoLines(
   return [`${indent}${builder}.OwnsOne<${voName}>(x => x.${nav}, o => {`, ...body, `${indent}});`];
 }
 
+/** Does this aggregate persist any value-object array (`Money[]`) to a child
+ *  table — i.e. the owned-collection path that needs the `ordinal` value
+ *  generator?  True only off the JSONB shapes (embedded/document) and event
+ *  sourcing, which fold or replace the collection instead of mapping a table. */
+export function aggregateHasTableValueArray(
+  agg: EnrichedAggregateIR,
+  opts: { isDoc?: boolean; isEmbedded?: boolean; isEs?: boolean } = {},
+): boolean {
+  if (opts.isDoc || opts.isEmbedded || opts.isEs) return false;
+  return agg.fields.some((f) => isValueCollectionType(f.type));
+}
+
+/** The shared `OwnedCollectionOrdinalGenerator` — one per project, emitted only
+ *  when some aggregate maps a value-object array to a child table.  See
+ *  `ownedVoArrayLines` for why table-mapped owned collections need it. */
+export function renderOrdinalGenerator(ns: string): string {
+  return (
+    lines(
+      "// Auto-generated.",
+      "using Microsoft.EntityFrameworkCore.ChangeTracking;",
+      "using Microsoft.EntityFrameworkCore.ValueGeneration;",
+      "",
+      `namespace ${ns}.Infrastructure.Persistence;`,
+      "",
+      "/// <summary>",
+      "/// Assigns the positional `ordinal` key for a value-object array persisted",
+      "/// as an EF owned collection to its own child table (`Money[]` →",
+      "/// `<owner>_<field>` with composite PK `(<owner>_id, ordinal)`).  EF Core has",
+      "/// no positional key for a table-mapped owned collection, so this generator",
+      "/// numbers each owner's items 1,2,3… from their order in the owning",
+      "/// navigation, at track time — before the shared CLR-default 0 keys collide.",
+      "/// 1-based so no value equals the int default (which `ValueGeneratedOnAdd`",
+      "/// treats as unset and omits from the INSERT).",
+      "/// </summary>",
+      "public sealed class OwnedCollectionOrdinalGenerator : ValueGenerator<int>",
+      "{",
+      "    public override bool GeneratesTemporaryValues => false;",
+      "",
+      "    public override int Next(EntityEntry entry)",
+      "    {",
+      "        var ownership = entry.Metadata.FindOwnership();",
+      "        var nav = ownership?.GetNavigation(pointsToPrincipal: false);",
+      "        if (nav is not null)",
+      "        {",
+      "            foreach (var principal in entry.Context.ChangeTracker.Entries())",
+      "            {",
+      "                if (principal.Metadata != ownership!.PrincipalEntityType) continue;",
+      "                var items = principal.Collection(nav.Name).CurrentValue;",
+      "                if (items is null) continue;",
+      "                var idx = 0;",
+      "                foreach (var item in items)",
+      "                {",
+      "                    if (ReferenceEquals(item, entry.Entity)) return idx + 1;",
+      "                    idx++;",
+      "                }",
+      "            }",
+      "        }",
+      "        return 1;",
+      "    }",
+      "}",
+    ) + "\n"
+  );
+}
+
 /** Map a value-object array field to its id-less child table as an EF owned
  *  collection: FK to the owner, a shadow `ordinal` key column, and the value
  *  object's columns named bare (matching the migration's `order_charges`). */
@@ -888,6 +959,9 @@ function ownedVoArrayLines(
   voLookup: VoLookup,
   indent: string,
   builder: string,
+  /** Owning aggregate's Postgres schema — qualifies the child table's
+   *  `ToTable(...)` so it matches the migration's `<schema>.<childTable>`. */
+  schema?: string,
 ): string[] {
   const vc = valueCollectionsFor({ name: ownerName, fields: [f] })[0];
   if (!vc) return [];
@@ -909,11 +983,20 @@ function ownedVoArrayLines(
     }
     return [`${inner}${sel}.HasColumnName("${col}");`];
   });
+  const childTableArgs = schema ? `"${vc.childTable}", "${schema}"` : `"${vc.childTable}"`;
   return [
     `${indent}${builder}.OwnsMany<${vc.voName}>(x => x.${upperFirst(f.name)}, o => {`,
-    `${inner}o.ToTable("${vc.childTable}");`,
+    `${inner}o.ToTable(${childTableArgs});`,
     `${inner}o.WithOwner().HasForeignKey("${vc.parentFk}");`,
-    `${inner}o.Property<int>("ordinal");`,
+    // The `ordinal` shadow key positions the array items in the id-less child
+    // table.  EF Core has no positional key for a table-mapped owned collection
+    // (its convention key is a store-generated identity), so a plain
+    // `Property<int>("ordinal")` leaves every item at CLR-default 0 → a
+    // duplicate-key tracking conflict on Add.  A value generator numbers each
+    // owner's items 1,2,3… from the owning navigation at track time (1-based so
+    // no value equals the int default, which `ValueGeneratedOnAdd` would treat
+    // as store-generated and omit from the INSERT → a NOT NULL violation).
+    `${inner}o.Property<int>("ordinal").HasValueGenerator<OwnedCollectionOrdinalGenerator>().ValueGeneratedOnAdd();`,
     `${inner}o.HasKey("${vc.parentFk}", "ordinal");`,
     ...props,
     `${indent}});`,
@@ -951,10 +1034,25 @@ function containmentConfigLines(
     const partFieldLines = partFields.flatMap((f) =>
       fieldConfigLines(f, inner, childVar, undefined, true),
     );
+    // The contained part entity carries a strongly-typed `<Part>Id` key plus a
+    // `ParentId` back-reference (type `<Owner>Id`).  Even folded into a JSON
+    // document, EF must be told how to handle both CLR types or model
+    // validation fails at boot ("property 'Id'/'ParentId' could not be mapped
+    // because it is of type '<…>Id'").  The key gets the same value-converter
+    // the relational path uses (no HasColumnName — inside ToJson it is a JSON
+    // key); the parent back-reference is redundant inside the owner's own JSON
+    // column (the fold IS the ownership), so it is ignored — the relational
+    // path maps it as the owner FK via `WithOwner().HasForeignKey(...)`, which
+    // ToJson has no equivalent for.
+    const idSetupLines = [
+      `${inner}${childVar}.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v));`,
+      `${inner}${childVar}.Ignore(x => x.ParentId);`,
+    ];
     if (!c.collection) {
       return [
         `${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, ${childVar} => {`,
         `${inner}${childVar}.ToJson("${jsonCol}");`,
+        ...idSetupLines,
         ...partFieldLines,
         `${indent}});`,
       ];
@@ -963,18 +1061,52 @@ function containmentConfigLines(
       `${indent}${builderVar}.Ignore(x => x.${upperFirst(c.name)});`,
       `${indent}${builderVar}.OwnsMany<${c.partName}>("_${c.name}", ${childVar} => {`,
       `${inner}${childVar}.ToJson("${jsonCol}");`,
+      ...idSetupLines,
       ...partFieldLines,
       `${indent}});`,
     ];
-  }
-  if (!c.collection) {
-    return [`${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
   const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, inner, childVar));
   // A nested part FKs to (and its shadow `ParentId` column is named for) its
   // DIRECT parent — a sibling part for a part-in-part, else the aggregate root
   // — matching the shared migration DDL (`tableForPart`).
   const fkColumn = `${snake(directParentName(agg, c.partName, agg.name))}_id`;
+  if (!c.collection) {
+    // A single (non-collection) `contains` is NOT stored inline on the owner —
+    // `tableForPart` (migrations-builder) gives EVERY part its OWN table
+    // (`shipments`: `id` PK + `<parent>_id` FK + flattened columns) regardless
+    // of cardinality.  So the owned reference needs the same explicit
+    // table/key/FK/id-conversion config as the collection path below.  A bare
+    // `OwnsOne<Part>(x => x.Part)` instead table-splits the part onto the owner
+    // AND leaves the strongly-typed `<Part>Id` key + `ParentId` back-reference
+    // unmapped — EF model validation aborts at boot (exit 134).  The owned nav
+    // is a public property here (entity.ts emits `public <Part> <Name> { get;
+    // private set; }`, not a private backing list), so map it directly — no
+    // `Ignore` + `"_<name>"` backing-field indirection.
+    return [
+      `${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, ${childVar} => {`,
+      `${inner}${childVar}.ToTable(${renderTableArgs(plural(c.partName), options)});`,
+      `${inner}${childVar}.WithOwner().HasForeignKey("ParentId");`,
+      `${inner}${childVar}.Property("ParentId").HasColumnName("${fkColumn}");`,
+      `${inner}${childVar}.HasKey(x => x.Id);`,
+      `${inner}${childVar}.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v)).HasColumnName("id");`,
+      ...partFieldLines,
+      // Recurse into this part's OWN nested containments, configured against
+      // THIS child builder so EF nests the owned graph (Order → Shipment → …).
+      ...(part?.contains ?? []).flatMap((nc) =>
+        containmentConfigLines(nc, agg, options, childVar, inner, depth + 1),
+      ),
+      `${indent}});`,
+      // The owned reference is OPTIONAL: a single containment starts unset
+      // (`public <Part> <Name> { get; private set; } = default!;`) and is filled
+      // by an operation, so the aggregate can be created — and loaded — before
+      // the dependent row exists.  Without this, EF treats the non-nullable CLR
+      // nav as a required dependent, INNER-JOINs `shipments`, and throws
+      // `InvalidCastException` reading the NULL `id` of an absent row.
+      // `IsRequired(false)` makes EF LEFT-JOIN and null the nav when absent.
+      `${indent}${builderVar}.Navigation(x => x.${upperFirst(c.name)}).IsRequired(false);`,
+    ];
+  }
   return [
     `${indent}// Ignore the public read-accessor and tell EF to map the`,
     `${indent}// private backing field instead.`,

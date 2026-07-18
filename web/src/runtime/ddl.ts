@@ -41,6 +41,12 @@ interface DrizzleColumn {
   scale?: number;
   length?: number;
   withTimezone?: boolean;
+  // Column DEFAULT.  `hasDefault` is set for serial types (implicit
+  // sequence — no explicit DEFAULT) AND for `.default(...)` / `.defaultNow()`
+  // columns; `default` carries the value (a Drizzle `SQL` object for
+  // `defaultNow()`/`sql\`…\``, or a literal).
+  hasDefault?: boolean;
+  default?: unknown;
 }
 
 interface DrizzleIndex {
@@ -126,6 +132,46 @@ function columnSql(c: DrizzleColumn): string {
   }
 }
 
+// Serial column types carry their DEFAULT implicitly (the type creates a
+// backing sequence), so we must NOT emit an explicit `DEFAULT` for them.
+const SERIAL_TYPES = new Set([
+  "PgSerial",
+  "PgSmallSerial",
+  "PgBigSerial53",
+  "PgBigSerial64",
+]);
+
+/** The `DEFAULT …` clause for a column, or `null` when it has none (or one we
+ *  can't faithfully render).  Needed because the generated event-log table
+ *  inserts rely on DB defaults (`seq` bigserial, `occurred_at` `defaultNow()`):
+ *  the repository omits those columns so the row falls back to the default.
+ *  Serial defaults come from the type; a Drizzle `SQL` default (e.g.
+ *  `defaultNow()` → `sql\`now()\``) is flattened from its string chunks; a
+ *  literal default is quoted.  A default with bound params is skipped (we don't
+ *  guess) rather than emitted wrong. */
+function columnDefaultSql(c: DrizzleColumn): string | null {
+  if (!c.hasDefault || SERIAL_TYPES.has(c.columnType)) return null;
+  const d = c.default;
+  if (d == null) return null;
+  if (typeof d === "object") {
+    const chunks = (d as { queryChunks?: unknown }).queryChunks;
+    if (!Array.isArray(chunks)) return null;
+    let out = "";
+    for (const ch of chunks) {
+      const val = (ch as { value?: unknown }).value;
+      if (Array.isArray(val) && val.every((x) => typeof x === "string")) {
+        out += val.join("");
+      } else {
+        return null; // param / non-string chunk — don't guess
+      }
+    }
+    return out.length > 0 ? out : null;
+  }
+  if (typeof d === "string") return quoteSqlString(d);
+  if (typeof d === "number" || typeof d === "boolean") return String(d);
+  return null;
+}
+
 function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -201,6 +247,8 @@ export function synthDDL(
     for (const c of cfg.columns) {
       const parts = [quoteIdent(c.name), columnSql(c)];
       if (c.notNull) parts.push("NOT NULL");
+      const def = columnDefaultSql(c);
+      if (def) parts.push(`DEFAULT ${def}`);
       if (c.primary) parts.push("PRIMARY KEY");
       colDefs.push(`  ${parts.join(" ")}`);
     }

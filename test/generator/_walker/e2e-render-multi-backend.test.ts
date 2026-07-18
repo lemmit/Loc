@@ -213,3 +213,43 @@ describe("e2e harness — bearer-token forwarding", () => {
     expect(e2e).toContain("await fetch(url, { headers: __authHeaders() });");
   });
 });
+
+const SAME_INSTANT = `
+  system Log {
+    subdomain S {
+      context C {
+        aggregate Entry with crudish {
+          at: datetime
+        }
+        repository Entries for Entry { }
+      }
+    }
+    deployable honoApi { platform: node, contexts: [C], port: 3000 }
+
+    test e2e "instant round-trips regardless of wire format" against honoApi {
+      let e = api.entries.create({ at: "2024-01-01T00:00:00Z" })
+      let read = api.entries.getById(e)
+      expect(read.at).toBeSameInstant("2024-01-01T00:00:00Z")
+      expect(read.at).not.toBeSameInstant("2025-01-01T00:00:00Z")
+    }
+  }
+`;
+
+describe("e2e expansion — toBeSameInstant matcher", () => {
+  it("lowers toBeSameInstant to instant-equality on Date.getTime() (format-agnostic)", async () => {
+    const files = await generateSystemFiles(SAME_INSTANT);
+    const e2e = files.get("e2e/Log.e2e.test.ts")!;
+    expect(e2e, "e2e file missing").toBeDefined();
+    // The wire value and the expected literal are both parsed to epoch ms, so a
+    // `…00.0000000Z` vs `…00Z` format difference cannot fail the assertion.
+    expect(e2e).toMatch(
+      /expect\(new Date\(read\.at\)\.getTime\(\)\)\.toBe\(new Date\("2024-01-01T00:00:00Z"\)\.getTime\(\)\)/,
+    );
+    // Negation is preserved through the lowering.
+    expect(e2e).toMatch(
+      /expect\(new Date\(read\.at\)\.getTime\(\)\)\.not\.toBe\(new Date\("2025-01-01T00:00:00Z"\)\.getTime\(\)\)/,
+    );
+    // It never emits a bare `toBeSameInstant` (vitest has no such matcher).
+    expect(e2e).not.toMatch(/toBeSameInstant/);
+  });
+});

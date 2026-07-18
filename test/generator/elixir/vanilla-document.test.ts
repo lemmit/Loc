@@ -70,6 +70,13 @@ describe("vanilla shape: document persistence (DEBT-07)", () => {
     expect(schema).toContain("field :status, :string");
     expect(schema).toContain("field :subtotal, :map");
     expect(schema).toContain("field :item_count, :integer");
+    // B5: the optimistic-concurrency `version` token is a ROOT column
+    // (`field :version` on the row, stamped by `document_changeset`), NOT a field
+    // inside the `:data` embed — if it leaked in, the embed's changeset would
+    // `validate_required(:version)` while create (which never supplies it) would
+    // fail with a 422 carrying an empty top-level `errors` array.
+    const dataEmbed = schema.slice(schema.indexOf("defmodule Api.Carts.Cart.Data do"));
+    expect(dataEmbed).not.toContain("field :version");
   });
 
   it("validates through the embedded Data changeset (cast + required + invariants)", async () => {
@@ -78,12 +85,8 @@ describe("vanilla shape: document persistence (DEBT-07)", () => {
     // (cast the scalar fields + validate_required + invariant validators), which
     // the root changeset `cast_embed`s.
     expect(schema).toContain("def changeset(struct, attrs) do");
-    expect(schema).toContain(
-      "|> cast(attrs, [:reference, :status, :subtotal, :item_count, :version])",
-    );
-    expect(schema).toContain(
-      "|> validate_required([:reference, :status, :subtotal, :item_count, :version])",
-    );
+    expect(schema).toContain("|> cast(attrs, [:reference, :status, :subtotal, :item_count])");
+    expect(schema).toContain("|> validate_required([:reference, :status, :subtotal, :item_count])");
     // The same invariant-derived validator the relational path emits.
     expect(schema).toContain("validate_number(:item_count, greater_than_or_equal_to: 0)");
     // The root changeset casts attrs INTO the embed + stamps version.
@@ -337,7 +340,7 @@ describe("vanilla shape: document non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(ctx).toContain("case Api.Carts.CartRepository.persist_change(changeset) do");
     expect(ctx).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count, "version" => saved.data.version}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count, "version" => saved.version}}',
     );
     expect(ctx).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -599,7 +602,7 @@ system Shop {
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.version}}',
     );
     expect(bump).toContain("{:error, changeset} -> {:error, changeset}");
   });
@@ -610,7 +613,7 @@ system Shop {
     // the aggregate-success projection off the saved embed (no inline in-memory return).
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.version}}',
     );
   });
 
@@ -661,7 +664,7 @@ system Shop {
     // Post-commit success projects the aggregate wire off the saved embed.
     expect(body).toContain("case tx_result do");
     expect(body).toContain(
-      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.data.version}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total, "version" => saved.version}}',
     );
     expect(body).toContain("{:error, reason} -> {:error, reason}");
     // Guard precedes the transaction (a denial writes nothing + records no audit).

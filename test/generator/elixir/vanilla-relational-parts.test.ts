@@ -172,8 +172,63 @@ describe("vanilla relational containment mutation (§11c put_assoc)", () => {
     );
     // NOT the embedded path's put_embed.
     expect(ctx).not.toContain("put_embed(:pipelines");
-    // The normalising helper is emitted once on the context module.
-    expect(ctx).toContain("defp __put_assoc_parts(list) when is_list(list) do");
+    // The normalising helper is emitted once on the context module — the list
+    // clause maps element-wise back through the shared per-element clauses (which
+    // also handle a single `has_one` value, B9).
+    expect(ctx).toContain(
+      "defp __put_assoc_parts(list) when is_list(list), do: Enum.map(list, &__put_assoc_parts/1)",
+    );
     expect(ctx).toContain("|> Map.drop([:__meta__, :inserted_at, :updated_at])");
+  });
+});
+
+// B9 — a SINGLE (non-collection) relational containment mutated by an `assign`
+// (`shipment := Shipment { … }`, not a `+=` collection add) also persists via
+// `put_assoc(..., __put_assoc_parts(record.<field>))`.  The bug: the persist tail
+// emitted that call, but the helper-emission gate only fired for collection
+// `add`/`remove`, so `__put_assoc_parts/1` was undefined (compile error) — and
+// even when defined, its `is_list` clause couldn't take a lone `has_one` struct.
+const SINGLE_SOURCE = `
+system SingleContain {
+  subdomain Core {
+    context Shop {
+      aggregate Order {
+        code: string
+        contains shipment: Shipment
+        entity Shipment { carrier: string  trackingCode: string }
+        operation ship(carrier: string, tracking: string) {
+          shipment := Shipment { carrier: carrier, trackingCode: tracking }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api ShopApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: ShopApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla single (has_one) relational containment mutation (B9)", () => {
+  it("the assign persists via put_assoc(__put_assoc_parts) AND the helper is defined", async () => {
+    const ctx = file(await generateSystemFiles(SINGLE_SOURCE), "/shop.ex");
+    // has_one child → put_assoc over the (single) struct, normalised by the helper.
+    expect(ctx).toContain(
+      "|> Ecto.Changeset.put_assoc(:shipment, __put_assoc_parts(record.shipment))",
+    );
+    expect(ctx).not.toContain("put_embed(:shipment");
+    // The gate must ALSO fire for the `assign` mutation, so the helper is DEFINED
+    // (the B9 compile error was a call with no matching def).
+    expect(ctx).toContain("defp __put_assoc_parts(%{__struct__: _} = part) do");
+    // The per-element struct clause handles the lone `has_one` value directly (no
+    // list wrapper), so the single struct normalises like a collection element.
+    expect(ctx).toContain("defp __put_assoc_parts(other), do: other");
   });
 });

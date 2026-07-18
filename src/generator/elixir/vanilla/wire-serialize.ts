@@ -160,6 +160,12 @@ export interface WireSerializeOpts {
   bind?: string;
   /** Expression for the `source: "id"` wire field (default `"record.id"`). */
   idExpr?: string;
+  /** Expression for the optimistic-concurrency `version` wire field (a
+   *  `source: "property"`, `access: "token"` field).  The Route A document
+   *  controller stores `version` on the ROOT row, not inside the `:data` embed
+   *  (`record`), so it overrides just that field to `"row.version"`; omit to read
+   *  it off `record` like any other property (the relational default). */
+  versionExpr?: string;
   /** `<App>.<Ctx>` module prefix for the `renderExpr` context used to project
    *  derived wire fields.  Only consulted for a derived that references a
    *  context-qualified name; omit for the (common) scalar-prop derived. */
@@ -268,8 +274,18 @@ export function renderWireSerialize(
         const d = derived.get(wf.name);
         if (!d || !derivedRenderable(d.expr)) continue;
         ve = renderExpr(d.expr, derivedRc);
+      } else if (wf.source === "id") {
+        ve = idExprLocal;
+      } else if (
+        opts.versionExpr !== undefined &&
+        wf.source === "property" &&
+        wf.access === "token"
+      ) {
+        // The concurrency `version` token lives on the document root row, not the
+        // `:data` embed (`record`) — read it off the caller-supplied root expr.
+        ve = opts.versionExpr;
       } else {
-        ve = wf.source === "id" ? idExprLocal : valueExpr(wf, isVo);
+        ve = valueExpr(wf, isVo);
       }
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
     }

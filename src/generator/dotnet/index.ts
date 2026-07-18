@@ -98,6 +98,7 @@ import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import { anyTimerUsesCron, renderTimerScheduler, timerServiceFqns } from "./emit/timer.js";
 import {
+  aggregateHasTableValueArray,
   joinEntityName,
   renderAbstractBaseEntity,
   renderConfiguration,
@@ -118,6 +119,7 @@ import {
   renderJoinEntity,
   renderJoinEntityConfiguration,
   renderListWrapperFilter,
+  renderOrdinalGenerator,
   renderProblemDetailsFilter,
   renderProgram,
   renderRepositoryImpl,
@@ -454,20 +456,42 @@ function emitProjectFromContexts(
       ? (c: EnrichedBoundedContextIR): string | undefined => resolveContextSchema(c, system.sys)
       : undefined;
     emitEventLogFiles(contexts, ns, out, resolveEventLogSchema);
+    const docSet = documentAggNames(contexts, system?.sys);
+    const esSet = eventSourcedAggNames(contexts);
+    const embSet = embeddedAggNames(contexts, system?.sys);
     out.set(
       "Infrastructure/Persistence/AppDbContext.cs",
       renderDbContext(
         merged,
         ns,
-        documentAggNames(contexts, system?.sys),
-        eventSourcedAggNames(contexts),
-        embeddedAggNames(contexts, system?.sys),
+        docSet,
+        esSet,
+        embSet,
         hasOutbox,
         hasProvenance,
         hasAudit,
         eventLogContexts(contexts).map((c) => c.name),
       ),
     );
+    // The shared owned-collection ordinal value generator — one per project,
+    // emitted only when some aggregate maps a value-object array (`Money[]`) to
+    // a child table (the owned-collection persistence path in efcore.ts).
+    if (
+      contexts.some((c) =>
+        c.aggregates.some((a) =>
+          aggregateHasTableValueArray(a, {
+            isDoc: docSet.has(a.name),
+            isEmbedded: embSet.has(a.name),
+            isEs: esSet.has(a.name),
+          }),
+        ),
+      )
+    ) {
+      out.set(
+        "Infrastructure/Persistence/OwnedCollectionOrdinalGenerator.cs",
+        renderOrdinalGenerator(ns),
+      );
+    }
     // Provenance runtime shared files — the lineage SDK + the append-only
     // history POCO/configuration.  The co-located columns + per-write capture +
     // flush are emitted per aggregate (entity.ts / efcore.ts / repository.ts).
@@ -885,6 +909,12 @@ function emitAggregate(
   // concretes).  Either way, stop — everything below is per concrete aggregate.
   if (agg.isAbstract) {
     if (isTphBase(agg, ctx.aggregates)) {
+      // The TPH base owns the single shared table (`ToTable`) — it must carry
+      // the SAME dataSource schema/tablePrefix the migration stamps on that
+      // table (the owning context's Postgres schema), else EF issues
+      // `INSERT INTO "vehicles"` while the migration created
+      // `"fleet"."vehicles"` → `relation "vehicles" does not exist` at runtime.
+      const baseDs = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
       place(
         `${agg.name}.cs`,
         "entity",
@@ -895,6 +925,8 @@ function emitAggregate(
         `${agg.name}Configuration.cs`,
         "ef-configuration",
         renderConfiguration(agg, ns, ctx, {
+          schema: baseDs?.schema,
+          tablePrefix: baseDs?.tablePrefix,
           tph: { role: "base", concretes: tphConcretesOf(agg, ctx.aggregates) },
         }),
         agg.origin,
@@ -1217,20 +1249,39 @@ function emitInfrastructure(
   // into the DbContext so it maps the single `Events` DbSet.  No schema in the
   // legacy single-context path.
   emitEventLogFiles([ctx], ns, out);
+  const docSetLegacy = documentAggNames([ctx]);
+  const esSetLegacy = eventSourcedAggNames([ctx]);
+  const embSetLegacy = embeddedAggNames([ctx]);
   out.set(
     "Infrastructure/Persistence/AppDbContext.cs",
     renderDbContext(
       ctx,
       ns,
-      documentAggNames([ctx]),
-      eventSourcedAggNames([ctx]),
-      embeddedAggNames([ctx]),
+      docSetLegacy,
+      esSetLegacy,
+      embSetLegacy,
       hasOutbox,
       false,
       false,
       eventLogContexts([ctx]).map((c) => c.name),
     ),
   );
+  // The shared owned-collection ordinal value generator (see the multi-context
+  // path) — emitted only when an aggregate maps a value-object array to a table.
+  if (
+    ctx.aggregates.some((a) =>
+      aggregateHasTableValueArray(a, {
+        isDoc: docSetLegacy.has(a.name),
+        isEmbedded: embSetLegacy.has(a.name),
+        isEs: esSetLegacy.has(a.name),
+      }),
+    )
+  ) {
+    out.set(
+      "Infrastructure/Persistence/OwnedCollectionOrdinalGenerator.cs",
+      renderOrdinalGenerator(ns),
+    );
+  }
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitProjectionRowPersistence(ctx.projections, ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));

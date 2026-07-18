@@ -131,6 +131,19 @@ export function checkExpectMatcher(model: Model, accept: ValidationAcceptor): vo
       );
       continue;
     }
+    // `toBeSameInstant` forgives wire timestamp FORMAT — a concept that only
+    // exists once a value has crossed the HTTP boundary.  In a domain unit test
+    // (in-memory values) there is nothing to forgive, so restrict it to e2e.
+    if (matcher.member === "toBeSameInstant") {
+      if (!isTestE2E(stmt.$container)) {
+        accept(
+          "error",
+          `'toBeSameInstant' compares wire timestamps and is only valid in a 'test e2e' block; compare in-memory values with 'toBe' in an in-process test.`,
+          { node: matcher, property: "member" },
+        );
+      }
+      continue;
+    }
     if (matcher.member !== "toThrow") continue;
     if (matcher.args.length > 1) {
       accept(

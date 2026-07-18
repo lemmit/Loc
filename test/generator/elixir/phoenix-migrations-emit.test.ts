@@ -216,6 +216,63 @@ describe("phoenix migrations-emit — delta path", () => {
     );
   });
 
+  it("orders parent tables FK-topologically so a cross-aggregate reference target is created first (B10)", () => {
+    // Two PARENT aggregates: `gadgets` carries a cross-aggregate `X id` reference
+    // (`widgetId: Widget id`) → an inline `references(:widgets)` FK (on_delete:
+    // :restrict, NOT the cascade a part uses).  Alphabetically `gadgets` < `widgets`,
+    // so the old alphabetical sort emitted `create_gadgets` FIRST — `ecto.migrate`
+    // then hit `relation "<schema>.widgets" does not exist`.  The referenced table
+    // must get the earlier timestamp.
+    const ir: MigrationsIR = {
+      module: "Catalog",
+      storageName: "",
+      baseline: null,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "createTable",
+          table: {
+            name: "gadgets",
+            ownerModule: "Catalog",
+            schema: "catalog",
+            columns: [
+              { name: "id", type: { kind: "uuid" }, nullable: false },
+              { name: "widget_id", type: { kind: "uuid" }, nullable: false },
+              { name: "label", type: { kind: "text" }, nullable: false },
+            ],
+            primaryKey: ["id"],
+            foreignKeys: [{ column: "widget_id", refTable: "widgets", onDelete: "restrict" }],
+            indexes: [],
+          },
+        },
+        {
+          op: "createTable",
+          table: {
+            name: "widgets",
+            ownerModule: "Catalog",
+            schema: "catalog",
+            columns: [
+              { name: "id", type: { kind: "uuid" }, nullable: false },
+              { name: "name", type: { kind: "text" }, nullable: false },
+            ],
+            primaryKey: ["id"],
+            foreignKeys: [],
+            indexes: [],
+          },
+        },
+      ],
+      version: "20260101000000",
+      name: "Initial",
+    };
+    const files = emit(ir);
+    const paths = [...files.keys()].sort();
+    // widgets (the FK target) gets BASE + 0; gadgets (the referencer) BASE + 1.
+    expect(paths).toEqual([
+      "priv/repo/migrations/20260101000000_create_widgets.exs",
+      "priv/repo/migrations/20260101000001_create_gadgets.exs",
+    ]);
+  });
+
   it("renders the per-context event-log table with a composite PK, the unique seq index, and no timestamps()", () => {
     // The `<ctx>_events` log (event-log-architecture.md) has no `id` (so it
     // would otherwise fall to the state-table renderer, which emits no indexes
