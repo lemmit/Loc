@@ -65,22 +65,40 @@ System:
 // (`OldName -> NewAggregate`).
 Migration:
     'migration' name=STRING '{'
-        (renames+=RenameStep (','? renames+=RenameStep)* ','?)?
+        (steps+=MigrationStepDecl (','? steps+=MigrationStepDecl)* ','?)?
     '}';
 
-// A rename step: column (has the `.field` selector) or table/aggregate (bare
-// `OldName -> NewAggregate`).  The two are disambiguated by the token after
-// the first identifier — `.` selects a column, `->` a whole table.  Only the
-// LIVE side is a cross-reference: a column rename's `aggregate` is the still-
-// present aggregate; a table rename's `toAggregate` is the post-rename
-// aggregate.  The dead side (`from` old column / `fromTable` old name) is a
-// bare identifier the model no longer declares — a ledger block legitimately
-// names things that have since moved on, so it is NOT cross-referenced.
-RenameStep:
-    ColumnRename | TableRename;
+// A migration step: a raw `sql "…"` escape hatch, a column step (rename or
+// backfill — shares the `Agg.field` prefix, left-factored so the parser
+// stays LL(k)), or a table/aggregate rename (bare `OldName -> NewAggregate`).
+// Disambiguation: `sql` keyword ⇒ raw step; `ID '.'` ⇒ column step; `ID '->'`
+// ⇒ table rename.  Only the LIVE side is a cross-reference: a column step's
+// `aggregate` is the still-present aggregate; a table rename's `toAggregate`
+// is the post-rename aggregate.  The dead side (`field` as an old column
+// name / `fromTable` old table) is a bare identifier the model may no longer
+// declare — a ledger block legitimately names things that have since moved
+// on, so it is NOT cross-referenced.
+MigrationStepDecl:
+    SqlStep | ColumnStep | TableRename;
 
-ColumnRename:
-    aggregate=[Aggregate:ID] '.' from=UserFieldName '->' to=UserFieldName;
+// One raw one-shot SQL statement (M-T2.3), applied through the migration
+// chain exactly once (the builder records `<block>#<index>` in the snapshot's
+// `appliedDataMigrations` ledger).  Postgres-flavoured — every backend
+// applies Postgres (Ecto wraps it in `execute/1`).
+SqlStep:
+    'sql' sql=STRING;
+
+// A column step, left-factored on the shared `Agg.field` prefix:
+//   - rename:   `Order.qty -> quantity`   (`renamedTo` set; `field` is the
+//     OLD, now-absent column — the M-T2.1 ledger semantics)
+//   - backfill: `Order.status = <expr>`   (`value` set; `field` is a LIVE
+//     field — it names the newly-added / newly-required column, and the
+//     expression is lowered in the aggregate's scope so sibling fields
+//     resolve as columns)
+// `=` carries the backfill intent exactly as `->` carries rename — no new
+// keyword.
+ColumnStep:
+    aggregate=[Aggregate:ID] '.' field=UserFieldName ('->' renamedTo=UserFieldName | '=' value=Expression);
 
 // `OldName -> NewAggregate` — the aggregate's table `plural(snake(OldName))`
 // is renamed to `plural(snake(NewAggregate))` in the derived diff, cascading
@@ -1784,7 +1802,7 @@ CommonSoftKeywords returns string:
       | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
-      | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'store' | 'tablePrefix'
+      | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix'
       | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 // LooseName — admissible identifiers in name positions that need to

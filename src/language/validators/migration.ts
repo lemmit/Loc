@@ -25,7 +25,7 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Migration, Model } from "../generated/ast.js";
-import { isMigration, isTableRename } from "../generated/ast.js";
+import { isMigration, isProperty, isSqlStep, isTableRename } from "../generated/ast.js";
 
 export function checkMigrations(model: Model, accept: ValidationAcceptor): void {
   const seenNames = new Set<string>();
@@ -33,9 +33,14 @@ export function checkMigrations(model: Model, accept: ValidationAcceptor): void 
   // rename source at most once and a rename target at most once.
   const seenSource = new Set<string>();
   const seenTarget = new Set<string>();
+  // (aggregate, column) → at most one backfill per block (`loom.backfill-duplicate`
+  // keys on block + column: re-backfilling the same column in a LATER block is
+  // legitimate ledger history, within one block it is ambiguous).
+  const seenBackfill = new Set<string>();
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isMigration(node)) continue;
-    checkMigration(node, seenNames, seenSource, seenTarget, accept);
+    seenBackfill.clear();
+    checkMigration(node, seenNames, seenSource, seenTarget, seenBackfill, accept);
   }
 }
 
@@ -44,6 +49,7 @@ function checkMigration(
   seenNames: Set<string>,
   seenSource: Set<string>,
   seenTarget: Set<string>,
+  seenBackfill: Set<string>,
   accept: ValidationAcceptor,
 ): void {
   if (seenNames.has(m.name)) {
@@ -56,7 +62,7 @@ function checkMigration(
     seenNames.add(m.name);
   }
 
-  for (const step of m.renames) {
+  for (const step of m.steps) {
     if (isTableRename(step)) {
       // Table/aggregate rename (`OldName -> NewAggregate`).  Structural checks
       // only: `fromTable` is a bare name (the old aggregate is gone), so it
@@ -92,23 +98,60 @@ function checkMigration(
       }
       continue;
     }
-    // A column rename is scoped to a specific aggregate; key collisions per aggregate.
+    if (isSqlStep(step)) {
+      // Raw `sql "…"` step (M-T2.3) — structural check only: non-empty.
+      if (step.sql.trim() === "") {
+        accept("error", "Empty sql step — a raw migration statement must not be blank.", {
+          node: step,
+          property: "sql",
+          code: "loom.migration-sql-empty",
+        });
+      }
+      continue;
+    }
+    // A column step is scoped to a specific aggregate; key collisions per aggregate.
     const agg = step.aggregate.ref?.name ?? step.aggregate.$refText;
-    if (step.from === step.to) {
+    if (step.value !== undefined) {
+      // Backfill (`Agg.field = <expr>`, M-T2.3).  Unlike a rename's dead-side
+      // names, the target field must be LIVE — it names the newly-added /
+      // newly-required column.  (The expression's SQL-renderability and type
+      // fit are IR-level checks — phase ⑦ — where the lowered ExprIR exists.)
+      const fields = step.aggregate.ref?.members.filter(isProperty).map((p) => p.name) ?? [];
+      if (step.aggregate.ref && !fields.includes(step.field)) {
+        accept(
+          "error",
+          `'${step.field}' is not a field of aggregate '${agg}' — a backfill targets a live field (it names the newly-added column).`,
+          { node: step, property: "field", code: "loom.backfill-unknown-field" },
+        );
+      }
+      const key = `${agg}.${step.field}`;
+      if (seenBackfill.has(key)) {
+        accept(
+          "error",
+          `Field '${key}' is backfilled more than once in this block — one backfill per column per block (ambiguous value).`,
+          { node: step, property: "field", code: "loom.backfill-duplicate" },
+        );
+      } else {
+        seenBackfill.add(key);
+      }
+      continue;
+    }
+    const stepTo = step.renamedTo ?? step.field;
+    if (step.field === stepTo) {
       accept(
         "error",
-        `Rename of '${agg}.${step.from}' names the same field on both sides — a rename must change the name.`,
-        { node: step, property: "to", code: "loom.rename-to-self" },
+        `Rename of '${agg}.${step.field}' names the same field on both sides — a rename must change the name.`,
+        { node: step, property: "renamedTo", code: "loom.rename-to-self" },
       );
       continue;
     }
-    const sourceKey = `${agg}.${step.from}`;
-    const targetKey = `${agg}.${step.to}`;
+    const sourceKey = `${agg}.${step.field}`;
+    const targetKey = `${agg}.${stepTo}`;
     if (seenSource.has(sourceKey)) {
       accept(
         "error",
         `Field '${sourceKey}' is renamed more than once — a column can be renamed FROM only once (ambiguous origin).`,
-        { node: step, property: "from", code: "loom.rename-duplicate-source" },
+        { node: step, property: "field", code: "loom.rename-duplicate-source" },
       );
     } else {
       seenSource.add(sourceKey);
@@ -117,7 +160,7 @@ function checkMigration(
       accept(
         "error",
         `Two renames target '${targetKey}' — a column can be renamed TO only once (ambiguous destination).`,
-        { node: step, property: "to", code: "loom.rename-duplicate-target" },
+        { node: step, property: "renamedTo", code: "loom.rename-duplicate-target" },
       );
     } else {
       seenTarget.add(targetKey);

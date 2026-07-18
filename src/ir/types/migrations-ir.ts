@@ -120,6 +120,14 @@ export interface SchemaSnapshot {
    *  framework migration tables (`schema_migrations`, `__EFMigrationsHistory`)
    *  track runtime state.  Empty / absent on a fresh snapshot. */
   migrationHistory?: MigrationHistoryEntry[];
+  /** Applied-data-migration ledger (M-T2.3).  Keys `"<block>#<index>"` for
+   *  every raw `sql` migration-block step already emitted against this
+   *  baseline.  Raw SQL has no structural condition to guard on (unlike
+   *  renames/backfills, which are naturally inert once baked in), so the
+   *  snapshot records which ones ran — a `sql` step is emitted exactly
+   *  once.  Absent / empty when no raw steps have been emitted.  Optional
+   *  ⇒ `schemaVersion` stays 1; old snapshots read fine. */
+  appliedDataMigrations?: string[];
   tables: TableShape[];
 }
 
@@ -175,7 +183,27 @@ export type MigrationStep =
   // destructive-change gate's NOT-NULL-add rewrite to mark the backfill the
   // operator must perform between adding a nullable column and setting it NOT
   // NULL.  Renders to a no-op comment on every backend.
-  | { op: "sqlComment"; comment: string };
+  | { op: "sqlComment"; comment: string }
+  // Data backfill (M-T2.3): `UPDATE <table> SET <column> = <valueSql>`
+  // [`WHERE <column> IS NULL` when `onlyNull`].  `valueSql` is a pre-rendered
+  // Postgres scalar expression (the `IndexShape.predicate` precedent — SQL
+  // text in the platform-neutral IR), produced by `renderSqlScalarExpr` from
+  // a validated `migration`-block backfill step.  `onlyNull: true` (the
+  // NOT-NULL-sequence default) makes re-application against a half-migrated
+  // table safe.  Renders as raw SQL on every backend (Ecto: `execute/1`).
+  | {
+      op: "backfillColumn";
+      table: string;
+      schema?: string;
+      column: string;
+      valueSql: string;
+      onlyNull: boolean;
+    }
+  // Raw one-shot DML (M-T2.3): a `sql "…"` step from a `migration` block,
+  // emitted verbatim.  NOT naturally inert — the builder records the step's
+  // `<block>#<index>` key in the snapshot's `appliedDataMigrations` so it is
+  // emitted exactly once.  Ordered after the generation's structural steps.
+  | { op: "sqlExec"; sql: string };
 
 export interface MigrationsIR {
   /** Owning module name — `.loom/snapshots/<module>.snapshot.json` is keyed

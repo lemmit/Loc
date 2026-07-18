@@ -51,7 +51,7 @@ import {
   isBoundedContext,
   isChannel,
   isChannelSource,
-  isColumnRename,
+  isColumnStep,
   isCommandHandler,
   isComponent,
   isContainment,
@@ -83,6 +83,7 @@ import {
   isRetrieval,
   isSeed,
   isSolution,
+  isSqlStep,
   isStorage,
   isSubdomain,
   isSystem,
@@ -108,6 +109,7 @@ import type {
   AggregateIR,
   ApiIR,
   AuthIR,
+  BackfillIntentIR,
   BoundedContextIR,
   ChannelIR,
   ChannelSourceIR,
@@ -145,6 +147,7 @@ import type {
   SeedRowIR,
   SolutionIR,
   SortTermIR,
+  SqlStepIR,
   StorageIR,
   StorageKind,
   SubdomainIR,
@@ -366,6 +369,8 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const testCases: TestCaseIR[] = [];
   const renameIntents: RenameIntentIR[] = [];
   const tableRenameIntents: TableRenameIntentIR[] = [];
+  const backfillIntents: BackfillIntentIR[] = [];
+  const sqlMigrationSteps: SqlStepIR[] = [];
   // Root-level VOs / enums have no enclosing context — pass an empty
   // env so `lowerValueObject`'s `inValueObject(env, vo)` still works.
   const rootEnv: Env = { locals: new Map() };
@@ -388,22 +393,51 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     else if (isSolution(m)) solutions.push(lowerSolution(m));
     else if (isTestCase(m)) testCases.push(lowerTestCase(m));
     else if (isMigration(m)) {
-      // Schema-evolution intent (M-T2.1): each step becomes a rename intent the
-      // phase-⑨ migration builder folds into its diff.  The live aggregate is
-      // resolved to its owning bounded context so the builder can pin the
-      // module + Postgres schema.  Names stay RAW (the builder snake-cases them
-      // exactly as it does aggregate fields / table names).
-      for (const step of m.renames) {
-        if (isColumnRename(step)) {
-          const agg = step.aggregate.ref;
-          renameIntents.push({
+      // Schema-evolution intents (M-T2.1 renames + M-T2.3 data steps): each
+      // step becomes an intent the phase-⑨ migration builder folds into its
+      // diff.  The live aggregate is resolved to its owning bounded context so
+      // the builder can pin the module + Postgres schema.  Names stay RAW (the
+      // builder snake-cases them exactly as it does aggregate fields / table
+      // names).
+      m.steps.forEach((step, index) => {
+        if (isSqlStep(step)) {
+          sqlMigrationSteps.push({
             migration: m.name,
-            aggregate: agg?.name ?? step.aggregate.$refText,
-            context: AstUtils.getContainerOfType(agg, isBoundedContext)?.name ?? "",
-            from: step.from,
-            to: step.to,
+            index,
+            sql: step.sql,
             origin: originFor(step),
           });
+        } else if (isColumnStep(step)) {
+          const agg = step.aggregate.ref;
+          const context = AstUtils.getContainerOfType(agg, isBoundedContext)?.name ?? "";
+          if (step.value !== undefined) {
+            // Backfill (`Agg.field = <expr>`, M-T2.3).  The expression lowers
+            // in the aggregate's scope so sibling fields resolve as
+            // `this-prop` refs — the SQL renderer's column references.
+            backfillIntents.push({
+              migration: m.name,
+              aggregate: agg?.name ?? step.aggregate.$refText,
+              context,
+              field: step.field,
+              value: lowerExpr(step.value, {
+                ctx: AstUtils.getContainerOfType(agg, isBoundedContext),
+                aggregate: agg,
+                locals: new Map(),
+              }),
+              origin: originFor(step),
+            });
+          } else {
+            // Column rename (`Agg.old -> new`, M-T2.1).  `field` is the OLD,
+            // now-absent column; `renamedTo` the live one.
+            renameIntents.push({
+              migration: m.name,
+              aggregate: agg?.name ?? step.aggregate.$refText,
+              context,
+              from: step.field,
+              to: step.renamedTo ?? step.field,
+              origin: originFor(step),
+            });
+          }
         } else {
           // Table/aggregate rename (`OldName -> NewAggregate`).  Only the NEW
           // aggregate is cross-referenced (the old name is gone); it pins the
@@ -417,7 +451,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
             origin: originFor(step),
           });
         }
-      }
+      });
     }
   }
   return {
@@ -432,6 +466,8 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     testCases,
     renameIntents,
     tableRenameIntents,
+    backfillIntents,
+    sqlMigrationSteps,
   };
 }
 
@@ -458,6 +494,8 @@ export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
     testCases: models.flatMap((m) => m.testCases),
     renameIntents: models.flatMap((m) => m.renameIntents),
     tableRenameIntents: models.flatMap((m) => m.tableRenameIntents),
+    backfillIntents: models.flatMap((m) => m.backfillIntents),
+    sqlMigrationSteps: models.flatMap((m) => m.sqlMigrationSteps),
   };
 }
 

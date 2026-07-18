@@ -128,6 +128,8 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
     testCases: loom.testCases,
     renameIntents: loom.renameIntents,
     tableRenameIntents: loom.tableRenameIntents,
+    backfillIntents: loom.backfillIntents,
+    sqlMigrationSteps: loom.sqlMigrationSteps,
     traceability: computeTraceability(loom),
   } as EnrichedLoomModel;
 }

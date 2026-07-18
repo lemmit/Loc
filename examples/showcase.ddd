@@ -1010,4 +1010,16 @@ migration "2026-07-build-columns" {
     // Derives a `renameTable` for the root + owned-child cascade instead of a
     // destructive drop+recreate.  See docs/migrations.md (M-T2.1).
     LegacyBuild -> Build
+    // M-T2.3 — data steps.  A keyword-free backfill (`Agg.field = <expr>`)
+    // makes a NOT-NULL add / NULL→NOT-NULL flip non-destructive (add-nullable
+    // → UPDATE … WHERE … IS NULL → SET NOT NULL, no --allow-destructive);
+    // naturally inert once the column is baked into the baseline.
+    Build.total = 0
+    // Raw one-shot DML escape hatch — emitted exactly once (the snapshot's
+    // `appliedDataMigrations` ledger records "<block>#<index>"), after the
+    // generation's structural steps.  Raw SQL is verbatim: schema-qualify the
+    // relation (`builds.builds` — the Builds context's schema), because the
+    // migration runners' search_path does not include context schemas.
+    // See docs/migrations.md §Data migrations.
+    sql "UPDATE builds.builds SET total = 0 WHERE total IS NULL"
 }

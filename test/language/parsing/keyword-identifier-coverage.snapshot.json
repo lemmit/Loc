@@ -728,6 +728,14 @@
     "stateField"
   ],
   "spartanNg": [],
+  "sql": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "sqlite": [],
   "stamp": [
     "fieldName",

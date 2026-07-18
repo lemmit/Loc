@@ -503,3 +503,40 @@ describe("phoenix migrations-emit — multi-module initial versions are unique",
     expect(new Set(versions).size).toBe(3);
   });
 });
+
+describe("initial data-migrations file (M-T2.3)", () => {
+  it("emits sqlExec steps from an INITIAL generation into a trailing per-module data file", () => {
+    const out = new Map<string, string>();
+    const ir: MigrationsIR = {
+      module: "Sales",
+      storageName: "",
+      baseline: null,
+      next: { schemaVersion: 1, tables: [] },
+      version: "20260101000000",
+      name: "Initial",
+      steps: [
+        {
+          op: "createTable",
+          table: {
+            name: "orders",
+            ownerModule: "Sales",
+            columns: [{ name: "id", type: { kind: "uuid" }, nullable: false }],
+            primaryKey: ["id"],
+            foreignKeys: [],
+            indexes: [],
+          },
+        },
+        { op: "sqlExec", sql: "UPDATE sales.orders SET note = '' WHERE note IS NULL" },
+      ],
+    };
+    emitMigrations("phoenix_app", [ir], APP_MODULE, out);
+    const dataPath = [...out.keys()].find((p) => p.includes("_data_migrations_sales.exs"));
+    expect(dataPath).toBe("priv/repo/migrations/20260101900000_data_migrations_sales.exs");
+    const body = out.get(dataPath!)!;
+    expect(body).toContain("defmodule PhoenixApp.Repo.Migrations.DataMigrationsSales do");
+    expect(body).toContain(`execute("UPDATE sales.orders SET note = '' WHERE note IS NULL")`);
+    // The data file sorts after every table tier of its own module.
+    const tableFiles = [...out.keys()].filter((p) => p.includes("_create_"));
+    for (const f of tableFiles) expect(dataPath! > f).toBe(true);
+  });
+});

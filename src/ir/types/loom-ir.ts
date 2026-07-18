@@ -1813,6 +1813,19 @@ export interface LoomModel {
    *  owned-child cascade (part / value-collection / association tables and
    *  their owner FK columns).  Empty when no table renames are declared. */
   tableRenameIntents: TableRenameIntentIR[];
+  /** Backfill intents (M-T2.3) — lowered from `Agg.field = <expr>` steps in
+   *  a `migration` block.  Consumed only by the migration builder: a NOT-NULL
+   *  `addColumn` (or NULL→NOT-NULL flip) with a matching backfill rewrites to
+   *  the safe add-nullable → UPDATE → SET NOT NULL sequence WITHOUT the
+   *  destructive gate.  Naturally ledger-inert: fires only when the diff
+   *  contains the matching structural step.  Empty when none are declared. */
+  backfillIntents: BackfillIntentIR[];
+  /** Raw `sql "…"` migration steps (M-T2.3), in declaration order.  Consumed
+   *  only by the migration builder, which emits each exactly once (recording
+   *  `"<migration>#<index>"` in the snapshot's `appliedDataMigrations`
+   *  ledger) after the generation's structural steps.  Empty when none are
+   *  declared. */
+  sqlMigrationSteps: SqlStepIR[];
 }
 
 /** One `rename Agg.old -> new` step lowered from a `migration` block.  Field
@@ -1853,6 +1866,43 @@ export interface TableRenameIntentIR {
   /** Owning bounded-context name (of the new aggregate) — for module/schema
    *  resolution. */
   context: string;
+  /** Provenance back to the step's `.ddd` source. */
+  origin?: OriginRef;
+}
+
+/** One `Agg.field = <expr>` backfill step (M-T2.3) lowered from a `migration`
+ *  block.  Unlike a rename's dead-side names, `field` names a LIVE field of
+ *  `aggregate` (the newly-added / newly-required column); `value` is lowered
+ *  in the aggregate's scope, so sibling fields appear as `this-prop` refs the
+ *  SQL renderer turns into column references.  The builder snake-cases names
+ *  exactly as it does for table/column derivation. */
+export interface BackfillIntentIR {
+  /** Block label — the `"<name>"` on the owning `migration` block. */
+  migration: string;
+  /** Target aggregate name (table `plural(snake(aggregate))`). */
+  aggregate: string;
+  /** Owning bounded-context name — for module/schema resolution. */
+  context: string;
+  /** The LIVE field being backfilled (column `snake(field)`). */
+  field: string;
+  /** The backfill expression, restricted to the SQL-renderable subset
+   *  (`sqlRenderableExpr` — validated at phase ⑦, rendered at phase ⑨). */
+  value: ExprIR;
+  /** Provenance back to the step's `.ddd` source. */
+  origin?: OriginRef;
+}
+
+/** One raw `sql "…"` step (M-T2.3) lowered from a `migration` block.
+ *  `index` is the step's position among the block's steps — the ledger key
+ *  is `"<migration>#<index>"`, recorded in the snapshot's
+ *  `appliedDataMigrations` so the statement runs exactly once. */
+export interface SqlStepIR {
+  /** Block label — the `"<name>"` on the owning `migration` block. */
+  migration: string;
+  /** Position among the owning block's steps (ledger key component). */
+  index: number;
+  /** The raw Postgres statement, verbatim. */
+  sql: string;
   /** Provenance back to the step's `.ddd` source. */
   origin?: OriginRef;
 }
