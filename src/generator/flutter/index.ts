@@ -15,6 +15,7 @@
 
 import type {
   DeployableIR,
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   PageIR,
   SystemIR,
@@ -26,6 +27,7 @@ import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
+import { collectFlutterForms, collectPageForms, renderFormsFile } from "./forms-emit.js";
 import { flutterPack } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -55,13 +57,36 @@ export function generateFlutterForContexts(
   // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
   out.set("lib/models.dart", renderDartModels(contexts));
 
+  // Aggregate + owning-bounded-context lookups, built once — threaded into the
+  // walker (form seams resolve the aggregate's create-input / op params + the
+  // BC's enums / value objects) and the form projector.
+  const aggregatesByName = new Map<string, EnrichedAggregateIR>();
+  const bcByAggregate = new Map<string, EnrichedBoundedContextIR>();
+  for (const c of contexts) {
+    for (const a of c.aggregates) {
+      aggregatesByName.set(a.name, a);
+      bcByAggregate.set(a.name, c);
+    }
+  }
+
+  // Form widgets — one self-contained `StatefulWidget` per CreateForm /
+  // OperationForm / DestroyForm a page hosts (POST/DELETE over package:http).
+  const forms = collectFlutterForms(ui, aggregatesByName, bcByAggregate);
+
   // Riverpod read providers — one `FutureProvider` per distinct QueryView read
   // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
   // only when the ui issues reads, alongside the `AppConfig` api-base helper.
   const reads = collectFlutterReads(ui, contexts);
+  // `AppConfig`/`apiUri` is shared by both the read providers AND the form
+  // widgets — emit it when either is present.
+  if (reads.length > 0 || forms.length > 0) {
+    out.set("lib/config.dart", renderAppConfig());
+  }
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
-    out.set("lib/config.dart", renderAppConfig());
+  }
+  if (forms.length > 0) {
+    out.set("lib/forms.dart", renderFormsFile(forms));
   }
 
   // The aggregates reachable through this deployable — used for the fallback
@@ -69,7 +94,10 @@ export function generateFlutterForContexts(
   const aggregates = contexts.flatMap((c) => c.aggregates.map((a) => a.name));
 
   const pages = ui?.pages ?? [];
-  const rendered = pages.map((page) => ({ page, ...renderPage(page, ui as UiIR, contexts) }));
+  const rendered = pages.map((page) => ({
+    page,
+    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate),
+  }));
 
   if (rendered.length > 0) {
     for (const r of rendered) {
@@ -107,14 +135,20 @@ function renderPage(
   page: PageIR,
   ui: UiIR,
   contexts: EnrichedBoundedContextIR[],
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+  bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR>,
 ): Omit<RenderedPage, "page"> {
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
 
-  const aggregatesByName = new Map(contexts.flatMap((c) => c.aggregates.map((a) => [a.name, a])));
   const paramNames = new Set(page.params.map((p) => p.name));
   const stateNames = new Set(page.state.map((s) => s.name));
+
+  // Does this page host a form widget?  Its build references the generated
+  // widget class (`CreateAggForm()` / `DeleteAggForm(id: id)`), so the page
+  // imports `../forms.dart`.
+  const hostsForm = collectPageForms(page.body, aggregatesByName, bcByAggregate).length > 0;
 
   let bodyWidget = "const Center(child: Text('Empty page'))";
   let usesState = false;
@@ -131,6 +165,7 @@ function renderPage(
       new Map(), // userComponents
       ui.apiParams,
       aggregatesByName,
+      bcByAggregate, // form seams resolve enum / value-object types here
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
     usesState = result.usesState;
@@ -149,11 +184,11 @@ function renderPage(
     ? renderConsumerPage(
         page,
         className,
-        { usesState, usedActions, usedApiHooks, usesRouteId, stateful },
+        { usesState, usedActions, usedApiHooks, usesRouteId, stateful, hostsForm },
         bodyWidget,
         contexts,
       )
-    : renderStatelessPage(page, className, bodyWidget);
+    : renderStatelessPage(page, className, bodyWidget, { usesRouteId, hostsForm });
 
   return { fileBase, className, routePath, source };
 }
@@ -166,22 +201,38 @@ interface ConsumerBindings {
   usedApiHooks: ReadonlyMap<string, ApiHookUse>;
   usesRouteId: boolean;
   stateful: boolean;
+  /** Page hosts a form widget → imports `../forms.dart`. */
+  hostsForm: boolean;
 }
 
 /** Display-only page → a plain `StatelessWidget`.  The body references no
  *  wire-model types, so it imports only material.dart — importing
  *  lib/models.dart here would be an `unused_import` under `flutter analyze`.
  *  Full parity (data-bound pages) adds the models import at the point a page
- *  actually references a model class. */
-function renderStatelessPage(page: PageIR, className: string, bodyWidget: string): string {
+ *  actually references a model class.  A form-hosting page still stays a
+ *  `StatelessWidget` (each form is its own `StatefulWidget`) — it imports
+ *  `../forms.dart` and, when a form carries the route id (op / destroy), binds
+ *  `id` from the route arguments in `build`. */
+function renderStatelessPage(
+  page: PageIR,
+  className: string,
+  bodyWidget: string,
+  opts: { usesRouteId: boolean; hostsForm: boolean },
+): string {
+  const imports = ["import 'package:flutter/material.dart';"];
+  if (opts.hostsForm) imports.push("import '../forms.dart';");
+  const idBinding = opts.usesRouteId
+    ? ["    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';"]
+    : [];
   return `${lines(
-    "import 'package:flutter/material.dart';",
+    ...imports,
     "",
     `class ${className} extends StatelessWidget {`,
     `  const ${className}({super.key});`,
     "",
     "  @override",
     "  Widget build(BuildContext context) {",
+    ...idBinding,
     "    return Scaffold(",
     `      appBar: AppBar(title: const Text('${escapeDart(page.name)}')),`,
     "      body: SingleChildScrollView(",
@@ -244,6 +295,7 @@ function renderConsumerPage(
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
   ];
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
+  if (b.hostsForm) imports.push("import '../forms.dart';");
   return `${lines(
     ...imports,
     "",
