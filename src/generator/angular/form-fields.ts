@@ -1,5 +1,12 @@
-import type { AggregateIR, BoundedContextIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  FieldIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { renderDefaultSeed } from "../_frontend/default-seed.js";
 import { unwrapOpt } from "../_frontend/form-helpers.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 
@@ -484,7 +491,7 @@ export function fieldGroupInput(
  *  and no value object, `flatMarkup`/`flatControls` are byte-identical to the
  *  previous all-flat output. */
 export function partitionAngularFields(
-  fields: readonly { name: string; type: TypeIR }[],
+  fields: readonly { name: string; type: TypeIR; default?: ExprIR }[],
   bc: BoundedContextIR,
   ns: string,
   ctx: WalkContext,
@@ -529,7 +536,14 @@ export function partitionAngularFields(
   }
   if (fieldArrays.length > 0) addNg(ctx, "@angular/forms", "FormArray");
   return {
-    flatControls: flat.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    // A constant/enum `= default` seeds the control's initial value (client can
+    // still edit it); non-evaluable defaults (money/now/this-relative/ref) and
+    // no default fall back to the type-zero init.  A nonNullable control needs a
+    // non-null literal, and `renderDefaultSeed` yields exactly that.
+    flatControls: flat.map((f) => ({
+      name: f.name,
+      init: (f.default ? renderDefaultSeed(f.default) : null) ?? controlInit(f.type),
+    })),
     flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx)),
     flatNames: flat.map((f) => f.name),
     // A value-object sub-field that is itself an `X id` needs the target's

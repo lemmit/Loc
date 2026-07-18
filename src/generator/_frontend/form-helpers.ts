@@ -1,5 +1,6 @@
-import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural } from "../../util/naming.js";
+import { type DefaultSeedCtx, renderDefaultSeed } from "./default-seed.js";
 
 // ---------------------------------------------------------------------------
 // React form helpers — Mantine input rendering on top of `react-hook-form`,
@@ -122,10 +123,17 @@ export function idTargetHookVar(target: AggregateIR): string {
  * warnings.
  */
 export function initialValuesTs(
-  fields: { name: string; type: TypeIR; optional: boolean }[],
+  fields: { name: string; type: TypeIR; optional: boolean; default?: ExprIR }[],
   ctx: BoundedContextIR,
+  seedCtx: DefaultSeedCtx = {},
 ): string {
-  const entries = fields.map((f) => `${f.name}: ${initialValueTs(f.type, ctx, f.optional)}`);
+  const entries = fields.map((f) => {
+    // A declared default (`field: T = <expr>`) seeds the input when the
+    // frontend can evaluate it client-side; otherwise fall back to the
+    // type-zero placeholder (RHF still needs a controlled value).
+    const seed = f.default ? renderDefaultSeed(f.default, seedCtx) : null;
+    return `${f.name}: ${seed ?? initialValueTs(f.type, ctx, f.optional)}`;
+  });
   return `{ ${entries.join(", ")} }`;
 }
 

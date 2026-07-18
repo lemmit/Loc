@@ -328,7 +328,13 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
   const params: ParamIR[] = [];
   for (const p of spec.params) {
     const t = lowerType(p.type, env);
-    params.push({ name: p.name, type: t });
+    // A param default (`param: T = <expr>`) lowers in the surrounding env —
+    // which for an operation/create/destroy carries `this` — so a default may
+    // reference the target instance (`to: date = this.eta`).  Sibling params
+    // are intentionally NOT in scope (defaults resolve against `env`, not the
+    // param-accumulating `inner`), keeping the resolution order-independent.
+    const def = p.default ? lowerExprInContext(p.default, t, env) : undefined;
+    params.push({ name: p.name, type: t, ...(def ? { default: def } : {}) });
     inner = withLocal(inner, p.name, "param", t);
   }
   // A union-returning operation threads its variants into the env so each

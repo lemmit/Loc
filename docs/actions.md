@@ -228,6 +228,62 @@ action confirm() {
 Reads (`byId`, finders), sibling-action calls, pure helpers, and view-effects
 (`navigate` / `toast`) are **not** flagged.
 
+## Parameter defaults — `param: T = <expr>`
+
+Any operation / workflow-start / create parameter may declare a default value,
+the parameter analogue of a field default (`field: T = <expr>`). The scaffolded
+`OperationForm` / `WorkflowForm` seeds its input from that default instead of the
+type-zero placeholder — a *suggestion* the user can still override (unlike a
+`stamp`, which the server owns and hides from the form entirely).
+
+```ddd
+aggregate Shipment {
+  eta:    datetime
+  status: string
+  // constant default → seeds the op form's input
+  operation cancel(reason: string = "customer request") { status := "cancelled" }
+  // this-relative default → resolves against the target instance
+  operation reschedule(to: datetime = this.eta) { eta := to }
+}
+```
+
+The default lowers in the operation's env (so `this` binds the target instance)
+and rides `ParamIR.default`. Generated create-form seed (React):
+
+```tsx
+useForm<CancelShipmentRequest>({ defaultValues: { reason: "customer request" } })
+```
+
+Seeding is best-effort over the **client-evaluable** subset — compile-time
+constants and enum members. These seed on **React** (all packs), **Svelte**,
+**Angular**, and **Feliz**, in both create forms (field defaults) and operation
+forms (param defaults). (Vue's generated forms are a pending slice and don't
+seed yet.) A mistyped default is rejected at the source, exactly like a field
+default (`operation cancel(reason: int = "x")` → validation error).
+
+A **`this.<field>`** default additionally seeds from the loaded record
+(`record.<field>`) on a **hand-written instance-qualified** op form
+(`OperationForm { order.<op> }`, where the instance is in scope) rendered by a
+React pack that threads the record into its op-form component (`seedsOpFormRecord`
+— **mantine, shadcn, mui, and chakra**). The **scaffolded** Detail page uses the
+by-name form (`OperationForm { of:, op: }` — id from the route, no record in
+scope), so its op modals seed constants but fall back to type-zero for a
+`this.<field>` default.
+
+```tsx
+// operation note(memo: string = this.customerId) → mantine op-form component
+function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … }) {
+  const { … } = useForm<NoteOrderRequest>({ defaultValues: { memo: record.customerId } });
+```
+
+Everything else falls back to the type-zero seed: a `this.<field>` on the
+by-name op form (`OperationForm { of:, op: }` — no record in scope) or on a
+non-threading pack (Vue / Svelte / Angular / Feliz), and any ambient / lookup
+source (`now()`, `currentUser.*`, a sequence, a cross-aggregate read) — the
+server-`prepare`-endpoint tier. `ParamIR.default` is still carried in the IR for
+a future backend that applies it server-side (today none do — op params are
+required on the wire and the form always seeds + sends them).
+
 ## Further reading
 
 - [`docs/page-metamodel.md`](page-metamodel.md) — the page/component DSL surface,

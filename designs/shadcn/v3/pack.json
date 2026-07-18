@@ -577,5 +577,6 @@
       "green": "default",
       "blue": "default"
     }
-  }
+  },
+  "seedsOpFormRecord": true
 }

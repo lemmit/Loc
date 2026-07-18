@@ -44,6 +44,7 @@ import {
   checkDerived,
   checkFunction,
   checkInvariant,
+  checkParameterDefault,
   checkPropertyCheck,
   checkPropertyDefault,
 } from "./types.js";
@@ -499,6 +500,14 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isUnique(m)) checkUnique(m, agg, accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
+    // Parameter defaults on aggregate actions (`operation cancel(reason = "x")`,
+    // `create(...)`) get the same type-check as field defaults — `envForAggregate`
+    // binds `this` so a this-relative default resolves.
+    if (isOperation(m) || isCreate(m)) {
+      for (const param of m.params) {
+        if (param.default) checkParameterDefault(param, envForAggregate(agg), accept);
+      }
+    }
     if (isDerivedProp(m)) {
       checkDerived(m, envForAggregate(agg), accept);
       // Reserved-name derived fields — `display` (user-facing label) and

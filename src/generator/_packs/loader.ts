@@ -123,6 +123,14 @@ export interface PackManifest {
    *  source module.  Default imports aren't supported in v0
    *  because no built-in primitive needs them. */
   imports?: Record<string, ImportSpec[]>;
+  /** Opt-in: this pack's `form-op-module` + `primitive-modal` templates
+   *  thread the loaded record into the operation-form component, so a
+   *  `this.<field>` parameter default (`reschedule(to: datetime = this.eta)`)
+   *  can seed `defaultValues` as `record.<field>`.  Only packs that actually
+   *  accept + pass the `record` prop set this — absent, a `this.*` op-param
+   *  default falls back to the type-zero seed (the JSX-family op-form is a
+   *  record-less module component by default). */
+  seedsOpFormRecord?: boolean;
 }
 
 /** A single named-import declaration: `import { ...named } from "<from>"`. */

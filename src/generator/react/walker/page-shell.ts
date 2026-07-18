@@ -654,6 +654,11 @@ function renderFormOpWiring(
     state;
   const opPascal = upperFirst(op.name);
   const tplCtx = {
+    // Present iff a this-relative default seeded from the loaded record: the
+    // component takes a `record: <recordType>` prop and its `defaultValues`
+    // reads it (`record.<field>`).  Absent → no record prop (default path).
+    recordVar: state.recordVar,
+    recordType: state.recordType,
     aggregateName: agg.name,
     aggregateNameCamel: lowerFirst(agg.name),
     opName: op.name,
