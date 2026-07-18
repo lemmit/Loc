@@ -6,7 +6,7 @@ system CoreShop {
       enum Status { Draft, Placed, Cancelled }
       valueobject Money { amount: decimal  currency: string }
       event OrderPlaced { code: string }
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         status: Status
         total: Money
@@ -31,5 +31,13 @@ system CoreShop {
     dataSources: [ordersState]
     serves: OrdersApi
     port: 4000
+  }
+
+  test e2e "core domain: create, add line, place, read" against d {
+    let o = api.orders.create({ code: "CD1", status: "Draft", total: { amount: 10.00, currency: "USD" } })
+    api.orders.addLine(o, { sku: "S1", qty: 2 })
+    api.orders.place(o)
+    let read = api.orders.getById(o)
+    expect(read.status).toBe("Placed")
   }
 }

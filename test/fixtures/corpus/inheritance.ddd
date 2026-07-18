@@ -6,7 +6,7 @@ system Parties {
         name: string
         email: string
       }
-      aggregate Customer extends Party {
+      aggregate Customer extends Party with crudish {
         creditLimit: int
         operation raiseLimit(by: int) { creditLimit := creditLimit + by }
       }
@@ -31,5 +31,11 @@ system Parties {
     dataSources: [partiesState]
     serves: PartiesApi
     port: 4000
+  }
+
+  test e2e "TPH concrete (Customer) round-trips" against d {
+    let c = api.customers.create({ name: "Acme", email: "a@x.com", creditLimit: 100 })
+    let read = api.customers.getById(c)
+    expect(read.name).toBe("Acme")
   }
 }

@@ -36,6 +36,9 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
 | operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |🔴 B11  |
+| core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
+| document (crudish)            |  ✅  |  ✅  |   ✅   |🔴 B12  |  ⏳    |
+| inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -43,6 +46,13 @@ Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
 
 ---
+
+## B12 🔴 dotnet — `with crudish` on a `shape: document` aggregate won't compile
+
+- **Where:** `src/generator/dotnet/` (crudish repo interface vs document-shape repo impl).
+- **Repro:** `test/fixtures/corpus/document.ddd` with `aggregate Article shape: document, with crudish` on dotnet — `dotnet build` fails **CS0535: `ArticleRepository` does not implement `IArticleRepository.DeleteAsync(Article, …)`**. The `crudish` capability adds `DeleteAsync` to the repo interface, but the document-shape repository emitter doesn't emit a `DeleteAsync` body (the two paths — crudish interface, document impl — disagree). node/java/python compile + round-trip.
+- **Impact:** you can't add CRUD (needed to create/delete) to a document-shaped aggregate on dotnet. Found by the Slice-4 drain (needed crudish for a create path to test document behaviourally).
+- **Status:** confirmed build error; skip-listed pending fix.
 
 ## B11 🔴 elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
 

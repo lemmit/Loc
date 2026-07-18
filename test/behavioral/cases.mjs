@@ -108,13 +108,20 @@ const BEHAVIOURAL_SKIP = {
     // re-armed; no node skips remain.
   },
   dotnet: {
-    // B2/B3/B4/B8 fixed — no dotnet skips remain. (B8: single-containment
-    // relational owned-entity EF model + optional-nav; efcore.ts.)
+    // B2/B3/B4/B8 fixed. B12 open — `with crudish` on a `shape: document`
+    // aggregate: the repo interface declares DeleteAsync but the document-shape
+    // repo impl doesn't provide it (CS0535 interface/impl mismatch).
+    document: "B12: dotnet crudish+document — ArticleRepository missing DeleteAsync",
   },
   elixir: {
     // B11 open — a `T or Error` union whose success type is a PRIMITIVE (e.g.
     // `string or NotFound`) emits an invalid elixir module name (`…stringOrNotFound`).
     "operation-returns": "B11: elixir union-return with a primitive success type → invalid module name",
+    // UNVERIFIED on elixir (docker contention with the in-flight B11 fix agent).
+    // node/java/python(+dotnet, minus document B12) pass; verify + resolve post-B11.
+    "core-domain": "unverified on elixir (docker contention) — verify post-B11",
+    document: "unverified on elixir (docker contention) — verify post-B11",
+    inheritance: "unverified on elixir (docker contention) — verify post-B11",
     // B5/B6/B7/B9/B10 fixed — no other elixir skips remain. (B9: single `contains`
     // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
     // handles a single `has_one` struct; context-emit.ts. B10: parent-table
