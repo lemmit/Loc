@@ -33,6 +33,8 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+| single-containment            |  ✅  |  ✅  |   ✅   |🔴 B8   |  ⏳    |
+| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -137,6 +139,19 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   its snake_case column (`.HasColumnName("id"|"data"|"version")`, `Id` also
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
+
+## B8 🔴 dotnet — single (non-collection) `contains` crashes on boot (EF)
+
+- **Where:** `src/generator/dotnet/` (single-containment owned-entity EF model).
+- **Repro:** `test/fixtures/corpus/single-containment.ddd` on dotnet — the app
+  **aborts on startup (exit 134)** in EF Core `GetMigrations`/`DbContext`
+  construction (same signature as B3). node/java/python boot + round-trip. A
+  `contains shipment: Shipment` (single, non-collection) owned entity isn't
+  mapped in a way EF accepts (likely the part key / back-reference, cf. B3).
+- **Impact:** any aggregate with a single (non-collection) containment fails to
+  start on dotnet. Found by the Slice-4 drain (batch: single-containment/seeding).
+- **Status:** confirmed boot crash; skip-listed pending fix. Likely a sibling of
+  B3's owned-entity mapping fix.
 
 ## B7 🔴 elixir — `auditable` lifecycle stamps 500 on create
 

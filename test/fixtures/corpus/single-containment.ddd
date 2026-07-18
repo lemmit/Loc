@@ -2,7 +2,7 @@
 system SC {
   subdomain D {
     context Shop {
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         contains shipment: Shipment
         entity Shipment { carrier: string  trackingCode: string }
@@ -22,5 +22,12 @@ system SC {
     dataSources: [st]
     serves: A
     port: 4000
+  }
+
+  test e2e "single containment round-trips through an op" against d {
+    let o = api.orders.create({ code: "SC1" })
+    api.orders.ship(o, { carrier: "UPS", tracking: "1Z999" })
+    let read = api.orders.getById(o)
+    expect(read.shipment.carrier).toBe("UPS")
   }
 }

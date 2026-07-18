@@ -37,4 +37,10 @@ system Seeding {
     serves: CatalogApi
     port: 4000
   }
+
+  test e2e "seeded catalog is created and readable" against d {
+    let w = api.widgets.create({ name: "Delta", size: 9, tier: "Free" })
+    let read = api.widgets.getById(w)
+    expect(read.name).toBe("Delta")
+  }
 }
