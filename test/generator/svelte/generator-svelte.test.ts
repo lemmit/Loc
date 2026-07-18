@@ -181,6 +181,16 @@ describe("svelte generator — project shape", () => {
       'role="dialog" aria-modal="true" aria-labelledby="orders-op-confirm-title"',
     );
     expect(detail).toContain('<h3 id="orders-op-confirm-title"');
+    // a11y: the raw dialog box gets a focus trap (focus-in / Tab-cycle / Escape /
+    // restore) via the emitted `modalTrap` action + a `tabindex="-1"` focus
+    // fallback — the lib dialogs get this from their component. `use:modalTrap`
+    // closes the modal (its onClose flips the open flag).
+    expect(detail).toContain('tabindex="-1"');
+    expect(detail).toContain("use:modalTrap={() => { confirmModalOpen = false; }}");
+    // `modalTrap` rides the shared forms runtime import (not the walker collector,
+    // since the op-modal snippet renders via a direct pack.render).
+    expect(detail).toContain("modalTrap");
+    expect(detail).toContain('from "$lib/forms.svelte"');
   });
 
   it("magic route id: a hand-written byId(id) page derives id from page.params", async () => {
@@ -215,6 +225,12 @@ describe("svelte generator — project shape", () => {
   it("emits the runes form/toast/format lib and no react artifacts", async () => {
     const out = await files();
     expect(out.get("web/src/lib/forms.svelte.ts")).toContain("export function createForm");
+    // The modal focus-trap action ships in the shared forms runtime — moves
+    // focus in, traps Tab, closes on Escape, restores focus on teardown.
+    const forms = out.get("web/src/lib/forms.svelte.ts") ?? "";
+    expect(forms).toContain("export function modalTrap(node: HTMLElement, onClose: () => void)");
+    expect(forms).toContain('if (e.key === "Escape")');
+    expect(forms).toContain("previouslyFocused?.focus?.()");
     expect(out.get("web/src/lib/toast.svelte.ts")).toContain("export const toast");
     expect(out.get("web/src/lib/format.ts")).toContain("export function formatMoney");
     for (const path of out.keys()) {

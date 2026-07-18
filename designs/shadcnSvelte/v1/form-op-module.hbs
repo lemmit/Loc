@@ -2,7 +2,7 @@
   <button type="button" class="loom-btn {{#if triggerPrimary}}loom-btn-primary{{else}}loom-btn-outline{{/if}}" onclick={() => { {{opCamel}}ModalOpen = true; }} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</button>
   {#if {{opCamel}}ModalOpen}
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div class="w-full max-w-md rounded-xl border bg-background p-6 shadow-lg" role="dialog" aria-modal="true" aria-labelledby="{{slug}}-op-{{opName}}-title" data-testid="{{slug}}-op-{{opName}}-form">
+      <div class="w-full max-w-md rounded-xl border bg-background p-6 shadow-lg" role="dialog" aria-modal="true" aria-labelledby="{{slug}}-op-{{opName}}-title" tabindex="-1" data-testid="{{slug}}-op-{{opName}}-form" use:modalTrap={() => { {{opCamel}}ModalOpen = false; }}>
         <h3 id="{{slug}}-op-{{opName}}-title" class="mb-4 text-lg font-semibold">{{humanOp}}</h3>
         <form onsubmit={(e) => { e.preventDefault(); form.submit(async (vals) => {
           try {

@@ -186,6 +186,25 @@ function renderFormOpWiring(state: OperationFormState, pack: LoadedPack): FormWi
   };
 }
 
+/** The op-modal snippet (`form-op-module`) uses the pack's `modalTrap` action
+ *  (focus trap + Escape-to-close).  Unlike walker primitives, that snippet is
+ *  rendered via a direct `pack.render`, so its `pack.json` `imports` entry does
+ *  NOT ride the walker's import collector — merge it into the page map here when
+ *  the page carries any operation form.  Pack-driven (reads whatever the pack
+ *  declares), so a pack whose op-modal needs no runtime import contributes none. */
+function addOpModuleImports(
+  imports: ImportMap,
+  pack: LoadedPack,
+  formOfs: readonly FormOfState[],
+): void {
+  if (!formOfs.some((st) => st.kind === "operation")) return;
+  for (const spec of pack.manifest.imports?.["form-op-module"] ?? []) {
+    const names = imports.get(spec.from) ?? new Set<string>();
+    for (const name of spec.named) names.add(name);
+    imports.set(spec.from, names);
+  }
+}
+
 /** Render a page's full `+page.svelte` module around a walked body. */
 export function renderSveltePage(
   pageName: string,
@@ -319,6 +338,7 @@ export function renderSveltePage(
   const effectiveUsesState =
     usesState || usesStateForTitle || derivedResult.usesState || actionResult.usesState;
 
+  addOpModuleImports(imports, pack, formOfs);
   const packImports = renderSvelteImportLines(imports);
   // Interactive-table sort helper — imported only when a sortable `Table`
   // renders on this page (M-T1.1).
@@ -603,6 +623,7 @@ export function renderSvelteComponentFile(
     },
     { decls: "", templateScope: "", usesNavigate: false },
   );
+  addOpModuleImports(imports, pack, formOfs);
   const packImports = renderSvelteImportLines(imports);
   const tableHelperNames = [
     ...(usesTableSort ? ["sortRows"] : []),
