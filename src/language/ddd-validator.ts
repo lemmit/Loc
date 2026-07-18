@@ -43,6 +43,7 @@ import {
   checkDuplicateNames,
   checkDurationConstructors,
   checkExpectMatcher,
+  checkFactoryCreateFields,
   checkGenericCarriers,
   checkHandlerBodies,
   checkIconOnlyButtonName,
@@ -186,6 +187,10 @@ export class DddValidator {
     // errors on misses.
     guard("builder-call-type", model, () => checkBuilderCallType(model, accept, this.services));
     guard("construction-fields", model, () => checkConstructionFields(model, accept));
+    // `Agg.create({ … })` factory: reject object-literal keys that aren't on the
+    // aggregate's create-input contract (server-owned `managed`/`token`/`internal`
+    // fields, or typos) — they compile the .ddd but fail the emitted project's tsc.
+    guard("factory-create-fields", model, () => checkFactoryCreateFields(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
