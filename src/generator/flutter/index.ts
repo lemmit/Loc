@@ -71,6 +71,11 @@ export function generateFlutterForContexts(
 
   out.set("pubspec.yaml", renderPubspec(pkg, deployable.name));
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
+  // Web platform scaffold — `flutter build web` refuses a project with no
+  // `web/index.html` ("This project is not configured for the web").  Emit the
+  // minimal loader shell + PWA manifest (no icon refs → no dangling assets).
+  out.set("web/index.html", renderWebIndexHtml(title));
+  out.set("web/manifest.json", renderWebManifest(pkg, title));
   out.set("Dockerfile", DOCKERFILE);
 
   return out;
@@ -197,6 +202,51 @@ flutter:
 const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
 `;
 
+/** `web/index.html` — the loader shell `flutter build web` requires.  `base
+ *  href` is the `$FLUTTER_BASE_HREF` placeholder the build rewrites; the app
+ *  boots via `flutter_bootstrap.js` (injected at build time).  No favicon/icon
+ *  links (those assets aren't emitted) so there are no dangling references. */
+function renderWebIndexHtml(title: string): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Generated Flutter app (Loom).">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="${escapeHtml(title)}">
+  <title>${escapeHtml(title)}</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
+`;
+}
+
+/** `web/manifest.json` — the PWA manifest.  No `icons` array (no icon assets
+ *  are emitted), so nothing dangles. */
+function renderWebManifest(pkg: string, title: string): string {
+  return `${JSON.stringify(
+    {
+      name: title,
+      short_name: title,
+      start_url: ".",
+      display: "standalone",
+      background_color: "#0175C2",
+      theme_color: "#0175C2",
+      description: `Generated Flutter app: ${pkg} (Loom).`,
+      orientation: "portrait-primary",
+      prefer_related_applications: false,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 // Self-hosting web build — mirrors the Feliz Dockerfile shape (SDK build stage →
 // nginx runtime serving the static bundle on :3000 with SPA fallback).  The
 // compose service references \`build: ./\`, so the Flutter bundle is produced at
@@ -271,6 +321,15 @@ ${tiles}
 /** Escape a bare identifier/title for embedding in a single-quoted Dart string. */
 function escapeDart(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$");
+}
+
+/** Escape a title for HTML text/attribute context (web/index.html). */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 /** Re-indent a possibly-multiline widget expression so its continuation lines

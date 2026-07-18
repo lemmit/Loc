@@ -75,5 +75,12 @@ describe("flutter foundation skeleton", () => {
     const dockerfile = keys.find((k) => k.endsWith("app/Dockerfile"));
     expect(dockerfile, `no Dockerfile in: ${keys.join(", ")}`).toBeDefined();
     expect(files.get(dockerfile!)).toContain("flutter build web");
+
+    // Web platform scaffold — `flutter build web` refuses a project without it.
+    const indexHtml = keys.find((k) => k.endsWith("app/web/index.html"));
+    expect(indexHtml, `no web/index.html in: ${keys.join(", ")}`).toBeDefined();
+    expect(files.get(indexHtml!)).toContain("flutter_bootstrap.js");
+    const manifest = keys.find((k) => k.endsWith("app/web/manifest.json"));
+    expect(manifest, `no web/manifest.json in: ${keys.join(", ")}`).toBeDefined();
   });
 });
