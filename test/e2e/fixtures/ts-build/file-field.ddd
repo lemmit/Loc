@@ -1,0 +1,37 @@
+// File primitive (M-T1.2 / M-T4.6 §5.3) — a `File` field on a node
+// deployable that binds a `localDisk` object store.  Compiles the wire
+// contract end-to-end: the `File` field serialises as the fixed `FileRef`
+// object `{ url, key, contentType, size }` in the aggregate Request/Response
+// zod schemas, stores as a JSONB column + migration, and the app-level
+// `POST /files` upload + `GET /files/:key` download routes plus the
+// `localDisk` resource adapter type-check.  Single `platform: node` system
+// (kept out of any cross-backend / behavioral corpus — endpoints are
+// Hono-only in this slice).
+system FileUpload {
+  subdomain Media {
+    context Docs {
+      aggregate Attachment with crudish {
+        title: string
+        // The passive File leaf — its bytes live in the bound object store;
+        // the row carries only the FileRef reference.
+        blob: File
+        thumbnail: File?
+      }
+      repository Attachments for Attachment { }
+    }
+  }
+
+  api DocsApi from Media
+  storage pg { type: postgres }
+  storage uploads { type: localDisk }
+  resource docsState { for: Docs, kind: state, use: pg }
+  resource docsFiles { for: Docs, kind: objectStore, use: uploads }
+
+  deployable api {
+    platform: node
+    contexts: [Docs]
+    dataSources: [docsState, docsFiles]
+    serves: DocsApi
+    port: 4200
+  }
+}
