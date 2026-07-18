@@ -117,6 +117,137 @@ export const s3ResourceAdapter: ResourceAdapter = {
       );
       out.push(`}`);
       out.push(``);
+      // Raw-bytes verbs consumed by the File upload/download endpoints
+      // (M-T1.2).  Unlike `$put`/`$get` (which JSON-encode), these store the
+      // exact bytes with their contentType, so a downloaded object streams
+      // back byte-identical.
+      out.push(
+        `export async function ${r.name}$putBytes(key: string, body: Uint8Array, contentType: string): Promise<void> {`,
+      );
+      out.push(`  await ${r.name}.send(`);
+      out.push(`    new PutObjectCommand({`);
+      out.push(`      Bucket: ${r.name}Bucket,`);
+      out.push(`      Key: key,`);
+      out.push(`      Body: body,`);
+      out.push(`      ContentType: contentType,`);
+      out.push(`    }),`);
+      out.push(`  );`);
+      out.push(`}`);
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$getBytes(key: string): Promise<{ body: Uint8Array; contentType: string; size: number } | null> {`,
+      );
+      out.push(`  try {`);
+      out.push(
+        `    const res = await ${r.name}.send(new GetObjectCommand({ Bucket: ${r.name}Bucket, Key: key }));`,
+      );
+      out.push(`    const bytes = await res.Body?.transformToByteArray();`);
+      out.push(`    if (!bytes) return null;`);
+      out.push(
+        `    return { body: bytes, contentType: res.ContentType ?? "application/octet-stream", size: bytes.byteLength };`,
+      );
+      out.push(`  } catch (err) {`);
+      out.push(`    if ((err as { name?: string }).name === "NoSuchKey") return null;`);
+      out.push(`    throw err;`);
+      out.push(`  }`);
+      out.push(`}`);
+      out.push(``);
+    }
+    return out;
+  },
+};
+
+/** localDisk — a dependency-free local-directory object store (M-T1.2).
+ *  Stores each object's raw bytes under a data dir keyed by `key`, plus a
+ *  sidecar `<key>.meta.json` carrying the contentType/size so a download
+ *  round-trips its metadata.  Backs the File upload/download endpoints
+ *  without any cloud SDK. */
+export const localDiskResourceAdapter: ResourceAdapter = {
+  name: "localDisk",
+  supportedKinds: ["objectStore"],
+  supports: (storageType, kind) =>
+    storageType === "localDisk" && supportsSurfaceKind("localDisk", kind),
+  emitProjectDeps: () => ({}),
+  emitClientModule(resources): Lines {
+    const out: string[] = [
+      `import { promises as fs } from "node:fs";`,
+      `import * as path from "node:path";`,
+      ``,
+    ];
+    for (const r of resources) {
+      out.push(`// objectStore '${r.name}' — local-directory store (raw bytes + sidecar meta).`);
+      out.push(
+        `export const ${r.name}Dir = process.env.${envVar(r.name)}_DIR ?? path.join(process.cwd(), "data", ${JSON.stringify(r.name)});`,
+      );
+      out.push(``);
+      out.push(`function ${r.name}$path(key: string): string {`);
+      // Guard against path traversal: keys are minted server-side (uuids),
+      // but a `GET /files/:key` param is caller-supplied, so keep the resolved
+      // path inside the data dir.
+      out.push(`  const safe = key.replace(/[^A-Za-z0-9._-]/g, "_");`);
+      out.push(`  return path.join(${r.name}Dir, safe);`);
+      out.push(`}`);
+      out.push(``);
+      // Vendor-neutral JSON verbs (parity with s3's $put/$get) so workflow
+      // bodies that reach the store keep working against localDisk.
+      out.push(`export async function ${r.name}$put(key: string, body: unknown): Promise<void> {`);
+      out.push(
+        `  await ${r.name}$putBytes(key, Buffer.from(JSON.stringify(body)), "application/json");`,
+      );
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$get(key: string): Promise<unknown> {`);
+      out.push(`  const obj = await ${r.name}$getBytes(key);`);
+      out.push(`  return obj ? JSON.parse(Buffer.from(obj.body).toString("utf8")) : null;`);
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$list(prefix: string): Promise<string[]> {`);
+      out.push(`  try {`);
+      out.push(`    const names = await fs.readdir(${r.name}Dir);`);
+      out.push(
+        `    return names.filter((n) => !n.endsWith(".meta.json") && n.startsWith(prefix));`,
+      );
+      out.push(`  } catch (err) {`);
+      out.push(`    if ((err as { code?: string }).code === "ENOENT") return [];`);
+      out.push(`    throw err;`);
+      out.push(`  }`);
+      out.push(`}`);
+      out.push(``);
+      out.push(`export async function ${r.name}$delete(key: string): Promise<void> {`);
+      out.push(`  await fs.rm(${r.name}$path(key), { force: true });`);
+      out.push(`  await fs.rm(${r.name}$path(key) + ".meta.json", { force: true });`);
+      out.push(`}`);
+      out.push(``);
+      // Raw-bytes verbs — the File endpoints' storage seam.
+      out.push(
+        `export async function ${r.name}$putBytes(key: string, body: Uint8Array, contentType: string): Promise<void> {`,
+      );
+      out.push(`  await fs.mkdir(${r.name}Dir, { recursive: true });`);
+      out.push(`  await fs.writeFile(${r.name}$path(key), body);`);
+      out.push(
+        `  await fs.writeFile(${r.name}$path(key) + ".meta.json", JSON.stringify({ contentType, size: body.byteLength }));`,
+      );
+      out.push(`}`);
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$getBytes(key: string): Promise<{ body: Uint8Array; contentType: string; size: number } | null> {`,
+      );
+      out.push(`  try {`);
+      out.push(`    const body = await fs.readFile(${r.name}$path(key));`);
+      out.push(`    let contentType = "application/octet-stream";`);
+      out.push(`    try {`);
+      out.push(
+        `      const meta = JSON.parse(await fs.readFile(${r.name}$path(key) + ".meta.json", "utf8")) as { contentType?: string };`,
+      );
+      out.push(`      if (meta.contentType) contentType = meta.contentType;`);
+      out.push(`    } catch { /* no sidecar — fall back to octet-stream */ }`);
+      out.push(`    return { body, contentType, size: body.byteLength };`);
+      out.push(`  } catch (err) {`);
+      out.push(`    if ((err as { code?: string }).code === "ENOENT") return null;`);
+      out.push(`    throw err;`);
+      out.push(`  }`);
+      out.push(`}`);
+      out.push(``);
     }
     return out;
   },
@@ -215,6 +346,7 @@ export const restApiResourceAdapter: ResourceAdapter = {
 
 const ADAPTERS: readonly ResourceAdapter[] = [
   s3ResourceAdapter,
+  localDiskResourceAdapter,
   rabbitmqResourceAdapter,
   restApiResourceAdapter,
 ];

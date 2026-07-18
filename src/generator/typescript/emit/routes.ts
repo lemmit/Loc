@@ -29,10 +29,24 @@ export function renderHttpIndex(
      *  the aggregate/workflow/view routers, before `/openapi.json`.  Empty /
      *  absent → byte-identical to the pre-A2 output. */
     explicitRouters?: readonly ExplicitRouterMount[];
+    /** File upload/download wiring (M-T1.2).  Present iff the deployable hosts
+     *  a `File`-bearing aggregate AND binds an `objectStore` dataSource;
+     *  `resource` is that binding's name, `sourceType` its storage type (the
+     *  `resources/<sourceType>.ts` module exposing `<resource>$putBytes` /
+     *  `<resource>$getBytes`).  Absent → no `/files` routes emitted
+     *  (byte-identical output). */
+    fileUpload?: { resource: string; sourceType: string };
   },
 ): string {
   const authRequired = !!options?.authRequired;
   const explicitRouters = options?.explicitRouters ?? [];
+  // File upload/download (M-T1.2) — global `POST /files` + `GET /files/:key`
+  // over the deployable's bound objectStore adapter.  Absent → no import, no
+  // routes (byte-identical).
+  const fileUpload = options?.fileUpload;
+  const fileImport = fileUpload
+    ? `import { ${fileUpload.resource}$getBytes, ${fileUpload.resource}$putBytes } from "../resources/${fileUpload.sourceType}";\nimport { randomUUID } from "node:crypto";`
+    : null;
   // Persistence selection (D-REALIZATION-AXES) — the `db` handle createApp
   // threads is drizzle's `NodePgDatabase` by default, or a MikroORM
   // `EntityManager` when `persistence: mikroorm`.
@@ -163,6 +177,41 @@ export function renderHttpIndex(
   // present.  Same origin as the domain routes — the frontend already targets
   // `${API_BASE_URL}/auth/...`.
   const authRoutesMount = authRequired ? `  app.route("${AUTH_BASE_PATH}", authRoutes());` : null;
+  // File routes (M-T1.2): multipart upload mints a uuid key, stores the raw
+  // bytes via the objectStore adapter, and returns the FileRef the wire
+  // schemas expect; download streams the object back with its stored
+  // contentType.  A deleted File-bearing row leaves its object (no lifecycle
+  // coupling — owner decision).
+  const fileRoutes = fileUpload
+    ? [
+        `  // File upload — multipart POST, stores raw bytes in the '${fileUpload.resource}' object store,`,
+        `  // returns a FileRef { url, key, contentType, size } to persist on a File field.`,
+        `  app.post("/files", async (c) => {`,
+        `    const body = await c.req.parseBody();`,
+        `    const file = body["file"];`,
+        `    if (!(file instanceof File)) {`,
+        `      return c.json({ error: "expected a 'file' form field" }, 400);`,
+        `    }`,
+        `    const key = randomUUID();`,
+        `    const bytes = new Uint8Array(await file.arrayBuffer());`,
+        `    const contentType = file.type || "application/octet-stream";`,
+        `    await ${fileUpload.resource}$putBytes(key, bytes, contentType);`,
+        `    return c.json({ url: "/files/" + key, key, contentType, size: bytes.byteLength }, 201);`,
+        `  });`,
+        `  // File download — streams the stored object back with its contentType.`,
+        `  app.get("/files/:key", async (c) => {`,
+        `    const obj = await ${fileUpload.resource}$getBytes(c.req.param("key"));`,
+        `    if (!obj) return c.json({ error: "not found" }, 404);`,
+        `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
+        `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,
+        `    const ab = obj.body.buffer.slice(`,
+        `      obj.body.byteOffset,`,
+        `      obj.body.byteOffset + obj.body.byteLength,`,
+        `    ) as ArrayBuffer;`,
+        `    return c.body(ab, 200, { "content-type": obj.contentType });`,
+        `  });`,
+      ].join("\n")
+    : null;
   return (
     lines(
       "// Auto-generated.",
@@ -178,6 +227,7 @@ export function renderHttpIndex(
       viewImport,
       projectionImport,
       ...explicitRouterImports,
+      fileImport,
       usingMikro
         ? 'import { EntityManager } from "@mikro-orm/postgresql";'
         : 'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
@@ -266,6 +316,7 @@ export function renderHttpIndex(
       viewMount,
       projectionMount,
       ...explicitRouterMounts,
+      fileRoutes,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /openapi.json by",
       "  // the cross-platform contract check.",
