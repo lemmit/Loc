@@ -36,8 +36,8 @@ migration "rename-order-fields" {
     const block = model.members.find(isMigration);
     expect(block?.name).toBe("rename-order-fields");
     expect(
-      block?.renames.map((r) =>
-        r.$type === "ColumnRename" ? `${r.aggregate.$refText}.${r.from}->${r.to}` : "TABLE",
+      block?.steps.map((r) =>
+        r.$type === "ColumnStep" ? `${r.aggregate.$refText}.${r.field}->${r.renamedTo}` : "TABLE",
       ),
     ).toEqual(["Order.qty->quantity", "Order.shippedAt->fulfilledAt"]);
   });
@@ -66,7 +66,7 @@ context C {
     );
     expect(errors).toEqual([]);
     const block = model.members.find(isMigration);
-    const step = block?.renames[0];
+    const step = block?.steps[0];
     expect(step?.$type).toBe("TableRename");
     // `fromTable` is a bare (uncross-referenced) old name; `toAggregate` is the
     // live aggregate cross-reference.
@@ -83,6 +83,6 @@ context C {
     );
     expect(errors).toEqual([]);
     const block = model.members.find(isMigration);
-    expect(block?.renames.map((r) => r.$type)).toEqual(["TableRename", "ColumnRename"]);
+    expect(block?.steps.map((r) => r.$type)).toEqual(["TableRename", "ColumnStep"]);
   });
 });

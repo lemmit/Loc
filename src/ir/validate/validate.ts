@@ -5,6 +5,10 @@ import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
+import {
+  validateMigrationDataSteps,
+  validateMigrationDataStepsUnsupported,
+} from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
   validateFindGates,
@@ -238,6 +242,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
+  // Migration-block data steps (M-T2.3): expression renderability / target /
+  // type fit, plus the TEMPORARY S2 honest gate (lifted by S3).
+  validateMigrationDataSteps(loom, diags);
+  validateMigrationDataStepsUnsupported(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
   // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
   // system-level, their targets cross-context).

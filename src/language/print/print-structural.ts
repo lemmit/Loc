@@ -1158,11 +1158,14 @@ function printTestStatement(node: TestStatement): string {
 function printMigration(node: import("../generated/ast.js").Migration): string {
   return block(
     `migration ${JSON.stringify(node.name)}`,
-    node.renames.map((r) =>
-      r.$type === "TableRename"
-        ? `${r.fromTable} -> ${r.toAggregate.$refText}`
-        : `${r.aggregate.$refText}.${r.from} -> ${r.to}`,
-    ),
+    node.steps.map((s) => {
+      if (s.$type === "TableRename") return `${s.fromTable} -> ${s.toAggregate.$refText}`;
+      if (s.$type === "SqlStep") return `sql ${JSON.stringify(s.sql)}`;
+      // ColumnStep — rename (`renamedTo`) or backfill (`value`), M-T2.3.
+      return s.value !== undefined
+        ? `${s.aggregate.$refText}.${s.field} = ${printExpr(s.value)}`
+        : `${s.aggregate.$refText}.${s.field} -> ${s.renamedTo}`;
+    }),
   );
 }
 
