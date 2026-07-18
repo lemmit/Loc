@@ -160,6 +160,15 @@ export type GenericCtorName = "paged" | "envelope";
 export interface ParamIR {
   name: string;
   type: TypeIR;
+  /** Lowered default-value expression from `param: T = <expr>` — the
+   *  parameter analogue of {@link FieldIR.default}.  Present only where the
+   *  lowering site had an env to resolve the expression (operation / create /
+   *  destroy / workflow-start / function params); the expression is
+   *  fully-resolved like any other `ExprIR` and may reference `this` (the
+   *  target instance) for an operation param.  Consumed by the scaffolded
+   *  operation / workflow form to seed its inputs; a default the target UI
+   *  can't evaluate falls back to the type-zero seed. */
+  default?: ExprIR;
 }
 
 /** Resolved access role for a stored field.  Controls the field's

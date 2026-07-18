@@ -203,7 +203,8 @@ function lowerWorkflowCreate(
   const params: ParamIR[] = [];
   for (const p of c.params) {
     const t = lowerType(p.type, baseEnv);
-    params.push({ name: p.name, type: t });
+    const def = p.default ? lowerExprInContext(p.default, t, baseEnv) : undefined;
+    params.push({ name: p.name, type: t, ...(def ? { default: def } : {}) });
     inner = withLocal(inner, p.name, "param", t);
   }
   const correlation = c.correlation ? lowerExpr(c.correlation, inner) : undefined;
