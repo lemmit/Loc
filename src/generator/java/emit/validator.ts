@@ -8,6 +8,7 @@ import {
   singleFieldShape,
 } from "../../../ir/validate/invariant-classify.js";
 import { lines } from "../../../util/code-builder.js";
+import { messageCode } from "../../../util/message-code.js";
 import {
   collectJavaExprImports,
   collectJavaRegexLiterals,
@@ -147,6 +148,7 @@ function methodBody(
           single.pattern,
           typeOf(single.field),
           inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
+          inv.message ? messageCode(inv.message.text) : undefined,
           imports,
           regexFields,
         ),
@@ -167,8 +169,11 @@ function methodBody(
       }
     }
     const predicate = renderJavaExpr(inv.expr, { thisName: "this", bareProps: true, regexFields });
+    // A messaged rule also carries a stable content-hash wire `code` (the i18n
+    // key); a message-less rule adds no code (byte-identical body).
+    const codeArg = inv.message ? `, ${JSON.stringify(messageCode(inv.message.text))}` : "";
     checks.push(
-      `        if (!(${predicate})) errors.add(WireValidationException.error("/${path}", ${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)}));`,
+      `        if (!(${predicate})) errors.add(WireValidationException.error("/${path}", ${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)}${codeArg}));`,
     );
   }
   if (checks.length === 0) return null;
@@ -186,6 +191,9 @@ function patternCheck(
   // The fully-resolved failure message — the author's `message "..."` text
   // when present, else the derived `Invariant violated: <source>` default.
   message: string,
+  // The stable content-hash wire `code` for a messaged rule, or undefined for a
+  // message-less rule (no code arg → byte-identical body).
+  code: string | undefined,
   imports: Set<string>,
   regexFields: Map<string, string>,
 ): string[] {
@@ -195,8 +203,9 @@ function patternCheck(
     moneyLike
       ? `${field}.compareTo(new java.math.BigDecimal("${n}")) ${op} 0`
       : `${field} ${op} ${n}`;
+  const codeArg = code ? `, ${JSON.stringify(code)}` : "";
   const fail = (cond: string): string =>
-    `        if (!(${cond})) errors.add(WireValidationException.error("/${field}", ${JSON.stringify(message)}));`;
+    `        if (!(${cond})) errors.add(WireValidationException.error("/${field}", ${JSON.stringify(message)}${codeArg}));`;
   switch (pattern.kind) {
     case "min":
       // Exclusive (`weight > 0.5` on a decimal/money field) → strict `>`; the
