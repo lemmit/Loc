@@ -805,5 +805,52 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // M-T6.9 wave 3: the Dapper adapter's DOCUMENT SHAPE surface — a
+    // `shape(document)` aggregate persists as one JSONB `data` blob (a `(id,
+    // data, version)` table); contained parts + `X id[]` refs fold into the blob
+    // (no child/join tables), reusing the persistence-agnostic ToSnapshot/
+    // FromSnapshot round-trip.  Build under /warnaserror — the snapshot DTOs +
+    // the raw-Npgsql JSONB round-trip + in-memory finds are what this compiles.
+    it("system `persistence: dapper` + shape(document) — JSONB blob repository builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-doc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-document.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Blob table, not a normalised per-field/child-table tree.
+        expect(schema).toContain("data jsonb not null");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines");
+        expect(
+          fs.readFileSync(
+            path.join(proj, "Infrastructure", "Repositories", "CartRepository.cs"),
+            "utf8",
+          ),
+        ).toContain("FromSnapshot");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );

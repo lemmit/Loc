@@ -1,0 +1,58 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's DOCUMENT
+// SHAPE surface (M-T6.9 wave 3).  A `shape(document)` aggregate persists as ONE
+// JSONB `data` blob (a `(id, data, version)` table) — the whole read model,
+// contained parts + `X id[]` references folded in, no child/join tables —
+// reusing the persistence-agnostic `ToSnapshot()` / `FromSnapshot(...)`
+// round-trip.  Finds run in-memory over the rehydrated documents.  Build under
+// `dotnet build /warnaserror`.
+
+system DapperDocument {
+  api CartsApi from Sales
+
+  subdomain Sales {
+    context Carts {
+      enum LineKind { Physical, Digital }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Cart shape: document with crudish {
+        customer: string
+        total:    Money
+        note:     string?
+        contains lines: CartLine[]
+        contains coupon: Coupon?
+
+        entity CartLine {
+          sku:   string
+          qty:   int
+          kind:  LineKind
+          price: Money
+        }
+
+        entity Coupon {
+          code:    string
+          percent: int
+        }
+      }
+
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource cartsState { for: Carts, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Carts]
+    dataSources: [cartsState]
+    serves: CartsApi
+    port: 8080
+  }
+}

@@ -327,18 +327,18 @@ system D {
       errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
     ).toBe(true);
   });
-  it("rejects a non-relational saving shape (shape: document)", async () => {
+  it("still rejects the embedded saving shape (shape: embedded)", async () => {
     const src = `
       system D {
         api A from S
         subdomain S { context O {
-          aggregate Cart shape: document with crudish { customer: string }
+          aggregate Cart shape: embedded with crudish { customer: string }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
         deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /shape\(document\)/.test(e))).toBe(
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /shape\(embedded\)/.test(e))).toBe(
       true,
     );
   });
@@ -458,6 +458,68 @@ system D {
         (e) => /persistence: dapper/.test(e) && /reference-collection associations/.test(e),
       ),
     ).toBe(true);
+  });
+});
+
+// Document shape (`shape(document)`) on Dapper (M-T6.9 wave 3): the whole
+// aggregate persists as one JSONB `data` blob (a `(id, data, version)` table),
+// reusing the persistence-agnostic ToSnapshot/FromSnapshot round-trip; contained
+// parts + `X id[]` references fold into the blob (no child/join tables).  Finds
+// run in-memory over the rehydrated documents.
+describe("dapper document shape (contains + finds)", () => {
+  const DOC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      aggregate Cart shape: document with crudish {
+        customer: string
+        total:    Money
+        contains lines: CartLine[]
+        entity CartLine { sku: string  qty: int }
+      }
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects shape(document); emits a (id, data, version) blob table + JSONB repository", async () => {
+    const { files, errors } = await emit(DOC);
+    expect(errors).toEqual([]); // the dapper document gate is lifted
+    // Blob table (no per-field columns, no child/join tables).
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS carts (");
+    expect(schema).toContain("data jsonb not null");
+    expect(schema).toContain("version int not null");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines"); // parts fold into the blob
+    // The repository (de)serialises the whole aggregate through the snapshot.
+    const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
+    expect(repo).toContain(
+      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)!)",
+    );
+    expect(repo).toContain(
+      "System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json)",
+    );
+    expect(repo).toContain(
+      "ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = carts.version + 1 WHERE carts.version = @ExpectedVersion",
+    );
+    // Finds run in-memory over the rehydrated documents (no SQL WHERE).
+    expect(repo).toContain("var __all = __rows.Select(__d => Cart.FromSnapshot(");
+    expect(repo).toContain(".Where(x => x.Customer == customer).ToList();");
+    // Snapshot DTOs are emitted; the EF <Agg>Document POCO / configuration are NOT.
+    expect(files.has("api/Domain/Carts/CartSnapshots.cs")).toBe(true);
+    expect(files.has("api/Domain/Carts/CartDocument.cs")).toBe(false);
+    expect(
+      files.has("api/Infrastructure/Persistence/Configurations/CartDocumentConfiguration.cs"),
+    ).toBe(false);
+    // No EF AppDbContext on the Dapper deployable.
+    expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
   });
 });
 

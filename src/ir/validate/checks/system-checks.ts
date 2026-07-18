@@ -1775,10 +1775,18 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
         // so the `shape(...)` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        if (a.persistedAs !== "eventLog" && shape !== "relational")
+        // shape(document) IS supported now (D-DOCUMENT-AXIS, Dapper edition): the
+        // whole aggregate persists as one JSONB `data` blob (a `(id, data,
+        // version)` table), reusing the persistence-agnostic ToSnapshot/
+        // FromSnapshot round-trip.  Contained parts + `X id[]` references fold
+        // INTO the blob, so the relational-only containment/association gates
+        // below are moot for it — skip them.  shape(embedded) is still gated.
+        const isDocShape = a.persistedAs !== "eventLog" && shape === "document";
+        if (a.persistedAs !== "eventLog" && shape !== "relational" && shape !== "document")
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
+        if (isDocShape) continue;
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every
         // read and full-list-replaced on save by the Dapper repository.

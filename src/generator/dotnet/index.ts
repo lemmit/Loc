@@ -70,6 +70,7 @@ import {
   renderAuditWriterInterface,
 } from "./emit/audit.js";
 import {
+  renderDapperDocumentRepository,
   renderDapperEventSourcedRepository,
   renderDapperRepository,
   renderDapperSchema,
@@ -447,6 +448,9 @@ function emitProjectFromContexts(
   // — `create(...) audited` / `destroy audited` with no audited operation —
   // still gets the audit_records table + IAuditWriter seam.
   const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedTarget);
+  // Shape routing (shared by both persistence paths): document-shaped aggregates
+  // persist as one JSONB blob table (Dapper) / DbSet<Document> (EF).
+  const docAggSet = documentAggNames(contexts, system?.sys);
   if (usingDapper) {
     out.set(
       "Infrastructure/Persistence/DbSchema.cs",
@@ -454,6 +458,7 @@ function emitProjectFromContexts(
         merged.aggregates,
         ns,
         eventLogContexts(contexts).map((c) => snake(c.name)),
+        docAggSet,
       ),
     );
     // The shared provenance lineage SDK (ProvLineage) — the entity's co-located
@@ -1146,9 +1151,19 @@ function emitAggregate(
       "repository-impl",
       isEs
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
-        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp),
+        : isDoc
+          ? renderDapperDocumentRepository(agg, repoWithViews, ns, findBodies)
+          : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp),
       repoOrigin,
     );
+    if (isDoc) {
+      // Document shape (Dapper): the whole aggregate serialises through the
+      // `<Agg>Snapshot` DTOs the repository (de)serialises into/out of the
+      // JSONB `data` column (the entity's `ToSnapshot`/`FromSnapshot` methods,
+      // emitted under `isDoc`, do the mapping).  No `<Agg>Document` EF POCO /
+      // configuration — DbSchema owns the table DDL.
+      place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns), agg.origin);
+    }
   } else if (isEs) {
     // Event-sourced: the repository folds the per-context `<ctx>_events` log
     // (filtered by `stream_type = "<Agg>"`) on load and appends on save.  The
