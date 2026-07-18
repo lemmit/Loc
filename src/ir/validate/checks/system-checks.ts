@@ -1810,11 +1810,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
       // emits a runtime-throwing stub at codegen (same as a find predicate), so
       // there's no validate-time gate here — mirrors the .NET Dapper v1 path.
-      if ((ctx.seeds ?? []).length > 0)
-        reject(
-          `context '${ctxName}'`,
-          "declares 'seed' data (the MikroORM seed path is not wired)",
-        );
+      // `seed` data IS supported: `emitMikroSeeds` threads the same dataset
+      // functions (domain `create` → `<Agg>Repository.save`) through the
+      // EntityManager, with raw INSERTs + the `__loom_seed` marker via
+      // `em.getConnection().execute`.  The mikro seed CLI inits the ORM +
+      // `updateSchema()` before running; the boot path runs it after schema
+      // update — so no gate here.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;

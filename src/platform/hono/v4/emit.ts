@@ -31,7 +31,7 @@ import {
   renderMikroEventSourcedRepository,
   renderMikroRepository,
 } from "../../../generator/typescript/emit/mikroorm.js";
-import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
+import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
   type OpFragment,
   renderAggregate,
@@ -769,9 +769,13 @@ export function generateTypeScriptForContexts(
   }
   // First-boot seed data (database-seeding.md, Phase 2) — emits `db/seed.ts`
   // when the served contexts declare any `seed` block.  Through the domain
-  // `create` (D-SEED-PATH), ship-once per dataset (D-SEED-IDEMPOTENCY).
+  // `create` (D-SEED-PATH), ship-once per dataset (D-SEED-IDEMPOTENCY).  The
+  // mikroorm variant threads the same dataset functions through the
+  // EntityManager (raw INSERTs + the `__loom_seed` marker via
+  // `em.getConnection().execute`); the domain-`create` path is identical.
   if (merged.seeds.length > 0) {
-    emitTypescriptSeeds(merged, out);
+    if (usingMikro) emitMikroSeeds(merged, out);
+    else emitTypescriptSeeds(merged, out);
   }
   const hasSeeds = out.has("db/seed.ts");
   // decimal.js is conditional: only depended on when at least one

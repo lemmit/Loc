@@ -411,6 +411,76 @@ describe("mikroorm — reference-collection associations (Id[] pivot tables)", (
   });
 });
 
+// ---------------------------------------------------------------------------
+// `seed` data (wave 1) — the mikro seed path threads the same dataset
+// functions (domain `create` → `<Agg>Repository.save`) through the
+// EntityManager, with raw INSERTs + the `__loom_seed` marker via
+// `em.getConnection().execute`.
+// ---------------------------------------------------------------------------
+describe("mikroorm — `seed` data", () => {
+  const SEED_SRC = `system M {
+  api A from S
+  subdomain S {
+    context Catalog {
+      enum Tier { Free, Pro }
+      aggregate Widget with crudish {
+        name: string
+        size: int
+        tier: Tier
+      }
+      aggregate Gadget with crudish {
+        widgetId: Widget id
+        label: string
+      }
+      repository Widgets for Widget { }
+      repository Gadgets for Gadget { }
+      seed default {
+        Widget { name: "Alpha", size: 1, tier: Free }
+      }
+      seed wired raw {
+        Widget { id: "11111111-1111-1111-1111-111111111111", name: "Anchor", size: 4, tier: Free }
+        Gadget { id: "22222222-2222-2222-2222-222222222222", widgetId: "11111111-1111-1111-1111-111111111111", label: "g1" }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Catalog, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [Catalog]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a seed block", async () => {
+    const { errors } = await emit(SEED_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits an EntityManager-typed db/seed.ts + mikro seed-cli", async () => {
+    const { files } = await emit(SEED_SRC);
+    const seed = files.get("api/db/seed.ts")!;
+    expect(seed).toBeDefined();
+    // EntityManager-typed, no drizzle.
+    expect(seed).toContain('import { EntityManager } from "@mikro-orm/postgresql";');
+    expect(seed).not.toContain("drizzle");
+    expect(seed).toContain("type Db = EntityManager;");
+    // Domain-`create` path via the mikro repository.
+    expect(seed).toContain(
+      "const widgetRepo = new WidgetRepository(db, NoopDomainEventDispatcher);",
+    );
+    expect(seed).toContain(
+      'await widgetRepo.save(Widget.create({ name: "Alpha", size: 1, tier: Tier.Free }));',
+    );
+    // Raw path + the __loom_seed marker via the connection.
+    expect(seed).toContain('await db.getConnection().execute("INSERT INTO \\"widgets\\"');
+    expect(seed).toContain('db.getConnection().execute(\'SELECT 1 FROM "__loom_seed"');
+    // Mikro CLI inits the ORM + applies the schema before seeding.
+    const cli = files.get("api/db/seed-cli.ts")!;
+    expect(cli).toContain('import { MikroORM } from "@mikro-orm/postgresql";');
+    expect(cli).toContain("await orm.schema.updateSchema();");
+    expect(cli).toContain("await runSeeds(orm.em);");
+    // Boot path runs the seeds after schema update.
+    expect(files.get("api/index.ts")).toContain("await runSeeds(db);");
+  });
+});
+
 describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   const rejects = async (body: string, needle: RegExp) => {
     const { errors } = await emit(sys("mikroorm", body));

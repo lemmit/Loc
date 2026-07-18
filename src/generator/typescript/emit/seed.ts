@@ -33,6 +33,38 @@ import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderTsExpr } from "../render-expr.js";
 
 export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
+  emitSeeds(ctx, out, {
+    // drizzle: raw INSERTs go through the drizzle `sql.raw` execute.
+    rawInsert: (sql) => `  await db.execute(sql.raw(${JSON.stringify(sql)}));`,
+    renderFile: renderSeedFile,
+    renderCli: renderSeedCliFile,
+  });
+}
+
+/** MikroORM variant (persistence: mikroorm) — same domain `create` path (the
+ *  mikro `<Agg>Repository` takes the EntityManager), with raw INSERTs + the
+ *  `__loom_seed` marker going through `em.getConnection().execute(...)` instead
+ *  of drizzle's `sql.raw`. */
+export function emitMikroSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
+  emitSeeds(ctx, out, {
+    rawInsert: (sql) => `  await db.getConnection().execute(${JSON.stringify(sql)});`,
+    renderFile: renderMikroSeedFile,
+    renderCli: renderMikroSeedCliFile,
+  });
+}
+
+interface SeedBackend {
+  /** Emit the raw-INSERT statement for a `raw` seed row (already SQL). */
+  rawInsert: (sql: string) => string;
+  renderFile: (body: string, callLines: string[], aggs: string[], voEnumNames: string[]) => string;
+  renderCli: () => string;
+}
+
+function emitSeeds(
+  ctx: EnrichedBoundedContextIR,
+  out: Map<string, string>,
+  backend: SeedBackend,
+): void {
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return;
 
@@ -53,7 +85,7 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, typesByAgg));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, typesByAgg, backend.rawInsert));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -62,9 +94,9 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)];
   out.set(
     "db/seed.ts",
-    renderSeedFile(body, callLines, usedAggregates(datasets, seedable), voEnumNames),
+    backend.renderFile(body, callLines, usedAggregates(datasets, seedable), voEnumNames),
   );
-  out.set("db/seed-cli.ts", renderSeedCliFile());
+  out.set("db/seed-cli.ts", backend.renderCli());
 }
 
 /** Render one `async function seed<Dataset>(db, requested)`. */
@@ -72,6 +104,7 @@ function renderDatasetFn(
   dataset: string,
   entries: Entry[],
   typesByAgg: Map<string, Map<string, TypeIR>>,
+  rawInsert: (sql: string) => string,
 ): string {
   // One repository instance per distinct aggregate used on the domain path.
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
@@ -81,7 +114,7 @@ function renderDatasetFn(
   const saveLines = entries.map((e) =>
     e.raw
       ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
-        `  await db.execute(sql.raw(${JSON.stringify(renderSeedRowInsert(e.row.aggregate, e.row.fields))}));`
+        rawInsert(renderSeedRowInsert(e.row.aggregate, e.row.fields))
       : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, typesByAgg.get(e.row.aggregate))}));`,
   );
   return lines(
@@ -226,6 +259,105 @@ function renderSeedCliFile(): string {
       "    await runSeeds(db);",
       "  } finally {",
       "    await pool.end();",
+      "  }",
+      "}",
+      "",
+      "void main();",
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MikroORM seed file + CLI (persistence: mikroorm).  Same dataset functions
+// (domain `create` → `<Agg>Repository.save`, the mikro repo taking the
+// EntityManager), but the `__loom_seed` marker + raw INSERTs go through
+// `db.getConnection().execute(...)` rather than drizzle's `sql.raw`.
+// ---------------------------------------------------------------------------
+
+/** Assemble the MikroORM `db/seed.ts`, narrowing imports to what the body uses. */
+function renderMikroSeedFile(
+  body: string,
+  callLines: string[],
+  aggs: string[],
+  voEnumNames: string[],
+): string {
+  const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/`(?:\\.|[^`\\])*`/g, "``");
+  const usesDecimal = /\bnew Decimal\(/.test(scan);
+  const voEnum = [...new Set(voEnumNames)]
+    .filter((n) => new RegExp(`\\b${n}\\b`).test(scan))
+    .sort();
+
+  const header = lines(
+    "// Auto-generated.  Do not edit by hand.",
+    usesDecimal && `import Decimal from "decimal.js";`,
+    `import { EntityManager } from "@mikro-orm/postgresql";`,
+    `import { NoopDomainEventDispatcher } from "../domain/events";`,
+    ...aggs.map((a) => `import { ${a} } from "../domain/${lowerFirst(a)}";`),
+    ...aggs.map(
+      (a) => `import { ${a}Repository } from "./repositories/${lowerFirst(a)}-repository";`,
+    ),
+    voEnum.length > 0 && `import { ${voEnum.join(", ")} } from "../domain/value-objects";`,
+  );
+
+  return (
+    lines(
+      header,
+      "",
+      `type Db = EntityManager;`,
+      "",
+      "// `default` always runs; other datasets opt in via LOOM_SEED (comma-separated).",
+      "function datasetEnabled(dataset: string, requested: Set<string>): boolean {",
+      `  return dataset === "default" || requested.has(dataset);`,
+      "}",
+      "",
+      "async function alreadySeeded(db: Db, dataset: string): Promise<boolean> {",
+      '  const r = (await db.getConnection().execute(\'SELECT 1 FROM "__loom_seed" WHERE "dataset" = ?\', [dataset])) as unknown[];',
+      "  return r.length > 0;",
+      "}",
+      "",
+      "async function markSeeded(db: Db, dataset: string): Promise<void> {",
+      '  await db.getConnection().execute(\'INSERT INTO "__loom_seed" ("dataset") VALUES (?)\', [dataset]);',
+      "}",
+      "",
+      "/** First-boot seed data (database-seeding.md).  Ship-once per dataset via",
+      " *  the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are no-ops. */",
+      "export async function runSeeds(db: Db): Promise<void> {",
+      "  await db.getConnection().execute(",
+      '    \'CREATE TABLE IF NOT EXISTS "__loom_seed" ("dataset" text PRIMARY KEY, "applied_at" timestamptz NOT NULL DEFAULT now())\',',
+      "  );",
+      "  const requested = new Set(",
+      '    (process.env.LOOM_SEED ?? "")',
+      '      .split(",")',
+      "      .map((s) => s.trim())",
+      "      .filter(Boolean),",
+      "  );",
+      ...callLines,
+      "}",
+      "",
+      body,
+    ) + "\n"
+  );
+}
+
+/** The standalone `npm run db:seed` entry for MikroORM — inits the ORM, applies
+ *  the schema, then runs the exported `runSeeds(em)`. */
+function renderMikroSeedCliFile(): string {
+  return (
+    lines(
+      "// Auto-generated.  Do not edit by hand.",
+      `import { MikroORM } from "@mikro-orm/postgresql";`,
+      `import mikroConfig from "../mikro-orm.config";`,
+      `import { runSeeds } from "./seed";`,
+      "",
+      "// Standalone seeding (`npm run db:seed`) — the server boot path calls",
+      "// the exported `runSeeds(db)` from index.ts instead, after schema update.",
+      "async function main(): Promise<void> {",
+      "  const orm = await MikroORM.init(mikroConfig);",
+      "  await orm.schema.updateSchema();",
+      "  try {",
+      "    await runSeeds(orm.em);",
+      "  } finally {",
+      "    await orm.close();",
       "  }",
       "}",
       "",
