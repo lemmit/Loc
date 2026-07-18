@@ -43,6 +43,9 @@ export interface AngularWorkflowFormSpec {
   /** Single-value-object (`price: Money`) params — page-shell adds a nested
    *  `FormGroup` control per entry. */
   fieldGroups?: AngularFieldGroupSpec[];
+  /** True when the form has ≥1 `File` param — page-shell emits the shared
+   *  `onFileUpload` method once per component. */
+  hasFile?: boolean;
 }
 
 export function renderAngularWorkflowForm(
@@ -82,7 +85,7 @@ export function renderAngularWorkflowForm(
   addNg(ctx, importFrom, mutationFn, requestType);
   ctx.usesNavigate = true; // hoists inject(Router) for the redirect
 
-  const parts = partitionAngularFields(workflow.params, bc, ns, ctx);
+  const parts = partitionAngularFields(workflow.params, bc, ns, ctx, formVar);
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
   const fieldMarkup = parts.flatMarkup;
@@ -109,6 +112,7 @@ export function renderAngularWorkflowForm(
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
     fieldGroups: parts.fieldGroups,
+    hasFile: parts.hasFileField,
   };
   angularSink(ctx).workflowForms.push(spec);
 

@@ -27,6 +27,7 @@ import {
   fieldArrayControlDecl,
   fieldArrayMembers,
   fieldGroupControlDecl,
+  fileUploadMethodLines,
 } from "../form-fields.js";
 import { storeClassName, storeFileSlug } from "../store-builder.js";
 import { angularTarget } from "./angular-target.js";
@@ -533,6 +534,18 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // mutation, builds the typed Reactive `FormGroup`, and declares the submit
   // handler (`mutate` → navigate).  The form-shell imports (FormGroup /
   // ReactiveFormsModule / Mat modules / the api types) ride `result.imports`.
+  // A `File` field in any of the component's forms needs the shared
+  // `onFileUpload` method (uploads via `api.upload`, `setValue`s the FileRef).
+  // Emit it once, regardless of how many forms carry a File field.
+  if (
+    sink.forms.some((f) => f.hasFile) ||
+    sink.opForms.some((f) => f.hasFile) ||
+    sink.workflowForms.some((f) => f.hasFile) ||
+    sink.modals.some((m) => m.hasFile)
+  ) {
+    members.push(fileUploadMethodLines().join("\n"));
+  }
+
   const angularForms = sink.forms;
   for (const form of angularForms) {
     members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);

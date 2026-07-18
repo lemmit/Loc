@@ -53,6 +53,9 @@ export interface AngularOperationFormSpec {
   /** Single-value-object (`price: Money`) params — page-shell adds a nested
    *  `FormGroup` control per entry. */
   fieldGroups?: AngularFieldGroupSpec[];
+  /** True when the form has ≥1 `File` param — page-shell emits the shared
+   *  `onFileUpload` method once per component. */
+  hasFile?: boolean;
 }
 
 /** Resolve the operation the call targets, plus the template-scope id
@@ -121,7 +124,7 @@ export function renderAngularOperationForm(
   addNg(ctx, importFrom, mutationFn);
 
   const parts = bc
-    ? partitionAngularFields(op.params, bc, ns, ctx)
+    ? partitionAngularFields(op.params, bc, ns, ctx, formVar)
     : {
         flatControls: [],
         flatMarkup: [],
@@ -131,6 +134,7 @@ export function renderAngularOperationForm(
         arrayMarkup: [],
         fieldGroups: [],
         groupMarkup: [],
+        hasFileField: false,
       };
   const fieldMarkup = parts.flatMarkup;
 
@@ -150,6 +154,7 @@ export function renderAngularOperationForm(
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
     fieldGroups: parts.fieldGroups,
+    hasFile: parts.hasFileField,
   };
   angularSink(ctx).opForms.push(spec);
 

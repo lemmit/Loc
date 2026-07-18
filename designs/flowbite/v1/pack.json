@@ -74,7 +74,9 @@
     "theme": "theme.hbs",
     "tsconfig": "tsconfig.hbs",
     "vite-config": "vite-config.hbs",
-    "realtime-toast": "realtime-toast.hbs"
+    "realtime-toast": "realtime-toast.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -420,6 +422,37 @@
         "from": "$lib/toast.svelte",
         "named": [
           "toast"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Fileupload",
+          "Helper",
+          "Label"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Fileupload",
+          "Label"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]

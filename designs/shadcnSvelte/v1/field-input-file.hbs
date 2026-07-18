@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <label class="loom-label" for="{{testId}}">{{label}}</label>
+          <input id="{{testId}}" type="file" class="loom-input" data-testid="{{testId}}" onchange={async (e) => { const file = e.currentTarget.files?.[0]; if (!file) { form.values.{{path}} = null; return; } const fd = new FormData(); fd.append("file", file); form.values.{{path}} = (await api.upload("/files", fd)) as typeof form.values.{{path}}; }} />
+          {#if form.errors["{{path}}"]}<p class="text-sm text-destructive">{form.errors["{{path}}"]}</p>{/if}
+        </div>
