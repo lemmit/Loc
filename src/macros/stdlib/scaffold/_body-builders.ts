@@ -74,20 +74,32 @@ export function scaffoldNewForm(aggName: string): Expression {
  *  first operation's button is primary, the rest secondary).  No public
  *  operations ⇒ an empty `Group()`.
  *  public = the aggregate's non-`private` operations. */
-export function scaffoldOperations(agg: Aggregate): Expression {
+export function scaffoldOperations(agg: Aggregate, recordVar?: string): Expression {
   const slug = snake(plural(agg.name));
   const publicOps = agg.members.filter(
     (m): m is Operation => m.$type === "Operation" && !m.private,
   );
   if (publicOps.length === 0) return callExpr("Group", []);
+  // The op form addresses its operation either through the loaded-record
+  // instance (`OperationForm { <record>.<op> }`, when a `recordVar` is in scope
+  // — the Detail page nests the ops inside its `QueryView` data lambda) or,
+  // absent one, the flat by-name shape (`OperationForm(of:, op:)` — id from the
+  // route).  The instance shape lets a `this.<field>` param default seed from
+  // the record; the by-name shape can only seed constants.
+  const opFormArgs = (op: Operation) =>
+    recordVar
+      ? [{ value: memberAccess(nameRefExpr(recordVar), op.name) }]
+      : [
+          { name: "of", value: nameRefExpr(agg.name) },
+          { name: "op", value: nameRefExpr(op.name) },
+        ];
   return callExpr(
     "Group",
     publicOps.map((op, i) => ({
       value: callExpr("Modal", [
         {
           value: callExpr("OperationForm", [
-            { name: "of", value: nameRefExpr(agg.name) },
-            { name: "op", value: nameRefExpr(op.name) },
+            ...opFormArgs(op),
             { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
           ]),
         },
@@ -573,10 +585,19 @@ export function scaffoldDetailsParts(
     opts.apiHandle ? memberAccess(nameRefExpr(opts.apiHandle), agg.name) : nameRefExpr(agg.name);
 
   const { card, related } = buildDataCardParts(agg, cellVar);
-  const dataBody =
-    related.length === 0
-      ? card
-      : callExpr("Stack", [{ value: card }, ...related.map((r) => ({ value: r }))]);
+  // Operations render INSIDE the data lambda (record `cellVar` in scope) as
+  // instance-qualified forms, so a `this.<field>` param default seeds from the
+  // loaded record.  Only present when the aggregate has a public operation.
+  const hasPublicOp = agg.members.some(
+    (m): m is Operation => m.$type === "Operation" && !m.private,
+  );
+  const opsGroup = hasPublicOp ? scaffoldOperations(agg, cellVar) : undefined;
+  const dataChildren = [
+    { value: card },
+    ...related.map((r) => ({ value: r })),
+    ...(opsGroup ? [{ value: opsGroup }] : []),
+  ];
+  const dataBody = dataChildren.length === 1 ? card : callExpr("Stack", dataChildren);
 
   return [
     {
