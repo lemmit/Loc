@@ -167,6 +167,7 @@ const NON_TEXT_PRIMITIVES: Record<string, string> = {
   PasswordField: "form input — no body text literal",
   MultilineField: "form input — no body text literal",
   SelectField: "form input — no body text literal",
+  FileUpload: "form input — no body text literal",
   Toggle: "form input — no body text literal",
   // Structural / data / control — no caller text literal in text position.
   Table: "data grid — cell text comes from row bindings",
