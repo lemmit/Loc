@@ -83,7 +83,10 @@ export function renderJavaController(
   // by the aggregate controller — the queryHandler's own route is the exposure.
   for (const f of declaredFinds(repo).filter((f) => !f.synthesized)) {
     for (const p of f.params) {
-      const rendered = renderJavaType(p.type);
+      // An id param binds as its raw value type (see findRoutes), so pull the
+      // raw type's import — not `renderJavaType`'s `<Agg>Id` wrapper (which never
+      // mentions UUID).
+      const rendered = p.type.kind === "id" ? javaValueTypeForId(p.type.valueType) : renderJavaType(p.type);
       if (rendered.includes("BigDecimal")) imports.add("java.math.BigDecimal");
       if (rendered.includes("Instant")) imports.add("java.time.Instant");
       if (rendered.includes("UUID")) imports.add("java.util.UUID");
@@ -206,9 +209,20 @@ export function renderJavaController(
   const findRoutes = declaredFinds(repo)
     .filter((f) => !f.synthesized)
     .flatMap((f) => {
-      const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
+      // An id-typed find param (`find byOrder(order: Order id)`) binds as its
+      // RAW underlying type (`UUID`/`long`/…) and wraps into the id class at the
+      // service call — Spring has no `String → <Agg>Id` value-type converter, so
+      // binding `@RequestParam OrderId` 500s.  Mirrors the getById path variable
+      // (`@PathVariable UUID id` → `new OrderId(id)`).
+      const declared = f.params.map((p) =>
+        p.type.kind === "id"
+          ? `@RequestParam ${javaValueTypeForId(p.type.valueType)} ${p.name}`
+          : `@RequestParam ${renderJavaType(p.type)} ${p.name}`,
+      );
       const params = declared.join(", ");
-      const args = f.params.map((p) => p.name).join(", ");
+      const args = f.params
+        .map((p) => (p.type.kind === "id" ? `new ${p.type.targetName}Id(${p.name})` : p.name))
+        .join(", ");
       // Union find (`Order or NotFound` / `Order option`): the service returns
       // the success variant's `<Agg>Response` (or null).  Per exception-less.md
       // §4 the 200 body is that success variant DIRECTLY — never a tagged union
