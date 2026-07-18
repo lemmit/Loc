@@ -182,6 +182,40 @@ export function renderOpGuardClause(
   return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${reason})`;
 }
 
+/** Does the operation declare a `when` canCommand state gate (criterion.md use
+ *  site 2)?  A `when`-gated op evaluates the predicate against the loaded
+ *  aggregate BEFORE the body runs; false → 409 Conflict.  Parity gate for the
+ *  controller's `{:error, :disallowed}` denial arm + the shared `ensure/2`. */
+export function opHasWhenGate(op: OperationIR): boolean {
+  return op.when !== undefined;
+}
+
+/** The `when` state gate → a leading `:ok <- ensure(<pred>, :disallowed)`
+ *  with-clause.  The predicate reads the loaded `record`'s own state (op params
+ *  are out of scope by design); a false predicate short-circuits the `with` to
+ *  `{:error, :disallowed}`, which the controller maps to 409 Conflict — parity
+ *  with Hono/​.NET/​Java/​Python's `DisallowedError` → 409.  Rendered FIRST in the
+ *  guard chain so the state gate precedes any `precondition`. */
+export function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
+  return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, :disallowed)`;
+}
+
+/** All hoisted guard with-clauses for an op, in evaluation order: the `when`
+ *  state gate (→ `:disallowed` / 409) first, then each `requires` (→ `:forbidden`
+ *  / 403) and `precondition` (→ `:precondition_failed` / 422) in body order.
+ *  Byte-identical to the old requires/precondition-only list when the op has no
+ *  `when`, so a guard-free / `when`-free op is unchanged. */
+export function collectOpGuardClauses(op: OperationIR, rc: RenderCtx): string[] {
+  const clauses: string[] = [];
+  if (op.when) clauses.push(renderWhenGateClause(op, rc));
+  for (const s of op.statements) {
+    if (s.kind === "requires" || s.kind === "precondition") {
+      clauses.push(renderOpGuardClause(s, rc));
+    }
+  }
+  return clauses;
+}
+
 /** Wrap an operation body (its rendered 4-space-indented `bodyLines` + persist
  *  tail) in a leading `with :ok <- ensure(...)` guard chain, so a failed
  *  `requires`/`precondition` short-circuits to `{:error, :forbidden}` /
@@ -474,15 +508,14 @@ export function renderReturningOpFunction(
   // together via `statementSubRegions` — the hoisted `emit`(s) and the
   // relocated trailing return are deliberately excluded from both, matching
   // the "regular body" scope this milestone covers (see `OpFragment`).
-  // `requires`/`precondition` guards are hoisted out of the linear body into a
-  // leading `with :ok <- ensure(...)` chain (below), so a failed guard returns a
-  // typed denial tuple (403/422) instead of raising (→ 500).  Exclude them from
-  // the in-body statements (they no longer render inline).
-  const guardStmts = op.statements.filter(
-    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
-      s.kind === "requires" || s.kind === "precondition",
-  );
-  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, renderCtx));
+  // The `when` state gate + `requires`/`precondition` guards are hoisted out of
+  // the linear body into a leading `with :ok <- ensure(...)` chain (below), so a
+  // failed guard returns a typed denial tuple (`:disallowed` 409 / `:forbidden`
+  // 403 / `:precondition_failed` 422) instead of raising (→ 500).  Exclude the
+  // guard STATEMENTS from the in-body statements (they no longer render inline;
+  // the `when` gate is a predicate field, not a statement, so it needs no
+  // exclusion).
+  const guardClauses = collectOpGuardClauses(op, renderCtx);
   const bodyStmts = op.statements.filter((s, idx) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
     if (hoistEmits && s.kind === "emit") return false;
@@ -1034,14 +1067,26 @@ export function renderReturningOpControllerAction(
   // old `raise(ArgumentError, …)` (→ 500).  Emit the matching clauses only when
   // the op has a guard (else the clauses would be unreachable — `--warnings-as-
   // errors`).  Same status + ProblemDetails body as the ES-command controller.
-  const denialClauses = opHasGuards(op)
-    ? [
-        `  def ${resultFn}(conn, {:error, :forbidden}),
+  const denialClauses = [
+    // The `when` state gate denies with `:disallowed` → 409 Conflict (parity with
+    // Hono/​.NET/​Java/​Python's DisallowedError → 409).  Gated on `op.when` alone so
+    // a guard-free `when`-gated op still gets its 409 arm (and a `when`-free op
+    // never emits an unreachable clause).
+    ...(opHasWhenGate(op)
+      ? [
+          `  def ${resultFn}(conn, {:error, :disallowed}),
+    do: ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")`,
+        ]
+      : []),
+    ...(opHasGuards(op)
+      ? [
+          `  def ${resultFn}(conn, {:error, :forbidden}),
     do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")`,
-        `  def ${resultFn}(conn, {:error, :precondition_failed}),
+          `  def ${resultFn}(conn, {:error, :precondition_failed}),
     do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`,
-      ]
-    : [];
+        ]
+      : []),
+  ];
   const resultClauses = [
     `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
     ...errorVariantsOf(op, ctx).map(

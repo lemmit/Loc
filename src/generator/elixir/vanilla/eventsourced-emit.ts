@@ -51,14 +51,19 @@ export function isEventSourced(agg: AggregateIR): boolean {
 }
 
 /** Does any event-sourced aggregate in this context declare a command body
- *  (create / operation) with a `precondition` / `requires` guard?  Drives
- *  whether the context module emits the private `ensure/2` helper (emitting it
- *  unused would fail `mix compile --warnings-as-errors`). */
+ *  (create / operation) with a `precondition` / `requires` guard, or an operation
+ *  with a `when` state gate?  All three hoist to an `ensure/2` with-clause, so any
+ *  of them drives whether the context module emits the private `ensure/2` helper
+ *  (emitting it unused would fail `mix compile --warnings-as-errors`). */
 export function esContextNeedsEnsure(ctx: BoundedContextIR): boolean {
   return ctx.aggregates
     .filter(isEventSourced)
     .flatMap((agg) => [...(agg.creates ?? []), ...agg.operations])
-    .some((op) => op.statements.some((s) => s.kind === "precondition" || s.kind === "requires"));
+    .some(
+      (op) =>
+        op.when !== undefined ||
+        op.statements.some((s) => s.kind === "precondition" || s.kind === "requires"),
+    );
 }
 
 /** The private guard helper shared by the ES command runners in a context
@@ -579,9 +584,21 @@ export function renderEsController(
   // branches — emit it only when one of those exists, else it's an unused
   // private function (fails `--warnings-as-errors`).
   const hasCommands = (agg.creates ?? []).length > 0 || publicOps.length > 0;
+  // A `when`-gated operation short-circuits to `{:error, :disallowed}` → 409
+  // Conflict (parity with the relational/Hono/​.NET/​Java/​Python state gate).  Only
+  // emit the clause when some command carries a `when`, so it never shadows the
+  // catch-all as dead code.
+  const hasWhenGate = publicOps.some((op) => op.when !== undefined);
+  const disallowedClause = hasWhenGate
+    ? `  defp command_error(conn, :disallowed) do
+    ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")
+  end
+
+`
+    : "";
   const commandError = hasCommands
     ? `
-  defp command_error(conn, :forbidden) do
+${disallowedClause}  defp command_error(conn, :forbidden) do
     ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
   end
 
@@ -687,6 +704,13 @@ function renderCommandRunner(c: CommandCtx): string {
 
   // with-clauses: guards + the `events` binding + the append.
   const clauses: string[] = [];
+  // The `when` canCommand state gate (criterion.md use site 2) evaluates against
+  // the already-folded `state` BEFORE the command emits — a false predicate
+  // short-circuits the `with` to `{:error, :disallowed}` → 409 (`command_error`).
+  // Only an operation carries `when` (a create has no prior state to gate on).
+  if (c.kind === "operation" && c.op.when) {
+    clauses.push(`:ok <- ensure(${renderExpr(c.op.when, exprCtx)}, :disallowed)`);
+  }
   const lets: string[] = [];
   const eventStructs: string[] = [];
   for (const s of c.op.statements) {

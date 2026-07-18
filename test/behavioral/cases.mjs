@@ -113,11 +113,9 @@ const BEHAVIOURAL_SKIP = {
     // mapping). No dotnet behavioural skips remain.
   },
   elixir: {
-    // B6 — elixir doesn't enforce the `when` canCommand state-gate at runtime
-    // (the guarded op resolves instead of 409). A correctness gap to fix.
-    "state-gate": "B6: elixir `when` state-gate not enforced at runtime",
-    // B5 — elixir document/embedded shape create 422s (Ecto changeset/cast).
-    shapes: "B5: elixir document/embedded shape create 422s",
+    // B5/B6 fixed — the `when` state-gate now enforces at runtime (→ 409) and
+    // the document/embedded shape create no longer 422s (the server-managed
+    // `version` token is dropped from the create cast/required set).
   },
 };
 

@@ -20,7 +20,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   OperationIR,
-  StmtIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
@@ -51,13 +50,14 @@ import { externImplModule, externPersistForceChanges, isExternOp } from "./exter
 import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
+  collectOpGuardClauses,
   isReturningOperation,
   type OpFragment,
   opEmitsEvent,
   opHasGuards,
+  opHasWhenGate,
   persistPutBodies,
   renderEmitDispatchLines,
-  renderOpGuardClause,
   renderReturningOpFunction,
   renderReturningStmt,
   wrapOpBodyWithGuards,
@@ -435,7 +435,7 @@ function contextNeedsGuardEnsure(ctx: BoundedContextIR): boolean {
   return ctx.aggregates.some((agg) => {
     if (isEventSourced(agg)) return false;
     return (agg.operations ?? []).some(
-      (op) => !CRUD_RESERVED_NAMES.has(op.name) && opHasGuards(op),
+      (op) => !CRUD_RESERVED_NAMES.has(op.name) && (opHasGuards(op) || opHasWhenGate(op)),
     );
   });
 }
@@ -598,15 +598,11 @@ function renderExternOpFunction(
     foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
-  // Preconditions → a leading `with :ok <- ensure(...)` chain (identical atoms +
-  // 422 mapping to the non-extern guard path); the extern delegation is the final
-  // with-clause, rebinding `record` to the mutated struct.
-  const guardClauses = op.statements
-    .filter(
-      (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
-        s.kind === "requires" || s.kind === "precondition",
-    )
-    .map((s) => renderOpGuardClause(s, rc));
+  // `when` state gate + preconditions → a leading `with :ok <- ensure(...)` chain
+  // (identical atoms + status mapping to the non-extern guard path — `:disallowed`
+  // 409 / `:forbidden` 403 / `:precondition_failed` 422); the extern delegation is
+  // the final with-clause, rebinding `record` to the mutated struct.
+  const guardClauses = collectOpGuardClauses(op, rc);
   const withClauses = [...guardClauses, `{:ok, record} <- ${implMod}.${opSnake}(record, params)`];
   // Bind the params the preconditions reference (`score = Map.get(params,
   // "score")`) BEFORE the `with` — a precondition like `score >= 0` reads the op
@@ -728,16 +724,13 @@ function renderNamedOpFunction(
   // `statementSubRegions` — a hoisted `emit` is deliberately excluded from
   // both, matching the "regular body" scope this milestone covers (see
   // `OpFragment` in operation-returns-emit.ts).
-  // `requires`/`precondition` guards are hoisted into a leading `with :ok <-
-  // ensure(...)` chain so an expected denial returns a typed tuple
-  // (`{:error, :forbidden}` 403 / `{:error, :precondition_failed}` 422) BEFORE the
-  // mutation/persist runs, instead of raising an ArgumentError (→ 500).  Exclude
-  // them from the in-body statements.
-  const guardStmts = op.statements.filter(
-    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
-      s.kind === "requires" || s.kind === "precondition",
-  );
-  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, rc));
+  // The `when` state gate + `requires`/`precondition` guards are hoisted into a
+  // leading `with :ok <- ensure(...)` chain so an expected denial returns a typed
+  // tuple (`{:error, :disallowed}` 409 / `{:error, :forbidden}` 403 /
+  // `{:error, :precondition_failed}` 422) BEFORE the mutation/persist runs, instead
+  // of raising an ArgumentError (→ 500).  Exclude the guard STATEMENTS from the
+  // in-body statements (the `when` gate is a predicate field, not a statement).
+  const guardClauses = collectOpGuardClauses(op, rc);
   const bodyStmts = op.statements.filter((s) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
     if (emits && s.kind === "emit") return false;
@@ -767,6 +760,27 @@ function renderNamedOpFunction(
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
+  // An op that mutates an EMBEDDED containment (`items += Item{…}` on an
+  // `embeds_many`/`embeds_one` jsonb field) rebinds `record.<field>` in the body,
+  // then persists via `put_embed(:<field>, record.<field>)`.  `put_embed`, like
+  // `put_change`, DROPS the change when the new embed equals the changeset DATA —
+  // and the data is the ALREADY-mutated `record`, so `Repo.update` runs no SQL
+  // and the write is silently lost (the embed analogue of the `force_change`
+  // scalar trap; embeds have no `force_` variant).  B5.  Build the persist
+  // changeset off the ORIGINAL (pre-mutation) struct `record_before` so
+  // `put_embed` sees a real diff; scalar columns still `force_change` regardless
+  // of the base.  Relational containments (`put_assoc`) don't hit this, so the
+  // swap is gated on embedded-containment mutation only (byte-identical
+  // otherwise).
+  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
+  const mutatesEmbeddedContainment = op.statements.some((s) => {
+    if (s.kind !== "add" && s.kind !== "remove") return false;
+    const f = snake(s.target.segments[0] ?? "");
+    return containNames.has(f) && !relationalContainments.has(f);
+  });
+  const persistBase = mutatesEmbeddedContainment ? "record_before" : "record";
+  const captureBase = mutatesEmbeddedContainment ? "    record_before = record\n" : "";
+
   // Operation persistence re-runs the aggregate's cross-field invariants (the
   // audit's "operation persist skips validation"): the plain `change(%{})` +
   // `put_change` path bypasses every changeset validator, so a `handle := …`
@@ -783,7 +797,9 @@ function renderNamedOpFunction(
     : "";
 
   const prelude = [...paramBinds, ...bodyLines].join("\n");
-  const preludeBlock = prelude ? `${beforeBind}${prelude}\n` : beforeBind;
+  const preludeBlock = prelude
+    ? `${beforeBind}${captureBase}${prelude}\n`
+    : `${beforeBind}${captureBase}`;
 
   // Persist tail.  Without provenance or audit: the plain changeset pipe.  With
   // either: build the changeset, then run the save + (history flush and/or audit
@@ -815,7 +831,7 @@ function renderNamedOpFunction(
         // transaction, then dispatch AFTER commit (outside the tx fn) so a
         // rollback drops the events too.
         `    changeset =
-      record
+      ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     tx_result =
@@ -839,7 +855,7 @@ ${dispatchBlock}
         {:error, reason}
     end`
       : `    changeset =
-      record
+      ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     ${appModule}.Repo.transaction(fn ->
@@ -858,7 +874,7 @@ ${txTail.join("\n")}
         // phantom event can no longer fire on a failed write, and the event
         // reaches the context Dispatcher (saga seam) + the raw broadcast.
         `    changeset =
-      record
+      ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     case ${repoMod}.persist_change(changeset) do
@@ -869,7 +885,7 @@ ${dispatchBlock}
       {:error, reason} ->
         {:error, reason}
     end`
-      : `    record
+      : `    ${persistBase}
     |> Ecto.Changeset.change(%{})${putBlock}${invPipe}
     |> ${repoMod}.persist_change()`;
   }
@@ -882,7 +898,7 @@ ${dispatchBlock}
   // `${preludeBlock}${persist}` layout (byte-identical).
   const bodyContent =
     guardClauses.length > 0
-      ? `${beforeBind}${paramBinds.length > 0 ? `${paramBinds.join("\n")}\n` : ""}${wrapOpBodyWithGuards(
+      ? `${beforeBind}${captureBase}${paramBinds.length > 0 ? `${paramBinds.join("\n")}\n` : ""}${wrapOpBodyWithGuards(
           guardClauses,
           [...bodyLines, persist],
         ).join("\n")}`
