@@ -984,6 +984,10 @@ in the DSL overrides the implicit one.
 The validator runs after parsing and reports errors for:
 
 - `precondition` and `invariant` expressions whose type is not `bool`.
+- A blank `message "..."` clause — empty or whitespace-only — on an
+  `invariant`, property `check`, or `precondition` (`loom.blank-message`). A
+  blank message renders an empty user-facing error string (and degenerates the
+  content-hashed wire `code` derived from it), so it's almost always a typo.
 - Field / parameter / call / member-access type mismatches.
 - Access to a member that doesn't exist on a fully-resolved record
   receiver — `order.totl`, `paid.amont`, `this.noField` (`loom.unknown-member`).

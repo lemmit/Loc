@@ -284,6 +284,35 @@ describe("validation", () => {
       expect(errors.some((e) => /Unknown builder type 'Mony'/.test(e))).toBe(true);
     });
 
+    it("special-cases the `Aggregate { }` literal — points at `.create({ … })`", async () => {
+      // An aggregate root is constructed through its `create({ … })` factory,
+      // not the value-object `{ }` builder literal.  Reaching for `Task { … }`
+      // must NOT surface the generic "unknown builder type" hint (which talks
+      // about walker primitives and misroutes the fix) — it names the remedy.
+      const { errors } = await parse(`
+        system S {
+          subdomain M {
+            context C {
+              aggregate Task with crudish {
+                title: string
+                test "bare literal" {
+                  let t = Task { title: "x" }
+                  expect(t.title).toBe("x")
+                }
+              }
+              repository Tasks for Task { }
+            }
+          }
+        }
+      `);
+      // The targeted diagnostic fires…
+      expect(
+        errors.some((e) => /'Task' is an aggregate — construct it with 'Task\.create\(/.test(e)),
+      ).toBe(true);
+      // …and the generic builder-type error does NOT (it would misdirect).
+      expect(errors.some((e) => /Unknown builder type 'Task'/.test(e))).toBe(false);
+    });
+
     it("rejects a typo on a walker primitive name", async () => {
       const { errors } = await parse(`
         system S {

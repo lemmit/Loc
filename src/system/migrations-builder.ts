@@ -347,7 +347,7 @@ function projectionTableShape(
   voLookup: VoLookup,
 ): TableShape {
   const tableName = plural(snake(proj.name));
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const columns: ColumnShape[] = [];
   for (const f of proj.stateFields) {
     if (f.name === corr) {

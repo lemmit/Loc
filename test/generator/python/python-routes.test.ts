@@ -169,6 +169,10 @@ describe("python routes", () => {
     expect(problem).toContain("@app.exception_handler(DomainError)");
     expect(problem).toContain("@app.exception_handler(AggregateNotFoundError)");
     expect(problem).toContain("@app.exception_handler(RequestValidationError)");
-    expect(problem).toContain('{"pointer": _pointer(tuple(e["loc"])), "message": str(e["msg"])}');
+    expect(problem).toContain('"pointer": _pointer(tuple(e["loc"])),');
+    expect(problem).toContain('"message": str(e["msg"]),');
+    // a messaged rule's PydanticCustomError "msg.<hash>" type rides as errors[].code
+    expect(problem).toContain('if code.startswith("msg."):');
+    expect(problem).toContain('entry["code"] = code');
   });
 });

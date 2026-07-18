@@ -50,7 +50,7 @@ export function projectionRowTable(proj: ProjectionIR): string {
 }
 
 function correlationField(proj: ProjectionIR): FieldIR {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const f = proj.stateFields.find((x) => x.name === corr);
   if (!f) {
     throw new Error(
@@ -83,7 +83,7 @@ export function renderProjectionRowEntity(
    *  unqualified, byte-identical. */
   schema?: string,
 ): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   // Non-key columns are nullable (partial upsert), so render every non-key
   // field as if optional — this drives the nullable column mapping AND leaves
   // `_allocate` an empty seed (no required non-key defaults).

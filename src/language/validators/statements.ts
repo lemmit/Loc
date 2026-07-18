@@ -59,6 +59,7 @@ import {
 } from "../type-system.js";
 import {
   canPromoteLiteralTo,
+  checkBlankMessage,
   envForAggregate,
   pathString,
   warnSensitivityDrop,
@@ -199,6 +200,7 @@ export function checkStatement(
   checkConstructionArgTypes(stmt, env, accept);
   checkExprCallArgs(stmt, env, accept);
   if (isPreconditionStmt(stmt)) {
+    checkBlankMessage(stmt, stmt.message, accept);
     const t = typeOf(stmt.expr, env);
     if (t.kind !== "primitive" || t.name !== "bool") {
       accept("error", `'precondition' must be of type 'bool', got '${typeToString(t)}'.`, {

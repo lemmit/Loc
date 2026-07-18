@@ -92,7 +92,7 @@ function renderProjectionFoldHandler(
   on: ProjectionOnIR,
   ns: string,
 ): string {
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const corrPascal = upperFirst(corr);
   const rowCls = projectionRowClass(proj);
   const usings = new Set<string>();
@@ -221,7 +221,7 @@ function renderProjectionsController(
     const shape = proj.wireShape ?? [];
     for (const f of shape) collectWireUsings(wireFieldType(f), ctx, usings);
     const corr = shape.find((f) => f.source === "id");
-    const corrName = upperFirst(proj.correlationField);
+    const corrName = upperFirst(proj.correlationField as string);
     const targetName = corr && corr.type.kind === "id" ? corr.type.targetName : "";
     // The `{key}` param binds the correlation id's CLR value type (Guid / int /
     // long / string), so Swashbuckle emits the matching param schema — parity

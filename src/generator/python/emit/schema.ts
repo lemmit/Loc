@@ -472,7 +472,7 @@ function renderProjectionStateModel(
   schema?: string,
 ): string {
   const tableName = plural(snake(proj.name));
-  const corr = proj.correlationField;
+  const corr = proj.correlationField as string;
   const cols: PyColumn[] = [];
   for (const f of proj.stateFields) {
     if (f.name === corr) {

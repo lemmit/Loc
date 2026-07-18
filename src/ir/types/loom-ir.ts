@@ -1442,20 +1442,100 @@ export interface OnIR {
  *  `wireShape` read surface, state-table migration). */
 export interface ProjectionIR {
   name: string;
+  /** Query parameters — a query-time projection may be parameterised
+   *  (`projection OrdersInRegion(region: string) …`), exactly like a
+   *  criterion / retrieval.  Empty for the folded flavor. */
+  params: ParamIR[];
   /** The read-model schema — the fold-target columns and the wire shape.
    *  Lowered with the same `lowerField` as aggregate / workflow state. */
   stateFields: FieldIR[];
   /** The explicit id-shaped state field inbound events route to (`keyed by`).
-   *  Required — no inference (unlike `WorkflowIR.correlationField`). */
-  correlationField: string;
-  /** One pure fold per subscribed foreign event. */
+   *  Required for the KEYED flavor — no inference (unlike
+   *  `WorkflowIR.correlationField`).  **Absent** for a SINGLETON projection
+   *  (no `keyed by`); its absence is the singleton discriminant — see
+   *  `isSingletonProjection`. */
+  correlationField?: string;
+  /** One pure fold per subscribed foreign event.  Non-empty ⇒ the read model
+   *  is MATERIALIZED (needs a table); empty ⇒ query-time (computed per read).
+   *  See `isMaterializedProjection`. */
   handlers: ProjectionOnIR[];
+  /** The query-time comprehension.  Present when the projection declares a
+   *  `from`/`where`/`join`/`select` clause (read-path-architecture.md
+   *  rev.13, § "projection generalises").  Absent ⇒ a pure folded read model
+   *  (today's projection).  The `materialized`/`singleton`/`query-time` facts
+   *  are DERIVED from clause presence (never stamped) — see the predicates
+   *  below `ProjectionIR`. */
+  query?: ProjectionQueryIR;
   /** Canonical wire shape of a projection row — correlation field as an id
    *  token then the state fields, mirroring `WorkflowIR.instanceWireShape`.
    *  Populated by `enrichLoomModel`. */
   wireShape?: WireField[];
   /** Provenance chain back to the `.ddd` source. */
   origin?: OriginRef;
+}
+
+/** The query-time comprehension clauses of a generalised projection
+ *  (read-path-architecture.md rev.13).  Every expression inside is Loom's one
+ *  candidate-rooted language (the same `criterion` / `find … where` dialect);
+ *  the LINQ shape is purely structural. */
+export interface ProjectionQueryIR {
+  /** `from <Source> [as <alias>]` — the query source aggregate, by name.
+   *  Undefined for the folded+`join` hybrid (no `from`; `join`s resolve
+   *  stored id columns instead). */
+  source?: string;
+  /** The author's alias for the source candidate (`from Order as o`).  `this`
+   *  / bare stays the default; the alias resolves identically (like
+   *  `criterion … of T as o`). */
+  sourceAlias?: string;
+  /** `where <criterion-expr>` — a single-aggregate queryable predicate over
+   *  the source, in the criterion position (composes named criteria). */
+  filter?: ExprIR;
+  /** Named criterion this `where` reifies to when it is exactly one criterion
+   *  reference (mirrors `RetrievalIR.criterionRef`) — the criterion name plus
+   *  its lowered argument expressions. */
+  criterionRef?: { name: string; args: ExprIR[] };
+  /** `join <Aggregate> as <c> on <idRef>` clauses — by-id follows.  Each is
+   *  one batched load through the aggregate's own repository (boundary-safe).
+   *  Also surfaced pre-planned as `auxiliaries` (path + mapVar) below, reusing
+   *  the machinery relocated from `lower-view`. */
+  joins: ProjectionJoinIR[];
+  /** `select <field> = <expr>, …` — fills the declared row fields from the
+   *  source (`this`/alias) and join aliases.  Undefined ⇒ the projection
+   *  exposes the source's own shape (shorthand, deferred). */
+  selects?: { field: string; expr: ExprIR; type: TypeIR }[];
+  /** Bulk-load plan derived from the `join` clauses — the `auxiliaries` shape
+   *  `lower-view` builds for view follows, now populated by reading the
+   *  DECLARED `join`s rather than walking binds for id-dots. */
+  auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
+}
+
+/** One `join <Aggregate> as <alias> on <idRef>` follow. */
+export interface ProjectionJoinIR {
+  /** The joined aggregate, by name. */
+  aggregate: string;
+  /** The alias the loaded aggregate binds to (`select`/`where` read from it). */
+  alias: string;
+  /** The id-typed reference the join resolves on — types to `<aggregate> id`;
+   *  the join condition is always the aggregate's identity (`c.id == <idRef>`). */
+  idRef: ExprIR;
+}
+
+/** True when the projection is MATERIALIZED (folded from events → needs a
+ *  table).  Derived from clause presence — a fold `on(e)` handler present. */
+export function isMaterializedProjection(p: ProjectionIR): boolean {
+  return p.handlers.length > 0;
+}
+
+/** True when the projection is a SINGLETON (exactly one row).  Derived: no
+ *  `keyed by` clause ⇒ no correlation field. */
+export function isSingletonProjection(p: ProjectionIR): boolean {
+  return p.correlationField === undefined;
+}
+
+/** True when the projection is QUERY-TIME (computed per read, always-current,
+ *  no table).  Derived: a query source with no fold handlers. */
+export function isQueryTimeProjection(p: ProjectionIR): boolean {
+  return p.query?.source !== undefined && p.handlers.length === 0;
 }
 
 /** One `on(e: Event) [by <expr>] { … }` pure fold on a projection.  Shares the
