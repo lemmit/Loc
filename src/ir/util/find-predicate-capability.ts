@@ -84,16 +84,16 @@ const COMPARE_OPS: ReadonlySet<string> = new Set(["==", "!=", "<", "<=", ">", ">
 const FULL_SUBSET: FindPredicateCapability = () => null;
 
 /** Dapper (`whereToSql`): comparisons, `&&`/`||`, unary `!`, `this.<field>`,
- *  params, this-prop / enum-value refs, literals.  It does NOT emit the
- *  reference-collection membership subquery, and has no request-principal
- *  accessor in its find path.  Those two shapes can appear at any node, so a
- *  plain node-by-node walk of the queryable structural arms suffices. */
+ *  params, this-prop / enum-value refs, literals, AND `currentUser.<claim>`
+ *  (lowered to a `@__cu_<claim>` param bound from the ambient request
+ *  principal — same accessor the capability-filter path uses).  It does NOT
+ *  emit the reference-collection membership subquery.  That shape can appear at
+ *  any node, so a plain node-by-node walk of the queryable structural arms
+ *  suffices. */
 const DAPPER_SUBSET: FindPredicateCapability = (e) => {
   const reject = (n: ExprIR): string | null => {
     if (isContainsMembership(n))
       return "'this.<refColl>.contains(x)' membership (no join subquery on Dapper)";
-    if (isCurrentUserMember(n))
-      return "'currentUser.<field>' principal reference (no principal accessor on the Dapper find path)";
     return null;
   };
   const walk = (n: ExprIR): string | null => {

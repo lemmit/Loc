@@ -1,0 +1,57 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's PRINCIPAL
+// surface (M-T6.9 wave 1): principal-referencing lifecycle stamps + principal
+// `filter` capability predicates on an auth deployable.
+//
+// The Dapper repository reaches the request principal through the ambient
+// `RequestContext.Current!.CurrentUser!` accessor — the raw-SQL mirror of the EF
+// AuditableInterceptor + per-request HasQueryFilter:
+//   - `tenantOwned` → `tenantId := currentUser.tenantId` (claim stamp) +
+//     `filter this.tenantId == currentUser.tenantId` (principal read filter,
+//     lowered to a `@__cu_tenantId` Dapper param).
+//   - `auditable`  → `createdBy/updatedBy := currentUser` (bare-principal id
+//     stamps, resolved to `RequestContext.Current!.CurrentUser!.Id`).
+// Built under `dotnet build /warnaserror` — no EF SaveChangesInterceptor is
+// emitted on the Dapper deployable.
+
+system DapperTenant {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Organization
+
+  api BillingApi from Core
+
+  subdomain Core {
+    context Billing {
+      aggregate Invoice with tenantOwned, auditable, crudish {
+        number:    string
+        amountDue: int
+      }
+
+      aggregate Organization with crudish {
+        name: string
+      }
+
+      repository Invoices for Invoice {
+        find byNumber(n: string): Invoice[] where this.number == n
+        // find-predicate widening: `currentUser.<claim>` in a find `where`
+        // lowers to a `@__cu_id` Dapper param bound from the ambient principal
+        // (was gated by the Dapper find-predicate subset).
+        find mine(): Invoice[] where this.createdBy == currentUser.id
+      }
+      repository Organizations for Organization { }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource billingState { for: Billing, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Billing]
+    dataSources: [billingState]
+    serves: BillingApi
+    port: 8080
+    auth: required
+  }
+}

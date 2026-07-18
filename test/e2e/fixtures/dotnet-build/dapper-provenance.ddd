@@ -1,0 +1,45 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's PROVENANCE
+// surface (M-T6.9 wave 1).  A `provenanced` field's lineage round-trips on the
+// co-located `<field>_provenance` jsonb column (ProvJson.Options) and the Dapper
+// SaveAsync flushes the drained ProvLineage into the `provenance_records`
+// history table (DbSchema owns its DDL) — the raw-Npgsql mirror of the EF
+// value-converter + ProvenanceRecord flush.  No EF ProvenanceRecord POCO /
+// EntityTypeConfiguration is emitted on the Dapper deployable.
+
+system DapperProvenance {
+  api OrderingApi from Ordering
+
+  subdomain Ordering {
+    context Ordering {
+      aggregate Order with crudish {
+        reference: string
+        quantity:  int
+        unitPrice: int
+        discount:  int
+        total:     int provenanced
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          precondition price >= 0
+          quantity  := qty
+          unitPrice := price
+          total     := qty * price - discount
+        }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+
+  resource orderingState { for: Ordering, kind: state, use: primary }
+
+  deployable d {
+    platform: dotnet { persistence: dapper }
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 4000
+  }
+}

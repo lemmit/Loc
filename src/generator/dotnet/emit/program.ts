@@ -129,8 +129,23 @@ export function renderProgram(
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
+  // Dapper resolves the singleton NpgsqlDataSource directly (no per-request
+  // scope needed); the EF path scopes an AppDbContext.  The domain-`Create`
+  // seed path resolves its repositories off the same provider either way.
   const seedBlock = hasSeeds
-    ? `
+    ? usingDapper
+      ? `
+// Apply first-boot seed data after the schema is ensured (database-seeding.md).
+// Ship-once per dataset via the __loom_seed marker; idempotent across boots.
+// A scope resolves the domain path's scoped I<Agg>Repository (the singleton
+// NpgsqlDataSource resolves off it too).
+using (var seedScope = app.Services.CreateScope())
+{
+    var seedDb = seedScope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();
+    await ${ns}.Infrastructure.Persistence.Seed.RunSeeds(seedDb, seedScope.ServiceProvider);
+}
+`
+      : `
 // Apply first-boot seed data after migrations (database-seeding.md).
 // Ship-once per dataset via the __loom_seed marker; idempotent across boots.
 using (var seedScope = app.Services.CreateScope())

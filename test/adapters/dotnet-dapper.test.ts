@@ -230,12 +230,46 @@ system D {
 });
 
 describe("dapper capability gating (loom.dapper-unsupported)", () => {
-  const rejects = async (body: string, needle: RegExp) => {
-    const { errors } = await emit(sys("dapper", body));
-    expect(errors.some((e) => /persistence: dapper/.test(e) && needle.test(e))).toBe(true);
-  };
-
-  it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
+  it("no longer rejects seed data; emits a Dapper-framed Seed.cs", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Customer with crudish { name: string  active: bool }
+      repository Customers for Customer { }
+      seed default { Customer { name: "Acme", active: true } }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the dapper seed gate is lifted
+    const seed = files.get("api/Infrastructure/Persistence/Seed.cs")!;
+    expect(seed).toBeDefined();
+    // Framed on Npgsql+Dapper, not the EF AppDbContext.
+    expect(seed).toContain(
+      "public static async Task RunSeeds(NpgsqlDataSource db, IServiceProvider sp",
+    );
+    expect(seed).toContain("using Dapper;");
+    expect(seed).not.toContain("AppDbContext");
+    expect(seed).not.toContain("Microsoft.EntityFrameworkCore");
+    // Marker table + idempotency go through Dapper's conn.ExecuteAsync.
+    expect(seed).toContain('CREATE TABLE IF NOT EXISTS \\"__loom_seed\\"');
+    expect(seed).toContain('INSERT INTO \\"__loom_seed\\" (\\"dataset\\") VALUES (@dataset)');
+    // Domain-`Create` path is persistence-agnostic (repository SaveAsync).
+    expect(seed).toContain(
+      'await customerRepo.SaveAsync(Customer.Create(name: "Acme", active: true), cancellationToken);',
+    );
+    // Program.cs resolves the singleton NpgsqlDataSource from a scope (which
+    // also resolves the scoped I<Agg>Repository the domain path uses).
+    const program = files.get("api/Program.cs")!;
+    expect(program).toContain(
+      "var seedDb = seedScope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();",
+    );
+  });
 
   it("rejects workflow event subscriptions (saga handlers + outbox need the EF AppDbContext)", async () => {
     const src = `
@@ -299,7 +333,7 @@ describe("dapper capability filters", () => {
     expect(repo).toContain("WHERE (customer = @customer) AND (NOT archived)");
   });
 
-  it("applies lifecycle stamps: onUpdate mutates pre-save, onCreate is INSERT-only", async () => {
+  it("applies lifecycle stamps as bound upsert params: onUpdate in the SET, onCreate INSERT-only", async () => {
     const body = `createdAt: datetime
         updatedAt: datetime
         stamp onCreate { createdAt := now() }
@@ -309,27 +343,159 @@ describe("dapper capability filters", () => {
     const repo = [...files.entries()].find(([k]) =>
       k.endsWith("Repositories/OrderRepository.cs"),
     )![1];
-    // onUpdate mutates the in-memory aggregate (EF-interceptor parity) so
-    // both the row and the projected response carry the stamp.
-    expect(repo).toContain("aggregate.UpdatedAt = DateTime.UtcNow;");
-    // onCreate binds an INSERT-only local …
+    // Stamps bind as column params (the entity's fields are `{ get; private
+    // set; }`, so the Dapper repo can't mutate them — it computes a local and
+    // binds it, reaching both the INSERT and the ON CONFLICT SET).
+    expect(repo).not.toContain("aggregate.UpdatedAt =");
     expect(repo).toContain("var __create_created_at = DateTime.UtcNow;");
     expect(repo).toContain("created_at = __create_created_at");
-    // … and the upsert SET excludes it (an existing row keeps its value)
-    // while still updating the onUpdate column.
+    expect(repo).toContain("var __stamp_updated_at = DateTime.UtcNow;");
+    expect(repo).toContain("updated_at = __stamp_updated_at");
+    // The upsert SET excludes the onCreate column (an existing row keeps its
+    // value) while still updating the onUpdate column.
     expect(repo).toMatch(
       /ON CONFLICT \(id\) DO UPDATE SET (?!.*created_at = excluded).*updated_at = excluded\.updated_at/,
     );
   });
 
-  it("never emits a silent principal-referencing filter (model errors out upstream)", async () => {
-    // The selectability validator already rejects `currentUser.<field>` in
-    // this fixture shape; the dapper gate's principal check is the
-    // defense-in-depth layer behind it.  Either way: errors, no silent drop.
+  it("never emits a silent principal filter on a no-auth deployable (errors upstream)", async () => {
+    // Without a `user {}`/auth deployable there is no principal to reference, so
+    // `currentUser.<field>` is unresolvable upstream (selectability validator).
+    // Errors, no silent drop.
     const { errors } = await emit(
       sys("dapper", "owner: string\n        filter this.owner == currentUser.email"),
     );
     expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+// Principal-referencing stamps + filters on Dapper: with an auth deployable the
+// Dapper repository reaches the request principal through the ambient
+// `RequestContext.Current!.CurrentUser!` accessor — the raw-SQL mirror of the EF
+// AuditableInterceptor + per-request HasQueryFilter.  A bare `currentUser` stamp
+// → the principal id; `currentUser.<claim>` → the claim; a principal `filter`
+// lowers `currentUser.<claim>` to a `@__cu_<claim>` Dapper param bound on every
+// SELECT.
+describe("dapper principal stamps + filters (auth)", () => {
+  const AUTH_SRC = `
+system D {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  subdomain S {
+    context O {
+      aggregate Invoice with tenantOwned, auditable, crudish {
+        number: string
+      }
+      aggregate Org with crudish { name: string }
+      repository Invoices for Invoice {
+        find byNumber(n: string): Invoice[] where this.number == n
+        find mine(): Invoice[] where this.createdBy == currentUser.id
+      }
+      repository Orgs for Org { }
+    }
+  }
+  api A from S
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required
+  }
+}`;
+
+  it("no longer rejects principal stamps/filters; binds them from the ambient principal", async () => {
+    const { files, errors } = await emit(AUTH_SRC);
+    expect(errors).toEqual([]); // both principal gates are lifted
+    const repo = files.get("api/Infrastructure/Repositories/InvoiceRepository.cs")!;
+    // Principal filter → a `@__cu_tenantId` param bound from the request
+    // principal, spliced into every SELECT (GetById shown).
+    expect(repo).toContain("WHERE id = @id AND (tenant_id = @__cu_tenantId)");
+    expect(repo).toContain("__cu_tenantId = RequestContext.Current!.CurrentUser!.TenantId");
+    // The named find carries it too.
+    expect(repo).toContain("WHERE (number = @n) AND (tenant_id = @__cu_tenantId)");
+    // Member-access principal stamp (tenantId := currentUser.tenantId) → the
+    // claim; bare `currentUser` stamp (createdBy/updatedBy := currentUser) → the
+    // principal id — both as bound upsert params (no private-setter mutation).
+    expect(repo).toContain(
+      "var __create_tenant_id = RequestContext.Current!.CurrentUser!.TenantId;",
+    );
+    expect(repo).toContain("var __create_created_by = RequestContext.Current!.CurrentUser!.Id;");
+    expect(repo).toContain("var __stamp_updated_by = RequestContext.Current!.CurrentUser!.Id;");
+    expect(repo).not.toContain("aggregate.UpdatedBy =");
+    // No EF SaveChangesInterceptor is emitted on the Dapper deployable (it would
+    // reference Microsoft.EntityFrameworkCore, absent here).
+    expect(files.has("api/Infrastructure/Persistence/AuditableInterceptor.cs")).toBe(false);
+  });
+
+  it("widens the find-predicate subset: `currentUser.<claim>` in a find `where`", async () => {
+    const { files, errors } = await emit(AUTH_SRC);
+    expect(errors).toEqual([]); // the Dapper find-predicate currentUser gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/InvoiceRepository.cs")!;
+    // The find carries the shared interface's `User currentUser` param and binds
+    // its own `@__cu_id` ref + the inherited capability filter's `@__cu_tenantId`
+    // from that parameter (not the ambient accessor).
+    expect(repo).toContain(
+      "public async Task<List<Invoice>> Mine(User currentUser, CancellationToken cancellationToken = default)",
+    );
+    expect(repo).toContain("WHERE (created_by = @__cu_id) AND (tenant_id = @__cu_tenantId)");
+    expect(repo).toContain("__cu_id = currentUser.Id");
+    expect(repo).toContain("__cu_tenantId = currentUser.TenantId");
+  });
+});
+
+// Provenanced fields on Dapper: the co-located `<field>_provenance` jsonb column
+// round-trips the ProvLineage (ProvJson.Options) and SaveAsync flushes the
+// drained lineage into the `provenance_records` history table (DbSchema owns the
+// DDL) — the raw-Npgsql mirror of the EF value-converter + ProvenanceRecord
+// flush.  The shared ProvLineage SDK is emitted; the EF ProvenanceRecord
+// POCO/configuration are NOT (they'd reference Microsoft.EntityFrameworkCore).
+describe("dapper provenanced fields", () => {
+  const PROV_SRC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        quantity: int
+        price:    int
+        total:    int provenanced
+        operation reprice(qty: int, unit: int) {
+          quantity := qty
+          price    := unit
+          total    := qty * unit
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects provenanced fields; round-trips the co-located column + flushes history", async () => {
+    const { files, errors } = await emit(PROV_SRC);
+    expect(errors).toEqual([]); // the dapper provenance gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Co-located `total_provenance` jsonb column round-trips the lineage.
+    expect(repo).toContain("public string? total_provenance { get; set; }");
+    expect(repo).toContain(
+      "TotalProvenance = r.total_provenance is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.total_provenance, ProvJson.Options)",
+    );
+    expect(repo).toContain("total_provenance = excluded.total_provenance");
+    // SaveAsync flushes the drained lineage into provenance_records.
+    expect(repo).toContain("foreach (var __lin in aggregate.DrainProv())");
+    expect(repo).toContain("INSERT INTO provenance_records (trace_id, snapshot_id, target_type");
+    // The shared lineage SDK is emitted; the EF history POCO/config are not.
+    expect(files.has("api/Domain/Common/ProvLineage.cs")).toBe(true);
+    expect(files.has("api/Infrastructure/Persistence/ProvenanceRecord.cs")).toBe(false);
+    expect(
+      files.has("api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs"),
+    ).toBe(false);
+    // DbSchema owns the history table + co-located column DDL.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("total_provenance jsonb");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS provenance_records (");
   });
 });
 

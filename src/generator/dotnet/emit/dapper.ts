@@ -30,13 +30,18 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
-import { csValueTypeForId, renderCsExpr, renderCsType } from "../render-expr.js";
+import {
+  AMBIENT_CURRENT_USER,
+  csValueTypeForId,
+  renderCsExpr,
+  renderCsType,
+} from "../render-expr.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
@@ -186,11 +191,35 @@ function fieldColumn(f: FieldIR): DapperColumn {
   }
 }
 
+/** Co-located provenance lineage column (`<field>_provenance` jsonb) for a
+ *  `provenanced` root field — the current ProvLineage, round-tripped through
+ *  System.Text.Json (ProvJson.Options) exactly like the EF value-converter, so
+ *  the read DTO's `<Field>Provenance` projection is populated on both adapters. */
+function provColumn(f: FieldIR): DapperColumn {
+  const col = `${snake(f.name)}_provenance`;
+  const prop = `${upperFirst(f.name)}Provenance`;
+  return {
+    col,
+    sql: "jsonb",
+    nullable: true,
+    rowCs: "string?",
+    cast: "::jsonb",
+    save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}, ProvJson.Options)`,
+    stateProp: prop,
+    hydrate: `r.${col} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${col}, ProvJson.Options)`,
+  };
+}
+
 function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
   // Reference-collection fields (`X id[]`) live in their join tables, not as
   // root columns — see the association load/save blocks in the repository.
   const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
-  return [idColumn(agg), ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn)];
+  return [
+    idColumn(agg),
+    ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn),
+    // One co-located `<field>_provenance` lineage column per provenanced field.
+    ...agg.fields.filter((f) => f.provenanced).map(provColumn),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +253,12 @@ function whereToSql(e: ExprIR): string {
     case "member":
       // `this.<field>` → column.
       if (e.receiver.kind === "this") return snake(e.member);
+      // `currentUser.<claim>` → a Dapper named parameter bound from the ambient
+      // request principal (`RequestContext.Current!.CurrentUser!.<Claim>`).  The
+      // caller (a capability `filter`) binds `@__cu_<claim>` into every SELECT's
+      // parameter object — see `filterPrincipalRefs` in renderDapperRepository.
+      if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user")
+        return `@${currentUserParam(e.member)}`;
       throw new Error("dapper: unsupported member access in find");
     case "ref":
       // A find/retrieval parameter → Dapper named parameter.
@@ -255,9 +290,82 @@ function whereToSql(e: ExprIR): string {
   }
 }
 
-function renderParams(params: ParamIR[], extra: readonly string[] = []): string {
+/** Dapper param name for a `currentUser.<claim>` principal reference in a
+ *  capability filter (`this.tenantId == currentUser.tenantId` →
+ *  `@__cu_tenantId`).  Stable per claim so repeated references share one param. */
+function currentUserParam(member: string): string {
+  return `__cu_${member}`;
+}
+
+/** A `currentUser.<claim>` reference found in a filter / find / retrieval
+ *  predicate: the Dapper param name it lowers to (`__cu_<claim>`) and the
+ *  principal claim property (PascalCased) read to bind it.  The accessor BASE
+ *  is chosen at the binding site — the ambient
+ *  `RequestContext.Current!.CurrentUser!` for queries with no principal param
+ *  (GetById / FindManyByIds / retrievals), or the `currentUser` method
+ *  parameter the shared repository interface adds to a `currentUser`-referencing
+ *  find. */
+interface FilterPrincipalRef {
+  param: string; // `__cu_tenantId`
+  claimProp: string; // `TenantId`
+}
+
+/** `${param} = ${base}.${claimProp}` fields for a `new { … }` / DynamicParameters. */
+function principalFields(refs: readonly FilterPrincipalRef[], base: string): string[] {
+  return refs.map((r) => `${r.param} = ${base}.${r.claimProp}`);
+}
+
+/** Collect the distinct `currentUser.<claim>` references across the given
+ *  predicates (deduped by claim), so the repository can bind each
+ *  `@__cu_<claim>` param from the principal on every SELECT. */
+function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipalRef[] {
+  const byParam = new Map<string, FilterPrincipalRef>();
+  const walk = (e: ExprIR): void => {
+    switch (e.kind) {
+      case "member":
+        if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
+          const param = currentUserParam(e.member);
+          if (!byParam.has(param)) byParam.set(param, { param, claimProp: upperFirst(e.member) });
+        } else {
+          walk(e.receiver);
+        }
+        return;
+      case "paren":
+        walk(e.inner);
+        return;
+      case "unary":
+        walk(e.operand);
+        return;
+      case "binary":
+        walk(e.left);
+        walk(e.right);
+        return;
+      default:
+        return;
+    }
+  };
+  for (const f of filters) walk(f);
+  return [...byParam.values()];
+}
+
+/** Dedup principal refs by param name (a claim referenced by both a capability
+ *  filter and a find's own predicate binds one parameter). */
+function dedupPrincipalRefs(refs: readonly FilterPrincipalRef[]): FilterPrincipalRef[] {
+  return [...new Map(refs.map((r) => [r.param, r])).values()];
+}
+
+/** Find/method parameter list.  A `currentUser`-referencing find carries a
+ *  trailing `User currentUser` parameter (after any page args, before the
+ *  CancellationToken) — the SAME position the shared `I<Agg>Repository`
+ *  interface renders (`renderParamsWithCt`), so the Dapper impl matches it. */
+function renderParams(params: ParamIR[], extra: readonly string[] = [], usesUser = false): string {
   const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
-  return [...ps, ...extra, "CancellationToken cancellationToken = default"].join(", ");
+  return [
+    ...ps,
+    ...extra,
+    ...(usesUser ? ["User currentUser"] : []),
+    "CancellationToken cancellationToken = default",
+  ].join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -269,22 +377,30 @@ export function renderDapperRepository(
   repo: RepositoryIR | undefined,
   ns: string,
   retrievals: RetrievalIR[] = [],
+  /** The request principal's id property (PascalCased, e.g. `Id`) — present
+   *  when the deployable carries auth.  A bare `currentUser` stamp value
+   *  (`createdBy := currentUser`) resolves to `RequestContext.Current!.CurrentUser!.<actorIdProp>`,
+   *  mirroring the EF AuditableInterceptor.  Undefined ⇒ no principal stamp
+   *  reaches this emitter (rejected upstream by loom.dotnet-stamp-unsupported). */
+  actorIdProp?: string,
 ): string {
   const table = tableOf(agg.name);
   const cols = columnsOf(agg);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
   // Lifecycle stamps (`stamp onCreate/onUpdate { field: expr }` →
-  // `contextStamps`).  EF applies these via SaveChangesInterceptor; the
-  // Dapper upsert can't see Added-vs-Modified, so:
-  //   - onUpdate assignments MUTATE the in-memory aggregate before the
-  //     upsert (EF parity — EF applies onUpdate at Added too), so both the
-  //     row and the projected response carry the stamp;
-  //   - onCreate assignments are INSERT-only: computed into locals, bound
-  //     as that column's parameter, and EXCLUDED from the ON CONFLICT
-  //     UPDATE SET — an existing row keeps its original value.  (The
-  //     in-memory aggregate is not mutated for onCreate; existence is
-  //     unknowable without an extra round-trip.)
+  // `contextStamps`).  EF applies these via SaveChangesInterceptor (writing the
+  // stamped column through EF metadata, so the entity's `{ get; private set; }`
+  // is honoured).  The Dapper repository can't mutate those private setters, so
+  // it computes each stamp value into a local and BINDS it as the column's
+  // upsert parameter (reaching both the INSERT VALUES and the ON CONFLICT SET):
+  //   - onCreate assignments are INSERT-only — bound as the column parameter and
+  //     EXCLUDED from the ON CONFLICT UPDATE SET, so an existing row keeps its
+  //     original value.
+  //   - onUpdate assignments are bound on both INSERT and UPDATE (EF stamps
+  //     onUpdate at Added too) — the column stays in the SET.
+  // Neither mutates the in-memory aggregate (its stamped fields are private-set;
+  // the crudish update handler returns Unit, so no in-memory projection needs it).
   const stampRules = agg.contextStamps ?? [];
   const onCreateStamps = stampRules
     .filter((r) => r.event === "create")
@@ -293,22 +409,35 @@ export function renderDapperRepository(
     .filter((r) => r.event === "update")
     .flatMap((r) => r.assignments);
   const onCreateCols = new Set(onCreateStamps.map((a) => snake(a.field)));
+  const onUpdateCols = new Set(onUpdateStamps.map((a) => snake(a.field)));
   const upsertSet = cols
     .filter((c) => c.col !== "id" && !onCreateCols.has(c.col))
     .map((c) => `${c.col} = excluded.${c.col}`)
     .join(", ");
   const createLocal = (col: string): string => `__create_${col}`;
-  const saveParams = cols
-    .map((c) => `${c.col} = ${onCreateCols.has(c.col) ? createLocal(c.col) : c.save}`)
-    .join(", ");
+  const updateLocal = (col: string): string => `__stamp_${col}`;
+  const stampParam = (col: string): string | null =>
+    onCreateCols.has(col) ? createLocal(col) : onUpdateCols.has(col) ? updateLocal(col) : null;
+  const saveParams = cols.map((c) => `${c.col} = ${stampParam(c.col) ?? c.save}`).join(", ");
+  // A stamp value referencing the request principal resolves through the same
+  // ambient accessor the EF AuditableInterceptor uses: `currentUser.<claim>` →
+  // `RequestContext.Current!.CurrentUser!.<Claim>` (via `currentUserExpr`), and
+  // a bare `currentUser` → the principal's id (`.<actorIdProp>`), the .NET
+  // analogue of Java's `currentUser.id()`.  Non-principal stamps (`now()`) are
+  // byte-identical (the ctx just carries an unused accessor).
+  const renderStampValue = (value: ExprIR): string =>
+    value.kind === "ref" && value.refKind === "current-user" && actorIdProp
+      ? `${AMBIENT_CURRENT_USER}.${actorIdProp}`
+      : renderCsExpr(value, {
+          thisName: "aggregate",
+          ...(actorIdProp ? { currentUserExpr: AMBIENT_CURRENT_USER } : {}),
+        });
   const stampLines: string[] = [
-    ...onUpdateStamps.map(
-      (a) =>
-        `        aggregate.${upperFirst(a.field)} = ${renderCsExpr(a.value, { thisName: "aggregate" })};`,
-    ),
     ...onCreateStamps.map(
-      (a) =>
-        `        var ${createLocal(snake(a.field))} = ${renderCsExpr(a.value, { thisName: "aggregate" })};`,
+      (a) => `        var ${createLocal(snake(a.field))} = ${renderStampValue(a.value)};`,
+    ),
+    ...onUpdateStamps.map(
+      (a) => `        var ${updateLocal(snake(a.field))} = ${renderStampValue(a.value)};`,
     ),
   ];
 
@@ -350,14 +479,17 @@ export function renderDapperRepository(
         `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
       ];
 
-  // Non-principal capability filters (`filter !this.isDeleted`) AND into
-  // every read (GetById / FindManyByIds / finds / retrievals) — Dapper has
-  // no EF HasQueryFilter, so the predicate is spliced into each SELECT's
-  // WHERE.  Principal-referencing filters are validator-rejected on Dapper
-  // (`loom.dapper-unsupported`).  A predicate outside the Dapper SQL subset
-  // throws here (loud) rather than silently dropping the filter — half-
-  // applying a soft-delete filter would be a correctness hole.
-  const capabilityFilters = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
+  // Capability filters (`filter !this.isDeleted`, `filter this.tenantId ==
+  // currentUser.tenantId`) AND into every read (GetById / FindManyByIds /
+  // finds / retrievals) — Dapper has no EF HasQueryFilter, so the predicate is
+  // spliced into each SELECT's WHERE.  A principal-referencing filter lowers
+  // `currentUser.<claim>` to a `@__cu_<claim>` Dapper param bound from the
+  // ambient request principal (`filterPrincipalRefs`), threaded into every
+  // query's parameter object — the raw-SQL mirror of EF's per-request
+  // HasQueryFilter.  A predicate outside the Dapper SQL subset throws here
+  // (loud) rather than silently dropping the filter — half-applying a
+  // soft-delete/tenant filter would be a correctness hole.
+  const capabilityFilters = agg.contextFilters ?? [];
   const filterSql: string | null =
     capabilityFilters.length > 0
       ? capabilityFilters
@@ -375,6 +507,16 @@ export function renderDapperRepository(
       : null;
   const andFilter = (existingWhere: boolean): string =>
     filterSql ? `${existingWhere ? " AND " : " WHERE "}${filterSql}` : "";
+  // Principal-filter param bindings appended to every SELECT's parameter object
+  // (`__cu_tenantId = RequestContext.Current!.CurrentUser!.TenantId`).  Empty
+  // for a non-principal (or no) filter, so those SELECTs stay byte-identical.
+  // GetById / FindManyByIds have no `currentUser` method param, so they bind
+  // from the ambient accessor.
+  const filterPrincipalRefs = collectFilterPrincipalRefs(capabilityFilters);
+  const princFields = principalFields(filterPrincipalRefs, AMBIENT_CURRENT_USER);
+  // Comma-prefixed suffix appended inside a `new { … }` that already has fields
+  // (GetById / FindManyByIds).
+  const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
@@ -426,6 +568,27 @@ export function renderDapperRepository(
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
   );
 
+  // Provenance flush (provenance.md): drain the per-write lineage buffer and
+  // append one `provenance_records` row per write, on the SAME connection as
+  // the aggregate upsert (the .NET Dapper mirror of the EF repository's
+  // transactional `DrainProv()` staging).  Empty when the aggregate has no
+  // provenanced fields (byte-identical to the pre-provenance emit).
+  const provFlushLines = agg.fields.some((f) => f.provenanced)
+    ? [
+        "        foreach (var __lin in aggregate.DrainProv())",
+        "        {",
+        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO provenance_records (trace_id, snapshot_id, target_type, field, inputs, computed_value, at, correlation_id, scope_id, actor_id, parent_id) VALUES (@trace_id, @snapshot_id, @target_type, @field, CAST(@inputs AS jsonb), CAST(@computed_value AS jsonb), @at, @correlation_id, @scope_id, @actor_id, @parent_id)", new { trace_id = Guid.NewGuid().ToString(), snapshot_id = __lin.SnapshotId, target_type = __lin.Target.Type, field = __lin.Target.Field, inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options), computed_value = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options), at = DateTime.UtcNow, correlation_id = RequestContext.Current?.CorrelationId, scope_id = RequestContext.Current?.ScopeId, actor_id = RequestContext.Current?.ActorId, parent_id = RequestContext.Current?.ParentId }, cancellationToken: cancellationToken));`,
+        "        }",
+      ]
+    : [];
+
+  // A `currentUser`-referencing find takes a `User currentUser` param (named
+  // type ⇒ needs `using <ns>.Auth`).  Principal stamps/filters use only the
+  // ambient `RequestContext.Current!.CurrentUser!` member access (no type name),
+  // so they don't.
+  const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
+    findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
+  );
   const findMethods = (repo?.finds ?? []).map((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const name = upperFirst(f.name);
@@ -437,14 +600,31 @@ export function renderDapperRepository(
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
       return pt.kind === "id" ? `${p.name} = ${p.name}.Value` : p.name;
     });
-    const paramObj = paramFields.length > 0 ? `, new { ${paramFields.join(", ")} }` : "";
+    // Bind the find's own params + every `currentUser.<claim>` param the SELECT
+    // references — both the capability-filter refs spliced into every WHERE AND
+    // any the find's OWN predicate carries (`find mine(): … where this.owner ==
+    // currentUser.id`) — deduped by param.  A `currentUser`-referencing find
+    // gets a trailing `User currentUser` method parameter (the shared repository
+    // interface adds it), so it binds its principal params from that parameter;
+    // a non-`currentUser` find (only inheriting the capability filter) binds
+    // from the ambient accessor.
+    const usesUser = findUsesCurrentUser(f);
+    const principalBase = usesUser ? "currentUser" : AMBIENT_CURRENT_USER;
+    const findPrincipalRefs = dedupPrincipalRefs([
+      ...filterPrincipalRefs,
+      ...collectFilterPrincipalRefs(f.filter ? [f.filter] : []),
+    ]);
+    const findPrincFields = principalFields(findPrincipalRefs, principalBase);
+    const findPrincSuffix = findPrincFields.length > 0 ? `, ${findPrincFields.join(", ")}` : "";
+    const allFindParams = [...paramFields, ...findPrincFields];
+    const paramObj = allFindParams.length > 0 ? `, new { ${allFindParams.join(", ")} }` : "";
     let where = "";
     try {
       where = f.filter ? ` WHERE ${whereToSql(f.filter)}` : "";
     } catch {
       // Unsupported predicate — emit a compile-safe stub.
       return lines(
-        `    public Task<${ret}> ${name}(${renderParams(f.params)})`,
+        `    public Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
         `        => throw new NotImplementedException("Dapper v1 does not support this find's predicate.");`,
       );
     }
@@ -461,7 +641,7 @@ export function renderDapperRepository(
         .map((wf) => `"${wf}" => "${snake(wf)}"`)
         .join(", ");
       return lines(
-        `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"])})`,
+        `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"], usesUser)})`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var offset = (page - 1) * pageSize;`,
@@ -469,7 +649,7 @@ export function renderDapperRepository(
         `        var sortDir = dir == "desc" ? "DESC" : "ASC";`,
         `        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) ${fromClause}"${paramObj}, cancellationToken: cancellationToken));`,
         `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
-        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset }, cancellationToken: cancellationToken));`,
+        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${findPrincSuffix} }, cancellationToken: cancellationToken));`,
         `        var items = rows.Select(Map).ToList();`,
         ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
         `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
@@ -478,7 +658,7 @@ export function renderDapperRepository(
     }
     if (isList) {
       return lines(
-        `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
+        `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
@@ -493,7 +673,7 @@ export function renderDapperRepository(
       );
     }
     return lines(
-      `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
+      `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
@@ -531,11 +711,19 @@ export function renderDapperRepository(
             .join(", ")}`
         : "";
     const baseSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${filterSql ? ` AND ${filterSql}` : ""}${orderSql}`;
-    const paramAdds = r.params.map((p) => {
-      const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-      const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
-      return `        p.Add("${p.name}", ${val});`;
-    });
+    const paramAdds = [
+      ...r.params.map((p) => {
+        const pt = p.type.kind === "optional" ? p.type.inner : p.type;
+        const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
+        return `        p.Add("${p.name}", ${val});`;
+      }),
+      // Principal params (`__cu_<claim>`) — the spliced capability filter's refs
+      // plus any the retrieval's own `where` carries — bound from the ambient
+      // request principal (the retrieval method takes no `currentUser` param).
+      ...dedupPrincipalRefs([...filterPrincipalRefs, ...collectFilterPrincipalRefs([r.where])]).map(
+        (pr) => `        p.Add("${pr.param}", ${AMBIENT_CURRENT_USER}.${pr.claimProp});`,
+      ),
+    ];
     return lines(
       `    public async Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
       `    {`,
@@ -580,6 +768,8 @@ export function renderDapperRepository(
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Common;`,
+      // `User currentUser` param on a `currentUser`-referencing find.
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -616,7 +806,7 @@ export function renderDapperRepository(
       `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value }, cancellationToken: cancellationToken));`,
+      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value${princSuffix} }, cancellationToken: cancellationToken));`,
       ...(hasAssoc
         ? [
             "        if (r is null) return null;",
@@ -631,7 +821,7 @@ export function renderDapperRepository(
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
-      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
+      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray()${princSuffix} }, cancellationToken: cancellationToken));`,
       ...(hasAssoc
         ? [
             "        var __roots = rows.Select(Map).ToList();",
@@ -646,6 +836,7 @@ export function renderDapperRepository(
       ...stampLines,
       ...saveUpsertLines,
       ...assocSaveLines,
+      ...provFlushLines,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
       "            await _events.DispatchAsync(ev, cancellationToken);",
@@ -878,7 +1069,34 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  const ddl = [...stateTables, ...eventLogTables].join("\n\n");
+  // The append-only provenance history table (provenance.md) — column-for-column
+  // the same shape the EF ProvenanceRecordConfiguration maps, plus its
+  // (target_type, field) + correlation_id indexes.  Emitted once when any served
+  // aggregate carries a provenanced field (the co-located `<field>_provenance`
+  // columns ride on each aggregate's CREATE TABLE via `columnsOf`).
+  const hasProvenance = aggs.some((agg) => agg.fields.some((f) => f.provenanced));
+  const provenanceTable = hasProvenance
+    ? [
+        [
+          "CREATE TABLE IF NOT EXISTS provenance_records (",
+          "    trace_id text primary key,",
+          "    snapshot_id text not null,",
+          "    target_type text not null,",
+          "    field text not null,",
+          "    inputs jsonb not null,",
+          "    computed_value jsonb,",
+          "    at timestamptz not null,",
+          "    correlation_id text,",
+          "    scope_id text,",
+          "    actor_id text,",
+          "    parent_id text",
+          ");",
+          "CREATE INDEX IF NOT EXISTS provenance_records_target_idx ON provenance_records (target_type, field);",
+          "CREATE INDEX IF NOT EXISTS provenance_records_correlation_idx ON provenance_records (correlation_id);",
+        ].join("\n"),
+      ]
+    : [];
+  const ddl = [...stateTables, ...eventLogTables, ...provenanceTable].join("\n\n");
   return (
     lines(
       "// Auto-generated.  Dapper schema bootstrap (persistence: dapper).",

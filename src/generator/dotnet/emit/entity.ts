@@ -646,6 +646,14 @@ export function renderEntity(
       `        public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; init; } = default!;`,
     );
   }
+  // Co-located provenance lineage (provenance.md): the `<Field>Provenance`
+  // property is `{ get; private set; }` on the entity, so a persistence adapter
+  // that hydrates through `_Create(State)` (Dapper) rehydrates the current
+  // lineage via a matching State slot.  Root-only (the property is root-only);
+  // EF hydrates it through its own materializer, so this slot is inert there.
+  for (const f of provFields) {
+    stateLines.push(`        public ProvLineage? ${upperFirst(f.name)}Provenance { get; init; }`);
+  }
   // A PART with its OWN nested containments accepts those children as optional
   // State slots (`new Shipment.State { …, Labels = [...] }`); `_Create` seeds the
   // collection so a cascade save writes them (EF stamps the owned FK from graph
@@ -672,6 +680,12 @@ export function renderEntity(
   if (!isRoot) createInternalLines.push("        e.ParentId = s.ParentId;");
   for (const f of entity.fields) {
     createInternalLines.push(`        e.${upperFirst(f.name)} = s.${upperFirst(f.name)};`);
+  }
+  // Rehydrate the co-located provenance lineage (see the State slot above).
+  for (const f of provFields) {
+    createInternalLines.push(
+      `        e.${upperFirst(f.name)}Provenance = s.${upperFirst(f.name)}Provenance;`,
+    );
   }
   // Seed nested containment children supplied at construction into the owned
   // collections — parts only (see the State note above); byte-identical for a

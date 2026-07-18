@@ -1753,8 +1753,9 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
       // mirroring the find path.  No gate.
-      if ((ctx.seeds ?? []).length > 0)
-        reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      // `seed` data is now supported — the Dapper seeder (Seed.cs) frames the
+      // marker table / raw inserts on Npgsql+Dapper while reusing the
+      // persistence-agnostic domain-`Create` path (I<Agg>Repository.SaveAsync).
       // Workflow event subscriptions (and therefore channels/outbox): the
       // saga handlers + outbox dispatcher/relay inject the EF AppDbContext,
       // which a Dapper deployable does not emit — the project would not
@@ -1784,27 +1785,24 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           reject(where, "contains nested entity parts");
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
-        // upsert SET).  Principal-referencing stamp values stay rejected —
-        // no request-scoped principal accessor on the Dapper repository.
-        if (
-          (a.contextStamps ?? []).some((r) =>
-            r.assignments.some((asg) => exprUsesCurrentUser(asg.value)),
-          )
-        )
-          reject(where, "uses a principal-referencing stamp value");
-        // Non-principal capability filters are supported (spliced into every
-        // SELECT's WHERE by the Dapper emitter); principal-referencing ones
-        // (tenancy: currentUser.<field>) stay rejected — there is no
-        // request-scoped principal accessor on the Dapper repository.
-        if ((a.contextFilters ?? []).some((p) => exprUsesCurrentUser(p)))
-          reject(where, "uses a principal-referencing 'filter' capability predicate");
-        for (const f of a.fields) {
-          // Access modifiers (`managed` / `token` / `internal` / `secret`)
-          // are wire-projection concerns handled by the shared Domain/CQRS
-          // layers (create-input shaping, `forApiRead` response stripping) —
-          // the Dapper column round-trips like any other field, so no gate.
-          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-        }
+        // upsert SET), INCLUDING principal-referencing stamp values — the
+        // Dapper repository reaches the request principal through the ambient
+        // `RequestContext.Current!.CurrentUser!` accessor (a bare `currentUser`
+        // → the principal id, `currentUser.<claim>` → the claim), exactly as
+        // the EF AuditableInterceptor.  A principal stamp on a no-auth
+        // deployable stays rejected by the category-A loom.dotnet-stamp-unsupported.
+        // Capability filters are supported too (spliced into every SELECT's
+        // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
+        // `@__cu_<claim>` Dapper param bound from the same ambient principal.
+        // Access modifiers (`managed` / `token` / `internal` / `secret`) are
+        // wire-projection concerns handled by the shared Domain/CQRS layers
+        // (create-input shaping, `forApiRead` response stripping) — the Dapper
+        // column round-trips like any other field, so no gate.  Provenanced
+        // fields are supported too: the co-located `<field>_provenance` jsonb
+        // column round-trips the ProvLineage (ProvJson.Options) and the Dapper
+        // SaveAsync flushes the drained lineage into the `provenance_records`
+        // history table (DbSchema owns its DDL) — the raw-Npgsql mirror of the
+        // EF value-converter + ProvenanceRecord flush.
       }
     }
   }

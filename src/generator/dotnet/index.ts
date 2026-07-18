@@ -416,7 +416,13 @@ function emitProjectFromContexts(
   // a per-entity-type switch built from each aggregate's
   // `contextStamps` IR; a `currentUser` stamp resolves the principal
   // id from the ambient RequestContext (so `actorIdProp` is threaded).
-  emitStampingInterceptor(merged, ns, out, actorIdProp);
+  // Skipped for `persistence: dapper` — the EF SaveChangesInterceptor references
+  // Microsoft.EntityFrameworkCore (unavailable on the Dapper deployable) and
+  // Program.cs never registers it there; the Dapper repository applies the same
+  // stamps inline on save (onUpdate mutate / onCreate INSERT-only local).
+  if (system?.deployable.persistence !== "dapper") {
+    emitStampingInterceptor(merged, ns, out, actorIdProp);
+  }
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
   emitCriteria(merged, ns, out);
@@ -428,10 +434,14 @@ function emitProjectFromContexts(
   // below stay byte-identical for the default `efcore`.
   const usingDapper = system?.deployable.persistence === "dapper";
   // Provenance (provenance.md) + per-operation audit (audit-and-logging.md)
-  // runtimes — EF Core only (the dapper path is a follow-up).  `hasProvenance`
-  // drives the lineage SDK + history table + co-located columns; `hasAudit`
-  // drives the audit table + writer + per-handler instrumentation.
-  const hasProvenance = !usingDapper && contextsHaveProvenance(contexts);
+  // runtimes.  `hasProvenance` drives the lineage SDK + history table +
+  // co-located columns; `hasAudit` drives the audit table + writer +
+  // per-handler instrumentation.  Provenance is supported on BOTH persistence
+  // adapters — the shared ProvLineage SDK + the co-located `<field>_provenance`
+  // columns + the append-only `provenance_records` flush; the Dapper repository
+  // flushes via raw Npgsql (DbSchema owns the history table's DDL) instead of
+  // the EF ProvenanceRecord POCO/configuration.  Audit stays EF-only.
+  const hasProvenance = contextsHaveProvenance(contexts);
   // Audit table/writer/DbSet emission is gated on the SHARED predicate
   // (operations ∪ creates ∪ destroys) so a lifecycle-only-audited aggregate
   // — `create(...) audited` / `destroy audited` with no audited operation —
@@ -446,6 +456,14 @@ function emitProjectFromContexts(
         eventLogContexts(contexts).map((c) => snake(c.name)),
       ),
     );
+    // The shared provenance lineage SDK (ProvLineage) — the entity's co-located
+    // `<Field>Provenance` property is typed by it.  The EF ProvenanceRecord POCO
+    // / EntityTypeConfiguration are NOT emitted (EF-only); the Dapper repository
+    // flushes history rows via raw Npgsql and DbSchema owns the
+    // `provenance_records` DDL (renderDapperSchema, above).
+    if (hasProvenance) {
+      out.set("Domain/Common/ProvLineage.cs", renderProvLineage(ns));
+    }
   } else {
     // Per-context event log (event-log-architecture.md): the shared `EventRecord`
     // POCO + one `<Ctx>EventRecordConfiguration` per event-sourced context, and
@@ -496,6 +514,9 @@ function emitProjectFromContexts(
     // history POCO/configuration.  The co-located columns + per-write capture +
     // flush are emitted per aggregate (entity.ts / efcore.ts / repository.ts).
     if (hasProvenance) {
+      // EF path: the lineage SDK + the append-only history POCO + its
+      // EntityTypeConfiguration (the Dapper branch above emits only ProvLineage
+      // — it flushes history via raw Npgsql, no EF POCO/config).
       out.set("Domain/Common/ProvLineage.cs", renderProvLineage(ns));
       out.set("Infrastructure/Persistence/ProvenanceRecord.cs", renderProvenanceRecord(ns));
       out.set(
@@ -625,7 +646,7 @@ function emitProjectFromContexts(
   // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
   // adds the `Seed.RunSeeds(...)` startup call after `Database.Migrate()`.
   if (merged.seeds.length > 0) {
-    emitDotnetSeeds(merged, ns, out);
+    emitDotnetSeeds(merged, ns, out, usingDapper);
   }
   const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet
@@ -1107,6 +1128,16 @@ function emitAggregate(
   // byte-identical.
   const usingDapper = emitCtx?.deployable.persistence === "dapper";
   if (usingDapper) {
+    // The request principal's id property (PascalCased) — present only when the
+    // deployable carries auth.  Threaded to the Dapper repository so a bare
+    // `currentUser` lifecycle stamp resolves the principal id from the ambient
+    // RequestContext, exactly as the EF AuditableInterceptor does (index.ts's
+    // `actorIdProp` for the interceptor).  Undefined without auth (a principal
+    // stamp is then rejected upstream by loom.dotnet-stamp-unsupported).
+    const authed = !!(emitCtx?.deployable.auth?.required && emitCtx.sys.user);
+    const userFields = authed ? emitCtx?.sys.user?.fields : undefined;
+    const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
+    const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
     // Dapper event store (persistedAs(eventLog)) reuses the persistence-agnostic
     // domain fold + CQRS create chain; only the repository is Dapper-specific.
     // The `<agg>_events` table ships in DbSchema.cs (renderDapperSchema).
@@ -1115,7 +1146,7 @@ function emitAggregate(
       "repository-impl",
       isEs
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
-        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
+        : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp),
       repoOrigin,
     );
   } else if (isEs) {
