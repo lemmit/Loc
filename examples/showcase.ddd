@@ -588,6 +588,7 @@ system DevPlatform {
                 editing: bool = false
                 draftName: string = ""
                 level: int = 1
+                attachment: File
             }
             // Named async action driving a `match await` over a union-returning
             // remote op (Stage 2) — exercises AwaitExpr + MatchStmt +
@@ -623,6 +624,7 @@ system DevPlatform {
                                 NumberField { "Level", bind: level },
                                 PasswordField { "Token" },
                                 Toggle { "Editing", bind: editing },
+                                FileUpload { "Attachment", bind: attachment },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" },
                                 Button { "Reserve", onClick: reserveNow }
