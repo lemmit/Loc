@@ -22,7 +22,7 @@ system Mail {
   resource notifyState { for: Notify, kind: state, use: pg }
   resource mail { for: Notify, kind: mailer, use: mailServer }
   deployable api {
-    platform: node
+    platform: __PLATFORM__
     contexts: [Notify]
     dataSources: [notifyState, mail]
     serves: A

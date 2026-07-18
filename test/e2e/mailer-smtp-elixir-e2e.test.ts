@@ -14,23 +14,14 @@ import {
 } from "./support/mailpit-harness.js";
 
 // ---------------------------------------------------------------------------
-// Mailer (smtp) runtime e2e — HONO/node.  The mocked-SMTP-server test the
-// M-T4.6 plan asked for (docs/old/proposals/email-resource-kind.md §6 "TODO —
-// runtime e2e with a mocked SMTP server").  Generates the Hono backend from
-// `mailer-e2e.ddd`, boots it against a throwaway postgres (migrations apply)
-// and a **Mailpit** sidecar (real SMTP endpoint + queryable REST inbox),
-// drives `POST /api/workflows/notify`, then asserts the message actually
-// landed — from / to / subject / body — via Mailpit's REST API.
+// Mailer (smtp) runtime e2e — ELIXIR/Phoenix (vanilla Ecto).  Sibling of
+// mailer-smtp-e2e.ts; same fixture + same shared delivery assertion
+// (assertMailDelivered).  Only the boot differs (mix deps.get + ecto + phx.server).
+// Proves the Swoosh mailer client reaches an SMTP server and delivers at
+// RUNTIME, not just that it compiles under `elixir-vanilla-build`.
 //
-// The delivery assertion (assertMailDelivered) is backend-agnostic and shared
-// with the .NET / Java / Python / Elixir siblings; only the boot differs.
-// This is the assertion the compile gates can't make: `corpus × tsc` proves
-// the emitted nodemailer client type-checks, but only a boot proves
-// `mail.send(...)` reaches an SMTP server and delivers the declared envelope.
-//
-// Slow (npm install + docker pg + Mailpit + boot), so opt-in via
-// LOOM_EMAIL_E2E=1.  In CI the two sidecars come from `services:` containers
-// via LOOM_MAIL_PG_URL / LOOM_MAILPIT_{SMTP,API}.
+// Opt-in: LOOM_EMAIL_E2E_ELIXIR=1.  Needs elixir/mix on PATH (setup-beam) +
+// docker (or the LOOM_MAIL_PG_URL / LOOM_MAILPIT_{SMTP,API} `services:` overrides).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,49 +29,77 @@ const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 const fixture = path.join(here, "fixtures", "mailer-e2e.ddd");
 
-const ENABLED = process.env.LOOM_EMAIL_E2E === "1";
+const ENABLED = process.env.LOOM_EMAIL_E2E_ELIXIR === "1";
 const HAVE_SIDECARS =
   !!process.env.LOOM_MAIL_PG_URL &&
   !!process.env.LOOM_MAILPIT_SMTP &&
   !!process.env.LOOM_MAILPIT_API;
 
+function hasElixir(): boolean {
+  try {
+    execSync("mix --version", { stdio: "pipe", timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe.skipIf(!ENABLED)(
-  "generated Hono backend delivers mail through an smtp mailer resource (LOOM_EMAIL_E2E=1)",
+  "generated Phoenix backend delivers mail through an smtp mailer resource (LOOM_EMAIL_E2E_ELIXIR=1)",
   () => {
-    it("POST /api/workflows/notify → mail.send(...) lands in the Mailpit inbox", async () => {
+    it("POST /api/workflows/notify → Resources.Smtp.mail_send(...) lands in the Mailpit inbox", async () => {
+      if (!hasElixir())
+        throw new Error(
+          "LOOM_EMAIL_E2E_ELIXIR=1 set but `mix` is not on PATH. " +
+            "Add `erlef/setup-beam@v1` (otp-version 27.x, elixir-version 1.18.x) to the workflow.",
+        );
       if (!HAVE_SIDECARS && !hasDocker()) {
         throw new Error(
-          "mailer smtp e2e: docker unreachable and no LOOM_MAIL_PG_URL / LOOM_MAILPIT_* overrides given.",
+          "mailer elixir e2e: docker unreachable and no LOOM_MAIL_PG_URL / LOOM_MAILPIT_* overrides given.",
         );
       }
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-mail-node-"));
-      const pg = await startPostgres("node");
-      const mailpit = await startMailpit("node");
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-mail-elixir-"));
+      const pg = await startPostgres("elixir");
+      const mailpit = await startMailpit("elixir");
       let child: ReturnType<typeof spawn> | undefined;
       try {
-        const dddPath = path.join(outDir, "mailer-node.ddd");
-        fs.writeFileSync(dddPath, fs.readFileSync(fixture, "utf8").replace("__PLATFORM__", "node"));
+        const dddPath = path.join(outDir, "mailer-elixir.ddd");
+        fs.writeFileSync(
+          dddPath,
+          fs.readFileSync(fixture, "utf8").replace("__PLATFORM__", "elixir"),
+        );
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
           stdio: "pipe",
           cwd: repoRoot,
         });
         const apiDir = path.join(outDir, "api");
-        execSync("npm install --silent --no-audit --no-fund", {
+
+        execSync("mix local.hex --force && mix local.rebar --force && mix deps.get", {
           cwd: apiDir,
           stdio: "pipe",
+          timeout: 600_000,
+          shell: "/bin/bash",
+        });
+
+        const dbUrl = `ecto://${pg.user}:${pg.password}@${pg.host}:${pg.port}/${pg.db}`;
+        execSync("mix ecto.create && mix ecto.migrate", {
+          cwd: apiDir,
+          stdio: "pipe",
+          env: { ...process.env, DATABASE_URL: dbUrl, MIX_ENV: "dev" },
           timeout: 300_000,
+          shell: "/bin/bash",
         });
 
         const port = await freePort();
-        // detached: own process group so a single kill(-pid) reaches the
-        // tsx-wrapped node child on teardown.
-        child = spawn("npx", ["tsx", "index.ts"], {
+        child = spawn("mix", ["phx.server"], {
           cwd: apiDir,
           env: {
             ...process.env,
-            DATABASE_URL: `postgres://${pg.user}:${pg.password}@${pg.host}:${pg.port}/${pg.db}`,
+            DATABASE_URL: dbUrl,
             MAIL_URL: `smtp://${mailpit.smtp}`,
+            PHX_SERVER: "true",
             PORT: String(port),
+            MIX_ENV: "dev",
           },
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
@@ -94,7 +113,7 @@ describe.skipIf(!ENABLED)(
         });
 
         const base = `http://127.0.0.1:${port}`;
-        await waitForHealth(base, () => bootLog);
+        await waitForHealth(base, () => bootLog, 180_000);
         await assertMailDelivered(base, mailpit.api, `e2e body ${port}`);
       } finally {
         if (child?.pid) {
@@ -112,6 +131,6 @@ describe.skipIf(!ENABLED)(
           /* best-effort */
         }
       }
-    }, 420_000);
+    }, 600_000);
   },
 );

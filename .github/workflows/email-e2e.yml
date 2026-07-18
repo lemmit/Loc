@@ -1,0 +1,152 @@
+name: Mailer smtp (runtime e2e)
+
+# Boots the generated backend from `mailer-e2e.ddd` against a throwaway
+# postgres (migrations apply at boot) and a **Mailpit** sidecar (a catch-all
+# SMTP server that also exposes a queryable REST inbox), drives
+#   POST /api/workflows/notify   → mail.send("inbox@test.local", "Hello…", note)
+# then asserts the message actually landed — from / to / subject / body — by
+# polling Mailpit's REST API.  The mocked-SMTP-server test the M-T4.6 plan
+# asked for (docs/old/proposals/email-resource-kind.md §6).
+#
+# Fanned across ALL FIVE backends as a matrix: the delivery assertion
+# (test/e2e/support/mailpit-harness.ts → assertMailDelivered) is
+# backend-agnostic — every backend mounts the workflow at
+# `POST /api/workflows/notify` and sends through a `MAIL_URL` SMTP endpoint —
+# so only the boot differs per cell (npx tsx / uvicorn / dotnet run / java -jar
+# / mix phx.server).  This is the assertion the compile gates can't make:
+# `corpus × {tsc,dotnet,java,python}` + `elixir-vanilla-build` prove the
+# emitted vendor mailer client compiles, but only a boot proves
+# `mail.send(...)` reaches an SMTP server and delivers the declared envelope.
+#
+# Uses `services:` containers (postgres + mailpit) rather than a
+# docker-in-runner sidecar, handed to the suite via LOOM_MAIL_PG_URL /
+# LOOM_MAILPIT_{SMTP,API}, so the harness skips its own docker sidecars.
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling to the
+# obs-e2e / tenancy-e2e jobs; same rationale (a docker-heavy boot is a runner
+# burst for a runtime regression acceptable to catch one merge later; the
+# structural + compile tiers are per-PR).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/**'
+      - 'src/platform/**'
+      - 'src/ir/resource-verbs.ts'
+      - 'src/util/source-types.ts'
+      - 'test/e2e/mailer-smtp-e2e.test.ts'
+      - 'test/e2e/mailer-smtp-python-e2e.test.ts'
+      - 'test/e2e/mailer-smtp-dotnet-e2e.test.ts'
+      - 'test/e2e/mailer-smtp-java-e2e.test.ts'
+      - 'test/e2e/mailer-smtp-elixir-e2e.test.ts'
+      - 'test/e2e/support/mailpit-harness.ts'
+      - 'test/e2e/fixtures/mailer-e2e.ddd'
+      - 'package.json'
+      - '.github/workflows/email-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  email-e2e:
+    runs-on: ubuntu-latest
+    # Cold path is dominated by the generated project's build/dep install
+    # (gradle bootJar / mix deps.get + compile are the slowest).  15min cap.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: node
+            script: test:email
+          - backend: python
+            script: test:email-python
+          - backend: dotnet
+            script: test:email-dotnet
+          - backend: java
+            script: test:email-java
+          - backend: elixir
+            script: test:email-elixir
+    name: email-e2e (${{ matrix.backend }})
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:latest
+        env:
+          MP_SMTP_AUTH_ACCEPT_ANY: 1
+          MP_SMTP_AUTH_ALLOW_INSECURE: 1
+        ports:
+          - 1025:1025
+          - 8025:8025
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up uv (python)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up JDK (java)
+        if: matrix.backend == 'java'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # Java 25 toolchain needs Gradle 9.1+ (no wrapper is emitted).
+      - name: Set up Gradle (java)
+        if: matrix.backend == 'java'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Set up .NET (dotnet)
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Elixir/OTP (elixir)
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run mailer smtp runtime e2e (${{ matrix.backend }})
+        env:
+          LOOM_MAIL_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app
+          LOOM_MAILPIT_SMTP: 127.0.0.1:1025
+          LOOM_MAILPIT_API: http://127.0.0.1:8025
+        run: npm run ${{ matrix.script }} -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo "## Mailer smtp runtime e2e failed (${{ matrix.backend }})" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the run step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated backend against postgres + Mailpit, drives POST /api/workflows/notify, and asserts the mail.send(...) message landed in the Mailpit inbox with the declared from/to/subject/body envelope.' >> $GITHUB_STEP_SUMMARY

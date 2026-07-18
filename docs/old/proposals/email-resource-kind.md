@@ -292,10 +292,18 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   message landed by polling Mailpit's REST inbox (`GET /api/v1/messages` +
   `/api/v1/message/:id` → from / to / subject / body). Mailpit is ideal because
   it exposes both a real SMTP endpoint *and* a queryable REST inbox, so the
-  assertion needs no provider mocking. CI: `.github/workflows/hono-email-e2e.yml`
-  (`services:` postgres + mailpit, push-to-main + dispatch, not per-PR).
-  Fanning across the other four backends is a follow-on matrix (the assertion is
-  backend-agnostic; only the boot differs). For `ses`/`sendgrid` sourceTypes,
+  assertion needs no provider mocking. **Fanned across all five backends** —
+  `mailer-smtp-{,,python-,dotnet-,java-,elixir-}e2e.test.ts` share one
+  backend-agnostic delivery assertion (`assertMailDelivered`); only the boot
+  differs (npx tsx / uvicorn / dotnet run / java -jar / mix phx.server), since
+  every backend mounts the workflow at `POST /api/workflows/notify` and sends
+  through a `MAIL_URL` SMTP endpoint. CI: `.github/workflows/email-e2e.yml`
+  (matrix × 5, `services:` postgres + mailpit + per-backend SDK setup,
+  push-to-main + dispatch, not per-PR). Runtime delivery locally verified on
+  Hono (nodemailer) + Python (aiosmtplib) via the full vitest leg and on .NET
+  (MailKit) via a docker boot smoke; Java (Jakarta Mail) + Elixir (Swoosh) mirror
+  the proven tenancy-e2e boot mechanics and compile clean (4.6-email-b). For
+  `ses`/`sendgrid` sourceTypes,
   a captured-request fake (or the provider's sandbox) is a later, separate concern —
   smtp+Mailpit covers the domain path end to end.
 - **Fixtures + build gates:** add a `resource … kind: email` + a `mail.send`
