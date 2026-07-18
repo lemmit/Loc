@@ -354,7 +354,19 @@ describe.skipIf(!ENABLED)("generated frontend clears axe-core (preview + axe)", 
           .analyze();
         for (const v of violations) {
           if (!GATE_IMPACTS.has(v.impact ?? "")) continue;
-          offenders.push(`${route}  [${v.impact}] ${v.id}: ${v.help} (${v.nodes.length} node(s))`);
+          // Log the offending node(s) — the selector + axe's failureSummary
+          // (for color-contrast this carries the fg/bg colours + the actual vs
+          // required ratio), so a red cell is directly actionable instead of
+          // an opaque "1 node(s)".
+          const nodeDetail = v.nodes
+            .map((n) => {
+              const summary = (n.failureSummary ?? "").replace(/\n/g, "\n         ");
+              return `      → ${n.target.join(" ")}${summary ? `\n         ${summary}` : ""}`;
+            })
+            .join("\n");
+          offenders.push(
+            `${route}  [${v.impact}] ${v.id}: ${v.help} (${v.nodes.length} node(s))\n${nodeDetail}`,
+          );
         }
       }
     } finally {
