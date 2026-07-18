@@ -307,6 +307,7 @@ ${devClaimStringFields
     ? `  defp bypass_path?("${AUTH_BASE_PATH}/login"), do: true
   defp bypass_path?("${AUTH_BASE_PATH}/callback"), do: true
   defp bypass_path?("${AUTH_BASE_PATH}/logout"), do: true
+  defp bypass_path?("${AUTH_BASE_PATH}/refresh"), do: true
 `
     : "";
 
@@ -705,7 +706,11 @@ end
   const clientSecretExpr = auth.oidc.clientSecret
     ? elixirAuthValue(auth.oidc.clientSecret)
     : `System.get_env("OIDC_CLIENT_SECRET")`;
-  const scopes = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).join(" ");
+  // `offline_access` asks the IdP for a refresh token so /refresh can rotate
+  // it (M-T3.5).  Idempotent.
+  const scopeList = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).slice();
+  if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
+  const scopes = scopeList.join(" ");
 
   return `# Auto-generated.
 defmodule ${webModule}.AuthController do
@@ -714,11 +719,12 @@ defmodule ${webModule}.AuthController do
   @moduledoc """
   Session probe + OIDC redirect handshake (D-AUTH-OIDC).
 
-  GET /auth/me     — the verified current_user (the \`auth: ui\` guard reads it).
-  GET /auth/login  — starts the authorization-code flow (redirect to the IdP).
-  GET /auth/callback — exchanges the code, sets the HttpOnly \`session\` cookie
-                     ${webModule}.Auth reads, redirects post-login.
-  GET /auth/logout — clears the \`session\` cookie.
+  GET  /auth/me      — the verified current_user (the \`auth: ui\` guard reads it).
+  GET  /auth/login   — starts the authorization-code flow with PKCE (redirect to the IdP).
+  GET  /auth/callback — exchanges the code, sets the HttpOnly \`session\` + \`refresh\`
+                     cookies ${webModule}.Auth reads, redirects post-login.
+  POST /auth/refresh — rotates the refresh token → a fresh session, no IdP round-trip.
+  GET  /auth/logout  — clears the \`session\` + \`refresh\` cookies.
 
   No login form — the IdP hosts the credential pages.
   """
@@ -732,6 +738,10 @@ ${me}
     case discovery() do
       {:ok, %{"authorization_endpoint" => authorize}} ->
         state = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+        # PKCE (RFC 7636): mint a verifier, send only its S256 challenge to the
+        # IdP, stash the verifier in an HttpOnly cookie for /callback.
+        verifier = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+        challenge = :crypto.hash(:sha256, verifier) |> Base.url_encode64(padding: false)
 
         query =
           URI.encode_query(%{
@@ -739,11 +749,14 @@ ${me}
             "client_id" => client_id(),
             "redirect_uri" => redirect_uri(),
             "scope" => @scopes,
-            "state" => state
+            "state" => state,
+            "code_challenge" => challenge,
+            "code_challenge_method" => "S256"
           })
 
         conn
         |> put_resp_cookie("oidc_state", state, http_only: true, same_site: "Lax")
+        |> put_resp_cookie("oidc_verifier", verifier, http_only: true, same_site: "Lax")
         |> redirect(external: authorize <> "?" <> query)
 
       _ ->
@@ -751,16 +764,18 @@ ${me}
     end
   end
 
-  @doc "GET /auth/callback — exchange the code, issue the session cookie."
+  @doc "GET /auth/callback — exchange the code, issue the session + refresh cookies."
   def callback(conn, %{"code" => code, "state" => state}) do
     conn = fetch_cookies(conn)
+    verifier = conn.cookies["oidc_verifier"]
 
-    if state != "" and state == conn.cookies["oidc_state"] do
-      case exchange_code(code) do
-        {:ok, access_token} ->
+    if state != "" and state == conn.cookies["oidc_state"] and is_binary(verifier) do
+      case exchange_code(code, verifier) do
+        {:ok, tokens} ->
           conn
-          |> put_resp_cookie("session", access_token, http_only: true, same_site: "Lax")
+          |> store_tokens(tokens)
           |> delete_resp_cookie("oidc_state")
+          |> delete_resp_cookie("oidc_verifier")
           |> redirect_post_login()
 
         _ ->
@@ -775,11 +790,59 @@ ${me}
     conn |> put_status(400) |> json(%{error: "invalid_request"})
   end
 
-  @doc "GET /auth/logout — clear the session cookie."
+  @doc """
+  POST /auth/refresh — silent renewal.  Exchange the stored refresh token for a
+  fresh access token WITHOUT another IdP round-trip, and ROTATE it (the IdP
+  returns a new refresh token; store_tokens overwrites the cookie → single-use).
+  """
+  def refresh(conn, _params) do
+    conn = fetch_cookies(conn)
+
+    case conn.cookies["refresh"] do
+      token when is_binary(token) and token != "" ->
+        case exchange_refresh(token) do
+          {:ok, tokens} ->
+            conn |> store_tokens(tokens) |> json(%{ok: true})
+
+          _ ->
+            # Spent or revoked — clear both cookies so the SPA falls back to a
+            # full /login instead of looping on a dead token.
+            conn
+            |> delete_resp_cookie("session")
+            |> delete_resp_cookie("refresh")
+            |> put_status(401)
+            |> json(%{error: "refresh_failed"})
+        end
+
+      _ ->
+        conn |> put_status(401) |> json(%{error: "no_refresh_token"})
+    end
+  end
+
+  @doc "GET /auth/logout — clear the session + refresh cookies."
   def logout(conn, _params) do
     conn
     |> delete_resp_cookie("session")
+    |> delete_resp_cookie("refresh")
     |> redirect_post_login()
+  end
+
+  # Persist the access token as the browser session and the refresh token (when
+  # the IdP granted one) for /refresh.  Both HttpOnly — the SPA never sees them.
+  defp store_tokens(conn, tokens) do
+    conn =
+      put_resp_cookie(conn, "session", Map.get(tokens, "access_token", ""),
+        http_only: true,
+        same_site: "Lax"
+      )
+
+    case Map.get(tokens, "refresh_token") do
+      refresh when is_binary(refresh) and refresh != "" ->
+        put_resp_cookie(conn, "refresh", refresh, http_only: true, same_site: "Lax")
+
+      _ ->
+        conn
+    end
   end
 
   # --- OIDC config (read at runtime) -----------------------------------------
@@ -807,9 +870,28 @@ ${me}
 
   defp discovery, do: http_get_json(issuer() <> "/.well-known/openid-configuration")
 
-  defp exchange_code(code) do
+  defp exchange_code(code, verifier) do
+    token_request(%{
+      "grant_type" => "authorization_code",
+      "code" => code,
+      "redirect_uri" => redirect_uri(),
+      "client_id" => client_id(),
+      "code_verifier" => verifier
+    })
+  end
+
+  defp exchange_refresh(refresh_token) do
+    token_request(%{
+      "grant_type" => "refresh_token",
+      "refresh_token" => refresh_token,
+      "client_id" => client_id()
+    })
+  end
+
+  # POST a form-urlencoded token request; {:ok, token_map} on 200, :error otherwise.
+  defp token_request(form) do
     with {:ok, %{"token_endpoint" => token_endpoint}} <- discovery() do
-      body = URI.encode_query(base_form(code))
+      body = URI.encode_query(with_secret(form))
 
       _ = :inets.start()
       _ = :ssl.start()
@@ -820,7 +902,7 @@ ${me}
       case :httpc.request(:post, request, http_opts(token_endpoint), body_format: :binary) do
         {:ok, {{_, 200, _}, _headers, resp}} ->
           case Jason.decode(resp) do
-            {:ok, %{"access_token" => token}} when is_binary(token) -> {:ok, token}
+            {:ok, %{"access_token" => token} = tokens} when is_binary(token) -> {:ok, tokens}
             _ -> :error
           end
 
@@ -832,17 +914,10 @@ ${me}
     end
   end
 
-  defp base_form(code) do
-    base = %{
-      "grant_type" => "authorization_code",
-      "code" => code,
-      "redirect_uri" => redirect_uri(),
-      "client_id" => client_id()
-    }
-
+  defp with_secret(form) do
     case client_secret() do
-      secret when is_binary(secret) and secret != "" -> Map.put(base, "client_secret", secret)
-      _ -> base
+      secret when is_binary(secret) and secret != "" -> Map.put(form, "client_secret", secret)
+      _ -> form
     end
   end
 

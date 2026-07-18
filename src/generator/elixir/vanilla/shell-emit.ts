@@ -488,6 +488,7 @@ ${liveLines}
     ? `
     get "/login", AuthController, :login
     get "/callback", AuthController, :callback
+    post "/refresh", AuthController, :refresh
     get "/logout", AuthController, :logout`
     : "";
   const authScope = authEnabled

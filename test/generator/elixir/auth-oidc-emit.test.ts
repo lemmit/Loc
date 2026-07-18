@@ -138,7 +138,7 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(ctrl).toContain("def login(conn, _params)");
     expect(ctrl).toContain('def callback(conn, %{"code" => code, "state" => state})');
     expect(ctrl).toContain("def logout(conn, _params)");
-    expect(ctrl).toContain('put_resp_cookie("session", access_token');
+    expect(ctrl).toContain('put_resp_cookie(conn, "session", Map.get(tokens, "access_token"');
     expect(ctrl).toContain('"grant_type" => "authorization_code"');
     // Routed.
     const router = files.get("api/lib/api_web/router.ex")!;
@@ -153,6 +153,26 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(auth).toContain('defp bypass_path?("/api/auth/logout"), do: true');
     expect(auth).toContain("defp extract_token(conn)");
     expect(auth).toContain('conn.cookies["session"]');
+  });
+
+  it("drives login with PKCE and rotates refresh tokens under OIDC", async () => {
+    const files = await build(source({ oidc: true }));
+    const ctrl = files.get("api/lib/api_web/controllers/auth_controller.ex")!;
+    // PKCE (RFC 7636): S256 challenge, verifier cookie, code_verifier on exchange.
+    expect(ctrl).toContain(":crypto.hash(:sha256, verifier)");
+    expect(ctrl).toContain('"code_challenge_method" => "S256"');
+    expect(ctrl).toContain('put_resp_cookie("oidc_verifier", verifier');
+    expect(ctrl).toContain('"code_verifier" => verifier');
+    // Refresh rotation: offline_access scope, refresh action, refresh cookie.
+    expect(ctrl).toContain("offline_access");
+    expect(ctrl).toContain("def refresh(conn, _params)");
+    expect(ctrl).toContain('"grant_type" => "refresh_token"');
+    expect(ctrl).toContain('put_resp_cookie(conn, "refresh"');
+    // Routed + bypassed (no valid access token yet).
+    const router = files.get("api/lib/api_web/router.ex")!;
+    expect(router).toContain('post "/refresh", AuthController, :refresh');
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    expect(auth).toContain('defp bypass_path?("/api/auth/refresh"), do: true');
   });
 
   it("emits NO handshake on the dev-stub path (auth required, no oidc)", async () => {
