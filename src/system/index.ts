@@ -798,6 +798,17 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
         `    RABBITMQ_DEFAULT_USER: guest`,
         `    RABBITMQ_DEFAULT_PASS: guest`,
       ]);
+    } else if (s.type === "smtp") {
+      // Dev SMTP catch-all: Mailpit exposes a real SMTP endpoint on :1025
+      // and a queryable web/HTTP inbox on :8025 (no credentials needed).
+      // `ses`/`sendgrid` are cloud SaaS — env-configured, no sidecar.
+      services.push([
+        `${slug}:`,
+        `  image: axllent/mailpit:latest`,
+        `  environment:`,
+        `    MP_SMTP_AUTH_ACCEPT_ANY: 1`,
+        `    MP_SMTP_AUTH_ALLOW_INSECURE: 1`,
+      ]);
     }
   }
   return { services, volumes };

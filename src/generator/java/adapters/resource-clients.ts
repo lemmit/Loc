@@ -249,10 +249,174 @@ const restApiJavaAdapter: JavaResourceAdapter = {
   },
 };
 
+/** The env-overridable `from:` sender address literal for a mailer. */
+function mailFrom(r: DataSourceIR, stores: readonly StorageIR[]): string {
+  return cfg(storeOf(r, stores), "from") ?? "no-reply@example.test";
+}
+
+const smtpJavaAdapter: JavaResourceAdapter = {
+  name: "smtp",
+  // Jakarta Mail API + the Angus reference implementation (runtime).
+  gradleDeps: () => ({
+    "jakarta.mail:jakarta.mail-api": "2.1.3",
+    "org.eclipse.angus:angus-mail": "2.0.3",
+  }),
+  emitClientClass(resources, stores, pkg): string {
+    const blocks = resources.flatMap((r) => {
+      const n = r.name;
+      return [
+        `    private static final String ${n}Url =`,
+        `        System.getenv().getOrDefault("${envVar(n)}", "smtp://localhost:1025");`,
+        `    private static final String ${n}From =`,
+        `        System.getenv().getOrDefault("${envVar(n).replace(/_URL$/, "")}_FROM", ${JSON.stringify(mailFrom(r, stores))});`,
+        ``,
+        `    public static void ${n}Send(String to, String subject, String body) {`,
+        `        try {`,
+        `            var uri = URI.create(${n}Url);`,
+        `            var props = new Properties();`,
+        `            props.put("mail.smtp.host", uri.getHost());`,
+        `            props.put("mail.smtp.port", String.valueOf(uri.getPort() < 0 ? 25 : uri.getPort()));`,
+        `            var session = Session.getInstance(props);`,
+        `            var msg = new MimeMessage(session);`,
+        `            msg.setFrom(new InternetAddress(${n}From));`,
+        `            msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));`,
+        `            msg.setSubject(subject);`,
+        `            msg.setText(body);`,
+        `            Transport.send(msg);`,
+        `        } catch (MessagingException e) {`,
+        `            throw new RuntimeException("${n} send failed", e);`,
+        `        }`,
+        `    }`,
+        ``,
+      ];
+    });
+    while (blocks[blocks.length - 1] === "") blocks.pop();
+    return lines(
+      `package ${pkg};`,
+      ``,
+      `import java.net.URI;`,
+      `import java.util.Properties;`,
+      ``,
+      `import jakarta.mail.Message;`,
+      `import jakarta.mail.MessagingException;`,
+      `import jakarta.mail.Session;`,
+      `import jakarta.mail.Transport;`,
+      `import jakarta.mail.internet.InternetAddress;`,
+      `import jakarta.mail.internet.MimeMessage;`,
+      ``,
+      `public final class SmtpResources {`,
+      `    private SmtpResources() {`,
+      `    }`,
+      ``,
+      ...blocks,
+      `}`,
+      ``,
+    );
+  },
+};
+
+const sesJavaAdapter: JavaResourceAdapter = {
+  name: "ses",
+  gradleDeps: () => ({ "software.amazon.awssdk:ses": "2.29.52" }),
+  emitClientClass(resources, stores, pkg): string {
+    const blocks = resources.flatMap((r) => {
+      const n = r.name;
+      return [
+        `    private static final SesClient ${n}Client = SesClient.create();`,
+        `    private static final String ${n}From =`,
+        `        System.getenv().getOrDefault("${envVar(n).replace(/_URL$/, "")}_FROM", ${JSON.stringify(mailFrom(r, stores))});`,
+        ``,
+        `    public static void ${n}Send(String to, String subject, String body) {`,
+        `        ${n}Client.sendEmail(SendEmailRequest.builder()`,
+        `            .source(${n}From)`,
+        `            .destination(Destination.builder().toAddresses(to).build())`,
+        `            .message(Message.builder()`,
+        `                .subject(Content.builder().data(subject).build())`,
+        `                .body(Body.builder().text(Content.builder().data(body).build()).build())`,
+        `                .build())`,
+        `            .build());`,
+        `    }`,
+        ``,
+      ];
+    });
+    while (blocks[blocks.length - 1] === "") blocks.pop();
+    return lines(
+      `package ${pkg};`,
+      ``,
+      `import software.amazon.awssdk.services.ses.SesClient;`,
+      `import software.amazon.awssdk.services.ses.model.Body;`,
+      `import software.amazon.awssdk.services.ses.model.Content;`,
+      `import software.amazon.awssdk.services.ses.model.Destination;`,
+      `import software.amazon.awssdk.services.ses.model.Message;`,
+      `import software.amazon.awssdk.services.ses.model.SendEmailRequest;`,
+      ``,
+      `public final class SesResources {`,
+      `    private SesResources() {`,
+      `    }`,
+      ``,
+      ...blocks,
+      `}`,
+      ``,
+    );
+  },
+};
+
+const sendgridJavaAdapter: JavaResourceAdapter = {
+  name: "sendgrid",
+  gradleDeps: () => ({ "com.sendgrid:sendgrid-java": "4.10.3" }),
+  emitClientClass(resources, stores, pkg): string {
+    const blocks = resources.flatMap((r) => {
+      const n = r.name;
+      return [
+        `    private static final SendGrid ${n}Client =`,
+        `        new SendGrid(System.getenv().getOrDefault("SENDGRID_API_KEY", ""));`,
+        `    private static final String ${n}From =`,
+        `        System.getenv().getOrDefault("${envVar(n).replace(/_URL$/, "")}_FROM", ${JSON.stringify(mailFrom(r, stores))});`,
+        ``,
+        `    public static void ${n}Send(String to, String subject, String body) {`,
+        `        var mail = new Mail(new Email(${n}From), subject, new Email(to), new Content("text/plain", body));`,
+        `        var req = new Request();`,
+        `        req.setMethod(Method.POST);`,
+        `        req.setEndpoint("mail/send");`,
+        `        try {`,
+        `            req.setBody(mail.build());`,
+        `            ${n}Client.api(req);`,
+        `        } catch (java.io.IOException e) {`,
+        `            throw new RuntimeException("${n} send failed", e);`,
+        `        }`,
+        `    }`,
+        ``,
+      ];
+    });
+    while (blocks[blocks.length - 1] === "") blocks.pop();
+    return lines(
+      `package ${pkg};`,
+      ``,
+      `import com.sendgrid.Method;`,
+      `import com.sendgrid.Request;`,
+      `import com.sendgrid.SendGrid;`,
+      `import com.sendgrid.helpers.mail.Mail;`,
+      `import com.sendgrid.helpers.mail.objects.Content;`,
+      `import com.sendgrid.helpers.mail.objects.Email;`,
+      ``,
+      `public final class SendgridResources {`,
+      `    private SendgridResources() {`,
+      `    }`,
+      ``,
+      ...blocks,
+      `}`,
+      ``,
+    );
+  },
+};
+
 const ADAPTERS: readonly JavaResourceAdapter[] = [
   s3JavaAdapter,
   rabbitmqJavaAdapter,
   restApiJavaAdapter,
+  smtpJavaAdapter,
+  sesJavaAdapter,
+  sendgridJavaAdapter,
 ];
 
 export function javaResourceAdapterFor(sourceType: string): JavaResourceAdapter | undefined {
@@ -276,7 +440,8 @@ export function emitJavaResourceFiles(
   const bySourceType = new Map<string, DataSourceIR[]>();
   for (const r of sys.dataSources) {
     if (!wiredNames.has(r.name)) continue;
-    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api" && r.kind !== "mailer")
+      continue;
     const st = storeType.get(r.storageName);
     if (!st || !javaResourceAdapterFor(st)) continue;
     classes.set(r.name, javaResourceClassName(st));

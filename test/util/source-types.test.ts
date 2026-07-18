@@ -99,6 +99,23 @@ describe("sourceType registry — descriptors & lookups", () => {
     );
   });
 
+  it("seeds the mailer kind (email) on smtp/ses/sendgrid", () => {
+    for (const st of ["smtp", "ses", "sendgrid"]) {
+      expect(supportsSurfaceKind(st, "mailer")).toBe(true);
+      expect([...interfacesFor(st, "mailer")]).toEqual(["sdk"]);
+      expect(sourceTypeFor(st)?.supports.email?.capabilities.has("send")).toBe(true);
+      // `from` is a required config key on every mailer sourceType.
+      expect(configSchemaFor(st).some((k) => k.name === "from" && k.required)).toBe(true);
+    }
+    // ses additionally accepts a region.
+    expect(configSchemaFor("ses").some((k) => k.name === "region")).toBe(true);
+    // not cross-wired: a mailer store backs no other kind, and a relational
+    // store does not back mailer.
+    expect(supportsSurfaceKind("smtp", "objectStore")).toBe(false);
+    expect(supportsSurfaceKind("postgres", "mailer")).toBe(false);
+    expect(sourceTypesForSurfaceKind("mailer")).toEqual(["sendgrid", "ses", "smtp"]);
+  });
+
   it("registerSourceType adds a descriptor that resolves through the lookups", () => {
     registerSourceType({
       name: "__test_objstore",

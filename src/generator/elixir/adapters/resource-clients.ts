@@ -165,10 +165,137 @@ const restApiPhoenixAdapter: PhoenixResourceAdapter = {
   },
 };
 
+function mailFrom(r: DataSourceIR, stores: readonly StorageIR[]): string {
+  return cfg(storeOf(r, stores), "from") ?? "no-reply@example.test";
+}
+
+/** SCREAMING_SNAKE env stem without the `_URL` suffix. */
+function envStem(resourceName: string): string {
+  return envVar(resourceName).replace(/_URL$/, "");
+}
+
+/** Shared prelude for a Swoosh mailer module: `import Swoosh.Email` and,
+ *  per resource, the `@<fn>_from` attribute + a `<fn>_email/3` builder. */
+function mailerEmailBuilders(
+  resources: readonly DataSourceIR[],
+  stores: readonly StorageIR[],
+): string[] {
+  return resources.flatMap((r) => {
+    const fn = snake(r.name);
+    return [
+      `  @${fn}_from System.get_env("${envStem(r.name)}_FROM") || ${JSON.stringify(mailFrom(r, stores))}`,
+      "",
+      `  defp ${fn}_email(to, subject, body) do`,
+      "    Swoosh.Email.new()",
+      `    |> Swoosh.Email.from(@${fn}_from)`,
+      "    |> Swoosh.Email.to(to)",
+      "    |> Swoosh.Email.subject(subject)",
+      "    |> Swoosh.Email.text_body(body)",
+      "  end",
+      "",
+    ];
+  });
+}
+
+const smtpPhoenixAdapter: PhoenixResourceAdapter = {
+  name: "smtp",
+  hexDeps: () => ({ swoosh: '"~> 1.17"', gen_smtp: '"~> 1.2"' }),
+  emitClientModule(resources, stores, appModule): string {
+    const lines: string[] = [
+      "# Auto-generated.",
+      `defmodule ${resourceModuleName(appModule, "smtp")} do`,
+      ...mailerEmailBuilders(resources, stores),
+    ];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      lines.push(
+        `  @${fn}_url System.get_env("${envVar(r.name)}") || "smtp://localhost:1025"`,
+        "",
+        `  def ${fn}_send(to, subject, body) do`,
+        `    uri = URI.parse(@${fn}_url)`,
+        "",
+        `    Swoosh.Adapters.SMTP.deliver(${fn}_email(to, subject, body),`,
+        "      relay: uri.host,",
+        "      port: uri.port || 25,",
+        "      auth: :never",
+        "    )",
+        "",
+        "    :ok",
+        "  end",
+        "",
+      );
+    }
+    lines.push("end", "");
+    return lines.join("\n");
+  },
+};
+
+const sesPhoenixAdapter: PhoenixResourceAdapter = {
+  name: "ses",
+  hexDeps: () => ({ swoosh: '"~> 1.17"', hackney: '"~> 1.20"' }),
+  emitClientModule(resources, stores, appModule): string {
+    const lines: string[] = [
+      "# Auto-generated.",
+      `defmodule ${resourceModuleName(appModule, "ses")} do`,
+      ...mailerEmailBuilders(resources, stores),
+    ];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      const region = cfg(storeOf(r, stores), "region") ?? "us-east-1";
+      lines.push(
+        `  @${fn}_region System.get_env("${envStem(r.name)}_REGION") || ${JSON.stringify(region)}`,
+        "",
+        `  def ${fn}_send(to, subject, body) do`,
+        `    Swoosh.Adapters.AmazonSES.deliver(${fn}_email(to, subject, body),`,
+        `      region: @${fn}_region,`,
+        '      access_key: System.get_env("AWS_ACCESS_KEY_ID"),',
+        '      secret: System.get_env("AWS_SECRET_ACCESS_KEY")',
+        "    )",
+        "",
+        "    :ok",
+        "  end",
+        "",
+      );
+    }
+    lines.push("end", "");
+    return lines.join("\n");
+  },
+};
+
+const sendgridPhoenixAdapter: PhoenixResourceAdapter = {
+  name: "sendgrid",
+  hexDeps: () => ({ swoosh: '"~> 1.17"', hackney: '"~> 1.20"' }),
+  emitClientModule(resources, stores, appModule): string {
+    const lines: string[] = [
+      "# Auto-generated.",
+      `defmodule ${resourceModuleName(appModule, "sendgrid")} do`,
+      ...mailerEmailBuilders(resources, stores),
+    ];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      lines.push(
+        `  def ${fn}_send(to, subject, body) do`,
+        `    Swoosh.Adapters.Sendgrid.deliver(${fn}_email(to, subject, body),`,
+        '      api_key: System.get_env("SENDGRID_API_KEY")',
+        "    )",
+        "",
+        "    :ok",
+        "  end",
+        "",
+      );
+    }
+    lines.push("end", "");
+    return lines.join("\n");
+  },
+};
+
 const ADAPTERS: readonly PhoenixResourceAdapter[] = [
   s3PhoenixAdapter,
   rabbitmqPhoenixAdapter,
   restApiPhoenixAdapter,
+  smtpPhoenixAdapter,
+  sesPhoenixAdapter,
+  sendgridPhoenixAdapter,
 ];
 
 export function phoenixResourceAdapterFor(sourceType: string): PhoenixResourceAdapter | undefined {
@@ -189,7 +316,8 @@ export function emitPhoenixResourceFiles(
   const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
   const bySourceType = new Map<string, DataSourceIR[]>();
   for (const r of sys.dataSources) {
-    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api" && r.kind !== "mailer")
+      continue;
     const st = storeType.get(r.storageName);
     if (!st || !phoenixResourceAdapterFor(st)) continue;
     const group = bySourceType.get(st);

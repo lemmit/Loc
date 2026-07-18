@@ -1,8 +1,25 @@
 # Plan: `email` as a resource kind (M-T4.6)
 
-**Status:** Draft / Proposed. Implementation plan for the `email` slice of
+**Status:** PARTIAL — foundation + all-five-backend emission landed; vendor
+compile-gating is the follow-on. Implementation plan for the `email` slice of
 mission **M-T4.6** ([`docs/new-plan/T4-eventing-temporal.md`](../../new-plan/T4-eventing-temporal.md)) —
 "Day-one batteries: `job`, `email`, object `storage`."
+
+> **[landed]** Surface `kind: mailer` → infra kind `email`; sourceTypes
+> `smtp`/`ses`/`sendgrid`; one `mail.send(to, subject, body)` verb. Shipped:
+> grammar (`mailer` + `smtp`/`ses`/`sendgrid` literals; `from` admitted as a
+> `LooseName` so `config: { from: … }` parses), IR unions, the sourceType
+> registry entries + `send` capability, the verb-table row, **ResourceAdapters
+> on all five backends** (Hono/nodemailer, .NET/MailKit, Java/Jakarta-Mail,
+> Python/aiosmtplib, Phoenix/Swoosh — each with SES + SendGrid siblings), the
+> per-backend writer wiring, and the Mailpit dev compose sidecar for `smtp`.
+> Call-site rendering needed **zero** per-backend changes (verb-name-generic).
+> Gated by unit tests (registry, lowering, negative-verb, cross-backend
+> emission, compose). **Follow-on (4.6-email-b):** wire the mailer into each
+> backend's compiled build-gate fixture so the emitted vendor clients are
+> compile-verified (deferred here to keep `main` green — the vendor SDK
+> snippets are inspected + unit-tested but not yet compiled by CI), and the
+> `LOOM_EMAIL_E2E` Mailpit runtime test.
 
 **Scope:** transactional email as a first-class **resource kind**, consumed
 from workflow bodies through a closed verb (`mail.send(...)`), realized on all
@@ -265,6 +282,17 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   the client dep, and that `mail.send(...)` renders the call.
 - **Compose:** `test/system/storage-sidecars.test.ts` — smtp emits Mailpit;
   ses/sendgrid emit none.
+- **TODO — runtime e2e with a mocked SMTP server.** Add an opt-in e2e leg
+  (`LOOM_EMAIL_E2E`-gated, sibling to the `obs-*`/`tenancy` legs) that boots the
+  generated backend against a **Mailpit** sidecar (`type: smtp` → the same dev
+  image the compose arm emits), drives a workflow that calls `mail.send(...)`,
+  then asserts the message landed by polling Mailpit's HTTP API
+  (`GET /api/v1/messages` → assert recipient/subject/body). Mailpit is ideal here
+  because it exposes both a real SMTP endpoint *and* a queryable REST inbox, so the
+  assertion needs no provider mocking. Start with Hono, then fan across backends as
+  a matrix (the `k8s-e2e.yml` / obs-gate pattern). For `ses`/`sendgrid` sourceTypes,
+  a captured-request fake (or the provider's sandbox) is a later, separate concern —
+  smtp+Mailpit covers the domain path end to end.
 - **Fixtures + build gates:** add a `resource … kind: email` + a `mail.send`
   workflow to the corpus/e2e fixtures (`test/fixtures/corpus/resources.ddd` and
   its manifest; `test/e2e/fixtures/{python,java,elixir-vanilla}-build/*.ddd`) so

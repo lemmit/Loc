@@ -234,7 +234,143 @@ const restApiAdapter: PyResourceAdapter = {
   },
 };
 
-const ADAPTERS: readonly PyResourceAdapter[] = [s3Adapter, rabbitmqAdapter, restApiAdapter];
+function mailFrom(r: DataSourceIR, stores: readonly StorageIR[]): string {
+  return cfg(storeOf(r, stores), "from") ?? "no-reply@example.test";
+}
+
+const smtpAdapter: PyResourceAdapter = {
+  name: "smtp",
+  deps: () => ["aiosmtplib>=3.0,<4"],
+  devDeps: () => [],
+  emitModule(resources, stores): string {
+    const body: string[] = [];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      body.push(
+        `_${fn}_url = os.environ.get("${envVar(r.name)}_URL", "smtp://localhost:1025")`,
+        `_${fn}_from = os.environ.get("${envVar(r.name)}_FROM", ${JSON.stringify(mailFrom(r, stores))})`,
+        "",
+        "",
+        `async def ${fn}_send(to: str, subject: str, body: str) -> None:`,
+        `    parsed = urlparse(_${fn}_url)`,
+        "    msg = EmailMessage()",
+        `    msg["From"] = _${fn}_from`,
+        '    msg["To"] = to',
+        '    msg["Subject"] = subject',
+        "    msg.set_content(body)",
+        "    await aiosmtplib.send(",
+        '        msg, hostname=parsed.hostname or "localhost", port=parsed.port or 25',
+        "    )",
+        "",
+        "",
+      );
+    }
+    return lines(
+      '"""SMTP mailer resource clients (resources.md).  Auto-generated."""',
+      "",
+      "import os",
+      "from email.message import EmailMessage",
+      "from urllib.parse import urlparse",
+      "",
+      "import aiosmtplib",
+      "",
+      "",
+      body,
+    );
+  },
+};
+
+const sesAdapter: PyResourceAdapter = {
+  name: "ses",
+  deps: () => ["boto3>=1.35,<2"],
+  devDeps: () => ["boto3-stubs[ses]>=1.35,<2"],
+  emitModule(resources, stores): string {
+    const body: string[] = [];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      const region = cfg(storeOf(r, stores), "region") ?? "us-east-1";
+      body.push(
+        `_${fn}_region = os.environ.get("${envVar(r.name)}_REGION", ${JSON.stringify(region)})`,
+        `_${fn}_from = os.environ.get("${envVar(r.name)}_FROM", ${JSON.stringify(mailFrom(r, stores))})`,
+        `_${fn}_client = boto3.client("ses", region_name=_${fn}_region)`,
+        "",
+        "",
+        `async def ${fn}_send(to: str, subject: str, body: str) -> None:`,
+        `    await asyncio.to_thread(`,
+        `        _${fn}_client.send_email,`,
+        `        Source=_${fn}_from,`,
+        '        Destination={"ToAddresses": [to]},',
+        '        Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}},',
+        "    )",
+        "",
+        "",
+      );
+    }
+    return lines(
+      '"""Amazon SES mailer resource clients (resources.md).  Auto-generated."""',
+      "",
+      "import asyncio",
+      "import os",
+      "",
+      "import boto3",
+      "",
+      "",
+      body,
+    );
+  },
+};
+
+const sendgridAdapter: PyResourceAdapter = {
+  name: "sendgrid",
+  deps: () => ["httpx>=0.28,<1"],
+  devDeps: () => [],
+  emitModule(resources, stores): string {
+    const body: string[] = [];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      body.push(
+        `_${fn}_key = os.environ.get("SENDGRID_API_KEY", "")`,
+        `_${fn}_from = os.environ.get("${envVar(r.name)}_FROM", ${JSON.stringify(mailFrom(r, stores))})`,
+        "",
+        "",
+        `async def ${fn}_send(to: str, subject: str, body: str) -> None:`,
+        `    async with httpx.AsyncClient() as client:`,
+        "        res = await client.post(",
+        '            "https://api.sendgrid.com/v3/mail/send",',
+        `            headers={"Authorization": f"Bearer {_${fn}_key}"},`,
+        "            json={",
+        '                "personalizations": [{"to": [{"email": to}]}],',
+        `                "from": {"email": _${fn}_from},`,
+        '                "subject": subject,',
+        '                "content": [{"type": "text/plain", "value": body}],',
+        "            },",
+        "        )",
+        "        res.raise_for_status()",
+        "",
+        "",
+      );
+    }
+    return lines(
+      '"""SendGrid mailer resource clients (resources.md).  Auto-generated."""',
+      "",
+      "import os",
+      "",
+      "import httpx",
+      "",
+      "",
+      body,
+    );
+  },
+};
+
+const ADAPTERS: readonly PyResourceAdapter[] = [
+  s3Adapter,
+  rabbitmqAdapter,
+  restApiAdapter,
+  smtpAdapter,
+  sesAdapter,
+  sendgridAdapter,
+];
 
 /** The Python ResourceAdapter realizing a sourceType, if any. */
 function pyResourceAdapterFor(sourceType: string): PyResourceAdapter | undefined {
@@ -273,7 +409,8 @@ export function emitPyResourceFiles(
   const bySourceType = new Map<string, DataSourceIR[]>();
   for (const r of sys.dataSources) {
     if (!wired.has(r.name)) continue;
-    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api" && r.kind !== "mailer")
+      continue;
     const st = storeType.get(r.storageName);
     if (!st || !pyResourceAdapterFor(st)) continue;
     const group = bySourceType.get(st);

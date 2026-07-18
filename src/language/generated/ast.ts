@@ -201,6 +201,7 @@ export type DddKeywordNames =
     | "localDisk"
     | "log"
     | "long"
+    | "mailer"
     | "main"
     | "managed"
     | "mantine"
@@ -282,10 +283,12 @@ export type DddKeywordNames =
     | "section"
     | "seed"
     | "select"
+    | "sendgrid"
     | "sensitive"
     | "serializable"
     | "serves"
     | "service"
+    | "ses"
     | "sessions"
     | "shadcn"
     | "shadcnSvelte"
@@ -294,6 +297,7 @@ export type DddKeywordNames =
     | "sharedTable"
     | "sidebar"
     | "slot"
+    | "smtp"
     | "snapshot"
     | "solution"
     | "sort"
@@ -940,10 +944,10 @@ export function isCommandHandler(item: unknown): item is CommandHandler {
     return reflection.isInstance(item, CommandHandler.$type);
 }
 
-export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
+export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 export function isCommonSoftKeywords(item: unknown): item is CommonSoftKeywords {
-    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
+    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
 }
 
 export interface Component extends langium.AstNode {
@@ -1093,10 +1097,10 @@ export function isCriterion(item: unknown): item is Criterion {
     return reflection.isInstance(item, Criterion.$type);
 }
 
-export type DataSourceKind = 'api' | 'cache' | 'eventLog' | 'objectStore' | 'queue' | 'replica' | 'snapshot' | 'state';
+export type DataSourceKind = 'api' | 'cache' | 'eventLog' | 'mailer' | 'objectStore' | 'queue' | 'replica' | 'snapshot' | 'state';
 
 export function isDataSourceKind(item: unknown): item is DataSourceKind {
-    return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'api';
+    return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'api' || item === 'mailer';
 }
 
 export interface DecLit extends langium.AstNode {
@@ -1931,10 +1935,10 @@ export function isLoadSegment(item: unknown): item is LoadSegment {
     return reflection.isInstance(item, LoadSegment.$type);
 }
 
-export type LooseName = 'aggregates' | 'allow' | 'api' | 'await' | 'bind' | 'cache' | 'component' | 'contains' | 'contexts' | 'deep' | 'design' | 'directoryLayout' | 'framework' | 'global' | 'id' | 'ignoring' | 'link' | 'local' | 'menu' | 'modules' | 'of' | 'page' | 'permissions' | 'persistence' | 'policy' | 'route' | 'section' | 'static' | 'targets' | 'transactional' | 'ui' | 'urlStyle' | 'views' | 'workflows' | CommonSoftKeywords | string;
+export type LooseName = 'aggregates' | 'allow' | 'api' | 'await' | 'bind' | 'cache' | 'component' | 'contains' | 'contexts' | 'deep' | 'design' | 'directoryLayout' | 'framework' | 'from' | 'global' | 'id' | 'ignoring' | 'link' | 'local' | 'menu' | 'modules' | 'of' | 'page' | 'permissions' | 'persistence' | 'policy' | 'route' | 'section' | 'static' | 'targets' | 'transactional' | 'ui' | 'urlStyle' | 'views' | 'workflows' | CommonSoftKeywords | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'allow' || item === 'api' || item === 'await' || item === 'bind' || item === 'cache' || item === 'component' || item === 'contains' || item === 'contexts' || item === 'deep' || item === 'design' || item === 'directoryLayout' || item === 'framework' || item === 'global' || item === 'id' || item === 'ignoring' || item === 'link' || item === 'local' || item === 'menu' || item === 'modules' || item === 'of' || item === 'page' || item === 'permissions' || item === 'persistence' || item === 'policy' || item === 'route' || item === 'section' || item === 'static' || item === 'targets' || item === 'transactional' || item === 'ui' || item === 'urlStyle' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'allow' || item === 'api' || item === 'await' || item === 'bind' || item === 'cache' || item === 'component' || item === 'contains' || item === 'contexts' || item === 'deep' || item === 'design' || item === 'directoryLayout' || item === 'framework' || item === 'from' || item === 'global' || item === 'id' || item === 'ignoring' || item === 'link' || item === 'local' || item === 'menu' || item === 'modules' || item === 'of' || item === 'page' || item === 'permissions' || item === 'persistence' || item === 'policy' || item === 'route' || item === 'section' || item === 'static' || item === 'targets' || item === 'transactional' || item === 'ui' || item === 'urlStyle' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface LValue extends langium.AstNode {
@@ -3456,10 +3460,10 @@ export function isStorage(item: unknown): item is Storage {
     return reflection.isInstance(item, Storage.$type);
 }
 
-export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'localDisk' | 'meilisearch' | 'mysql' | 'nats' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
+export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'localDisk' | 'meilisearch' | 'mysql' | 'nats' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sendgrid' | 'ses' | 'smtp' | 'sqlite';
 
 export function isStorageType(item: unknown): item is StorageType {
-    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'localDisk' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
+    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'localDisk' || item === 'rabbitmq' || item === 'nats' || item === 'restApi' || item === 'smtp' || item === 'ses' || item === 'sendgrid';
 }
 
 export interface Store extends langium.AstNode {

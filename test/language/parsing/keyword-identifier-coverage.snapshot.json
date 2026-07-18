@@ -293,7 +293,9 @@
     "nameRef",
     "paramName"
   ],
-  "from": [],
+  "from": [
+    "paramName"
+  ],
   "function": [],
   "global": [
     "paramName"
@@ -428,6 +430,14 @@
   "localDisk": [],
   "log": [],
   "long": [],
+  "mailer": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "main": [],
   "managed": [
     "fieldName",
@@ -693,6 +703,7 @@
     "paramName",
     "stateField"
   ],
+  "sendgrid": [],
   "sensitive": [],
   "serializable": [],
   "serves": [],
@@ -704,6 +715,7 @@
     "paramName",
     "stateField"
   ],
+  "ses": [],
   "sessions": [],
   "shadcn": [],
   "shadcnSvelte": [],
@@ -712,6 +724,7 @@
   "sharedTable": [],
   "sidebar": [],
   "slot": [],
+  "smtp": [],
   "snapshot": [
     "fieldName",
     "lValue",

@@ -35,7 +35,14 @@ export type { LoomInterface } from "../ir/types/loom-ir.js";
 
 /** The coarse, infrastructure-level semantic role a source plays.
  *  This is the registry's primary key axis (RFC §3.5). */
-export type InfraKind = "database" | "eventLog" | "cache" | "objectStore" | "queue" | "api";
+export type InfraKind =
+  | "database"
+  | "eventLog"
+  | "cache"
+  | "objectStore"
+  | "queue"
+  | "api"
+  | "email";
 
 /** What a sourceType offers for one infra kind. */
 export interface KindSupport {
@@ -85,6 +92,10 @@ export const SURFACE_KIND_MAP: Record<
   objectStore: { infraKind: "objectStore" },
   queue: { infraKind: "queue" },
   api: { infraKind: "api" },
+  // Surface `kind: mailer` → infra kind `email`.  The user-facing keyword
+  // avoids the `email`-field/expression collision (see the email-resource
+  // plan §1); the registry reasons in the coarse infra kind `email`.
+  mailer: { infraKind: "email" },
 };
 
 const set = <T>(...xs: T[]): ReadonlySet<T> => new Set(xs);
@@ -213,6 +224,33 @@ function seedBuiltins(): void {
       api: { capabilities: set("request"), interfaces: set<LoomInterface>("rest") },
     },
     configKeys: [{ name: "baseUrl", type: "string", required: true }],
+  });
+  // Mailer sourceTypes (surface `kind: mailer` → infra `email`).  All three
+  // offer the single `send` capability over the `sdk` interface (each backend's
+  // ResourceAdapter maps `send` to nodemailer / SES SDK / SendGrid client).
+  // `from` is a required sender address; provider credentials are env-bound at
+  // runtime, never config, so they are not config keys here.
+  const MAILER: KindSupport = {
+    capabilities: set("send"),
+    interfaces: set<LoomInterface>("sdk"),
+  };
+  registerSourceType({
+    name: "smtp",
+    supports: { email: MAILER },
+    configKeys: [{ name: "from", type: "string", required: true }],
+  });
+  registerSourceType({
+    name: "ses",
+    supports: { email: MAILER },
+    configKeys: [
+      { name: "from", type: "string", required: true },
+      { name: "region", type: "string" },
+    ],
+  });
+  registerSourceType({
+    name: "sendgrid",
+    supports: { email: MAILER },
+    configKeys: [{ name: "from", type: "string", required: true }],
   });
   // Declared storage types with no kind binding today.
   for (const name of ["elastic", "meilisearch", "clickhouse", "bigquery"]) {

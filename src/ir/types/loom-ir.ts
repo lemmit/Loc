@@ -2351,7 +2351,10 @@ export type StorageKind =
   | "s3"
   | "localDisk"
   | "rabbitmq"
-  | "restApi";
+  | "restApi"
+  | "smtp"
+  | "ses"
+  | "sendgrid";
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
  *  same source applies to whatever target the React generator
@@ -2905,7 +2908,8 @@ export type DataSourceKind =
   | "replica"
   | "objectStore"
   | "queue"
-  | "api";
+  | "api"
+  | "mailer";
 
 /** Access mode used to reach a source in a given context (RFC §3.5).
  *  Owned here (the IR vocabulary); the sourceType registry declares
