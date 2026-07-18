@@ -182,6 +182,32 @@ export function emitSelectField(
   });
 }
 
+export function emitFileUpload(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // FileUpload("Label", bind: <File state>) — standalone file-upload
+  // input bound to a `File`-typed state field.  On select it POSTs the
+  // file to `/files` (multipart via `api.upload`) and writes the returned
+  // `FileRef` back through the setter.  Mirrors `emitField`'s bind shape.
+  void depth;
+  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const bind = stateBindArg(call, "bind", ctx);
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
+  return renderPrimitive(ctx, "primitive-file-upload", {
+    labelAttr,
+    labelText,
+    bind,
+    setter,
+    hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
 export function emitPasswordField(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,

@@ -1,0 +1,86 @@
+// FileUpload primitive — slice 4a (React) fixture.
+//
+// Exercises both file-upload surfaces the React generator emits:
+//   (a) an in-form `File` field on a `CreateForm(of: …)` → the
+//       `field-input-file` template (RHF `<Controller>` + `api.upload`).
+//   (b) a standalone `FileUpload { bind: … }` primitive on a hand-
+//       authored page → the `primitive-file-upload` template.
+//
+// The UI is hand-authored (no `scaffold`) so the fixture stays focused
+// on the form + standalone upload surfaces — scaffolded list/detail
+// rendering of a `File` field (showing a FileRef in a cell) is a
+// separate display concern, out of slice 4a's form scope.
+//
+// Pointed at by the `generated-react-build` matrix so the emitted React
+// project type-checks (`tsc --noEmit`) on every pack.
+
+system FileUpload {
+
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#64748b"
+    radius: "md"
+  }
+
+  subdomain Docs {
+    context Documents {
+
+      // `crudish` gives the aggregate its create factory + repository +
+      // `POST /attachments` endpoint (so the form's `useCreateAttachment`
+      // hook + wire schema exist); the UI below is hand-authored, not
+      // scaffolded.
+      aggregate Attachment with crudish {
+        title: string
+        attachment: File
+        derived display: string = title
+      }
+    }
+  }
+
+  ui WebApp {
+
+    // Surface (a): a `File`-typed field inside a `CreateForm` auto-renders
+    // the file-upload input.
+    page NewAttachment {
+      route: "/attachments/new"
+      title: "New attachment"
+      body: Stack {
+        Heading { "New attachment", level: 1 },
+        CreateForm { of: Attachment }
+      }
+    }
+
+    // Surface (b): standalone `FileUpload` bound to a `File` state field.
+    page Uploader {
+      route: "/upload"
+      title: "Upload a file"
+      state {
+        doc: File
+      }
+      body: Stack {
+        Heading { "Standalone upload", level: 1 },
+        FileUpload { "Attachment", bind: doc }
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  storage uploads { type: localDisk }
+  resource docsState { for: Documents, kind: state, use: primary }
+  resource docsFiles { for: Documents, kind: objectStore, use: uploads }
+
+  deployable api {
+    platform: node
+    contexts: [Documents]
+    dataSources: [docsState, docsFiles]
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: WebApp
+    port: 3001
+    design: mantine
+  }
+}

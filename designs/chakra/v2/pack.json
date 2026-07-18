@@ -72,7 +72,9 @@
     "primitive-multiline-field": "primitive-multiline-field.hbs",
     "primitive-select-field": "primitive-select-field.hbs",
     "realtime-toast": "realtime-toast.hbs",
-    "realtime-toast-setup": "realtime-toast-setup.hbs"
+    "realtime-toast-setup": "realtime-toast-setup.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "helpers": {
     "chakraRadius": {
@@ -608,6 +610,40 @@
           "ModalContent",
           "ModalHeader",
           "ModalBody"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "FormControl",
+          "FormErrorMessage",
+          "FormLabel",
+          "Input"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "FormControl",
+          "FormErrorMessage",
+          "FormLabel",
+          "Input"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]

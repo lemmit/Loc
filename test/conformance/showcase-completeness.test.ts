@@ -167,6 +167,17 @@ function invokedNames(model: Model): Set<string> {
   return names;
 }
 
+/** Walker primitives that are React-only today, so they must NOT appear in
+ *  `showcase.ddd` — which feeds the cross-frontend render matrix
+ *  (`frontend-showcase-render.test.ts`) that drives the SAME source through
+ *  Vue / Svelte / Angular. A React-only primitive there would fail-fast on a
+ *  missing pack template. Excluded from the walker-primitive coverage gate
+ *  until it's backfilled across the other frontends and can join the shared
+ *  fixture.
+ *    - FileUpload: M-T1.2 slice 4a (React only); LiveView/Vue/Svelte/Angular
+ *      uploads land in slice 4b, then this entry drops and it joins showcase. */
+const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set(["FileUpload"]);
+
 describe("conformance: showcase.ddd completeness", () => {
   it(`parses and validates ${SHOWCASE} with no errors`, async () => {
     const doc = await buildShowcase();
@@ -219,7 +230,9 @@ describe("conformance: showcase.ddd completeness", () => {
     const model = doc.parseResult.value;
 
     const used = invokedNames(model);
-    const primitives = [...STDLIB_LAYOUT_COMPONENTS].sort();
+    const primitives = [...STDLIB_LAYOUT_COMPONENTS]
+      .filter((p) => !REACT_ONLY_PRIMITIVES.has(p))
+      .sort();
     const missing = primitives.filter((p) => !used.has(p));
 
     if (missing.length > 0) {

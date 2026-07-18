@@ -51,9 +51,39 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   return body;
 }
 
+// Multipart upload variant of `rawFetch`.  Sends a `FormData` body and,
+// crucially, does NOT set `content-type` — the browser adds it with the
+// generated multipart boundary.  Returns the parsed JSON (a `FileRef`).
+async function rawUpload(path: string, form: FormData): Promise<unknown> {
+  const startedAt =
+    typeof performance !== "undefined" ? performance.now() : Date.now();
+  log.debug(`-> POST ${path} (multipart)`);
+  const r = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    body: form,
+  });
+  const text = await r.text();
+  const body: unknown = text ? JSON.parse(text) : null;
+  const ms = Math.round(
+    (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+      startedAt,
+  );
+  if (!r.ok) {
+    const message =
+      body && typeof body === "object" && "error" in body
+        ? String((body as { error: unknown }).error)
+        : r.statusText;
+    log.warn(`<- ${r.status} POST ${path} (${ms}ms): ${message}`);
+    throw new ApiError(r.status, message, body);
+  }
+  log.debug(`<- ${r.status} POST ${path} (${ms}ms)`);
+  return body;
+}
+
 export const api = {
   get: (path: string) => rawFetch(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
     rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  upload: (path: string, form: FormData) => rawUpload(path, form),
   delete: (path: string) => rawFetch(path, { method: "DELETE" }),
 };

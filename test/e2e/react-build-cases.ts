@@ -48,4 +48,10 @@ export const reactBuildExamples = [
   // guards the row templates + the op-form `fieldArrays` hoist across every
   // pack.
   { ddd: "web/src/examples/subform-showcase.ddd", reactDir: "web_app" },
+  // FileUpload primitive (slice 4a): a `File`-typed field on a scaffolded
+  // aggregate → the in-form `field-input-file` template (RHF Controller +
+  // `api.upload`), and a standalone `FileUpload { bind: … }` → the
+  // `primitive-file-upload` template.  Guards both file-upload surfaces
+  // compiling under every React pack.
+  { ddd: "web/src/examples/file-upload-system.ddd", reactDir: "web_app" },
 ] as const;

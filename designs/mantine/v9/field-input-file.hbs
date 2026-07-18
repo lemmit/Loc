@@ -1,0 +1,7 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <FileInput label="{{label}}" data-testid="{{testId}}" clearable placeholder={field.value?.key ?? "Choose file"} onChange={async (f) => { if (!f) { field.onChange(null); return; } const fd = new FormData(); fd.append("file", f); field.onChange(await api.upload("/files", fd)); }} error={fieldState.error?.message} />
+          )}
+        />

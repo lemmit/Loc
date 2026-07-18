@@ -45,6 +45,13 @@ export function prepareFormFieldVM(
     if (inner.name === "datetime") {
       return { template: "field-input-datetime", path, label, testId, errorExpr };
     }
+    if (inner.name === "File") {
+      // A `File`-typed field renders a file-upload input: the pack's
+      // `field-input-file` template wraps a `<Controller>` whose
+      // `onChange` receives the uploaded `FileRef` (via `api.upload`).
+      // Mirrors the `money` compound-value arm above.
+      return { template: "field-input-file", path, label, testId, errorExpr };
+    }
     return { template: "field-input-string", path, label, testId, errorExpr };
   }
 

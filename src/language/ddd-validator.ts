@@ -44,6 +44,7 @@ import {
   checkDurationConstructors,
   checkExpectMatcher,
   checkFactoryCreateFields,
+  checkFileUploadBinding,
   checkGenericCarriers,
   checkHandlerBodies,
   checkIconOnlyButtonName,
@@ -194,6 +195,7 @@ export class DddValidator {
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
+    guard("file-upload-binding", model, () => checkFileUploadBinding(model, accept));
     // Accessibility: an `Image`/`Avatar` rendering an image needs a text
     // alternative (`alt:` or `decorative: true`).  Alt text is human content
     // Loom can't derive — a missing alt fails WCAG 1.1.1 (accessibility.md).
