@@ -48,4 +48,21 @@ describe("this-relative op-form seeding (mantine)", () => {
     // Response type imported.
     expect(tsx!).toMatch(/OrderResponse/);
   });
+
+  it("threads the record on shadcn (self-contained OpModal) too", async () => {
+    const files = await generateSystemFiles(
+      SRC.replace(
+        "ui: WebApp { Sales: api } port: 3001",
+        'ui: WebApp { Sales: api } design: "shadcn@v4" port: 3001',
+      ),
+    );
+    const tsx = files.get("web/src/components/OrderPanel.tsx");
+    expect(tsx, "OrderPanel component generated").toBeDefined();
+    // Self-contained OpModal component takes the typed record prop…
+    expect(tsx!).toMatch(/function ConfirmOpModal\(\{ mut, record \}/);
+    expect(tsx!).toMatch(/record:\s*OrderResponse/);
+    // …seeds defaultValues from it, and the instantiation passes the instance.
+    expect(tsx!).toMatch(/defaultValues:\s*\{[^}]*memo:\s*record\.customerId/);
+    expect(tsx!).toMatch(/<ConfirmOpModal mut=\{ confirm \} record=\{ order \} \/>/);
+  });
 });

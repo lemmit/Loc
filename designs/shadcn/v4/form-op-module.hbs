@@ -1,4 +1,4 @@
-function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}> }) {
+function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>{{#if recordVar}}; record: {{recordType}}{{/if}} }) {
   const [open, setOpen] = useState(false);
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
 {{/each}}  const form = useForm<{{opPascal}}{{aggregateName}}Request>({
