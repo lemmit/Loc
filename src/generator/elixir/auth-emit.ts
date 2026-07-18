@@ -85,6 +85,13 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
     renderAuthPlug(sys.user, webModule, auth, sys.tenancy?.claimField, orgPathRegistry),
   );
   files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule, auth));
+  // OIDC only: the :browser-pipeline plug that seeds the Phoenix session's
+  // `current_user` from the verified session cookie so LiveAuth can gate
+  // LiveViews (the `auth: ui` frontend guard).  The dev stub needs none —
+  // LiveAuth's dev_user fallback grants LiveViews out of the box.
+  if (auth) {
+    files.set(`lib/${appName}_web/browser_auth.ex`, renderBrowserAuth(webModule));
+  }
   files.set(
     `lib/${appName}_web/controllers/auth_controller.ex`,
     renderAuthController(webModule, auth, deployable.port ?? 4000),
@@ -288,6 +295,29 @@ ${devClaimStringFields
   # LiveViews the same identity the :api pipeline grants every request.
   def dev_user, do: build_user(elem(verify_token(nil), 1))${orgPathPipe}
 `;
+  // OIDC only: the browser LiveView guard reads the verified principal from the
+  // `session` cookie (the /auth/callback handshake token) so the :browser
+  // pipeline's BrowserAuth plug can seed the Phoenix session before
+  // LiveAuth.on_mount gates a LiveView (the `auth: ui` frontend guard).
+  const sessionUserFn = auth
+    ? `
+  @doc """
+  The verified principal from the browser \`session\` cookie (the /auth/callback
+  handshake token), or nil.  The :browser pipeline's BrowserAuth plug seeds the
+  Phoenix session with this so LiveAuth.on_mount can gate LiveViews.
+  """
+  def session_user(conn) do
+    conn = fetch_cookies(conn)
+
+    with token when is_binary(token) and token != "" <- conn.cookies["session"],
+         {:ok, claims} <- verify_token(token) do
+      build_user(claims)${orgPathPipe}
+    else
+      _ -> nil
+    end
+  end
+`
+    : "";
 
   // OIDC: the token rides the Authorization header OR the `session` cookie the
   // /auth/callback handshake issued (the browser flow), so read both.  Dev
@@ -397,7 +427,7 @@ ${extractTokenDef}
     |> send_resp(401, ~s({"error":"unauthorized"}))
     |> halt()
   end
-${devUserFn}
+${devUserFn}${sessionUserFn}
 ${verifierSection}
   # ---------------------------------------------------------------------------
   # Maps verified JWT claims onto the system's user { } shape.  OIDC walks
@@ -956,10 +986,14 @@ function renderLiveAuth(webModule: string, auth: AuthIR | undefined): string {
   const missingSessionArm = auth
     ? `_ -> {:error, :unauthenticated}`
     : `_ -> {:ok, ${webModule}.Auth.dev_user()}`;
+  // Where an unauthenticated LiveView bounces.  OIDC → the real login handshake
+  // (which 302s to the IdP); dev-stub never reaches this arm (dev_user always
+  // grants), so "/" is a harmless placeholder.
+  const loginRedirect = auth ? `${AUTH_BASE_PATH}/login` : "/login";
   const verifyDoc = auth
-    ? `reads \\\`current_user\\\` directly from the session map (populated by the
-  /auth/callback handshake).  Extend it to validate a session token, load from
-  the database, etc.`
+    ? `reads \\\`current_user\\\` from the session map, seeded per-request by the
+  :browser pipeline's BrowserAuth plug from the verified /auth/callback session
+  cookie.  A missing session bounces to the login handshake.`
     : `reads \\\`current_user\\\` from the session, falling back to the dev-stub
   admin so LiveViews render without a login handshake (symmetric with the
   permissive :api plug).  Replace for production, or declare an
@@ -984,7 +1018,7 @@ defmodule ${webModule}.LiveAuth do
   def on_mount(:default, _params, session, socket) do
     case verify_session(session) do
       {:ok, user} -> {:cont, assign(socket, :current_user, user)}
-      _ -> {:halt, Phoenix.LiveView.redirect(socket, to: "/login")}
+      _ -> {:halt, Phoenix.LiveView.redirect(socket, to: "${loginRedirect}")}
     end
   end
 
@@ -996,6 +1030,44 @@ defmodule ${webModule}.LiveAuth do
     case session do
       %{"current_user" => user} -> {:ok, user}
       ${missingSessionArm}
+    end
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// BrowserAuth plug (OIDC only) — the HTTP-request half of the `auth: ui`
+// LiveView guard.  Runs in the `:browser` pipeline AFTER `:fetch_session`:
+// it verifies the `session` cookie the /auth/callback handshake issued and
+// writes the resolved principal into the Phoenix session under
+// `"current_user"`, so LiveAuth.on_mount (which reads the session map) sees a
+// signed-in user on the live connect.  A missing / invalid cookie leaves the
+// session untouched, and LiveAuth bounces the LiveView to the login handshake.
+// ---------------------------------------------------------------------------
+
+function renderBrowserAuth(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.BrowserAuth do
+  @moduledoc """
+  Plug (\`:browser\` pipeline) that seeds the Phoenix session's \`current_user\`
+  from the verified \`session\` cookie the /auth/callback handshake issued, so
+  \`${webModule}.LiveAuth.on_mount/4\` can gate LiveViews (the \`auth: ui\`
+  frontend guard).  Runs after \`:fetch_session\`; a missing / invalid cookie
+  leaves the session untouched (LiveAuth then redirects to the login handshake).
+  """
+
+  @behaviour Plug
+  import Plug.Conn
+
+  @impl Plug
+  def init(opts), do: opts
+
+  @impl Plug
+  def call(conn, _opts) do
+    case ${webModule}.Auth.session_user(conn) do
+      nil -> conn
+      user -> put_session(conn, "current_user", user)
     end
   end
 end
