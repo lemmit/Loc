@@ -68,7 +68,8 @@ jobs:
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
           #   • forms (NewProduct's CreateForm; ProductAdmin's OperationForm +
           #     DestroyForm on a :id route) over every field kind (string/int/bool/
-          #     enum/datetime/optional + a Money value object)
+          #     enum/datetime/optional + a Money value object + a Category id
+          #     FK-loaded dropdown)
           #   • display + multi-page named routing + navigation buttons
           # This is the load-bearing "does the emitted Dart compile" gate.
           cat > ci-flutter/showcase.ddd <<'DDD'
@@ -78,10 +79,16 @@ jobs:
               context Cat {
                 enum Status { active inactive archived }
                 valueobject Money { amount: int  currency: string }
+                aggregate Category {
+                  name: string
+                  derived display: string = name
+                }
                 aggregate Product {
                   name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
+                  category: Category id
                   operation rename(newName: string) { name := newName }
                 }
+                repository Categories for Category { }
                 repository Products for Product { }
               }
             }
