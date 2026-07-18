@@ -112,6 +112,18 @@ export async function resetDatabase(pgUrl) {
  *  docs/audits/behavioral-parity-bugs-2026-07.md.  Removing an entry is how a fix
  *  re-arms the boot.  Keyed by platform clause; applies to BOTH featureCases and
  *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
+// OIDC boot-harness gap: `auth-oidc` has an `auth {}` block → a real JWT
+// verifier that validates a bearer token against the issuer's JWKS.  The node
+// runner (run.mjs) stands up an in-process mock issuer (oidc-mock.mjs), sets
+// OIDC_ISSUER, and forwards a signed E2E_BEARER_TOKEN — so it boots the full
+// OIDC path.  The backend runners (java/python/dotnet/elixir) spawn a SEPARATE
+// backend process and would each need the mock issuer forwarded into that
+// process's env (OIDC_ISSUER) + the token plumbed through; that per-runner
+// wiring (and any per-backend claim-mapping differences it surfaces) is the
+// tracked follow-up.  Until then the OIDC boot is node-only; the case still
+// EMITS on every backend (behavioural-coverage gate) and boots on node.
+const OIDC_BOOT_GAP = { "auth-oidc": "OIDC mock-issuer harness wired into run.mjs (node) only — backend-runner forwarding is the follow-up" };
+
 const BEHAVIOURAL_SKIP = {
   node: {
     // B1 fixed (event-sourced create now folds events before asserting
@@ -122,8 +134,12 @@ const BEHAVIOURAL_SKIP = {
     // B2/B3/B4/B8/B12 fixed — no dotnet skips remain. (B12: `crudish` on a
     // `shape: document` aggregate now emits a matching `DeleteAsync` on the
     // document-repo impl, so the interface/impl method sets agree; repository.ts.)
+    ...OIDC_BOOT_GAP,
   },
+  java: { ...OIDC_BOOT_GAP },
+  python: { ...OIDC_BOOT_GAP },
   elixir: {
+    ...OIDC_BOOT_GAP,
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
     // now mints a valid PascalCase module alias; openapi-emit.ts.)
