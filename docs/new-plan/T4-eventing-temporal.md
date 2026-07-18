@@ -32,8 +32,8 @@ Sources: [channels.md](../old/proposals/channels.md) §brokers, production-readi
 Live branches from the generated-code DDD review: S5(a) Phoenix persist-then-dispatch (+S12), S5(b) ES saga starter exists-guard (all 5 backends), S5(c) Java unconditional publisher, Phoenix op guards 403/422. Land or re-drive each; they're small and correctness-grade.
 Sources: [phoenix-event-delivery-s5a](../old/plans/phoenix-event-delivery-s5a.md), [saga-starter-guard-s5b](../old/plans/saga-starter-guard-s5b.md), [java-uniform-publisher-s5c](../old/plans/java-uniform-publisher-s5c.md), [phoenix-op-guards-403-422](../old/plans/phoenix-op-guards-403-422.md).
 
-## M-T4.6 — Day-one batteries: `job`, `email`, object `storage` — `open` · **L** · P1
-The ~100%-of-apps integrations: an email adapter (resource kind — smtp/ses/sendgrid), object-storage `File`/`Upload` surface (resource verbs `files.put/get/signedUrl` already render — wire the type + UI via M-T1.2), and `job` (folds into M-T4.1 timers).
+## M-T4.6 — Day-one batteries: `job`, `email`, object `storage` — `partial` · **L** · P1
+The ~100%-of-apps integrations: an email adapter (resource kind — smtp/ses/sendgrid), object-storage `File`/`Upload` surface, and `job` (folds into M-T4.1 timers). **Object-storage `File` slice 1 shipped** (PR #2007, tracked under M-T1.2): the `File` field type + `FileRef` wire contract on all five backends + a dependency-free `localDisk` store + Hono `POST /files`/`GET /files/:key` endpoints. (The `files.put/get/signedUrl` workflow-body verbs already rendered; this adds the declarative field type they hang off.) Remaining here: `email`, `job`, and the File follow-ons (other-backend endpoints, s3 presign, the `FileUpload` UI primitive) tracked under M-T1.2.
 Sources: [quickstart-and-day-one-batteries](../old/proposals/quickstart-and-day-one-batteries.md) §5, completeness-audit Tier 1.
 
 ## M-T4.7 — Workflow family v2 — `open` · **L** · P3
