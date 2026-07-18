@@ -93,20 +93,22 @@ export default function ProductDetail() {
           <Alert color="yellow" variant="light">No product matches that id.</Alert>
         ) }
         { productById.data && (
-          <Card withBorder padding="md">
-            <Stack>
-              <KeyValueRow label="Sku" data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
-              <KeyValueRow label="Price Amount"><Text>{productById.data.price.amount}</Text></KeyValueRow>
-              <KeyValueRow label="Price Currency"><Text>{productById.data.price.currency}</Text></KeyValueRow>
-              <KeyValueRow label="Version" data-testid="products-detail-version"><Text>{productById.data.version}</Text></KeyValueRow>
-            </Stack>
-          </Card>
+          <Stack>
+            <Card withBorder padding="md">
+              <Stack>
+                <KeyValueRow label="Sku" data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
+                <KeyValueRow label="Price Amount"><Text>{productById.data.price.amount}</Text></KeyValueRow>
+                <KeyValueRow label="Price Currency"><Text>{productById.data.price.currency}</Text></KeyValueRow>
+                <KeyValueRow label="Version" data-testid="products-detail-version"><Text>{productById.data.version}</Text></KeyValueRow>
+              </Stack>
+            </Card>
+            <Group>
+              <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">Update</Button>
+    
+            </Group>
+          </Stack>
         ) }
       </>
-      <Group>
-        <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">Update</Button>
-    
-      </Group>
     </Stack>
   );
 }

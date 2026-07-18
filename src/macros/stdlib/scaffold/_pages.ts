@@ -16,7 +16,6 @@ import {
   scaffoldInstanceList,
   scaffoldList,
   scaffoldNewForm,
-  scaffoldOperations,
   scaffoldViewList,
   scaffoldViewsIndex,
   scaffoldWorkflowForm,
@@ -106,14 +105,14 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
     page({
       name: "Detail",
       route: `/${pluralSnake}/:id`,
-      // `Stack { Breadcrumbs, Heading, QueryView, <operations> }` — the read
-      // view's parts flattened directly into the page Stack (spliced, not
-      // nested), then the auto-fanned
-      // per-operation modals.  The outer Stack testid (`<plural>-detail`)
-      // anchors the e2e page-objects.
+      // `Stack { Breadcrumbs, Heading, QueryView }` — the read view's parts
+      // flattened directly into the page Stack (spliced, not nested).  The
+      // per-operation modals are auto-fanned INSIDE the QueryView's `data`
+      // lambda (`withOperations`), so each op form is instance-qualified against
+      // the loaded record and a `this.<field>` param default seeds from it.  The
+      // outer Stack testid (`<plural>-detail`) anchors the e2e page-objects.
       body: callExpr("Stack", [
-        ...scaffoldDetailsParts(agg, { apiHandle }),
-        { value: scaffoldOperations(agg) },
+        ...scaffoldDetailsParts(agg, { apiHandle, withOperations: true }),
         { name: "testid", value: stringLit(`${pluralSnake}-detail`) },
       ]),
       menu: { hidden: boolLit(true) },

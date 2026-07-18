@@ -182,8 +182,9 @@ export function emitWorkflowForm(
 /** Like `emitFormOfOperation` but addressed by aggregate name +
  *  op name (`OperationForm(of: <Agg>, op: <opName>)`) instead of an
  *  instance-qualified member.  No in-scope record needed — the
- *  mutation hook resolves the id from the route `id`.  Used by
- *  the auto-fanning `scaffoldOperations(of: <Agg>)` primitive. */
+ *  mutation hook resolves the id from the route `id`.  The by-name shape for a
+ *  hand-written page with no loaded record (the scaffold's Detail op modals are
+ *  instance-qualified inside the QueryView data lambda, so they seed from it). */
 function emitFormOfOperationByName(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -786,10 +787,10 @@ export function emitModal(
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
   // The op-form names its operation either through an instance-
-  // member shape (`OperationForm(data.confirm)`) or through the
-  // `OperationForm(of: <Agg>, op: <opName>)` flat shape (used by
-  // `scaffoldOperations(of:)` so modals can live outside a
-  // QueryView data lambda).  Recover the op name from whichever
+  // member shape (`OperationForm(data.confirm)` — the scaffold's Detail modals,
+  // instance-qualified inside the QueryView data lambda) or through the
+  // `OperationForm(of: <Agg>, op: <opName>)` flat shape (a hand-written page with
+  // no loaded record in scope).  Recover the op name from whichever
   // shape the child carries.
   const opRef = positionalArgs(formChild)[0];
   const opNameNamed = (() => {

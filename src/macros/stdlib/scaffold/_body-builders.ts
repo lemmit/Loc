@@ -74,22 +74,34 @@ export function scaffoldNewForm(aggName: string): Expression {
  *  first operation's button is primary, the rest secondary).  No public
  *  operations ⇒ an empty `Group()`.
  *  public = the aggregate's non-`private` operations. */
-export function scaffoldOperations(agg: Aggregate): Expression {
+export function scaffoldOperations(agg: Aggregate, instanceVar?: string): Expression {
   const slug = snake(plural(agg.name));
   const publicOps = agg.members.filter(
     (m): m is Operation => m.$type === "Operation" && !m.private,
   );
   if (publicOps.length === 0) return callExpr("Group", []);
+  // When the ops render inside the Detail QueryView's `data` lambda, `instanceVar`
+  // is the loaded record binding (`data`) — emit the INSTANCE-QUALIFIED op form
+  // (`OperationForm { data.<op> }`) so a `this.<field>` param default seeds from
+  // that record (the `seedsOpFormRecord` record-threading path).  Without it,
+  // fall back to the by-name shape (`of:/op:`, id from the route, no record).
+  const opForm = (op: Operation): Expression =>
+    instanceVar
+      ? callExpr("OperationForm", [
+          { value: memberAccess(nameRefExpr(instanceVar), op.name) },
+          { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+        ])
+      : callExpr("OperationForm", [
+          { name: "of", value: nameRefExpr(agg.name) },
+          { name: "op", value: nameRefExpr(op.name) },
+          { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+        ]);
   return callExpr(
     "Group",
     publicOps.map((op, i) => ({
       value: callExpr("Modal", [
         {
-          value: callExpr("OperationForm", [
-            { name: "of", value: nameRefExpr(agg.name) },
-            { name: "op", value: nameRefExpr(op.name) },
-            { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
-          ]),
+          value: opForm(op),
         },
         { name: "title", value: stringLit(humanize(op.name)) },
         {
@@ -562,7 +574,7 @@ export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {
  *  its outer `Stack` alongside the operation modals (flattened into the page Stack rather than nested). */
 export function scaffoldDetailsParts(
   agg: Aggregate,
-  opts: { apiHandle?: string } = {},
+  opts: { apiHandle?: string; withOperations?: boolean } = {},
 ): Array<{ name?: string; value: Expression }> {
   const slug = snake(plural(agg.name));
   const humanPlural = humanize(plural(agg.name));
@@ -573,10 +585,16 @@ export function scaffoldDetailsParts(
     opts.apiHandle ? memberAccess(nameRefExpr(opts.apiHandle), agg.name) : nameRefExpr(agg.name);
 
   const { card, related } = buildDataCardParts(agg, cellVar);
+  // Operation modals render INSIDE the `data` lambda (below the record card, only
+  // once the record loads) so their instance-qualified op forms seed a
+  // `this.<field>` param default from the in-scope loaded record (`data`).
+  const hasPublicOps = agg.members.some((m) => m.$type === "Operation" && !m.private);
+  const dataExtras: Expression[] = [...related];
+  if (opts.withOperations && hasPublicOps) dataExtras.push(scaffoldOperations(agg, cellVar));
   const dataBody =
-    related.length === 0
+    dataExtras.length === 0
       ? card
-      : callExpr("Stack", [{ value: card }, ...related.map((r) => ({ value: r }))]);
+      : callExpr("Stack", [{ value: card }, ...dataExtras.map((r) => ({ value: r }))]);
 
   return [
     {

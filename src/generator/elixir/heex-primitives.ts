@@ -170,9 +170,9 @@ ${heading}${childrenHeex}
   //     is the op name.  The classic Detail-page form inside a
   //     QueryView lambda binding.
   //   * `OperationForm(of: <Agg>, op: <opName>)` — flat named args; aggregate
-  //     resolved directly by name, id falls back to route.  The
-  //     shape `scaffoldOperations(of:)` emits so modals can live
-  //     outside a QueryView lambda.
+  //     resolved directly by name, id falls back to route.  The by-name shape
+  //     for a hand-written page with no loaded record (the scaffold's Detail
+  //     modals are instance-qualified inside the QueryView data lambda).
   let opName: string | undefined;
   let ofName: string | undefined;
   if (formChild) {
