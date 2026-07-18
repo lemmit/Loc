@@ -230,13 +230,6 @@ system D {
 });
 
 describe("dapper capability gating (loom.dapper-unsupported)", () => {
-  const rejects = async (body: string, needle: RegExp) => {
-    const { errors } = await emit(sys("dapper", body));
-    expect(errors.some((e) => /persistence: dapper/.test(e) && needle.test(e))).toBe(true);
-  };
-
-  it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
-
   it("no longer rejects seed data; emits a Dapper-framed Seed.cs", async () => {
     const src = `
 system D {
@@ -447,6 +440,62 @@ system D {
     expect(repo).toContain("WHERE (created_by = @__cu_id) AND (tenant_id = @__cu_tenantId)");
     expect(repo).toContain("__cu_id = currentUser.Id");
     expect(repo).toContain("__cu_tenantId = currentUser.TenantId");
+  });
+});
+
+// Provenanced fields on Dapper: the co-located `<field>_provenance` jsonb column
+// round-trips the ProvLineage (ProvJson.Options) and SaveAsync flushes the
+// drained lineage into the `provenance_records` history table (DbSchema owns the
+// DDL) — the raw-Npgsql mirror of the EF value-converter + ProvenanceRecord
+// flush.  The shared ProvLineage SDK is emitted; the EF ProvenanceRecord
+// POCO/configuration are NOT (they'd reference Microsoft.EntityFrameworkCore).
+describe("dapper provenanced fields", () => {
+  const PROV_SRC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        quantity: int
+        price:    int
+        total:    int provenanced
+        operation reprice(qty: int, unit: int) {
+          quantity := qty
+          price    := unit
+          total    := qty * unit
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects provenanced fields; round-trips the co-located column + flushes history", async () => {
+    const { files, errors } = await emit(PROV_SRC);
+    expect(errors).toEqual([]); // the dapper provenance gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Co-located `total_provenance` jsonb column round-trips the lineage.
+    expect(repo).toContain("public string? total_provenance { get; set; }");
+    expect(repo).toContain(
+      "TotalProvenance = r.total_provenance is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.total_provenance, ProvJson.Options)",
+    );
+    expect(repo).toContain("total_provenance = excluded.total_provenance");
+    // SaveAsync flushes the drained lineage into provenance_records.
+    expect(repo).toContain("foreach (var __lin in aggregate.DrainProv())");
+    expect(repo).toContain("INSERT INTO provenance_records (trace_id, snapshot_id, target_type");
+    // The shared lineage SDK is emitted; the EF history POCO/config are not.
+    expect(files.has("api/Domain/Common/ProvLineage.cs")).toBe(true);
+    expect(files.has("api/Infrastructure/Persistence/ProvenanceRecord.cs")).toBe(false);
+    expect(
+      files.has("api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs"),
+    ).toBe(false);
+    // DbSchema owns the history table + co-located column DDL.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("total_provenance jsonb");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS provenance_records (");
   });
 });
 

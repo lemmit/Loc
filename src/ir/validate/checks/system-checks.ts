@@ -1749,13 +1749,15 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // Capability filters are supported too (spliced into every SELECT's
         // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
         // `@__cu_<claim>` Dapper param bound from the same ambient principal.
-        for (const f of a.fields) {
-          // Access modifiers (`managed` / `token` / `internal` / `secret`)
-          // are wire-projection concerns handled by the shared Domain/CQRS
-          // layers (create-input shaping, `forApiRead` response stripping) —
-          // the Dapper column round-trips like any other field, so no gate.
-          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-        }
+        // Access modifiers (`managed` / `token` / `internal` / `secret`) are
+        // wire-projection concerns handled by the shared Domain/CQRS layers
+        // (create-input shaping, `forApiRead` response stripping) — the Dapper
+        // column round-trips like any other field, so no gate.  Provenanced
+        // fields are supported too: the co-located `<field>_provenance` jsonb
+        // column round-trips the ProvLineage (ProvJson.Options) and the Dapper
+        // SaveAsync flushes the drained lineage into the `provenance_records`
+        // history table (DbSchema owns its DDL) — the raw-Npgsql mirror of the
+        // EF value-converter + ProvenanceRecord flush.
       }
     }
   }

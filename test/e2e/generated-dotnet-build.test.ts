@@ -194,6 +194,44 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 1: the Dapper adapter's PROVENANCE surface — a `provenanced`
+    // field's co-located `<field>_provenance` jsonb column + the
+    // `provenance_records` history flush (raw Npgsql, DbSchema DDL).  Proves the
+    // shared ProvLineage SDK + the co-located round-trip + the flush compile
+    // under /warnaserror, and that no EF ProvenanceRecord POCO/config leaks.
+    it("system `persistence: dapper` (dotnet) — provenance columns + history flush build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-prov-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-provenance.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "d");
+        // Shared lineage SDK present; EF history POCO absent on the Dapper path.
+        expect(fs.existsSync(path.join(proj, "Domain", "Common", "ProvLineage.cs"))).toBe(true);
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "ProvenanceRecord.cs")),
+        ).toBe(false);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits the
     // generated OidcUserVerifier (JWKS validation + claims→User) + its NuGet
     // refs + the Program.cs registration.  This cell compiles the verifier

@@ -191,11 +191,35 @@ function fieldColumn(f: FieldIR): DapperColumn {
   }
 }
 
+/** Co-located provenance lineage column (`<field>_provenance` jsonb) for a
+ *  `provenanced` root field — the current ProvLineage, round-tripped through
+ *  System.Text.Json (ProvJson.Options) exactly like the EF value-converter, so
+ *  the read DTO's `<Field>Provenance` projection is populated on both adapters. */
+function provColumn(f: FieldIR): DapperColumn {
+  const col = `${snake(f.name)}_provenance`;
+  const prop = `${upperFirst(f.name)}Provenance`;
+  return {
+    col,
+    sql: "jsonb",
+    nullable: true,
+    rowCs: "string?",
+    cast: "::jsonb",
+    save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}, ProvJson.Options)`,
+    stateProp: prop,
+    hydrate: `r.${col} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${col}, ProvJson.Options)`,
+  };
+}
+
 function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
   // Reference-collection fields (`X id[]`) live in their join tables, not as
   // root columns — see the association load/save blocks in the repository.
   const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
-  return [idColumn(agg), ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn)];
+  return [
+    idColumn(agg),
+    ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn),
+    // One co-located `<field>_provenance` lineage column per provenanced field.
+    ...agg.fields.filter((f) => f.provenanced).map(provColumn),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +568,20 @@ export function renderDapperRepository(
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
   );
 
+  // Provenance flush (provenance.md): drain the per-write lineage buffer and
+  // append one `provenance_records` row per write, on the SAME connection as
+  // the aggregate upsert (the .NET Dapper mirror of the EF repository's
+  // transactional `DrainProv()` staging).  Empty when the aggregate has no
+  // provenanced fields (byte-identical to the pre-provenance emit).
+  const provFlushLines = agg.fields.some((f) => f.provenanced)
+    ? [
+        "        foreach (var __lin in aggregate.DrainProv())",
+        "        {",
+        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO provenance_records (trace_id, snapshot_id, target_type, field, inputs, computed_value, at, correlation_id, scope_id, actor_id, parent_id) VALUES (@trace_id, @snapshot_id, @target_type, @field, CAST(@inputs AS jsonb), CAST(@computed_value AS jsonb), @at, @correlation_id, @scope_id, @actor_id, @parent_id)", new { trace_id = Guid.NewGuid().ToString(), snapshot_id = __lin.SnapshotId, target_type = __lin.Target.Type, field = __lin.Target.Field, inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options), computed_value = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options), at = DateTime.UtcNow, correlation_id = RequestContext.Current?.CorrelationId, scope_id = RequestContext.Current?.ScopeId, actor_id = RequestContext.Current?.ActorId, parent_id = RequestContext.Current?.ParentId }, cancellationToken: cancellationToken));`,
+        "        }",
+      ]
+    : [];
+
   // A `currentUser`-referencing find takes a `User currentUser` param (named
   // type ⇒ needs `using <ns>.Auth`).  Principal stamps/filters use only the
   // ambient `RequestContext.Current!.CurrentUser!` member access (no type name),
@@ -798,6 +836,7 @@ export function renderDapperRepository(
       ...stampLines,
       ...saveUpsertLines,
       ...assocSaveLines,
+      ...provFlushLines,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
       "            await _events.DispatchAsync(ev, cancellationToken);",
@@ -1030,7 +1069,34 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  const ddl = [...stateTables, ...eventLogTables].join("\n\n");
+  // The append-only provenance history table (provenance.md) — column-for-column
+  // the same shape the EF ProvenanceRecordConfiguration maps, plus its
+  // (target_type, field) + correlation_id indexes.  Emitted once when any served
+  // aggregate carries a provenanced field (the co-located `<field>_provenance`
+  // columns ride on each aggregate's CREATE TABLE via `columnsOf`).
+  const hasProvenance = aggs.some((agg) => agg.fields.some((f) => f.provenanced));
+  const provenanceTable = hasProvenance
+    ? [
+        [
+          "CREATE TABLE IF NOT EXISTS provenance_records (",
+          "    trace_id text primary key,",
+          "    snapshot_id text not null,",
+          "    target_type text not null,",
+          "    field text not null,",
+          "    inputs jsonb not null,",
+          "    computed_value jsonb,",
+          "    at timestamptz not null,",
+          "    correlation_id text,",
+          "    scope_id text,",
+          "    actor_id text,",
+          "    parent_id text",
+          ");",
+          "CREATE INDEX IF NOT EXISTS provenance_records_target_idx ON provenance_records (target_type, field);",
+          "CREATE INDEX IF NOT EXISTS provenance_records_correlation_idx ON provenance_records (correlation_id);",
+        ].join("\n"),
+      ]
+    : [];
+  const ddl = [...stateTables, ...eventLogTables, ...provenanceTable].join("\n\n");
   return (
     lines(
       "// Auto-generated.  Dapper schema bootstrap (persistence: dapper).",

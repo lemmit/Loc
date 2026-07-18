@@ -434,10 +434,14 @@ function emitProjectFromContexts(
   // below stay byte-identical for the default `efcore`.
   const usingDapper = system?.deployable.persistence === "dapper";
   // Provenance (provenance.md) + per-operation audit (audit-and-logging.md)
-  // runtimes — EF Core only (the dapper path is a follow-up).  `hasProvenance`
-  // drives the lineage SDK + history table + co-located columns; `hasAudit`
-  // drives the audit table + writer + per-handler instrumentation.
-  const hasProvenance = !usingDapper && contextsHaveProvenance(contexts);
+  // runtimes.  `hasProvenance` drives the lineage SDK + history table +
+  // co-located columns; `hasAudit` drives the audit table + writer +
+  // per-handler instrumentation.  Provenance is supported on BOTH persistence
+  // adapters — the shared ProvLineage SDK + the co-located `<field>_provenance`
+  // columns + the append-only `provenance_records` flush; the Dapper repository
+  // flushes via raw Npgsql (DbSchema owns the history table's DDL) instead of
+  // the EF ProvenanceRecord POCO/configuration.  Audit stays EF-only.
+  const hasProvenance = contextsHaveProvenance(contexts);
   // Audit table/writer/DbSet emission is gated on the SHARED predicate
   // (operations ∪ creates ∪ destroys) so a lifecycle-only-audited aggregate
   // — `create(...) audited` / `destroy audited` with no audited operation —
@@ -452,6 +456,14 @@ function emitProjectFromContexts(
         eventLogContexts(contexts).map((c) => snake(c.name)),
       ),
     );
+    // The shared provenance lineage SDK (ProvLineage) — the entity's co-located
+    // `<Field>Provenance` property is typed by it.  The EF ProvenanceRecord POCO
+    // / EntityTypeConfiguration are NOT emitted (EF-only); the Dapper repository
+    // flushes history rows via raw Npgsql and DbSchema owns the
+    // `provenance_records` DDL (renderDapperSchema, above).
+    if (hasProvenance) {
+      out.set("Domain/Common/ProvLineage.cs", renderProvLineage(ns));
+    }
   } else {
     // Per-context event log (event-log-architecture.md): the shared `EventRecord`
     // POCO + one `<Ctx>EventRecordConfiguration` per event-sourced context, and
@@ -502,6 +514,9 @@ function emitProjectFromContexts(
     // history POCO/configuration.  The co-located columns + per-write capture +
     // flush are emitted per aggregate (entity.ts / efcore.ts / repository.ts).
     if (hasProvenance) {
+      // EF path: the lineage SDK + the append-only history POCO + its
+      // EntityTypeConfiguration (the Dapper branch above emits only ProvLineage
+      // — it flushes history via raw Npgsql, no EF POCO/config).
       out.set("Domain/Common/ProvLineage.cs", renderProvLineage(ns));
       out.set("Infrastructure/Persistence/ProvenanceRecord.cs", renderProvenanceRecord(ns));
       out.set(
