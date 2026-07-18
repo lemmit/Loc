@@ -33,8 +33,8 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |✅ B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
-| single-containment            |  ✅  |  ✅  |   ✅   |🔴 B8   |  ⏳    |
-| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |  ⏳    |
+| single-containment            |  ✅  |  ✅  |   ✅   |🔴 B8   |🔴 B9   |
+| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B10  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -139,6 +139,26 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   its snake_case column (`.HasColumnName("id"|"data"|"version")`, `Id` also
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
+
+## B9 🔴 elixir — single (non-collection) `contains` emits an undefined function
+
+- **Where:** `src/generator/elixir/vanilla/` (single-containment persist path).
+- **Repro:** `test/fixtures/corpus/single-containment.ddd` on elixir — `mix ecto.create`
+  (compile) fails: **`undefined function __put_assoc_parts/1`**. node/java/python/dotnet
+  round-trip. The single (non-collection) `contains shipment: Shipment` path emits a
+  call to a helper the module never defines (the collection path defines it; the
+  single path was missed).
+- **Status:** confirmed compile error; skip-listed. Sibling of B8/B3 (single vs
+  collection containment) but on the elixir side.
+
+## B10 🔴 elixir — `seed` migration references a table before it exists
+
+- **Where:** `src/generator/elixir/vanilla/` (seed → migration ordering).
+- **Repro:** `test/fixtures/corpus/seeding.ddd` on elixir — `mix ecto.migrate` fails:
+  **`relation "catalog.widgets" does not exist`**. node/java/python/dotnet apply the
+  seed fine. The generated seed runs (or is ordered) before the table-creating
+  migration, so the INSERT hits a missing relation.
+- **Status:** confirmed migrate failure; skip-listed.
 
 ## B8 🔴 dotnet — single (non-collection) `contains` crashes on boot (EF)
 

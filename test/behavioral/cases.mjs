@@ -113,12 +113,12 @@ const BEHAVIOURAL_SKIP = {
     "single-containment": "B8: dotnet single-containment boot crash (EF owned entity)",
   },
   elixir: {
-    // B5/B6/B7 fixed. single-containment/seeding are UNVERIFIED on elixir (docker
-    // contention during the B7 fix blocked a local boot) — node/java/python/dotnet
-    // pass both, and elixir handles plain containment + crudish elsewhere, so
-    // they're expected green. Verify + remove next (the B7 image is now free).
-    "single-containment": "unverified on elixir (docker contention); expected green — verify next",
-    seeding: "unverified on elixir (docker contention); expected green — verify next",
+    // B5/B6/B7 fixed. B9/B10 open (found when the batch-3 elixir boot finally ran):
+    // B9 — single (non-collection) `contains` emits an undefined `__put_assoc_parts/1`.
+    "single-containment": "B9: elixir single-containment emits undefined __put_assoc_parts/1",
+    // B10 — seeding's migration references a table before it exists (relation
+    //       "<ctx>.widgets" does not exist during ecto.migrate).
+    seeding: "B10: elixir seeding migrate fails — relation does not exist (ordering)",
   },
 };
 
