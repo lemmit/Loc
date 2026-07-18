@@ -9,6 +9,18 @@
 // so the package *version* bump here is driven by the zod/TS majors, not
 // a Hono major — the `loomVersion` tracks the package's own evolution.
 //
+// Node-target dependency refresh (routine bump): **@hono/node-server
+// 1→2** and **pino 9→10** are adopted here.  Both are boot-path runtime
+// deps whose only breaking change is dropping Node 18 (v2 also removes
+// the unused `@hono/node-server/vercel` adapter); the generated image
+// runs `node:24`, and the `serve({ fetch, port })` + pino APIs are
+// unchanged, so the shared emitter stays byte-identical.  Every other
+// dep already floats to its current latest via its caret.  **TypeScript
+// stays on `^6` — TS 7 (the native compiler port) is a separate major
+// initiative, not folded into a routine bump** (same discipline that kept
+// TS 6 its own step off v4).  `LOOM_TS_BUILD` + the behavioral boot gate
+// prove these resolve, typecheck, and boot together.
+//
 // v5 reuses the shared TypeScript/Hono emitter unchanged (the one
 // zod-3/4-divergent spot — the validation hook's issue-path typing — was
 // widened to `PropertyKey`, valid under both majors), so this file +
@@ -21,12 +33,12 @@
 export const BACKEND_PINS = {
   dependencies: {
     hono: "^4.12.0",
-    "@hono/node-server": "^1.19.0",
+    "@hono/node-server": "^2.0.0",
     "@hono/zod-openapi": "^1.0.0",
     zod: "^4.0.0",
     "drizzle-orm": "^0.45.0",
     pg: "^8.13.0",
-    pino: "^9.5.0",
+    pino: "^10.3.0",
     uuidv7: "^1.0.2",
   },
   devDependencies: {
