@@ -35,18 +35,30 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
-| operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |🔴 B11  |
+| operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |✅ B11  |
+| core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+| document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ✅    |
+| inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
 `Object.groupBy`; host apt ships only Elixir 1.14, and the 1.16 binary download is
-org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
+org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11) is
+now fixed; all corpus cases boot green on all five backends.
 
 ---
 
-## B11 🔴 elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
+## B12 ✅ dotnet — `with crudish` on a `shape: document` aggregate won't compile
 
-- **Where:** `src/generator/elixir/` (union-return payload schema module naming).
+- **Where:** `src/generator/dotnet/emit/repository.ts` (crudish repo interface vs document-shape repo impl).
+- **Repro:** `test/fixtures/corpus/document.ddd` with `aggregate Article shape: document, with crudish` on dotnet — `dotnet build` fails **CS0535: `ArticleRepository` does not implement `IArticleRepository.DeleteAsync(Article, …)`**. The `crudish` capability adds `DeleteAsync` to the repo interface, but the document-shape repository emitter doesn't emit a `DeleteAsync` body (the two paths — crudish interface, document impl — disagree). node/java/python compile + round-trip.
+- **Impact:** you can't add CRUD (needed to create/delete) to a document-shaped aggregate on dotnet. Found by the Slice-4 drain (needed crudish for a create path to test document behaviourally).
+- **Fix:** added a `canonicalDestroy`-gated `DeleteAsync` arm to `renderDocumentRepositoryImpl`, mirroring the relational impl's placement. Since the DbSet holds `<Agg>Document` (JSONB) rows keyed by the raw id value, it loads the row by `id.Value` via `FirstOrDefaultAsync` and `Remove`s it (missing row = no-op) — not the relational path's bare `_db.Set.Remove(aggregate)`. Verified: `run-dotnet.mjs document` green; `LOOM_DOTNET_BUILD=1` corpus build clean; `test/generator/dotnet/crudish-document.test.ts` pins both the interface declaration and the impl body.
+
+## B11 ✅ elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
+
+- **Where:** `src/generator/elixir/vanilla/openapi-emit.ts` (union-return OpenApiSpex
+  schema module naming).
 - **Repro:** `test/fixtures/corpus/operation-returns.ddd` on elixir — `mix ecto.create`
   (compile) fails: **`invalid module name: …DWeb.Api.Schemas.stringOrNotFound`**.
   The op `reject(): string or NotFound` has a union return whose success arm is the
@@ -55,8 +67,30 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   round-trip (`reject` → the NotFound error → 404).
 - **Impact:** any exception-less op returning `<primitive> or <Error>` breaks
   elixir codegen. (A union over an aggregate/record success type — the common case
-  — likely works; the primitive success arm is the gap.) Found by the Slice-4 drain.
-- **Status:** confirmed compile error; skip-listed pending fix.
+  — works; only the primitive success arm was the gap.) Found by the Slice-4 drain.
+- **Root cause:** the union DTO name is `unionInstanceName(variants)` — a join of
+  each variant's `variantTag`. A primitive variant tags by its own **lowercase**
+  name (`string`), so a union whose FIRST variant is a primitive yields a
+  lower-camel stem (`stringOrNotFound`). That is a valid class name on every other
+  backend — Java emits it as a lowercase `sealed interface`, TS as a const — but an
+  Elixir module alias MUST be uppercase-first, so `defmodule …Schemas.stringOrNotFound`
+  is rejected at compile. The elixir emitter fed the raw `unionInstanceName` straight
+  into the alias.
+- **Fix:** a local `unionSchemaAlias(variants)` = `upperFirst(unionInstanceName(…))`
+  supplies the module segment at all three emit sites (the schema `defmodule` +
+  `title`, the schemas-file name, and the op's 200-response `schema:` reference) —
+  `…Schemas.StringOrNotFound`. Only the Elixir alias is uppercased; the wire `type`
+  discriminator tags (`string`, `NotFound`) still come from `variantTag`, so the
+  serialized union is byte-identical to every other backend. Union-*find* returns
+  are unaffected (their success arm is always the aggregate → already PascalCase).
+- **Verification:** booted via `elixir:1.16-otp-26` + node 22 — `run-elixir.mjs
+  operation-returns` green (`reject` → NotFound → 404; app compiles clean); the
+  `sales ledger payments shapes state-gate stamps single-containment seeding`
+  regression set still green (record/aggregate-typed unions + the other elixir
+  fixes unaffected). Pinned by `test/generator/elixir/vanilla-openapi-spec.test.ts`
+  (the primitive-success-arm alias case).
+- **Status:** ✅ fixed — `operation-returns` re-armed (removed from the elixir
+  behavioural skips).
 
 ## B1 ✅ node — event-sourced `create` checks invariants before folding the create event
 

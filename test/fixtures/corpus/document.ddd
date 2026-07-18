@@ -2,7 +2,7 @@
 system DocSys {
   subdomain Cms {
     context Cms {
-      aggregate Article shape: document {
+      aggregate Article shape: document, with crudish {
         title: string
         viewCount: int
         contains sections: Section[]
@@ -26,5 +26,12 @@ system DocSys {
     dataSources: [cmsState]
     serves: CmsApi
     port: 4000
+  }
+
+  test e2e "document aggregate round-trips the jsonb tree" against d {
+    let a = api.articles.create({ title: "T1", viewCount: 0 })
+    api.articles.addSection(a, { heading: "H", body: "B" })
+    let read = api.articles.getById(a)
+    expect(read.title).toBe("T1")
   }
 }
