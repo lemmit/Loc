@@ -9,10 +9,16 @@
 // constructor, and hand-written `factory X.fromJson(...)` / `toJson()` — no
 // `json_serializable` / `build_runner` codegen needed.
 //
-// TODO(flutter full-parity): discriminated payload unions (`payload Foo = A | B`)
-// should emit a Dart-3 `sealed class` hierarchy + a `switch`-based
-// `fromJson`/`toJson` keyed on the `type` tag.  The skeleton skips union
-// payloads (record payloads still emit); see `dartRecordForPayload`.
+// Discriminated payload unions (`payload Foo = A | B`, and `A or B` in any
+// transport position) emit a Dart-3 `sealed class` hierarchy: a `sealed class
+// <Union>` base with a `switch`-based `factory fromJson` keyed on the `type`
+// discriminator, plus one `final class <Union><Tag> extends <Union>` per
+// variant (each carrying its own `final` fields + `const` ctor + `toJson`).
+// Because the base is `sealed`, a Dart-3 `switch` over an instance is
+// exhaustive with no default — the payoff that mirrors Loom's `match`.  See
+// `renderDartUnion`; the record/scalar/`none` variant shapes come from the
+// shared `unionMembers` resolver, so the wire is byte-identical to every other
+// backend's tagged union.
 
 import {
   forApiRead,
@@ -32,6 +38,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
+import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
 import { dartFromJson, dartToJson, dartType, isIdentityJson } from "./dart-types.js";
 
 /** One field of a Dart wire model — the JSON key (kept verbatim from the wire
@@ -148,14 +155,102 @@ export function dartRecordForEvent(ev: EventIR): DartRecord {
 }
 
 /** The Dart wire model for a record-shaped payload (command / query / response /
- *  error DTO).  Returns null for a discriminated union payload — deferred to
- *  full parity (see the file-header TODO). */
+ *  error DTO).  Returns null for a discriminated *union* payload — those emit a
+ *  whole `sealed class` hierarchy (multiple classes) via `renderDartUnion`, not
+ *  a single record, so `renderDartModels` routes them there directly. */
 export function dartRecordForPayload(p: PayloadIR): DartRecord | null {
-  if (p.variants) return null; // TODO(flutter full-parity): sealed-class union
+  if (p.variants) return null; // union → renderDartUnion (sealed-class hierarchy)
   return {
     className: upperFirst(p.name),
     fields: p.fields.map((f: FieldIR) => toDartField(f)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Discriminated-union sealed classes.
+// ---------------------------------------------------------------------------
+
+/** The `final` fields a union variant contributes: a record variant flattens
+ *  its wire fields; a scalar variant carries a single `value`; `none` is
+ *  empty. */
+function unionVariantFields(m: UnionMember): DartField[] {
+  if (m.shape === "record") return m.fields.map(toDartField);
+  if (m.shape === "scalar") return [{ name: "value", type: m.type, optional: false }];
+  return [];
+}
+
+/** Emit one `final class <Union><Tag> extends <Union>` variant — its `final`
+ *  fields, a `const` constructor, a `fromJson` reading the flattened variant
+ *  body, and an `@override toJson()` that re-stamps the `type` discriminator. */
+function renderUnionVariant(unionName: string, m: UnionMember): string {
+  const className = `${unionName}${upperFirst(m.tag)}`;
+  const fields = unionVariantFields(m);
+  const tagEntry = `        'type': '${m.tag}',`;
+
+  if (fields.length === 0) {
+    // `none` (or any empty variant): a bare tagged object.  `json` is unused
+    // (nothing to decode) — flutter_lints doesn't flag an unused parameter.
+    return lines(
+      `final class ${className} extends ${unionName} {`,
+      `  const ${className}();`,
+      "",
+      `  factory ${className}.fromJson(Map<String, dynamic> json) => const ${className}();`,
+      "",
+      "  @override",
+      "  Map<String, dynamic> toJson() => {",
+      tagEntry,
+      "      };",
+      "}",
+    );
+  }
+
+  return lines(
+    `final class ${className} extends ${unionName} {`,
+    ...fields.map(fieldDecl),
+    "",
+    `  const ${className}({`,
+    ...fields.map(ctorParam),
+    "  });",
+    "",
+    `  factory ${className}.fromJson(Map<String, dynamic> json) => ${className}(`,
+    ...fields.map(fromJsonEntry),
+    "      );",
+    "",
+    "  @override",
+    "  Map<String, dynamic> toJson() => {",
+    tagEntry,
+    ...fields.map(toJsonEntry),
+    "      };",
+    "}",
+  );
+}
+
+/** Emit the full Dart-3 `sealed class` hierarchy for a discriminated union: a
+ *  `sealed class <Union>` base whose `factory fromJson` switches on the `type`
+ *  discriminator into the right variant, plus one `final class` per variant.
+ *  A `switch` over an instance of the sealed base is exhaustive with no
+ *  `default` — the consumer-side payoff that mirrors Loom's `match`. */
+export function renderDartUnion(name: string, variants: TypeIR[], ctx: BoundedContextIR): string {
+  const members = unionMembers(variants, ctx);
+  const base = lines(
+    `sealed class ${name} {`,
+    `  const ${name}();`,
+    "",
+    `  factory ${name}.fromJson(Map<String, dynamic> json) {`,
+    "    switch (json['type'] as String) {",
+    ...members.flatMap((m) => [
+      `      case '${m.tag}':`,
+      `        return ${name}${upperFirst(m.tag)}.fromJson(json);`,
+    ]),
+    "      default:",
+    `        throw ArgumentError('Unknown ${name} variant: \${json['type']}');`,
+    "    }",
+    "  }",
+    "",
+    "  Map<String, dynamic> toJson();",
+    "}",
+  );
+  return lines(base, ...members.flatMap((m) => ["", renderUnionVariant(name, m)]));
 }
 
 /** Emit every Dart wire model a system's contexts declare — value objects,
@@ -165,26 +260,36 @@ export function dartRecordForPayload(p: PayloadIR): DartRecord | null {
  *  finer-grained use. */
 export function renderDartModels(contexts: readonly BoundedContextIR[]): string {
   const seen = new Set<string>();
-  const records: DartRecord[] = [];
-  const add = (r: DartRecord | null): void => {
+  const blocks: string[] = [];
+  const addRecord = (r: DartRecord | null): void => {
     if (!r || seen.has(r.className)) return;
     seen.add(r.className);
-    records.push(r);
+    blocks.push(renderDartModel(r));
+  };
+  const addUnion = (p: PayloadIR, ctx: BoundedContextIR): void => {
+    const name = upperFirst(p.name);
+    if (!p.variants || seen.has(name)) return;
+    seen.add(name);
+    blocks.push(renderDartUnion(name, p.variants, ctx));
   };
   for (const ctx of contexts) {
-    for (const vo of ctx.valueObjects) add(dartRecordForValueObject(vo));
-    for (const ev of ctx.events) add(dartRecordForEvent(ev));
-    for (const p of ctx.payloads) add(dartRecordForPayload(p));
+    for (const vo of ctx.valueObjects) addRecord(dartRecordForValueObject(vo));
+    for (const ev of ctx.events) addRecord(dartRecordForEvent(ev));
+    for (const p of ctx.payloads) {
+      if (p.variants) addUnion(p, ctx);
+      else addRecord(dartRecordForPayload(p));
+    }
     for (const agg of ctx.aggregates) {
-      add(dartRecordForAggregate(agg));
-      for (const part of agg.parts) add(dartRecordForPart(part));
+      addRecord(dartRecordForAggregate(agg));
+      for (const part of agg.parts) addRecord(dartRecordForPart(part));
     }
   }
-  if (records.length === 0) return "";
+  if (blocks.length === 0) return "";
   return lines(
     "// Wire models — one class per aggregate / part / value-object / event /",
-    "// payload wire shape.  Generated by the Loom Flutter target; do not edit.",
+    "// payload wire shape (discriminated unions → a `sealed class` hierarchy).",
+    "// Generated by the Loom Flutter target; do not edit.",
     "",
-    ...records.flatMap((r, i) => (i === 0 ? [renderDartModel(r)] : ["", renderDartModel(r)])),
+    ...blocks.flatMap((b, i) => (i === 0 ? [b] : ["", b])),
   );
 }
