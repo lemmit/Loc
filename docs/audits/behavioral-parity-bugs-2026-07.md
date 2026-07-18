@@ -35,6 +35,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
+| operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |🔴 B11  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -42,6 +43,20 @@ Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
 
 ---
+
+## B11 🔴 elixir — `T or Error` union with a PRIMITIVE success type emits an invalid module name
+
+- **Where:** `src/generator/elixir/` (union-return payload schema module naming).
+- **Repro:** `test/fixtures/corpus/operation-returns.ddd` on elixir — `mix ecto.create`
+  (compile) fails: **`invalid module name: …DWeb.Api.Schemas.stringOrNotFound`**.
+  The op `reject(): string or NotFound` has a union return whose success arm is the
+  PRIMITIVE `string`; elixir mints a schema module named `stringOrNotFound` (lower
+  camel, off a primitive) — not a valid Elixir alias. node/java/python/dotnet all
+  round-trip (`reject` → the NotFound error → 404).
+- **Impact:** any exception-less op returning `<primitive> or <Error>` breaks
+  elixir codegen. (A union over an aggregate/record success type — the common case
+  — likely works; the primitive success arm is the gap.) Found by the Slice-4 drain.
+- **Status:** confirmed compile error; skip-listed pending fix.
 
 ## B1 ✅ node — event-sourced `create` checks invariants before folding the create event
 

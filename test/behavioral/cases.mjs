@@ -112,7 +112,10 @@ const BEHAVIOURAL_SKIP = {
     // relational owned-entity EF model + optional-nav; efcore.ts.)
   },
   elixir: {
-    // B5/B6/B7/B9/B10 fixed — no elixir skips remain. (B9: single `contains`
+    // B11 open — a `T or Error` union whose success type is a PRIMITIVE (e.g.
+    // `string or NotFound`) emits an invalid elixir module name (`…stringOrNotFound`).
+    "operation-returns": "B11: elixir union-return with a primitive success type → invalid module name",
+    // B5/B6/B7/B9/B10 fixed — no other elixir skips remain. (B9: single `contains`
     // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
     // handles a single `has_one` struct; context-emit.ts. B10: parent-table
     // migrations ordered FK-topologically so a cross-aggregate reference target
