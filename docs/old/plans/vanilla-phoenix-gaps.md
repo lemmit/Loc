@@ -48,8 +48,8 @@ on the vanilla backend later — this file is the tracked list.
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
 | §5 | Workflow `isolationLevel` | **CLOSED** (#1574) | S–M | done |
-| §6 | SPA embed under Phoenix host | **REAL — react path also unwired** | L | 4 |
-| §7 | `mix format` / Dialyzer CI gates | REAL (output fails `mix format`) | M (+defer Dialyzer) | 4 |
+| §6 | SPA embed under Phoenix host | **CLOSED** (#1886 / M-T6.1) — react/vue/svelte embed now wired; see correction below | L | done |
+| §7 | `mix format` / Dialyzer CI gates | REAL (output fails `mix format`) — now tracked as **M-T6.3** (`open`) | M (+defer Dialyzer) | 4 |
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
@@ -168,6 +168,17 @@ struct with a nil PK is silently NOT inserted by `put_assoc`; boot-verified).  T
   dataSource and the bare wrap (no SET) when unset.
 
 ## 6. Vue / Svelte SPA embedding under a Phoenix host
+
+> [!NOTE]
+> **CLOSED 2026-07-18 correction (frozen doc — record only).** This gap **shipped**
+> in #1886 (M-T6.1). `platform: elixir` hosting `framework: react|vue|svelte` now emits
+> the real SPA: `vanilla/index.ts:320-328` dispatches
+> `generate{React,Vue,Svelte}ForContexts`, `shell-emit.ts:104` emits
+> `renderVanillaSpaController`, and the endpoint gains a `Plug.Static` `/app` mount +
+> Dockerfile SPA stage. The "`renderSpaController` … is dead code" reference below is
+> **doubly stale** — that function was deleted in the #1897 dead-export sweep; the live
+> emitter is `renderVanillaSpaController`. The original text is preserved unedited as
+> the design record.
 
 - **Status (REAL — worse than documented, size L):** the whole Phoenix-host SPA
   embed path is unwired — **including React**. `src/generator/elixir/vanilla/index.ts`
