@@ -1,0 +1,31 @@
+// Runtime e2e fixture for the mailer (smtp) resource kind — M-T4.6.
+// A workflow whose body is a single `mail.send(...)` so the boot test can
+// drive `POST /api/workflows/notify` and assert the message landed in a
+// Mailpit inbox (the same dev image `type: smtp` emits into docker-compose).
+// The aggregate + state store exist only so migrations apply at boot; the
+// notify workflow never touches the DB.
+system Mail {
+  subdomain D {
+    context Notify {
+      aggregate Ping with crudish { note: string }
+      repository Pings for Ping { }
+      workflow notify {
+        create(note: string) {
+          mail.send("inbox@test.local", "Hello from Loom", note)
+        }
+      }
+    }
+  }
+  api A from D
+  storage pg { type: postgres }
+  storage mailServer { type: smtp, config: { from: "no-reply@test.local" } }
+  resource notifyState { for: Notify, kind: state, use: pg }
+  resource mail { for: Notify, kind: mailer, use: mailServer }
+  deployable api {
+    platform: node
+    contexts: [Notify]
+    dataSources: [notifyState, mail]
+    serves: A
+    port: 3000
+  }
+}
