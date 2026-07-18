@@ -31,7 +31,25 @@ export async function startMockIssuer() {
     const url = req.url ?? "";
     if (url.startsWith("/.well-known/openid-configuration")) {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ issuer, jwks_uri: `${issuer}/jwks` }));
+      // A fuller discovery document than node strictly needs: the stricter
+      // OIDC clients on the other backends (.NET ConfigurationManager, java
+      // nimbus, python PyJWKClient) parse the whole doc and expect the
+      // standard endpoint/algorithm fields to be present.
+      res.end(
+        JSON.stringify({
+          issuer,
+          jwks_uri: `${issuer}/jwks`,
+          authorization_endpoint: `${issuer}/authorize`,
+          token_endpoint: `${issuer}/token`,
+          userinfo_endpoint: `${issuer}/userinfo`,
+          response_types_supported: ["code", "id_token", "token id_token"],
+          subject_types_supported: ["public"],
+          id_token_signing_alg_values_supported: ["RS256"],
+          scopes_supported: ["openid", "profile", "email"],
+          token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+          claims_supported: ["sub", "iss", "email", "realm_access", "permissions"],
+        }),
+      );
     } else if (url.startsWith("/jwks")) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ keys: [jwk] }));

@@ -34,6 +34,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { startMockIssuer } from "./oidc-mock.mjs";
+
+/** In-process mock OIDC issuer, started when the corpus has an `auth {}` case. */
+let oidc = null;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -115,8 +119,9 @@ async function waitForReady(base, timeoutMs = 60_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted Phoenix server. */
-function entrySource(e2eFile) {
+function entrySource(e2eFile, bearerToken) {
   const J = JSON.stringify;
+  const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
 import { runTests } from ${J(join(REPO, "web/src/testing/harness.ts"))};
@@ -125,6 +130,7 @@ import { readFileSync } from "node:fs";
 
 const E2E_FILE = ${J(e2eFile)};
 const DEV_CLAIMS = ${J(DEV_CLAIMS)};
+const BEARER_ENV = { E2E_DEV_CLAIMS: DEV_CLAIMS${bearerEnv} };
 const BASE = ${J(BASE)};
 
 export async function run() {
@@ -142,7 +148,7 @@ export async function run() {
     r.headers.forEach((v, k) => { headers[k] = v; });
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() } };
   };
-  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: { E2E_DEV_CLAIMS: DEV_CLAIMS } });
+  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: BEARER_ENV });
   return await runTests(cases);
 }
 `;
@@ -168,6 +174,16 @@ async function runCase(c) {
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
     if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <elixir>`)");
 
+    // OIDC (`auth {}` block) → point the Phoenix app at the in-process mock
+    // issuer + forward its signed token.  Detect from source (verifier path is
+    // backend-specific).
+    const isOidc = /\n\s*auth\s*\{/.test(c.source);
+    const oidcEnv =
+      isOidc && oidc
+        ? { OIDC_ISSUER: oidc.issuer, OIDC_CLIENT_ID: "loom-behavioural", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" }
+        : {};
+    const bearerToken = isOidc && oidc ? oidc.token : null;
+
     if (!EXTERNAL_BASE) {
       // Fetch hex deps, create + migrate the schema, then boot the server.
       // Migrations auto-apply here (before phx.server), so a listening port
@@ -185,7 +201,7 @@ async function runCase(c) {
         cwd: deplDir,
         stdio: "pipe",
         detached: true, // own process group so we can SIGTERM the whole app
-        env: mixEnv({ PHX_SERVER: "true", PORT: String(PORT) }),
+        env: mixEnv({ PHX_SERVER: "true", PORT: String(PORT), ...oidcEnv }),
       });
       let serverLog = "";
       server.stdout.on("data", (d) => { serverLog += d; });
@@ -197,7 +213,7 @@ async function runCase(c) {
 
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource(e2eFile));
+    writeFileSync(entry, entrySource(e2eFile, bearerToken));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     return await run();
@@ -220,6 +236,11 @@ const corpus = [...(await featureCases("vanilla", "elixir", WORK)), ...sharedSys
   (c) => only.length === 0 || only.includes(c.name),
 );
 
+// Stand up the mock OIDC issuer once if any case carries an `auth {}` block.
+if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
+  oidc = await startMockIssuer();
+}
+
 let pass = 0;
 let fail = 0;
 let errored = 0;
@@ -240,6 +261,8 @@ for (const c of corpus) {
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
 }
+
+await oidc?.stop();
 
 process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
 process.exit(fail > 0 || errored > 0 ? 1 : 0);
