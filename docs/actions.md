@@ -228,6 +228,38 @@ action confirm() {
 Reads (`byId`, finders), sibling-action calls, pure helpers, and view-effects
 (`navigate` / `toast`) are **not** flagged.
 
+## Parameter defaults — `param: T = <expr>`
+
+Any operation / workflow-start / create parameter may declare a default value,
+the parameter analogue of a field default (`field: T = <expr>`). The scaffolded
+`OperationForm` / `WorkflowForm` seeds its input from that default instead of the
+type-zero placeholder — a *suggestion* the user can still override (unlike a
+`stamp`, which the server owns and hides from the form entirely).
+
+```ddd
+aggregate Shipment {
+  eta:    datetime
+  status: string
+  // constant default → seeds the op form's input
+  operation cancel(reason: string = "customer request") { status := "cancelled" }
+  // this-relative default → resolves against the target instance
+  operation reschedule(to: datetime = this.eta) { eta := to }
+}
+```
+
+The default lowers in the operation's env (so `this` binds the target instance)
+and rides `ParamIR.default`. Generated create-form seed (React):
+
+```tsx
+useForm<CancelShipmentRequest>({ defaultValues: { reason: "customer request" } })
+```
+
+Seeding is best-effort over the **client-evaluable** subset — constants and enum
+members. A default the target UI can't evaluate without a server round-trip or
+the loaded record (`now()`, `currentUser.*`, a `this.<field>` on the by-id op
+form, a sequence, a cross-aggregate lookup) falls back to the type-zero seed; the
+value is still carried in the IR for backends that consume it.
+
 ## Further reading
 
 - [`docs/page-metamodel.md`](page-metamodel.md) — the page/component DSL surface,
