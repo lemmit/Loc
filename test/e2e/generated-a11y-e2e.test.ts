@@ -232,13 +232,23 @@ interface FrameworkProfile {
 function profileFor(format: PackFormat): FrameworkProfile {
   switch (format) {
     case "vue":
-    case "svelte":
     case "tsx":
       return {
         platform: PLATFORM_BY_FORMAT[format],
         projectMarker: "vite.config.ts",
         buildCmd: "npx vite build",
         distSubdir: "dist",
+        preview: "vite",
+      };
+    case "svelte":
+      // SvelteKit's adapter-static writes the client bundle to `build/`, not
+      // Vite's default `dist/` — so the post-build `index.html` existence check
+      // must look there.  `vite preview` still serves the SvelteKit output.
+      return {
+        platform: PLATFORM_BY_FORMAT[format],
+        projectMarker: "vite.config.ts",
+        buildCmd: "npx vite build",
+        distSubdir: "build",
         preview: "vite",
       };
     case "angular":
