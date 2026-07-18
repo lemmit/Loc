@@ -21,12 +21,27 @@
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 
+/** Context for {@link renderDefaultSeed}. */
+export interface DefaultSeedCtx {
+  /** Name of an in-scope variable holding the target record, which enables a
+   *  `this.<field>` default (an operation param such as
+   *  `reschedule(to: datetime = this.eta)`) to seed as `<recordVar>.<field>`.
+   *  Passed ONLY where the seed site provably has the loaded record in scope —
+   *  a per-target decision (a JSX-family op-form pushes `defaultValues` into a
+   *  record-less module component, so it opts out).  Omitted → `this.*`
+   *  defaults fall back to the type-zero seed. */
+  recordVar?: string;
+}
+
 /**
- * Render a default-value `ExprIR` to a JS literal expression, or `null` when
- * the expression falls outside the client-evaluable constant subset (the
+ * Render a default-value `ExprIR` to a JS literal/reference expression, or
+ * `null` when the expression falls outside the client-evaluable subset (the
  * caller then keeps its type-zero seed).
+ *
+ * The subset is constants + enum members, plus — when `ctx.recordVar` is set —
+ * `this.<field>` member reads against the loaded record.
  */
-export function renderDefaultSeed(e: ExprIR): string | null {
+export function renderDefaultSeed(e: ExprIR, ctx: DefaultSeedCtx = {}): string | null {
   switch (e.kind) {
     case "literal":
       return renderLiteral(e.lit, e.value);
@@ -35,13 +50,24 @@ export function renderDefaultSeed(e: ExprIR): string | null {
       // enum-value ref; its wire form is the bare member-name string.
       if (e.refKind === "enum-value") return JSON.stringify(e.name);
       return null;
+    case "this":
+      // A bare `this` only means something with a record var in scope; a
+      // `this.<field>` read then renders as `<recordVar>.<field>` (below).
+      return ctx.recordVar ?? null;
+    case "member": {
+      // `this.<field>` (or a nested read off it) → `<recordVar>.<field>`.  Any
+      // other receiver (a `currentUser.*` claim, etc.) fails to render and
+      // falls back — this seed is loaded-record-only, not ambient.
+      const recv = renderDefaultSeed(e.receiver, ctx);
+      return recv === null ? null : `${recv}.${e.member}`;
+    }
     case "paren": {
-      const inner = renderDefaultSeed(e.inner);
+      const inner = renderDefaultSeed(e.inner, ctx);
       return inner === null ? null : `(${inner})`;
     }
     case "unary": {
       // Negative / logical-not constants — `-1`, `!true`.
-      const operand = renderDefaultSeed(e.operand);
+      const operand = renderDefaultSeed(e.operand, ctx);
       return operand === null ? null : `${e.op}${operand}`;
     }
     default:
