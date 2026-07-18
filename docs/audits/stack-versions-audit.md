@@ -19,8 +19,13 @@ acting; these numbers age).
 > - **.NET is on `net10.0`**, not deferred-on-net8. `renderCsproj`
 >   (`src/generator/dotnet/emit/program.ts:632`) emits `<TargetFramework>net10.0`
 >   with EF Core / Npgsql.EntityFrameworkCore `10.0.x` (program.ts:594–603).
-> - **Spring Boot is `4.1.0`** (`src/generator/java/emit/program.ts:21`,
->   `JAVA_VERSION = "21"`).
+> - **Spring Boot is `4.1.0`** (`src/generator/java/emit/program.ts`), on
+>   the **Java 25** LTS toolchain (`JAVA_VERSION = "25"`). The Java 25 bump
+>   pulls **Gradle 9** (`gradle:9-jdk25` build image, `GRADLE_IMAGE_MAJOR`),
+>   **ASM 9.10.1** (class-file v69 for the `injectSmap` sourcemap task), and
+>   **eclipse-temurin:25-jre** runtime; deps: jMolecules `2.0.1`, springdoc
+>   `3.0.3`, nimbus-jose-jwt `10.9.1`, java-uuid-generator `5.2.0`. CI pins
+>   Gradle 9.6.1 via `gradle/actions/setup-gradle` (no wrapper is emitted).
 > - **The Hono backend now lives in `src/platform/hono/v5/`** (zod 4, the
 >   default lane) with v4 pinnable via `platform: node@v4` — not
 >   `src/generator/typescript/index.ts`. Hono v5 pins: hono `^4.12.0`,

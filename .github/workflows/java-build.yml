@@ -66,12 +66,19 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '25'
+
+      # Pin Gradle explicitly — the generated projects target a Java 25
+      # toolchain, which requires Gradle 9.1+, newer than the runner's
+      # pre-installed Gradle.  No wrapper is emitted, so this is what puts
+      # a compatible `gradle` on PATH for `test:java`.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
 
       # Cache the Gradle caches across runs.  Keyed on the build
       # template (the generated dependency set only moves when the
-      # pinned versions in emit/program.ts move).  ubuntu-latest
-      # runners ship Gradle ≥ 8.14 (Spring Boot 4's minimum).
+      # pinned versions in emit/program.ts move).
       - name: Cache Gradle packages
         uses: actions/cache@v5
         with:

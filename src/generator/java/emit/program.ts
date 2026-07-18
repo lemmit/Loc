@@ -11,7 +11,8 @@
 // gradle-wrapper.jar is committed: the generator emits text files only,
 // and every environment the toolchain controls provides Gradle itself
 // (the Dockerfile's `gradle` base image, CI's runner toolchain, local
-// dev with Gradle ≥ 8 — or run `gradle wrapper` once to add one).
+// dev with Gradle ≥ 9.1 — Java 25 toolchains need it — or run
+// `gradle wrapper` once to add one).
 // ---------------------------------------------------------------------------
 
 import { lines } from "../../../util/code-builder.js";
@@ -23,13 +24,25 @@ export const SPRING_BOOT_VERSION = "4.1.0";
 /** Spring's Gradle dependency-management plugin (BOM import). */
 export const DEPENDENCY_MANAGEMENT_VERSION = "1.1.7";
 
-/** Java language level for the generated projects. */
-export const JAVA_VERSION = "21";
+/** Java language level for the generated projects.  25 is the current LTS
+ *  (GA Sep 2025).  Spring Boot 4.1 supports Java 17–26, so 25 is squarely
+ *  in range; the toolchain bump pulls Gradle 9 (`gradle:9-jdk25` image) and
+ *  ASM 9.8+ (class-file v69) along with it — see GRADLE_IMAGE_MAJOR / ASM_VERSION. */
+export const JAVA_VERSION = "25";
+
+/** Gradle major for the build/runtime docker image (`gradle:<M>-jdk<JAVA>`).
+ *  Java 25 toolchains/bytecode require Gradle 9.1+, so this is decoupled from
+ *  JAVA_VERSION: an LTS bump moves the JDK, but the Gradle major moves on its
+ *  own cadence. */
+export const GRADLE_IMAGE_MAJOR = "9";
 
 /** jMolecules DDD/event annotation libraries — metadata-only deps that
  *  make the generated domain idiomatically DDD (@AggregateRoot /
- *  @ValueObject / @DomainEvent) and enable ArchUnit verification. */
-export const JMOLECULES_VERSION = "1.10.0";
+ *  @ValueObject / @DomainEvent) and enable ArchUnit verification.  2.x
+ *  baselines Java 17 and adds the stereotype metamodel; the core
+ *  annotations Loom emits (@AggregateRoot / @Entity / @ValueObject /
+ *  @Repository / @DomainEvent) are unchanged. */
+export const JMOLECULES_VERSION = "2.0.1";
 
 /** springdoc serves the OpenAPI document (`/openapi.json`) the
  *  cross-backend conformance harness diffs. */
@@ -40,20 +53,21 @@ export const SPRINGDOC_VERSION = "3.0.3";
  *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
  *  spring-security-oauth2-jose is on the classpath, which the generated
  *  backend doesn't pull), so a version-less coordinate fails to resolve. */
-export const NIMBUS_JOSE_JWT_VERSION = "10.3";
+export const NIMBUS_JOSE_JWT_VERSION = "10.9.1";
 
 /** java-uuid-generator — supplies UUIDv7 (time-ordered epoch UUIDs) via
  *  `Generators.timeBasedEpochGenerator()`; the JDK's `UUID` has no v7 factory
- *  through 21.  Used by the aggregate/part id factories (`XId.newId()`). */
-export const JAVA_UUID_GENERATOR_VERSION = "5.1.0";
+ *  through 25.  Used by the aggregate/part id factories (`XId.newId()`). */
+export const JAVA_UUID_GENERATOR_VERSION = "5.2.0";
 
 /** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
  *  uses to attach a `.smap` sidecar as a compiled class's
  *  `SourceDebugExtension` attribute (JSR-45, M10 phase 6b).  Only pulled
  *  onto the BUILDSCRIPT classpath — the build script itself imports
  *  `org.objectweb.asm.*` to define the task — never onto the generated
- *  app's own runtime classpath. */
-export const ASM_VERSION = "9.7.1";
+ *  app's own runtime classpath.  9.8+ is required to read Java 25 class
+ *  files (major version 69); 9.10.1 is the current stable. */
+export const ASM_VERSION = "9.10.1";
 
 /** Marker comments fencing the `--sourcemap` additions to `build.gradle.kts`
  *  (M10 phase 6b) so the byte-identical gate (test/system/sourcemap.test.ts)
@@ -338,7 +352,7 @@ export function renderDockerfile(
     : [];
   return lines(
     ...spaStage,
-    `FROM gradle:8-jdk${JAVA_VERSION} AS build`,
+    `FROM gradle:${GRADLE_IMAGE_MAJOR}-jdk${JAVA_VERSION} AS build`,
     `WORKDIR /src`,
     `# Optional proxy CAs — drop *.crt files into ./certs/ to make Gradle`,
     `# trust them.  The directory always exists (with a .gitkeep), so the`,

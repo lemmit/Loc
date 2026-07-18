@@ -78,12 +78,12 @@ npm run test:vue-e2e      # LOOM_VUE_E2E=1 — RUNTIME e2e: vite-builds vue-show
                           # emitted Playwright smoke spec against it (pure client-side; pack via LOOM_VUE_E2E_PACK)
 npm run test:svelte-e2e   # LOOM_SVELTE_E2E=1 — the Svelte sibling of the above (vite preview + Playwright smoke)
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
-npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
+npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 25 + Gradle 9.1+)
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
 npm run test:phoenix      # LOOM_PHOENIX_VANILLA_BUILD=1 — `mix compile --warnings-as-errors` against plain Ecto/Phoenix in Elixir docker
 npm run test:tenancy      # LOOM_TENANCY_E2E=1 — boots generated Hono backend on docker postgres, asserts cross-tenant isolation + registry self-scope/signup bootstrap end-to-end (LOOM_TENANCY_PG_URL override skips the sidecar)
 npm run test:tenancy-python # LOOM_TENANCY_E2E_PYTHON=1 — same isolation assertions against the generated FastAPI backend (shared harness; needs uv + docker/LOOM_TENANCY_PG_URL)
-npm run test:tenancy-java   # LOOM_TENANCY_E2E_JAVA=1 — same, generated Spring Boot/JPA backend (needs gradle + JDK 21)
+npm run test:tenancy-java   # LOOM_TENANCY_E2E_JAVA=1 — same, generated Spring Boot/JPA backend (needs Gradle 9.1+ + JDK 25)
 npm run test:tenancy-dotnet # LOOM_TENANCY_E2E_DOTNET=1 — same, generated .NET/EF Core backend (needs the .NET SDK + docker/LOOM_TENANCY_PG_URL); gates the per-request query-filter fix
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
@@ -118,7 +118,7 @@ It does **not** persist — if `docker info` starts failing mid-session, just re
 
 **Every backend target compiles locally without waiting on CI** (verified end-to-end here — generate → compile):
 
-- **Java** — `gradle testClasses bootJar` on the *host* (JDK 21 + Gradle present; no container needed).
+- **Java** — the generated projects target a **Java 25** toolchain (needs Gradle 9.1+). The sandbox host ships JDK 21 + Gradle 8.14, which **cannot** build them, so build in the `gradle:9-jdk25` container (matches the emitted Dockerfile): `docker run --rm --network host -v <deployable>:/src -w /src -v /root/.ccr:/root/.ccr:ro -e JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS" gradle:9-jdk25 gradle --no-daemon testClasses bootJar`. (CI installs JDK 25 + a pinned Gradle 9.6.1 via `gradle/actions/setup-gradle`.)
 - **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:10.0` container (matches the `net10.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
 - **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against plain Ecto/Phoenix.
 - **Python** — `uv sync` + ruff + mypy + pytest on the host.

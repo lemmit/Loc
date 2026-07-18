@@ -942,11 +942,11 @@ for the full mapping table.
 
 ## Java backend (`platform: java`)
 
-Spring Boot 3.5 / Spring Data JPA (Hibernate) / Postgres, built with
-Gradle (Kotlin DSL, Boot plugin + BOM import, Java 21 toolchain; no
+Spring Boot 4.1 / Spring Data JPA (Hibernate) / Postgres, built with
+Gradle (Kotlin DSL, Boot plugin + BOM import, Java 25 toolchain; no
 wrapper jar is committed — the generator emits text only, and the
-Dockerfile/CI/dev environments provide Gradle ≥ 8, or run
-`gradle wrapper` once).  Emission
+Dockerfile/CI/dev environments provide Gradle ≥ 9.1 — required for the
+Java 25 toolchain — or run `gradle wrapper` once).  Emission
 lives in `src/generator/java/`; the surface is `src/platform/java.ts`
 (`java@v1`).  Per-aggregate placement routes through the layout adapter
 (`byFeature` default — package-by-feature; `byLayer` — package-by-layer),
