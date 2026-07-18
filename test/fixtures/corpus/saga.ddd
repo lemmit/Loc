@@ -2,7 +2,7 @@
 system FulfillmentSaga {
   subdomain Fulfillment {
     context Fulfillment {
-      aggregate Order {
+      aggregate Order with crudish {
         customerId: string
         status: string
         operation place() {
@@ -17,7 +17,9 @@ system FulfillmentSaga {
         status: string
         operation markTracked() { status := "Tracked" }
       }
-      repository Shipments for Shipment { }
+      repository Shipments for Shipment {
+        find byOrder(order: Order id): Shipment? where this.orderRef == order
+      }
       event OrderPlaced { order: Order id, at: datetime }
       event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
       channel Lifecycle {
@@ -48,5 +50,15 @@ system FulfillmentSaga {
     dataSources: [fulfillmentState]
     serves: FulfillmentApi
     port: 4000
+  }
+
+  // In-process synchronous cascade: place() emits OrderPlaced → the workflow
+  // creates a Shipment (Pending) + emits ShipmentRequested → on() marks it
+  // Tracked.  If dispatch is synchronous, the shipment is Tracked by read time.
+  test e2e "saga cascade creates and tracks a shipment" against d {
+    let ord = api.orders.create({ customerId: "c1", status: "Draft" })
+    api.orders.place(ord)
+    let ship = api.shipments.byOrder({ order: ord.id })
+    expect(ship.status).toBe("Tracked")
   }
 }

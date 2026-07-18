@@ -42,6 +42,17 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | views (where-filtered)        |  ✅  |  ✅  |   ✅   |  ✅    |✅ B13  |
 | embedded (containment fold)   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | embedded-optional (`Memo?`)   |✅ B14|  ✅  |   ✅   |✅ B14  |  ✅    |
+| saga (in-process cascade)     |  ✅  |✅ B15|   ✅   |  ✅    |  ✅    |
+
+### Note — the java behavioural boot now needs JDK 25 + Gradle 9.1
+
+A recent `main` bumped the generated Java toolchain to `JavaLanguageVersion.of(25)`,
+which requires **Gradle 9.1+** (the host ships Gradle 8.14.3 + JDK 21). Local java
+boots now run in a `gradle:9.1.0-jdk25` docker image + node 22 (committed
+`loom-java:node22`), mounting `/root/.ccr` and passing the host's
+`JAVA_TOOL_OPTIONS` (proxy truststore) so Gradle can resolve the Spring Boot
+plugin through the egress proxy. `SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/app`
+against the shared docker postgres.
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
@@ -50,6 +61,14 @@ org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11/B1
 now fixed; all corpus cases boot green on all five backends.
 
 ---
+
+## B15 ✅ java — a find with an ID-typed query param 500s (no `String → <Agg>Id` converter)
+
+- **Where:** `src/generator/java/emit/api.ts` (find-route controller param binding).
+- **Repro:** `test/fixtures/corpus/saga.ddd` on java — `GET /api/shipments/by_order?order=<uuid>` → 500. The controller bound `@RequestParam OrderId order` (the value-typed id wrapper), but Spring MVC has no registered `Converter<String, OrderId>`, so it can't bind the query string → request-time exception. The path-variable getById avoids this by binding `@PathVariable UUID id` and wrapping `new OrderId(id)`; the find route didn't mirror it. (First surfaced by `saga` — the earlier drains' java boots only exercised path-variable ids and string/int find params, never an id-typed `@RequestParam`.)
+- **Impact:** any `find byX(y: T id)` is unreachable on the java backend (500 on every call). node/python/dotnet/elixir already bind/convert the id param.
+- **Fix:** an id-typed find param now binds its RAW underlying type (`javaValueTypeForId(p.type.valueType)` → `UUID`/`long`/…) and wraps into the id class at the service call (`new <Target>Id(<name>)`), mirroring getById; the raw type's import (`java.util.UUID`) is pulled in. Non-id params (string/int/enum) are unchanged. Pinned by `test/generator/java/find-id-param-binding.test.ts`.
+- **Verification:** `run-java.mjs saga` green (docker `gradle:9.1.0-jdk25`); was 500 before the fix. node/python/dotnet/elixir already green.
 
 ## B14 ✅ node + dotnet — an OPTIONAL single containment on `shape: embedded` isn't null-safe
 
