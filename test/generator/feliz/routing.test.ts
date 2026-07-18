@@ -133,6 +133,27 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain('Html.main [ prop.id "main-content"; prop.children [');
   });
 
+  // Regression (main went red on feliz-build at d1ebf8a): the shell's three
+  // top-level children — skip link, <nav>, <main> — are a newline-separated F#
+  // element list, so F# keys each element by its first-token COLUMN. The navbar
+  // is rendered at a 4-space base and re-indented to sit beside the 6-space skip
+  // link + <main>; if the columns disagree, F# reads the skip link as a function
+  // applied to the nav ("This value is not a function"). A substring `toContain`
+  // is blind to indentation — this pins the columns are equal.
+  it("the shell's skip-link / <nav> / <main> share one offside column", async () => {
+    const app = await appFs(MULTI);
+    const indent = (needle: string): number => {
+      const line = app.split("\n").find((l) => l.includes(needle));
+      expect(line, `line with ${needle}`).toBeDefined();
+      return line!.length - line!.trimStart().length;
+    };
+    const skip = indent('prop.text "Skip to content"');
+    const nav = indent('prop.ariaLabel "Primary navigation"');
+    const main = indent('Html.main [ prop.id "main-content"');
+    expect(nav).toBe(skip);
+    expect(main).toBe(skip);
+  });
+
   it("cross-page nav renders Router.navigate + fsproj pulls Feliz.Router", async () => {
     const app = await appFs(MULTI);
     // Button(to: "/products") → Router.navigatePath("products").
