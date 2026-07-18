@@ -26,10 +26,13 @@ import { emitTypescriptMigrations } from "../../../generator/typescript/emit/mig
 import {
   MIKRO_INDEX_IMPORTS,
   mikroConnectionSetup,
+  renderMikroBaseReader,
   renderMikroConfig,
+  renderMikroEmbeddedRepository,
   renderMikroEntities,
   renderMikroEventSourcedRepository,
   renderMikroRepository,
+  renderMikroTpcBaseReader,
 } from "../../../generator/typescript/emit/mikroorm.js";
 import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
@@ -439,7 +442,12 @@ export function generateTypeScriptForContexts(
   // stay byte-identical for the default `drizzle`.
   const usingMikro = system?.deployable.persistence === "mikroorm";
   if (usingMikro) {
-    out.set("db/entities.ts", renderMikroEntities(merged.aggregates, merged));
+    out.set(
+      "db/entities.ts",
+      renderMikroEntities(merged.aggregates, merged, (agg) =>
+        effectiveSavingShape(agg, resolveDataSource?.(agg)),
+      ),
+    );
     out.set("mikro-orm.config.ts", renderMikroConfig());
   } else {
     out.set(
@@ -668,11 +676,13 @@ export function generateTypeScriptForContexts(
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       const repoContent = usingMikro
         ? // mikroorm: event-sourced aggregates use the EntityManager event
-          // store (appliers, MikroORM edition); document / embedded /
-          // inheritance stay validator-gated out.
+          // store (appliers, MikroORM edition); `shape(embedded)` folds
+          // containments into jsonb columns; `shape(document)` stays gated.
           agg.persistedAs === "eventLog"
           ? renderMikroEventSourcedRepository(agg, repo, ctx)
-          : renderMikroRepository(agg, repo, ctx)
+          : shape === "embedded"
+            ? renderMikroEmbeddedRepository(agg, repo, ctx)
+            : renderMikroRepository(agg, repo, ctx)
         : agg.persistedAs === "eventLog"
           ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
           : shape === "document"
@@ -729,7 +739,9 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         base.name,
-        buildBaseReaderFile(base, concretes, ctx),
+        usingMikro
+          ? renderMikroBaseReader(base, concretes, ctx)
+          : buildBaseReaderFile(base, concretes, ctx),
         base.origin,
         baseConstruct,
       );
@@ -755,7 +767,9 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         base.name,
-        buildTpcBaseReaderFile(base, concretes),
+        usingMikro
+          ? renderMikroTpcBaseReader(base, concretes)
+          : buildTpcBaseReaderFile(base, concretes),
         base.origin,
         baseConstruct,
       );
