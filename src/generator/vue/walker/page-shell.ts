@@ -502,6 +502,18 @@ export function renderVuePage(input: VuePageShellInput): string {
     const ext = input.externComponents?.has(n) ? "" : ".vue";
     script.push(`import ${n} from "${relPrefix(input)}components/${n}${ext}";`);
   }
+  // The file-upload templates (`field-input-file` / `primitive-file-upload`)
+  // declare `import { api } from "../api/client"` via their pack.json `imports`
+  // table, which lands in `result.imports`.  The relative-import skip below
+  // drops it, so fold `../api/client` into `apiImports` here — this loop
+  // depth-adjusts the specifier and dedupes with any `ApiError` import from the
+  // same module into one line.
+  const clientNames = result.imports.get("../api/client");
+  if (clientNames && clientNames.size > 0) {
+    const set = apiImports.get("../api/client") ?? new Set<string>();
+    for (const n of clientNames) set.add(n);
+    apiImports.set("../api/client", set);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
     script.push(`import { ${[...names].sort().join(", ")} } from "${adjusted}";`);
