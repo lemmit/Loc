@@ -1,0 +1,137 @@
+name: Generated Flutter build
+
+# Generate the Flutter (Dart/Material) mobile frontend from a .ddd, then prove
+# the emitted Dart actually COMPILES: `flutter analyze` (errors) + `flutter build
+# web`.  The analogue of generated-feliz-build.yml (which Fable-compiles the
+# emitted F#) — Flutter is structurally a Feliz clone (a non-JSX WalkerTarget
+# riding the shared walkBody engine), so this gate catches generator drift that
+# lowers cleanly to IR but emits non-compiling Dart — invisible to the fast
+# vitest suite (which only asserts emitted-string shape; no local Flutter SDK).
+#
+# Covers the full shipped interactive surface — display + Riverpod state/actions
+# + data reads (QueryView) + forms (Create/Operation/Destroy) + named routing.
+# Workflows/match-await and the native (non-web) surface remain deferred to
+# later parity and this gate grows with them.  `analyze` runs errors-only
+# (`--no-fatal-warnings --no-fatal-infos`) so lint-nits (prefer_const infos)
+# don't block; `flutter build web` is the load-bearing "is the Dart real"
+# check.  The .ddd is embedded here (not under examples/) so the other
+# example-globbing gates never pick up a flutter-only source.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/flutter/**'
+      - 'src/generator/_walker/**'
+      - 'src/generator/_packs/required-primitives.ts'
+      - 'src/platform/flutter.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-flutter-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/generator/flutter/**'
+      - 'src/generator/_walker/**'
+      - 'src/generator/_packs/required-primitives.ts'
+      - 'src/platform/flutter.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-flutter-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install + build the toolchain
+        run: npm ci
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate the Flutter showcase system
+        run: |
+          mkdir -p ci-flutter
+          # Full interactive showcase — exercises every shipped tier:
+          #   • Riverpod state + actions (Home's counter: state{count} + inc())
+          #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
+          #   • forms (NewProduct's CreateForm; ProductAdmin's OperationForm +
+          #     DestroyForm on a :id route) over every field kind (string/int/bool/
+          #     enum/datetime/optional + a Money value object)
+          #   • display + multi-page named routing + navigation buttons
+          # This is the load-bearing "does the emitted Dart compile" gate.
+          cat > ci-flutter/showcase.ddd <<'DDD'
+          system Storefront {
+            api ShopApi from Catalog
+            subdomain Catalog {
+              context Cat {
+                enum Status { active inactive archived }
+                valueobject Money { amount: int  currency: string }
+                aggregate Product {
+                  name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
+                  operation rename(newName: string) { name := newName }
+                }
+                repository Products for Product { }
+              }
+            }
+            storage db { type: postgres }
+            resource catState { for: Cat, kind: state, use: db }
+            ui MobileApp {
+              framework: flutter
+              api Shop: ShopApi
+              page Home {
+                route: "/"
+                state { count: int = 0 }
+                action inc() { count := count + 1 }
+                body: Stack {
+                  Heading { "Storefront", level: 1 },
+                  Text { "Taps: " + count },
+                  Button { "+", onClick: inc },
+                  Button { "Browse products", to: "/products" }
+                }
+              }
+              page Products {
+                route: "/products"
+                body: Stack {
+                  Heading { "Products", level: 1 },
+                  QueryView {
+                    of: Shop.Product.all,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No products yet." },
+                    data: rows => Stack { For { each: rows, p => Card { p.name, Text { p.price } } } }
+                  },
+                  Button { "Add product", to: "/products/new" }
+                }
+              }
+              page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              page ProductAdmin { route: "/products/:id"  body: Stack {
+                Heading { "Admin", level: 1 }, OperationForm { of: Product, op: rename }, DestroyForm { of: Product }
+              } }
+            }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter/showcase.ddd -o ci-flutter/out
+      - name: Locate the emitted Flutter project
+        id: proj
+        run: echo "dir=$(dirname "$(find ci-flutter/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: flutter pub get
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter pub get
+      - name: flutter analyze (errors)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+      - name: flutter build web (the real compile gate)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: flutter build web --release

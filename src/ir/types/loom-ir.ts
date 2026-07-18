@@ -2975,6 +2975,7 @@ export type Platform =
   | "vue"
   | "angular"
   | "feliz"
+  | "flutter"
   | "static"
   | "elixir"
   | "python"

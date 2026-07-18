@@ -51,7 +51,7 @@ export function emitStack(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-stack", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
@@ -69,7 +69,7 @@ export function emitGroup(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-group", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
@@ -160,7 +160,7 @@ export function emitSection(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-section", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     id,
@@ -184,7 +184,7 @@ export function emitSticky(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-sticky", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     top,
@@ -208,7 +208,7 @@ export function emitContainer(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-container", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     size,
@@ -284,7 +284,7 @@ export function emitToolbar(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-toolbar", {
     hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),

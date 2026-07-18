@@ -379,7 +379,7 @@ UiSugarBinding:
 // (Vite SPA + vue-router) against a vue-format design pack
 // (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'phoenixLiveView';
+    'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'flutter' | 'phoenixLiveView';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "node@v4"`) via the STRING alternative — symmetric with
@@ -390,7 +390,7 @@ Framework returns string:
 // for the plain Ecto/Phoenix backend; `python` for the FastAPI + SQLAlchemy
 // backend.
 Platform returns string:
-    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'static' | 'elixir' | 'python' | 'java' | STRING;
+    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'flutter' | 'static' | 'elixir' | 'python' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

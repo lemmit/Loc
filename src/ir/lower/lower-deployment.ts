@@ -62,9 +62,11 @@ export function lowerDeployable(d: Deployable): DeployableIR {
             ? "vue"
             : platform === "angular"
               ? "angular"
-              : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
-                ? "react"
-                : undefined
+              : platform === "flutter"
+                ? "flutter"
+                : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
+                  ? "react"
+                  : undefined
       : undefined);
   // Design pack default depends on what actually RENDERS — the ui's
   // `framework:`, not the host platform keyword.  A static-asset host serves
@@ -82,16 +84,21 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
   const design = descriptorFor(platform).isFrontend
-    ? qualifyDesign(
-        d.design,
-        uiFramework === "svelte"
-          ? "shadcnSvelte"
-          : uiFramework === "vue"
-            ? "vuetify"
-            : uiFramework === "angular"
-              ? "angularMaterial"
-              : "mantine",
-      )
+    ? // Flutter has no design-pack menu in this phase (Feliz-style: it renders
+      // Material widgets procedurally, not a `design:`-selected pixel pack), so
+      // it carries no design rather than wrongly defaulting to `mantine`.
+      platform === "flutter"
+      ? undefined
+      : qualifyDesign(
+          d.design,
+          uiFramework === "svelte"
+            ? "shadcnSvelte"
+            : uiFramework === "vue"
+              ? "vuetify"
+              : uiFramework === "angular"
+                ? "angularMaterial"
+                : "mantine",
+        )
     : platform === "elixir"
       ? qualifyDesign(
           d.design,

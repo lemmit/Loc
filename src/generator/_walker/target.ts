@@ -507,6 +507,14 @@ export interface WalkerTarget {
    *  `{@render children?.()}` (snippets aren't interpolatable). */
   renderChildrenSlot?(): string;
 
+  /** OPTIONAL — separator token placed between a container's rendered
+   *  children (before the `\n<indent>` the walker always inserts).
+   *  Omitted → `""`: the JSX/HEEx/F# families need no inter-child token
+   *  (JSX siblings, F# list newlines).  Flutter sets `","` because Dart
+   *  `<Widget>[ … ]` list literals are comma-separated — without it the
+   *  emitted `Column(children: […])` is a syntax error. */
+  interChildSeparator?: string;
+
   /** OPTIONAL — assemble a lambda event-handler body (a `Button`'s
    *  `onClick:` etc.) from its already-rendered pieces.  The JSX-family
    *  frameworks (TSX / Vue / Svelte) bind a function VALUE in event

@@ -120,6 +120,7 @@ export const PLATFORM_KEYWORDS: ReadonlySet<string> = new Set([
   "vue",
   "angular",
   "feliz",
+  "flutter",
   "static",
   "elixir",
   "python",
