@@ -643,6 +643,10 @@ const PY_TYPE_TARGET: TypeTarget = {
         return "datetime";
       case "json":
         return "object";
+      case "File":
+        // Passive wire-only leaf — the shared FileRef pydantic model
+        // (emitted once per project; see the http-models emitter).
+        return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as `datetime.timedelta`.
         // Expression-only (never a field / wire type in this slice).

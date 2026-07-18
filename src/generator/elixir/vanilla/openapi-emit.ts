@@ -844,6 +844,7 @@ const OPENAPI_PRIMITIVE: Record<WirePrimitive, string> = {
   datetime: "%OpenApiSpex.Schema{type: :string, format: :'date-time'}",
   guid: "%OpenApiSpex.Schema{type: :string, format: :uuid}",
   json: "%OpenApiSpex.Schema{type: :object}",
+  File: "%OpenApiSpex.Schema{type: :object, properties: %{url: %OpenApiSpex.Schema{type: :string}, key: %OpenApiSpex.Schema{type: :string}, contentType: %OpenApiSpex.Schema{type: :string}, size: %OpenApiSpex.Schema{type: :integer}}, required: [:url, :key, :contentType, :size]}",
 };
 
 /** Id value-type → OpenApiSpex %Schema{} literal.  Mirrors the

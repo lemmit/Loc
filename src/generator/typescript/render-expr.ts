@@ -670,6 +670,9 @@ const TS_TYPE_TARGET: TypeTarget = {
         return "number";
       case "json":
         return "unknown";
+      case "File":
+        // Passive wire-only leaf — the fixed FileRef reference object.
+        return "{ url: string; key: string; contentType: string; size: number }";
     }
   },
   id: (targetName) => `Ids.${targetName}Id`,

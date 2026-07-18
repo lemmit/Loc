@@ -50,6 +50,14 @@ type JsonSchemaProperty =
   /** Opaque JSON blob (the `json` primitive) — freeform object, no
    *  further constraints.  `additionalProperties` left default. */
   | { type: "object" }
+  /** Fixed-shape object (the `File` primitive's `FileRef` wire object) —
+   *  a closed set of named scalar properties. */
+  | {
+      type: "object";
+      properties: Record<string, JsonSchemaProperty>;
+      required: string[];
+      additionalProperties: false;
+    }
   | { $ref: string };
 
 /** Resolves a `$ref` string for a referenced part / value object.  Threaded
@@ -198,6 +206,21 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
         case "json":
           // Opaque blob — freeform object at the JSON boundary.
           return { type: "object" };
+        case "File":
+          // Fixed 4-field FileRef object — the wire reference to bytes held
+          // in object storage.  Modelled explicitly (unlike `json`) so the
+          // contract diff sees its shape.
+          return {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+              key: { type: "string" },
+              contentType: { type: "string" },
+              size: { type: "integer" },
+            },
+            required: ["url", "key", "contentType", "size"],
+            additionalProperties: false,
+          };
         case "duration":
           // A5: expression-only primitive — never a wire / schema type.
           throw new Error("internal: 'duration' is expression-only and never reaches the wire");
