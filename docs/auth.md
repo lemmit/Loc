@@ -570,6 +570,44 @@ Every backend mounts its auth routes under the shared API base, i.e.
 - `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout` — the OIDC
   authorization-code redirect handshake, emitted only under an
   `auth { oidc { … } }` block.
+- `POST /api/auth/refresh` — silent renewal: exchanges the stored refresh
+  token for a fresh access token (no IdP round-trip) and **rotates** it, so a
+  SPA can extend a session on a 401 without bouncing the user back to login.
+  Emitted with the handshake; bypassed by the middleware (the caller has no
+  valid access token yet). On a spent/revoked token it clears both cookies
+  (→ full `/login`).
+
+### Session depth (PKCE + refresh rotation)
+
+The handshake is hardened by default (no knobs):
+
+- **PKCE (RFC 7636), unconditional** — `/login` mints a per-login code
+  verifier, sends only its `S256` challenge to the IdP, and stashes the
+  verifier in an HttpOnly `oidc_verifier` cookie the `/callback` exchange
+  proves possession with. OAuth 2.1 makes PKCE mandatory; it costs nothing for
+  confidential clients and closes the code-interception hole for public ones.
+- **Refresh rotation** — the handshake requests the `offline_access` scope,
+  stores the granted refresh token in its own HttpOnly `refresh` cookie, and
+  `POST /api/auth/refresh` rotates it (the cookie is overwritten with the new
+  token the IdP hands back — single-use). All access/refresh tokens ride
+  HttpOnly cookies; the SPA never sees the raw tokens.
+
+Emitted identically across all five backends (Hono, .NET, Java/Spring,
+Python/FastAPI, Phoenix).
+
+**Boundary (D-AUTH-OIDC):** Loom owns "validate a token + run the redirect
+handshake". **The IdP owns credentials, password reset, MFA, and consent** —
+there is deliberately no Loom-hosted login form or password-reset flow. Point
+users at your IdP's account pages for those; Loom will not generate them.
+
+**Phoenix-LiveView `auth: ui` guard.** A `phoenixLiveView` deployable that
+serves a HEEx `ui:` gates its LiveViews server-side: `LiveAuth.on_mount` runs
+first in the `live_session`, assigns `@current_user`, and redirects an
+unauthenticated connection to the login handshake. Under OIDC a `BrowserAuth`
+plug (in the `:browser` pipeline) seeds the Phoenix session's `current_user`
+from the verified session cookie so the on_mount hook sees a signed-in user;
+the dev stub falls back to the built-in admin so a fresh stack renders out of
+the box.
 
 Auth is browser-facing traffic, the same class as the domain routes, so it
 lives under `/api` — one reverse-proxy / k8s-ingress rule (`/api → backend`)
