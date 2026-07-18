@@ -50,6 +50,7 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   log.debug(`<- ${r.status} ${method} ${path} (${ms}ms)`);
   return body;
 }
+const request = rawFetch;
 
 // Multipart upload variant of `rawFetch`.  Sends a `FormData` body and,
 // crucially, does NOT set `content-type` — the browser adds it with the
@@ -81,9 +82,9 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
 }
 
 export const api = {
-  get: (path: string) => rawFetch(path, { method: "GET" }),
+  get: (path: string) => request(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
-    rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+    request(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   upload: (path: string, form: FormData) => rawUpload(path, form),
-  delete: (path: string) => rawFetch(path, { method: "DELETE" }),
+  delete: (path: string) => request(path, { method: "DELETE" }),
 };
