@@ -49,6 +49,7 @@ import {
   errorTypeUri,
   resolveErrorStatus,
 } from "../../util/error-defaults.js";
+import { messageCode } from "../../util/message-code.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
@@ -214,6 +215,7 @@ export function buildPyRoutesFile(
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
     `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
+    refersTo("PydanticCustomError") ? "from pydantic_core import PydanticCustomError" : null,
     refersTo("JSON.NULL") ? "from sqlalchemy import JSON" : null,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
@@ -547,10 +549,14 @@ function createModelValidator(
     const ok = inv.guard
       ? `not (${renderPyExpr(inv.guard, { thisName: "self", wireField: true })}) or (${pred})`
       : pred;
-    return lines(
-      `        if not (${ok}):`,
-      `            raise ValueError(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`,
-    );
+    // A messaged rule raises PydanticCustomError so the wire error carries a
+    // stable content-hash `type` (surfaced as `errors[].code`, the i18n key) —
+    // and cleanly drops the "Value error, " prefix a bare ValueError adds. A
+    // message-less rule keeps `raise ValueError(...)`, byte-identical.
+    const raise = inv.message
+      ? `raise PydanticCustomError(${JSON.stringify(messageCode(inv.message.text))}, ${JSON.stringify(inv.message.text)})`
+      : `raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
+    return lines(`        if not (${ok}):`, `            ${raise}`);
   });
   return lines(
     "",
