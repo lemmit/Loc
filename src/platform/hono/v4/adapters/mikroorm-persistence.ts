@@ -11,10 +11,12 @@
 // (`supports`), and wraps the same emitters on the formal contract for the
 // eventual clean orchestrator dispatch.
 //
-// v1 capability: relational state only.  The IR validator
-// (`validateMikroOrmSupport` in `ir/validate/validate.ts`) rejects the gated-out
-// features (document/embedded shape, associations, nested parts, inheritance,
-// event-sourcing, audit/provenance/managed fields, retrievals, seeds).
+// The IR validator (`validateMikroOrmSupport` in `ir/validate/checks/
+// system-checks.ts`) accepts the wired surface — relational + event-sourced
+// state, associations, retrievals, seeds, managed/audited fields, and
+// aggregate inheritance (TPH `sharedTable` shared-Row + TPC `ownTable`
+// per-concrete tables, wave 2) — and still rejects the not-yet-wired
+// features (document/embedded shape, nested parts, provenanced fields).
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";

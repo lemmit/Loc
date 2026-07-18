@@ -1870,8 +1870,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
         if (a.persistedAs !== "eventLog" && shape !== "relational")
           reject(where, `is persisted as shape(${shape})`);
-        if (a.isAbstract || a.extendsAggregate)
-          reject(where, "participates in aggregate inheritance");
+        // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
+        // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
+        // `kind` — concrete repos read/write it scoped to their `kind`, a
+        // polymorphic `<Base>Repository` dispatches on it; TPC (`ownTable`)
+        // gives each concrete its own table with a delegating base reader.
+        // Both mirror the drizzle inheritance slice.
         // `Id[]` reference-collection associations ARE supported on a state
         // aggregate: each persists as a composite-PK pivot Row entity, bulk-
         // loaded on read and full-list-replaced on save (the MikroORM analogue

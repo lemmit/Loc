@@ -26,10 +26,12 @@ import { emitTypescriptMigrations } from "../../../generator/typescript/emit/mig
 import {
   MIKRO_INDEX_IMPORTS,
   mikroConnectionSetup,
+  renderMikroBaseReader,
   renderMikroConfig,
   renderMikroEntities,
   renderMikroEventSourcedRepository,
   renderMikroRepository,
+  renderMikroTpcBaseReader,
 } from "../../../generator/typescript/emit/mikroorm.js";
 import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
@@ -729,7 +731,9 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         base.name,
-        buildBaseReaderFile(base, concretes, ctx),
+        usingMikro
+          ? renderMikroBaseReader(base, concretes, ctx)
+          : buildBaseReaderFile(base, concretes, ctx),
         base.origin,
         baseConstruct,
       );
@@ -755,7 +759,9 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         base.name,
-        buildTpcBaseReaderFile(base, concretes),
+        usingMikro
+          ? renderMikroTpcBaseReader(base, concretes)
+          : buildTpcBaseReaderFile(base, concretes),
         base.origin,
         baseConstruct,
       );

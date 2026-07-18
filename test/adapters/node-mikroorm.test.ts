@@ -511,6 +511,94 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Aggregate inheritance (aggregate-inheritance.md) on mikroorm — wave 2.
+// TPH (`sharedTable`) maps the hierarchy to ONE shared Row discriminated by a
+// `kind` column; TPC (`ownTable`) gives each concrete its own table.  Both
+// mirror the drizzle inheritance slice and emit a polymorphic `<Base>Repository`
+// read home.  No longer gated.
+// ---------------------------------------------------------------------------
+describe("mikroorm — aggregate inheritance (wave 2)", () => {
+  const inh = (layout: "sharedTable" | "ownTable") => `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum CardNetwork { Visa, Mastercard, Amex }
+      abstract aggregate PaymentMethod inheritanceUsing: ${layout} {
+        holderName: string
+        last4: string
+      }
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        expiryMonth: int
+      }
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+      }
+      repository CreditCards for CreditCard {
+        find byNetwork(network: CardNetwork): CreditCard[] where this.network == network
+      }
+      repository BankAccounts for BankAccount { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("TPH no longer trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(inh("sharedTable"));
+    expect(errors).toEqual([]);
+  });
+
+  it("TPH emits ONE shared Row with a kind discriminator + every concrete's columns nullable", async () => {
+    const { files } = await emit(inh("sharedTable"));
+    const entities = files.get("api/db/entities.ts")!;
+    // The abstract base owns the single shared table…
+    expect(entities).toContain('tableName: "payment_methods"');
+    expect(entities).toContain("kind!: string;");
+    // …base columns keep their nullability, concrete-own columns are nullable.
+    expect(entities).toContain("holderName!: string;");
+    expect(entities).toContain("network!: string | null;");
+    expect(entities).toContain("routingNumber!: string | null;");
+    // No per-concrete Row table under TPH.
+    expect(entities).not.toContain("CreditCardRow");
+    expect(entities).not.toContain("BankAccountRow");
+  });
+
+  it("TPH concrete repo reads/writes the shared Row scoped to its kind", async () => {
+    const { files } = await emit(inh("sharedTable"));
+    const repo = files.get("api/db/repositories/creditCard-repository.ts")!;
+    expect(repo).toContain("PaymentMethodRow");
+    expect(repo).toContain('{ kind: "CreditCard" }');
+    // save stamps the discriminator.
+    expect(repo).toContain('kind: "CreditCard"');
+  });
+
+  it("TPH emits a polymorphic base reader dispatching on kind", async () => {
+    const { files } = await emit(inh("sharedTable"));
+    const reader = files.get("api/db/repositories/paymentMethod-repository.ts")!;
+    expect(reader).toContain("class PaymentMethodRepository");
+    expect(reader).toContain("switch (row.kind)");
+    expect(reader).toContain('case "CreditCard":');
+    expect(reader).toContain("em.find(PaymentMethodRow, {})");
+  });
+
+  it("TPC gives each concrete its own table + a delegating base reader", async () => {
+    const { errors, files } = await emit(inh("ownTable"));
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('tableName: "credit_cards"');
+    expect(entities).toContain('tableName: "bank_accounts"');
+    // TPC concrete tables carry the merged base fields.
+    expect(entities).toContain("holderName!: string;");
+    const reader = files.get("api/db/repositories/paymentMethod-repository.ts")!;
+    expect(reader).toContain("new CreditCardRepository(em, events)");
+    expect(reader).toContain("this.creditCardRepo.all()");
+    expect(reader).toContain("results.flat()");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Server-managed access fields (token / internal / secret) on mikroorm — the
 // access modifier shapes only the API wire surface, so the data-mapper stores
 // the field as an ordinary column that round-trips through the shared save /
