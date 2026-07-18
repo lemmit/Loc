@@ -40,7 +40,12 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '25'
+
+      # Java 25 toolchain needs Gradle 9.1+ (no wrapper is emitted).
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
 
       - name: Cache Gradle packages
         uses: actions/cache@v5

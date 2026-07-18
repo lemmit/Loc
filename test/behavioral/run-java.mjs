@@ -173,7 +173,12 @@ async function runCase(c) {
         (f) => f.endsWith(".jar") && !f.endsWith("-plain.jar"),
       );
       if (!jar) throw new Error("no jar produced by gradle bootJar");
-      server = spawn("java", ["-jar", join("build", "libs", jar)], {
+      // Boot with the JDK that gradle's toolchain compiled against (Java 25):
+      // the generated classes are class-file v69, so a stale PATH `java` (the
+      // CI runner ships an older default) throws UnsupportedClassVersionError.
+      // JAVA_HOME is set to the toolchain JDK by setup-java; fall back to PATH.
+      const javaBin = process.env.JAVA_HOME ? join(process.env.JAVA_HOME, "bin", "java") : "java";
+      server = spawn(javaBin, ["-jar", join("build", "libs", jar)], {
         cwd: deplDir,
         stdio: "pipe",
         detached: true, // own process group so we can SIGTERM the whole app

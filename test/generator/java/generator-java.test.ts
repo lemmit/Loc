@@ -45,7 +45,7 @@ describe("java generator — project shell (S1)", () => {
       'implementation("org.springframework.boot:spring-boot-starter-data-jpa")',
     );
     expect(build).toContain('runtimeOnly("org.postgresql:postgresql")');
-    expect(build).toContain("JavaLanguageVersion.of(21)");
+    expect(build).toContain("JavaLanguageVersion.of(25)");
     expect(f.get("shop_api/settings.gradle.kts")).toContain('rootProject.name = "shopapi"');
   });
 
@@ -75,9 +75,9 @@ describe("java generator — project shell (S1)", () => {
 
   it("emits a multi-stage Gradle Dockerfile", async () => {
     const docker = (await files()).get("shop_api/Dockerfile")!;
-    expect(docker).toContain("FROM gradle:8-jdk21 AS build");
+    expect(docker).toContain("FROM gradle:9-jdk25 AS build");
     expect(docker).toContain("RUN gradle --no-daemon -q bootJar");
-    expect(docker).toContain("FROM eclipse-temurin:21-jre");
+    expect(docker).toContain("FROM eclipse-temurin:25-jre");
     expect(docker).toContain('ENTRYPOINT ["java", "-jar", "app.jar"]');
   });
 

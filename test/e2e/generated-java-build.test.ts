@@ -18,7 +18,8 @@ import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/
 // dominated by the Gradle dependency download; warm runs reuse ~/.gradle).
 // Opt-in via LOOM_JAVA_BUILD=1 so the default `npm test` stays fast.
 //
-// Requires JDK 21 + Gradle ≥ 8 on PATH (matching the generated build).
+// Requires JDK 25 + Gradle ≥ 9.1 on PATH (matching the generated build's
+// Java 25 toolchain — older Gradle rejects the toolchain version).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
