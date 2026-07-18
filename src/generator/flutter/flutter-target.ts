@@ -23,7 +23,7 @@
 
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { DART_LEAVES, dartString, dartZeroValue } from "./dart-expr.js";
 import {
@@ -272,6 +272,47 @@ export const flutterTarget: WalkerTarget = {
     if (!agg) return null;
     ctx.usesRouteId = true;
     return `${destroyFormWidgetName(agg.name)}(id: id)`;
+  },
+  // `Action(<instance>.<op>)` → a one-click `ElevatedButton` that POSTs the
+  // instance-qualified op (`/<coll>/${instance.id}/<op>`) — the parameter-less
+  // sibling of `OperationForm`.  `instance` is an aggregate-typed var in scope
+  // (a QueryView row `p`, a byId record); its `.id` addresses the row.  The
+  // page's http/config imports are added by index.ts when the body references
+  // `apiUri(` (an Action-only signal).  A parameterised op → a diagnostic
+  // comment steering to OperationForm (never broken Dart).  Auth gating
+  // (currentUser `requires`) is deferred to the auth-ui slice.
+  renderAction: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const opRef = (call.args ?? []).find((_, i) => !argNames[i]);
+    if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") {
+      return flutterTarget.renderComment("Action: first argument must be <instance>.<operation>");
+    }
+    const aggName = ctx.paramTypes?.get(opRef.receiver.name);
+    const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
+    const op = agg?.operations.find(
+      (o) => o.name === opRef.member && o.visibility === "public" && o.params.length === 0,
+    );
+    if (!agg || !op) {
+      return flutterTarget.renderComment(
+        `Action(${opRef.receiver.name}.${opRef.member}): no parameter-less public operation in scope (use OperationForm for an op with parameters)`,
+      );
+    }
+    const coll = snake(plural(agg.name));
+    const opPath = snake(op.routeSlug ?? op.name);
+    // Address the row by the page's route `id` — on a byId detail page (the only
+    // place `paramTypes` resolves the instance) it IS the loaded record's id, and
+    // it's always in scope (the shell binds it under `usesRouteId`).  This mirrors
+    // Feliz, and sidesteps the QueryView data-param rename (`p` → the provider var).
+    ctx.usesRouteId = true;
+    const label = humanize(op.name);
+    return (
+      `ElevatedButton(onPressed: () async { ` +
+      `final res = await http.post(apiUri('/${coll}/\${id}/${opPath}')); ` +
+      `if (res.statusCode >= 200 && res.statusCode < 300 && context.mounted) { ` +
+      `ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(${dartString(`${label} done`)}))); ` +
+      `} }, child: Text(${dartString(label)}))`
+    );
   },
 
   // --- Type-default seam ---------------------------------------------------
