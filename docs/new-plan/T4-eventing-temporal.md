@@ -24,8 +24,8 @@ Sources: [projection.md](../old/proposals/projection.md) (draft 2026-07-05), [wo
 Outbox + idempotent-consumer markers ship on Hono/.NET/Python (+Java ⚠ verify). Remaining: Phoenix/Oban relay, S5(d) close-out from the DDD review, LISTEN/NOTIFY upgrade over polling, dead-letter surface + observability event, the opt-in knob decision (reuse `retention:`).
 Sources: [dispatch-delivery-semantics](../old/proposals/dispatch-delivery-semantics.md), ddd-review S5(d).
 
-## M-T4.4 — Cross-deployable eventing (external brokers) — `open` · **XL** · P2 (design-first)
-`channelSource` parses but is "declared, not provisioned" — a microservice-shaped system is decorative. Provision redis/kafka/nats from `channelSource`, emit producer/consumer clients, `delivery: queue` competing-consumer semantics, service-to-service auth. The real distributed-systems work; sequence after M-T4.3.
+## M-T4.4 — Cross-deployable eventing (external brokers) — `in-flight (design)` · **XL** · P2 (design-first)
+`channelSource` parses but is "declared, not provisioned" — a microservice-shaped system is decorative. Provision brokers from `channelSource`, emit producer/consumer clients, `delivery: queue` competing-consumer semantics, service-to-service auth. The real distributed-systems work; queue-semantics implementation sequences after M-T4.3 (producer rides the outbox relay), design starts now. **Broker rollout pinned (2026-07-18): redis → rabbitmq → kafka, one slice each; NATS dropped** (stays a parseable storage type — compat validator rejects it as a channel transport; ancestor-room routing rides Redis patterns / RabbitMQ topic wildcards, never Kafka). Excludes browser delivery (M-T1.10) but owns the dispatcher publish/subscribe seam both missions consume. Kickoff: [missions/M-T4.4-broker-eventing-brief.md](missions/M-T4.4-broker-eventing-brief.md).
 Sources: [channels.md](../old/proposals/channels.md) §brokers, production-readiness §3.3, weak-spots (runtime islands).
 
 ## M-T4.5 — Saga hardening slices (in-flight review remediation) — `in-flight` · **S–M** · P1
