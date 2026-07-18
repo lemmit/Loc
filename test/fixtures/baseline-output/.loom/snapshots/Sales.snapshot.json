@@ -110,7 +110,8 @@
       ],
       "foreignKeys": [],
       "indexes": [],
-      "schema": "orders"
+      "schema": "orders",
+      "savingShape": "relational"
     }
   ],
   "lastVersion": "20260101000000",

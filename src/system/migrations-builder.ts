@@ -34,9 +34,11 @@ import type {
 import { durableEventTypes } from "../ir/util/channels.js";
 import { directParentOf } from "../ir/util/containment-parent.js";
 import {
+  isTpcConcrete,
   isTphBase,
   isTphConcrete,
   ownFieldsOf,
+  rootBaseOf,
   tableOwnerName,
   tphConcretesOf,
 } from "../ir/util/inheritance.js";
@@ -208,6 +210,12 @@ export function schemaFromModule(
     if (schema !== undefined) {
       for (const t of produced) t.schema = schema;
     }
+    // Reshape-detection stamp (M-T2.4): mark the aggregate ROOT table with its
+    // saving shape / inheritance strategy so a later generation's diff can tell
+    // a full-table reshape (relational→document, TPH↔TPC) from ordinary column
+    // churn.  Stamped on the root only; parts / joins / saga / event-log carry
+    // no stamp.
+    stampReshapeMetadata(agg, produced, pool, shapeOf(agg, ctxFor(agg)));
     // Manual performance indexes (`resource index: [...]`): place each index
     // on its EXPLICITLY-named entity's table (an aggregate root or a contained
     // part).  A spec whose entity isn't one of this aggregate's tables belongs
@@ -1144,6 +1152,112 @@ export function applyDestructivePolicy(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reshape detection (M-T2.4).
+// ---------------------------------------------------------------------------
+
+/** Suffix for the archival copy a reshape leaves behind under
+ *  --allow-destructive: the old-shape table is renamed to
+ *  `<table>__pre_reshape` (kept for the data move, NOT dropped). */
+const RESHAPE_BACKUP_SUFFIX = "__pre_reshape";
+
+/** One detected reshape — a saving-shape or inheritance-strategy flip. */
+interface ReshapeEvent {
+  /** Human-readable summary for the error message / TODO recipe. */
+  description: string;
+  /** The BASELINE tables to preserve as `__pre_reshape` backups. */
+  backups: TableShape[];
+}
+
+/** Raised when a delta reshapes a table — a saving-shape flip
+ *  (relational↔document↔embedded) or an inheritance-strategy flip (TPH↔TPC) —
+ *  and --allow-destructive is off.  A reshape is a full-table data move the
+ *  column diff can't express, so it gets this DEDICATED error (code
+ *  `loom.migration-shape-change`) instead of the generic destructive listing. */
+export class MigrationShapeChangeError extends Error {
+  readonly code = "loom.migration-shape-change";
+  constructor(
+    readonly module: string,
+    readonly reshapes: readonly string[],
+  ) {
+    super(
+      `migration for module "${module}" reshapes ${reshapes.length} table(s):\n` +
+        reshapes.map((r) => `  - ${r}`).join("\n") +
+        `\nA shape/strategy flip is a full-table data move the column diff can't express. ` +
+        `Re-run \`generate system\` with --allow-destructive to emit the safe reshape: the ` +
+        `old table is renamed to <table>${RESHAPE_BACKUP_SUFFIX} (kept, NOT dropped) and the ` +
+        `new shape is created empty, with a TODO recipe to copy the data across (INSERT … ` +
+        `SELECT). The backup's cleanup drop is destructive-gated on the next generation.`,
+    );
+    this.name = "MigrationShapeChangeError";
+  }
+}
+
+/** Detect table reshapes between the baseline snapshot and the next schema
+ *  (M-T2.4).  Two mechanisms:
+ *
+ *   A) **Saving-shape flip** — a table matched by name whose `savingShape`
+ *      stamp changed (relational→document, …).  The columns churn wildly (a
+ *      relational row becomes `(id, data, version)`), so the naive diff would
+ *      drop+add half the columns.
+ *   B) **Inheritance-strategy flip** (TPH↔TPC) — the table NAMES change (one
+ *      shared base table ↔ one table per concrete), so there is no matched
+ *      pair.  Group this generation's dropped + created inheritance tables by
+ *      their ROOT-base stamp and compare strategies.
+ *
+ *  Both fire only when the BASELINE table carries the relevant stamp — an
+ *  unstamped baseline (a pre-M-T2.4 snapshot) isn't compared, so the flip falls
+ *  to the generic destructive gate exactly as before (backward-compatible
+ *  grace).  Returns [] on an Initial migration (nothing pre-exists). */
+export function detectReshapes(
+  baseline: SchemaSnapshot | null,
+  next: SchemaSnapshot,
+): ReshapeEvent[] {
+  if (baseline === null) return [];
+  const events: ReshapeEvent[] = [];
+  const { pairs, dropped, created } = matchTables(baseline.tables, next.tables);
+
+  // A) Saving-shape flip on a matched table.
+  for (const [prev, nextT] of pairs) {
+    if (
+      prev.savingShape !== undefined &&
+      nextT.savingShape !== undefined &&
+      prev.savingShape !== nextT.savingShape
+    ) {
+      events.push({
+        description: `${qualifiedName(prev.schema, prev.name)}: saving shape ${prev.savingShape} → ${nextT.savingShape}`,
+        backups: [prev],
+      });
+    }
+  }
+
+  // B) Inheritance-strategy flip, grouped by ROOT base (names change → no pair).
+  const droppedByBase = new Map<string, { strategy: string; tables: TableShape[] }>();
+  for (const t of dropped) {
+    if (!t.inheritance) continue;
+    const g = droppedByBase.get(t.inheritance.base) ?? {
+      strategy: t.inheritance.strategy,
+      tables: [],
+    };
+    g.tables.push(t);
+    droppedByBase.set(t.inheritance.base, g);
+  }
+  const createdStrategyByBase = new Map<string, string>();
+  for (const t of created) {
+    if (t.inheritance) createdStrategyByBase.set(t.inheritance.base, t.inheritance.strategy);
+  }
+  for (const [base, g] of droppedByBase) {
+    const toStrategy = createdStrategyByBase.get(base);
+    if (toStrategy && toStrategy !== g.strategy) {
+      events.push({
+        description: `inheritance "${base}": ${g.strategy} → ${toStrategy}`,
+        backups: g.tables,
+      });
+    }
+  }
+  return events;
+}
+
 export interface BuildMigrationsOptions {
   /** When true, destructive deltas (dropColumn / dropTable, and NOT-NULL
    *  column adds without a default on a previously-existing table) are
@@ -1286,8 +1400,52 @@ export function buildMigrations(
     // the backend schema emitters use), not `public`.
     const contextSchemaOf = (ctx: EnrichedBoundedContextIR): string | undefined =>
       resolveContextSchema(ctx, sys);
-    const next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf, contextSchemaOf);
+    let next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf, contextSchemaOf);
     const baseline = snapshots.read(m.name);
+    // Reshape detection (M-T2.4): a saving-shape or inheritance-strategy flip
+    // is a full-table data move the column diff can't express.  Detect it up
+    // front so it raises the dedicated `loom.migration-shape-change` error (or
+    // takes the safe backup path under --allow-destructive) instead of diffing
+    // as a pile of dropColumn/dropTable under the generic destructive gate.
+    const reshapes = detectReshapes(baseline, next);
+    const reshapeTableRenames: ResolvedTableRename[] = [];
+    const reshapeComments: MigrationStep[] = [];
+    if (reshapes.length > 0) {
+      if (!allowDestructive) {
+        throw new MigrationShapeChangeError(
+          m.name,
+          reshapes.map((r) => r.description),
+        );
+      }
+      // --allow-destructive: rename each old table to a `__pre_reshape` backup
+      // (kept, NOT dropped) + inject it into `next` so it pairs with its renamed
+      // self instead of dropping; the new shape is created fresh.  The backup
+      // carries no indexes (frees the names the new shape reuses) and no reshape
+      // stamp, so next generation it is a plain dropTable — its cleanup is
+      // destructive-gated.  A TODO recipe marks the data move the operator runs.
+      const injected: TableShape[] = [];
+      for (const r of reshapes) {
+        for (const b of r.backups) {
+          const backupName = `${b.name}${RESHAPE_BACKUP_SUFFIX}`;
+          reshapeTableRenames.push({ from: b.name, to: backupName, schema: b.schema });
+          injected.push({
+            ...b,
+            name: backupName,
+            indexes: [],
+            savingShape: undefined,
+            inheritance: undefined,
+          });
+          reshapeComments.push({
+            op: "sqlComment",
+            comment: `TODO reshape (${r.description}): copy data from ${qualifiedName(b.schema, backupName)} into the new shape (e.g. INSERT … SELECT), then drop the backup under --allow-destructive`,
+          });
+        }
+      }
+      next = {
+        ...next,
+        tables: [...next.tables, ...injected].sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    }
     // Resolve this module's rename intents to per-table column renames, keyed
     // by the table's schema-qualified key so the diff can fold them in.  A
     // rename whose aggregate/context isn't in THIS module is skipped here and
@@ -1308,7 +1466,10 @@ export function buildMigrations(
     // flip with a declared backfill is the safe sequence, not a gate trip.
     const backfills = resolveBackfills(m, options.backfillIntents ?? [], schemaOf);
     const structuralSteps = applyDestructivePolicy(
-      diffSchema(baseline, next, allRenames, tableRenamePlan.tableRenames),
+      diffSchema(baseline, next, allRenames, [
+        ...tableRenamePlan.tableRenames,
+        ...reshapeTableRenames,
+      ]),
       baseline,
       {
         allowDestructive,
@@ -1335,6 +1496,7 @@ export function buildMigrations(
     ].filter((d) => !applied.has(d.key));
     const steps: MigrationStep[] = [
       ...structuralSteps,
+      ...reshapeComments,
       ...newData.map((d): MigrationStep => ({ op: "sqlExec", sql: d.sql })),
     ];
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
@@ -1744,6 +1906,34 @@ function uniqueIndexesFor(agg: AggregateIR, tableName: string): IndexShape[] {
       ...(softDeletable ? { predicate: "is_deleted = false" } : {}),
     };
   });
+}
+
+/** Stamp the aggregate ROOT table with its reshape-detection metadata
+ *  (M-T2.4).  A TPH shared base table gets `inheritance = sharedTable`; each
+ *  TPC concrete's own table gets `inheritance = ownTable` (both keyed by the
+ *  ROOT-base name so a TPH↔TPC flip groups across the strategy change).  A
+ *  plain relational / document / embedded root gets `savingShape`.  Tables with
+ *  no reshape identity — parts, join tables, saga / event-log / outbox, a TPH
+ *  concrete (owns no root), an abstract TPC base (owns none) — stay unstamped. */
+function stampReshapeMetadata(
+  agg: AggregateIR,
+  produced: readonly TableShape[],
+  pool: readonly AggregateIR[],
+  shape: SavingShape,
+): void {
+  if (agg.persistedAs === "eventLog") return; // stream lives in <ctx>_events
+  if (isTphConcrete(agg, pool)) return; // shares the base's table (stamped there)
+  const root = produced.find((t) => t.name === plural(snake(agg.name)));
+  if (!root) return; // no own root table (abstract TPC base owns none)
+  if (isTphBase(agg, pool)) {
+    root.inheritance = { strategy: "sharedTable", base: agg.name };
+    return;
+  }
+  if (isTpcConcrete(agg, pool)) {
+    root.inheritance = { strategy: "ownTable", base: rootBaseOf(agg, pool).name };
+    return;
+  }
+  root.savingShape = shape;
 }
 
 function tableForAggregate(

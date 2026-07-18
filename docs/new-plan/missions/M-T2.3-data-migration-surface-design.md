@@ -3,9 +3,14 @@
 > **Status: implemented (PR #1983 — design + slices S1–S4 in one PR, one
 > commit per slice), scope trimmed to the crucial core per review.**
 > v1 ships exactly two data steps — **backfill** and **raw `sql`** — plus the
-> destructive-gate fixes they unlock. Everything else (transforms,
-> `renameIndex`, the wider rename cascades, M-T2.4 reshape detection) is
-> **deferred with sketches kept in the appendix** so nothing is lost silently.
+> destructive-gate fixes they unlock.
+>
+> **Update 2026-07-18 — the deferred appendix items shipped** (one PR each):
+> `renameIndex` collapse (a), the sibling `targetFk` cascade (b), the
+> shape-coverage audit + eventLog `stream_type` fix-up (c), and **M-T2.4
+> reshape detection** are all landed (see `docs/new-plan/T2-data-evolution.md`
+> for the code evidence). Still deferred: the **transform `using` clause** and
+> the **workflow/projection rename** (tracker slice d) — both propose-first.
 > Verified against `main` @ #1981 — no in-flight PR touches this area.
 > Sources: `docs/new-plan/T2-data-evolution.md`,
 > [`M-T2.1-migration-surface-design.md`](M-T2.1-migration-surface-design.md),

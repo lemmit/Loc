@@ -25,7 +25,11 @@ import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
 import { fsMigrationArtifactIndex, MigrationBaselineError } from "../system/migration-artifacts.js";
-import { MigrationDestructiveError, MigrationSqlScopeError } from "../system/migrations-builder.js";
+import {
+  MigrationDestructiveError,
+  MigrationShapeChangeError,
+  MigrationSqlScopeError,
+} from "../system/migrations-builder.js";
 import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
 import { annotateTrace, type SourceMap } from "../trace/index.js";
 import { isScaffoldOnce } from "../util/scaffold-once.js";
@@ -463,6 +467,7 @@ async function runGenerate(
       if (
         err instanceof SnapshotReadError ||
         err instanceof MigrationDestructiveError ||
+        err instanceof MigrationShapeChangeError ||
         err instanceof MigrationSqlScopeError ||
         err instanceof MigrationBaselineError
       ) {

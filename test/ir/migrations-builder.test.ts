@@ -17,6 +17,7 @@ import {
   buildMigrations,
   diffSchema,
   MigrationDestructiveError,
+  MigrationShapeChangeError,
   schemaFromModule,
 } from "../../src/system/migrations-builder.js";
 import {
@@ -1861,5 +1862,141 @@ system Tally {
       tableRenameIntents: newLoom.tableRenameIntents,
     })[0]!;
     expect(gen2.steps).toEqual([]);
+  });
+});
+
+describe("buildMigrations — reshape detection (M-T2.4)", () => {
+  const SHAPED = (shape: string) => `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Cart shape: ${shape} {
+        customer: Customer id
+        total: int
+      }
+      aggregate Customer { name: string }
+      repository Carts for Cart { }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}`;
+
+  const baselineFor = async (shape: string): Promise<SchemaSnapshot> => {
+    const loom = await buildLoomModel(SHAPED(shape));
+    return { ...schemaFromModule(loom.systems[0]!.subdomains[0]!), lastVersion: BASE_TIMESTAMP };
+  };
+  const docSys = async () => (await buildLoomModel(SHAPED("document"))).systems[0]!;
+
+  it("raises the dedicated loom.migration-shape-change on a relational→document flip (no flag)", async () => {
+    const baseline = await baselineFor("relational");
+    const sys = await docSys();
+    expect(() => buildMigrations(sys, memorySnapshotStore({ Sales: baseline }))).toThrow(
+      MigrationShapeChangeError,
+    );
+    try {
+      buildMigrations(sys, memorySnapshotStore({ Sales: baseline }));
+    } catch (e) {
+      expect((e as MigrationShapeChangeError).code).toBe("loom.migration-shape-change");
+    }
+  });
+
+  it("under --allow-destructive: renames the old table to a backup (NO drop) + creates the new shape", async () => {
+    const baseline = await baselineFor("relational");
+    const out = buildMigrations(await docSys(), memorySnapshotStore({ Sales: baseline }), {
+      allowDestructive: true,
+    })[0]!;
+    expect(
+      out.steps.some(
+        (s) => s.op === "renameTable" && s.from === "carts" && s.to === "carts__pre_reshape",
+      ),
+    ).toBe(true);
+    expect(out.steps.some((s) => s.op === "createTable" && s.table.name === "carts")).toBe(true);
+    // The relational FK index name is freed for the new shape (dropped off the backup).
+    expect(out.steps.some((s) => s.op === "dropIndex" && s.name === "carts_customer_idx")).toBe(
+      true,
+    );
+    // NO drop — the backup is kept for the data move.
+    expect(out.steps.some((s) => s.op === "dropTable")).toBe(false);
+    // TODO recipe + backup recorded in the written snapshot.
+    expect(
+      out.steps.some((s) => s.op === "sqlComment" && s.comment.includes("carts__pre_reshape")),
+    ).toBe(true);
+    expect(out.next.tables.some((t) => t.name === "carts__pre_reshape")).toBe(true);
+  });
+
+  it("the backup's cleanup drop is destructive-gated the next generation", async () => {
+    const baseline = await baselineFor("relational");
+    const sys = await docSys();
+    const gen1 = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      allowDestructive: true,
+    })[0]!;
+    // Gen 2: same document model, baseline now carries the backup — no reshape,
+    // but dropping the backup trips the generic destructive gate.
+    expect(() => buildMigrations(sys, memorySnapshotStore({ Sales: gen1.next }))).toThrow(
+      MigrationDestructiveError,
+    );
+    const gen2 = buildMigrations(sys, memorySnapshotStore({ Sales: gen1.next }), {
+      allowDestructive: true,
+    })[0]!;
+    expect(gen2.steps.some((s) => s.op === "dropTable" && s.name === "carts__pre_reshape")).toBe(
+      true,
+    );
+  });
+
+  it("an UNstamped baseline (pre-M-T2.4 snapshot) is not detected — grace to the generic gate", async () => {
+    const stamped = await baselineFor("relational");
+    const unstamped: SchemaSnapshot = {
+      ...stamped,
+      tables: stamped.tables.map((t) => ({ ...t, savingShape: undefined })),
+    };
+    const sys = await docSys();
+    // Degrades to the generic destructive gate, NOT the dedicated shape error.
+    expect(() => buildMigrations(sys, memorySnapshotStore({ Sales: unstamped }))).toThrow(
+      MigrationDestructiveError,
+    );
+    expect(() => buildMigrations(sys, memorySnapshotStore({ Sales: unstamped }))).not.toThrow(
+      MigrationShapeChangeError,
+    );
+  });
+
+  it("detects a TPH↔TPC inheritance-strategy flip whose table names change", async () => {
+    const HIER = (layout: string) => `
+system Fleet {
+  subdomain Registry {
+    context Reg {
+      abstract aggregate Party inheritanceUsing: ${layout} { name: string }
+      aggregate Customer extends Party { creditLimit: decimal }
+      aggregate Sponsor extends Party { rating: int }
+      repository Customers for Customer { }
+      repository Sponsors for Sponsor { }
+    }
+  }
+  deployable api { platform: node, contexts: [Reg], port: 3000 }
+}`;
+    const tph = await buildLoomModel(HIER("sharedTable"));
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(tph.systems[0]!.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const tpc = (await buildLoomModel(HIER("ownTable"))).systems[0]!;
+    expect(() => buildMigrations(tpc, memorySnapshotStore({ Registry: baseline }))).toThrow(
+      MigrationShapeChangeError,
+    );
+    const out = buildMigrations(tpc, memorySnapshotStore({ Registry: baseline }), {
+      allowDestructive: true,
+    })[0]!;
+    // The one shared `parties` table backs up; each concrete table is created.
+    expect(
+      out.steps.some(
+        (s) => s.op === "renameTable" && s.from === "parties" && s.to === "parties__pre_reshape",
+      ),
+    ).toBe(true);
+    const created = out.steps
+      .filter((s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable")
+      .map((s) => s.table.name)
+      .sort();
+    expect(created).toEqual(["customers", "sponsors"]);
+    expect(out.steps.some((s) => s.op === "dropTable")).toBe(false);
   });
 });
