@@ -1017,6 +1017,9 @@ migration "2026-07-build-columns" {
     Build.total = 0
     // Raw one-shot DML escape hatch — emitted exactly once (the snapshot's
     // `appliedDataMigrations` ledger records "<block>#<index>"), after the
-    // generation's structural steps.  See docs/migrations.md §Data migrations.
-    sql "UPDATE builds SET total = 0 WHERE total IS NULL"
+    // generation's structural steps.  Raw SQL is verbatim: schema-qualify the
+    // relation (`builds.builds` — the Builds context's schema), because the
+    // migration runners' search_path does not include context schemas.
+    // See docs/migrations.md §Data migrations.
+    sql "UPDATE builds.builds SET total = 0 WHERE total IS NULL"
 }

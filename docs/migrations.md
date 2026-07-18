@@ -200,6 +200,11 @@ as the DDL (`renderBackfillSql` is shared, so the DML is bit-identical).
 migration "clear-legacy-notes" { sql "UPDATE sales.orders SET note = '' WHERE note IS NULL" }
 ```
 
+Raw SQL is verbatim — **schema-qualify every relation** (`sales.orders`, not
+`orders`): the generated DDL is schema-qualified, and the migration runners'
+`search_path` does not include context schemas, so an unqualified name fails
+at apply time (Flyway/Drizzle/psql alike).
+
 A raw step is pinned to the module its block's *other* steps name; a block
 with only `sql` steps targets the system's single owner module, and an
 ambiguous scope (a block spanning modules, or no affinity in a multi-module

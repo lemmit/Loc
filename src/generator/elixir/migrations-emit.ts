@@ -198,7 +198,40 @@ function emitInitial(
     const ts = base + parentCount * 100 + k;
     writeInitialFile(sortedJoins[k]!, ts, appModule, out);
   }
+  // Data steps (M-T2.3): an initial generation can still carry `sqlExec`
+  // steps (a raw `sql "…"` block in a fresh system — the other backends run
+  // it inside their single Initial file).  The per-table layout above has no
+  // home for them, so they land in ONE trailing data file, offset far above
+  // every table tier (and below MODULE_VERSION_STRIDE, so modules stay
+  // disjoint).  Dropping them instead would silently diverge from the
+  // snapshot's appliedDataMigrations ledger, which already recorded them.
+  const dataSteps = m.steps.filter(
+    (s): s is Extract<MigrationStep, { op: "sqlExec" }> => s.op === "sqlExec",
+  );
+  if (dataSteps.length > 0) {
+    const ts = base + INITIAL_DATA_OFFSET;
+    const lines = dataSteps.flatMap((s) => renderEctoStep(s)).map((l) => `    ${l}`);
+    // Module-qualified name + filename: Ecto requires migration module names
+    // to be unique across the shared dir, and every module with data steps
+    // lands one of these files.
+    const body = [
+      `defmodule ${appModule}.Repo.Migrations.DataMigrations${tableToPascal(snake(m.module))} do`,
+      `  use Ecto.Migration`,
+      ``,
+      `  def change do`,
+      ...lines,
+      `  end`,
+      `end`,
+      ``,
+    ].join("\n");
+    out.set(`priv/repo/migrations/${ts}_data_migrations_${snake(m.module)}.exs`, body);
+  }
 }
+
+/** Within-module version offset for the initial data-migrations file — far
+ *  above the table tiers (parents `+i`, parts `+N*10+…`, joins `+N*100+k`)
+ *  and safely below `MODULE_VERSION_STRIDE`. */
+const INITIAL_DATA_OFFSET = 900_000;
 
 function writeInitialFile(
   table: TableShape,
