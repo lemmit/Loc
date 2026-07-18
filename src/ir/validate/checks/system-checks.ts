@@ -50,7 +50,6 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
-import { aggregateIsVersioned } from "../../util/versioned-capability.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 import { validateE2ETest } from "./test-checks.js";
@@ -1778,15 +1777,16 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
 // ambient request principal (`stampInsert`, db/audit-stamp.ts), keeping
-// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.  So
-// the stamp-target fields' `managed` access is no longer rejected, and an
-// `auditable` aggregate is accepted.  Other server-managed fields
-// (token / internal / secret) and provenanced fields stay gated.
+// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.
+//
+// Server-managed access (`managed` / `token` / `internal` / `secret`) is NO
+// LONGER gated either: the data-mapper stores such a field as an ordinary
+// column that round-trips through the shared save/hydrate seams (the access
+// modifier shapes only the API wire surface).  Provenanced fields stay gated.
 // ---------------------------------------------------------------------------
 export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
 
   for (const dep of sys.deployables) {
     if (dep.persistence !== "mikroorm") continue;
@@ -1833,21 +1833,16 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           reject(where, "contains nested entity parts");
         if ((a.contextFilters ?? []).length > 0)
           reject(where, "uses a 'filter' capability predicate");
-        // Audit-stamp targets are filled by the save-layer stamp (`stampInsert`
-        // injected into `em.upsert`), so their `managed` access is fine; skip
-        // them when gating server-managed access below.
-        const stampFields = new Set(
-          (a.contextStamps ?? []).flatMap((r) => r.assignments.map((x) => x.field)),
-        );
-        // The default-on `version` token (M-T3.4) is supported: the MikroORM
-        // save emits a guarded `nativeUpdate` version-CAS on it, so it is NOT an
-        // unfillable server-managed field — skip it before the managed gate.
-        const aggVersioned = aggregateIsVersioned(a);
+        // Server-managed access (`managed` / `token` / `internal` / `secret`)
+        // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
+        // a field as an ordinary column that round-trips through the shared
+        // save-projection / hydrate seams (the access modifier only shapes the
+        // API wire surface, not persistence).  Audit-stamp targets are filled by
+        // the persist-time stamp (`stampInsert` in `em.upsert`) and the default-
+        // on `version` token by the guarded version-CAS `nativeUpdate` — both
+        // already supported.
         for (const f of a.fields) {
-          if (aggVersioned && f.name === "version" && f.access === "token") continue;
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-          else if (f.access && MANAGED_ACCESS.has(f.access) && !stampFields.has(f.name))
-            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
         }
       }
     }

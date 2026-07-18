@@ -239,11 +239,46 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
   });
+});
 
-  // A NON-stamp server-managed field (token access) still trips the gate — the
-  // managed-access relaxation is scoped to audit-stamp targets only.
-  it("still rejects a non-stamp server-managed (token) field", () =>
-    rejects("token apiKey: string", /server-managed access 'token'/));
+// ---------------------------------------------------------------------------
+// Server-managed access fields (token / internal / secret) on mikroorm — the
+// access modifier shapes only the API wire surface, so the data-mapper stores
+// the field as an ordinary column that round-trips through the shared save /
+// hydrate seams (like drizzle).  No longer gated (wave 1).
+// ---------------------------------------------------------------------------
+describe("mikroorm — server-managed access fields round-trip as columns", () => {
+  const MANAGED_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        token apiKey: string
+        internal note2: string
+        secret pin: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("accepts a token / internal / secret field (no loom.mikroorm-unsupported)", async () => {
+    const { files, errors } = await emit(MANAGED_SRC);
+    expect(errors).toEqual([]);
+    // Each server-managed field is a real persisted column on the Row entity…
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("apiKey!: string");
+    expect(entities).toContain("note2!: string");
+    expect(entities).toContain("pin!: string");
+    // …and rides the save projection + hydrate seam.
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("apiKey: aggregate.apiKey");
+    expect(repo).toContain("apiKey: row.apiKey");
+  });
 });
 
 // ---------------------------------------------------------------------------
