@@ -86,11 +86,25 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
   return body;
 }
 
+// The wire shape a `File` field / FileUpload primitive round-trips.
+export type FileRef = {
+  url: string;
+  key: string;
+  contentType: string;
+  size: number;
+};
+
 export const api = {
   get: (path: string) => rawFetch(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
     rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   upload: (path: string, form: FormData) => rawUpload(path, form),
+  // Wraps a single File in a FormData and POSTs it (see api-client.hbs).
+  uploadFile: (file: File): Promise<FileRef> => {
+    const form = new FormData();
+    form.append("file", file);
+    return rawUpload("/files", form) as Promise<FileRef>;
+  },
 {{#if hasDelete}}
   delete: (path: string) => rawFetch(path, { method: "DELETE" }),
 {{/if}}

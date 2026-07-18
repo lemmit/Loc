@@ -268,7 +268,19 @@ export function renderVuePage(input: VuePageShellInput): string {
   const stateLines: string[] = [];
   if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of page.state) {
-      stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
+      // A `File`-typed state field (FileUpload bind target) holds a nullable
+      // FileRef.  Its `ref()` init (undefined) would infer `Ref<undefined>` and
+      // reject the uploaded FileRef, so type it explicitly and import FileRef.
+      const base = f.type.kind === "optional" ? f.type.inner : f.type;
+      const isFile = base.kind === "primitive" && base.name === "File";
+      if (isFile) {
+        stateLines.push(`const ${f.name} = ref<FileRef | null>(null);`);
+        const set = apiImports.get("../api/client") ?? new Set<string>();
+        set.add("FileRef");
+        apiImports.set("../api/client", set);
+      } else {
+        stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
+      }
       // The shared input primitives' VM carries the React-style
       // `set<Pascal>` setter name (`@update:model-value` callbacks in
       // the vue packs call it) — provide it as a plain function.
