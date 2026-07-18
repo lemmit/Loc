@@ -75,9 +75,13 @@ describe(".NET validation-error extension — DomainExceptionFilter emission", (
     // ProblemDetails component schema isn't yet declared with `errors`
     // (Phase D), so the array rides as a JSON extension key.
     expect(filter).toMatch(/problem\.Extensions\["errors"\] = fv\.Errors/);
-    expect(filter).toMatch(
-      /\.Select\(e => new \{ pointer = PointerOf\(e\.PropertyName\), message = e\.ErrorMessage \}\)/,
-    );
+    // Each error is a Dictionary so the optional `code` key is OMITTED for a
+    // message-less rule (byte-identical body) and PRESENT for a messaged rule
+    // whose `.WithErrorCode("msg.<hash>")` surfaces the content-hash wire code.
+    expect(filter).toMatch(/\["pointer"\] = PointerOf\(e\.PropertyName\)/);
+    expect(filter).toMatch(/\["message"\] = e\.ErrorMessage/);
+    expect(filter).toMatch(/e\.ErrorCode\.StartsWith\("msg\.", StringComparison\.Ordinal\)/);
+    expect(filter).toMatch(/err\["code"\] = e\.ErrorCode/);
     expect(filter).toMatch(/\.ToArray\(\)/);
     // Response shape: 422 + application/problem+json + x-request-id.
     expect(filter).toMatch(/x-request-id"\] = trace_id/);
