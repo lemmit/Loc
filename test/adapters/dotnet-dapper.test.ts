@@ -327,20 +327,24 @@ system D {
       errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
     ).toBe(true);
   });
-  it("still rejects the embedded saving shape (shape: embedded)", async () => {
+  it("still rejects a non-relational saving shape outside {document, embedded} (part-in-part on embedded)", async () => {
+    // Embedded is supported for FLAT-part containments; a part-in-part stays
+    // gated (the conservative v1 embedded surface).
     const src = `
       system D {
         api A from S
         subdomain S { context O {
-          aggregate Cart shape: embedded with crudish { customer: string }
+          aggregate Cart shape: embedded with crudish {
+            customer: string
+            contains boxes: Box[]
+            entity Box { label: string  contains items: Item[]  entity Item { sku: string } }
+          }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
         deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /shape\(embedded\)/.test(e))).toBe(
-      true,
-    );
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
   });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
@@ -519,6 +523,67 @@ system D {
       files.has("api/Infrastructure/Persistence/Configurations/CartDocumentConfiguration.cs"),
     ).toBe(false);
     // No EF AppDbContext on the Dapper deployable.
+    expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
+  });
+});
+
+// Embedded shape (`shape(embedded)`) on Dapper (M-T6.9 wave 3): flat root
+// columns PLUS one JSONB column per containment (the part sub-graph folds into
+// it via the ToSnapshot/FromSnapshot round-trip), no child tables.  The flat
+// `Map` hydrates each containment from its JSONB column.
+describe("dapper embedded shape (containments as jsonb columns)", () => {
+  const EMB = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      enum LineKind { Physical, Digital }
+      valueobject Money { amount: int  currency: string }
+      aggregate Cart shape: embedded with crudish {
+        customer: string
+        total:    Money
+        contains lines: CartLine[]
+        contains coupon: Coupon?
+        entity CartLine { sku: string  qty: int  kind: LineKind  price: Money }
+        entity Coupon { code: string  percent: int }
+      }
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects shape(embedded); folds containments into JSONB columns (no child tables)", async () => {
+    const { files, errors } = await emit(EMB);
+    expect(errors).toEqual([]); // the dapper embedded gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // Flat root columns + one jsonb column per containment; NO child tables.
+    expect(schema).toContain("customer text not null");
+    expect(schema).toContain("lines jsonb not null");
+    expect(schema).toContain("coupon jsonb"); // single optional → nullable
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS coupons");
+    const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
+    // The JSONB options field + the snapshot (de)serialisation.
+    expect(repo).toContain("private static readonly System.Text.Json.JsonSerializerOptions __json");
+    expect(repo).toContain(
+      "Lines = System.Text.Json.JsonSerializer.Deserialize<List<CartLineSnapshot>>(r.lines, __json)!.Select(CartLine.FromSnapshot).ToList()",
+    );
+    expect(repo).toContain(
+      "Coupon = r.coupon is null ? null : Coupon.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CouponSnapshot>(r.coupon, __json)!)",
+    );
+    expect(repo).toContain(
+      "lines = System.Text.Json.JsonSerializer.Serialize(aggregate.Lines.Select(__x => __x.ToSnapshot()).ToList(), __json)",
+    );
+    // Reads still go through the flat Map (no HydrateAsync child-table load).
+    expect(repo).toContain("private static Cart Map(Row r)");
+    expect(repo).not.toContain("HydrateAsync");
+    // Snapshot DTOs emitted; no EF document/owned config on the Dapper path.
+    expect(files.has("api/Domain/Carts/CartSnapshots.cs")).toBe(true);
     expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
   });
 });

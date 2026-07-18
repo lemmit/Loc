@@ -1781,8 +1781,20 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // FromSnapshot round-trip.  Contained parts + `X id[]` references fold
         // INTO the blob, so the relational-only containment/association gates
         // below are moot for it — skip them.  shape(embedded) is still gated.
+        // shape(embedded) IS supported too (Dapper edition): flat root columns
+        // PLUS one JSONB column per containment (the part sub-graph folds into
+        // it via the ToSnapshot/FromSnapshot round-trip), no child tables.  The
+        // v1 embedded surface is FLAT-part containments — a part-in-part, a
+        // part-collection field, and a contains+association combo stay gated by
+        // the shared containment block below (conservative; snapshots could fold
+        // them, but they're an untested follow-up).
         const isDocShape = a.persistedAs !== "eventLog" && shape === "document";
-        if (a.persistedAs !== "eventLog" && shape !== "relational" && shape !== "document")
+        if (
+          a.persistedAs !== "eventLog" &&
+          shape !== "relational" &&
+          shape !== "document" &&
+          shape !== "embedded"
+        )
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");

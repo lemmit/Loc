@@ -449,8 +449,10 @@ function emitProjectFromContexts(
   // still gets the audit_records table + IAuditWriter seam.
   const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedTarget);
   // Shape routing (shared by both persistence paths): document-shaped aggregates
-  // persist as one JSONB blob table (Dapper) / DbSet<Document> (EF).
+  // persist as one JSONB blob table (Dapper) / DbSet<Document> (EF); embedded
+  // ones fold each containment into a JSONB column (Dapper) / owned `.ToJson()`.
   const docAggSet = documentAggNames(contexts, system?.sys);
+  const embAggSet = embeddedAggNames(contexts, system?.sys);
   if (usingDapper) {
     out.set(
       "Infrastructure/Persistence/DbSchema.cs",
@@ -459,6 +461,7 @@ function emitProjectFromContexts(
         ns,
         eventLogContexts(contexts).map((c) => snake(c.name)),
         docAggSet,
+        embAggSet,
       ),
     );
     // The shared provenance lineage SDK (ProvLineage) — the entity's co-located
@@ -1009,6 +1012,13 @@ function emitAggregate(
   const isEs = agg.persistedAs === "eventLog";
   const isDoc = !isEs && shape === "document";
   const isEmbedded = !isEs && shape === "embedded";
+  // The `ToSnapshot()` / `FromSnapshot(...)` round-trip seam on the entity (+
+  // its `<Agg>Snapshot` DTOs) is emitted for document shape on every backend AND
+  // for the Dapper embedded path (which serialises each containment's part
+  // snapshots into a JSONB column — EF embedded uses owned-type `.ToJson()`
+  // instead, so it doesn't need the seam).
+  const usingDapperPersistence = emitCtx?.deployable.persistence === "dapper";
+  const snapshotSeam = isDoc || (usingDapperPersistence && isEmbedded);
 
   for (const part of agg.parts) {
     place(
@@ -1021,7 +1031,7 @@ function emitAggregate(
         agg.name,
         directParentName(agg, part.name, agg.name),
         emitTrace,
-        isDoc,
+        snapshotSeam,
       ),
       agg.origin,
     );
@@ -1054,7 +1064,7 @@ function emitAggregate(
       // A root aggregate has no ParentId; pass its own name for the unused slot.
       agg.name,
       emitTrace,
-      isDoc,
+      snapshotSeam,
       superType,
       operationReturnUnions,
       opFragments,
@@ -1153,15 +1163,16 @@ function emitAggregate(
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
         : isDoc
           ? renderDapperDocumentRepository(agg, repoWithViews, ns, findBodies)
-          : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp),
+          : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp, isEmbedded),
       repoOrigin,
     );
-    if (isDoc) {
-      // Document shape (Dapper): the whole aggregate serialises through the
-      // `<Agg>Snapshot` DTOs the repository (de)serialises into/out of the
-      // JSONB `data` column (the entity's `ToSnapshot`/`FromSnapshot` methods,
-      // emitted under `isDoc`, do the mapping).  No `<Agg>Document` EF POCO /
-      // configuration — DbSchema owns the table DDL.
+    if (isDoc || isEmbedded) {
+      // Document / embedded shape (Dapper): the containment sub-graph serialises
+      // through the `<Agg>Snapshot` DTOs (the entity's `ToSnapshot`/`FromSnapshot`
+      // methods, emitted under the snapshot seam, do the mapping).  Document
+      // folds the WHOLE aggregate into one JSONB blob; embedded folds each
+      // containment into its own JSONB column beside the flat root columns.  No
+      // `<Agg>Document` EF POCO / configuration — DbSchema owns the table DDL.
       place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns), agg.origin);
     }
   } else if (isEs) {

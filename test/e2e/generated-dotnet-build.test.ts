@@ -852,5 +852,51 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // M-T6.9 wave 3: the Dapper adapter's EMBEDDED SHAPE surface — a
+    // `shape(embedded)` aggregate keeps its own fields as FLAT columns but folds
+    // each containment into ONE JSONB column (serialised part snapshots), no
+    // child tables.  Build under /warnaserror — the flat-column + JSONB-column
+    // mix + the snapshot round-trip on the flat `Map` are what this compiles.
+    it("system `persistence: dapper` + shape(embedded) — containment JSONB columns build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-emb-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-embedded.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Flat root columns + jsonb containment columns; no child tables.
+        expect(schema).toContain("lines jsonb not null");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines");
+        expect(
+          fs.readFileSync(
+            path.join(proj, "Infrastructure", "Repositories", "CartRepository.cs"),
+            "utf8",
+          ),
+        ).toContain("CartLine.FromSnapshot");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );

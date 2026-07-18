@@ -215,7 +215,56 @@ function provColumn(f: FieldIR): DapperColumn {
   };
 }
 
-function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
+/** Embedded (`shape(embedded)`) containment column — one JSONB column per
+ *  containment holding the serialised part snapshot(s).  The whole contained
+ *  sub-graph folds into this one column (no child table): a collection stores a
+ *  JSON array of snapshots, a single (optional) containment stores one snapshot
+ *  (or null).  Round-trips through the part's persistence-agnostic
+ *  `ToSnapshot()` / `FromSnapshot(...)` (emitted under the entity `document`
+ *  seam), the raw-Npgsql mirror of EF's owned-type `.ToJson()` mapping.  Save
+ *  reads off `aggregate`, hydrate off the flat `Row` (`r.<col>`) into the
+ *  `_Create(State)` containment slot. */
+function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
+  const col = snake(cont.name);
+  const prop = upperFirst(cont.name);
+  const snapT = `${cont.partName}Snapshot`;
+  if (cont.collection) {
+    return {
+      col,
+      sql: "jsonb",
+      nullable: false,
+      rowCs: "string",
+      cast: "::jsonb",
+      save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.Select(__x => __x.ToSnapshot()).ToList(), __json)`,
+      stateProp: prop,
+      hydrate: `System.Text.Json.JsonSerializer.Deserialize<List<${snapT}>>(r.${col}, __json)!.Select(${cont.partName}.FromSnapshot).ToList()`,
+    };
+  }
+  if (cont.optional) {
+    return {
+      col,
+      sql: "jsonb",
+      nullable: true,
+      rowCs: "string?",
+      cast: "::jsonb",
+      save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
+      stateProp: prop,
+      hydrate: `r.${col} is null ? null : ${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+    };
+  }
+  return {
+    col,
+    sql: "jsonb",
+    nullable: false,
+    rowCs: "string",
+    cast: "::jsonb",
+    save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
+    stateProp: prop,
+    hydrate: `${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+  };
+}
+
+function columnsOf(agg: EnrichedAggregateIR, embedded = false): DapperColumn[] {
   // Reference-collection fields (`X id[]`) live in their join tables, not as
   // root columns — see the association load/save blocks in the repository.
   const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
@@ -224,6 +273,9 @@ function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
     ...agg.fields.filter((f) => !assocFields.has(f.name)).map((f) => fieldColumn(f)),
     // One co-located `<field>_provenance` lineage column per provenanced field.
     ...agg.fields.filter((f) => f.provenanced).map(provColumn),
+    // shape(embedded): each containment folds into one JSONB column (no child
+    // table).  Relational (default) keeps them as child tables (partChildrenOf).
+    ...(embedded ? (agg.contains ?? []).map(embeddedContainmentColumn) : []),
   ];
 }
 
@@ -535,10 +587,14 @@ export function renderDapperRepository(
    *  mirroring the EF AuditableInterceptor.  Undefined ⇒ no principal stamp
    *  reaches this emitter (rejected upstream by loom.dotnet-stamp-unsupported). */
   actorIdProp?: string,
+  /** shape(embedded): each containment folds into one JSONB column (serialised
+   *  part snapshots) instead of a child table.  Adds the STJ `__json` options
+   *  field the containment (de)serialisation uses. */
+  embedded = false,
 ): string {
   const table = tableOf(agg.name);
   const sqlCtx: WhereSqlCtx = { agg, table };
-  const cols = columnsOf(agg);
+  const cols = columnsOf(agg, embedded);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
   // Lifecycle stamps (`stamp onCreate/onUpdate { field: expr }` →
@@ -727,7 +783,10 @@ export function renderDapperRepository(
   // deletes cascade the children first.  `hasContains` and reference-collection
   // associations are mutually exclusive on the same aggregate (validator-gated),
   // so the two hydrate paths never overlap.
-  const partChildren = partChildrenOf(agg);
+  // Relational: containments are child tables (partChildrenOf).  Embedded folds
+  // each into a JSONB column instead (added to `cols` above), so no child
+  // tables / HydrateAsync — the flat `Map` hydrates from the containment columns.
+  const partChildren = embedded ? [] : partChildrenOf(agg);
   const hasContains = partChildren.length > 0;
   const containSaveLines = partChildren.flatMap((pc) => {
     const insertCols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
@@ -982,6 +1041,11 @@ export function renderDapperRepository(
       "{",
       "    private readonly NpgsqlDataSource _db;",
       "    private readonly IDomainEventDispatcher _events;",
+      // shape(embedded): the STJ options the containment-column (de)serialisation
+      // uses (Web defaults — matching the document path + the entity snapshots).
+      embedded
+        ? "    private static readonly System.Text.Json.JsonSerializerOptions __json =\n        new(System.Text.Json.JsonSerializerDefaults.Web);"
+        : null,
       "",
       `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
       "    {",
@@ -1396,6 +1460,9 @@ export function renderDapperSchema(
    *  jsonb, version)` table (the whole read model in the JSONB `data` column,
    *  no normalised child/join tables) instead of the flat relational shape. */
   documentAggNames: ReadonlySet<string> = new Set(),
+  /** Names of `shape(embedded)` aggregates — flat root columns PLUS one JSONB
+   *  column per containment (the part sub-graph folds into it), no child tables. */
+  embeddedAggNames: ReadonlySet<string> = new Set(),
 ): string {
   // Event-sourced aggregates own no per-aggregate table — their stream lives in
   // the shared per-context `<ctx>_events` log emitted after this map.  Document
@@ -1414,7 +1481,10 @@ export function renderDapperSchema(
           ");",
         ].join("\n");
       }
-      const cols = columnsOf(agg).map((c, i) => {
+      // Embedded shape: flat root columns + one JSONB containment column each
+      // (folded into `columnsOf(agg, true)`), and NO child tables.
+      const embedded = embeddedAggNames.has(agg.name);
+      const cols = columnsOf(agg, embedded).map((c, i) => {
         const pk = i === 0 ? " primary key" : "";
         const nn = c.nullable || i === 0 ? "" : " not null";
         return `    ${c.col} ${c.sql}${pk}${nn}`;
@@ -1436,7 +1506,7 @@ export function renderDapperSchema(
       // LineItem[]`): `id` PK + `<agg>_id` owner FK (indexed) + the part's own
       // scalar/enum/vo/id columns.  Cascade-delete keeps the raw-SQL delete
       // path trivial (the repository also deletes children first defensively).
-      const childTables = partChildrenOf(agg).map((pc) => {
+      const childTables = (embedded ? [] : partChildrenOf(agg)).map((pc) => {
         const fieldCols = pc.fieldCols.map(
           (c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`,
         );
