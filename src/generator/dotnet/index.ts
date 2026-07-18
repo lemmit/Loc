@@ -6,8 +6,10 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EventIR,
   RepositoryIR,
   SystemIR,
+  TimerSourceIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
@@ -94,6 +96,7 @@ import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
+import { anyTimerUsesCron, renderTimerScheduler, timerServiceFqns } from "./emit/timer.js";
 import {
   joinEntityName,
   renderAbstractBaseEntity,
@@ -606,7 +609,32 @@ function emitProjectFromContexts(
   // resources — the csproj stays byte-identical.
   const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
+  // TimerSource scheduling (scheduling.md, M-T4.1).  A timer's emit owner is
+  // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
+  // for-event's context (single-fire lock owner == DB owner).  Filter the
+  // system's timers to the ones THIS deployable owns; a timer-free deployable
+  // stays byte-identical (no TimerScheduler.cs, no registration, no Cronos dep).
+  // EF-only — the tick's advisory lock rides `AppDbContext.Database`, which the
+  // Dapper path (NpgsqlDataSource, no DbContext) doesn't have; a dapper timer
+  // owner is a follow-up slice.
+  const ownedTimers: TimerSourceIR[] = system
+    ? (system.sys.timerSources ?? []).filter((ts) => {
+        const sub = system.sys.subdomains.find((s) =>
+          s.contexts.some((c) => c.name === ts.context),
+        );
+        return sub?.migrationsOwner === system.deployable.name;
+      })
+    : [];
+  const hasTimers = ownedTimers.length > 0 && !usingDapper;
+  if (hasTimers) {
+    const eventByName = new Map<string, EventIR>(merged.events.map((e) => [e.name, e]));
+    out.set(
+      "Infrastructure/Scheduling/TimerScheduler.cs",
+      renderTimerScheduler(ownedTimers, eventByName, ns),
+    );
+  }
   emitProject(merged, ns, out, {
+    timers: hasTimers ? ownedTimers : [],
     authRequired,
     actorIdProp,
     usesValidators,
@@ -1264,6 +1292,11 @@ function emitProject(
      *  `IOrgPathResolver` → `EfOrgPathResolver` for the per-request
      *  `currentUser.orgPath` registry `data_key` read. */
     orgPathResolver?: boolean;
+    /** TimerSource scheduling (scheduling.md, M-T4.1): the owned timers this
+     *  deployable emits `<Pascal>TimerService` BackgroundServices for.  Drives
+     *  the `AddHostedService<…>()` registrations (Program.cs) and — when any
+     *  uses `cron:` — the Cronos NuGet ref (csproj).  Empty ⇒ byte-identical. */
+    timers?: TimerSourceIR[];
   },
 ): void {
   // Scrutor scan (+ package ref) is needed when the project emits any
@@ -1281,6 +1314,7 @@ function emitProject(
   const hasSeeds = !!options?.hasSeeds;
   const emitTrace = !!options?.emitTrace;
   const usingDapper = !!options?.usingDapper;
+  const timers = options?.timers ?? [];
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
@@ -1298,6 +1332,7 @@ function emitProject(
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,
+      timerServices: timerServiceFqns(timers, ns),
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;
@@ -1317,6 +1352,9 @@ function emitProject(
       usingDapper,
       usesSpecifications,
       !!options?.oidc,
+      // Cronos ships only when an owned timerSource uses a real `cron:`
+      // expression (an `every:`-only deployable uses PeriodicTimer, no dep).
+      anyTimerUsesCron(timers),
     ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));
