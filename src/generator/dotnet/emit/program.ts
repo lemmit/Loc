@@ -834,6 +834,19 @@ export function renderCsproj(
   const cronosRef = withCronTimers
     ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.13.0" />`
     : "";
+  // MailKit (smtp mailer, kind: mailer) and its transitive MimeKit carry a
+  // moderate BouncyCastle advisory present on every published version; the
+  // generated code only uses the SMTP send path.  Suppress the two audit
+  // entries so `dotnet build /warnaserror` (NU1902) passes with MailKit present.
+  const mailkitAuditSuppress =
+    "MailKit" in resourceNugetDeps
+      ? `\n  <ItemGroup>
+    <!-- MailKit/MimeKit: moderate transitive (BouncyCastle) advisory on every
+         version; SMTP send path only.  See docs/old/proposals/email-resource-kind.md. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-9j88-vvj5-vhgr" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-g7hc-96xr-gvvx" />
+  </ItemGroup>`
+      : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
@@ -890,7 +903,7 @@ ${persistenceRefs}
     <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${oidcRefs}${resourceRefs}
-  </ItemGroup>
+  </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;
 }
