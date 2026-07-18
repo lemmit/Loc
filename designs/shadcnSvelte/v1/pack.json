@@ -143,6 +143,14 @@
         ]
       }
     ],
+    "form-op-module": [
+      {
+        "from": "$lib/forms.svelte",
+        "named": [
+          "modalTrap"
+        ]
+      }
+    ],
     "primitive-modal": [
       {
         "from": "$lib/forms.svelte",
