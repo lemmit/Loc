@@ -129,7 +129,7 @@ function renderPyStatement(
   const sub = `${i}    `;
   switch (s.kind) {
     case "precondition": {
-      const thrown = `raise DomainError(${JSON.stringify(`Precondition failed: ${s.source}`)})`;
+      const thrown = `raise DomainError(${JSON.stringify(s.message ? s.message.text : `Precondition failed: ${s.source}`)})`;
       if (!ctx.trace) {
         return [`${i}if not (${renderPyExpr(s.expr)}):`, `${sub}${thrown}`].join("\n");
       }

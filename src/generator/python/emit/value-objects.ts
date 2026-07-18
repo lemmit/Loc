@@ -107,7 +107,7 @@ function renderPyValueObject(v: ValueObjectIR): string[] {
       : `not (${renderPyExpr(inv.expr, VO_CTX)})`;
     return [
       `        if ${cond}:`,
-      `            raise DomainError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`,
+      `            raise DomainError(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`,
     ];
   });
   const derived = v.derived.flatMap((d) => [
