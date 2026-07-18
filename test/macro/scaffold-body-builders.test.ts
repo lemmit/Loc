@@ -100,6 +100,7 @@ describe("scaffold body-builders — AST → printable source", () => {
       { name: "total", kind: { tag: "numeric" } },
       { name: "status", kind: { tag: "enum" } },
       { name: "note", kind: { tag: "text" } },
+      { name: "blob", kind: { tag: "file" } },
     ];
     const src = printExpr(scaffoldList("Order", cols));
     expect(src).toContain(
@@ -116,6 +117,9 @@ describe("scaffold body-builders — AST → printable source", () => {
       'Column("Status", o => EnumBadge(o.status), sortable: true, field: "status")',
     );
     expect(src).toContain('Column("Note", o => Text(o.note), sortable: true, field: "note")');
+    // A `File` column renders its download path (the FileRef object is not a
+    // ReactNode) — see `typedCell` "file".
+    expect(src).toContain('Column("Blob", o => Text(o.blob.url), sortable: true, field: "blob")');
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)
