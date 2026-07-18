@@ -188,7 +188,12 @@ function primitiveAnchor(c: Ctx): string {
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
   const href = lit ? `"${lit[1]}"` : `${to}`;
-  return `Html.a [ prop.className "link link-primary"; prop.href ${href}; prop.text "${label}" ]`;
+  // Plain daisyUI `link` (underlined, inherits `base-content`) — NOT
+  // `link-primary`: several daisyUI themes' primary colour fails WCAG AA on
+  // `base-100` (e.g. `corporate` #4d6eff → 4.2:1 < 4.5:1, an axe serious
+  // color-contrast violation).  `base-content` is theme-guaranteed readable, and
+  // the underline carries the link affordance without relying on colour (1.4.1).
+  return `Html.a [ prop.className "link"; prop.href ${href}; prop.text "${label}" ]`;
 }
 
 /** Table(rows:, ...Column(header, accessor)) — the list-page data table.  Rows
@@ -232,7 +237,8 @@ function primitiveTable(c: Ctx): string {
 function primitiveIdLink(c: Ctx): string {
   const idExpr = String(c.idExpr ?? '""');
   const prefix = String(c.pathPrefix ?? "/");
-  return `Html.a [ prop.className "link link-primary"; prop.href ("${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
+  // Plain `link` (not `link-primary`) for AA colour contrast — see primitiveAnchor.
+  return `Html.a [ prop.className "link"; prop.href ("${prefix}" + ${idExpr}); prop.text (string (${idExpr})) ]`;
 }
 
 /** Modal(trigger, form) — SUPERSEDED for Feliz by `felizTarget.renderModal`
