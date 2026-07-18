@@ -361,9 +361,12 @@ function primitiveStat(c: Ctx): string {
   const val = `Html.div [ prop.className "stat-value tabular-nums"; prop.children [ ${asChild(String(c.value ?? ""))} ] ]`;
   return `Html.div [ prop.className "stats"; prop.children [ Html.div [ prop.className "stat"; prop.children [ ${title}; ${val} ] ] ] ]`;
 }
-/** Loader() — a centred daisyUI spinner (size v1-fixed). */
+/** Loader() — a centred daisyUI spinner (size v1-fixed).  The spinner is a
+ *  raw `<span>` (not a library component), so it carries its own status
+ *  semantics: `role="status"` + an accessible name so assistive tech
+ *  announces the busy state (WCAG 4.1.2). */
 function primitiveLoader(_c: Ctx): string {
-  return `Html.div [ prop.className "flex justify-center py-8"; prop.children [ Html.span [ prop.className "loading loading-spinner loading-lg text-primary" ] ] ]`;
+  return `Html.div [ prop.className "flex justify-center py-8"; prop.children [ Html.span [ prop.className "loading loading-spinner loading-lg text-primary"; prop.role "status"; prop.ariaLabel "Loading" ] ] ]`;
 }
 /** Image(src, alt?) — a rounded `<img>`; `src`/`alt` are already-rendered exprs
  *  (a quoted literal or a ref).  A missing alt renders `alt=""` (the validator

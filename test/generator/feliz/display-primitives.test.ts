@@ -66,7 +66,12 @@ describe("feliz display / layout primitives", () => {
     expect(app).toContain('Html.span [ prop.className "badge badge-outline"');
     expect(app).toContain('prop.className "stats"');
     expect(app).toContain('prop.className "stat-value tabular-nums"');
-    expect(app).toContain('prop.className "loading loading-spinner loading-lg text-primary"');
+    // The raw spinner span carries its own status semantics (WCAG 4.1.2) —
+    // it is not a library component, so `role="status"` + an accessible name
+    // let assistive tech announce the busy state.
+    expect(app).toContain(
+      'prop.className "loading loading-spinner loading-lg text-primary"; prop.role "status"; prop.ariaLabel "Loading"',
+    );
     expect(app).toContain('Html.img [ prop.className "rounded"; prop.src "/a.png"; prop.alt "a" ]');
     expect(app).toContain('prop.className "avatar"');
   });
