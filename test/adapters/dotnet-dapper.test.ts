@@ -349,6 +349,118 @@ system D {
   });
 });
 
+// Nested entity parts (`contains lineItems: LineItem[]`) on Dapper: one FLAT
+// child table per containment (`id` PK + `<agg>_id` FK + the part's own
+// columns), bulk-loaded + hydrated through the root's `_Create(State)` seam,
+// full-list-replaced on save, cascade-deleted.
+describe("dapper nested entity parts (contains)", () => {
+  const PARTS = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      aggregate Order with crudish {
+        customer: string
+        contains lineItems: LineItem[]
+        contains shipping: ShipInfo?
+        entity LineItem { sku: string  price: Money  qty: int  note: string? }
+        entity ShipInfo { address: string }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("emits child tables + a HydrateAsync load/save/delete graph", async () => {
+    const { files, errors } = await emit(PARTS);
+    expect(errors).toEqual([]);
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // One child table per containment, FK-cascaded to the root + indexed.
+    expect(schema).toContain("order_id uuid not null references orders (id) on delete cascade");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS line_items");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS ship_infos");
+    expect(schema).toContain("CREATE INDEX IF NOT EXISTS line_items_order_id_idx");
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // The root has no flat `Map` (reads reconstruct via HydrateAsync); children
+    // hydrate through the part's own `_Create(State)` seam.
+    expect(repo).not.toContain("private static Order Map(Row r)");
+    expect(repo).toContain(
+      "private static async Task<List<Order>> HydrateAsync(NpgsqlConnection conn, List<Row> rows, CancellationToken cancellationToken)",
+    );
+    expect(repo).toContain("LineItem._Create(new LineItem.State");
+    expect(repo).toContain(
+      "LineItems = __lineItemsByOwner.TryGetValue(r.id, out var __lineItems) ? __lineItems : new List<LineItem>(),",
+    );
+    // Single optional containment hydrates 0-or-1 and slots null when absent.
+    expect(repo).toContain(
+      "Shipping = __shippingByOwner.TryGetValue(r.id, out var __shipping) ? __shipping : null,",
+    );
+    // Save is full-list-replace per containment; each block uses a unique loop
+    // var so two save blocks don't collide in the one SaveAsync.
+    expect(repo).toContain("DELETE FROM line_items WHERE order_id = @id");
+    expect(repo).toContain("foreach (var __lineItemsChild in aggregate.LineItems)");
+    expect(repo).toContain("if (aggregate.Shipping is { } __shippingChild)");
+    // Delete cascades children first.
+    expect(repo).toContain("DELETE FROM line_items WHERE order_id = @id");
+    expect(repo).toContain("DELETE FROM ship_infos WHERE order_id = @id");
+  });
+
+  it("still rejects a part-in-part (nested containment)", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        contains boxes: Box[]
+        entity Box { label: string  contains items: Item[]  entity Item { sku: string } }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
+  });
+
+  it("still rejects nested parts combined with a reference collection", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Tag with crudish { label: string }
+      aggregate Order with crudish {
+        customer: string
+        tags: Tag id[]
+        contains lineItems: LineItem[]
+        entity LineItem { sku: string }
+      }
+      repository Orders for Order { }
+      repository Tags for Tag { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { errors } = await emit(src);
+    expect(
+      errors.some(
+        (e) => /persistence: dapper/.test(e) && /reference-collection associations/.test(e),
+      ),
+    ).toBe(true);
+  });
+});
+
 // Capability filters on Dapper: a non-principal `filter <expr>` is spliced
 // into every SELECT's WHERE (Dapper has no EF HasQueryFilter); the gate only
 // rejects principal-referencing predicates (no request-scoped principal

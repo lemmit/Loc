@@ -641,6 +641,49 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 2: the Dapper adapter's NESTED ENTITY PARTS surface — a state
+    // aggregate with a collection containment + a single optional containment.
+    // Each persists as one flat child table (`id` PK + `<agg>_id` FK + the
+    // part's own columns); reads reconstruct the root through `HydrateAsync`
+    // (which loads each child table + slots them into `_Create(State)`), saves
+    // full-list-replace, deletes cascade the children first.  Build under
+    // /warnaserror — the part `_Create` State seam + VO/enum child columns are
+    // the type-sensitive parts this gate compiles.
+    it("system `persistence: dapper` + nested entity parts — child tables + hydrate build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS line_items");
+        expect(schema).toContain("references orders (id) on delete cascade");
+        expect(
+          fs.readFileSync(
+            path.join(proj, "Infrastructure", "Repositories", "OrderRepository.cs"),
+            "utf8",
+          ),
+        ).toContain("HydrateAsync");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // Event sourcing (appliers A2.2b): a `persistedAs: eventLog` aggregate on a
     // dotnet deployable emits the EF `<Agg>EventRecord` entity + config, the
     // `_Apply`/`_FromEvents` fold on the aggregate, the record-and-apply `emit`,

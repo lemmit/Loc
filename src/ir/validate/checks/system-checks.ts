@@ -1781,8 +1781,38 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every
         // read and full-list-replaced on save by the Dapper repository.
-        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
-          reject(where, "contains nested entity parts");
+        //
+        // Nested entity parts (`contains lineItems: LineItem[]`) are supported
+        // for STATE aggregates whose parts are FLAT: one child table per
+        // containment (`id` PK + `<agg>_id` FK + the part's scalar/enum/vo/id
+        // columns), bulk-loaded on every read and hydrated through the root's
+        // `_Create(State)` seam, full-list-replaced on save, and cascade-deleted.
+        // Still gated (v1 scope): a part-in-part (a part with its OWN
+        // containments), a reference-collection field on a part, and any
+        // containment on an EVENT-SOURCED aggregate (its stream folds children
+        // in-memory — no child table).
+        const contains = a.contains ?? [];
+        if (contains.length > 0) {
+          if (a.persistedAs === "eventLog") {
+            reject(where, "has nested entity parts on an event-sourced aggregate");
+          } else if ((a.associations ?? []).length > 0) {
+            // The Dapper repository's containment hydration reconstructs each
+            // root through `_Create(State)`; the reference-collection load
+            // post-sets a writable list.  v1 keeps these two hydrate paths
+            // mutually exclusive (combining them is a follow-up slice).
+            reject(where, "combines nested entity parts with reference-collection associations");
+          } else {
+            for (const part of a.parts ?? []) {
+              if ((part.contains ?? []).length > 0)
+                reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
+              for (const pf of part.fields) {
+                const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
+                if (pt.kind === "array")
+                  reject(where, `contains a part ('${part.name}') with a collection field`);
+              }
+            }
+          }
+        }
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
         // upsert SET), INCLUDING principal-referencing stamp values — the
