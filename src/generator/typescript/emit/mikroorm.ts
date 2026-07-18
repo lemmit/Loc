@@ -33,8 +33,10 @@
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AssociationIR,
+  ContainmentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EntityPartIR,
   EventIR,
   ExprIR,
   FieldIR,
@@ -68,6 +70,7 @@ import {
   serializeField,
 } from "../repository-document-builder.js";
 import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-find-builder.js";
+import { hydrateEntityExpr } from "../repository-find-hydrate.js";
 import { collectEnums, collectValueObjects } from "../repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
 import { projectFieldEntries, projectionObject } from "../repository-save-builder.js";
@@ -257,6 +260,52 @@ function renderJoinRowEntity(assoc: AssociationIR): { block: string; schemaName:
   };
 }
 
+/** Row-entity class name for a contained entity part (`OrderLine` →
+ *  `OrderLineRow`), its own child table keyed by a `parentId` FK. */
+const partRowClassOf = (partName: string): string => `${partName}Row`;
+
+/** Render one child Row entity + EntitySchema for a contained entity part.
+ *  Columns: `id` (PK), `parentId` (FK to the owner), then the part's own
+ *  fields (scalar / enum / VO-flattened / id).  MikroORM owns the schema, so
+ *  no explicit FK/index — the parent-scoped reads carry the relationship. */
+function renderPartRowEntity(
+  part: EntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): { block: string; schemaName: string } {
+  const cls = partRowClassOf(part.name);
+  const schemaName = `${cls}Schema`;
+  const cols: MikroColumn[] = [
+    { prop: "id", mikroType: "string", tsType: "string", nullable: false, primary: true },
+    { prop: "parentId", mikroType: "string", tsType: "string", nullable: false, primary: false },
+    ...part.fields.filter((f) => !isRefCollection(f.type)).flatMap((f) => fieldColumns(f, ctx)),
+  ];
+  const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
+  const propLines = cols.map((c) => {
+    const parts = [`type: "${c.mikroType}"`];
+    if (c.primary) parts.push("primary: true");
+    if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
+    if (c.nullable) parts.push("nullable: true");
+    return `    ${c.prop}: { ${parts.join(", ")} },`;
+  });
+  return {
+    schemaName,
+    block: lines(
+      `export class ${cls} {`,
+      ...classFields,
+      `}`,
+      "",
+      `export const ${schemaName} = new EntitySchema<${cls}>({`,
+      `  class: ${cls},`,
+      `  tableName: "${snake(plural(part.name))}",`,
+      `  properties: {`,
+      ...propLines,
+      `  },`,
+      `});`,
+      "",
+    ),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // db/entities.ts — Row classes + EntitySchema definitions.
 // ---------------------------------------------------------------------------
@@ -317,6 +366,13 @@ export function renderMikroEntities(
     for (const assoc of agg.associations ?? []) {
       const { block, schemaName: joinSchema } = renderJoinRowEntity(assoc);
       schemaNames.push(joinSchema);
+      blocks.push(block);
+    }
+    // Contained entity parts persist as parent-scoped child Row entities
+    // (relational shape), one table per declared part.
+    for (const part of agg.parts ?? []) {
+      const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
+      schemaNames.push(partSchema);
       blocks.push(block);
     }
   }
@@ -696,17 +752,152 @@ function assocHydrateBind(
 ): string[] {
   const hy = hydrateRootExpr(agg, "row", ctx);
   const head = keyword === "return" ? "return" : `const ${targetVar} =`;
-  if ((agg.associations ?? []).length === 0) {
+  const hasChildren = (agg.associations ?? []).length > 0 || (agg.contains ?? []).length > 0;
+  if (!hasChildren) {
     return [`${indent}${head} rows.map((row) => ${hy});`];
   }
   return [
     `${indent}const rootIds = rows.map((r) => r.id);`,
     ...assocMapLoadLines(agg, emVar, indent),
+    ...containMapLoadLines(agg, ctx, emVar, indent),
     `${indent}${head} rows.map((row) => {`,
     ...assocRowDeclLines(agg, "row", `${indent}  `),
+    ...containRowDeclLines(agg, "row", `${indent}  `),
     `${indent}  return ${hy};`,
     `${indent}});`,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Contained entity parts (`contains <name>: <Part>[]` / singular).  Relational
+// shape: each part is a parent-scoped `<Part>Row` child table.  Mirrors the
+// `Id[]` association machinery — bulk-load into a `<name>ByParent` map on the
+// array reads, inline-load on findById, diff-sync on save.  The domain root
+// hydrates each containment from a bare `<name>` local (hydrateRootExpr), so
+// these helpers just supply those locals.  v1 is bounded to single-level flat
+// parts (validator-gated), so a part row never nests further.
+// ---------------------------------------------------------------------------
+
+/** The entity part a containment names (undefined if malformed — validator-
+ *  gated, so callers no-op). */
+function partForContainment(agg: EnrichedAggregateIR, c: ContainmentIR): EntityPartIR | undefined {
+  return (agg.parts ?? []).find((p) => p.name === c.partName);
+}
+
+/** Save projection for a child part row — `{ id, parentId, <fields> }`,
+ *  reusing the shared field projector so the columns match the Row entity. */
+function partProjection(
+  part: EntityPartIR,
+  varExpr: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  return projectionObject(varExpr, [
+    { fieldName: "id", expr: `${varExpr}.id as string` },
+    { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
+    ...part.fields
+      .filter((f) => !isRefCollection(f.type))
+      .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+  ]);
+}
+
+/** Inline single-owner containment loads (findById / single find) — each
+ *  containment bound to a `<name>` local from its child table. */
+function containInlineLoadLines(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  emVar: string,
+  ownerIdExpr: string,
+  indent: string,
+): string[] {
+  return (agg.contains ?? []).flatMap((c) => {
+    const part = partForContainment(agg, c);
+    if (!part) return [];
+    const prow = partRowClassOf(part.name);
+    if (c.collection) {
+      return [
+        `${indent}const ${c.name} = (await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } })).map((r) => ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+      ];
+    }
+    return [
+      `${indent}const ${c.name}Row = await ${emVar}.findOne(${prow}, { parentId: ${ownerIdExpr} });`,
+      `${indent}const ${c.name} = ${c.name}Row === null ? null : ${hydrateEntityExpr(part, `${c.name}Row`, agg, ctx)};`,
+    ];
+  });
+}
+
+/** Bulk-load every containment into a `<name>ByParent` map keyed by owner id
+ *  (the array-read analogue of `assocMapLoadLines`). */
+function containMapLoadLines(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  emVar: string,
+  indent: string,
+): string[] {
+  return (agg.contains ?? []).flatMap((c) => {
+    const part = partForContainment(agg, c);
+    if (!part) return [];
+    const prow = partRowClassOf(part.name);
+    const rows = `${c.name}Rows`;
+    const map = `${c.name}ByParent`;
+    const elemT = c.collection ? `${part.name}[]` : part.name;
+    const head = [
+      `${indent}const ${rows} = rootIds.length === 0 ? [] : await ${emVar}.find(${prow}, { parentId: { $in: rootIds } }, { orderBy: { parentId: "asc", id: "asc" } });`,
+      `${indent}const ${map} = new Map<string, ${elemT}>();`,
+    ];
+    if (c.collection) {
+      return [
+        ...head,
+        `${indent}for (const r of ${rows}) {`,
+        `${indent}  const list = ${map}.get(r.parentId) ?? [];`,
+        `${indent}  list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `${indent}  ${map}.set(r.parentId, list);`,
+        `${indent}}`,
+      ];
+    }
+    return [
+      ...head,
+      `${indent}for (const r of ${rows}) ${map}.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+    ];
+  });
+}
+
+/** Per-row containment decls binding `<name>` from the bulk `<name>ByParent`
+ *  map (the array-read analogue of `assocRowDeclLines`). */
+function containRowDeclLines(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
+  return (agg.contains ?? []).map(
+    (c) =>
+      `${indent}const ${c.name} = ${c.name}ByParent.get(${rowVar}.id) ?? ${c.collection ? "[]" : "null"};`,
+  );
+}
+
+/** Diff-sync each containment's child rows on save: delete the rows the
+ *  aggregate no longer holds, upsert the current set (id is the PK). */
+function containSaveLines(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  emVar: string,
+  indent: string,
+): string[] {
+  return (agg.contains ?? []).flatMap((c) => {
+    const part = partForContainment(agg, c);
+    if (!part) return [];
+    const prow = partRowClassOf(part.name);
+    const cap = upperFirst(c.name);
+    const itemsRef = c.collection
+      ? `aggregate.${c.name}`
+      : `(aggregate.${c.name} ? [aggregate.${c.name}] : [])`;
+    return [
+      `${indent}// Full child sync of the '${c.name}' containment.`,
+      `${indent}const existing${cap} = await ${emVar}.find(${prow}, { parentId: aggregate.id as string });`,
+      `${indent}const currentIds${cap} = new Set(${itemsRef}.map((e) => e.id as string));`,
+      `${indent}for (const r of existing${cap}) {`,
+      `${indent}  if (!currentIds${cap}.has(r.id)) await ${emVar}.nativeDelete(${prow}, { id: r.id });`,
+      `${indent}}`,
+      `${indent}for (const child of ${itemsRef}) {`,
+      `${indent}  await ${emVar}.upsert(${prow}, ${partProjection(part, "child", ctx)});`,
+      `${indent}}`,
+    ];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -739,6 +930,8 @@ export function renderMikroRepository(
   // are excluded from the aggregate-row save projection (synced separately).
   const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
   const hasAssocs = (agg.associations ?? []).length > 0;
+  const hasContains = (agg.contains ?? []).length > 0;
+  const hasChildren = hasAssocs || hasContains;
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
@@ -875,15 +1068,16 @@ export function renderMikroRepository(
         `  }`,
       );
     }
-    // Single-row find: load the associations inline (owner id known) then
+    // Single-row find: load the children inline (owner id known) then
     // hydrate, mirroring findById.
-    if (hasAssocs) {
+    if (hasChildren) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name} | null> {`,
         `    const em = this.em.fork();`,
         `    const row = await em.findOne(${row}, ${filter});`,
         `    if (row === null) return null;`,
         ...assocInlineLoadLines(agg, "em", "row.id", "    "),
+        ...containInlineLoadLines(agg, ctx, "em", "row.id", "    "),
         `    return ${hydrate("row")};`,
         `  }`,
       );
@@ -945,16 +1139,24 @@ export function renderMikroRepository(
     });
 
   const deleteMethod = agg.canonicalDestroy
-    ? hasAssocs
+    ? hasChildren
       ? lines(
           `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
           `    const em = this.em.fork();`,
           // No FK cascade (MikroORM owns the schema), so clear the owner's
-          // pivot rows before the root delete.
+          // pivot rows + contained child rows before the root delete.
           ...(agg.associations ?? []).map(
             (a) =>
               `    await em.nativeDelete(${joinRowClassOf(a)}, { ${joinColumnName(a.ownerFk)}: id as string });`,
           ),
+          ...(agg.contains ?? []).flatMap((c) => {
+            const part = partForContainment(agg, c);
+            return part
+              ? [
+                  `    await em.nativeDelete(${partRowClassOf(part.name)}, { parentId: id as string });`,
+                ]
+              : [];
+          }),
           `    await em.nativeDelete(${row}, ${withContextFilters("{ id: id as string }", kindClause)});`,
           `  }`,
         )
@@ -987,6 +1189,7 @@ export function renderMikroRepository(
     `      return null;`,
     `    }`,
     ...assocInlineLoadLines(agg, "em", "id as string", "    "),
+    ...containInlineLoadLines(agg, ctx, "em", "id as string", "    "),
     `    const loaded = ${hydrate("row")};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -1011,6 +1214,7 @@ export function renderMikroRepository(
     `    const em = this.em.fork();`,
     ...(versioned ? versionedSaveLines : [upsertCall]),
     ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
+    ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -1054,13 +1258,19 @@ export function renderMikroRepository(
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
-      // The aggregate Row + every `Id[]` association's pivot Row entity.
-      `import { ${[row, ...(agg.associations ?? []).map(joinRowClassOf)].join(", ")} } from "../entities";`,
+      // The aggregate Row + every `Id[]` association's pivot Row entity + each
+      // contained entity part's child Row entity.
+      `import { ${[
+        row,
+        ...(agg.associations ?? []).map(joinRowClassOf),
+        ...(agg.parts ?? []).map((p) => partRowClassOf(p.name)),
+      ].join(", ")} } from "../entities";`,
       // Persist-time audit stamping helper — pulled in only when this
       // aggregate's `save()` stamps (audited).  Stamps the audit columns from
       // the ambient request principal at the upsert (db/audit-stamp.ts).
       audited && `import { stampInsert${versioned ? ", stampUpdate" : ""} } from "../audit-stamp";`,
-      `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
+      // The aggregate root + its contained entity parts (same domain module).
+      `import { ${[agg.name, ...(agg.parts ?? []).map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
       `import { AggregateNotFoundError${versioned ? ", ConcurrencyError" : ""} } from "../../domain/errors";`,

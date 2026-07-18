@@ -599,6 +599,89 @@ describe("mikroorm — aggregate inheritance (wave 2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Contained entity parts (`contains`) on mikroorm — wave 2.  Relational shape:
+// each part is a parent-scoped `<Part>Row` child table, bulk-loaded on read and
+// diff-synced on save (mirrors the drizzle containment path).  Bounded to
+// single-level flat parts.
+// ---------------------------------------------------------------------------
+describe("mikroorm — contained entity parts (wave 2)", () => {
+  const CONTAINS_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      aggregate Order with crudish {
+        customer: string
+        contains shipping: Address?
+        contains lines: OrderLine[]
+        entity Address { city: string  zip: string }
+        entity OrderLine { sku: string  price: Money }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for single-level flat parts", async () => {
+    const { errors } = await emit(CONTAINS_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits a parent-scoped child Row per part (VO fields flattened)", async () => {
+    const { files } = await emit(CONTAINS_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class AddressRow");
+    expect(entities).toContain("export class OrderLineRow");
+    expect(entities).toContain('tableName: "order_lines"');
+    expect(entities).toContain("parentId!: string;");
+    expect(entities).toContain("price_amount!: number;");
+  });
+
+  it("bulk-loads parts by parent on reads and diff-syncs them on save", async () => {
+    const { files } = await emit(CONTAINS_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Collection containment → ByParent map on the array reads.
+    expect(repo).toContain("const linesByParent = new Map<string, OrderLine[]>();");
+    expect(repo).toContain("em.find(OrderLineRow, { parentId: { $in: rootIds } }");
+    // Singular optional containment → nullable local.
+    expect(repo).toContain("const shipping = shippingByParent.get(row.id) ?? null;");
+    // Save diff-syncs: delete removed child rows, upsert current.
+    expect(repo).toContain("await em.upsert(OrderLineRow,");
+    expect(repo).toContain("if (!currentIdsLines.has(r.id)) await em.nativeDelete(OrderLineRow");
+    // Delete clears child rows before the root.
+    expect(repo).toContain("await em.nativeDelete(OrderLineRow, { parentId: id as string });");
+  });
+
+  it("still rejects a part that itself contains a part (deeper nesting)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customer: string
+        contains boxes: Box[]
+        entity Box {
+          label: string
+          contains items: Item[]
+          entity Item { sku: string }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /entity part/.test(e))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Server-managed access fields (token / internal / secret) on mikroorm — the
 // access modifier shapes only the API wire surface, so the data-mapper stores
 // the field as an ordinary column that round-trips through the shared save /

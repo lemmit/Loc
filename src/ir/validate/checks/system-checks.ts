@@ -27,6 +27,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
+  EntityPartIR,
   ExprIR,
   FunctionIR,
   OperationIR,
@@ -1884,8 +1885,27 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // gated until that path is wired.
         if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
           reject(where, "has reference-collection associations on an event-sourced aggregate");
-        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
-          reject(where, "contains nested entity parts");
+        // Contained entity parts ARE supported (relational child tables, wave 2):
+        // each part persists as a parent-scoped `<Part>Row` child table, bulk-
+        // loaded on read and diff-synced on save (the MikroORM analogue of the
+        // drizzle containment path).  Bounded to single-level FLAT parts (no
+        // part-of-a-part, no collection field inside a part) on a plain state
+        // aggregate — deeper nesting / inheritance / event-sourcing stay gated.
+        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
+          const flatType = (t: TypeIR): boolean =>
+            (t.kind === "optional" ? t.inner : t).kind !== "array";
+          const partFlat = (p: EntityPartIR): boolean =>
+            (p.contains ?? []).length === 0 && p.fields.every((f) => flatType(f.type));
+          if (a.persistedAs === "eventLog")
+            reject(where, "contains nested entity parts on an event-sourced aggregate");
+          else if (a.isAbstract || a.extendsAggregate)
+            reject(where, "contains nested entity parts on an aggregate-inheritance participant");
+          else if (!(a.parts ?? []).every(partFlat))
+            reject(
+              where,
+              "contains a nested or collection-bearing entity part (v1 supports single-level flat parts)",
+            );
+        }
         // `filter` capability predicates ARE supported: the repository ANDs each
         // non-principal predicate (a MikroORM FilterQuery) into every root read
         // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
