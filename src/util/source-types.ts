@@ -182,6 +182,19 @@ function seedBuiltins(): void {
     ],
   });
   registerSourceType({
+    name: "localDisk",
+    supports: {
+      objectStore: {
+        // Dependency-free local-directory object store.  Stores raw bytes
+        // keyed by object key; no signed URLs or versioning (those are
+        // cloud-object-store features).  No required `bucket` config — the
+        // store is a local data directory, not a remote bucket.
+        capabilities: set("blob", "list"),
+        interfaces: set<LoomInterface>("sdk"),
+      },
+    },
+  });
+  registerSourceType({
     name: "rabbitmq",
     supports: {
       queue: {

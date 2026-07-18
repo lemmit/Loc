@@ -49,6 +49,16 @@ export type PrimitiveName =
    *  `docs/old/proposals/document-and-json-hierarchies.md` (Option 1,
    *  D-DOCUMENT-AXIS). */
   | "json"
+  /** A file attachment — a leaf primitive (like `json`), passive/wire-only:
+   *  NO arithmetic, operators, or expression semantics.  Its wire shape is a
+   *  FIXED typed object `{ url: string, key: string, contentType: string,
+   *  size: int }` (a `FileRef`), and it is stored as a JSONB / jsonb column
+   *  exactly like `json` (never expanded or structurally diffed in
+   *  `wireShape`).  The bytes themselves live in object storage (an
+   *  `objectStore` data source — `s3` / `localDisk`); the column carries only
+   *  the reference.  A File-bearing aggregate requires its host deployable to
+   *  bind an `objectStore` (`loom.file-field-needs-object-storage`). */
+  | "File"
   /** An ABSOLUTE span of time (A5 temporal, docs/old/plans/stdlib.md) — fixed
    *  millisecond width per unit, so it renders uniformly on every backend.
    *  EXPRESSION-ONLY in this slice: not in the grammar's `PrimitiveType`
@@ -80,6 +90,7 @@ export const PRIMITIVES: readonly PrimitiveName[] = [
   "datetime",
   "guid",
   "json",
+  "File",
 ] as const;
 
 /** Information-flow sensitivity tags carried by a value's type.  See
@@ -2338,6 +2349,7 @@ export type StorageKind =
   | "clickhouse"
   | "bigquery"
   | "s3"
+  | "localDisk"
   | "rabbitmq"
   | "restApi";
 

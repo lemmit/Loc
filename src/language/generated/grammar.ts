@@ -4677,6 +4677,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "localDisk"
+          },
+          {
+            "$type": "Keyword",
             "value": "rabbitmq"
           },
           {
@@ -14653,6 +14657,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             {
               "$type": "Keyword",
               "value": "json"
+            },
+            {
+              "$type": "Keyword",
+              "value": "File"
             }
           ]
         }
