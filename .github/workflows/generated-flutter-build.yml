@@ -67,9 +67,9 @@ jobs:
           #   • Riverpod state + actions (Home's counter: state{count} + inc())
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
           #   • forms (NewProduct's CreateForm; ProductAdmin's OperationForm +
-          #     DestroyForm on a :id route) over every field kind (string/int/bool/
-          #     enum/datetime/optional + a Money value object + a Category id
-          #     FK-loaded dropdown)
+          #     Modal-wrapped op-form dialog + DestroyForm on a :id route) over
+          #     every field kind (string/int/bool/enum/datetime/optional + a Money
+          #     value object + a Category id FK-loaded dropdown)
           #   • display + multi-page named routing + navigation buttons
           # This is the load-bearing "does the emitted Dart compile" gate.
           cat > ci-flutter/showcase.ddd <<'DDD'
@@ -122,7 +122,10 @@ jobs:
               }
               page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
-                Heading { "Admin", level: 1 }, OperationForm { of: Product, op: rename }, DestroyForm { of: Product }
+                Heading { "Admin", level: 1 },
+                OperationForm { of: Product, op: rename },
+                Modal { OperationForm { of: Product, op: rename }, trigger: Button { "Rename…" }, title: "Rename product" },
+                DestroyForm { of: Product }
               } }
             }
             deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
