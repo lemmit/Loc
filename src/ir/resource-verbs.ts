@@ -115,6 +115,19 @@ export const RESOURCE_VERBS: readonly ResourceVerbDef[] = [
     ],
     result: "json",
   },
+  {
+    // Surface `kind: mailer` → infra `email`.  Single plain-text verb for
+    // v1; templated / HTML / multi-recipient email is a later slice.
+    kind: "mailer",
+    verb: "send",
+    capability: "send",
+    params: [
+      { name: "to", type: "string" },
+      { name: "subject", type: "string" },
+      { name: "body", type: "string" },
+    ],
+    result: "void",
+  },
 ];
 
 /** Look up a verb definition by (kind, verb), or `undefined`. */

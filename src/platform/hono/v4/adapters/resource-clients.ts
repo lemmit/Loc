@@ -18,9 +18,14 @@ function cfg(store: StorageIR | undefined, key: string): string | undefined {
   return entry && entry.value.kind === "string" ? entry.value.value : undefined;
 }
 
+/** `SALES_FILES`-style SCREAMING_SNAKE env-var base for a resource. */
+function envBase(resourceName: string): string {
+  return resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+}
+
 /** `SALES_FILES_URL`-style env var name for a resource's connection. */
 function envVar(resourceName: string): string {
-  return `${resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}_URL`;
+  return `${envBase(resourceName)}_URL`;
 }
 
 /** Resolve each resource to the physical store it `use:`s. */
@@ -344,11 +349,109 @@ export const restApiResourceAdapter: ResourceAdapter = {
   },
 };
 
+/** The `from:` sender address for a mailer resource — env-overridable,
+ *  defaulting to the `from` config on the bound storage. */
+function mailFromLine(r: DataSourceIR, stores: readonly StorageIR[]): string {
+  const from = cfg(storeOf(r, stores), "from") ?? "no-reply@example.test";
+  return `export const ${r.name}From = process.env.${envBase(r.name)}_FROM ?? ${JSON.stringify(from)};`;
+}
+
+export const smtpResourceAdapter: ResourceAdapter = {
+  name: "smtp",
+  supportedKinds: ["mailer"],
+  supports: (storageType, kind) => storageType === "smtp" && supportsSurfaceKind("smtp", kind),
+  // nodemailer ships no bundled type declarations.
+  emitProjectDeps: () => ({ nodemailer: "^6.9.0", "@types/nodemailer": "^6.4.0" }),
+  emitClientModule(resources, stores): Lines {
+    const out: string[] = [`import nodemailer from "nodemailer";`, ``];
+    for (const r of resources) {
+      out.push(`// mailer '${r.name}' — SMTP transport (dev: Mailpit on :1025).`);
+      out.push(mailFromLine(r, stores));
+      out.push(
+        `export const ${r.name}Transport = nodemailer.createTransport(process.env.${envVar(r.name)} ?? "smtp://${r.name}:1025");`,
+      );
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$send(to: string, subject: string, body: string): Promise<void> {`,
+      );
+      out.push(
+        `  await ${r.name}Transport.sendMail({ from: ${r.name}From, to, subject, text: body });`,
+      );
+      out.push(`}`);
+      out.push(``);
+    }
+    return out;
+  },
+};
+
+export const sesResourceAdapter: ResourceAdapter = {
+  name: "ses",
+  supportedKinds: ["mailer"],
+  supports: (storageType, kind) => storageType === "ses" && supportsSurfaceKind("ses", kind),
+  emitProjectDeps: () => ({ "@aws-sdk/client-ses": "^3.700.0" }),
+  emitClientModule(resources, stores): Lines {
+    const out: string[] = [
+      `import { SendEmailCommand, SESClient } from "@aws-sdk/client-ses";`,
+      ``,
+    ];
+    for (const r of resources) {
+      const region = cfg(storeOf(r, stores), "region") ?? "us-east-1";
+      out.push(`// mailer '${r.name}' — Amazon SES.`);
+      out.push(mailFromLine(r, stores));
+      out.push(
+        `export const ${r.name}Client = new SESClient({ region: process.env.${envBase(r.name)}_REGION ?? ${JSON.stringify(region)} });`,
+      );
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$send(to: string, subject: string, body: string): Promise<void> {`,
+      );
+      out.push(`  await ${r.name}Client.send(`);
+      out.push(`    new SendEmailCommand({`);
+      out.push(`      Source: ${r.name}From,`);
+      out.push(`      Destination: { ToAddresses: [to] },`);
+      out.push(`      Message: { Subject: { Data: subject }, Body: { Text: { Data: body } } },`);
+      out.push(`    }),`);
+      out.push(`  );`);
+      out.push(`}`);
+      out.push(``);
+    }
+    return out;
+  },
+};
+
+export const sendgridResourceAdapter: ResourceAdapter = {
+  name: "sendgrid",
+  supportedKinds: ["mailer"],
+  supports: (storageType, kind) =>
+    storageType === "sendgrid" && supportsSurfaceKind("sendgrid", kind),
+  emitProjectDeps: () => ({ "@sendgrid/mail": "^8.1.0" }),
+  emitClientModule(resources, stores): Lines {
+    const out: string[] = [`import sgMail from "@sendgrid/mail";`, ``];
+    out.push(`sgMail.setApiKey(process.env.SENDGRID_API_KEY ?? "");`);
+    out.push(``);
+    for (const r of resources) {
+      out.push(`// mailer '${r.name}' — SendGrid.`);
+      out.push(mailFromLine(r, stores));
+      out.push(``);
+      out.push(
+        `export async function ${r.name}$send(to: string, subject: string, body: string): Promise<void> {`,
+      );
+      out.push(`  await sgMail.send({ to, from: ${r.name}From, subject, text: body });`);
+      out.push(`}`);
+      out.push(``);
+    }
+    return out;
+  },
+};
+
 const ADAPTERS: readonly ResourceAdapter[] = [
   s3ResourceAdapter,
   localDiskResourceAdapter,
   rabbitmqResourceAdapter,
   restApiResourceAdapter,
+  smtpResourceAdapter,
+  sesResourceAdapter,
+  sendgridResourceAdapter,
 ];
 
 /** The hono ResourceAdapter realizing a given sourceType, if any. */

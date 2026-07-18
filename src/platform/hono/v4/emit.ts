@@ -819,7 +819,8 @@ export function generateTypeScriptForContexts(
     const bySourceType = new Map<string, DataSourceIR[]>();
     for (const r of system.sys.dataSources) {
       if (!wired.has(r.name)) continue;
-      if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+      if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api" && r.kind !== "mailer")
+        continue;
       const st = storeType.get(r.storageName);
       if (!st) continue;
       const group = bySourceType.get(st);

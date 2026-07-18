@@ -3365,6 +3365,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "api"
+          },
+          {
+            "$type": "Keyword",
+            "value": "mailer"
           }
         ]
       },
@@ -4690,6 +4694,18 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "restApi"
+          },
+          {
+            "$type": "Keyword",
+            "value": "smtp"
+          },
+          {
+            "$type": "Keyword",
+            "value": "ses"
+          },
+          {
+            "$type": "Keyword",
+            "value": "sendgrid"
           }
         ]
       },
@@ -14049,6 +14065,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "mailer"
+          },
+          {
+            "$type": "Keyword",
             "value": "managed"
           },
           {
@@ -14269,6 +14289,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "framework"
+          },
+          {
+            "$type": "Keyword",
+            "value": "from"
           },
           {
             "$type": "Keyword",

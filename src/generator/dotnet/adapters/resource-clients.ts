@@ -229,10 +229,149 @@ const restApiDotnetAdapter: DotnetResourceAdapter = {
   },
 };
 
+function mailFrom(r: DataSourceIR, stores: readonly StorageIR[]): string {
+  return cfg(storeOf(r, stores), "from") ?? "no-reply@example.test";
+}
+
+/** SCREAMING_SNAKE env stem without the `_URL` suffix. */
+function envStem(resourceName: string): string {
+  return envVar(resourceName).replace(/_URL$/, "");
+}
+
+const smtpDotnetAdapter: DotnetResourceAdapter = {
+  name: "smtp",
+  nugetDeps: () => ({ MailKit: "4.8.0" }),
+  emitClientClass(resources, stores, ns): string {
+    const lines: string[] = [
+      "// Auto-generated.",
+      "using System;",
+      "using System.Threading.Tasks;",
+      "using MailKit.Net.Smtp;",
+      "using MailKit.Security;",
+      "using MimeKit;",
+      "",
+      `namespace ${ns}.Resources;`,
+      "",
+      "public static class SmtpResources",
+      "{",
+    ];
+    for (const r of resources) {
+      const cls = upperFirst(r.name);
+      lines.push(
+        `    private static readonly string ${cls}Url =`,
+        `        Environment.GetEnvironmentVariable("${envVar(r.name)}") ?? "smtp://localhost:1025";`,
+        `    private static readonly string ${cls}From =`,
+        `        Environment.GetEnvironmentVariable("${envStem(r.name)}_FROM") ?? ${JSON.stringify(mailFrom(r, stores))};`,
+        "",
+        `    public static async Task ${cls}_Send(string to, string subject, string body)`,
+        "    {",
+        `        var uri = new Uri(${cls}Url);`,
+        "        var message = new MimeMessage();",
+        `        message.From.Add(MailboxAddress.Parse(${cls}From));`,
+        "        message.To.Add(MailboxAddress.Parse(to));",
+        "        message.Subject = subject;",
+        '        message.Body = new TextPart("plain") { Text = body };',
+        "        using var client = new SmtpClient();",
+        "        await client.ConnectAsync(uri.Host, uri.Port < 0 ? 25 : uri.Port, SecureSocketOptions.None);",
+        "        await client.SendAsync(message);",
+        "        await client.DisconnectAsync(true);",
+        "    }",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  },
+};
+
+const sesDotnetAdapter: DotnetResourceAdapter = {
+  name: "ses",
+  nugetDeps: () => ({ "AWSSDK.SimpleEmail": "3.7.400.108" }),
+  emitClientClass(resources, stores, ns): string {
+    const lines: string[] = [
+      "// Auto-generated.",
+      "using System;",
+      "using System.Collections.Generic;",
+      "using System.Threading.Tasks;",
+      "using Amazon.SimpleEmail;",
+      "using Amazon.SimpleEmail.Model;",
+      "",
+      `namespace ${ns}.Resources;`,
+      "",
+      "public static class SesResources",
+      "{",
+    ];
+    for (const r of resources) {
+      const cls = upperFirst(r.name);
+      lines.push(
+        `    private static readonly AmazonSimpleEmailServiceClient ${cls}Client = new AmazonSimpleEmailServiceClient();`,
+        `    private static readonly string ${cls}From =`,
+        `        Environment.GetEnvironmentVariable("${envStem(r.name)}_FROM") ?? ${JSON.stringify(mailFrom(r, stores))};`,
+        "",
+        `    public static async Task ${cls}_Send(string to, string subject, string body)`,
+        "    {",
+        `        await ${cls}Client.SendEmailAsync(new SendEmailRequest`,
+        "        {",
+        `            Source = ${cls}From,`,
+        "            Destination = new Destination { ToAddresses = new List<string> { to } },",
+        "            Message = new Message",
+        "            {",
+        "                Subject = new Content(subject),",
+        "                Body = new Body { Text = new Content(body) },",
+        "            },",
+        "        });",
+        "    }",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  },
+};
+
+const sendgridDotnetAdapter: DotnetResourceAdapter = {
+  name: "sendgrid",
+  nugetDeps: () => ({ SendGrid: "9.29.3" }),
+  emitClientClass(resources, stores, ns): string {
+    const lines: string[] = [
+      "// Auto-generated.",
+      "using System;",
+      "using System.Threading.Tasks;",
+      "using SendGrid;",
+      "using SendGrid.Helpers.Mail;",
+      "",
+      `namespace ${ns}.Resources;`,
+      "",
+      "public static class SendgridResources",
+      "{",
+    ];
+    for (const r of resources) {
+      const cls = upperFirst(r.name);
+      lines.push(
+        `    private static readonly string ${cls}From =`,
+        `        Environment.GetEnvironmentVariable("${envStem(r.name)}_FROM") ?? ${JSON.stringify(mailFrom(r, stores))};`,
+        "",
+        `    public static async Task ${cls}_Send(string to, string subject, string body)`,
+        "    {",
+        '        var client = new SendGridClient(Environment.GetEnvironmentVariable("SENDGRID_API_KEY") ?? "");',
+        `        var msg = MailHelper.CreateSingleEmail(new EmailAddress(${cls}From), new EmailAddress(to), subject, body, body);`,
+        "        await client.SendEmailAsync(msg);",
+        "    }",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  },
+};
+
 const ADAPTERS: readonly DotnetResourceAdapter[] = [
   s3DotnetAdapter,
   rabbitmqDotnetAdapter,
   restApiDotnetAdapter,
+  smtpDotnetAdapter,
+  sesDotnetAdapter,
+  sendgridDotnetAdapter,
 ];
 
 /** The .NET ResourceAdapter realizing a sourceType, if any, and only
@@ -261,7 +400,8 @@ export function emitDotnetResourceFiles(
   const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
   const bySourceType = new Map<string, DataSourceIR[]>();
   for (const r of sys.dataSources) {
-    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api") continue;
+    if (r.kind !== "objectStore" && r.kind !== "queue" && r.kind !== "api" && r.kind !== "mailer")
+      continue;
     const st = storeType.get(r.storageName);
     if (!st || !dotnetResourceAdapterFor(st)) continue;
     const group = bySourceType.get(st);

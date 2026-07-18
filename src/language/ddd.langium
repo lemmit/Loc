@@ -359,7 +359,7 @@ IndexSpec:
 
 DataSourceKind returns string:
     'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica'
-    | 'objectStore' | 'queue' | 'api';
+    | 'objectStore' | 'queue' | 'api' | 'mailer';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -566,7 +566,8 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 's3' | 'localDisk' | 'rabbitmq' | 'nats' | 'restApi';
+    | 's3' | 'localDisk' | 'rabbitmq' | 'nats' | 'restApi'
+    | 'smtp' | 'ses' | 'sendgrid';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -1799,7 +1800,7 @@ CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
       | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
-      | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'message' | 'migration' | 'money'
+      | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
       | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix'
@@ -1820,7 +1821,7 @@ LooseName returns string:
     ID | CommonSoftKeywords
     // LooseName-only (soft here but not in every value position):
     | 'aggregates' | 'allow' | 'api' | 'await' | 'bind' | 'cache' | 'component' | 'contains'
-    | 'contexts' | 'deep' | 'design' | 'directoryLayout' | 'framework' | 'global' | 'id' | 'ignoring'
+    | 'contexts' | 'deep' | 'design' | 'directoryLayout' | 'framework' | 'from' | 'global' | 'id' | 'ignoring'
     | 'link' | 'local' | 'menu' | 'modules' | 'of' | 'page' | 'permissions' | 'persistence'
     | 'policy' | 'route' | 'section' | 'static' | 'targets' | 'transactional' | 'ui' | 'urlStyle'
     | 'views' | 'workflows';

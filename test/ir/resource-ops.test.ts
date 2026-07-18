@@ -100,3 +100,60 @@ describe("resource-op validation", () => {
     ).toBe(true);
   });
 });
+
+// ── mailer kind (M-T4.6) ─────────────────────────────────────────────
+const MAILER = `
+system Sys {
+  subdomain Sales { context Sales {
+    aggregate Order { customerEmail: string }
+    workflow Notify { create(customerEmail: string) { __BODY__ } }
+  } }
+  storage pg { type: postgres }
+  storage mailServer { type: smtp, config: { from: "no-reply@acme.test" } }
+  resource salesState { for: Sales, kind: state, use: pg }
+  resource mail { for: Sales, kind: mailer, use: mailServer }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState, mail], port: 3000 }
+}`;
+
+async function mailerDiags(body: string) {
+  const { model } = await parseString(MAILER.replace("__BODY__", body), { validate: false });
+  return validateLoomModel(enrichLoomModel(lowerModel(model)));
+}
+
+describe("mailer resource-op", () => {
+  it("lowers `mail.send(...)` to a resource-op carrying the mailer kind + send capability", async () => {
+    const { model } = await parseString(
+      MAILER.replace("__BODY__", `mail.send(customerEmail, "s", "b")`),
+      { validate: false },
+    );
+    const ctx = lowerModel(model).systems[0]!.subdomains[0]!.contexts.find(
+      (c) => c.name === "Sales",
+    )!;
+    const call = asCall(
+      ctx.workflows
+        .find((w) => w.name === "Notify")!
+        .statements.find((s) => s.kind === "resource-call"),
+    );
+    expect(call.callKind).toBe("resource-op");
+    expect(call.resourceOp).toMatchObject({
+      resourceName: "mail",
+      resourceKind: "mailer",
+      verb: "send",
+      capability: "send",
+    });
+  });
+
+  it("accepts a valid mail.send workflow", async () => {
+    const diags = await mailerDiags(`mail.send(customerEmail, "Order", "Thanks")`);
+    expect(diags.filter((d) => d.severity === "error")).toEqual([]);
+  });
+
+  it("rejects an unknown mailer verb", async () => {
+    const diags = await mailerDiags(`mail.blast(customerEmail)`);
+    expect(
+      diags.some(
+        (d) => d.severity === "error" && /is not a valid verb for a mailer/.test(d.message),
+      ),
+    ).toBe(true);
+  });
+});
