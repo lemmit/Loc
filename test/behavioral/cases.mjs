@@ -112,6 +112,13 @@ const BEHAVIOURAL_SKIP = {
     // (schema-qualified secondary ToTable calls + jsonb owned-entity key/column
     // mapping). No dotnet behavioural skips remain.
   },
+  elixir: {
+    // B6 — elixir doesn't enforce the `when` canCommand state-gate at runtime
+    // (the guarded op resolves instead of 409). A correctness gap to fix.
+    "state-gate": "B6: elixir `when` state-gate not enforced at runtime",
+    // B5 — elixir document/embedded shape create 422s (Ecto changeset/cast).
+    shapes: "B5: elixir document/embedded shape create 422s",
+  },
 };
 
 /** Filter a case-name list against the platform's behavioural skip set. */

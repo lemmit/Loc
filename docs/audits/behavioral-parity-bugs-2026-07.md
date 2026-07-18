@@ -24,16 +24,18 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 
 | System (feature)              | node | java | python | dotnet | elixir |
 |-------------------------------|:----:|:----:|:------:|:------:|:------:|
-| state-gate (`when` gate)      |  ✅  |  ✅  |   ✅   |   ✅   |  ⏳CI  |
-| sales (core CRUD/VO/assoc)    |  ✅  |  ✅  |   ✅   |   ✅   |  ⏳CI  |
-| payments (inheritance)        |  ✅  |  ✅  |   ✅   |✅ B2   |  ⏳CI  |
-| ledger (event-sourcing)       |✅ B1 |  ✅  |   ✅   |   ✅   |  ⏳CI  |
-| shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |  ⏳CI  |
-| value-collections (`Money[]`) |  ✅  |  ✅  |   ✅   |✅ B4   |  ⏳CI  |
+| state-gate (`when` gate)      |  ✅  |  ✅  |   ✅   |   ✅   |🔴 B6   |
+| sales (core CRUD/VO/assoc)    |  ✅  |  ✅  |   ✅   |   ✅   |  ✅    |
+| payments (inheritance)        |  ✅  |  ✅  |   ✅   |✅ B2   |  ✅    |
+| ledger (event-sourcing)       |✅ B1 |  ✅  |   ✅   |   ✅   |  ✅    |
+| shapes (document/embedded)    |  ✅  |  ✅  |   ✅   |✅ B3   |🔴 B5   |
+| value-collections (`Money[]`) |  ✅  |  ✅  |   ✅   |✅ B4   |  ✅    |
+| provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 
-⏳CI = elixir has no host toolchain (needs the `hexpm/elixir` docker image + the
-hex-mirror for egress); its bugs will be gathered from `behavioral-e2e-elixir.yml`
-once this branch's CI runs, and appended here.
+Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
+(the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
+`Object.groupBy`; host apt ships only Elixir 1.14, and the 1.16 binary download is
+org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
 
 ---
 
@@ -133,6 +135,32 @@ once this branch's CI runs, and appended here.
   its snake_case column (`.HasColumnName("id"|"data"|"version")`, `Id` also
   `ValueGeneratedNever`).
 - **Status:** ✅ fixed — `shapes` (both document + embedded cases) green on dotnet.
+
+## B6 🔴 elixir — `when` state-gate is not enforced at runtime
+
+- **Where:** `src/generator/elixir/` (operation `when` canCommand guard).
+- **Repro:** `test/fixtures/corpus/state-gate.ddd` on elixir —
+  `POST /api/orders/{id}/cancel` on a **Shipped** order should be rejected 409 (the
+  `when this.status != Shipped …` gate), but on elixir the call **resolves** ("the
+  call resolved, expected it to reject"). node/java/python/dotnet all return 409.
+- **Impact:** a **correctness/consistency control silently not enforced** — every
+  `operation … when <guard>` runs unconditionally on elixir, so state-gated
+  commands execute in states they should be blocked in.
+- **Status:** confirmed (op resolves instead of 409); the `when` predicate check
+  is missing from the elixir operation path.
+
+## B5 🔴 elixir — `shape: document` / `shape: embedded` create 422s
+
+- **Where:** `src/generator/elixir/` (jsonb shape → Ecto changeset/schema).
+- **Repro:** `test/behavioral/systems/shapes.ddd` on elixir (booted via the
+  `elixir:1.16-otp-26` docker image + node 22) — `POST /api/carts` (document) and
+  `POST /api/wishlists` (embedded) → **422 "Validation failed"** with an EMPTY
+  `errors` array. node/java/python pass; dotnet crashes on boot (B3) — elixir
+  fails differently (changeset rejects the create with no field error).
+- **Impact:** document/embedded aggregates can't be created on elixir at runtime.
+  ES `ledger` PASSES on elixir (contrast node B1), so this is shape-specific.
+- **Status:** confirmed 422; the Ecto changeset/cast for the jsonb shape is the
+  suspect (empty errors ⇒ a top-level cast/validation rejects before field checks).
 
 <!-- Note the asymmetry: dotnet's event-sourced `ledger` PASSES (node's B1 fails);
      node's `payments`/`shapes` PASS (dotnet's B2/B3 fail). Each backend has its
