@@ -1,5 +1,6 @@
 {
   "DELETE": [],
+  "File": [],
   "GET": [],
   "PATCH": [],
   "POST": [],
@@ -424,6 +425,7 @@
   "local": [
     "paramName"
   ],
+  "localDisk": [],
   "log": [],
   "long": [],
   "main": [],

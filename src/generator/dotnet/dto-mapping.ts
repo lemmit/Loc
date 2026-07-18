@@ -54,6 +54,9 @@ const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
   // Opaque JSON blob — round-trips through System.Text.Json untouched
   // (System.Text.Json serialises a JsonElement back verbatim).
   json: "System.Text.Json.JsonElement",
+  // Passive wire-only leaf — the shared FileRef reference record
+  // (bytes live in object storage; the DTO carries only the reference).
+  File: "FileRef",
 };
 
 /** C# expression rendering a domain `DateTime` as its canonical wire string:

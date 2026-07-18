@@ -988,6 +988,10 @@ const CS_TYPE_TARGET: TypeTarget = {
         return "Guid";
       case "json":
         return "System.Text.Json.JsonElement";
+      case "File":
+        // Passive wire-only leaf — the shared FileRef reference record
+        // (emitted once per project; see the wire/DTO emitter).
+        return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as a native TimeSpan.
         // Expression-only (never a field / wire type in this slice);

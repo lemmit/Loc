@@ -2011,6 +2011,10 @@ function primitiveColumnType(name: string): ColumnType {
       return { kind: "uuid" };
     case "json":
       return { kind: "json" };
+    case "File":
+      // File reference (FileRef) is stored as JSONB, exactly like `json` —
+      // the bytes live in object storage; the column carries the reference.
+      return { kind: "json" };
     default:
       throw new Error(`migrations-builder: unknown primitive type '${name}'`);
   }

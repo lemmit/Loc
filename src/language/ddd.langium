@@ -566,7 +566,7 @@ StorageType returns string:
     | 'elastic' | 'meilisearch'
     | 'kafka'
     | 'clickhouse' | 'bigquery'
-    | 's3' | 'rabbitmq' | 'nats' | 'restApi';
+    | 's3' | 'localDisk' | 'rabbitmq' | 'nats' | 'restApi';
 
 ConnectionSource:
       {infer ServiceConnectionSource} 'service' '(' service=ID ')'
@@ -1871,7 +1871,7 @@ BaseType:
     PrimitiveType | SlotType | ActionType | SelfType | IdType | NamedType;
 
 PrimitiveType:
-    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
+    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json' | 'File');
 
 // Element-shaped param type for component slot injection.  Valid only on a
 // `component`'s parameter list; values flow as JSX (`React.ReactNode`-ish in

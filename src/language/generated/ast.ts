@@ -52,6 +52,7 @@ export type DddKeywordNames =
     | ">="
     | "?"
     | "DELETE"
+    | "File"
     | "GET"
     | "PATCH"
     | "POST"
@@ -197,6 +198,7 @@ export type DddKeywordNames =
     | "literal"
     | "loads"
     | "local"
+    | "localDisk"
     | "log"
     | "long"
     | "main"
@@ -2769,7 +2771,7 @@ export function isPrimitiveConversion(item: unknown): item is PrimitiveConversio
 export interface PrimitiveType extends langium.AstNode {
     readonly $container: TypeAtom | TypeRef;
     readonly $type: 'PrimitiveType';
-    name: 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'json' | 'long' | 'money' | 'string';
+    name: 'File' | 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'json' | 'long' | 'money' | 'string';
 }
 
 export const PrimitiveType = {
@@ -3454,10 +3456,10 @@ export function isStorage(item: unknown): item is Storage {
     return reflection.isInstance(item, Storage.$type);
 }
 
-export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'meilisearch' | 'mysql' | 'nats' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
+export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | 'kafka' | 'localDisk' | 'meilisearch' | 'mysql' | 'nats' | 'postgres' | 'rabbitmq' | 'redis' | 'restApi' | 's3' | 'sqlite';
 
 export function isStorageType(item: unknown): item is StorageType {
-    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
+    return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'localDisk' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
 }
 
 export interface Store extends langium.AstNode {

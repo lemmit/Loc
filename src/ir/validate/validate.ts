@@ -51,6 +51,7 @@ import {
   validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
+  validateFileFieldObjectStorage,
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
   validateInheritanceStorage,
@@ -136,6 +137,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateComposeUniqueness(sys, diags);
     validateDuplicateTables(sys, diags);
     validateDataSourceCoverage(sys, diags);
+    validateFileFieldObjectStorage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
     validateElixirOpSelfCallPosition(sys, diags);

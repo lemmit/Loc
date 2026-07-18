@@ -317,6 +317,8 @@ export function zodForViewResponseInner(t: TypeIR): string {
           return "z.string()";
         case "json":
           return "z.unknown()";
+        case "File":
+          return "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })";
         case "duration":
           // A5: expression-only primitive — never a view-row / wire type.
           throw new Error("internal: 'duration' is expression-only and never reaches a view row");

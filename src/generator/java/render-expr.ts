@@ -967,6 +967,10 @@ const JAVA_TYPE_TARGET: TypeTarget = {
         return "UUID";
       case "json":
         return "JsonNode";
+      case "File":
+        // Passive wire-only leaf — the shared FileRef reference record
+        // (emitted once per project; see the wire emitter).
+        return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as java.time.Duration.
         // Expression-only (never a field / wire type in this slice).

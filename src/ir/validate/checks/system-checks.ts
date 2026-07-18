@@ -39,6 +39,7 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../types/loom-ir.js";
+import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
@@ -546,6 +547,51 @@ export function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[
           `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
         source: `${sys.name}/${dep.name}`,
       });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File-field object-storage coverage.  A `File` primitive is passive/
+// wire-only: it stores a `FileRef` reference in the row (JSONB), while the
+// bytes live in an object store.  A backend deployable that hosts a
+// File-bearing aggregate must therefore bind at least one `objectStore`
+// dataSource (an `s3` / `localDisk` storage), or the upload/download
+// endpoints have nowhere to put the bytes.  Frontend-only platforms own no
+// storage and can't bind one, so they're skipped (a react frontend serves
+// the wire shape, not the object).
+// ---------------------------------------------------------------------------
+export function validateFileFieldObjectStorage(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const dsByName = new Map<string, DataSourceIR>();
+  for (const d of sys.dataSources) dsByName.set(d.name, d);
+
+  for (const dep of sys.deployables) {
+    if (!platformOwnsBackend(dep.platform)) continue;
+    const hasObjectStore = (dep.dataSourceNames ?? []).some(
+      (n) => dsByName.get(n)?.kind === "objectStore",
+    );
+    if (hasObjectStore) continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const fileField = aggregateFileField(agg as AggregateIR);
+        if (!fileField) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.file-field-needs-object-storage",
+          message:
+            `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
+            `which has a \`File\` field ('${fileField}'), but binds no object-store ` +
+            `dataSource.  A \`File\` stores its bytes in an object store — declare a ` +
+            `\`storage <s> { type: localDisk }\` (or \`s3\`), a ` +
+            `\`dataSource <ds> { for: ${ctxName}, kind: objectStore, use: <s> }\`, and ` +
+            `add '<ds>' to '${dep.name}'\`s 'dataSources:' list.`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
     }
   }
 }

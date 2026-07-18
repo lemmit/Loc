@@ -75,6 +75,7 @@ import type { OriginRef } from "../../../ir/types/origin.js";
 import { aggregatesNeedConcurrency } from "../../../ir/util/aggregate-flags.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
+import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import {
   isTpcBase,
   isTphBase,
@@ -516,12 +517,33 @@ export function generateTypeScriptForContexts(
       });
     }
   }
+  // File upload/download wiring (M-T1.2): when this deployable hosts a
+  // File-bearing aggregate AND binds an objectStore, `createApp` mounts the
+  // global `/files` routes over that store's bytes adapter.  The IR validator
+  // (`loom.file-field-needs-object-storage`) guarantees the binding exists, so
+  // a missing objectStore here means simply no File field — emit nothing.
+  let fileUpload: { resource: string; sourceType: string } | undefined;
+  if (system) {
+    const hasFileField = contexts.some((ctx) =>
+      ctx.aggregates.some((agg) => aggregateHasFileField(agg)),
+    );
+    if (hasFileField) {
+      const wired = new Set(system.deployable.dataSourceNames);
+      const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+      const objStore = system.sys.dataSources.find(
+        (r) => wired.has(r.name) && r.kind === "objectStore",
+      );
+      const st = objStore ? storeType.get(objStore.storageName) : undefined;
+      if (objStore && st) fileUpload = { resource: objStore.name, sourceType: st };
+    }
+  }
   out.set(
     "http/index.ts",
     renderHttpIndex(merged, {
       authRequired,
       persistence: usingMikro ? "mikroorm" : "drizzle",
       explicitRouters,
+      fileUpload,
     }),
   );
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`

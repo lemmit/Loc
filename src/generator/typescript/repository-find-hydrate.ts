@@ -157,6 +157,10 @@ function hydrateValueExpr(
     // loss.
     if (t.name === "decimal") return `Number(${colExpr})`;
     if (t.name === "money") return `new Decimal(${colExpr})`;
+    // File hydrates from a JSONB column (drizzle types it `unknown`) — cast to
+    // the fixed FileRef shape the domain field declares.
+    if (t.name === "File")
+      return `(${colExpr} as { url: string; key: string; contentType: string; size: number })`;
     return colExpr;
   }
   if (t.kind === "id") {

@@ -230,6 +230,55 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // File primitive (M-T1.2 / M-T4.6 §5.3) — a `File` field on a node
+    // deployable bound to a `localDisk` object store.  System-mode only
+    // (storage / objectStore dataSource / endpoints are system-level).  Gates:
+    // the `File` field serialises as the fixed FileRef object in the aggregate
+    // Request/Response zod, stores as a JSONB column, hydrates back through the
+    // FileRef cast, and the app-level `POST /files` + `GET /files/:key` routes
+    // plus the emitted `localDisk` resource adapter type-check + bundle.
+    it("system File field (localDisk objectStore) — upload/download routes type-check + bundle", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-file-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/file-field.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // The localDisk resource adapter module was emitted with its bytes verbs.
+        const adapterSrc = fs.readFileSync(path.join(proj, "resources", "localDisk.ts"), "utf8");
+        expect(adapterSrc).toContain("docsFiles$putBytes");
+        expect(adapterSrc).toContain("docsFiles$getBytes");
+        // The global upload/download routes were mounted in createApp.
+        const indexSrc = fs.readFileSync(path.join(proj, "http", "index.ts"), "utf8");
+        expect(indexSrc).toContain('app.post("/files"');
+        expect(indexSrc).toContain('app.get("/files/:key"');
+        // The File field serialises as the fixed FileRef object in the aggregate
+        // Response schema, and stores as a JSONB column.
+        const routesSrc = fs.readFileSync(path.join(proj, "http", "attachment.routes.ts"), "utf8");
+        expect(routesSrc).toContain(
+          "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
+        );
+        expect(fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8")).toContain(
+          'jsonb("blob")',
+        );
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // M-T5.10 handler-param rewrite — the SCAFFOLDED explicit handlers take a
     // single `command`/`query` record param (`cmd.<field>`/`query.<field>`) and
     // reads declare a `<Agg>Response` return.  A Money-typed operation param

@@ -846,6 +846,10 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: uuid("${colName}")${not},`];
         case "json":
           return [`${fieldName}: jsonb("${colName}")${not},`];
+        case "File":
+          // File reference (FileRef) stores as JSONB, exactly like `json` —
+          // the bytes live in object storage; the column carries the reference.
+          return [`${fieldName}: jsonb("${colName}")${not},`];
         case "duration":
           // A5: expression-only primitive — never a stored column in this
           // slice (Postgres `interval` columns are a follow-on).

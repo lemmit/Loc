@@ -175,6 +175,7 @@ const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
   datetime: "z.string()",
   guid: "z.string()",
   json: "z.unknown()",
+  File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
 };
 
 const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
@@ -187,6 +188,7 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   datetime: "z.string()",
   guid: "z.string()",
   json: "z.unknown()",
+  File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
 };
 
 export function zodForRequest(t: TypeIR): string {
