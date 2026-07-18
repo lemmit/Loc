@@ -33,7 +33,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | provenance / union-find       |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |✅ B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
-| single-containment            |  ✅  |  ✅  |   ✅   |🔴 B8   |🔴 B9   |
+| single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |🔴 B9   |
 | seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |🔴 B10  |
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
@@ -160,18 +160,48 @@ org-policy-blocked). Two elixir gaps surfaced (B5, B6); the rest pass.
   migration, so the INSERT hits a missing relation.
 - **Status:** confirmed migrate failure; skip-listed.
 
-## B8 🔴 dotnet — single (non-collection) `contains` crashes on boot (EF)
+## B8 ✅ dotnet — single (non-collection) `contains` crashes on boot (EF)
 
-- **Where:** `src/generator/dotnet/` (single-containment owned-entity EF model).
+- **Where:** `src/generator/dotnet/emit/efcore.ts` (`containmentConfigLines`, the
+  relational single-containment owned-entity EF model).
 - **Repro:** `test/fixtures/corpus/single-containment.ddd` on dotnet — the app
   **aborts on startup (exit 134)** in EF Core `GetMigrations`/`DbContext`
   construction (same signature as B3). node/java/python boot + round-trip. A
   `contains shipment: Shipment` (single, non-collection) owned entity isn't
-  mapped in a way EF accepts (likely the part key / back-reference, cf. B3).
+  mapped in a way EF accepts.
 - **Impact:** any aggregate with a single (non-collection) containment fails to
   start on dotnet. Found by the Slice-4 drain (batch: single-containment/seeding).
-- **Status:** confirmed boot crash; skip-listed pending fix. Likely a sibling of
-  B3's owned-entity mapping fix.
+- **Root cause:** TWO bugs surfaced in sequence — a sibling of B3, but on the
+  RELATIONAL owned-entity path, not the jsonb one. (1, boot crash) the
+  `!c.collection` branch emitted a bare, UNCONFIGURED `OwnsOne<Shipment>(x =>
+  x.Shipment)`. But `tableForPart` (migrations-builder) gives EVERY part its own
+  table regardless of cardinality — `shipments` (`id` PK + `order_id` FK +
+  flattened columns) — so the bare `OwnsOne` both table-splits the part onto the
+  owner (no `ToTable`) AND leaves the strongly-typed `ShipmentId` key +
+  `OrderId ParentId` back-reference unmapped → EF model validation aborts at boot
+  (the same "property could not be mapped … type '<…>Id'" class as B3-embedded).
+  (2, runtime 500) once mapped, `GetByIdAsync` threw `InvalidCastException` on
+  `GetGuid` — a single containment starts unset (`= default!`) and is filled by an
+  op, so the Order is created and loaded BEFORE the `shipments` row exists. EF
+  treated the non-nullable CLR nav as a REQUIRED dependent, inner-joined
+  `shipments`, and read the NULL `id` of the absent row.
+- **Fix:** (1) the single-containment branch now emits the same explicit
+  table/key/FK/id-conversion config as the collection path — `OwnsOne<Part>(x =>
+  x.Part, o => { o.ToTable(<part>, <schema>); o.WithOwner().HasForeignKey(
+  "ParentId"); o.Property("ParentId").HasColumnName("<parent>_id"); o.HasKey(x =>
+  x.Id); o.Property(x => x.Id).HasConversion(…); … })` (mapping the public nav
+  directly — no `Ignore` + private-backing-field indirection), recursing into
+  nested containments. (2) append `builder.Navigation(x => x.<Name>).IsRequired(
+  false)` so EF LEFT-joins and returns a null nav when the dependent row is
+  absent.
+- **Verification:** `run-dotnet.mjs single-containment` → green (create → ship
+  → read-back `shipment.carrier` = "UPS"); `sales shapes payments
+  value-collections tph state-gate` → 11/11 (no regression); `LOOM_DOTNET_BUILD=1`
+  single-containment → `dotnet build /warnaserror` 0 warnings. Pinned by
+  `test/generator/dotnet/single-containment.test.ts`.
+- **Status:** ✅ fixed — `single-containment` re-armed (removed from the dotnet
+  behavioural skips). Was a sibling of B3 (owned-entity mapping), on the
+  relational path rather than jsonb, plus the optional-nav bug B3 didn't have.
 
 ## B7 ✅ elixir — `auditable` lifecycle stamps 500 on create
 

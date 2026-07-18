@@ -1066,14 +1066,47 @@ function containmentConfigLines(
       `${indent}});`,
     ];
   }
-  if (!c.collection) {
-    return [`${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
-  }
   const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, inner, childVar));
   // A nested part FKs to (and its shadow `ParentId` column is named for) its
   // DIRECT parent — a sibling part for a part-in-part, else the aggregate root
   // — matching the shared migration DDL (`tableForPart`).
   const fkColumn = `${snake(directParentName(agg, c.partName, agg.name))}_id`;
+  if (!c.collection) {
+    // A single (non-collection) `contains` is NOT stored inline on the owner —
+    // `tableForPart` (migrations-builder) gives EVERY part its OWN table
+    // (`shipments`: `id` PK + `<parent>_id` FK + flattened columns) regardless
+    // of cardinality.  So the owned reference needs the same explicit
+    // table/key/FK/id-conversion config as the collection path below.  A bare
+    // `OwnsOne<Part>(x => x.Part)` instead table-splits the part onto the owner
+    // AND leaves the strongly-typed `<Part>Id` key + `ParentId` back-reference
+    // unmapped — EF model validation aborts at boot (exit 134).  The owned nav
+    // is a public property here (entity.ts emits `public <Part> <Name> { get;
+    // private set; }`, not a private backing list), so map it directly — no
+    // `Ignore` + `"_<name>"` backing-field indirection.
+    return [
+      `${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, ${childVar} => {`,
+      `${inner}${childVar}.ToTable(${renderTableArgs(plural(c.partName), options)});`,
+      `${inner}${childVar}.WithOwner().HasForeignKey("ParentId");`,
+      `${inner}${childVar}.Property("ParentId").HasColumnName("${fkColumn}");`,
+      `${inner}${childVar}.HasKey(x => x.Id);`,
+      `${inner}${childVar}.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v)).HasColumnName("id");`,
+      ...partFieldLines,
+      // Recurse into this part's OWN nested containments, configured against
+      // THIS child builder so EF nests the owned graph (Order → Shipment → …).
+      ...(part?.contains ?? []).flatMap((nc) =>
+        containmentConfigLines(nc, agg, options, childVar, inner, depth + 1),
+      ),
+      `${indent}});`,
+      // The owned reference is OPTIONAL: a single containment starts unset
+      // (`public <Part> <Name> { get; private set; } = default!;`) and is filled
+      // by an operation, so the aggregate can be created — and loaded — before
+      // the dependent row exists.  Without this, EF treats the non-nullable CLR
+      // nav as a required dependent, INNER-JOINs `shipments`, and throws
+      // `InvalidCastException` reading the NULL `id` of an absent row.
+      // `IsRequired(false)` makes EF LEFT-JOIN and null the nav when absent.
+      `${indent}${builderVar}.Navigation(x => x.${upperFirst(c.name)}).IsRequired(false);`,
+    ];
+  }
   return [
     `${indent}// Ignore the public read-accessor and tell EF to map the`,
     `${indent}// private backing field instead.`,
