@@ -300,11 +300,23 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   client. Byte-identical fixtures stay untouched for models with no mailer.
 
 ## 7. Phasing
-- **4.6-email-a** — grammar + IR unions + registry + verb table + hono adapter +
-  Mailpit sidecar + lowering/validation/registry tests, delivered end to end on
-  Hono (`LOOM_TS_BUILD` green). Self-contained vertical.
-- **4.6-email-b** — the .NET / Java / Python / Phoenix adapters, each behind its
-  own `build-generated-*` gate (the 4c pattern from workflow-resource-consumption).
+- **4.6-email-a** ✓ **landed** — grammar + IR unions + registry + verb table +
+  **all five backend adapters** (not just Hono) + Mailpit sidecar +
+  lowering/validation/registry/cross-backend-emission tests. Hono verified with
+  `tsc --noEmit`.
+- **4.6-email-b** — wire the mailer into each backend's **compiled** build-gate
+  fixture (the corpus `resources.ddd` / per-backend e2e fixtures) so CI compiles
+  the emitted vendor clients. **All five smtp emissions were compile-verified
+  locally** ahead of this: Java (`gradle testClasses bootJar`), Python (`uv sync`
+  + `ruff` + `mypy --strict`), Hono (`tsc`), .NET (`dotnet build`, 0/0), Phoenix
+  (`mix compile --warnings-as-errors`, Swoosh module valid). **Gotcha — .NET
+  NuGet audit:** `MailKit`/`MimeKit` carry a moderate advisory
+  (GHSA-9j88-vvj5-vhgr / GHSA-g7hc-96xr-gvvx, via transitive BouncyCastle) that
+  hits *every* current version (4.8.0 ≡ 4.13.0), so `dotnet build /warnaserror`
+  fails on `NU1902` — bumping the version does **not** clear it. Wiring the .NET
+  mailer into the compile gate therefore needs a `<NuGetAuditSuppress Include="…">`
+  for those two advisories in the emitted `.csproj` (the C# itself compiles 0/0).
+  SES/SendGrid paths per backend still need their own compile pass.
 - **4.6-email-c (later, own proposal)** — templated email: a `send(to,
   template, data)` verb over declared `template { subject, body }` entries
   (i18n-ready — the old §5.2 richer surface), HTML bodies, multi-recipient/cc/bcc.
