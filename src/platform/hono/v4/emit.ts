@@ -28,6 +28,7 @@ import {
   mikroConnectionSetup,
   renderMikroBaseReader,
   renderMikroConfig,
+  renderMikroDocumentRepository,
   renderMikroEmbeddedRepository,
   renderMikroEntities,
   renderMikroEventSourcedRepository,
@@ -676,13 +677,16 @@ export function generateTypeScriptForContexts(
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       const repoContent = usingMikro
         ? // mikroorm: event-sourced aggregates use the EntityManager event
-          // store (appliers, MikroORM edition); `shape(embedded)` folds
-          // containments into jsonb columns; `shape(document)` stays gated.
+          // store (appliers, MikroORM edition); `shape(document)` folds the
+          // whole tree into one jsonb blob; `shape(embedded)` folds only the
+          // containments into jsonb columns.
           agg.persistedAs === "eventLog"
           ? renderMikroEventSourcedRepository(agg, repo, ctx)
-          : shape === "embedded"
-            ? renderMikroEmbeddedRepository(agg, repo, ctx)
-            : renderMikroRepository(agg, repo, ctx)
+          : shape === "document"
+            ? renderMikroDocumentRepository(agg, repo, ctx)
+            : shape === "embedded"
+              ? renderMikroEmbeddedRepository(agg, repo, ctx)
+              : renderMikroRepository(agg, repo, ctx)
         : agg.persistedAs === "eventLog"
           ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
           : shape === "document"

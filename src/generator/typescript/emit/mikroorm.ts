@@ -67,6 +67,7 @@ import {
   deserializeField,
   docFieldType,
   docTypeAlias,
+  documentCapabilityBody,
   entityFromDocFn,
   entityToDocFn,
   findPredicate,
@@ -313,6 +314,24 @@ function renderPartRowEntity(
 // db/entities.ts — Row classes + EntitySchema definitions.
 // ---------------------------------------------------------------------------
 
+/** Document-shape columns: the whole aggregate collapses to `(id, data,
+ *  version)` — one opaque jsonb blob + a concurrency counter.  Mirrors the
+ *  drizzle `emitDocumentTable`; no per-field / containment / pivot columns. */
+function documentColumnsOf(): MikroColumn[] {
+  return [
+    { prop: "id", mikroType: "string", tsType: "string", nullable: false, primary: true },
+    {
+      prop: "data",
+      mikroType: "json",
+      tsType: "unknown",
+      nullable: false,
+      primary: false,
+      columnType: "jsonb",
+    },
+    { prop: "version", mikroType: "number", tsType: "number", nullable: false, primary: false },
+  ];
+}
+
 /** Embedded-shape columns: the queryable root columns (via `columnsOf`) plus
  *  one jsonb column per containment (typed `unknown` on the Row, cast in the
  *  repo through `<Part>Doc`).  Mirrors the drizzle embedded table. */
@@ -354,15 +373,20 @@ export function renderMikroEntities(
     // Abstract bases own no table EXCEPT a TPH root, which owns the shared
     // table (a TPC / intermediate abstract base emits nothing).
     if (agg.isAbstract && !isTphBase(agg, aggs)) continue;
-    // TPH base → the one shared hierarchy table; embedded → root columns +
-    // one jsonb column per containment; else the aggregate's own Row (a TPC
-    // concrete carries its merged base+own fields via columnsOf).
-    const embedded = shapeOf(agg) === "embedded";
+    // TPH base → the one shared hierarchy table; document → one `(id, data,
+    // version)` jsonb blob; embedded → root columns + one jsonb column per
+    // containment; else the aggregate's own Row (a TPC concrete carries its
+    // merged base+own fields via columnsOf).
+    const shape = shapeOf(agg);
+    const embedded = shape === "embedded";
+    const document = shape === "document";
     const cols = isTphBase(agg, aggs)
       ? tphSharedColumns(agg, aggs, ctx)
-      : embedded
-        ? embeddedColumnsOf(agg, ctx)
-        : columnsOf(agg, ctx);
+      : document
+        ? documentColumnsOf()
+        : embedded
+          ? embeddedColumnsOf(agg, ctx)
+          : columnsOf(agg, ctx);
     const cls = rowClassOf(agg.name);
     const schemaName = `${cls}Schema`;
     schemaNames.push(schemaName);
@@ -391,16 +415,19 @@ export function renderMikroEntities(
       ),
     );
     // `Id[]` reference-collection associations persist as pivot Row entities
-    // (composite-PK join tables), one per declared collection field.
-    for (const assoc of agg.associations ?? []) {
-      const { block, schemaName: joinSchema } = renderJoinRowEntity(assoc);
-      schemaNames.push(joinSchema);
-      blocks.push(block);
-    }
+    // (composite-PK join tables), one per declared collection field.  Under
+    // document they ride inside the blob as id-string arrays — no pivot table.
+    if (!document)
+      for (const assoc of agg.associations ?? []) {
+        const { block, schemaName: joinSchema } = renderJoinRowEntity(assoc);
+        schemaNames.push(joinSchema);
+        blocks.push(block);
+      }
     // Contained entity parts persist as parent-scoped child Row entities
     // (relational shape only), one table per declared part.  Under embedded
-    // they fold into the jsonb containment columns above — no child tables.
-    if (!embedded) {
+    // (jsonb containment columns) or document (whole blob) they fold in — no
+    // child tables.
+    if (!embedded && !document) {
       for (const part of agg.parts ?? []) {
         const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
         schemaNames.push(partSchema);
@@ -1544,6 +1571,208 @@ export function renderMikroEmbeddedRepository(
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
       `import { AggregateNotFoundError } from "../../domain/errors";`,
+      `import type { DomainEventDispatcher } from "../../domain/events";`,
+      `import { requestLog } from "../../obs/als";`,
+      "",
+      body,
+      "",
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Document-shape (`shape(document)`) MikroORM repository.  The whole aggregate
+// tree collapses to ONE opaque jsonb blob (`(id, data, version)`) — the Marten-
+// style end of the saving-shape spectrum.  Row ↔ domain mapping runs entirely
+// through the shared `<agg>ToDoc` / `<agg>FromDoc` (de)serialisers the drizzle
+// document repository uses (contained parts nest, `Id[]` references ride as id
+// strings), so the wire contract is byte-identical to the drizzle document
+// path.  Capability `filter`s and find predicates can't be column FilterQueries
+// (every field lives in the blob), so they evaluate IN-APP over the rehydrated
+// aggregates — mirroring `buildDocumentRepositoryFile`.
+// ---------------------------------------------------------------------------
+export function renderMikroDocumentRepository(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const row = rowClassOf(agg.name);
+  const idVar = `Ids.${agg.name}Id`;
+  const versioned = aggregateIsVersioned(agg);
+  const emitsDelete = !!agg.canonicalDestroy;
+  // Root rehydrate — a versioned root takes the authoritative `version` COLUMN
+  // (the blob copy lags a write), matching the drizzle document path.
+  const fromDocOf = (rowVar: string): string =>
+    versioned
+      ? `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc, ${rowVar}.version)`
+      : `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc)`;
+  // In-app capability predicate over a rehydrated aggregate (soft-delete /
+  // non-principal tenancy).  Principal filters are validator-rejected on Hono,
+  // so no `requireCurrentUser()` bind is reachable here.
+  const capRec = documentCapabilityBody(agg, "rec");
+  const capX = documentCapabilityBody(agg, "x");
+
+  // Finds evaluate in-memory over the rehydrated read model (the read already
+  // deserialises every row), narrowed first by the capability filter then by
+  // the find's own predicate — same selector shape as the drizzle document
+  // builder's `documentFindMethod`.
+  const findMethods = (repo?.finds ?? []).map((f) => {
+    const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
+    const pred = findPredicate(agg, f, ctx);
+    const isArray = f.returnType.kind === "array";
+    const isOptional = f.returnType.kind === "optional";
+    const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
+    const allExpr = capX ? `all.filter((x) => ${capX})` : "all";
+    const selector = isArray
+      ? pred
+        ? `${allExpr}.filter(${pred})`
+        : allExpr
+      : isOptional
+        ? `${allExpr}.find(${pred ?? "() => true"}) ?? null`
+        : `${allExpr}.find(${pred ?? "() => true"})!`;
+    const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
+    return lines(
+      `  async ${f.name}(${params}): Promise<${ret}> {`,
+      `    const em = this.em.fork();`,
+      `    const rows = await em.find(${row}, {});`,
+      `    const all = rows.map((r) => ${fromDocOf("r")});`,
+      `    const result = ${selector};`,
+      `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${f.name}", rows: ${rowsExpr} });`,
+      `    return result;`,
+      `  }`,
+    );
+  });
+
+  const deleteMethod = emitsDelete
+    ? lines(
+        `  async delete(id: ${idVar}): Promise<void> {`,
+        `    await this.em.fork().nativeDelete(${row}, { id: id as string });`,
+        `  }`,
+      )
+    : "";
+
+  const saveLines = versioned
+    ? [
+        `    const expected = expectedVersion ?? aggregate.version;`,
+        `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
+        `    if (existing === null) {`,
+        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `    } else {`,
+        `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, { data, version: expected + 1 });`,
+        `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+        `    }`,
+      ]
+    : [
+        `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
+        `    if (existing === null) {`,
+        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `    } else {`,
+        `      await em.nativeUpdate(${row}, { id: aggregate.id as string }, { data, version: existing.version + 1 });`,
+        `    }`,
+      ];
+
+  const body = lines(
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
+    `  private readonly em: EntityManager;`,
+    `  private readonly events: DomainEventDispatcher;`,
+    `  constructor(`,
+    `    em: EntityManager,`,
+    `    events: DomainEventDispatcher,`,
+    `  ) {`,
+    `    this.em = em;`,
+    `    this.events = events;`,
+    `  }`,
+    "",
+    `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
+    `    const em = this.em.fork();`,
+    `    const row = await em.findOne(${row}, { id: id as string });`,
+    `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: !!row });`,
+    `    if (row === null) return null;`,
+    ...(capRec
+      ? [
+          `    const rec = ${fromDocOf("row")};`,
+          `    if (!(${capRec})) return null;`,
+          `    return rec;`,
+        ]
+      : [`    return ${fromDocOf("row")};`]),
+    `  }`,
+    "",
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    `    const found = await this.findById(id);`,
+    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    `    return found;`,
+    `  }`,
+    "",
+    `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
+    `    if (ids.length === 0) return [];`,
+    `    const em = this.em.fork();`,
+    `    const rows = await em.find(${row}, { id: { $in: ids as string[] } });`,
+    `    return rows.map((r) => ${fromDocOf("r")})${capX ? `.filter((x) => ${capX})` : ""};`,
+    `  }`,
+    "",
+    versioned
+      ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+      : `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    `    const em = this.em.fork();`,
+    `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
+    ...saveLines,
+    `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
+    "",
+    `    for (const event of aggregate.pullEvents()) {`,
+    `      requestLog().info({ event: "event_dispatched", event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string });`,
+    `      await this.events.dispatch(event);`,
+    `    }`,
+    `  }`,
+    deleteMethod ? "" : null,
+    deleteMethod || null,
+    ...findMethods.flatMap((m) => ["", m]),
+    "",
+    toWireMethod(agg, ctx),
+    `}`,
+    "",
+    // Document (de)serialisers — module-level so they recurse into contained
+    // parts.  The root carries a `<Agg>Doc` type alias; parts carry their own.
+    docTypeAlias(agg, true, agg.name, ctx),
+    "",
+    ...agg.parts.flatMap((p) => [docTypeAlias(p, false, agg.name, ctx), ""]),
+    entityToDocFn(agg, ctx),
+    "",
+    ...agg.parts.flatMap((p) => [entityToDocFn(p, ctx), ""]),
+    entityFromDocFn(agg, true, agg.name, ctx),
+    "",
+    ...agg.parts.flatMap((p) => [entityFromDocFn(p, false, agg.name, ctx), ""]),
+  );
+
+  const bodyScan = body
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  const candidates = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)];
+  const referenced = candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
+  const isValueUsed = (n: string): boolean =>
+    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
+  let voImportLine: string | false = false;
+  if (referenced.length > 0) {
+    const anyValue = referenced.some(isValueUsed);
+    voImportLine = anyValue
+      ? `import { ${referenced.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
+      : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
+  }
+  const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+
+  return (
+    lines(
+      "// Auto-generated.  Do not edit by hand.",
+      usesDecimal && `import Decimal from "decimal.js";`,
+      repoPortImportLine(agg.name),
+      `import { EntityManager } from "@mikro-orm/postgresql";`,
+      `import { ${row} } from "../entities";`,
+      `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
+      voImportLine,
+      `import * as Ids from "../../domain/ids";`,
+      versioned
+        ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
+        : `import { AggregateNotFoundError } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
       `import { requestLog } from "../../obs/als";`,
       "",

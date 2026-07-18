@@ -488,21 +488,6 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   };
 
   it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
-  it("rejects a non-relational saving shape (shape: document)", async () => {
-    const src = `
-      system M {
-        api A from S
-        subdomain S { context O {
-          aggregate Cart shape: document with crudish { customer: string }
-          repository Carts for Cart { }
-        } }
-        storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
-        deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /shape\(document\)/.test(e))).toBe(
-      true,
-    );
-  });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("mikroorm"));
@@ -739,22 +724,84 @@ describe("mikroorm — shape(embedded) (wave 2)", () => {
     expect(repo).toContain("lines: aggregate.lines.map((e) => tagItemToDoc(e))");
     expect(repo).toContain("await em.upsert(TagListRow, rootRow)");
   });
+});
 
-  it("still rejects shape(document)", async () => {
-    const src = `system M {
+// ---------------------------------------------------------------------------
+// shape(document) on mikroorm — wave 3.  The whole aggregate tree collapses to
+// ONE opaque `(id, data, version)` jsonb blob (Marten-style), round-tripped
+// through the shared `<agg>ToDoc`/`<agg>FromDoc` (de)serialisers the drizzle
+// document repository uses — so contained parts nest in the blob (no child
+// tables), `Id[]` references ride as id strings (no pivot tables), and finds /
+// capability filters evaluate in-app over the rehydrated read model.
+// ---------------------------------------------------------------------------
+describe("mikroorm — shape(document) (wave 3)", () => {
+  const DOC_SRC = `system M {
   api A from S
   subdomain S {
     context O {
-      aggregate Cart shape: document with crudish { customer: string }
-      repository Carts for Cart { }
+      aggregate Article shape: document, with crudish {
+        title: string
+        viewCount: int
+        contains sections: Section[]
+        entity Section { heading: string  body: string }
+        operation addSection(heading: string, body: string) {
+          sections += Section { heading: heading, body: body }
+        }
+      }
+      repository Articles for Article {
+        find popular(min: int): Article[] where this.viewCount >= min
+      }
     }
   }
-  storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
-  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /shape\(document\)/.test(e))).toBe(
-      true,
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for shape(document)", async () => {
+    const { errors } = await emit(DOC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("collapses the aggregate to a single (id, data, version) jsonb Row — no child/pivot tables", async () => {
+    const { files } = await emit(DOC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class ArticleRow {");
+    expect(entities).toContain('id: { type: "string", primary: true }');
+    expect(entities).toContain('data: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('version: { type: "number" }');
+    // The contained Section part rides inside the blob — no relational child Row.
+    expect(entities).not.toContain("SectionRow");
+    expect(entities).toContain("export const entities = [ArticleRowSchema];");
+  });
+
+  it("round-trips the whole tree through <agg>ToDoc/<agg>FromDoc on the EntityManager", async () => {
+    const { files } = await emit(DOC_SRC);
+    const repo = files.get("api/db/repositories/article-repository.ts")!;
+    // Doc (de)serialisers recurse into the contained part.
+    expect(repo).toContain("type ArticleDoc = {");
+    expect(repo).toContain("type SectionDoc = {");
+    expect(repo).toContain("function articleToDoc");
+    expect(repo).toContain("function sectionToDoc");
+    // Read casts the jsonb blob; the versioned root takes the authoritative
+    // version COLUMN (not the stale blob copy).
+    expect(repo).toContain("articleFromDoc(row.data as ArticleDoc, row.version)");
+    // Save is the version-CAS write over the blob (default-on versioning).
+    expect(repo).toContain("const data = articleToDoc(aggregate);");
+    expect(repo).toContain(
+      "await em.insert(ArticleRow, { id: aggregate.id as string, data, version: 1 });",
     );
+    expect(repo).toContain(
+      "await em.nativeUpdate(ArticleRow, { id: aggregate.id as string, version: expected }, { data, version: expected + 1 })",
+    );
+    expect(repo).toContain('throw new ConcurrencyError("Article", aggregate.id as string)');
+  });
+
+  it("evaluates finds in-app over the rehydrated read model (blob fields aren't columns)", async () => {
+    const { files } = await emit(DOC_SRC);
+    const repo = files.get("api/db/repositories/article-repository.ts")!;
+    expect(repo).toContain("const rows = await em.find(ArticleRow, {});");
+    expect(repo).toContain("const result = all.filter((x) => x.viewCount >= min);");
   });
 });
 
