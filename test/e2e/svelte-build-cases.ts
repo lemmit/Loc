@@ -13,6 +13,10 @@ export const svelteBuildExamples = [
   // against real SvelteKit/svelte-check.  Svelte sibling of the React
   // store-showcase matrix case.
   "web/src/examples/svelte-store-showcase.ddd",
+  // File upload (M-T1.2 slice 4b): builds a `File` CreateForm field
+  // (`field-input-file`) + a standalone `FileUpload(bind:)`
+  // (`primitive-file-upload`) against real SvelteKit/svelte-check.
+  "web/src/examples/svelte-file-upload.ddd",
 ] as const;
 
 export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;

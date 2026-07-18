@@ -116,6 +116,37 @@ const STORE: Case = {
 /** The vue pack matrix.  Mirrors the React harness's
  *  `{example × pack}` sweep: every case runs against each pack via a
  *  `design:` injection into the vue deployable. */
+/** File upload (M-T1.2 slice 4b) — a `File` aggregate field in a CreateForm
+ *  (`field-input-file`) + a standalone `FileUpload(bind:)` over a `File` state
+ *  field (`primitive-file-upload`).  Guards both surfaces compiling under each
+ *  vue pack (the `api.uploadFile` call, the FileRef import, the nullable
+ *  request field, the typed `ref<FileRef | null>` state). */
+const FILE: Case = {
+  name: "file",
+  vueDir: "web",
+  source: `
+    system VFileUp {
+      subdomain Media { context Docs {
+        aggregate Attachment with crudish { title: string  blob: File }
+      } }
+      ui WebApp {
+        page NewDoc { route: "/new"  title: "New"
+          body: Stack { CreateForm { of: Attachment } } }
+        page Up { route: "/up"  title: "Up"
+          state { doc: File }
+          body: Stack { FileUpload { "Doc", bind: doc } } }
+      }
+      api DocsApi from Media
+      storage primary { type: postgres }
+      storage uploads { type: localDisk }
+      resource docsState { for: Docs, kind: state, use: primary }
+      resource docsFiles { for: Docs, kind: objectStore, use: uploads }
+      deployable api { platform: node, contexts: [Docs], dataSources: [docsState, docsFiles], serves: DocsApi, port: 3000 }
+      deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
+    }
+  `,
+};
+
 const PACKS = ["vuetify@v3", "shadcnVue@v1"] as const;
 
 interface MatrixCase extends Case {
@@ -123,7 +154,7 @@ interface MatrixCase extends Case {
   label: string;
 }
 
-const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE].flatMap((c) =>
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE, FILE].flatMap((c) =>
   PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
 );
 

@@ -1,0 +1,35 @@
+// File upload (M-T1.2 slice 4b) — the Svelte sibling of the vue/angular File
+// build cases.  A `File` aggregate field in a CreateForm (`field-input-file`)
+// + a standalone `FileUpload(bind:)` over a `File` state field
+// (`primitive-file-upload`), so svelte-check verifies the `api.uploadFile`
+// call, the `$lib/api/client` import, and the nullable request field compile.
+system SFileUp {
+  subdomain Media {
+    context Docs {
+      aggregate Attachment with crudish {
+        title: string
+        blob: File
+      }
+    }
+  }
+  ui WebApp {
+    page NewDoc {
+      route: "/new"
+      title: "New"
+      body: Stack { CreateForm { of: Attachment } }
+    }
+    page Up {
+      route: "/up"
+      title: "Up"
+      state { doc: File }
+      body: Stack { FileUpload { "Doc", bind: doc } }
+    }
+  }
+  api DocsApi from Media
+  storage primary { type: postgres }
+  storage uploads { type: localDisk }
+  resource docsState { for: Docs, kind: state, use: primary }
+  resource docsFiles { for: Docs, kind: objectStore, use: uploads }
+  deployable api { platform: node, contexts: [Docs], dataSources: [docsState, docsFiles], serves: DocsApi, port: 3000 }
+  deployable web { platform: svelte, targets: api, ui: WebApp, port: 3005 }
+}

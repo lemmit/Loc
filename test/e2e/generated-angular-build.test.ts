@@ -262,6 +262,33 @@ const STORE: Case = {
 /** The angular pack matrix.  angularMaterial (Material components), primeng
  *  (PrimeNG components), and spartanNg (shadcn-for-Angular design language,
  *  plain styled elements) all ship the required template surface. */
+/** File upload (M-T1.2 slice 4b) — a `File` aggregate field in a CreateForm
+ *  renders a native file input wired through `onFileUpload` into a
+ *  `FormControl<FileRef | null>`.  (The standalone `FileUpload(bind:)` on
+ *  Angular renders a bare input — functionally deferred — but still builds.) */
+const FILE: Case = {
+  name: "file",
+  angularDir: "web",
+  source: `
+    system AFileUp {
+      subdomain Media { context Docs {
+        aggregate Attachment with crudish { title: string  blob: File }
+      } }
+      ui WebApp {
+        page NewDoc { route: "/new"  title: "New"
+          body: Stack { CreateForm { of: Attachment } } }
+      }
+      api DocsApi from Media
+      storage primary { type: postgres }
+      storage uploads { type: localDisk }
+      resource docsState { for: Docs, kind: state, use: primary }
+      resource docsFiles { for: Docs, kind: objectStore, use: uploads }
+      deployable api { platform: node, contexts: [Docs], dataSources: [docsState, docsFiles], serves: DocsApi, port: 3000 }
+      deployable web { platform: angular, targets: api, ui: WebApp, port: 3004 }
+    }
+  `,
+};
+
 const PACKS = ["angularMaterial@v1", "primeng@v1", "spartanNg@v1"] as const;
 
 interface MatrixCase extends Case {
@@ -269,7 +296,7 @@ interface MatrixCase extends Case {
   label: string;
 }
 
-const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE].flatMap((c) =>
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE, FILE].flatMap((c) =>
   PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
 );
 

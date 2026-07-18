@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: ['examples/svelte-shop.ddd', 'test/e2e/fixtures/svelte-build/auth-ui.ddd', 'web/src/examples/svelte-store-showcase.ddd']
+        example: ['examples/svelte-shop.ddd', 'test/e2e/fixtures/svelte-build/auth-ui.ddd', 'web/src/examples/svelte-store-showcase.ddd', 'web/src/examples/svelte-file-upload.ddd']
         pack: ['shadcnSvelte@v1', 'flowbite@v1']
     timeout-minutes: 10
     name: ${{ matrix.example }} × ${{ matrix.pack }}
