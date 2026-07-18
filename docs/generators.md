@@ -151,31 +151,40 @@ A system-scope `timerSource { for: <Event>, cron: "…" | every: <dur> }`
 (scheduling.md) fires a plain domain event on a wall-clock cadence; workflows
 react through the existing `on`/`create … by` triggers. When a deployable owns a
 timer (its subdomain is the for-event's `migrationsOwner`), the Hono backend
-emits `scheduler.ts` and wires it at boot:
+emits `scheduler.ts` and wires it at boot. **Phase 2** splits the two cadences by
+where durability matters:
 
-- **One job per timer.** `cron:` → `node-cron`; `every:` → a bare `setInterval`.
-- **Single-fire across replicas.** Each tick opens a transaction and takes a
-  `pg_try_advisory_xact_lock` keyed by an FNV-1a hash of the timer name; the
-  lock is held for the dispatch and released automatically when the tx commits
-  (a plain session `pg_advisory_lock` + a connection pool would leak the unlock
-  onto a different pooled connection). The loser of the race skips (logged). A
-  `running` guard skips (does not queue) an overlapping tick on the same replica.
+- **`cron:` timers → pg-boss** (a Postgres-backed durable job queue). pg-boss
+  owns single-fire across replicas natively (no advisory lock), persists each
+  run, and **retries a failed body with backoff** (`retryLimit: 3`,
+  `retryBackoff: true`). The schedule (`boss.schedule`) and worker (`boss.work`)
+  live in the app's own Postgres.
+- **Missed-window catch-up.** pg-boss does *not* back-fill a cron boundary that
+  elapsed while every replica was down (its `shouldSendIt` only sends when the
+  last boundary is < 60s old). A self-owned `loom_timer_runs` watermark (created
+  by the scheduler on boot, like pg-boss creates its own schema — *not* in the
+  domain MigrationsIR) drives a **coalesce-once catch-up**: on the *first* boot
+  it records a baseline without retro-firing (a fresh deploy must not replay
+  history); on a later boot, if the previous boundary is > 60s old and later than
+  the last recorded run, it replays that boundary **exactly once** (a 20-minute
+  outage over four 5-minute boundaries fires one catch-up, not four).
+- **`every:` (sub-minute) timers → in-process** `setInterval` + a
+  transaction-scoped `pg_try_advisory_xact_lock` (single-fire) with a `running`
+  no-overlap guard. Durability is meaningless for a high-frequency poll
+  (resume-at-next-tick is correct) and pg-boss cron is minute-granularity.
 - **Dispatch.** The tick event is constructed (id fields minted, `at` stamped)
   and dispatched through the same in-process dispatcher the sagas use, so an
   `on`/`create` reactor fires with no new machinery.
 - **Observability.** `timer_fired` / `timer_skipped_overlap` /
-  `timer_lock_contended` / `timer_emit_failed` on the catalog.
+  `timer_lock_contended` / `timer_emit_failed` / `timer_catchup` on the catalog.
 
-**Delivery semantics (multi-pod).** The advisory lock is a *mutex around the
-body*: while one replica is dispatching, a peer's concurrent tick fails the lock
-and skips — no concurrent double-fire. It is **at-least-once**, not
-exactly-once: if a replica commits before a peer's clock-skewed tick fires, the
-peer can also fire, so **tick reactors must be idempotent** (the same contract
-event reactors already carry). True exactly-once-per-instant (a durable claim
-keyed by the cadence bucket / competing-consumer queue) is not implemented — a
-Phase-3 durability item.
+**Delivery semantics (multi-pod).** Still **at-least-once**: pg-boss gives
+single-fire per boundary and durable retry, but a clock-skewed peer or a
+catch-up replay can re-deliver, so **tick reactors must be idempotent** (the
+same contract event reactors already carry). Exactly-once-per-instant is not a
+goal — at-least-once + idempotent reactors is the contract.
 
-A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
+A deployable owning no timer emits no `scheduler.ts`, no `pg-boss` dep, and no
 boot wiring — byte-identical to before.
 
 **Phase-2 durable drivers (M-T4.1).** The advisory-lock path above is the
@@ -184,12 +193,9 @@ boot wiring — byte-identical to before.
 backend, so a boundary missed while every replica was down is replayed once on
 recovery (missed-run catch-up) and fires exactly once across replicas
 (single-fire), with retries. Each backend uses its ecosystem's Postgres-native
-job store: **Python → procrastinate** (`@app.periodic` periodic tasks; the
-`periodic_defers` table is the single-fire/catch-up ledger; the worker runs
-in-process in the FastAPI lifespan). The `every:` tier stays the in-process
-asyncio interval loop + `pg_try_advisory_xact_lock` described above. (Other
-backends land their own durable driver — pg-boss / Hangfire / JobRunr / Oban —
-under the same split; see M-T4.1.)
+job store: **node → pg-boss**, **.NET → Hangfire**, **Java → JobRunr**,
+**Python → procrastinate**, **Elixir → Oban**. The `every:` tier stays the
+in-process interval loop + `pg_try_advisory_xact_lock` on every backend.
 
 ### Per-aggregate detail
 

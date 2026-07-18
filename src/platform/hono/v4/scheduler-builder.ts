@@ -1,15 +1,26 @@
-// Timer scheduler emission (scheduling.md, M-T4.1) — the Hono half of Phase 1.
+// Timer scheduler emission (scheduling.md) — the Hono backend, Phase 2 (durable).
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  This
-// builder renders `scheduler.ts`: one job per owned timer that, on each tick,
-// takes a Postgres advisory lock (single-fire across replicas), constructs the
-// tick event struct, and dispatches it through the SAME in-process dispatcher
-// the sagas already route through — so an `on(t: Tick)` / `create(t: Tick) by …`
-// reactor fires with no new dispatch machinery.  Structure (the `running`
-// no-overlap guard + array-of-stops disposer) mirrors `startOutboxRelay`.
+// builder renders `scheduler.ts`, splitting the owned timers by cadence:
 //
-// Emitted ONLY when the deployable owns at least one timerSource; a timer-free
-// deployable is byte-identical to before.
+//   • `cron:` timers run on **pg-boss** — a Postgres-backed durable job queue.
+//     pg-boss owns single-fire across replicas (native, no advisory lock),
+//     persists each run, and retries a failed body with backoff.  pg-boss does
+//     NOT back-fill a cron window missed while every replica was down (its
+//     `shouldSendIt` gate only sends when the last boundary is < 60s old), so a
+//     tiny `loom_timer_runs` watermark drives a **coalesce-once catch-up** on
+//     boot: if the previous boundary is > 60s old and later than the last
+//     recorded fire, we replay it exactly once.
+//
+//   • `every:` (sub-minute) timers stay **in-process** (`setInterval` + a
+//     transaction-scoped `pg_try_advisory_xact_lock` for single-fire).
+//     Durability is meaningless for a high-frequency poll — resume-at-next-tick
+//     is the correct behaviour — and pg-boss cron is minute-granularity.
+//
+// Every tick constructs its event struct and dispatches it through the SAME
+// in-process dispatcher the sagas route through, so an `on(t)` / `create(t) by`
+// reactor fires with no new machinery.  Emitted ONLY when the deployable owns at
+// least one timerSource; a timer-free deployable is byte-identical to before.
 
 import type { EventIR, FieldIR, TimerSourceIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
@@ -54,6 +65,20 @@ function tickStruct(event: EventIR): string {
   return `{ ${parts.join(", ")} }`;
 }
 
+/** Split a deployable's owned timers by cadence — cron (→ pg-boss, durable) vs
+ *  interval (→ in-process). */
+function partitionByCadence(timers: readonly TimerSourceIR[]): {
+  cron: TimerSourceIR[];
+  interval: TimerSourceIR[];
+} {
+  const cron: TimerSourceIR[] = [];
+  const interval: TimerSourceIR[] = [];
+  for (const ts of timers) {
+    (ts.cadence.kind === "cron" ? cron : interval).push(ts);
+  }
+  return { cron, interval };
+}
+
 /** Does any field of any owned timer's event reference an id type?  Gates the
  *  `import * as Ids` (kept out of a timer whose ticks carry no id). */
 function anyTickUsesId(
@@ -65,89 +90,115 @@ function anyTickUsesId(
   );
 }
 
-/** Whether any owned timer uses a real cron expression (vs a bare-interval
- *  `every:`).  Gates the `node-cron` import + dependency. */
+/** Whether any owned timer uses a real cron expression.  Gates the durable
+ *  `pg-boss` + `cron-parser` dependencies (a deployable with only `every:`
+ *  timers needs neither). */
 export function anyTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
 
-/**
- * Render `scheduler.ts` for a deployable's owned timers.  `eventByName` resolves
- * each timer's `for:` event to its declared field shape (for the tick struct).
- */
-export function renderTimerScheduler(
-  timers: readonly TimerSourceIR[],
-  eventByName: Map<string, EventIR>,
-): string {
-  const usesCron = anyTimerUsesCron(timers);
-  const usesIds = anyTickUsesId(timers, eventByName);
-
-  const jobs = timers.map((ts) => {
+/** The pg-boss durable block for the `cron:` timers (one queue + worker +
+ *  schedule + coalesce-once catch-up per timer). */
+function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, EventIR>): string[] {
+  const jobs = timers.flatMap((ts) => {
+    if (ts.cadence.kind !== "cron") return [];
     const event = eventByName.get(ts.event);
     const struct = event ? tickStruct(event) : `{ type: "${ts.event}" }`;
-    const build = `() => (${struct})`;
-    const schedule =
-      ts.cadence.kind === "cron"
-        ? [
-            `    const task = cron.schedule(${JSON.stringify(ts.cadence.cron)}, () => void tick());`,
-            `    stops.push(() => task.stop());`,
-          ]
-        : [
-            `    const handle = setInterval(() => void tick(), ${ts.cadence.everyMs});`,
-            `    stops.push(() => clearInterval(handle));`,
-          ];
-    return lines(
-      `  // timerSource ${ts.name} { for: ${ts.event}, ${
-        ts.cadence.kind === "cron"
-          ? `cron: ${JSON.stringify(ts.cadence.cron)}`
-          : `every: ${ts.cadence.everyMs}ms`
-      } }`,
-      `  {`,
-      `    const tick = makeTick(${JSON.stringify(ts.name)}, ${build});`,
-      ...schedule,
-      `  }`,
-    );
+    const queue = `timer_${ts.name}`;
+    const cronLit = JSON.stringify(ts.cadence.cron);
+    const nameLit = JSON.stringify(ts.name);
+    return [
+      lines(
+        `  // timerSource ${ts.name} { for: ${ts.event}, cron: ${ts.cadence.cron} } — durable (pg-boss)`,
+        `  {`,
+        `    const queue = ${JSON.stringify(queue)};`,
+        `    await boss.createQueue(queue);`,
+        `    await boss.work(queue, async () => {`,
+        `      await events.dispatch(${struct});`,
+        `      await db.execute(`,
+        "        sql`INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (${queue}, now())" +
+          " ON CONFLICT (timer) DO UPDATE SET last_fired_at = now()`,",
+        `      );`,
+        `      baseLogger.info({ event: "timer_fired", timer: ${nameLit} });`,
+        `    });`,
+        `    // Durable schedule: single-fire across replicas + retry with backoff.`,
+        `    await boss.schedule(queue, ${cronLit}, {}, { retryLimit: 3, retryBackoff: true });`,
+        `    // Coalesce-once catch-up: pg-boss does not back-fill a boundary missed`,
+        `    // while every replica was down.  On the FIRST boot (no watermark) we`,
+        `    // establish a baseline WITHOUT retro-firing — a fresh deploy must not`,
+        `    // replay historical boundaries.  On a later boot, if the previous`,
+        `    // boundary is > 60s old (outside pg-boss's own send window, so no`,
+        `    // double-fire) and later than the last recorded run, replay it once.`,
+        `    {`,
+        `      const prev = CronExpressionParser.parse(${cronLit}, { currentDate: new Date() }).prev().toDate();`,
+        `      const ageSec = (Date.now() - prev.getTime()) / 1000;`,
+        "      const seen = await db.execute(sql`SELECT last_fired_at FROM loom_timer_runs WHERE timer = ${queue}`);",
+        `      // node-postgres returns timestamptz as a string — coerce before compare.`,
+        `      const raw = (seen.rows[0] as { last_fired_at: string | Date } | undefined)?.last_fired_at;`,
+        `      const last = raw != null ? new Date(raw) : undefined;`,
+        `      if (!last) {`,
+        "        await db.execute(",
+        "          sql`INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (${queue}, now())" +
+          " ON CONFLICT (timer) DO NOTHING`,",
+        "        );",
+        `      } else if (ageSec >= 60 && last.getTime() < prev.getTime()) {`,
+        `        await boss.send(queue, {}, { singletonKey: prev.toISOString() });`,
+        `        baseLogger.info({ event: "timer_catchup", timer: ${nameLit}, boundary: prev.toISOString() });`,
+        `      }`,
+        `    }`,
+        `  }`,
+      ),
+    ];
   });
 
-  return lines(
-    "// Auto-generated — emitted only when this deployable owns timerSources (scheduling.md).",
-    `import { sql } from "drizzle-orm";`,
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    usesCron ? `import cron from "node-cron";` : false,
-    usesIds ? `import * as Ids from "./domain/ids";` : false,
-    `import type * as Events from "./domain/events";`,
-    `import type { DomainEventDispatcher } from "./domain/events";`,
-    `import type * as schema from "./db/schema";`,
-    `import { baseLogger } from "./obs/log";`,
+  return [
+    "  // ── cron timers: pg-boss (durable, retried, single-fire across replicas) ──",
+    "  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL });",
+    '  boss.on("error", (err) =>',
+    '    baseLogger.error({ event: "timer_emit_failed", timer: "(pg-boss)",',
+    "      error: err instanceof Error ? err.message : String(err) }),",
+    "  );",
+    "  await boss.start();",
+    "  // Watermark for the coalesce-once catch-up (pg-boss has no missed-window",
+    "  // back-fill).  Self-owned — created here like pg-boss creates its own",
+    "  // schema, so it never enters the domain MigrationsIR.",
+    "  await db.execute(",
+    "    sql`CREATE TABLE IF NOT EXISTS loom_timer_runs (timer text PRIMARY KEY," +
+      " last_fired_at timestamptz NOT NULL DEFAULT now())`,",
+    "  );",
+    "  disposers.push(async () => {",
+    "    await boss.stop();",
+    "  });",
     "",
-    "// Stable per-timer advisory-lock key — an FNV-1a hash of the timerSource name",
-    "// into a signed 32-bit int, so two replicas contend on the SAME key.",
-    "// pg_try_advisory_xact_lock is non-blocking: the loser skips this tick.",
-    "function timerLockKey(name: string): number {",
-    "  let h = 0x811c9dc5;",
-    "  for (let i = 0; i < name.length; i++) {",
-    "    h ^= name.charCodeAt(i);",
-    "    h = Math.imul(h, 0x01000193);",
-    "  }",
-    "  return h | 0;",
-    "}",
-    "",
-    "export function startTimerScheduler(",
-    "  db: NodePgDatabase<typeof schema>,",
-    "  events: DomainEventDispatcher,",
-    "): () => void {",
-    "  const stops: Array<() => void> = [];",
-    "",
-    "  // One tick: a TRANSACTION-SCOPED advisory lock (single-fire across replicas)",
-    "  // -> build the event -> dispatch.  pg_try_advisory_xact_lock is held on the",
-    "  // transaction's single pinned connection and released automatically when the",
-    "  // tx commits — so there is no manual unlock to leak onto a different pooled",
-    "  // connection (a plain session-level pg_advisory_lock + pool would).  The",
-    "  // dispatch runs inside the tx window, so a peer replica's concurrent tick",
-    "  // fails the try and skips; the lock is a mutex, not the reactor's own",
-    "  // transaction.  The in-process `running` guard skips (does not queue) a tick",
-    "  // that overlaps a slow body on THIS replica.",
-    "  const makeTick = (name: string, build: () => Events.DomainEvent) => {",
+    ...jobs,
+  ];
+}
+
+/** The in-process block for the `every:` timers (setInterval + a
+ *  transaction-scoped advisory lock for single-fire). */
+function intervalBlock(
+  timers: readonly TimerSourceIR[],
+  eventByName: Map<string, EventIR>,
+): string[] {
+  const jobs = timers.flatMap((ts) => {
+    if (ts.cadence.kind !== "every") return [];
+    const event = eventByName.get(ts.event);
+    const struct = event ? tickStruct(event) : `{ type: "${ts.event}" }`;
+    return [
+      lines(
+        `  // timerSource ${ts.name} { for: ${ts.event}, every: ${ts.cadence.everyMs}ms } — in-process`,
+        `  {`,
+        `    const tick = makeIntervalTick(${JSON.stringify(ts.name)}, () => (${struct}));`,
+        `    const handle = setInterval(() => void tick(), ${ts.cadence.everyMs});`,
+        `    disposers.push(() => clearInterval(handle));`,
+        `  }`,
+      ),
+    ];
+  });
+
+  return [
+    "  // ── every: timers — in-process (setInterval + tx-scoped advisory lock) ──",
+    "  const makeIntervalTick = (name: string, build: () => Events.DomainEvent) => {",
     "    const lockKey = timerLockKey(name);",
     "    let running = false;",
     "    return async (): Promise<void> => {",
@@ -181,9 +232,63 @@ export function renderTimerScheduler(
     "  };",
     "",
     ...jobs,
+  ];
+}
+
+/**
+ * Render `scheduler.ts` for a deployable's owned timers.  `eventByName` resolves
+ * each timer's `for:` event to its declared field shape (for the tick struct).
+ */
+export function renderTimerScheduler(
+  timers: readonly TimerSourceIR[],
+  eventByName: Map<string, EventIR>,
+): string {
+  const { cron, interval } = partitionByCadence(timers);
+  const usesIds = anyTickUsesId(timers, eventByName);
+
+  return lines(
+    "// Auto-generated — durable timer scheduler (scheduling.md Phase 2).",
+    "// cron: → pg-boss (durable, retried, single-fire); every: → in-process.",
+    "// Emitted only when this deployable owns timerSources.",
+    cron.length > 0 ? `import { PgBoss } from "pg-boss";` : false,
+    cron.length > 0 ? `import { CronExpressionParser } from "cron-parser";` : false,
+    `import { sql } from "drizzle-orm";`,
+    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    usesIds ? `import * as Ids from "./domain/ids";` : false,
+    `import type * as Events from "./domain/events";`,
+    `import type { DomainEventDispatcher } from "./domain/events";`,
+    `import type * as schema from "./db/schema";`,
+    `import { baseLogger } from "./obs/log";`,
     "",
-    "  return () => {",
-    "    for (const stop of stops) stop();",
+    interval.length > 0
+      ? lines(
+          "// Stable per-timer advisory-lock key — an FNV-1a hash of the timerSource",
+          "// name into a signed 32-bit int, so two replicas contend on the SAME key.",
+          "function timerLockKey(name: string): number {",
+          "  let h = 0x811c9dc5;",
+          "  for (let i = 0; i < name.length; i++) {",
+          "    h ^= name.charCodeAt(i);",
+          "    h = Math.imul(h, 0x01000193);",
+          "  }",
+          "  return h | 0;",
+          "}",
+          "",
+        )
+      : false,
+    "// Starts every owned timer.  Async: pg-boss boot is async, and the returned",
+    "// disposer awaits a clean pg-boss shutdown.",
+    "export async function startTimerScheduler(",
+    "  db: NodePgDatabase<typeof schema>,",
+    "  events: DomainEventDispatcher,",
+    "): Promise<() => Promise<void>> {",
+    "  const disposers: Array<() => void | Promise<void>> = [];",
+    "",
+    ...(cron.length > 0 ? cronBlock(cron, eventByName) : []),
+    cron.length > 0 && interval.length > 0 ? "" : false,
+    ...(interval.length > 0 ? intervalBlock(interval, eventByName) : []),
+    "",
+    "  return async () => {",
+    "    for (const dispose of disposers) await dispose();",
     "  };",
     "}",
   );
