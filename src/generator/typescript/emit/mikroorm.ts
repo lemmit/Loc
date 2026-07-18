@@ -12,9 +12,12 @@
 // This is written the way a MikroORM developer would hand-write a DDD
 // data-mapper layer: the persistence model (Row entities) is deliberately
 // separate from the rich domain aggregate, and the repository maps between
-// them — using the EntityManager idiomatically (`em.fork()` for isolated unit-
-// of-work, `em.findOne` / `em.find` with real FilterQuery objects, `em.upsert`,
-// `em.nativeDelete`). Schema is owned by MikroORM (`orm.schema.updateSchema()`
+// them — using the EntityManager idiomatically (`em.fork({ keepTransactionContext:
+// true })` for an isolated per-call unit-of-work that still joins an ambient
+// `db.transactional(...)` when the audit / provenance route runs the save +
+// history flush atomically, `em.findOne` / `em.find` with real FilterQuery
+// objects, `em.upsert`, `em.nativeDelete`).  Outside a transaction the flag is
+// a no-op (nothing to keep).  Schema is owned by MikroORM (`orm.schema.updateSchema()`
 // at startup), so this backend is self-consistent without drizzle migrations.
 //
 // Row ↔ domain mapping reuses Loom's shared builders (`hydrateRootExpr`,
@@ -77,7 +80,11 @@ import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-fin
 import { hydrateEntityExpr } from "../repository-find-hydrate.js";
 import { collectEnums, collectValueObjects } from "../repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
-import { projectFieldEntries, projectionObject } from "../repository-save-builder.js";
+import {
+  projectFieldEntries,
+  projectionObject,
+  provColumnEntries,
+} from "../repository-save-builder.js";
 import { toWireMethod } from "../repository-wire-builder.js";
 import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./audit-stamp.js";
 
@@ -185,6 +192,24 @@ function columnsForType(
   }
 }
 
+/** Co-located provenance sidecar columns (provenance.md): a `<field>_provenance`
+ *  jsonb column holding the current lineage for each provenanced field.  Typed
+ *  `ProvLineage | null` on the Row so the shared save-projection / hydrate seams
+ *  (`provColumnEntries` / `hydrateRootExpr`) line up without a cast — mirrors the
+ *  drizzle `$type<ProvLineage>()` column. */
+function provColumnsOf(fields: readonly FieldIR[]): MikroColumn[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({
+      prop: `${f.name}_provenance`,
+      mikroType: "json",
+      tsType: `import("../domain/provenance").ProvLineage`,
+      nullable: true,
+      primary: false,
+      columnType: "jsonb",
+    }));
+}
+
 function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const id: MikroColumn = {
     prop: "id",
@@ -196,7 +221,7 @@ function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): Mik
   // `Id[]` reference collections persist as pivot tables (join-Row entities),
   // not columns on the aggregate row — skip them here.
   const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
-  return [id, ...scalarFields.flatMap((f) => fieldColumns(f, ctx))];
+  return [id, ...scalarFields.flatMap((f) => fieldColumns(f, ctx)), ...provColumnsOf(agg.fields)];
 }
 
 /** TPH shared-table columns (aggregate-inheritance.md, sharedTable): one Row
@@ -350,11 +375,111 @@ function embeddedColumnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContext
   return cols;
 }
 
+/** A plain Row entity block from a fixed column list (audit / provenance
+ *  history tables — no aggregate to walk). */
+function renderRecordRowEntity(
+  cls: string,
+  tableName: string,
+  cols: MikroColumn[],
+): { block: string; schemaName: string } {
+  const schemaName = `${cls}Schema`;
+  const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
+  const propLines = cols.map((c) => {
+    const parts = [`type: "${c.mikroType}"`];
+    if (c.primary) parts.push("primary: true");
+    if (c.columnType) parts.push(`columnType: "${c.columnType}"`);
+    if (c.nullable) parts.push("nullable: true");
+    return `    ${c.prop}: { ${parts.join(", ")} },`;
+  });
+  return {
+    schemaName,
+    block: lines(
+      `export class ${cls} {`,
+      ...classFields,
+      `}`,
+      "",
+      `export const ${schemaName} = new EntitySchema<${cls}>({`,
+      `  class: ${cls},`,
+      `  tableName: "${tableName}",`,
+      `  properties: {`,
+      ...propLines,
+      `  },`,
+      `});`,
+      "",
+    ),
+  };
+}
+
+const JSONB = (prop: string, nullable: boolean): MikroColumn => ({
+  prop,
+  mikroType: "json",
+  tsType: "unknown",
+  nullable,
+  primary: false,
+  columnType: "jsonb",
+});
+const TEXT = (prop: string, opts: { primary?: boolean; nullable?: boolean } = {}): MikroColumn => ({
+  prop,
+  mikroType: "string",
+  tsType: "string",
+  nullable: opts.nullable ?? false,
+  primary: opts.primary ?? false,
+});
+const TIMESTAMPTZ = (prop: string): MikroColumn => ({
+  prop,
+  mikroType: "Date",
+  tsType: "Date",
+  nullable: false,
+  primary: false,
+  columnType: "timestamptz",
+});
+
+/** Audit history Row (`audit_records`) — the MikroORM edition of the drizzle
+ *  `auditRecords` table.  Property names + underscore-mapped columns match, so
+ *  the shared routes-builder's `em.insert(AuditRecordRow, { auditId, … })`
+ *  round-trips into the same schema. */
+function auditRecordEntity(): { block: string; schemaName: string } {
+  return renderRecordRowEntity("AuditRecordRow", "audit_records", [
+    TEXT("auditId", { primary: true }),
+    TEXT("operationId"),
+    TEXT("action"),
+    TEXT("targetType"),
+    TEXT("targetId"),
+    JSONB("actor", true),
+    JSONB("before", false),
+    JSONB("after", false),
+    TIMESTAMPTZ("at"),
+    TEXT("status"),
+    TEXT("correlationId", { nullable: true }),
+    TEXT("scopeId", { nullable: true }),
+    TEXT("parentId", { nullable: true }),
+  ]);
+}
+
+/** Provenance history Row (`provenance_records`) — the MikroORM edition of the
+ *  drizzle `provenanceRecords` table. */
+function provenanceRecordEntity(): { block: string; schemaName: string } {
+  return renderRecordRowEntity("ProvenanceRecordRow", "provenance_records", [
+    TEXT("traceId", { primary: true }),
+    TEXT("snapshotId"),
+    TEXT("targetType"),
+    TEXT("field"),
+    JSONB("inputs", false),
+    JSONB("computedValue", true),
+    TIMESTAMPTZ("at"),
+    TEXT("correlationId", { nullable: true }),
+    TEXT("scopeId", { nullable: true }),
+    TEXT("actorId", { nullable: true }),
+    TEXT("parentId", { nullable: true }),
+  ]);
+}
+
 export function renderMikroEntities(
   aggs: readonly EnrichedAggregateIR[],
   ctx: EnrichedBoundedContextIR,
   shapeOf: (agg: EnrichedAggregateIR) => "relational" | "embedded" | "document" = (a) =>
     (a.savingShape as "relational" | "embedded" | "document" | undefined) ?? "relational",
+  opts: { audit?: boolean; provenance?: boolean } = {},
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
@@ -471,6 +596,19 @@ export function renderMikroEntities(
         "",
       ),
     );
+  }
+  // Audit / provenance history Row entities — emitted (like the drizzle
+  // `audit_records` / `provenance_records` tables) only when the model has an
+  // audited target / a provenanced field, so a plain project pays nothing.
+  if (opts.audit) {
+    const { block, schemaName } = auditRecordEntity();
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
+  if (opts.provenance) {
+    const { block, schemaName } = provenanceRecordEntity();
+    schemaNames.push(schemaName);
+    blocks.push(block);
   }
   return (
     lines(
@@ -994,10 +1132,16 @@ export function renderMikroRepository(
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
+  // Co-located provenance sidecar (provenance.md): each provenanced field's
+  // `<field>_provenance` jsonb column reads straight off the domain getter, the
+  // same shared entries the drizzle root projection uses.  Empty for a plain
+  // aggregate → byte-identical mikro output.
+  const provEntries = provColumnEntries(agg.fields, "aggregate");
   const saveProjection = projectionObject("aggregate", [
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...scalarFields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
+    ...provEntries,
   ]);
 
   // Persist-time audit stamping (node-persist-time-auditing): on an audited
@@ -1038,11 +1182,13 @@ export function renderMikroRepository(
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...nonVersionEntries,
+    ...provEntries,
     { fieldName: "version", expr: "1" },
   ]);
   const updateData = projectionObject("aggregate", [
     ...kindProjection,
     ...nonVersionEntries,
+    ...provEntries,
     { fieldName: "version", expr: "expected + 1" },
   ]);
   const insertValues = audited ? `stampInsert(${insertProjection})` : insertProjection;
@@ -1104,7 +1250,7 @@ export function renderMikroRepository(
         .join(", ");
       return lines(
         `  async ${name}(${pagedParams}): Promise<{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const sortable = new Set<string>([${sortable}]);`,
         `    const sortField = sortable.has(sort) ? sort : "id";`,
         `    const orderBy: Record<string, "asc" | "desc"> = { [sortField]: dir === "desc" ? "desc" : "asc" };`,
@@ -1120,7 +1266,7 @@ export function renderMikroRepository(
     if (isList) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name}[]> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const rows = await em.find(${row}, ${filter});`,
         dbg(f.name, "rows.length"),
         ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
@@ -1132,7 +1278,7 @@ export function renderMikroRepository(
     if (hasChildren) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name} | null> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const row = await em.findOne(${row}, ${filter});`,
         `    if (row === null) return null;`,
         ...assocInlineLoadLines(agg, "em", "row.id", "    "),
@@ -1143,7 +1289,7 @@ export function renderMikroRepository(
     }
     return lines(
       `  async ${name}(${params}): Promise<${agg.name} | null> {`,
-      `    const em = this.em.fork();`,
+      `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const row = await em.findOne(${row}, ${filter});`,
       `    return row === null ? null : ${hydrate("row")};`,
       `  }`,
@@ -1189,7 +1335,7 @@ export function renderMikroRepository(
           : "";
       return lines(
         `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const rows = await em.find(${row}, ${filter}, { limit: page?.limit, offset: page?.offset${orderBy} });`,
         dbg(r.name, "rows.length"),
         ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
@@ -1201,7 +1347,7 @@ export function renderMikroRepository(
     ? hasChildren
       ? lines(
           `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
-          `    const em = this.em.fork();`,
+          `    const em = this.em.fork({ keepTransactionContext: true });`,
           // No FK cascade (MikroORM owns the schema), so clear the owner's
           // pivot rows + contained child rows before the root delete.
           ...(agg.associations ?? []).map(
@@ -1221,7 +1367,7 @@ export function renderMikroRepository(
         )
       : lines(
           `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
-          `    await this.em.fork().nativeDelete(${row}, ${withContextFilters("{ id: id as string }", kindClause)});`,
+          `    await this.em.fork({ keepTransactionContext: true }).nativeDelete(${row}, ${withContextFilters("{ id: id as string }", kindClause)});`,
           `  }`,
         )
     : "";
@@ -1241,7 +1387,7 @@ export function renderMikroRepository(
     `  }`,
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const row = await em.findOne(${row}, ${withContextFilters("{ id: id as string }", baseFilters)});`,
     `    if (row === null) {`,
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
@@ -1262,7 +1408,7 @@ export function renderMikroRepository(
     "",
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
     ...assocHydrateBind(agg, ctx, "em", "", "return", "    "),
     `  }`,
@@ -1270,7 +1416,7 @@ export function renderMikroRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     ...(versioned ? versionedSaveLines : [upsertCall]),
     ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
     ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
@@ -1429,7 +1575,7 @@ export function renderMikroEmbeddedRepository(
         .join(", ");
       return lines(
         `  async ${name}(${pagedParams}): Promise<{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const sortable = new Set<string>([${sortable}]);`,
         `    const sortField = sortable.has(sort) ? sort : "id";`,
         `    const orderBy: Record<string, "asc" | "desc"> = { [sortField]: dir === "desc" ? "desc" : "asc" };`,
@@ -1448,7 +1594,7 @@ export function renderMikroEmbeddedRepository(
     if (isList) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name}[]> {`,
-        `    const em = this.em.fork();`,
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
         `    const rows = await em.find(${row}, ${filter});`,
         dbg(f.name, "rows.length"),
         `    return rows.map((row) => {`,
@@ -1460,7 +1606,7 @@ export function renderMikroEmbeddedRepository(
     }
     return lines(
       `  async ${name}(${params}): Promise<${agg.name} | null> {`,
-      `    const em = this.em.fork();`,
+      `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const row = await em.findOne(${row}, ${filter});`,
       `    if (row === null) return null;`,
       ...embeddedHydrateLocals(agg, "row", "    "),
@@ -1472,7 +1618,7 @@ export function renderMikroEmbeddedRepository(
   const deleteMethod = agg.canonicalDestroy
     ? lines(
         `  async delete(id: ${idVar}): Promise<void> {`,
-        `    await this.em.fork().nativeDelete(${row}, ${withContextFilters("{ id: id as string }", [])});`,
+        `    await this.em.fork({ keepTransactionContext: true }).nativeDelete(${row}, ${withContextFilters("{ id: id as string }", [])});`,
         `  }`,
       )
     : "";
@@ -1490,7 +1636,7 @@ export function renderMikroEmbeddedRepository(
     `  }`,
     "",
     `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const row = await em.findOne(${row}, ${withContextFilters("{ id: id as string }", baseFilters)});`,
     `    if (row === null) {`,
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
@@ -1510,7 +1656,7 @@ export function renderMikroEmbeddedRepository(
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
     `    return rows.map((row) => {`,
     ...embeddedHydrateLocals(agg, "row", "      "),
@@ -1519,7 +1665,7 @@ export function renderMikroEmbeddedRepository(
     `  }`,
     "",
     `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rootRow = ${rootRow};`,
     upsertCall,
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
@@ -1633,7 +1779,7 @@ export function renderMikroDocumentRepository(
     const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
     return lines(
       `  async ${f.name}(${params}): Promise<${ret}> {`,
-      `    const em = this.em.fork();`,
+      `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const rows = await em.find(${row}, {});`,
       `    const all = rows.map((r) => ${fromDocOf("r")});`,
       `    const result = ${selector};`,
@@ -1646,7 +1792,7 @@ export function renderMikroDocumentRepository(
   const deleteMethod = emitsDelete
     ? lines(
         `  async delete(id: ${idVar}): Promise<void> {`,
-        `    await this.em.fork().nativeDelete(${row}, { id: id as string });`,
+        `    await this.em.fork({ keepTransactionContext: true }).nativeDelete(${row}, { id: id as string });`,
         `  }`,
       )
     : "";
@@ -1684,7 +1830,7 @@ export function renderMikroDocumentRepository(
     `  }`,
     "",
     `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const row = await em.findOne(${row}, { id: id as string });`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: !!row });`,
     `    if (row === null) return null;`,
@@ -1705,7 +1851,7 @@ export function renderMikroDocumentRepository(
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, { id: { $in: ids as string[] } });`,
     `    return rows.map((r) => ${fromDocOf("r")})${capX ? `.filter((x) => ${capX})` : ""};`,
     `  }`,
@@ -1713,7 +1859,7 @@ export function renderMikroDocumentRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
     ...saveLines,
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
@@ -1885,7 +2031,7 @@ export function renderMikroEventSourcedRepository(
     "  }",
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
-    "    const em = this.em.fork();",
+    "    const em = this.em.fork({ keepTransactionContext: true });",
     `    const rows = await em.find(${eventRow}, { streamType: "${streamType}", streamId: id as string }, { orderBy: { version: "ASC" } });`,
     "    if (rows.length === 0) return null;",
     `    return ${agg.name}._fromEvents(`,
@@ -1911,7 +2057,7 @@ export function renderMikroEventSourcedRepository(
     "  }",
     "",
     `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    "    const em = this.em.fork();",
+    "    const em = this.em.fork({ keepTransactionContext: true });",
     "    const pending = aggregate.pullEvents();",
     "    if (pending.length > 0) {",
     "      const streamId = aggregate.id as string;",
@@ -1942,7 +2088,7 @@ export function renderMikroEventSourcedRepository(
     "  }",
     "",
     `  private async _loadAll(): Promise<${agg.name}[]> {`,
-    "    const em = this.em.fork();",
+    "    const em = this.em.fork({ keepTransactionContext: true });",
     `    const rows = await em.find(${eventRow}, { streamType: "${streamType}" }, { orderBy: { streamId: "ASC", version: "ASC" } });`,
     "    const byStream = new Map<string, Events.DomainEvent[]>();",
     "    for (const r of rows) {",
@@ -2069,14 +2215,14 @@ export function renderMikroBaseReader(
     `  }`,
     "",
     `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const row = await em.findOne(${row}, { id: id as string });`,
     `    if (row === null) return null;`,
     `    return hydrate${base.name}(row);`,
     `  }`,
     "",
     `  async findAll(): Promise<${base.name}[]> {`,
-    `    const em = this.em.fork();`,
+    `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, {});`,
     `    return rows.map(hydrate${base.name});`,
     `  }`,

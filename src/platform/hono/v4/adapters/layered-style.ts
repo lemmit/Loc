@@ -111,6 +111,10 @@ export const layeredStyleAdapter: StyleAdapter = {
       emitAudit,
       emitProvenance,
       !!ctx.emitTrace,
+      // `persistence: mikroorm` → the history flush runs on the EntityManager
+      // (`db.transactional` + `em.insert(<Row>, …)`).  drizzle keeps the false
+      // default, so its routes stay byte-identical.
+      ctx.deployable.persistence === "mikroorm",
     );
     const category: HonoArtifactCategory = "http-routes";
     return [

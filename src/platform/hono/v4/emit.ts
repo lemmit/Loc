@@ -445,8 +445,11 @@ export function generateTypeScriptForContexts(
   if (usingMikro) {
     out.set(
       "db/entities.ts",
-      renderMikroEntities(merged.aggregates, merged, (agg) =>
-        effectiveSavingShape(agg, resolveDataSource?.(agg)),
+      renderMikroEntities(
+        merged.aggregates,
+        merged,
+        (agg) => effectiveSavingShape(agg, resolveDataSource?.(agg)),
+        { audit: emitAudit, provenance: emitProvenance },
       ),
     );
     out.set("mikro-orm.config.ts", renderMikroConfig());
@@ -714,7 +717,15 @@ export function generateTypeScriptForContexts(
         }
       } else {
         const routesPath = `http/${lowerFirst(agg.name)}.routes.ts`;
-        const routesContent = buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace);
+        const routesContent = buildRoutesFile(
+          agg,
+          repo,
+          ctx,
+          emitAudit,
+          emitProvenance,
+          emitTrace,
+          usingMikro,
+        );
         out.set(routesPath, routesContent);
         sourcemap?.file(routesPath, routesContent, agg.origin, construct);
       }

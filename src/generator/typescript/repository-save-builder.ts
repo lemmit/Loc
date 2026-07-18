@@ -299,8 +299,8 @@ function entityProjection(
   ]);
 }
 
-function provColumnEntries(
-  fields: FieldIR[],
+export function provColumnEntries(
+  fields: readonly FieldIR[],
   varExpr: string,
 ): { fieldName: string; expr: string }[] {
   return fields

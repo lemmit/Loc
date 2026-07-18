@@ -75,7 +75,7 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
     expect(entities).toContain("@mikro-orm/core");
     const repo = files.get("api/db/repositories/order-repository.ts")!;
     expect(repo).toContain('import { EntityManager } from "@mikro-orm/postgresql"');
-    expect(repo).toContain("this.em.fork()"); // idiomatic isolated unit-of-work
+    expect(repo).toContain("this.em.fork({ keepTransactionContext: true })"); // idiomatic isolated unit-of-work
     // Versioning is default-on (M-T3.4): the save is the guarded optimistic-
     // concurrency write (findOne → insert / version-CAS nativeUpdate), not a
     // blind upsert.
@@ -330,14 +330,14 @@ describe("mikroorm — `filter` capability predicates", () => {
     // The softDeletable filter (`!this.isDeleted` → `{ isDeleted: false }`) is
     // applied to the plain read…
     expect(repo).toContain(
-      "async active(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { $and: [{ customer: customer }, { isDeleted: false }] });",
+      "async active(customer: string): Promise<Order[]> {\n    const em = this.em.fork({ keepTransactionContext: true });\n    const rows = await em.find(OrderRow, { $and: [{ customer: customer }, { isDeleted: false }] });",
     );
     // …and dropped when the read bypasses it by name or with `*`.
     expect(repo).toContain(
-      "async withDeleted(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+      "async withDeleted(customer: string): Promise<Order[]> {\n    const em = this.em.fork({ keepTransactionContext: true });\n    const rows = await em.find(OrderRow, { customer: customer });",
     );
     expect(repo).toContain(
-      "async reallyAll(customer: string): Promise<Order[]> {\n    const em = this.em.fork();\n    const rows = await em.find(OrderRow, { customer: customer });",
+      "async reallyAll(customer: string): Promise<Order[]> {\n    const em = this.em.fork({ keepTransactionContext: true });\n    const rows = await em.find(OrderRow, { customer: customer });",
     );
   });
 });
@@ -487,20 +487,115 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     expect(errors.some((e) => /persistence: mikroorm/.test(e) && needle.test(e))).toBe(true);
   };
 
-  it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
+  // A genuinely-impossible shape still fails fast (the reject surface survives
+  // as a guard, not a subset boundary) — a nested/collection-bearing part.
+  it("still rejects a nested entity part (deeper nesting)", () =>
+    rejects(
+      "contains lines: Line[]  entity Line { contains sub: Sub[]  entity Sub { x: int } }",
+      /nested/,
+    ));
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
   });
 
-  // Per-op / lifecycle `audited` writes an audit_records history row through the
-  // SHARED (drizzle-shaped) routes-builder transaction (`db.transaction` +
-  // `tx.insert(schema.auditRecords)`), which doesn't compile on the EntityManager
-  // — fail fast until the flush is ported (same seam as provenanced fields).
-  // NOTE: persist-time audit STAMPING (`auditable`) stays supported (see below).
-  it("rejects a per-operation `audited` flag", () =>
-    rejects('status: string  operation ship() audited { status := "shipped" }', /audited/));
+  it("no longer rejects a provenanced field (wave 3)", async () => {
+    const { errors } = await emit(sys("mikroorm", "total: int provenanced"));
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+
+  it("no longer rejects a per-operation `audited` flag (wave 3)", async () => {
+    const { errors } = await emit(
+      sys("mikroorm", "operation ship() audited { status := Confirmed }"),
+    );
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provenanced fields + per-op `audited` on mikroorm — wave 3.  The history flush
+// the SHARED routes-builder writes in the save transaction is ported to the
+// EntityManager: `db.transactional(...)` + `em.insert(AuditRecordRow /
+// ProvenanceRecordRow, {...})` over the mikro history-Row entities, with the
+// save joining the same transaction via the repos' `keepTransactionContext`
+// fork.  A provenanced field also rides a co-located `<field>_provenance` jsonb
+// column on the aggregate Row.  Drizzle is untouched (usingMikro-gated).
+// ---------------------------------------------------------------------------
+describe("mikroorm — provenanced fields + audited ops (wave 3)", () => {
+  const AP_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        reference: string
+        quantity: int
+        unitPrice: int
+        total: int provenanced
+        operation reprice(qty: int, price: int) audited {
+          quantity := qty
+          unitPrice := price
+          total := qty * price
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("emits the AuditRecordRow + ProvenanceRecordRow history entities", async () => {
+    const { files, errors } = await emit(AP_SRC);
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class AuditRecordRow {");
+    expect(entities).toContain('tableName: "audit_records"');
+    expect(entities).toContain('auditId: { type: "string", primary: true }');
+    expect(entities).toContain("export class ProvenanceRecordRow {");
+    expect(entities).toContain('tableName: "provenance_records"');
+    expect(entities).toContain(
+      "export const entities = [OrderRowSchema, AuditRecordRowSchema, ProvenanceRecordRowSchema];",
+    );
+  });
+
+  it("rides a co-located <field>_provenance jsonb column on the aggregate Row + save projection", async () => {
+    const { files } = await emit(AP_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain(
+      'total_provenance!: import("../domain/provenance").ProvLineage | null;',
+    );
+    expect(entities).toContain(
+      'total_provenance: { type: "json", columnType: "jsonb", nullable: true }',
+    );
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("total_provenance: aggregate.total_provenance");
+    expect(repo).toContain("total_provenance: row.total_provenance ?? null");
+  });
+
+  it("runs the history flush on the EntityManager (db.transactional + em.insert), not drizzle", async () => {
+    const { files } = await emit(AP_SRC);
+    const routes = files.get("api/http/order.routes.ts")!;
+    expect(routes).toContain(
+      'import { AuditRecordRow, ProvenanceRecordRow } from "../db/entities";',
+    );
+    expect(routes).toContain('import type { EntityManager } from "@mikro-orm/postgresql";');
+    expect(routes).toContain("db: EntityManager");
+    expect(routes).toContain("await db.transactional(async (tx) => {");
+    expect(routes).toContain("await tx.insert(AuditRecordRow, {");
+    expect(routes).toContain("await tx.insert(ProvenanceRecordRow, {");
+    // The drizzle transaction seam is gone on the mikro emission.
+    expect(routes).not.toContain("db.transaction(");
+    expect(routes).not.toContain("schema.auditRecords");
+    expect(routes).not.toContain("NodePgDatabase");
+  });
+
+  it("the transactional repo joins the ambient transaction (keepTransactionContext fork)", async () => {
+    const { files } = await emit(AP_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("this.em.fork({ keepTransactionContext: true })");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -93,6 +93,28 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // catch drift.
 // ---------------------------------------------------------------------------
 
+/** Transaction wrapper for the audit / provenance history flush.  drizzle:
+ *  `db.transaction`; mikroorm: the EntityManager's `db.transactional` (which
+ *  opens a real DB transaction and threads its async context to the forked
+ *  repo em — see the mikro repos' `keepTransactionContext` fork).  The callback
+ *  var stays `tx` on both, so the repo construction + close line are shared. */
+function txWrapperCall(usingMikro: boolean): string {
+  return usingMikro ? `db.transactional(async (tx) => {` : `db.transaction(async (tx) => {`;
+}
+
+/** History-row insert opener.  drizzle: `tx.insert(schema.<table>).values({`;
+ *  mikroorm: `tx.insert(<Row>, {` (the EntityManager insert takes the entity
+ *  class + a plain data object).  The row-value entries + `});` close are
+ *  identical between backends. */
+function historyInsertCall(
+  usingMikro: boolean,
+  table: "auditRecords" | "provenanceRecords",
+): string {
+  if (!usingMikro) return `tx.insert(schema.${table}).values({`;
+  const row = table === "auditRecords" ? "AuditRecordRow" : "ProvenanceRecordRow";
+  return `tx.insert(${row}, {`;
+}
+
 export function buildRoutesFile(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
@@ -100,6 +122,11 @@ export function buildRoutesFile(
   emitAudit = false,
   emitProvenance = false,
   emitTrace = false,
+  // `persistence: mikroorm` — the audited / provenanced history flush runs on
+  // the MikroORM EntityManager (`db.transactional` + `em.insert(<Row>, …)`)
+  // instead of drizzle's `db.transaction` + `tx.insert(schema.<table>)`.  The
+  // drizzle default keeps `usingMikro = false`, so its output is byte-identical.
+  usingMikro = false,
 ): string {
   // An audited public command action instruments its route handler with an
   // `audit_records` insert; the schema table is only emitted when some
@@ -192,10 +219,24 @@ export function buildRoutesFile(
     // Needs the schema tables (runtime value), a UUID, and the db/events
     // types for the transactional repo (mirrors the workflow routes' imports).
     lines.push(`import { randomUUID } from "node:crypto";`);
-    lines.push(`import * as schema from "../db/schema";`);
-    lines.push(`import { requestContext } from "../obs/als";`);
-    lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
-    lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+    if (usingMikro) {
+      // MikroORM edition: `db` is the EntityManager and the history rows are
+      // its Row entities (`em.insert(<Row>, …)`), so pull the entity classes +
+      // the EntityManager type in place of the drizzle schema module.
+      const histRows = [
+        ...(fileHasAudit ? ["AuditRecordRow"] : []),
+        ...(fileHasProv || fileHasProvField ? ["ProvenanceRecordRow"] : []),
+      ];
+      lines.push(`import { ${histRows.join(", ")} } from "../db/entities";`);
+      lines.push(`import { requestContext } from "../obs/als";`);
+      lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
+      lines.push(`import type { EntityManager } from "@mikro-orm/postgresql";`);
+    } else {
+      lines.push(`import * as schema from "../db/schema";`);
+      lines.push(`import { requestContext } from "../obs/als";`);
+      lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
+      lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+    }
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -448,7 +489,7 @@ export function buildRoutesFile(
   // `events` so the operation can run its save + audit insert + provenance
   // flush in one transaction.
   const routerParams = needsTx
-    ? `repo: ${agg.name}Repository, db: NodePgDatabase<typeof schema>, events: DomainEventDispatcher`
+    ? `repo: ${agg.name}Repository, db: ${usingMikro ? "EntityManager" : "NodePgDatabase<typeof schema>"}, events: DomainEventDispatcher`
     : `repo: ${agg.name}Repository`;
   lines.push(`export function ${lowerFirst(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
   // `newApp()` from `./problem-details` constructs OpenAPIHono with the
@@ -508,10 +549,10 @@ export function buildRoutesFile(
       const actorExpr = `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
       lines.push(`      const actor = ${actorExpr};`);
       lines.push(`      const reqCtx = requestContext();`);
-      lines.push(`      await db.transaction(async (tx) => {`);
+      lines.push(`      await ${txWrapperCall(usingMikro)}`);
       lines.push(`        const repoTx = new ${agg.name}Repository(tx, events);`);
       lines.push(`        await repoTx.save(created);`);
-      lines.push(`        await tx.insert(schema.auditRecords).values({`);
+      lines.push(`        await ${historyInsertCall(usingMikro, "auditRecords")}`);
       lines.push(`          auditId: randomUUID(),`);
       lines.push(`          operationId: "${camelId(opCreate(agg.name))}",`);
       lines.push(`          action: "create",`);
@@ -659,12 +700,12 @@ export function buildRoutesFile(
         `        const actor = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null;`,
       );
       lines.push(`        const reqCtx = requestContext();`);
-      lines.push(`        await db.transaction(async (tx) => {`);
+      lines.push(`        await ${txWrapperCall(usingMikro)}`);
       lines.push(`          const repoTx = new ${agg.name}Repository(tx, events);`);
       // getById throws AggregateNotFoundError (→ 404) when absent.
       lines.push(`          const loaded = await repoTx.getById(Ids.${agg.name}Id(id));`);
       lines.push(`          const before = repoTx.toWire(loaded);`);
-      lines.push(`          await tx.insert(schema.auditRecords).values({`);
+      lines.push(`          await ${historyInsertCall(usingMikro, "auditRecords")}`);
       lines.push(`            auditId: randomUUID(),`);
       lines.push(`            operationId: "${camelId(opDestroy(agg.name))}",`);
       lines.push(`            action: "destroy",`);
@@ -719,6 +760,7 @@ export function buildRoutesFile(
         auditOps.includes(op),
         provOps.includes(op),
         emitTrace,
+        usingMikro,
       ).map((l) => `  ${l}`),
     );
     if (op.when) {
@@ -955,6 +997,7 @@ function emitOperationRoute(
   audit: boolean,
   prov: boolean,
   emitTrace: boolean,
+  usingMikro = false,
 ): string[] {
   // Lifecycle stamps are applied persist-time in the drizzle save()
   // (node-persist-time-auditing); the operation route no longer stamps.
@@ -1116,7 +1159,7 @@ function emitOperationRoute(
     // that produced it.  Read from the ambient RequestContext opened by the
     // request-id middleware.
     out.push(`    const reqCtx = requestContext();`);
-    out.push(`    await db.transaction(async (tx) => {`);
+    out.push(`    await ${txWrapperCall(usingMikro)}`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
     if (isVersionedUpdate) {
@@ -1135,7 +1178,7 @@ function emitOperationRoute(
     );
     if (audit) {
       out.push(`      const after = repoTx.toWire(aggregate);`);
-      out.push(`      await tx.insert(schema.auditRecords).values({`);
+      out.push(`      await ${historyInsertCall(usingMikro, "auditRecords")}`);
       out.push(`        auditId: randomUUID(),`);
       out.push(`        operationId: "${camelId(opOperation(agg.name, op.name))}",`);
       out.push(`        action: "${op.name}",`);
@@ -1159,7 +1202,7 @@ function emitOperationRoute(
       // traceId + at are stamped here so the domain layer stays pure.
       out.push(`      const __prov = aggregate.drainProv();`);
       out.push(`      for (const t of __prov) {`);
-      out.push(`        await tx.insert(schema.provenanceRecords).values({`);
+      out.push(`        await ${historyInsertCall(usingMikro, "provenanceRecords")}`);
       out.push(`          traceId: randomUUID(),`);
       out.push(`          snapshotId: t.snapshotId,`);
       out.push(`          targetType: t.target.type,`);
