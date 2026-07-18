@@ -635,7 +635,12 @@ const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
   datetime: "z.string()",
   guid: "z.string()",
   json: "z.unknown()",
-  File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
+  // A `File` REQUEST field is `.nullable()`: a form starts with no file
+  // (a `null` FileRef — the `field-input-file` template seeds `null`,
+  // since a zero FileRef object is not a valid "unset" state) and the
+  // user uploads to fill it.  The RESPONSE File stays non-null — the
+  // server always returns a resolved ref.
+  File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() }).nullable()",
 };
 
 const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
