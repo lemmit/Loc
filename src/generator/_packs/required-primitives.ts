@@ -126,6 +126,25 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-sticky",
 ];
 
+// Primitives the Flutter walking-skeleton pack renders INLINE via the walker
+// seams (Track B/D) or DEFERS to full parity — never as a `flutter` pack
+// template.  Subtracted from the shared + TSX-only lists to form the
+// `flutter` required surface (the display / layout primitives only).  Mirrors
+// how `angular` drops `primitive-form-of` / `primitive-modal`; Flutter drops
+// the whole interactive-input family too (`Field*` / `Toggle` / `Tabs` are
+// deferred Material `TextFormField` / `Switch` / `DefaultTabController` work).
+const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
+  "primitive-form-of",
+  "primitive-modal",
+  "primitive-field",
+  "primitive-multiline-field",
+  "primitive-number-field",
+  "primitive-password-field",
+  "primitive-select-field",
+  "primitive-toggle",
+  "primitive-tabs",
+]);
+
 // Shell-level templates every pack must emit, regardless of format.
 const SHARED_SHELL: readonly string[] = [
   "app-shell",
@@ -164,7 +183,12 @@ const TSX_FORM: readonly string[] = [
   "realtime-toast",
 ];
 
-export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
+// `flutter` is keyed alongside the `PackFormat` union here (rather than in
+// `PackFormat` itself) because the format is registered by the Flutter-target
+// integrator in `src/util/builtin-formats.ts`; the required-set only needs the
+// key.  When that registration lands, `PackFormat | "flutter"` collapses to
+// `PackFormat` with no change here.
+export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = {
   tsx: {
     core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
     shell: SHARED_SHELL,
@@ -223,6 +247,24 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
       "tsconfig",
       "angular-json",
     ],
+  },
+  // Flutter (flutter-mobile-implementation.md Track C — WALKING SKELETON).
+  // Flutter is a Feliz clone: a non-JSX widget-tree target rendered by a
+  // PROCEDURAL pack (`src/generator/flutter/pack.ts`, Material widgets), not a
+  // `designs/` Handlebars tree.  Like `angular`, its form/modal/input family
+  // renders INLINE via the walker seams (or is deferred to full parity), so the
+  // required surface is the DISPLAY / layout primitives ONLY: the shared set
+  // minus the interactive `FLUTTER_INLINE_OR_DEFERRED` names, plus the TSX-only
+  // display primitives (`code-block` / `icon` / `section` / `sticky`) minus
+  // `modal`.  No `fieldInput` / `form` sets.  Shell delta: a single Dart
+  // `pubspec` in place of the Vite world's `package-json` + `vite-config` +
+  // `tsconfig` (Flutter builds via `flutter build`, not npm/tsc).
+  flutter: {
+    core: [
+      ...SHARED_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
+      ...TSX_ONLY_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
+    ],
+    shell: ["pubspec"],
   },
 };
 

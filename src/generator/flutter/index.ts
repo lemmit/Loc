@@ -4,14 +4,28 @@
 // native), so it dispatches straight through its own `emitProject` and is
 // absent from `STATIC_BUNDLE_FRAMEWORKS`.
 //
-// PHASE 0 STATUS: this emits a MINIMAL but coherent Flutter project skeleton —
-// `pubspec.yaml`, `lib/main.dart` (a trivial `MaterialApp`), and one placeholder
-// home page.  It does NOT yet render real page bodies through `walkBody` /
-// `flutterTarget`; the Phase 1 fan-out tracks (Dart wire model, the walker seam
-// object, the Material pack, the Riverpod projector) fill that in place.
+// WALKING SKELETON: page bodies render through the shared `walkBody` engine with
+// `flutterTarget` (the WalkerTarget seam) + the procedural `flutterMaterial`
+// pack, exactly as Feliz drives `walkBody` with `felizTarget` + `felizPack()`.
+// The Dart wire-model classes come from `renderDartModels`.  Forms / workflows /
+// match-await and the native (non-web) surface are deferred to full parity — the
+// display path (List / Detail) is what the skeleton proves end-to-end.  No Dart
+// is compiled locally (no Flutter SDK); `generated-flutter-build.yml` owns the
+// "is the Dart real" gate.
 
-import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
+import type {
+  DeployableIR,
+  EnrichedBoundedContextIR,
+  PageIR,
+  SystemIR,
+  UiIR,
+} from "../../ir/types/loom-ir.js";
+import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { walkBody } from "../_walker/walker-core.js";
+import { renderDartModels } from "./dart-model-emit.js";
+import { flutterTarget } from "./flutter-target.js";
+import { flutterPack } from "./pack.js";
 
 export interface GenerateFlutterOptions {
   apiBaseUrl?: string;
@@ -31,16 +45,127 @@ export function generateFlutterForContexts(
 
   const pkg = snake(deployable.name) || "loom_app";
   const title = upperFirst(deployable.uiName ?? deployable.name ?? sys.name);
-  // The aggregates reachable through this deployable's contexts — surfaced as
-  // placeholder list tiles so the skeleton reflects the model (Phase 1 replaces
-  // this with real per-page widget trees walked from the `ui`).
+
+  const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
+
+  // Wire-model classes for every aggregate/VO/event reachable through this
+  // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
+  out.set("lib/models.dart", renderDartModels(contexts));
+
+  // The aggregates reachable through this deployable — used for the fallback
+  // home page when the ui declares no pages of its own.
   const aggregates = contexts.flatMap((c) => c.aggregates.map((a) => a.name));
 
+  const pages = ui?.pages ?? [];
+  const rendered = pages.map((page) => ({ page, ...renderPage(page, ui as UiIR, contexts) }));
+
+  if (rendered.length > 0) {
+    for (const r of rendered) {
+      out.set(`lib/pages/${r.fileBase}.dart`, r.source);
+    }
+    out.set("lib/main.dart", renderMainWithRoutes(title, rendered));
+  } else {
+    out.set("lib/main.dart", renderMain(title));
+    out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
+  }
+
   out.set("pubspec.yaml", renderPubspec(pkg, deployable.name));
-  out.set("lib/main.dart", renderMain(title));
-  out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
+  out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
+  out.set("Dockerfile", DOCKERFILE);
 
   return out;
+}
+
+interface RenderedPage {
+  page: PageIR;
+  fileBase: string;
+  className: string;
+  routePath: string;
+  source: string;
+}
+
+/** Render one `ui` page into a Flutter `StatelessWidget` whose `build` returns
+ *  the widget tree the shared walker produced from the page body. */
+function renderPage(
+  page: PageIR,
+  ui: UiIR,
+  contexts: EnrichedBoundedContextIR[],
+): Omit<RenderedPage, "page"> {
+  const className = `${upperFirst(page.name)}Page`;
+  const fileBase = `${snake(page.name)}_page`;
+  const routePath = page.route ?? `/${snake(page.name)}`;
+
+  const aggregatesByName = new Map(contexts.flatMap((c) => c.aggregates.map((a) => [a.name, a])));
+  const paramNames = new Set(page.params.map((p) => p.name));
+  const stateNames = new Set(page.state.map((s) => s.name));
+
+  let bodyWidget = "const Center(child: Text('Empty page'))";
+  if (page.body) {
+    const result = walkBody(
+      page.body,
+      flutterTarget,
+      flutterPack(),
+      paramNames,
+      stateNames,
+      new Map(), // userComponents
+      ui.apiParams,
+      aggregatesByName,
+    );
+    bodyWidget = result.tsx.trim() || bodyWidget;
+  }
+
+  const src = `${lines(
+    "import 'package:flutter/material.dart';",
+    "",
+    "import '../models.dart';",
+    "",
+    `class ${className} extends StatelessWidget {`,
+    `  const ${className}({super.key});`,
+    "",
+    "  @override",
+    "  Widget build(BuildContext context) {",
+    "    return Scaffold(",
+    `      appBar: AppBar(title: const Text('${escapeDart(page.name)}')),`,
+    "      body: SingleChildScrollView(",
+    `        child: ${indentContinuation(bodyWidget, 8)},`,
+    "      ),",
+    "    );",
+    "  }",
+    "}",
+  )}\n`;
+
+  return { fileBase, className, routePath, source: src };
+}
+
+/** `main.dart` for a multi-page ui: a `MaterialApp` with named routes, the first
+ *  page as `initialRoute`. */
+function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
+  const home = pages[0];
+  return `${lines(
+    "import 'package:flutter/material.dart';",
+    "",
+    pages.map((p) => `import 'pages/${p.fileBase}.dart';`),
+    "",
+    "void main() {",
+    "  runApp(const App());",
+    "}",
+    "",
+    "class App extends StatelessWidget {",
+    "  const App({super.key});",
+    "",
+    "  @override",
+    "  Widget build(BuildContext context) {",
+    "    return MaterialApp(",
+    `      title: '${escapeDart(title)}',`,
+    "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
+    `      initialRoute: '${home.routePath}',`,
+    "      routes: {",
+    pages.map((p) => `        '${p.routePath}': (context) => const ${p.className}(),`),
+    "      },",
+    "    );",
+    "  }",
+    "}",
+  )}\n`;
 }
 
 function renderPubspec(pkg: string, deployableName: string): string {
@@ -67,6 +192,31 @@ flutter:
 `;
 }
 
+const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
+`;
+
+// Self-hosting web build — mirrors the Feliz Dockerfile shape (SDK build stage →
+// nginx runtime serving the static bundle on :3000 with SPA fallback).  The
+// compose service references \`build: ./\`, so the Flutter bundle is produced at
+// image-build time, not fetched.
+const DOCKERFILE = `# syntax=docker/dockerfile:1
+FROM ghcr.io/cirruslabs/flutter:stable AS build
+WORKDIR /app
+COPY pubspec.yaml ./
+RUN flutter pub get
+COPY . .
+RUN flutter build web --release
+
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /app/build/web /usr/share/nginx/html
+RUN printf 'server { listen 3000; root /usr/share/nginx/html; location / { try_files $uri /index.html; } }' \\
+  > /etc/nginx/conf.d/default.conf
+EXPOSE 3000
+CMD ["nginx", "-g", "daemon off;"]
+`;
+
+// --- Fallback (no ui pages) skeleton widgets --------------------------------
+
 function renderMain(title: string): string {
   return `import 'package:flutter/material.dart';
 
@@ -82,7 +232,7 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '${title}',
+      title: '${escapeDart(title)}',
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
       home: const HomePage(),
     );
@@ -104,7 +254,7 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('${title}')),
+      appBar: AppBar(title: const Text('${escapeDart(title)}')),
       body: ListView(
         children: [
 ${tiles}
@@ -114,4 +264,18 @@ ${tiles}
   }
 }
 `;
+}
+
+/** Escape a bare identifier/title for embedding in a single-quoted Dart string. */
+function escapeDart(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$");
+}
+
+/** Re-indent a possibly-multiline widget expression so its continuation lines
+ *  sit under the opening `child:` column. */
+function indentContinuation(widget: string, spaces: number): string {
+  const pad = " ".repeat(spaces);
+  const [first, ...rest] = widget.split("\n");
+  if (rest.length === 0) return first;
+  return [first, ...rest.map((line) => (line ? pad + line : line))].join("\n");
 }

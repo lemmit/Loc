@@ -47,15 +47,33 @@ describe("flutter foundation skeleton", () => {
     expect(files.get(pubspec!)).toContain("sdk: flutter");
     expect(files.get(pubspec!)).toContain("uses-material-design: true");
 
-    // main.dart boots a MaterialApp.
+    // main.dart boots a MaterialApp with the declared page wired as a route.
     const mainSrc = files.get(main!)!;
     expect(mainSrc).toContain("import 'package:flutter/material.dart';");
     expect(mainSrc).toContain("runApp(const App())");
     expect(mainSrc).toContain("MaterialApp(");
+    expect(mainSrc).toContain("routes:");
+    expect(mainSrc).toContain("const HomePage()");
 
-    // The model's aggregate surfaces in the placeholder home page.
+    // The `ui`'s Home page renders through walkBody → flutterTarget + the
+    // flutterMaterial pack (not a placeholder), surfacing the heading text.
     const home = keys.find((k) => k.endsWith("lib/pages/home_page.dart"));
-    expect(home).toBeDefined();
-    expect(files.get(home!)).toContain("Product");
+    expect(home, `no home page in: ${keys.join(", ")}`).toBeDefined();
+    const homeSrc = files.get(home!)!;
+    expect(homeSrc).toContain("class HomePage extends StatelessWidget");
+    expect(homeSrc).toContain("Products");
+
+    // Track A wire models: one Dart class per aggregate, JSON round-trip.
+    const models = keys.find((k) => k.endsWith("lib/models.dart"));
+    expect(models, `no models.dart in: ${keys.join(", ")}`).toBeDefined();
+    const modelsSrc = files.get(models!)!;
+    expect(modelsSrc).toContain("class Product");
+    expect(modelsSrc).toContain("fromJson");
+    expect(modelsSrc).toContain("toJson");
+
+    // Self-hosting web build (Track E web surface).
+    const dockerfile = keys.find((k) => k.endsWith("app/Dockerfile"));
+    expect(dockerfile, `no Dockerfile in: ${keys.join(", ")}`).toBeDefined();
+    expect(files.get(dockerfile!)).toContain("flutter build web");
   });
 });
