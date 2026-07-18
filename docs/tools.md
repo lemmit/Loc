@@ -147,6 +147,16 @@ project the .NET namespace and `.csproj` keep the capitalised form.
 `ddd parse` exits non-zero if the source has errors.  `ddd generate`
 runs validation first and refuses to emit if there are any errors.
 
+**`parse` green ≠ model valid.**  `parse` runs the front of the pipeline
+— syntax + AST-level validation (phases ①–④).  A whole class of checks
+only runs during `generate`, which adds lowering, enrichment, and
+**IR-level validation** (phases ⑤–⑦): queryability of a `retrieval` /
+`view` `where`, cross-aggregate reference rules, wire-shape and
+migration checks.  So a source that `parse`s clean can still fail
+`generate`.  In an edit loop, treat **`generate`** (or, for the last
+mile, a `tsc` / compiler run on the emitted target) as the real gate —
+not `parse`.  See the pipeline phases in [`technical.md`](technical.md).
+
 ### `verify` and `snapshot`
 
 `ddd verify` joins a JSON of test results onto the requirements graph

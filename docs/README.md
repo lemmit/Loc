@@ -11,6 +11,7 @@ section that matches what you need.
 | [`language-reference/`](language-reference/README.md) | **The complete language reference** — every feature, one chapter at a time, each with the `.ddd` source *and* its real generated output in per-platform tabs. Start here when you want the exhaustive surface. |
 | [`language.md`](language.md) | You're writing or reading `.ddd` source.  Declarations, types, expressions, statements, validation rules. |
 | [`page-metamodel.md`](page-metamodel.md) | You're writing `ui` / `page` / `component` blocks. |
+| [`customization-gradient.md`](customization-gradient.md) | You want the path from a fully-scaffolded UI to a fully hand-written one — override-by-name, unfold, and mixing rungs per page. The "no-code → no excuses" walkthrough. |
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
 | [`tools.md`](tools.md) | You're using the `ddd` CLI (`generate`, `verify`, `snapshot`, `patch`, `trace`), `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
 | [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular, Feliz) emits for a given DSL construct. |

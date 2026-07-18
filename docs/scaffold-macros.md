@@ -10,8 +10,8 @@ The stdlib ships three families:
 - **Scaffolding** — `scaffold`, `scaffoldSubdomain`, `scaffoldContext`,
   `scaffoldAggregate`, `scaffoldWorkflow`, `scaffoldView`.
   Synthesise UI pages from a domain.
-- **CRUDish** — `crudish`.  Adds a generated `update(...)` operation
-  to an aggregate.
+- **CRUDish** — `crudish`.  Adds a generated `create(...)` factory,
+  `update(...)` operation, and `destroy {}` terminator to an aggregate.
 - **Cross-cutting capabilities** — `softDelete` /
   `softDeleteByDefault`.  Add soft-delete behaviour via
   the [capability surface](capabilities.md).  (Audit is no longer a
@@ -71,11 +71,70 @@ The leaves all delegate page-shape decisions to `pagesForAggregate`
 / `pageForWorkflow` / `pageForView` in `src/macros/stdlib/scaffold/_pages.ts`
 — so all six macros agree on what a "list page" looks like.
 
+### Overriding a scaffolded page
+
+You don't have to choose between "scaffold everything" and "hand-write
+everything".  A page you write **explicitly** replaces the scaffolded
+one of the same name, and every sibling stays scaffolded — the scaffold
+grows a hole exactly where you want custom UI.
+
+Scaffolded pages live under a per-aggregate `area <Plural>` at the
+role-scoped names `List` / `New` / `Detail`.  To override one, open the
+matching `area` next to the `with scaffold(...)` clause and write the
+page there:
+
+```ddd
+ui WebApp with scaffold(subdomains: [Core]) {
+  area Tasks {
+    page Detail(id: Task id) {
+      route: "/tasks/:id"
+      title: "Custom task"
+      body: Stack {
+        Heading { "My bespoke task console", level: 1 },
+        testid: "custom-detail"
+      }
+    }
+  }
+}
+```
+
+One `generate system` later, `pages/tasks/detail.tsx` is *your* page,
+`list.tsx` / `new.tsx` are the untouched scaffold, and the router wires
+`/tasks/:id` to the custom component exactly once:
+
+```tsx
+// pages/tasks/detail.tsx — the explicit page wins
+export default function TaskDetail() {
+  return (
+    <Stack data-testid="custom-detail">
+      <Title order={1}>My bespoke task console</Title>
+    </Stack>
+  );
+}
+```
+
+The mechanism is scope-local override-by-name in the macro splicer
+(`mergeScopedMembers`, `src/macros/expander.ts`): a synthesised member
+whose name collides with one already present at that scope is dropped,
+and same-named `area` blocks merge recursively.  The singleton dashboard
+pages (`Home`, the workflows/views indexes) override the same way — write
+your own `page Home { … }` and the scaffolded one steps aside.
+
+**Override vs. unfold.**  Override-by-name *replaces* a page wholesale
+without seeing its generated body — reach for it when you're writing
+something bespoke anyway.  [Unfolding](#composability) instead
+materialises the scaffolded body as real `.ddd` source so you can *edit*
+it — reach for it when the default is 90% right and you want to tweak,
+not rewrite.  Both rungs, and where they sit on the path from all-scaffold
+to all-custom, are walked in
+[`customization-gradient.md`](customization-gradient.md).
+
 ## `crudish`
 
-`with crudish` on an aggregate adds a generated `update(...)`
-operation whose parameters are one per writable user field, and whose
-body assigns each parameter to the matching field.
+`with crudish` on an aggregate adds a generated `create(...)` factory,
+an `update(...)` operation, and a `destroy {}` destructor — each with
+one parameter per writable user field, and a body that assigns each
+parameter to the matching field.
 
 ```ddd
 aggregate Order with crudish {
@@ -91,21 +150,43 @@ aggregate Order {
   subject: string
   total: decimal
 
-  operation update(subject: string, total: decimal) {
-    this.subject := subject
-    this.total := total
+  create(subject: string, total: decimal) {
+    subject := subject
+    total := total
   }
+
+  operation update(subject: string, total: decimal) {
+    subject := subject
+    total := total
+  }
+
+  destroy {}
 }
 ```
 
-"Writable user field" means a property whose access modifier admits
-external writes (see [`language.md`](language.md) for the access
-modifier matrix).  `managed` / `token` / `internal` / `secret`
-fields are skipped; `editable` and `immutable` (on aggregates only)
-fields participate.
+These surface on a backend as the `POST` (create), `POST /{id}/update`,
+and `DELETE` routes — alongside the `GET /{id}` and `findAll` the
+repository always emits.  A `repository` without `crudish` gets only
+the read side (`getById` + `findAll`); `crudish` is what adds the
+write side.
 
-`create` and `delete` are **deferred** until input-type synthesis
-lands.  Today, `crudish` only emits `update`.
+Which fields become parameters is decided per-surface (see the access
+modifier matrix in [`language.md`](language.md)):
+
+- `managed` / `token` / `internal` are dropped from both — they're not
+  client-supplied.
+- `immutable` is **kept by `create`** (settable once, at creation) but
+  **dropped from `update`**.
+- `secret` **stays on both** — write-only fields still belong in the
+  create/update input.
+- Fields contributed by another capability or macro (`createdAt` from
+  `auditable`, `isDeleted` from `softDeletable`, …) are excluded
+  regardless of access modifier.
+
+Pass `with crudish(updateOnly: true)` to emit only `update` — no
+canonical `create`/`destroy`.  Use it when another macro owns the
+create/delete lifecycle, e.g. `with crudish(updateOnly: true),
+softDeletable` leaves the soft-delete terminator uncontested.
 
 ## Audit — now the builtin `capability auditable`
 

@@ -195,6 +195,21 @@ that still inline).
 The body is an ordinary expression, so mutation (`:=`, `+=`), `emit`,
 and workflow calls are already excluded by the grammar.
 
+## Advisories — the compiler steers you toward criteria
+
+Two **warnings** (not errors — they don't block `generate`) nudge you off
+patterns that work but scale badly, toward the criterion / retrieval / index
+model. They're worth trusting; both fire early:
+
+| Code | Fires when | Steers you to |
+|---|---|---|
+| `loom.repository-find-deprecated` | A `repository` declares a `find` returning a collection (`: T[]`) — a bespoke list finder accreting on the repo. | Pass a criterion to `run` (`Repo.run(<Criterion>(args))`) or name a `retrieval` instead. A unique-key reconstitution find returning a single `T` / `T?` stays fine. |
+| `loom.index-suggestion` | A field is read on a query filter (`find … where`, criterion, view filter) but has no index. | Add `index: <Agg>.<field>` on the aggregate's `kind: state` resource — the column then shows up in the migration. |
+
+The intent is "pit of success": the compiler notices a performance smell in a
+DDD model — an unusual and welcome nudge — and points at the idiomatic fix
+before it becomes a slow query in production.
+
 ## See also
 
 - [`docs/old/proposals/criterion.md`](old/proposals/criterion.md) — the full
