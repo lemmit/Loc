@@ -1569,6 +1569,23 @@ describe(".NET generator", () => {
       expect(files.get("Auth/UserMiddleware.cs")!).toContain('"/api/auth/login"');
     });
 
+    it("drives login with PKCE and rotates refresh tokens under `auth { oidc }`", async () => {
+      const files = await emitForAuthSystem(SRC_OIDC);
+      const handshake = files.get("Auth/AuthHandshake.cs")!;
+      // PKCE (RFC 7636): S256 challenge, verifier cookie, code_verifier on exchange.
+      expect(handshake).toContain("SHA256.HashData");
+      expect(handshake).toContain('["code_challenge_method"] = "S256"');
+      expect(handshake).toContain('Cookies.Append("oidc_verifier"');
+      expect(handshake).toContain('["code_verifier"] = verifier');
+      // Refresh rotation: offline_access scope, /refresh endpoint, refresh cookie.
+      expect(handshake).toContain("offline_access");
+      expect(handshake).toContain('app.MapPost("/api/auth/refresh"');
+      expect(handshake).toContain('["grant_type"] = "refresh_token"');
+      expect(handshake).toContain('Cookies.Append("refresh"');
+      // /refresh reachable without a valid access token.
+      expect(files.get("Auth/UserMiddleware.cs")!).toContain('"/api/auth/refresh"');
+    });
+
     it("does not emit the OIDC verifier or handshake without an `auth { oidc }` block", async () => {
       const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
       expect(files.has("Auth/OidcUserVerifier.cs")).toBe(false);

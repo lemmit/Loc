@@ -319,10 +319,16 @@ function renderHandshake(auth: AuthIR, ns: string): string {
       ? JSON.stringify(secret.value)
       : `Environment.GetEnvironmentVariable(${JSON.stringify(secret.env)})`
     : 'Environment.GetEnvironmentVariable("OIDC_CLIENT_SECRET")';
+  // `offline_access` asks the IdP for a refresh token so /refresh has
+  // something to rotate (M-T3.5).  Idempotent — never doubled.
   const scopes = auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"];
-  const scopesLiteral = JSON.stringify(scopes.join(" "));
+  const scopeList = scopes.slice();
+  if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
+  const scopesLiteral = JSON.stringify(scopeList.join(" "));
   return `// Auto-generated.
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -361,6 +367,26 @@ public static class AuthHandshake
     private static CookieOptions SessionCookie() =>
         new() { HttpOnly = true, SameSite = SameSiteMode.Lax, Path = "/" };
 
+    /// <summary>Base64url with no padding — the encoding PKCE (RFC 7636)
+    /// mandates for the verifier and the challenge.</summary>
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    /// <summary>Persist the access token as the browser session and the refresh
+    /// token (when the IdP granted one) for the /refresh rotation.  Both are
+    /// HttpOnly — the SPA only ever rides the session cookie as a Bearer.</summary>
+    private static void StoreTokens(HttpContext ctx, JsonElement root)
+    {
+        string accessToken = root.TryGetProperty("access_token", out JsonElement at)
+            ? at.GetString() ?? string.Empty
+            : string.Empty;
+        ctx.Response.Cookies.Append("session", accessToken, SessionCookie());
+        if (root.TryGetProperty("refresh_token", out JsonElement rt) && rt.GetString() is string refresh)
+        {
+            ctx.Response.Cookies.Append("refresh", refresh, SessionCookie());
+        }
+    }
+
     /// <summary>Mount the /auth/* redirect handlers.  Excluded from the
     /// OpenAPI contract — they are redirects, not business operations.</summary>
     public static void MapAuthHandshake(this WebApplication app)
@@ -369,7 +395,13 @@ public static class AuthHandshake
         {
             OpenIdConnectConfiguration config = await Configuration.GetConfigurationAsync(ctx.RequestAborted);
             string state = Guid.NewGuid().ToString("N");
+            // PKCE (RFC 7636): mint a verifier, send only its S256 challenge to
+            // the IdP, stash the verifier in an HttpOnly cookie for /callback.
+            byte[] verifierBytes = RandomNumberGenerator.GetBytes(32);
+            string verifier = Base64Url(verifierBytes);
+            string challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
             ctx.Response.Cookies.Append("oidc_state", state, SessionCookie());
+            ctx.Response.Cookies.Append("oidc_verifier", verifier, SessionCookie());
             var query = new Dictionary<string, string?>
             {
                 ["response_type"] = "code",
@@ -377,6 +409,8 @@ public static class AuthHandshake
                 ["redirect_uri"] = RedirectUri,
                 ["scope"] = Scopes,
                 ["state"] = state,
+                ["code_challenge"] = challenge,
+                ["code_challenge_method"] = "S256",
             };
             return Results.Redirect(QueryHelpers.AddQueryString(config.AuthorizationEndpoint, query));
         }).ExcludeFromDescription();
@@ -385,7 +419,8 @@ public static class AuthHandshake
         {
             string code = ctx.Request.Query["code"].ToString();
             string state = ctx.Request.Query["state"].ToString();
-            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state) || state != ctx.Request.Cookies["oidc_state"])
+            string? verifier = ctx.Request.Cookies["oidc_verifier"];
+            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state) || state != ctx.Request.Cookies["oidc_state"] || string.IsNullOrEmpty(verifier))
             {
                 return Results.Json(new { error = "invalid_state" }, statusCode: 400);
             }
@@ -396,12 +431,12 @@ public static class AuthHandshake
                 ["code"] = code,
                 ["redirect_uri"] = RedirectUri,
                 ["client_id"] = ClientId,
+                ["code_verifier"] = verifier,
             };
             if (ClientSecret is not null)
             {
                 form["client_secret"] = ClientSecret;
             }
-            string accessToken;
             try
             {
                 using var content = new FormUrlEncodedContent(form);
@@ -412,7 +447,7 @@ public static class AuthHandshake
                 }
                 string payload = await response.Content.ReadAsStringAsync(ctx.RequestAborted);
                 using JsonDocument document = JsonDocument.Parse(payload);
-                accessToken = document.RootElement.GetProperty("access_token").GetString() ?? string.Empty;
+                StoreTokens(ctx, document.RootElement);
             }
 #pragma warning disable CA1031 // any token-exchange failure → 401, never 500
             catch (Exception)
@@ -420,14 +455,64 @@ public static class AuthHandshake
             {
                 return Results.Json(new { error = "token_exchange_failed" }, statusCode: 401);
             }
-            ctx.Response.Cookies.Append("session", accessToken, SessionCookie());
             ctx.Response.Cookies.Delete("oidc_state");
+            ctx.Response.Cookies.Delete("oidc_verifier");
             return Results.Redirect(PostLogin);
+        }).ExcludeFromDescription();
+
+        // Silent renewal — exchange the stored refresh token for a fresh access
+        // token WITHOUT another IdP round-trip, and ROTATE it (the IdP returns a
+        // new refresh token; StoreTokens overwrites the cookie → single-use).
+        // The SPA calls this on a 401 to extend the session.
+        app.MapPost("${AUTH_BASE_PATH}/refresh", async (HttpContext ctx) =>
+        {
+            string? refresh = ctx.Request.Cookies["refresh"];
+            if (string.IsNullOrEmpty(refresh))
+            {
+                return Results.Json(new { error = "no_refresh_token" }, statusCode: 401);
+            }
+            OpenIdConnectConfiguration config = await Configuration.GetConfigurationAsync(ctx.RequestAborted);
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = refresh,
+                ["client_id"] = ClientId,
+            };
+            if (ClientSecret is not null)
+            {
+                form["client_secret"] = ClientSecret;
+            }
+            try
+            {
+                using var content = new FormUrlEncodedContent(form);
+                using HttpResponseMessage response = await Http.PostAsync(new Uri(config.TokenEndpoint), content, ctx.RequestAborted);
+                if (!response.IsSuccessStatusCode)
+                {
+                    // Spent or revoked — clear both cookies so the SPA falls back
+                    // to a full /login instead of looping on a dead token.
+                    ctx.Response.Cookies.Delete("session");
+                    ctx.Response.Cookies.Delete("refresh");
+                    return Results.Json(new { error = "refresh_failed" }, statusCode: 401);
+                }
+                string payload = await response.Content.ReadAsStringAsync(ctx.RequestAborted);
+                using JsonDocument document = JsonDocument.Parse(payload);
+                StoreTokens(ctx, document.RootElement);
+            }
+#pragma warning disable CA1031 // any refresh failure → 401, never 500
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                ctx.Response.Cookies.Delete("session");
+                ctx.Response.Cookies.Delete("refresh");
+                return Results.Json(new { error = "refresh_failed" }, statusCode: 401);
+            }
+            return Results.Json(new { ok = true });
         }).ExcludeFromDescription();
 
         app.MapGet("${AUTH_BASE_PATH}/logout", (HttpContext ctx) =>
         {
             ctx.Response.Cookies.Delete("session");
+            ctx.Response.Cookies.Delete("refresh");
             return Results.Redirect(PostLogin);
         }).ExcludeFromDescription();
     }
@@ -722,7 +807,8 @@ function renderMiddleware(ns: string, oidc: boolean, orgPathClaimExpr?: string):
     ? `
         "${AUTH_BASE_PATH}/login",
         "${AUTH_BASE_PATH}/callback",
-        "${AUTH_BASE_PATH}/logout",`
+        "${AUTH_BASE_PATH}/logout",
+        "${AUTH_BASE_PATH}/refresh",`
     : "";
   // Hierarchy (multi-tenancy P2.2): method-inject the scoped `IOrgPathResolver`
   // and, once the principal is attached, resolve the caller org's materialized
