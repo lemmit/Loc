@@ -54,4 +54,9 @@ export const reactBuildExamples = [
   // `primitive-file-upload` template.  Guards both file-upload surfaces
   // compiling under every React pack.
   { ddd: "web/src/examples/file-upload-system.ddd", reactDir: "web_app" },
+  // File display in SCAFFOLDED pages (slice 4a.1): a `File`-typed field on a
+  // `with scaffold` aggregate → the list/detail cell renders the FileRef's
+  // `.url` (a string) rather than the raw object, which is not a ReactNode and
+  // would tsc-error.  Guards the scaffold display path compiling.
+  { ddd: "web/src/examples/file-scaffold-system.ddd", reactDir: "web_app" },
 ] as const;
