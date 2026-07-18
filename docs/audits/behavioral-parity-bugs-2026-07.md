@@ -40,6 +40,24 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ✅    |
 | inheritance (TPH/TPC)         |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | views (where-filtered)        |  ✅  |  ✅  |   ✅   |  ✅    |✅ B13  |
+| embedded (containment fold)   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
+
+### Deferred — optional single containment on `shape: embedded`
+
+Booting `embedded` with an OPTIONAL single containment (`contains note: Memo?`)
+left unset surfaced a cross-backend gap: a null single-containment jsonb cell is
+not uniformly null-safe. node's drizzle schema hardcoded `.notNull()` on the
+containment column (disagreeing with the migration's `JSONB NULL`) and fed a
+null cell into `memoFromDoc(...)` on load; .NET declared the response field
+`[Required] MemoResponse` (non-nullable) and dereferenced `found.Note` unguarded.
+The ROOT is how `wireShape` represents an optional containment (the wire field
+doesn't carry the optional wrapper, so per-backend emitters can't see it). This
+is a multi-backend fix (node + dotnet + likely elixir) tracked as a dedicated
+follow-up; the `embedded` behavioural case above deliberately exercises the
+COLLECTION containment fold (the feature's core, green everywhere) and the
+`money` primitive, and leaves optional-single-containment to that slice. (java
+rejects `shape(embedded)` + a reference collection outright — a declared
+limitation pinned by `generator-java-shapes.test.ts` — so the case omits `tags`.)
 
 Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for

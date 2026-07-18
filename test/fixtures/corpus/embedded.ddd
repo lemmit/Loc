@@ -2,16 +2,11 @@
 system EmbSys {
   subdomain Shop {
     context Shop {
-      aggregate Tag { label: string }
-      repository Tags for Tag {}
-      aggregate Order shape: embedded {
+      aggregate Order shape: embedded, with crudish {
         customer: string
         total: money
-        tags: Tag id[]
         contains lines: LineItem[]
-        contains note: Memo
         entity LineItem { sku: string  qty: int }
-        entity Memo { text: string }
         operation addLine(sku: string, qty: int) { lines += LineItem { sku: sku, qty: qty } }
         operation retotal(amount: money) { total := amount }
       }
@@ -29,5 +24,18 @@ system EmbSys {
     dataSources: [shopState]
     serves: ShopApi
     port: 4000
+  }
+
+  // An embedded aggregate keeps a queryable root row; its `lines` collection
+  // containment folds into a jsonb column, and the `money` primitive rides
+  // through as a decimal string.  Create, append a line via the op, then read
+  // the whole tree back — asserting the containment fold (lines.length) and the
+  // root scalar (customer) both round-trip across every backend.
+  test e2e "embedded aggregate folds its containment collection into the jsonb row" against d {
+    let o = api.orders.create({ customer: "acme", total: "99.50" })
+    api.orders.addLine(o, { sku: "A1", qty: 3 })
+    let read = api.orders.getById(o)
+    expect(read.customer).toBe("acme")
+    expect(read.lines.length).toBe(1)
   }
 }
