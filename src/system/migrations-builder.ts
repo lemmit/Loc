@@ -1,6 +1,8 @@
+import { renderSqlScalarExpr } from "../generator/sql-pg-expr.js";
 import type {
   AggregateIR,
   AssociationIR,
+  BackfillIntentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedSubdomainIR,
@@ -12,6 +14,7 @@ import type {
   ProjectionIR,
   RenameIntentIR,
   SavingShape,
+  SqlStepIR,
   SubdomainIR,
   SystemIR,
   TableRenameIntentIR,
@@ -827,7 +830,9 @@ export class MigrationDestructiveError extends Error {
     super(
       `migration for module "${module}" contains ${offending.length} destructive change(s):\n` +
         offending.map((s) => `  - ${describeDestructive(s)}`).join("\n") +
-        `\nRe-run \`generate system\` with --allow-destructive to apply them. ` +
+        `\nA migration-block backfill step makes a NOT NULL add or flip non-destructive ` +
+        `with no flag needed:  migration "…" { <Agg>.<field> = <value> }\n` +
+        `Otherwise re-run \`generate system\` with --allow-destructive to apply them. ` +
         `Column/table drops are irreversible; a NOT NULL column add without a default fails ` +
         `on a populated table — under --allow-destructive it is emitted as the safe ` +
         `add-nullable / backfill-TODO / SET NOT NULL sequence instead.`,
@@ -844,6 +849,8 @@ function describeDestructive(s: MigrationStep): string {
       return `DROP COLUMN ${qualifiedName(s.schema, s.table)}.${s.name}`;
     case "addColumn":
       return `ADD COLUMN ${qualifiedName(s.schema, s.table)}.${s.column.name} NOT NULL (no default)`;
+    case "alterColumnNullable":
+      return `SET NOT NULL on ${qualifiedName(s.schema, s.table)}.${s.name} (fails on rows holding NULL)`;
     default:
       return s.op;
   }
@@ -861,15 +868,19 @@ function isBlockingNotNullAdd(s: MigrationStep): boolean {
   return s.op === "addColumn" && !s.column.nullable && s.column.default === undefined;
 }
 
-/** Classify the raw diff, collapse unambiguous renames, and enforce the
- *  destructive-change policy.  Returns the final step list (possibly rewritten
+/** Classify the raw diff, collapse unambiguous renames, weave declared
+ *  backfills (M-T2.3), and enforce the destructive-change policy.  A NOT-NULL
+ *  add or a NULL→NOT-NULL flip WITH a matching backfill becomes the safe
+ *  add-nullable → UPDATE → SET NOT NULL sequence and does NOT trip the gate;
+ *  without one, both are destructive (the flip fails on any row holding NULL
+ *  — previously ungated).  Returns the final step list (possibly rewritten
  *  for the `--allow-destructive` NOT-NULL path), or throws
  *  {@link MigrationDestructiveError} when a destructive step remains and the
  *  flag is off.  First-run (baseline null) migrations are returned untouched. */
 export function applyDestructivePolicy(
   steps: MigrationStep[],
   baseline: SchemaSnapshot | null,
-  opts: { allowDestructive: boolean; module: string },
+  opts: { allowDestructive: boolean; module: string; backfills?: readonly ResolvedBackfill[] },
 ): MigrationStep[] {
   if (baseline === null) return steps; // Initial migration — nothing pre-exists.
 
@@ -945,18 +956,106 @@ export function applyDestructivePolicy(
     afterRename.push(s);
   }
 
-  // Classify what remains.
-  const destructive = afterRename.filter(
-    (s) => s.op === "dropTable" || s.op === "dropColumn" || isBlockingNotNullAdd(s),
+  // Weave declared backfills (M-T2.3) — applies whether or not anything is
+  // destructive.  A matching addColumn gains an UPDATE after it (and, when
+  // the add was blocking, the add is split nullable-first with a SET NOT NULL
+  // after the UPDATE); a matching NULL→NOT-NULL flip gains the UPDATE before
+  // it.  Flips made safe this way are exempted from the gate below.
+  const backfillByCol = new Map<string, ResolvedBackfill>();
+  for (const b of opts.backfills ?? []) {
+    backfillByCol.set(`${qkey(b.schema, b.table)}.${b.column}`, b);
+  }
+  const backfillFor = (
+    schema: string | undefined,
+    table: string,
+    column: string,
+  ): ResolvedBackfill | undefined => backfillByCol.get(`${qkey(schema, table)}.${column}`);
+  const safeFlips = new Set<MigrationStep>();
+  const woven = afterRename.flatMap((s): MigrationStep[] => {
+    if (s.op === "addColumn") {
+      const b = backfillFor(s.schema, s.table, s.column.name);
+      if (b) {
+        const blocking = isBlockingNotNullAdd(s);
+        const addCol: ColumnShape = blocking ? { ...s.column, nullable: true } : s.column;
+        const add: MigrationStep = s.fk
+          ? { op: "addColumn", table: s.table, schema: s.schema, column: addCol, fk: s.fk }
+          : { op: "addColumn", table: s.table, schema: s.schema, column: addCol };
+        const out: MigrationStep[] = [
+          add,
+          {
+            op: "backfillColumn",
+            table: s.table,
+            schema: s.schema,
+            column: s.column.name,
+            valueSql: b.valueSql,
+            onlyNull: true,
+          },
+        ];
+        if (blocking) {
+          const flip: MigrationStep = {
+            op: "alterColumnNullable",
+            table: s.table,
+            schema: s.schema,
+            name: s.column.name,
+            type: s.column.type,
+            nullable: false,
+          };
+          safeFlips.add(flip);
+          out.push(flip);
+        }
+        return out;
+      }
+      return [s];
+    }
+    if (s.op === "alterColumnNullable" && !s.nullable) {
+      const b = backfillFor(s.schema, s.table, s.name);
+      if (b) {
+        safeFlips.add(s);
+        return [
+          {
+            op: "backfillColumn",
+            table: s.table,
+            schema: s.schema,
+            column: s.name,
+            valueSql: b.valueSql,
+            onlyNull: true,
+          },
+          s,
+        ];
+      }
+      return [s];
+    }
+    return [s];
+  });
+
+  // Classify what remains.  A NULL→NOT-NULL flip without a backfill joins
+  // the destructive set (it fails at apply time on any row holding NULL) —
+  // M-T2.3 closes what was previously an ungated apply-time failure.
+  const destructive = woven.filter(
+    (s) =>
+      s.op === "dropTable" ||
+      s.op === "dropColumn" ||
+      isBlockingNotNullAdd(s) ||
+      (s.op === "alterColumnNullable" && !s.nullable && !safeFlips.has(s)),
   );
   if (destructive.length > 0 && !opts.allowDestructive) {
     throw new MigrationDestructiveError(opts.module, destructive);
   }
-  if (destructive.length === 0) return afterRename;
+  if (destructive.length === 0) return woven;
 
   // --allow-destructive: rewrite each blocking NOT-NULL add into the safe
-  // three-step sequence; drops pass through unchanged.
-  return afterRename.flatMap((s): MigrationStep[] => {
+  // three-step sequence and prefix each unbackfilled flip with the TODO
+  // marker; drops pass through unchanged.
+  return woven.flatMap((s): MigrationStep[] => {
+    if (s.op === "alterColumnNullable" && !s.nullable && !safeFlips.has(s)) {
+      return [
+        {
+          op: "sqlComment",
+          comment: `TODO backfill ${qualifiedName(s.schema, s.table)}.${s.name} before it is set NOT NULL (a migration-block backfill makes this non-destructive: <Agg>.<field> = <value>)`,
+        },
+        s,
+      ];
+    }
     if (!isBlockingNotNullAdd(s) || s.op !== "addColumn") return [s];
     const nullableCol: ColumnShape = { ...s.column, nullable: true };
     const add: MigrationStep = s.fk
@@ -1003,6 +1102,19 @@ export interface BuildMigrationsOptions {
    *  so an aggregate rename is a clean set of renames instead of the data-losing
    *  drop+recreate.  Empty / omitted for models with no table rename. */
   tableRenameIntents?: readonly TableRenameIntentIR[];
+  /** Backfill intents (M-T2.3) — `Agg.field = <expr>`.  Each module resolves
+   *  its own and weaves them into the policy pass: a NOT-NULL add (or a
+   *  NULL→NOT-NULL flip) with a matching backfill becomes the safe
+   *  add-nullable → UPDATE → SET NOT NULL sequence WITHOUT tripping the
+   *  destructive gate.  Naturally ledger-inert (fires only when the diff
+   *  carries the matching structural step). */
+  backfillIntents?: readonly BackfillIntentIR[];
+  /** Raw `sql "…"` steps (M-T2.3), in declaration order.  Emitted exactly
+   *  once — the snapshot's `appliedDataMigrations` records each emitted
+   *  `"<block>#<index>"` key — after the generation's structural steps, on
+   *  the module the owning block's other intents pin (or the system's single
+   *  owner module; ambiguous scope raises {@link MigrationSqlScopeError}). */
+  sqlSteps?: readonly SqlStepIR[];
 }
 
 /** One resolved column rename (M-T2.1).  `from`/`to` are already snake-cased
@@ -1026,6 +1138,36 @@ export interface ResolvedTableRename {
   schema?: string;
 }
 
+/** One resolved backfill (M-T2.3): the physical target column + the
+ *  pre-rendered Postgres value expression.  `table` already accounts for a
+ *  TPH concrete (the root base's shared table). */
+export interface ResolvedBackfill {
+  table: string;
+  schema?: string;
+  column: string;
+  valueSql: string;
+}
+
+/** Raised when a raw `sql` migration step cannot be pinned to a single
+ *  module: its block names no aggregate (so no module affinity) in a
+ *  multi-module system, or its other steps span several modules.  Split the
+ *  block per module (add a rename/backfill naming one of the module's
+ *  aggregates, or keep one block per module) so the statement runs against
+ *  the right database. */
+export class MigrationSqlScopeError extends Error {
+  constructor(
+    readonly migration: string,
+    readonly modules: readonly string[],
+  ) {
+    super(
+      modules.length > 1
+        ? `migration block "${migration}" spans modules ${modules.join(", ")} — its sql steps cannot be pinned to one database. Split the block so each module's steps (and sql) live in their own block.`
+        : `migration block "${migration}" has sql steps but no module affinity in a multi-module system — add a step naming one of the module's aggregates, or split per module.`,
+    );
+    this.name = "MigrationSqlScopeError";
+  }
+}
+
 export function buildMigrations(
   sys: EnrichedSystemIR,
   snapshots: SnapshotStore,
@@ -1033,6 +1175,22 @@ export function buildMigrations(
 ): MigrationsIR[] {
   const allowDestructive = options.allowDestructive ?? false;
   const out: MigrationsIR[] = [];
+  // Raw-sql scope pinning (M-T2.3): a block's sql steps run on the module its
+  // OTHER intents pin.  A block naming aggregates across several modules — or
+  // none, in a multi-owner system — cannot be pinned and raises
+  // MigrationSqlScopeError at the sql-filter below.
+  const ctxModule = new Map<string, string>();
+  for (const md of sys.subdomains) for (const c of md.contexts) ctxModule.set(c.name, md.name);
+  const blockModules = new Map<string, Set<string>>();
+  const pin = (block: string, ctxName: string): void => {
+    const mod = ctxModule.get(ctxName);
+    if (!mod) return;
+    (blockModules.get(block) ?? blockModules.set(block, new Set()).get(block)!).add(mod);
+  };
+  for (const ri of options.renameIntents ?? []) pin(ri.migration, ri.context);
+  for (const tr of options.tableRenameIntents ?? []) pin(tr.migration, tr.context);
+  for (const bi of options.backfillIntents ?? []) pin(bi.migration, bi.context);
+  const ownerModules = sys.subdomains.filter((md) => md.migrationsOwner).map((md) => md.name);
   for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
     // Binding-aware saving-shape resolver: resolve each aggregate's
@@ -1076,14 +1234,39 @@ export function buildMigrations(
     // `diffSchema` so a renamed table pairs with its new self.
     const tableRenamePlan = resolveTableRenames(m, options.tableRenameIntents ?? [], schemaOf);
     const allRenames = [...renames, ...tableRenamePlan.columnRenames];
-    const steps = applyDestructivePolicy(
+    // Backfills (M-T2.3): woven into the policy pass so a NOT-NULL add /
+    // flip with a declared backfill is the safe sequence, not a gate trip.
+    const backfills = resolveBackfills(m, options.backfillIntents ?? [], schemaOf);
+    const structuralSteps = applyDestructivePolicy(
       diffSchema(baseline, next, allRenames, tableRenamePlan.tableRenames),
       baseline,
       {
         allowDestructive,
         module: m.name,
+        backfills,
       },
     );
+    // Raw sql steps + ledgered data fix-ups (M-T2.3): emitted exactly once —
+    // the baseline's `appliedDataMigrations` records each emitted key — after
+    // the generation's structural steps, in declaration order.
+    const applied = new Set(baseline?.appliedDataMigrations ?? []);
+    const sqlForModule = (options.sqlSteps ?? []).filter((step) => {
+      const mods = blockModules.get(step.migration);
+      if (mods && mods.size > 0) {
+        if (mods.size > 1) throw new MigrationSqlScopeError(step.migration, [...mods]);
+        return mods.has(m.name);
+      }
+      if (ownerModules.length === 1) return ownerModules[0] === m.name;
+      throw new MigrationSqlScopeError(step.migration, []);
+    });
+    const newData = [
+      ...sqlForModule.map((step) => ({ key: `${step.migration}#${step.index}`, sql: step.sql })),
+      ...tableRenamePlan.dataFixups,
+    ].filter((d) => !applied.has(d.key));
+    const steps: MigrationStep[] = [
+      ...structuralSteps,
+      ...newData.map((d): MigrationStep => ({ op: "sqlExec", sql: d.sql })),
+    ];
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
     const version =
       baseline === null
@@ -1096,17 +1279,25 @@ export function buildMigrations(
     // rebuilds Drizzle's _journal.json from this list each regen so
     // Drizzle's runtime migrator can see every past migration.
     const prevHistory = baseline?.migrationHistory ?? [];
+    // Applied-data ledger (M-T2.3): carry the baseline's keys and record the
+    // ones this generation emits, so a `sql` step / TPH fix-up runs exactly
+    // once across regens.
+    const appliedOut = [...(baseline?.appliedDataMigrations ?? []), ...newData.map((d) => d.key)];
+    const appliedField: Partial<SchemaSnapshot> =
+      appliedOut.length > 0 ? { appliedDataMigrations: appliedOut } : {};
     const stamped: SchemaSnapshot =
       steps.length === 0
         ? {
             ...next,
             lastVersion: baseline?.lastVersion ?? next.lastVersion,
             migrationHistory: prevHistory.length > 0 ? prevHistory : undefined,
+            ...appliedField,
           }
         : {
             ...next,
             lastVersion: version,
             migrationHistory: [...prevHistory, { version, name }],
+            ...appliedField,
           };
     out.push({
       module: m.name,
@@ -1151,6 +1342,54 @@ function resolveRenames(
   return out;
 }
 
+/** Resolve a model's backfill intents (M-T2.3) to physical columns + rendered
+ *  SQL for ONE module.  Mirrors {@link resolveRenames}: filters to intents
+ *  whose aggregate lives in this module, maps to the owning table (the TPH
+ *  root's shared table for a TPH concrete) and snake-cased column, and
+ *  renders the value expression with sibling scalar fields as column refs.
+ *  Intents the phase-⑦ validator rejected (non-scalar target, unrenderable
+ *  expression) are silently skipped — they were already reported. */
+function resolveBackfills(
+  module: EnrichedSubdomainIR,
+  intents: readonly BackfillIntentIR[],
+  schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined,
+): ResolvedBackfill[] {
+  const out: ResolvedBackfill[] = [];
+  if (intents.length === 0) return out;
+  const ctxByName = new Map<string, EnrichedBoundedContextIR>();
+  for (const ctx of module.contexts) ctxByName.set(ctx.name, ctx);
+  const isScalar = (t: TypeIR): boolean =>
+    t.kind === "primitive" ||
+    t.kind === "enum" ||
+    t.kind === "id" ||
+    (t.kind === "optional" && isScalar(t.inner));
+  for (const bi of intents) {
+    const ctx = ctxByName.get(bi.context);
+    if (!ctx) continue; // aggregate's context is in another module
+    const agg = ctx.aggregates.find((a) => a.name === bi.aggregate);
+    if (!agg) continue;
+    const field = agg.fields.find((f) => f.name === bi.field);
+    if (!field || !isScalar(field.type)) continue; // validator reported
+    const columnFor = (name: string): string | undefined => {
+      const sibling = agg.fields.find((f) => f.name === name);
+      return sibling && isScalar(sibling.type) ? snake(name) : undefined;
+    };
+    let valueSql: string;
+    try {
+      valueSql = renderSqlScalarExpr(bi.value, { columnFor });
+    } catch {
+      continue; // outside the SQL subset — validator reported
+    }
+    out.push({
+      table: plural(snake(tableOwnerName(agg, ctx.aggregates))),
+      schema: schemaOf(agg, ctx),
+      column: snake(bi.field),
+      valueSql,
+    });
+  }
+  return out;
+}
+
 /** Resolve a module's table/aggregate rename intents (M-T2.1) to a `renameTable`
  *  plan + the FK-column renames the cascade implies.  Filters to intents whose
  *  NEW aggregate lives in this module, then for each:
@@ -1171,10 +1410,20 @@ function resolveTableRenames(
   module: EnrichedSubdomainIR,
   intents: readonly TableRenameIntentIR[],
   schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined,
-): { tableRenames: ResolvedTableRename[]; columnRenames: TableColumnRename[] } {
+): {
+  tableRenames: ResolvedTableRename[];
+  columnRenames: TableColumnRename[];
+  /** Ledgered data fix-ups (M-T2.3): renaming a TPH CONCRETE changes no DDL
+   *  (its rows live on the base's shared table, columns are field-named) but
+   *  silently strands the `kind` discriminator data — so the cascade emits a
+   *  one-shot UPDATE, keyed for the snapshot's `appliedDataMigrations`
+   *  ledger (no structural step exists to be naturally inert against). */
+  dataFixups: { key: string; sql: string }[];
+} {
   const tableRenames: ResolvedTableRename[] = [];
   const columnRenames: TableColumnRename[] = [];
-  if (intents.length === 0) return { tableRenames, columnRenames };
+  const dataFixups: { key: string; sql: string }[] = [];
+  if (intents.length === 0) return { tableRenames, columnRenames, dataFixups };
   const ctxByName = new Map<string, EnrichedBoundedContextIR>();
   for (const ctx of module.contexts) ctxByName.set(ctx.name, ctx);
   for (const ri of intents) {
@@ -1187,6 +1436,19 @@ function resolveTableRenames(
     const oldStem = snake(ri.fromAggregate);
     const newStem = snake(ri.toAggregate);
     if (oldStem === newStem) continue; // same table name after snake-casing
+
+    // TPH concrete: no owned table, no cascade — but the shared table's
+    // `kind` discriminator rows still say the OLD name.  Emit the one-shot
+    // fix-up (M-T2.3 ledgered sqlExec) and skip the structural cascade.
+    if (isTphConcrete(agg, ctx.aggregates)) {
+      const baseTable = plural(snake(tableOwnerName(agg, ctx.aggregates)));
+      const target = schema ? `"${schema}"."${baseTable}"` : `"${baseTable}"`;
+      dataFixups.push({
+        key: `${ri.migration}#tph:${ri.fromAggregate}->${ri.toAggregate}`,
+        sql: `UPDATE ${target} SET "kind" = '${ri.toAggregate}' WHERE "kind" = '${ri.fromAggregate}'`,
+      });
+      continue;
+    }
 
     // Substitute the NEW snake stem prefix back to the OLD one on a derived
     // child-table / FK-column name (`snake(agg)_<suffix>`).  Undefined when the
@@ -1237,7 +1499,7 @@ function resolveTableRenames(
       });
     }
   }
-  return { tableRenames, columnRenames };
+  return { tableRenames, columnRenames, dataFixups };
 }
 
 // ---------------------------------------------------------------------------
@@ -1820,6 +2082,10 @@ function describeMigration(steps: MigrationStep[]): string {
         return `AddIndex${columnToPascal(s.index.name)}`;
       case "dropIndex":
         return `DropIndex${columnToPascal(s.name)}`;
+      case "backfillColumn":
+        return `Backfill${columnToPascal(s.column)}On${tableToPascal(s.table)}`;
+      case "sqlExec":
+        return "DataMigration";
     }
   }
   return "Migrate";

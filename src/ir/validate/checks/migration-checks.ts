@@ -181,26 +181,3 @@ function backfillTypeFits(
   if (expected === "id" && got === "string") return true;
   return { expected, got };
 }
-
-// ---------------------------------------------------------------------------
-// TEMPORARY honest gate (S2 of the M-T2.3 slice plan) — the surface exists
-// (grammar/IR/validators/print) but the phase-⑨ builder does not consume the
-// intents yet, so admitting them would silently no-op.  Lifted by S3, which
-// wires `buildMigrations` to the intents.  Mirrors the read-path
-// `loom.projection-query-time-unsupported` honest-gate pattern.
-// ---------------------------------------------------------------------------
-
-export function validateMigrationDataStepsUnsupported(
-  loom: EnrichedLoomModel,
-  diags: LoomDiagnostic[],
-): void {
-  const flag = (migration: string, what: string) =>
-    diags.push({
-      severity: "error",
-      code: "loom.migration-data-steps-unsupported",
-      message: `${what} steps are not applied by the migration builder yet (M-T2.3 S3) — remove the step or wait for the next slice.`,
-      source: `migration/${migration}`,
-    });
-  for (const b of loom.backfillIntents) flag(b.migration, "backfill");
-  for (const s of loom.sqlMigrationSteps) flag(s.migration, "sql");
-}

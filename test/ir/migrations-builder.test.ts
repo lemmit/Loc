@@ -1293,3 +1293,206 @@ describe("A8.3 — destructive-change gate", () => {
     expect(steps.every((s) => s.op === "createTable")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Data steps (M-T2.3) — backfill weaving, the NULL→NOT-NULL flip gate, raw
+// `sql` steps + the `appliedDataMigrations` snapshot ledger, and the TPH
+// discriminator fix-up.
+// ---------------------------------------------------------------------------
+
+describe("buildMigrations — backfill steps (M-T2.3)", () => {
+  const BF_SRC = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { quantity: int  status: string }
+      repository Orders for Order { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}
+migration "add-status" { Order.status = "pending" }
+`;
+
+  it("weaves a declared backfill into a NOT-NULL add — no --allow-destructive needed", async () => {
+    const loom = await buildLoomModel(BF_SRC);
+    const sys = loom.systems[0]!;
+    const next = schemaFromModule(sys.subdomains[0]!);
+    // Baseline WITHOUT the status column — this generation adds it NOT NULL.
+    const baseline = withModifiedTable({ ...next, lastVersion: BASE_TIMESTAMP }, "orders", (t) => ({
+      ...t,
+      columns: t.columns.filter((c) => c.name !== "status"),
+    }));
+    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      backfillIntents: loom.backfillIntents,
+      sqlSteps: loom.sqlMigrationSteps,
+    });
+    const steps = out[0]!.steps;
+    expect(steps.map((s) => s.op)).toEqual(["addColumn", "backfillColumn", "alterColumnNullable"]);
+    const add = steps[0]!;
+    if (add.op !== "addColumn") throw new Error("expected addColumn");
+    expect(add.column.nullable).toBe(true);
+    const bf = steps[1]!;
+    if (bf.op !== "backfillColumn") throw new Error("expected backfillColumn");
+    expect(bf).toMatchObject({
+      table: "orders",
+      column: "status",
+      valueSql: "'pending'",
+      onlyNull: true,
+    });
+    const flip = steps[2]!;
+    if (flip.op !== "alterColumnNullable") throw new Error("expected alterColumnNullable");
+    expect(flip.nullable).toBe(false);
+    expect(steps.map(renderPgStep).join("\n")).toContain(
+      `UPDATE "orders" SET "status" = 'pending' WHERE "status" IS NULL;`,
+    );
+  });
+
+  it("is inert once the column exists in the baseline (ledger semantics)", async () => {
+    const loom = await buildLoomModel(BF_SRC);
+    const sys = loom.systems[0]!;
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(sys.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      backfillIntents: loom.backfillIntents,
+    });
+    expect(out[0]!.steps).toEqual([]);
+  });
+});
+
+describe("applyDestructivePolicy — NULL→NOT-NULL flips (M-T2.3)", () => {
+  const emptyBaseline: SchemaSnapshot = { schemaVersion: 1, tables: [] };
+  const flip: MigrationStep = {
+    op: "alterColumnNullable",
+    table: "orders",
+    name: "status",
+    type: { kind: "text" },
+    nullable: false,
+  };
+
+  it("gates a flip without a backfill (previously an ungated apply-time failure)", () => {
+    expect(() =>
+      applyDestructivePolicy([flip], emptyBaseline, { allowDestructive: false, module: "Sales" }),
+    ).toThrow(MigrationDestructiveError);
+  });
+
+  it("a flip WITH a backfill becomes UPDATE → SET NOT NULL, non-destructive", () => {
+    const out = applyDestructivePolicy([flip], emptyBaseline, {
+      allowDestructive: false,
+      module: "Sales",
+      backfills: [{ table: "orders", column: "status", valueSql: "'pending'" }],
+    });
+    expect(out.map((s) => s.op)).toEqual(["backfillColumn", "alterColumnNullable"]);
+  });
+
+  it("under --allow-destructive an unbackfilled flip carries the TODO marker", () => {
+    const out = applyDestructivePolicy([flip], emptyBaseline, {
+      allowDestructive: true,
+      module: "Sales",
+    });
+    expect(out.map((s) => s.op)).toEqual(["sqlComment", "alterColumnNullable"]);
+  });
+
+  it("a NULLABLE add with a backfill gains the UPDATE but no flip", () => {
+    const add: MigrationStep = {
+      op: "addColumn",
+      table: "orders",
+      column: { name: "note", type: { kind: "text" }, nullable: true },
+    };
+    const out = applyDestructivePolicy([add], emptyBaseline, {
+      allowDestructive: false,
+      module: "Sales",
+      backfills: [{ table: "orders", column: "note", valueSql: "''" }],
+    });
+    expect(out.map((s) => s.op)).toEqual(["addColumn", "backfillColumn"]);
+  });
+
+  it("the DROP NOT NULL direction stays ungated", () => {
+    const loosen: MigrationStep = { ...flip, nullable: true };
+    const out = applyDestructivePolicy([loosen], emptyBaseline, {
+      allowDestructive: false,
+      module: "Sales",
+    });
+    expect(out).toEqual([loosen]);
+  });
+});
+
+describe("buildMigrations — raw sql steps + ledger (M-T2.3)", () => {
+  const SQL_SRC = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { quantity: int  status: string }
+      repository Orders for Order { }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+}
+migration "fixup" { sql "UPDATE orders SET status = 'x' WHERE status IS NULL" }
+`;
+
+  it("emits a sql step exactly once across generations (appliedDataMigrations)", async () => {
+    const loom = await buildLoomModel(SQL_SRC);
+    const sys = loom.systems[0]!;
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(sys.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    // Generation 1 — the statement rides its own data migration.
+    const gen1 = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      sqlSteps: loom.sqlMigrationSteps,
+    })[0]!;
+    expect(gen1.steps).toEqual([
+      { op: "sqlExec", sql: "UPDATE orders SET status = 'x' WHERE status IS NULL" },
+    ]);
+    expect(gen1.name).toBe("DataMigration");
+    expect(gen1.next.appliedDataMigrations).toEqual(["fixup#0"]);
+    // Generation 2 — the ledger makes the block a no-op; the key is carried.
+    const gen2 = buildMigrations(sys, memorySnapshotStore({ Sales: gen1.next }), {
+      sqlSteps: loom.sqlMigrationSteps,
+    })[0]!;
+    expect(gen2.steps).toEqual([]);
+    expect(gen2.next.appliedDataMigrations).toEqual(["fixup#0"]);
+  });
+});
+
+describe("buildMigrations — TPH discriminator fix-up (M-T2.1 c / M-T2.3)", () => {
+  const TPH_SRC = `
+system Fleet {
+  subdomain Registry {
+    context Reg {
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+      aggregate Customer extends Party { creditLimit: decimal }
+      aggregate Sponsor extends Party { rating: int }
+      repository Customers for Customer { }
+      repository Sponsors for Sponsor { }
+    }
+  }
+  deployable api { platform: node, contexts: [Reg], port: 3000 }
+}
+migration "vendor-to-sponsor" { Vendor -> Sponsor }
+`;
+
+  it("renaming a TPH concrete rewrites its kind rows via a ledgered sqlExec", async () => {
+    const loom = await buildLoomModel(TPH_SRC);
+    const sys = loom.systems[0]!;
+    const baseline: SchemaSnapshot = {
+      ...schemaFromModule(sys.subdomains[0]!),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const gen1 = buildMigrations(sys, memorySnapshotStore({ Registry: baseline }), {
+      tableRenameIntents: loom.tableRenameIntents,
+    })[0]!;
+    expect(gen1.steps).toEqual([
+      { op: "sqlExec", sql: `UPDATE "parties" SET "kind" = 'Sponsor' WHERE "kind" = 'Vendor'` },
+    ]);
+    expect(gen1.next.appliedDataMigrations).toEqual(["vendor-to-sponsor#tph:Vendor->Sponsor"]);
+    // Exactly once: the next generation is a no-op.
+    const gen2 = buildMigrations(sys, memorySnapshotStore({ Registry: gen1.next }), {
+      tableRenameIntents: loom.tableRenameIntents,
+    })[0]!;
+    expect(gen2.steps).toEqual([]);
+  });
+});

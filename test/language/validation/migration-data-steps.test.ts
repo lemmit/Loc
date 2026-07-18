@@ -1,8 +1,7 @@
 // Validation for the M-T2.3 `migration`-block data steps — the AST-level
 // structural checks (src/language/validators/migration.ts) and the phase-⑦
-// IR checks (src/ir/validate/checks/migration-checks.ts), including the
-// TEMPORARY S2 honest gate `loom.migration-data-steps-unsupported` (lifted
-// by S3 when the builder starts consuming the intents).
+// IR checks (src/ir/validate/checks/migration-checks.ts).  The temporary S2
+// honest gate is gone: the builder consumes the intents (S3).
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
@@ -71,19 +70,16 @@ describe("migration data steps — AST validation (M-T2.3)", () => {
 });
 
 describe("migration data steps — IR validation (M-T2.3)", () => {
-  it("accepts a well-formed backfill (only the temporary S2 gate fires)", async () => {
+  it("accepts a well-formed backfill (no migration diagnostics)", async () => {
     const found = await irCodes(`migration "ok" {
       Order.status = Pending
       Order.quantity = quantity + 1
       Order.note = null
     }`);
-    expect(found.filter((c) => c !== "loom.migration-data-steps-unsupported")).not.toContain(
-      "loom.migration-expr-unsupported",
-    );
+    expect(found).not.toContain("loom.migration-expr-unsupported");
     expect(found).not.toContain("loom.backfill-type-mismatch");
     expect(found).not.toContain("loom.backfill-target-unsupported");
-    // The TEMPORARY honest gate — every data step errors until S3 lands.
-    expect(found).toContain("loom.migration-data-steps-unsupported");
+    expect(found).not.toContain("loom.migration-data-steps-unsupported");
   });
 
   it("rejects an expression outside the SQL-renderable subset", async () => {
@@ -116,8 +112,8 @@ describe("migration data steps — IR validation (M-T2.3)", () => {
     );
   });
 
-  it("gates raw sql steps behind the S2 honest gate too", async () => {
-    expect(await irCodes(`migration "x" { sql "ANALYZE orders" }`)).toContain(
+  it("admits raw sql steps (the S2 honest gate is lifted)", async () => {
+    expect(await irCodes(`migration "x" { sql "ANALYZE orders" }`)).not.toContain(
       "loom.migration-data-steps-unsupported",
     );
   });
