@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { featureCases, sharedSystemCases } from "./cases.mjs";
+import { DEV_CLAIMS, featureCases, sharedSystemCases } from "./cases.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -62,8 +62,28 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles, traceFile }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authVerifierPath }) {
   const J = JSON.stringify;
+  // When the deployable is `auth: required` the generated boot module
+  // (index.ts) registers a dev-stub verifier before serving — but we boot
+  // via `createApp` (http/index.ts), which does NOT, so `verifyUserOrThrow`
+  // would throw "No user verifier is registered".  Re-register the SAME
+  // dev-stub here (accept every request as a built-in admin; merge
+  // base64-`x-loom-dev-claims` over it) so the behavioural principal
+  // (E2E_DEV_CLAIMS → __authHeaders) resolves exactly as it does at runtime.
+  const authImport = authVerifierPath ? `import { registerUserVerifier } from ${J(authVerifierPath)};` : "";
+  const authRegister = authVerifierPath
+    ? `registerUserVerifier((req) => {
+    const base = { id: "00000000-0000-0000-0000-000000000000", tenantId: "admin" };
+    const injected = req.headers.get("x-loom-dev-claims");
+    if (!injected) return base;
+    try {
+      return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };
+    } catch {
+      return base;
+    }
+  });`
+    : "";
   return `
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
@@ -71,6 +91,7 @@ import { createHarness, runTests } from ${J(join(REPO, "web/src/testing/harness.
 import { computeVerification } from ${J(join(REPO, "src/verify/verification.ts"))};
 import { createApp } from ${J(join(deplDir, "http/index.ts"))};
 import * as schema from ${J(join(deplDir, "db/schema.ts"))};
+${authImport}
 import { drizzle } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { is, Table } from "drizzle-orm";
@@ -80,6 +101,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const E2E_FILE = ${J(e2eFile)};
+const DEV_CLAIMS = ${J(DEV_CLAIMS)};
 const UNIT_FILES = ${J(unitFiles)};
 const TRACE_FILE = ${J(traceFile)};
 const SHIM = ${J(SHIM)};
@@ -88,6 +110,7 @@ export async function run() {
   const pglite = new PGlite();
   await pglite.exec(synthDDL(schema, { is, Table, getTableConfig }));
   const db = drizzle(pglite, { schema });
+  ${authRegister}
   const app = createApp(db);
 
   const dispatch = async (req) => {
@@ -100,7 +123,7 @@ export async function run() {
   const out = [];
   if (E2E_FILE) {
     const compile = async (ts) => (await esbuildTransform(ts, { loader: "ts", format: "cjs" })).code;
-    const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch });
+    const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: { E2E_DEV_CLAIMS: DEV_CLAIMS } });
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
   }
 
@@ -160,9 +183,14 @@ async function runCase(c) {
     const unitFiles = walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"));
 
     const traceFile = join(genDir, ".loom", "traceability.json");
+    // `auth: required` deployables emit auth/verifier.ts; when present the boot
+    // entry re-registers the dev-stub verifier (see entrySource).  Auth-less
+    // systems have no such file and skip it.
+    const verifierPath = join(deplDir, "auth", "verifier.ts");
+    const authVerifierPath = existsSync(verifierPath) ? verifierPath : null;
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile }));
+    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile, authVerifierPath }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     return await run();

@@ -5,7 +5,7 @@ system Tenancy {
   user { id: guid  tenantId: string }
   subdomain Core {
     context Ledger {
-      aggregate Account {
+      aggregate Account with crudish {
         tenantId: string
         balance: int
         filter this.tenantId == currentUser.tenantId
@@ -25,5 +25,19 @@ system Tenancy {
     serves: LedgerApi
     port: 4000
     auth: required
+  }
+
+  // The behavioural harness authenticates as the canonical principal
+  // (`tenantId: "acme"`; see cases.mjs DEV_CLAIMS).  The `filter this.tenantId ==
+  // currentUser.tenantId` capability filter is AND-ed into every read, so a read
+  // must see ONLY this principal's tenant.  Seed one in-tenant row ("acme") and
+  // one out-of-tenant row ("other"), then read across both via `byMinBalance` —
+  // the out-of-tenant row must be invisible.  A backend that fails to apply the
+  // filter returns 2 (cross-tenant leak); the correct answer is 1.
+  test e2e "capability filter scopes reads to the authenticated principal's tenant" against d {
+    api.accounts.create({ tenantId: "acme", balance: 100 })
+    api.accounts.create({ tenantId: "other", balance: 200 })
+    let mine = api.accounts.byMinBalance({ min: 0 })
+    expect(mine.length).toBe(1)
   }
 }

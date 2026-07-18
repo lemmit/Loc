@@ -201,14 +201,18 @@ describe("e2e expansion — count assertion", () => {
 // the runner) on BOTH verbs, and sends no Authorization header when the var is
 // unset — so an auth-less system's output is unaffected.
 // ---------------------------------------------------------------------------
-describe("e2e harness — bearer-token forwarding", () => {
-  it("threads E2E_BEARER_TOKEN onto POST and GET, without hardcoding a provider", async () => {
+describe("e2e harness — principal forwarding", () => {
+  it("threads both E2E_BEARER_TOKEN (OIDC) and E2E_DEV_CLAIMS (dev-stub) onto POST and GET, without hardcoding a provider", async () => {
     const e2e = (await generateSystemFiles(BANK_THREE_BACKEND)).get("e2e/Bank.e2e.test.ts")!;
-    // The token is read from the env and only becomes an Authorization header
-    // when present (auth-less runs send nothing).
+    // The bearer token is read from the env and only becomes an Authorization
+    // header when present (auth-less runs send nothing).
     expect(e2e).toContain("const token = process.env.E2E_BEARER_TOKEN;");
     // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
-    expect(e2e).toContain("return token ? { authorization: `Bearer ${token}` } : {};");
+    expect(e2e).toContain("if (token) headers.authorization = `Bearer ${token}`;");
+    // The dev-stub principal is base64-encoded into x-loom-dev-claims, the exact
+    // channel every backend's dev-stub verifier merges over its built-in identity.
+    expect(e2e).toContain("const claims = process.env.E2E_DEV_CLAIMS;");
+    expect(e2e).toContain('headers["x-loom-dev-claims"] = Buffer.from(claims).toString("base64");');
     // POST merges the auth header alongside content-type; GET carries it too.
     expect(e2e).toContain('headers: { "content-type": "application/json", ...__authHeaders() }');
     expect(e2e).toContain("await fetch(url, { headers: __authHeaders() });");

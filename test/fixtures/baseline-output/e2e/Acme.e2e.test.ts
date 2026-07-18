@@ -9,16 +9,24 @@ const ENDPOINTS: Record<string, string> = {
   web_app: process.env.E2E_WEB_APP_BASE ?? "http://localhost:3001",
 };
 
-// When the target system requires auth, every request must carry a bearer
-// token or the backend rejects it 401 before the assertion's real path
+// When the target system requires auth, every request must carry a principal
+// or the backend rejects it 401 before the assertion's real path
 // (create/validation/not-found) is ever reached.  The harness stays
-// provider-agnostic: it forwards a token from `E2E_BEARER_TOKEN` when set,
-// and sends no Authorization header when it is not (an auth-less system, or a
-// run that hasn't provisioned one).  The runner mints the token once and
-// exports it before invoking this suite.
+// provider-agnostic and supports both auth modes:
+//   • OIDC systems — forward a JWT from `E2E_BEARER_TOKEN` (the runner mints it).
+//   • dev-stub systems (no `auth {}` block) — inject `x-loom-dev-claims`, a
+//     base64-encoded JSON of principal claims (keyed by declared `user` field,
+//     e.g. `{"tenantId":"acme","role":"agent"}`), which every backend's dev-stub
+//     verifier merges over its built-in identity.  This is the exact mechanism
+//     the tenancy-e2e isolation harness uses.  `E2E_DEV_CLAIMS` is the raw JSON;
+//     an unset/empty value sends no header (auth-less systems ignore it anyway).
 function __authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
   const token = process.env.E2E_BEARER_TOKEN;
-  return token ? { authorization: `Bearer ${token}` } : {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  const claims = process.env.E2E_DEV_CLAIMS;
+  if (claims) headers["x-loom-dev-claims"] = Buffer.from(claims).toString("base64");
+  return headers;
 }
 
 async function __post(url: string, body: unknown): Promise<unknown> {

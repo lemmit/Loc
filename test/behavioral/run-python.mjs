@@ -36,7 +36,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -149,6 +149,7 @@ import { transform as esbuildTransform } from "esbuild";
 import { readFileSync } from "node:fs";
 
 const E2E_FILE = ${J(e2eFile)};
+const DEV_CLAIMS = ${J(DEV_CLAIMS)};
 const BASE = ${J(BASE)};
 
 export async function run() {
@@ -166,7 +167,7 @@ export async function run() {
     r.headers.forEach((v, k) => { headers[k] = v; });
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() } };
   };
-  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch });
+  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: { E2E_DEV_CLAIMS: DEV_CLAIMS } });
   return await runTests(cases);
 }
 `;

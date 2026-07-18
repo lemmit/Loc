@@ -62,6 +62,17 @@ export async function featureCases(backendKey, platformClause, workDir) {
   return cases;
 }
 
+/** The canonical dev-stub principal every behavioural runner authenticates as.
+ *  Injected via `E2E_DEV_CLAIMS` → the emitted `__authHeaders` base64-encodes it
+ *  into the `x-loom-dev-claims` header that each backend's dev-stub auth verifier
+ *  merges over its built-in identity (the exact mechanism tenancy-e2e uses).
+ *  Only STRING claims are honoured on the non-node backends, so keep it to
+ *  strings keyed by the declared `user` field name.  Inert for auth-less systems
+ *  (no middleware reads it).  Fixtures in the tenancy/auth cluster assert against
+ *  THIS principal — an in-tenant row uses `tenantId: "acme"`, an out-of-tenant
+ *  row any other value; a `requires currentUser.role == "agent"` op is satisfied. */
+export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", role: "agent" });
+
 /** Reset a shared Postgres to a pristine state before a case boots.  The backend
  *  runners (java/dotnet/python/elixir) boot against ONE external DB and each
  *  case emits its own migrations at a FIXED version — so running more than one
