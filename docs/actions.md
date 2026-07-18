@@ -255,10 +255,22 @@ useForm<CancelShipmentRequest>({ defaultValues: { reason: "customer request" } }
 ```
 
 Seeding is best-effort over the **client-evaluable** subset — constants and enum
-members. A default the target UI can't evaluate without a server round-trip or
-the loaded record (`now()`, `currentUser.*`, a `this.<field>` on the by-id op
-form, a sequence, a cross-aggregate lookup) falls back to the type-zero seed; the
-value is still carried in the IR for backends that consume it.
+members always seed. A **`this.<field>`** default seeds from the loaded record
+(`record.<field>`) on an **instance-qualified** op form (`OperationForm { order.<op> }`,
+where the instance is in scope) rendered by a pack that threads the record into
+its op-form component (`seedsOpFormRecord` — mantine today):
+
+```tsx
+// operation note(memo: string = this.customerId) → mantine op-form component
+function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … }) {
+  const { … } = useForm<NoteOrderRequest>({ defaultValues: { memo: record.customerId } });
+```
+
+Everything else falls back to the type-zero seed: a `this.<field>` on the
+by-name op form (`OperationForm { of:, op: }` — no record in scope, e.g. the
+scaffolded Detail page) or on a non-threading pack, and any ambient / lookup
+source (`now()`, `currentUser.*`, a sequence, a cross-aggregate read). The
+default is still carried in the IR for backends that consume it.
 
 ## Further reading
 

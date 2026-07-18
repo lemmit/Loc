@@ -271,11 +271,15 @@ function prepareFormFields(
   fieldsForHelpers: { name: string; type: TypeIR; optional: boolean; default?: ExprIR }[],
   bc: BoundedContextIR,
   testidNamespace: string,
+  seedRecordVar?: string,
 ): PreparedForm {
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
   const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
-  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
+  // A `this.<field>` op-param default seeds as `<seedRecordVar>.<field>` only
+  // when the caller passes a record var in scope at the seed site (op forms on
+  // record-threading packs); otherwise it falls back to the type-zero seed.
+  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc, { recordVar: seedRecordVar });
   const fieldVMs = fields.map((f) =>
     prepareFormFieldVM(
       f.name,
@@ -607,6 +611,15 @@ function emitFormOfOperation(
   // exactly as the workflow-form variant does.
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
+  // A `this.<field>` param default can seed `defaultValues` from the loaded
+  // record — but only when the active pack threads a `record` prop into the
+  // op-form component (`seedsOpFormRecord`) AND some default actually reads
+  // `this`.  Inside the component the record is the prop `record`; the trigger
+  // passes the in-scope instance (`instanceName`, e.g. `data`) as that prop.
+  const wantsRecord =
+    ctx.pack.manifest.seedsOpFormRecord === true &&
+    fieldsForHelpers.some((f) => defaultUsesThis(f.default));
+  const seedRecordVar = wantsRecord ? "record" : undefined;
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
   // The page shell ALWAYS emits this op-form's module-scope component from the
   // recorded `formOfs` state — whether or not an enclosing `Modal { … }` wraps
@@ -619,13 +632,24 @@ function emitFormOfOperation(
   // no-op for packs that ship no `primitive-modal` key; idempotent when a
   // Modal also registered it.
   addImportsForPrimitive(ctx, "primitive-modal");
-  const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
+  const prepared = prepareFormFields(
+    ctx,
+    fields,
+    fieldsForHelpers,
+    bc,
+    testidNamespace,
+    seedRecordVar,
+  );
   addImport(
     ctx,
     `../api/${lowerFirst(agg.name)}`,
     `${upperFirst(op.name)}${agg.name}Request`,
     `use${upperFirst(op.name)}${agg.name}`,
   );
+  // The threaded record prop is typed as the aggregate's response type
+  // (`<Agg>Response`) — already imported by the shell's instance/param
+  // type-import channel (the op-form's instance receiver is that type), so no
+  // extra import here (a second one would duplicate the binding).
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -646,10 +670,32 @@ function emitFormOfOperation(
     // Defaults — the enclosing Modal overrides from its trigger.
     triggerLabel: humanize(op.name),
     triggerPrimary: true,
+    // When a this-relative default was seeded, the trigger passes the in-scope
+    // instance (`instanceName`) as the component's `record` prop.
+    ...(wantsRecord ? { recordVar: instanceName, recordType: `${agg.name}Response` } : {}),
   });
   // No inline JSX — the Modal primitive renders the trigger and
   // the shell emits the module-scope form component.
   return "";
+}
+
+/** Whether a param default reads `this` (so it seeds from the loaded record) —
+ *  the exact `this`-reaching subset {@link renderDefaultSeed} renders against a
+ *  record var (`this.<field>`, plus paren/unary wrappers). */
+function defaultUsesThis(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  switch (e.kind) {
+    case "this":
+      return true;
+    case "member":
+      return defaultUsesThis(e.receiver);
+    case "paren":
+      return defaultUsesThis(e.inner);
+    case "unary":
+      return defaultUsesThis(e.operand);
+    default:
+      return false;
+  }
 }
 
 /** State-controlled modal: `Modal { <children>, open: <stateBool>, title: "…" }`
@@ -752,11 +798,15 @@ export function emitModal(
   // Backfill the trigger surface onto the OperationFormState the
   // form child just pushed so packs that own the trigger inside
   // their module component (shadcn/mui/chakra) can render it.
+  let recordVar: string | undefined;
   for (let i = ctx.formOfs.length - 1; i >= 0; i--) {
     const st = ctx.formOfs[i]!;
     if (st.kind === "operation" && st.op.name === opName) {
       st.triggerLabel = label;
       st.triggerPrimary = triggerPrimary;
+      // When a this-relative default was seeded, the op state carries the
+      // in-scope instance var the trigger must pass as the `record` prop.
+      recordVar = st.recordVar;
       break;
     }
   }
@@ -766,5 +816,6 @@ export function emitModal(
     opPascal: upperFirst(opName),
     opCamel: lowerFirst(opName),
     testidAttr: testidAttr(triggerArg, ctx),
+    recordVar,
   });
 }
