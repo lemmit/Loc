@@ -20,14 +20,15 @@
 //   - enum (values resolvable)    → `DropdownButtonFormField`
 //   - datetime                    → a `showDatePicker` field
 //   - value object (resolvable)   → flattened into its scalar sub-fields
-//   - id (foreign key)            → `TextFormField` (raw id string — a runtime
-//                                   FK <select> loaded from `X.all` is deferred,
-//                                   see the DEFERRED note below)
+//   - id (foreign key)            → `DropdownButtonFormField` loaded at runtime
+//                                   from `GET /<target-collection>` when the
+//                                   target aggregate has a derived `display`
+//                                   field (the option label); otherwise a raw id
+//                                   `TextFormField` (matches the cross-frontend
+//                                   `display`-gated id-select/id-text split).
 //
-// DEFERRED (scoped down per the slice brief): a foreign-key `X id` renders as a
-// plain id text field rather than a Riverpod-loaded dropdown (that needs the
-// target's `.all` read provider threaded in — cross-slice wiring); scalar-array
-// and array-of-value-object inputs are dropped (no repeatable sub-form yet).
+// DEFERRED (scoped down per the slice brief): scalar-array and array-of-value-
+// object inputs are dropped (no repeatable sub-form yet).
 
 import { createInputFields, isConstructible } from "../../ir/enrich/wire-projection.js";
 import type {
@@ -76,7 +77,8 @@ export type FlutterInputKind =
   | "number-double"
   | "bool"
   | "enum"
-  | "datetime";
+  | "datetime"
+  | "fk-select";
 
 /** One prepared form field — a scalar input the widget renders + submits. */
 export interface FlutterFormField {
@@ -97,6 +99,10 @@ export interface FlutterFormField {
   /** When flattened from a value object, the JSON object key it nests under
    *  (`cost` for a `cost: Money` VO expanded to `costAmount`/`costCurrency`). */
   objectKey?: string;
+  /** For an `fk-select` field, the snake-plural collection path (`categories`)
+   *  its option list loads from (`GET /<collection>`); the option label is the
+   *  target's derived `display` field (falling back to the row's `id`). */
+  fkCollection?: string;
 }
 
 /** A fully prepared form → everything `renderFormWidget` needs. */
@@ -131,11 +137,15 @@ function peel(t: TypeIR): TypeIR {
 function scalarInputKind(
   t: TypeIR,
   enumsByName: ReadonlyMap<string, string[]>,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterInputKind | undefined {
   const base = peel(t);
   if (base.kind === "enum") return enumsByName.has(base.name) ? "enum" : "text";
-  // A foreign-key id degrades to a raw text field (FK <select> loading deferred).
-  if (base.kind === "id") return "text";
+  // A foreign-key id → a runtime-loaded dropdown when the target has a derived
+  // `display` field (the option label); otherwise a raw id text field (the same
+  // `display`-gated split every other frontend makes).
+  if (base.kind === "id")
+    return aggregatesByName.get(base.targetName)?.displayDerived ? "fk-select" : "text";
   if (base.kind === "primitive") {
     switch (base.name) {
       case "int":
@@ -168,6 +178,8 @@ function buildField(
   const base = peel(type);
   const enumValues =
     kind === "enum" && base.kind === "enum" ? enumsByName.get(base.name) : undefined;
+  const fkCollection =
+    kind === "fk-select" && base.kind === "id" ? snake(plural(base.targetName)) : undefined;
   return {
     wireName,
     jsonKey,
@@ -176,6 +188,7 @@ function buildField(
     required: !optional,
     enumValues,
     objectKey,
+    fkCollection,
   };
 }
 
@@ -187,6 +200,7 @@ function prepareFields(
   inputs: readonly { name: string; type: TypeIR; optional?: boolean }[],
   enumsByName: ReadonlyMap<string, string[]>,
   vosByName: ReadonlyMap<string, readonly FieldIR[]>,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormField[] {
   const out: FlutterFormField[] = [];
   for (const f of inputs) {
@@ -195,7 +209,7 @@ function prepareFields(
     const voFields = base.kind === "valueobject" ? vosByName.get(base.name) : undefined;
     if (voFields) {
       for (const sub of voFields) {
-        const subKind = scalarInputKind(sub.type, enumsByName);
+        const subKind = scalarInputKind(sub.type, enumsByName, aggregatesByName);
         if (!subKind) continue; // nested VO / array sub-field — skip (one level)
         const subOptional = fieldOptional || sub.optional === true || sub.type.kind === "optional";
         out.push(
@@ -212,7 +226,7 @@ function prepareFields(
       }
       continue;
     }
-    const kind = scalarInputKind(f.type, enumsByName);
+    const kind = scalarInputKind(f.type, enumsByName, aggregatesByName);
     if (!kind) continue; // array / nested — deferred
     out.push(buildField(f.name, f.name, f.type, fieldOptional, kind, enumsByName));
   }
@@ -241,8 +255,14 @@ function vosFromBc(bc: EnrichedBoundedContextIR | undefined): Map<string, readon
 export function flutterCreateForm(
   agg: EnrichedAggregateIR,
   bc: EnrichedBoundedContextIR | undefined,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormSpec {
-  const fields = prepareFields(createInputFields(agg), enumsFromBc(bc), vosFromBc(bc));
+  const fields = prepareFields(
+    createInputFields(agg),
+    enumsFromBc(bc),
+    vosFromBc(bc),
+    aggregatesByName,
+  );
   return {
     widgetName: createFormWidgetName(agg.name),
     kind: "create",
@@ -260,8 +280,9 @@ export function flutterOperationForm(
   aggName: string,
   op: OperationIR,
   bc: EnrichedBoundedContextIR | undefined,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormSpec {
-  const fields = prepareFields(op.params, enumsFromBc(bc), vosFromBc(bc));
+  const fields = prepareFields(op.params, enumsFromBc(bc), vosFromBc(bc), aggregatesByName);
   const opPath = snake(op.routeSlug ?? op.name);
   return {
     widgetName: operationFormWidgetName(aggName, op.name),
@@ -351,14 +372,16 @@ function collectBodyForms(
       if (e.name === "CreateForm") {
         const ofArg = namedArg(e, "of");
         const agg = ofArg?.kind === "ref" ? aggregatesByName.get(ofArg.name) : undefined;
-        if (agg && isConstructible(agg)) push(flutterCreateForm(agg, bcByAggregate.get(agg.name)));
+        if (agg && isConstructible(agg))
+          push(flutterCreateForm(agg, bcByAggregate.get(agg.name), aggregatesByName));
       } else if (e.name === "OperationForm") {
         const ofArg = namedArg(e, "of");
         const opArg = namedArg(e, "op");
         const agg = ofArg?.kind === "ref" ? aggregatesByName.get(ofArg.name) : undefined;
         if (agg && opArg?.kind === "ref") {
           const op = agg.operations.find((o) => o.name === opArg.name && o.visibility === "public");
-          if (op) push(flutterOperationForm(agg.name, op, bcByAggregate.get(agg.name)));
+          if (op)
+            push(flutterOperationForm(agg.name, op, bcByAggregate.get(agg.name), aggregatesByName));
         }
       } else if (e.name === "DestroyForm") {
         const ofArg = namedArg(e, "of");
@@ -438,7 +461,57 @@ function stateDecls(fields: readonly FlutterFormField[]): string[] {
       out.push(`  String? ${stateId(f.wireName)}${first ? ` = '${dartStr(first)}'` : ""};`);
     } else if (f.kind === "datetime") {
       out.push(`  DateTime? ${stateId(f.wireName)};`);
+    } else if (f.kind === "fk-select") {
+      out.push(`  String? ${stateId(f.wireName)};`);
+      out.push(`  List<Map<String, dynamic>> ${optionsId(f.wireName)} = const [];`);
     }
+  }
+  return out;
+}
+
+/** The options-list state identifier for an fk-select field
+ *  (`category` → `_categoryOptions`). */
+function optionsId(wireName: string): string {
+  return `${stateId(wireName)}Options`;
+}
+
+/** The async loader-method name for an fk-select field
+ *  (`category` → `_loadCategoryOptions`). */
+function loaderId(wireName: string): string {
+  return `_load${upperFirst(wireName)}Options`;
+}
+
+/** The `initState` + per-field loader methods for a form's fk-select inputs
+ *  (empty when the form hosts none).  Each loader GETs `/<collection>`, unwraps
+ *  the paged `{items}` envelope, and stores the rows as the dropdown options. */
+function fkLoaders(fields: readonly FlutterFormField[]): string[] {
+  const fks = fields.filter((f) => f.kind === "fk-select");
+  if (fks.length === 0) return [];
+  const out: string[] = [
+    "  @override",
+    "  void initState() {",
+    "    super.initState();",
+    ...fks.map((f) => `    ${loaderId(f.wireName)}();`),
+    "  }",
+  ];
+  for (const f of fks) {
+    out.push(
+      "",
+      `  Future<void> ${loaderId(f.wireName)}() async {`,
+      "    try {",
+      `      final res = await http.get(apiUri('/${f.fkCollection}'));`,
+      "      if (res.statusCode < 200 || res.statusCode >= 300) return;",
+      "      final decoded = jsonDecode(res.body);",
+      "      final raw = decoded is Map<String, dynamic> ? decoded['items'] : decoded;",
+      "      if (raw is! List || !mounted) return;",
+      "      setState(() {",
+      `        ${optionsId(f.wireName)} = raw.whereType<Map<String, dynamic>>().toList();`,
+      "      });",
+      "    } catch (_) {",
+      "      // A failed option load leaves the dropdown empty — never crashes the form.",
+      "    }",
+      "  }",
+    );
   }
   return out;
 }
@@ -465,6 +538,8 @@ function fieldValueExpr(f: FlutterFormField): string {
     case "bool":
       return stateId(f.wireName);
     case "enum":
+      return stateId(f.wireName);
+    case "fk-select":
       return stateId(f.wireName);
     case "datetime":
       return `${stateId(f.wireName)}?.toIso8601String()`;
@@ -536,6 +611,13 @@ function fieldWidget(f: FlutterFormField): string {
         .join(", ");
       const validator = f.required ? ", validator: (v) => v == null ? 'Required' : null" : "";
       return `DropdownButtonFormField<String>(initialValue: ${stateId(f.wireName)}, decoration: ${decoration}, items: const [${items}], onChanged: (v) => setState(() => ${stateId(f.wireName)} = v)${validator})`;
+    }
+    case "fk-select": {
+      // Options load at runtime (`_<name>Options`); the label is the target's
+      // derived `display` field, falling back to the row id.
+      const items = `${optionsId(f.wireName)}.map((o) => DropdownMenuItem(value: o['id'] as String?, child: Text((o['display'] ?? o['id'] ?? '').toString()))).toList()`;
+      const validator = f.required ? ", validator: (v) => v == null ? 'Required' : null" : "";
+      return `DropdownButtonFormField<String>(initialValue: ${stateId(f.wireName)}, decoration: ${decoration}, isExpanded: true, items: ${items}, onChanged: (v) => setState(() => ${stateId(f.wireName)} = v)${validator})`;
     }
     case "datetime":
       return `InkWell(onTap: () async { final picked = await showDatePicker(context: context, initialDate: ${stateId(f.wireName)} ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100)); if (picked != null) setState(() => ${stateId(f.wireName)} = picked); }, child: InputDecorator(decoration: ${decoration}, child: Text(${stateId(f.wireName)}?.toIso8601String() ?? 'Select date')))`;
@@ -659,6 +741,9 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
   stateMembers.push("  bool _submitting = false;");
   stateMembers.push("  String? _error;");
 
+  const initState = fkLoaders(spec.fields);
+  const initStateBlock = initState.length > 0 ? ["", ...initState] : [];
+
   const dispose = disposeBody(spec.fields);
   const disposeOverride =
     dispose.length > 0
@@ -678,6 +763,7 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
     "",
     `class _${w}State extends State<${w}> {`,
     ...stateMembers,
+    ...initStateBlock,
     ...disposeOverride,
     "",
     ...submit,
