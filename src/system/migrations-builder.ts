@@ -573,6 +573,7 @@ interface DiffBuckets {
   rename: MigrationStep[];
   addColumn: MigrationStep[];
   alter: MigrationStep[];
+  renameIndex: MigrationStep[];
   addIndex: MigrationStep[];
 }
 
@@ -635,6 +636,7 @@ export function diffSchema(
     rename: [],
     addColumn: [],
     alter: [],
+    renameIndex: [],
     addIndex: [],
   };
   for (const [p, n] of pairs) {
@@ -669,6 +671,7 @@ export function diffSchema(
     ...buckets.rename,
     ...buckets.addColumn,
     ...buckets.alter,
+    ...buckets.renameIndex,
     ...buckets.addIndex,
   ];
 }
@@ -695,6 +698,10 @@ function diffTable(
   // drop/add loops.
   const renamedPrev = new Set<string>();
   const renamedNext = new Set<string>();
+  // Effective per-table column renames (old column → its final new name, after
+  // any chain resolution) — used below to map a dropped index's columns onto an
+  // added index's when the two are the SAME index whose derived name shifted.
+  const colRenameMap = new Map<string, string>();
   if (renames.length > 0) {
     const edge = new Map<string, string>();
     for (const r of renames) edge.set(r.from, r.to);
@@ -751,6 +758,7 @@ function diffTable(
       }
       renamedPrev.add(c.name);
       renamedNext.add(target);
+      colRenameMap.set(c.name, target);
     }
   }
 
@@ -798,18 +806,62 @@ function diffTable(
   }
 
   // Index diff — match by index name (deterministic, see tableForAggregate).
+  // A name-only shift that is otherwise the SAME index — identical columns
+  // (after mapping the old names through this table's column renames),
+  // uniqueness, partial-index predicate, and per-column opclasses — is the
+  // derived-name churn a table/column rename produces (the FK-index name embeds
+  // the table/column stem).  Collapse it to a single `renameIndex` (M-T2.1 a)
+  // instead of the non-destructive-but-noisy drop+recreate.
   const prevIdx = new Map<string, IndexShape>();
   for (const i of prev.indexes) prevIdx.set(i.name, i);
   const nextIdx = new Map<string, IndexShape>();
   for (const i of next.indexes) nextIdx.set(i.name, i);
-  for (const i of prev.indexes) {
-    if (!nextIdx.has(i.name)) {
-      buckets.dropIndex.push({ op: "dropIndex", table: next.name, schema, name: i.name });
+  const droppedIdx = prev.indexes.filter((i) => !nextIdx.has(i.name));
+  const addedIdx = next.indexes.filter((i) => !prevIdx.has(i.name));
+  const claimedAdd = new Set<IndexShape>();
+  for (const di of droppedIdx) {
+    const match = addedIdx.find((ai) => !claimedAdd.has(ai) && indexRenamed(di, ai, colRenameMap));
+    if (match) {
+      claimedAdd.add(match);
+      buckets.renameIndex.push({ op: "renameIndex", from: di.name, to: match.name, schema });
+    } else {
+      buckets.dropIndex.push({ op: "dropIndex", table: next.name, schema, name: di.name });
     }
   }
-  for (const i of next.indexes) {
-    if (!prevIdx.has(i.name)) buckets.addIndex.push({ op: "addIndex", index: i, schema });
+  for (const i of addedIdx) {
+    if (!claimedAdd.has(i)) buckets.addIndex.push({ op: "addIndex", index: i, schema });
   }
+}
+
+/** True when a dropped and an added index are the SAME index whose DERIVED name
+ *  shifted because a table/column rename this generation changed its stem: same
+ *  columns (after mapping the dropped index's columns through the table's
+ *  column renames), same uniqueness, same partial-index predicate, same
+ *  per-column opclasses.  Both indexes belong to one already-paired table, so
+ *  the relation is guaranteed identical — only the name needs reconciling, and
+ *  the names necessarily differ (or they'd have matched by name and never
+ *  entered the drop/add lists).  A genuine drop + unrelated add never collides
+ *  here: index names are a deterministic function of (table, columns, unique),
+ *  so two indexes with an identical shape carry the same name. */
+function indexRenamed(
+  di: IndexShape,
+  ai: IndexShape,
+  colRename: ReadonlyMap<string, string>,
+): boolean {
+  if (di.unique !== ai.unique) return false;
+  if ((di.predicate ?? "") !== (ai.predicate ?? "")) return false;
+  const mapCol = (c: string): string => colRename.get(c) ?? c;
+  const dCols = di.columns.map(mapCol);
+  if (dCols.length !== ai.columns.length) return false;
+  if (!dCols.every((c, k) => c === ai.columns[k])) return false;
+  // Per-column opclasses (keyed by column) must agree after mapping the keys.
+  const dOc = di.opclasses ?? {};
+  const aOc = ai.opclasses ?? {};
+  if (Object.keys(dOc).length !== Object.keys(aOc).length) return false;
+  for (const [k, v] of Object.entries(dOc)) {
+    if (aOc[mapCol(k)] !== v) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2086,6 +2138,8 @@ function describeMigration(steps: MigrationStep[]): string {
         return `AddIndex${columnToPascal(s.index.name)}`;
       case "dropIndex":
         return `DropIndex${columnToPascal(s.name)}`;
+      case "renameIndex":
+        return `RenameIndex${columnToPascal(s.from)}To${columnToPascal(s.to)}`;
       case "backfillColumn":
         return `Backfill${columnToPascal(s.column)}On${tableToPascal(s.table)}`;
       case "sqlExec":

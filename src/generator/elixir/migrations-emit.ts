@@ -7,7 +7,7 @@ import type {
   TableShape,
 } from "../../ir/types/migrations-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { renderBackfillSql } from "../sql-pg.js";
+import { renderBackfillSql, renderRenameIndexSql } from "../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix Ecto migration emitter.
@@ -560,6 +560,12 @@ export function renderEctoStep(step: MigrationStep): string[] {
     }
     case "dropIndex":
       return [`drop index(:${step.table}, name: "${step.name}"${prefixOpt(step.schema)})`];
+    case "renameIndex":
+      // Ecto has no `rename index` DSL — wrap the shared schema-qualified SQL in
+      // `execute/1` (the `CREATE SCHEMA` precedent), so the DDL is bit-identical
+      // with the Postgres backends.  Forward-only (single-arg execute), matching
+      // D-MIG-NO-DOWN.
+      return [`execute(${elixirStr(renderRenameIndexSql(step))})`];
     case "sqlComment":
       return [`# ${step.comment}`];
     case "backfillColumn":

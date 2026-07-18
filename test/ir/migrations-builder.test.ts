@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderEctoStep } from "../../src/generator/elixir/migrations-emit.js";
 import { renderPgStep } from "../../src/generator/sql-pg.js";
 import type {
   ColumnShape,
@@ -492,6 +493,89 @@ describe("diffSchema — table renames (M-T2.1 aggregate/table rename)", () => {
   });
 });
 
+describe("diffSchema — renameIndex collapse (M-T2.1 a)", () => {
+  // A single table carrying one FK index whose NAME embeds the table + column
+  // stem — the derived-name shape a real FK / performance index has.
+  const fkTable = (table: string, col: string): TableShape => ({
+    name: table,
+    ownerModule: "Sales",
+    columns: [
+      { name: "id", type: { kind: "uuid" }, nullable: false },
+      { name: col, type: { kind: "uuid" }, nullable: false },
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [{ column: col, refTable: "customers", onDelete: "restrict" }],
+    indexes: [{ name: `${table}_${col}_idx`, table, columns: [col], unique: false }],
+  });
+  const snap = (tables: TableShape[]): SchemaSnapshot => ({ schemaVersion: 1, tables });
+
+  it("collapses the derived FK index to renameIndex on a TABLE rename — zero index drop/create", () => {
+    const steps = diffSchema(
+      snap([fkTable("orders", "customer")]),
+      snap([fkTable("purchase_orders", "customer")]),
+      [],
+      [{ from: "orders", to: "purchase_orders" }],
+    );
+    expect(steps.filter((s) => s.op === "renameIndex")).toEqual([
+      {
+        op: "renameIndex",
+        from: "orders_customer_idx",
+        to: "purchase_orders_customer_idx",
+        schema: undefined,
+      },
+    ]);
+    expect(steps.some((s) => s.op === "dropIndex" || s.op === "addIndex")).toBe(false);
+  });
+
+  it("collapses the derived FK index to renameIndex on a COLUMN rename — zero index drop/create", () => {
+    const steps = diffSchema(
+      snap([fkTable("orders", "customer")]),
+      snap([fkTable("orders", "buyer")]),
+      [{ table: "orders", from: "customer", to: "buyer" }],
+    );
+    expect(steps.filter((s) => s.op === "renameIndex")).toEqual([
+      {
+        op: "renameIndex",
+        from: "orders_customer_idx",
+        to: "orders_buyer_idx",
+        schema: undefined,
+      },
+    ]);
+    expect(steps.some((s) => s.op === "dropIndex" || s.op === "addIndex")).toBe(false);
+  });
+
+  it("renders renameIndex to Postgres DDL (schema-qualified source, bare target) and Ecto execute", () => {
+    const withSchema = (t: TableShape): TableShape => ({ ...t, schema: "sales" });
+    const steps = diffSchema(
+      snap([withSchema(fkTable("orders", "customer"))]),
+      snap([withSchema(fkTable("purchase_orders", "customer"))]),
+      [],
+      [{ from: "orders", to: "purchase_orders", schema: "sales" }],
+    );
+    const rename = steps.find((s) => s.op === "renameIndex")!;
+    expect(renderPgStep(rename)).toBe(
+      'ALTER INDEX "sales"."orders_customer_idx" RENAME TO "purchase_orders_customer_idx";',
+    );
+    expect(renderEctoStep(rename)).toEqual([
+      'execute("ALTER INDEX \\"sales\\".\\"orders_customer_idx\\" RENAME TO \\"purchase_orders_customer_idx\\"")',
+    ]);
+  });
+
+  it("does NOT collapse when uniqueness differs (genuine drop + add)", () => {
+    const plain = fkTable("orders", "customer");
+    const uniq: TableShape = {
+      ...plain,
+      indexes: [
+        { name: "orders_customer_uq", table: "orders", columns: ["customer"], unique: true },
+      ],
+    };
+    const steps = diffSchema(snap([plain]), snap([uniq]));
+    expect(steps.some((s) => s.op === "renameIndex")).toBe(false);
+    expect(steps.some((s) => s.op === "dropIndex")).toBe(true);
+    expect(steps.some((s) => s.op === "addIndex")).toBe(true);
+  });
+});
+
 describe("buildMigrations — table/aggregate rename intent (M-T2.1)", () => {
   // Same aggregate under its OLD and NEW name; the OLD build supplies the
   // baseline snapshot (so the on-disk names are exactly what the schema emitter
@@ -559,6 +643,18 @@ system Shop {
     // or dropped column smuggles data loss past the gate.
     expect(steps.some((s) => s.op === "dropTable" || s.op === "createTable")).toBe(false);
     expect(steps.some((s) => s.op === "dropColumn")).toBe(false);
+    // …and the derived FK indexes on every owned child table rename in place
+    // (M-T2.1 a) rather than churning through drop + recreate.
+    const renamedIndexes = steps
+      .filter((s): s is Extract<MigrationStep, { op: "renameIndex" }> => s.op === "renameIndex")
+      .map((s) => `${s.from}->${s.to}`)
+      .sort();
+    expect(renamedIndexes).toEqual([
+      "lines_order_id_idx->lines_purchase_order_id_idx",
+      "order_charges_order_id_idx->purchase_order_charges_purchase_order_id_idx",
+      "order_tags_tag_id_idx->purchase_order_tags_tag_id_idx",
+    ]);
+    expect(steps.some((s) => s.op === "dropIndex" || s.op === "addIndex")).toBe(false);
   });
 
   it("is inert once the rename is baked into the baseline (ledger idempotency)", async () => {

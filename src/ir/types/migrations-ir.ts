@@ -179,6 +179,16 @@ export type MigrationStep =
     }
   | { op: "addIndex"; index: IndexShape; schema?: string }
   | { op: "dropIndex"; table: string; schema?: string; name: string }
+  // Rename an index in place (M-T2.1 a) — `from`/`to` are the bare (unqualified)
+  // old + new index names; `schema` is the owning table's Postgres schema (an
+  // index lives in its table's schema).  Emitted by `diffSchema` when a table or
+  // column rename changes only the DERIVED index name (the index is otherwise
+  // identical after mapping columns/table through this generation's renames), so
+  // the non-destructive rebuild collapses to a single `ALTER INDEX … RENAME TO`
+  // instead of a drop+create.  Postgres has native support; Ecto has no `rename
+  // index` DSL, so it wraps the same SQL in `execute/1` (forward-only, matching
+  // D-MIG-NO-DOWN).
+  | { op: "renameIndex"; from: string; to: string; schema?: string }
   // A pass-through comment line (`-- …` in SQL, `# …` in Ecto).  Emitted by the
   // destructive-change gate's NOT-NULL-add rewrite to mark the backfill the
   // operator must perform between adding a nullable column and setting it NOT
