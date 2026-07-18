@@ -396,6 +396,7 @@ system D {
       aggregate Org with crudish { name: string }
       repository Invoices for Invoice {
         find byNumber(n: string): Invoice[] where this.number == n
+        find mine(): Invoice[] where this.createdBy == currentUser.id
       }
       repository Orgs for Org { }
     }
@@ -431,6 +432,21 @@ system D {
     // No EF SaveChangesInterceptor is emitted on the Dapper deployable (it would
     // reference Microsoft.EntityFrameworkCore, absent here).
     expect(files.has("api/Infrastructure/Persistence/AuditableInterceptor.cs")).toBe(false);
+  });
+
+  it("widens the find-predicate subset: `currentUser.<claim>` in a find `where`", async () => {
+    const { files, errors } = await emit(AUTH_SRC);
+    expect(errors).toEqual([]); // the Dapper find-predicate currentUser gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/InvoiceRepository.cs")!;
+    // The find carries the shared interface's `User currentUser` param and binds
+    // its own `@__cu_id` ref + the inherited capability filter's `@__cu_tenantId`
+    // from that parameter (not the ambient accessor).
+    expect(repo).toContain(
+      "public async Task<List<Invoice>> Mine(User currentUser, CancellationToken cancellationToken = default)",
+    );
+    expect(repo).toContain("WHERE (created_by = @__cu_id) AND (tenant_id = @__cu_tenantId)");
+    expect(repo).toContain("__cu_id = currentUser.Id");
+    expect(repo).toContain("__cu_tenantId = currentUser.TenantId");
   });
 });
 

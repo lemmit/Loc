@@ -33,6 +33,10 @@ system DapperTenant {
 
       repository Invoices for Invoice {
         find byNumber(n: string): Invoice[] where this.number == n
+        // find-predicate widening: `currentUser.<claim>` in a find `where`
+        // lowers to a `@__cu_id` Dapper param bound from the ambient principal
+        // (was gated by the Dapper find-predicate subset).
+        find mine(): Invoice[] where this.createdBy == currentUser.id
       }
       repository Organizations for Organization { }
     }

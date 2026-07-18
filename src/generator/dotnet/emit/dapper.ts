@@ -30,6 +30,7 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -272,17 +273,27 @@ function currentUserParam(member: string): string {
   return `__cu_${member}`;
 }
 
-/** A `currentUser.<claim>` reference found in a capability filter predicate:
- *  the Dapper param name it lowers to (`__cu_<claim>`) and the C# accessor that
- *  binds it from the ambient request principal. */
+/** A `currentUser.<claim>` reference found in a filter / find / retrieval
+ *  predicate: the Dapper param name it lowers to (`__cu_<claim>`) and the
+ *  principal claim property (PascalCased) read to bind it.  The accessor BASE
+ *  is chosen at the binding site — the ambient
+ *  `RequestContext.Current!.CurrentUser!` for queries with no principal param
+ *  (GetById / FindManyByIds / retrievals), or the `currentUser` method
+ *  parameter the shared repository interface adds to a `currentUser`-referencing
+ *  find. */
 interface FilterPrincipalRef {
   param: string; // `__cu_tenantId`
-  access: string; // `RequestContext.Current!.CurrentUser!.TenantId`
+  claimProp: string; // `TenantId`
+}
+
+/** `${param} = ${base}.${claimProp}` fields for a `new { … }` / DynamicParameters. */
+function principalFields(refs: readonly FilterPrincipalRef[], base: string): string[] {
+  return refs.map((r) => `${r.param} = ${base}.${r.claimProp}`);
 }
 
 /** Collect the distinct `currentUser.<claim>` references across the given
- *  capability filter predicates (deduped by claim), so the repository can bind
- *  each `@__cu_<claim>` param from the ambient principal on every SELECT. */
+ *  predicates (deduped by claim), so the repository can bind each
+ *  `@__cu_<claim>` param from the principal on every SELECT. */
 function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipalRef[] {
   const byParam = new Map<string, FilterPrincipalRef>();
   const walk = (e: ExprIR): void => {
@@ -290,11 +301,7 @@ function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipal
       case "member":
         if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
           const param = currentUserParam(e.member);
-          if (!byParam.has(param))
-            byParam.set(param, {
-              param,
-              access: `${AMBIENT_CURRENT_USER}.${upperFirst(e.member)}`,
-            });
+          if (!byParam.has(param)) byParam.set(param, { param, claimProp: upperFirst(e.member) });
         } else {
           walk(e.receiver);
         }
@@ -317,9 +324,24 @@ function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipal
   return [...byParam.values()];
 }
 
-function renderParams(params: ParamIR[], extra: readonly string[] = []): string {
+/** Dedup principal refs by param name (a claim referenced by both a capability
+ *  filter and a find's own predicate binds one parameter). */
+function dedupPrincipalRefs(refs: readonly FilterPrincipalRef[]): FilterPrincipalRef[] {
+  return [...new Map(refs.map((r) => [r.param, r])).values()];
+}
+
+/** Find/method parameter list.  A `currentUser`-referencing find carries a
+ *  trailing `User currentUser` parameter (after any page args, before the
+ *  CancellationToken) — the SAME position the shared `I<Agg>Repository`
+ *  interface renders (`renderParamsWithCt`), so the Dapper impl matches it. */
+function renderParams(params: ParamIR[], extra: readonly string[] = [], usesUser = false): string {
   const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
-  return [...ps, ...extra, "CancellationToken cancellationToken = default"].join(", ");
+  return [
+    ...ps,
+    ...extra,
+    ...(usesUser ? ["User currentUser"] : []),
+    "CancellationToken cancellationToken = default",
+  ].join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -464,11 +486,12 @@ export function renderDapperRepository(
   // Principal-filter param bindings appended to every SELECT's parameter object
   // (`__cu_tenantId = RequestContext.Current!.CurrentUser!.TenantId`).  Empty
   // for a non-principal (or no) filter, so those SELECTs stay byte-identical.
+  // GetById / FindManyByIds have no `currentUser` method param, so they bind
+  // from the ambient accessor.
   const filterPrincipalRefs = collectFilterPrincipalRefs(capabilityFilters);
-  const princFields = filterPrincipalRefs.map((r) => `${r.param} = ${r.access}`);
+  const princFields = principalFields(filterPrincipalRefs, AMBIENT_CURRENT_USER);
   // Comma-prefixed suffix appended inside a `new { … }` that already has fields
-  // (GetById / FindManyByIds / paged rows) or merged into a find's own param
-  // list (`allFindParams`).
+  // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
@@ -521,6 +544,13 @@ export function renderDapperRepository(
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
   );
 
+  // A `currentUser`-referencing find takes a `User currentUser` param (named
+  // type ⇒ needs `using <ns>.Auth`).  Principal stamps/filters use only the
+  // ambient `RequestContext.Current!.CurrentUser!` member access (no type name),
+  // so they don't.
+  const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
+    findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
+  );
   const findMethods = (repo?.finds ?? []).map((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const name = upperFirst(f.name);
@@ -532,10 +562,23 @@ export function renderDapperRepository(
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
       return pt.kind === "id" ? `${p.name} = ${p.name}.Value` : p.name;
     });
-    // Bind the find's own params + any principal-filter params spliced into the
-    // WHERE (`__cu_<claim>`), so every SELECT carries the tenant/principal
-    // binding its filter references.
-    const allFindParams = [...paramFields, ...princFields];
+    // Bind the find's own params + every `currentUser.<claim>` param the SELECT
+    // references — both the capability-filter refs spliced into every WHERE AND
+    // any the find's OWN predicate carries (`find mine(): … where this.owner ==
+    // currentUser.id`) — deduped by param.  A `currentUser`-referencing find
+    // gets a trailing `User currentUser` method parameter (the shared repository
+    // interface adds it), so it binds its principal params from that parameter;
+    // a non-`currentUser` find (only inheriting the capability filter) binds
+    // from the ambient accessor.
+    const usesUser = findUsesCurrentUser(f);
+    const principalBase = usesUser ? "currentUser" : AMBIENT_CURRENT_USER;
+    const findPrincipalRefs = dedupPrincipalRefs([
+      ...filterPrincipalRefs,
+      ...collectFilterPrincipalRefs(f.filter ? [f.filter] : []),
+    ]);
+    const findPrincFields = principalFields(findPrincipalRefs, principalBase);
+    const findPrincSuffix = findPrincFields.length > 0 ? `, ${findPrincFields.join(", ")}` : "";
+    const allFindParams = [...paramFields, ...findPrincFields];
     const paramObj = allFindParams.length > 0 ? `, new { ${allFindParams.join(", ")} }` : "";
     let where = "";
     try {
@@ -543,7 +586,7 @@ export function renderDapperRepository(
     } catch {
       // Unsupported predicate — emit a compile-safe stub.
       return lines(
-        `    public Task<${ret}> ${name}(${renderParams(f.params)})`,
+        `    public Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
         `        => throw new NotImplementedException("Dapper v1 does not support this find's predicate.");`,
       );
     }
@@ -560,7 +603,7 @@ export function renderDapperRepository(
         .map((wf) => `"${wf}" => "${snake(wf)}"`)
         .join(", ");
       return lines(
-        `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"])})`,
+        `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"], usesUser)})`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var offset = (page - 1) * pageSize;`,
@@ -568,7 +611,7 @@ export function renderDapperRepository(
         `        var sortDir = dir == "desc" ? "DESC" : "ASC";`,
         `        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) ${fromClause}"${paramObj}, cancellationToken: cancellationToken));`,
         `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
-        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${princSuffix} }, cancellationToken: cancellationToken));`,
+        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${findPrincSuffix} }, cancellationToken: cancellationToken));`,
         `        var items = rows.Select(Map).ToList();`,
         ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
         `        return new Paged<${agg.name}>(items, page, pageSize, total, totalPages);`,
@@ -577,7 +620,7 @@ export function renderDapperRepository(
     }
     if (isList) {
       return lines(
-        `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
+        `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
@@ -592,7 +635,7 @@ export function renderDapperRepository(
       );
     }
     return lines(
-      `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
+      `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
@@ -636,9 +679,12 @@ export function renderDapperRepository(
         const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
         return `        p.Add("${p.name}", ${val});`;
       }),
-      // Principal-filter params (`__cu_<claim>`) the spliced capability filter
-      // references, bound from the ambient request principal.
-      ...filterPrincipalRefs.map((pr) => `        p.Add("${pr.param}", ${pr.access});`),
+      // Principal params (`__cu_<claim>`) — the spliced capability filter's refs
+      // plus any the retrieval's own `where` carries — bound from the ambient
+      // request principal (the retrieval method takes no `currentUser` param).
+      ...dedupPrincipalRefs([...filterPrincipalRefs, ...collectFilterPrincipalRefs([r.where])]).map(
+        (pr) => `        p.Add("${pr.param}", ${AMBIENT_CURRENT_USER}.${pr.claimProp});`,
+      ),
     ];
     return lines(
       `    public async Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
@@ -684,6 +730,8 @@ export function renderDapperRepository(
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Common;`,
+      // `User currentUser` param on a `currentUser`-referencing find.
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
