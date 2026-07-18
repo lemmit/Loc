@@ -52,6 +52,7 @@ import {
 import {
   canPromoteAstLitTo,
   canPromoteLiteralTo,
+  checkBlankMessage,
   envForAggregate,
   envForPart,
   isInfallibleConversion,
@@ -579,6 +580,7 @@ export function checkSinglePrimitiveConversion(
 
 export function checkPropertyCheck(p: Property, env: Env, accept: ValidationAcceptor): void {
   if (!p.check) return;
+  checkBlankMessage(p, p.message, accept);
   const t = typeOf(p.check, env);
   if (t.kind !== "primitive" || t.name !== "bool") {
     accept(
@@ -620,6 +622,7 @@ export function checkPropertyDefault(p: Property, env: Env, accept: ValidationAc
 export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAcceptor): void {
   checkConstructionArgTypes(inv.expr, env, accept);
   checkExprCallArgs(inv.expr, env, accept);
+  checkBlankMessage(inv, inv.message, accept);
   if (inv.guard) {
     checkConstructionArgTypes(inv.guard, env, accept);
     checkExprCallArgs(inv.guard, env, accept);
