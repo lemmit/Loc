@@ -75,6 +75,15 @@ public sealed class RequestLoggingMiddleware
         {
             sw.Stop();
             ${endCall}
+            // Record the same finished request against the Prometheus HTTP
+            // metrics — same seam as request_end.  The route TEMPLATE (from the
+            // matched endpoint), not the raw path, keeps label cardinality
+            // bounded (raw paths carry per-request ids).
+            var metricRoute =
+                (ctx.GetEndpoint() as Microsoft.AspNetCore.Routing.RouteEndpoint)
+                    ?.RoutePattern.RawText ?? ctx.Request.Path.Value ?? "/";
+            ${ns}.Observability.HttpMetrics.Record(
+                ctx.Request.Method, metricRoute, ctx.Response.StatusCode, sw.Elapsed.TotalMilliseconds);
         }
     }
 }
