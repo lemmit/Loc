@@ -154,7 +154,13 @@ describe.skipIf(!RUN)(
         .readdirSync(path.join(apiDir, "build", "libs"))
         .find((f) => f.endsWith(".jar") && !f.endsWith("-plain.jar"));
       if (!jar) throw new Error("no jar produced by gradle bootJar");
-      backend = spawn("java", ["-jar", path.join("build", "libs", jar)], {
+      // Boot with the toolchain JDK (Java 25 → class-file v69); a stale PATH
+      // `java` on the runner throws UnsupportedClassVersionError. JAVA_HOME is
+      // the setup-java JDK; fall back to PATH `java` locally.
+      const javaBin = process.env.JAVA_HOME
+        ? path.join(process.env.JAVA_HOME, "bin", "java")
+        : "java";
+      backend = spawn(javaBin, ["-jar", path.join("build", "libs", jar)], {
         cwd: apiDir,
         env: {
           ...process.env,

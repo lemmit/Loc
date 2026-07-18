@@ -75,7 +75,13 @@ describe.skipIf(!ENABLED)(
         const jdbc = `jdbc:postgresql://${pg.host}:${pg.port}/${pg.db}`;
 
         const port = await freePort();
-        child = spawn("java", ["-jar", path.join("build", "libs", jar)], {
+        // Boot with the toolchain JDK (Java 25 → class-file v69); a stale PATH
+        // `java` on the runner throws UnsupportedClassVersionError. JAVA_HOME is
+        // the setup-java JDK; fall back to PATH `java` locally.
+        const javaBin = process.env.JAVA_HOME
+          ? path.join(process.env.JAVA_HOME, "bin", "java")
+          : "java";
+        child = spawn(javaBin, ["-jar", path.join("build", "libs", jar)], {
           cwd: appDir,
           env: {
             ...process.env,
