@@ -370,6 +370,27 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
       }
       return recv;
     }
+    // Parameterless criterion CALL (`StillOpen()`) — the exact analogue of the
+    // policy-fn case above.  `resolveNameRef` eagerly inlines a *bare*
+    // parameterless criterion to its boolean body, so if we lowered the head
+    // first (line below) the trailing `()` suffix would be applied to that
+    // already-inlined `binary` body and collapse into a spurious free `call`
+    // — reported as non-queryable in a retrieval/find/view `where`.  Inline
+    // here instead so `where: StillOpen()` lowers identically to `where:
+    // StillOpen`.  Parameterised criteria keep their existing `ref` + suffix
+    // path (they aren't eagerly inlined); `Repo.run(...)` reads never reach
+    // here (matchRepoRead above intercepts them at the chain head).
+    const crit = findCriterionInEnv(env, chain.head.name);
+    if (crit && crit.params.length === 0) {
+      let recv: ExprIR = inlineCriterion(crit, [], env);
+      let recvType: TypeIR = { kind: "primitive", name: "bool" };
+      for (let i = 1; i < chain.suffixes.length; i++) {
+        const out = applySuffixToRecv(recv, recvType, chain.suffixes[i]!, env);
+        recv = out.recv;
+        recvType = out.recvType;
+      }
+      return recv;
+    }
   }
   let recv = lowerExpr(chain.head, env);
   let recvType = inferExprType(chain.head, env);
