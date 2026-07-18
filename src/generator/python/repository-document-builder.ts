@@ -54,6 +54,11 @@ export function buildPyDocumentRepositoryFile(
   const row = rowClassName(agg.name);
   const parts: EnrichedEntityPartIR[] = agg.parts;
   const versioned = aggregateIsVersioned(agg);
+  // `delete(id)` is emitted under the same reachable-`destroy` gate the
+  // relational builder + routes-builder use — the destroy route calls
+  // `repo.delete(id)` regardless of saving shape.  No cascade rows: contained
+  // parts / references live inside the jsonb document, so one row is deleted.
+  const emitsDelete = !!agg.canonicalDestroy;
   const findUser = emittableFinds(repo).some(findUsesCurrentUser);
   // Capability `filter` on a document aggregate (DEBT-02 tail): the jsonb blob
   // isn't per-field queryable, so the predicate is evaluated IN-APP over the
@@ -166,6 +171,14 @@ export function buildPyDocumentRepositoryFile(
           "            await self._events.dispatch(event)",
         ]
       : []),
+    ...(emitsDelete
+      ? [
+          "",
+          `    async def delete(self, id: ${agg.name}Id) -> None:`,
+          `        await self._session.execute(delete(${row}).where(${row}.id == id))`,
+          "        await self._session.flush()",
+        ]
+      : []),
     "",
     toWireMethod(agg, ctx),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
@@ -211,7 +224,7 @@ export function buildPyDocumentRepositoryFile(
       : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
-    "from sqlalchemy import select",
+    emitsDelete ? "from sqlalchemy import delete, select" : "from sqlalchemy import select",
     versioned ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",

@@ -10,6 +10,7 @@ import {
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -131,6 +132,20 @@ export function buildEmbeddedRepositoryFile(
     }
   }
   const rootRow = `{ ${rootEntries.join(", ")} }`;
+  // Versioned save + delete under the same gates the relational builder /
+  // routes-builder use, so an embedded aggregate with a reachable `destroy` /
+  // `versioned` capability (e.g. via `crudish`) compiles.  `rootEntries` omits
+  // `version`, so the guarded path stamps it explicitly (1 on insert, expected
+  // + 1 on the CAS update) — mirroring repository-save-builder.ts.
+  const versioned = aggregateIsVersioned(agg);
+  const emitsDelete = !!agg.canonicalDestroy;
+  // A versioned aggregate carries `version` as a projected column entry
+  // (`version: aggregate.version`); the guarded path stamps version itself, so
+  // drop that entry before re-appending the CAS value — else the object
+  // literal has two `version` keys (TS1117).
+  const rootEntriesNoVersion = rootEntries.filter((e) => !e.startsWith("version:"));
+  const rootRowInsert = `{ ${rootEntriesNoVersion.join(", ")}, version: 1 }`;
+  const rootRowUpdate = `{ ${rootEntriesNoVersion.join(", ")}, version: expected + 1 }`;
 
   const findMethods = (repo?.finds ?? []).map((find) =>
     embeddedFindMethod(agg, find, ctx, filterPred),
@@ -174,9 +189,26 @@ export function buildEmbeddedRepositoryFile(
     `    });`,
     `  }`,
     "",
-    `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const rootRow = ${rootRow};`,
-    `    await this.db.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
+    versioned
+      ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+      : `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    ...(versioned
+      ? [
+          // CAS-guarded write: expected version from the route's `If-Match`
+          // (falling back to the loaded version), a lost race → ConcurrencyError.
+          `    const expected = expectedVersion ?? aggregate.version;`,
+          `    const existing = await this.db.select({ version: schema.${tableName}.version }).from(schema.${tableName}).where(eq(schema.${tableName}.id, aggregate.id));`,
+          `    if (existing.length === 0) {`,
+          `      await this.db.insert(schema.${tableName}).values(${rootRowInsert});`,
+          `    } else {`,
+          `      const updated = await this.db.update(schema.${tableName}).set(${rootRowUpdate}).where(and(eq(schema.${tableName}.id, aggregate.id), eq(schema.${tableName}.version, expected))).returning({ id: schema.${tableName}.id });`,
+          `      if (updated.length === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+          `    }`,
+        ]
+      : [
+          `    const rootRow = ${rootRow};`,
+          `    await this.db.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
+        ]),
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `    for (const event of aggregate.pullEvents()) {`,
     `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
@@ -184,6 +216,16 @@ export function buildEmbeddedRepositoryFile(
     `    }`,
     `  }`,
     "",
+    // Single-row hard-delete (containments + ref-collections fold into the
+    // row's jsonb, so nothing cascades).  Gated on a reachable `destroy`.
+    ...(emitsDelete
+      ? [
+          `  async delete(id: ${idVar}): Promise<void> {`,
+          `    await this.db.delete(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+          `  }`,
+          "",
+        ]
+      : []),
     ...findMethods.flatMap((m) => [m, ""]),
     toWireMethod(agg, ctx),
     "",
@@ -230,7 +272,9 @@ export function buildEmbeddedRepositoryFile(
     `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
+    versioned
+      ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
+      : `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     // A principal-referencing capability filter (tenancy) weaves
     // `requireCurrentUser()` into every embedded root read (DEBT-02), the same

@@ -46,6 +46,10 @@ export function buildPyEmbeddedRepositoryFile(
 ): string {
   const row = rowClassName(agg.name);
   const parts: EnrichedEntityPartIR[] = agg.parts;
+  // `delete(id)` under the reachable-`destroy` gate (the destroy route calls
+  // `repo.delete(id)`).  One row — containments / ref-collections fold into the
+  // row's jsonb.  (The embedded `save` is already versioned.)
+  const emitsDelete = !!agg.canonicalDestroy;
   const findUser = emittableFinds(repo).some(findUsesCurrentUser);
   // An embedded aggregate's root scalars are real columns, so a capability
   // `filter` AND-s into every root read exactly like the relational path
@@ -106,6 +110,14 @@ export function buildPyEmbeddedRepositoryFile(
     "",
     saveMethod(agg, ctx),
     "",
+    ...(emitsDelete
+      ? [
+          `    async def delete(self, id: ${agg.name}Id) -> None:`,
+          `        await self._session.execute(delete(${row}).where(${row}.id == id))`,
+          "        await self._session.flush()",
+          "",
+        ]
+      : []),
     hydrateMethod(agg, ctx),
     "",
     toWireMethod(agg, ctx),
@@ -141,7 +153,7 @@ export function buildPyEmbeddedRepositoryFile(
   // `and_`/`or_`/`not_` ride in when a capability filter lowers to them; `func`
   // for a paged find's count; `select` for the reads + membership EXISTS.
   // (`insert` is the separate `sqlalchemy.dialects.postgresql` import below.)
-  const saNames = ["and_", "func", "literal", "not_", "or_", "select"].filter(refersTo);
+  const saNames = ["and_", "delete", "func", "literal", "not_", "or_", "select"].filter(refersTo);
   // `UTC` rides in with a value-side `now()` bind (`datetime.now(UTC)`), A5
   // temporal `where` arithmetic included.
   const dtNames = [
