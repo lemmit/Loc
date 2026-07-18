@@ -155,6 +155,53 @@ docker compose logs api | jq "select(.request_id == \"$RID\")"
 
 The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
+## Metrics (Prometheus)
+
+Alongside the log stream, every **Hono** deployable exposes a Prometheus
+scrape target at **`GET /metrics`** — the standard "monitoring" surface a
+dashboard or alert rule consumes. (Cross-backend renderers for
+.NET/Phoenix/Java/Python are the next slice; the catalog below is already
+platform-neutral so they emit the same series.)
+
+Same design as the log catalog: one platform-neutral source of truth,
+`src/generator/_obs/metrics.ts`, pins every metric's stable name, type,
+help, label set, and (for histograms) bucket bounds. A per-backend
+renderer consumes it, so a PromQL query written once works everywhere.
+
+**What's exposed:**
+
+| Metric | Type | Labels | Notes |
+|---|---|---|---|
+| `http_requests_total` | counter | `method`, `route`, `status` | RED rate + errors |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` | RED duration (quantiles via `histogram_quantile`) |
+| `process_*`, `nodejs_*` | (default) | — | CPU, resident memory, event-loop lag, GC, open handles — from `collectDefaultMetrics()` |
+
+The two HTTP metrics are recorded at the **same request seam** as the
+`request_start`/`request_end` log lines (the request-id middleware's
+`finally` block). The `route` label is the matched route **template**
+(`/api/carts/:id`), never the raw path — labelling by raw path would
+explode cardinality on every id.
+
+```bash
+# Scrape once.
+curl -s localhost:3000/metrics
+
+# Request rate over 1m (PromQL).
+rate(http_requests_total[1m])
+
+# 5xx error ratio.
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+
+# p95 latency.
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+```
+
+**Stability:** the metric catalog is a wire contract, same governance as
+the log catalog and `wireShape` — additive changes (new metrics, new
+optional labels) are safe; renaming a metric/label or changing a
+histogram's buckets breaks dashboards + recording rules and requires a
+consumer migration.
+
 ## Verification
 
 Five runtime end-to-end suites boot the generated server against a real
@@ -178,6 +225,11 @@ Each suite:
 5. Hits `/health`.
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
+
+The Hono suite additionally scrapes `GET /metrics` and asserts the
+Prometheus exposition carries the default runtime metrics plus the
+`http_requests_total` / `http_request_duration_seconds` series for the
+`/health` request (route-template + status labels).
 
 `.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,
