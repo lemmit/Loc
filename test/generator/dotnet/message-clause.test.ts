@@ -44,8 +44,21 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
     expect(validator).toContain(
       "RuleFor(x => x).Must(x => x.Name.Length >= 2 && x.Name.Length <= 120)",
     );
-    expect(validator).toContain('.WithMessage("Name must be 2-120 characters");');
-    expect(validator).toContain('.WithMessage("SKU is required");');
+    expect(validator).toContain('.WithMessage("Name must be 2-120 characters")');
+    expect(validator).toContain('.WithMessage("SKU is required")');
+  });
+
+  it("attaches a stable content-hash wire code via .WithErrorCode on a messaged rule", async () => {
+    const { validator } = await gen();
+    // messageCode("Name must be 2-120 characters") / ("SKU is required")
+    expect(validator).toContain(
+      '.WithMessage("Name must be 2-120 characters")\n            .WithErrorCode("msg.j985f2");',
+    );
+    expect(validator).toContain(
+      '.WithMessage("SKU is required")\n            .WithErrorCode("msg.u3w71r");',
+    );
+    // message-less rule gets no error code.
+    expect(validator).not.toContain('.WithErrorCode("msg." +');
   });
 
   it("keeps a message-LESS invariant as a byte-identical native chain", async () => {

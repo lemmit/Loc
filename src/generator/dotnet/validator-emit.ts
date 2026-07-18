@@ -13,6 +13,7 @@ import {
   type SingleFieldPattern,
   singleFieldShape,
 } from "../../ir/validate/invariant-classify.js";
+import { messageCode } from "../../util/message-code.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import { collectCsExprUsings } from "./render-expr.js";
 
@@ -152,8 +153,15 @@ function renderValidatorFile(args: {
       inv.message ? inv.message.text : `Invariant violated: ${inv.source}`,
     );
     const nameClause = path ? `\n            .WithName("${upperFirst(path)}")` : "";
+    // A messaged rule also carries a stable content-hash wire `code`
+    // (`errors[].code`, the i18n key) via FluentValidation's `.WithErrorCode`;
+    // the exception filter surfaces `ErrorCode` when it's a `msg.` code. A
+    // message-less rule adds no error code (byte-identical).
+    const codeClause = inv.message
+      ? `\n            .WithErrorCode(${csStringLiteral(messageCode(inv.message.text))})`
+      : "";
     ruleLines.push(
-      `        RuleFor(x => x).Must(x => ${guarded})${nameClause}\n            .WithMessage(${message});`,
+      `        RuleFor(x => x).Must(x => ${guarded})${nameClause}\n            .WithMessage(${message})${codeClause};`,
     );
   }
 

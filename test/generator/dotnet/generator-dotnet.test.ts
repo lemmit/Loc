@@ -1944,9 +1944,8 @@ describe(".NET generator", () => {
       expect(filter).toMatch(/Title = "Validation failed"/);
       expect(filter).toMatch(/Status = 422/);
       expect(filter).toMatch(/problem\.Extensions\["errors"\] = fv\.Errors/);
-      expect(filter).toMatch(
-        /new \{ pointer = PointerOf\(e\.PropertyName\), message = e\.ErrorMessage \}/,
-      );
+      expect(filter).toMatch(/\["pointer"\] = PointerOf\(e\.PropertyName\)/);
+      expect(filter).toMatch(/\["message"\] = e\.ErrorMessage/);
       expect(filter).toMatch(/StatusCode = 422/);
       expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
       // The PointerOf helper encodes RFC 6901 JSON pointers — see the
