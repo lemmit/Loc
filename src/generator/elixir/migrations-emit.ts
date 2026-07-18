@@ -6,8 +6,8 @@ import type {
   MigrationsIR,
   TableShape,
 } from "../../ir/types/migrations-ir.js";
-import { renderBackfillSql } from "../sql-pg.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderBackfillSql } from "../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix Ecto migration emitter.

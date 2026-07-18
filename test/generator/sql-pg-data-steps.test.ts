@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { ExprIR, LiteralKind, TypeIR } from "../../src/ir/types/loom-ir.js";
-import type { MigrationStep } from "../../src/ir/types/migrations-ir.js";
 import { renderEctoStep } from "../../src/generator/elixir/migrations-emit.js";
 import { renderBackfillSql, renderPgStep } from "../../src/generator/sql-pg.js";
 import { renderSqlScalarExpr, sqlRenderableExpr } from "../../src/generator/sql-pg-expr.js";
+import type { ExprIR, LiteralKind, TypeIR } from "../../src/ir/types/loom-ir.js";
+import type { MigrationStep } from "../../src/ir/types/migrations-ir.js";
 
 // M-T2.3 S1 — the data-step vocabulary (`backfillColumn` / `sqlExec`) and the
 // scalar-expression renderer, at the renderer level.  No producer exists in
@@ -27,7 +27,13 @@ describe("renderPgStep — data steps (M-T2.3)", () => {
 
   it("renders an unconditional backfill without the null guard or schema", () => {
     expect(
-      renderPgStep({ op: "backfillColumn", table: "orders", column: "note", valueSql: "''", onlyNull: false }),
+      renderPgStep({
+        op: "backfillColumn",
+        table: "orders",
+        column: "note",
+        valueSql: "''",
+        onlyNull: false,
+      }),
     ).toBe(`UPDATE "orders" SET "note" = '';`);
   });
 
@@ -54,7 +60,9 @@ describe("renderEctoStep — data steps (M-T2.3)", () => {
 
   it("escapes quotes and #{} interpolation in user SQL", () => {
     const step: MigrationStep = { op: "sqlExec", sql: `UPDATE t SET a = '#{x}' WHERE b = "q"` };
-    expect(renderEctoStep(step)).toEqual([`execute("UPDATE t SET a = '\\#{x}' WHERE b = \\"q\\"")`]);
+    expect(renderEctoStep(step)).toEqual([
+      `execute("UPDATE t SET a = '\\#{x}' WHERE b = \\"q\\"")`,
+    ]);
   });
 });
 
@@ -64,8 +72,7 @@ const STRING: TypeIR = { kind: "primitive", name: "string" };
 const lit = (l: LiteralKind, value: string): ExprIR => ({ kind: "literal", lit: l, value });
 const prop = (name: string): ExprIR => ({ kind: "ref", name, refKind: "this-prop" });
 const ctx = {
-  columnFor: (f: string) =>
-    ({ firstName: "first_name", lastName: "last_name", qty: "qty" })[f],
+  columnFor: (f: string) => ({ firstName: "first_name", lastName: "last_name", qty: "qty" })[f],
 };
 
 describe("renderSqlScalarExpr (M-T2.3)", () => {
@@ -107,7 +114,13 @@ describe("renderSqlScalarExpr (M-T2.3)", () => {
     expect(renderSqlScalarExpr(ne, ctx)).toBe(`("qty" <> 0)`);
     const and: ExprIR = { kind: "binary", op: "&&", left: cmp, right: ne };
     expect(renderSqlScalarExpr(and, ctx)).toBe(`(("qty" = 0) AND ("qty" <> 0))`);
-    const tern: ExprIR = { kind: "ternary", cond: cmp, then: lit("int", "1"), otherwise: prop("qty") };
+    const tern: ExprIR = {
+      kind: "ternary",
+      cond: cmp,
+      // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+      then: lit("int", "1"),
+      otherwise: prop("qty"),
+    };
     expect(renderSqlScalarExpr(tern, ctx)).toBe(`(CASE WHEN ("qty" = 0) THEN 1 ELSE "qty" END)`);
   });
 

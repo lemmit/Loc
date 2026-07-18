@@ -1,6 +1,6 @@
 import type { ExprIR, TypeIR } from "../ir/types/loom-ir.js";
 import { sqlRenderableExpr } from "../ir/util/sql-renderable-expr.js";
-import { sqlStr, qIdent } from "./sql-pg.js";
+import { qIdent, sqlStr } from "./sql-pg.js";
 
 export { sqlRenderableExpr };
 
