@@ -90,6 +90,7 @@ One shared naming scheme, derived (never configured): channel address `loom.<con
 
 | | Redis (slice 2/3) | RabbitMQ (slice 3) | Kafka (slice 4) |
 |---|---|---|---|
+| broker image (compose) | `valkey/valkey:8` (BSD-3; redis-wire-compatible — see §6a) | `rabbitmq:4-management-alpine` (MPL 2.0) | `apache/kafka` official (Apache 2.0, KRaft; **not** bitnami — see §6a) |
 | `broadcast` topology | `PUBLISH` to channel address; consumers `PSUBSCRIBE loom.Orders.Lifecycle*` | fanout/topic exchange, one auto-delete queue **per deployable** | topic; one consumer group per deployable (each group sees all) |
 | `queue` topology | Redis Stream + `XREADGROUP` (group = deployable) | one durable queue per consuming deployable; replicas compete | same topic; replicas of one deployable share its group |
 | ordering | none (ephemeral) | per-queue FIFO | per-partition, partition key = `loomkey` ?? `id` |
@@ -99,7 +100,7 @@ One shared naming scheme, derived (never configured): channel address `loom.<con
 
 Dead-letter surfaces join M-T4.3's dead-letter observability item — same catalog event, per-transport parking spot.
 
-**Delivery uniformity rule (double-delivery avoidance):** when a channel is broker-bound, **all** consumption of its events rides the broker — including consumers co-located in the producing deployable. The in-process fan-out for that channel's events is replaced by the broker round-trip (the relay publishes; the deployable's own consumer group receives). This keeps `queue` semantics exact (one-of-N across *all* replicas of all deployables) and makes local vs remote consumers behaviorally identical. Unbound channels keep today's direct in-process fan-out.
+**Delivery uniformity rule (double-delivery avoidance):** the **channel** defines delivery *semantics* (`delivery` × `retention` — the contract); the **channelSource** only picks the machinery that enforces them. So when a channel is broker-bound, **all** consumption of its events rides the broker — including consumers co-located in the producing deployable. The in-process fan-out for that channel's events is replaced by the broker round-trip (the relay publishes; the deployable's own consumer group receives). This is forced by the semantics, not a style choice: `queue` promises one-of-N across *all* consumers of the group, and a local shortcut that hands co-located consumers every event would silently break that promise the moment a second replica exists. Local vs remote consumers stay behaviorally identical; unbound channels keep today's direct in-process fan-out (whose semantics `broadcast`/`ephemeral` already describes).
 
 ## 5. Producer path & the dispatcher seam (the M-T1.10 contract)
 
@@ -138,7 +139,23 @@ Consumer side: `startChannelConsumers` subscribes each bound channel and dispatc
 
 - **`src/generator/_channels/`** (new `_`-shared home, à la `_expr`/`_obs`): the shared decision trees only — address/group naming, envelope field set, the compat matrix (single source for validator + docs), per-transport topology descriptors. Pure data + string builders; no backend syntax.
 - **Per-backend drivers**: `typescript/emit/channels.ts` (+ the `packages/backend-hono-v5` pins for `ioredis`/`amqplib`/`kafkajs`), `dotnet/emit/channels.ts` (MassTransit-free v1 — thin clients over `StackExchange.Redis` / `RabbitMQ.Client` / `Confluent.Kafka`, DI-registered like the repos), `python/emit/channels.py` emitter (`redis-py`/`pika`/`confluent-kafka`), `java/emit/channels.ts` (Lettuce/`spring-amqp`/`spring-kafka`), `elixir/…` (`Phoenix.PubSub`-fronted Redis / Broadway adapters) — **each a later fan-out slice; Hono is the reference driver**.
-- **Compose (phase ⑨, `src/system/`)**: for every storage a bound channelSource uses, emit the broker service — `redis:7-alpine`, `rabbitmq:3-management-alpine`, `bitnami/kafka` (KRaft, single node) — with healthchecks, and inject `LOOM_CHANNEL_<NAME>_URL` env per wired deployable. Mirrors the existing Postgres service pattern; k8s chart gets the same as an `enabled`-gated subchart (later slice, with `docs/kubernetes.md` update).
+- **Compose (phase ⑨, `src/system/`)**: for every storage a bound channelSource uses, emit the broker service — images per the §4 table — with healthchecks, and inject `LOOM_CHANNEL_<NAME>_URL` env per wired deployable. Mirrors the existing Postgres service pattern; k8s chart gets the same as an `enabled`-gated subchart (later slice, with `docs/kubernetes.md` update).
+
+### 6a. Licensing constraint (pinned 2026-07-18: free/OSS only)
+
+Everything provisioned or depended on must be free — free-as-in-cost for generated projects **and** permissively enough licensed that a generated app can ship commercially. Recorded per component; re-check on every version bump (the ecosystem is actively re-licensing):
+
+| Component | Choice | License | The trap avoided |
+|---|---|---|---|
+| broadcast broker image | **Valkey 8** (`valkey/valkey`) | BSD-3 | Redis 7.4+ left BSD (RSALv2/SSPL); Redis 8 is AGPLv3-tri-licensed — AGPL on a *sidecar we don't link* is arguably fine, but Valkey is drop-in wire-compatible with zero licensing analysis needed. Clients (`ioredis` etc.) speak RESP unchanged; the storage type stays `redis` (the contract names the protocol family, not the vendor). |
+| queue broker image | RabbitMQ 4 | MPL 2.0 | — |
+| log broker image | `apache/kafka` (KRaft) | Apache 2.0 | **Not** `bitnami/kafka` — Bitnami moved its catalog to the paid "Secure Images" program (2025); the free tags are frozen/legacy. |
+| .NET bus framework | none (thin clients) | — | **MassTransit v9 went commercial** (v8 stays Apache 2.0 but is EOL-bound) — this hardens §9 decision 4 from "style choice" to "licensing requirement". |
+| clients: node | `ioredis` / `amqplib` / `kafkajs` | MIT / MIT / MIT | — |
+| clients: .NET | `StackExchange.Redis` / `RabbitMQ.Client` / `Confluent.Kafka` | MIT / Apache 2.0+MPL 2.0 / Apache 2.0 | — |
+| clients: python | `redis-py` / `pika` / `confluent-kafka` | MIT / BSD-3 / Apache 2.0 | — |
+| clients: java | Lettuce / `spring-amqp` / `spring-kafka` | Apache 2.0 (all) | — |
+| clients: elixir | `phoenix_pubsub` + Redix / Broadway adapters | MIT / Apache 2.0 | — |
 - **Obs catalog** (`_obs/log-events.ts`): `channel_published`, `channel_consumed`, `channel_consume_failed`, `channel_dead_lettered` — asserted by the broker e2e.
 
 Layering: `_channels/` sits in `src/generator/`, imported by backends and (for the compose descriptors) `src/system/` — no upward edge; `pipeline-layering.test.ts` and `backend-packages-layering.test.ts` must stay green.
@@ -169,10 +186,10 @@ This is slice 5; slices 2–4 run brokers unauthenticated **on the compose-inter
 
 Sequencing gates honored: slice 3 (`queue`) lands **after or with** the M-T4.3 remainder (Phoenix relay is only needed for the Phoenix fan-out in 6+; dead-letter surface co-designs with slice 3). Slices 2/2b have no M-T4.3 dependency beyond what ships today.
 
-## 9. Decisions requiring sign-off
+## 9. Decisions — **signed off 2026-07-18** (maintainer: continue with recommended; licensing constraint added as §6a)
 
 1. **CloudEvents 1.0** as the envelope (vs a bespoke minimal JSON) — buys interop/AsyncAPI alignment at the cost of a few fixed fields. *Recommended: yes.*
 2. **Delivery uniformity rule** (§4): broker-bound channels route co-located consumers through the broker too (no hybrid local shortcut). *Recommended: yes — correctness over latency; the unbound default still covers the monolith.*
 3. **`nats` stays in the enum**, permanently gated by `loom.channelsource-unsupported-transport`. *Recommended: yes.*
-4. **v1 .NET drivers without MassTransit** (thin official clients, mirroring the no-framework stance of the vanilla Phoenix move). Flippable later behind the same `ChannelTransport` seam.
+4. **v1 .NET drivers without MassTransit** (thin official clients, mirroring the no-framework stance of the vanilla Phoenix move). Upgraded from recommendation to **requirement** by §6a: MassTransit v9 is commercially licensed. Flippable later behind the same `ChannelTransport` seam only if a free successor emerges.
 5. The **realtime tee migrates onto `ChannelTransport`** in slice 2 (mechanical refactor, byte-diff on generated output reviewed with M-T1.10's owner) — this is the moment the two missions physically meet; doing it early is the whole point.
