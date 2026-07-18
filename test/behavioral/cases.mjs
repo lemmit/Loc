@@ -114,15 +114,14 @@ const BEHAVIOURAL_SKIP = {
     document: "B12: dotnet crudish+document — ArticleRepository missing DeleteAsync",
   },
   elixir: {
-    // B11 open — a `T or Error` union whose success type is a PRIMITIVE (e.g.
-    // `string or NotFound`) emits an invalid elixir module name (`…stringOrNotFound`).
-    "operation-returns": "B11: elixir union-return with a primitive success type → invalid module name",
-    // UNVERIFIED on elixir (docker contention with the in-flight B11 fix agent).
-    // node/java/python(+dotnet, minus document B12) pass; verify + resolve post-B11.
-    "core-domain": "unverified on elixir (docker contention) — verify post-B11",
-    document: "unverified on elixir (docker contention) — verify post-B11",
-    inheritance: "unverified on elixir (docker contention) — verify post-B11",
-    // B5/B6/B7/B9/B10 fixed — no other elixir skips remain. (B9: single `contains`
+    // B5/B6/B7/B9/B10/B11 fixed. (B11: `T or <primitive>` union return now mints a
+    // valid PascalCase elixir module alias; openapi-emit.ts.)  Still UNVERIFIED on
+    // elixir (docker contention) — node/java/python(+dotnet, minus document B12) pass;
+    // boot elixir and resolve each of these three.
+    "core-domain": "unverified on elixir (docker contention) — boot + verify",
+    document: "unverified on elixir (docker contention) — boot + verify",
+    inheritance: "unverified on elixir (docker contention) — boot + verify",
+    // (B9: single `contains`
     // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
     // handles a single `has_one` struct; context-emit.ts. B10: parent-table
     // migrations ordered FK-topologically so a cross-aggregate reference target

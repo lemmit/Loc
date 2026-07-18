@@ -80,6 +80,22 @@ import { emitsRestCreate } from "./api-emit.js";
 //   View response:             <View>Response
 // ---------------------------------------------------------------------------
 
+/** Elixir module alias for an operation-return union schema
+ *  (`operation reject(): string or NotFound`).
+ *
+ *  `unionInstanceName` yields a lower-camel stem whenever the union's FIRST
+ *  variant is a primitive — `string or NotFound` → `stringOrNotFound` — because
+ *  `variantTag` returns a primitive's own lowercase name.  That is a valid class
+ *  name on the other backends (Java emits it as a lowercase `sealed interface`,
+ *  TS as a const), but an Elixir module alias MUST be uppercase-first —
+ *  `defmodule …Api.Schemas.stringOrNotFound` fails to compile (`invalid module
+ *  name`).  Uppercase the first char for the module segment only; the wire
+ *  `type` discriminator tags come from `variantTag` and are untouched, so the
+ *  serialized union stays byte-identical to every other backend. */
+function unionSchemaAlias(variants: TypeIR[]): string {
+  return upperFirst(unionInstanceName(variants));
+}
+
 export interface OpenApiEmitArgs {
   contexts: EnrichedBoundedContextIR[];
   deployable: DeployableIR;
@@ -264,7 +280,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   for (const { ctx, agg } of allAggregates) {
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
       if (op.returnType?.kind !== "union") continue;
-      const unionName = unionInstanceName(op.returnType.variants);
+      const unionName = unionSchemaAlias(op.returnType.variants);
       if (emittedOpUnions.has(unionName)) continue;
       emittedOpUnions.add(unionName);
       files.set(
@@ -642,7 +658,7 @@ ${pagingQueryParams()}
               op.returnType?.kind === "union"
                 ? `200 => %OpenApiSpex.Response{
               description: "OK",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${unionInstanceName(op.returnType.variants)}}}
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${unionSchemaAlias(op.returnType.variants)}}}
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
             }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${

@@ -141,6 +141,57 @@ system Shop {
     expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["Order"]}');
     expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["NotFound"]}');
   });
+
+  it("uppercases the module alias when the success arm is a PRIMITIVE (B11)", async () => {
+    // `operation reject(): string or NotFound` — the union's first variant is the
+    // PRIMITIVE `string`, so `unionInstanceName` is the lower-camel `stringOrNotFound`.
+    // That is a valid class name on the other backends but NOT a valid Elixir module
+    // alias — `defmodule …Schemas.stringOrNotFound` fails to compile.  The emitter
+    // must uppercase the alias (`StringOrNotFound`) while keeping the wire `type`
+    // discriminator tag `string` (lowercase — from `variantTag`) unchanged.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      error NotFound { resource: string }
+      aggregate Order {
+        code: string
+        operation reject(): string or NotFound {
+          return NotFound { resource: code }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}`;
+    const files = await generateSystemFiles(src);
+    // The schema module + the response reference are the uppercase-first alias …
+    const union = file(files, "string_or_not_found.ex");
+    expect(union).toContain("defmodule");
+    expect(union).toContain(".Api.Schemas.StringOrNotFound do");
+    expect(union).toContain('title: "StringOrNotFound"');
+    // … and NEVER the lower-camel form (which would be an invalid Elixir alias).
+    expect(union).not.toContain("Schemas.stringOrNotFound");
+    const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
+    const spec = files.get(specKey!)!;
+    expect(spec).toContain("Schemas.StringOrNotFound");
+    expect(spec).not.toContain("Schemas.stringOrNotFound");
+    // The success variant's wire discriminator stays the lowercase primitive tag …
+    expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["string"]}');
+    // … and the scalar arm carries its `value` (no record fields for a primitive).
+    expect(union).toContain("value:");
+    expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["NotFound"]}');
+  });
 });
 
 describe("vanilla OpenAPI spec — union finds", () => {
