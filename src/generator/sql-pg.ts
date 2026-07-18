@@ -54,7 +54,29 @@ export function renderPgStep(step: MigrationStep): string {
       return `DROP INDEX ${qualified(step.schema, step.name)};`;
     case "sqlComment":
       return `-- ${step.comment}`;
+    case "backfillColumn":
+      return `${renderBackfillSql(step)};`;
+    case "sqlExec":
+      // Verbatim user SQL; normalise the trailing semicolon so the statement
+      // splitters (Drizzle breakpoints, the Python runner) see one statement.
+      return step.sql.trimEnd().endsWith(";") ? step.sql.trimEnd() : `${step.sql.trimEnd()};`;
   }
+}
+
+/** The backfill UPDATE without its trailing semicolon — shared with the Ecto
+ *  emitter (which wraps it in `execute/1`), so the DML is bit-identical
+ *  cross-backend exactly like the DDL out of `renderPgStep`. */
+export function renderBackfillSql(step: {
+  table: string;
+  schema?: string;
+  column: string;
+  valueSql: string;
+  onlyNull: boolean;
+}): string {
+  const target = qualified(step.schema, step.table);
+  const col = ident(step.column);
+  const where = step.onlyNull ? ` WHERE ${col} IS NULL` : "";
+  return `UPDATE ${target} SET ${col} = ${step.valueSql}${where}`;
 }
 
 function renderCreateTable(table: TableShape): string {
@@ -204,8 +226,9 @@ export function renderSeedRowInsert(
 /** Double-quoted identifier — matches the lowercase tables the migrations
  *  create and is safe for reserved words (`order`, `user`).  An embedded `"`
  *  is doubled per the Postgres quoting rule, so a `.ddd`-sourced name can't
- *  break out of the quotes. */
-function qIdent(name: string): string {
+ *  break out of the quotes.  Exported for the scalar-expression renderer
+ *  (`sql-pg-expr.ts`), which quotes column refs the same way. */
+export function qIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -240,7 +263,8 @@ function seedSqlLiteral(e: ExprIR): string {
   );
 }
 
-/** Single-quoted SQL string literal (doubling embedded quotes). */
-function sqlStr(v: string): string {
+/** Single-quoted SQL string literal (doubling embedded quotes).  Exported
+ *  for the scalar-expression renderer (`sql-pg-expr.ts`). */
+export function sqlStr(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }

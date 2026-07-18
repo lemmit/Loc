@@ -6,6 +6,7 @@ import type {
   MigrationsIR,
   TableShape,
 } from "../../ir/types/migrations-ir.js";
+import { renderBackfillSql } from "../sql-pg.js";
 import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -23,9 +24,12 @@ import { snake, upperFirst } from "../../util/naming.js";
 //   - Subsequent migrations: one .exs file containing every step, named
 //     `<MigrationsIR.version>_<snake(MigrationsIR.name)>.exs`.
 //
-// Stays in Ecto DSL (not raw SQL) so `ecto.migrate` keeps working
-// unchanged; the shared `src/generator/sql-pg.ts` helper is for
-// TS/.NET Postgres backends only.
+// Stays in Ecto DSL (not raw SQL) for DDL so `ecto.migrate` keeps working
+// unchanged; the shared `src/generator/sql-pg.ts` helper renders DDL for the
+// TS/.NET/Python/Java backends only.  The M-T2.3 DATA steps
+// (`backfillColumn` / `sqlExec`) are the deliberate exception: they wrap raw
+// SQL in `execute/1` (the `CREATE SCHEMA` precedent), sharing
+// `renderBackfillSql` so the DML is bit-identical cross-backend.
 // ---------------------------------------------------------------------------
 
 const BASE_TIMESTAMP = 20260101000000;
@@ -438,7 +442,7 @@ end
 `;
 }
 
-function renderEctoStep(step: MigrationStep): string[] {
+export function renderEctoStep(step: MigrationStep): string[] {
   switch (step.op) {
     case "createTable":
       return renderCreateTableInline(step.table);
@@ -494,7 +498,21 @@ function renderEctoStep(step: MigrationStep): string[] {
       return [`drop index(:${step.table}, name: "${step.name}"${prefixOpt(step.schema)})`];
     case "sqlComment":
       return [`# ${step.comment}`];
+    case "backfillColumn":
+      // Raw-SQL DML via `execute/1` — the UPDATE text is shared with the
+      // Postgres renderer (`renderBackfillSql`) so the statement is
+      // bit-identical cross-backend, exactly like the DDL steps.
+      return [`execute(${elixirStr(renderBackfillSql(step))})`];
+    case "sqlExec":
+      return [`execute(${elixirStr(step.sql.trimEnd().replace(/;$/, ""))})`];
   }
+}
+
+/** Double-quoted Elixir string literal.  Escapes backslash, the quote, and
+ *  `#{` interpolation so arbitrary user SQL (a `sql "…"` migration step)
+ *  round-trips verbatim through the generated `.exs`. */
+function elixirStr(s: string): string {
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/#\{/g, "\\#{")}"`;
 }
 
 function renderCreateTableInline(table: TableShape): string[] {
