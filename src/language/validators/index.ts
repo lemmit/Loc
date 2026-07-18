@@ -9,6 +9,7 @@ export {
   checkBuilderCallType,
   checkConstructionFields,
   checkFactoryCreateFields,
+  checkFileUploadBinding,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
 export { checkChannels } from "./channel.js";

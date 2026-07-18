@@ -96,7 +96,7 @@ jobs:
             # a temp dir, so multi-file examples with `import "./…"`
             # (erp/main.ddd, fulfillment-newest.ddd) can't be built here
             # — their coverage lives in playground-feature-examples.
-            EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/inheritance-system.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/loom-landing.ddd","web/src/examples/action-showcase.ddd","web/src/examples/store-showcase.ddd","web/src/examples/subform-showcase.ddd"]'
+            EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/inheritance-system.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/loom-landing.ddd","web/src/examples/action-showcase.ddd","web/src/examples/store-showcase.ddd","web/src/examples/subform-showcase.ddd","web/src/examples/file-upload-system.ddd"]'
           fi
           echo "matrix={\"example\":$EXAMPLES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

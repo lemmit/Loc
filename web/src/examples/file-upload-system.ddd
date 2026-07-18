@@ -1,0 +1,67 @@
+// FileUpload primitive — slice 4a (React) fixture.
+//
+// Exercises both file-upload surfaces the React generator emits:
+//   (a) an in-form `File` field on a scaffolded aggregate → the
+//       `field-input-file` template (RHF `<Controller>` + `api.upload`).
+//   (b) a standalone `FileUpload { bind: … }` primitive on a hand-
+//       authored page → the `primitive-file-upload` template.
+//
+// Pointed at by the `generated-react-build` matrix so the emitted React
+// project type-checks (`tsc --noEmit`) on every pack.
+
+system FileUpload {
+
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#64748b"
+    radius: "md"
+  }
+
+  subdomain Docs {
+    context Documents {
+
+      // Surface (a): a `File`-typed field on a crudish aggregate.  The
+      // scaffolded new-form auto-renders the file-upload input; the
+      // field is optional so "no file yet" (a null default) is valid.
+      aggregate Attachment with crudish {
+        title: string
+        attachment: File?
+        derived display: string = title
+      }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Docs]) {
+
+    // Surface (b): standalone `FileUpload` bound to a `File` state field.
+    page Uploader {
+      route: "/upload"
+      title: "Upload a file"
+      state {
+        doc: File
+      }
+      body: Stack {
+        Heading { "Standalone upload", level: 1 },
+        FileUpload { "Attachment", bind: doc }
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource docsState { for: Documents, kind: state, use: primary }
+
+  deployable api {
+    platform: node
+    contexts: [Documents]
+    dataSources: [docsState]
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: WebApp
+    port: 3001
+    design: mantine
+  }
+}

@@ -51,7 +51,11 @@ export function needsController(
         inner.name === "long" ||
         inner.name === "decimal" ||
         inner.name === "money" ||
-        inner.name === "bool"
+        inner.name === "bool" ||
+        // A `File` field is a non-DOM-event compound value (a FileRef
+        // object bound via `field.onChange(fileRef)`), exactly like money —
+        // it renders inside a `<Controller>`, so force the RHF import.
+        inner.name === "File"
       );
     }
     if (inner.kind === "enum") return true;
@@ -142,6 +146,12 @@ function initialValueTs(t: TypeIR, ctx: BoundedContextIR, optional: boolean): st
         return "false";
       case "datetime":
         return `""`;
+      case "File":
+        // No file uploaded yet is a valid initial state — seed `null`,
+        // not a zero FileRef object.  The form's request schema types a
+        // File field as the FileRef object; a `.nullish()` (optional)
+        // File field accepts the null default cleanly.
+        return "null";
       default:
         return `""`;
     }

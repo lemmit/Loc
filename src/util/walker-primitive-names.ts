@@ -53,6 +53,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "Toggle",
   "MultilineField",
   "SelectField",
+  "FileUpload",
   // Display.
   "Loader",
   "Anchor",

@@ -128,6 +128,7 @@ import {
 import { emitIcon } from "./primitives/icon.js";
 import {
   emitField,
+  emitFileUpload,
   emitMultilineField,
   emitNumberField,
   emitPasswordField,
@@ -369,6 +370,16 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitSelectField,
     heex: renderSelectFieldHeex,
+    a11y: { labelled: "associate" },
+  },
+  // A standalone file-upload input bound to a `File`-typed state field.
+  // No `heex` renderer: LiveView uploads use `allow_upload`/`live_file_input`
+  // (a channel-streamed model, not the JSX POST-then-bind flow) — deferred to
+  // slice 4b and pinned in `heex-parity.test.ts`.
+  FileUpload: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitFileUpload,
     a11y: { labelled: "associate" },
   },
   // --- Display -----------------------------------------------------------

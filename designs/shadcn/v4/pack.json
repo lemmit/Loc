@@ -88,7 +88,9 @@
     "primitive-multiline-field": "primitive-multiline-field.hbs",
     "primitive-select-field": "primitive-select-field.hbs",
     "components-ui-textarea": "components-ui-textarea.hbs",
-    "realtime-toast": "realtime-toast.hbs"
+    "realtime-toast": "realtime-toast.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -503,6 +505,40 @@
           "DialogContent",
           "DialogHeader",
           "DialogTitle"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]

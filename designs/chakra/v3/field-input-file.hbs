@@ -1,0 +1,12 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <Field.Root invalid={!!fieldState.error}>
+              <Field.Label>{{label}}</Field.Label>
+              <Input type="file" data-testid="{{testId}}" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) { field.onChange(null); return; } const fd = new FormData(); fd.append("file", f); field.onChange(await api.upload("/files", fd)); }} />
+              {field.value?.key ? <Field.HelperText>{field.value?.key}</Field.HelperText> : null}
+              <Field.ErrorText>{fieldState.error?.message}</Field.ErrorText>
+            </Field.Root>
+          )}
+        />

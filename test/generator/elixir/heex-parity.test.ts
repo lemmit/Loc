@@ -52,7 +52,10 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 //  in-form inputs still go through Form-level dispatch.  A newly-added
 //  TSX-only primitive re-introduces a gap and fails this test until it gets a
 //  `heex` renderer or is pinned here with a reason.
-const KNOWN_HEEX_GAPS: Record<string, string> = {};
+const KNOWN_HEEX_GAPS: Record<string, string> = {
+  FileUpload:
+    "LiveView uploads use allow_upload/live_file_input — a channel-streamed model, not the JSX POST-then-bind flow; deferred to slice 4b.",
+};
 
 describe("HEEx walker parity (finding #5)", () => {
   it("the TSX-rendered-without-HEEx gap matches the pinned list", () => {

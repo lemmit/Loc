@@ -29,8 +29,10 @@ import {
   isPayloadDecl,
   isPostfixChain,
   isProperty,
+  isStateField,
   isValueObject,
 } from "../generated/ast.js";
+import type { Expression } from "../generated/ast.js";
 import { type DddType, resolveTypeRef, T } from "../type-system.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
@@ -42,6 +44,7 @@ const BINDABLE_INPUTS: ReadonlySet<string> = new Set([
   "MultilineField",
   "Toggle",
   "SelectField",
+  "FileUpload",
 ]);
 
 /** A bindable input (`Field`, `Toggle`, …) binds to page `state` through
@@ -63,6 +66,71 @@ export function checkBindableInputArgs(model: Model, accept: ValidationAcceptor)
       }
     }
   }
+}
+
+/** Extract the bare state-field name a `bind:` expression references —
+ *  a `NameRef` (`bind: docState`) or a suffix-less `PostfixChain` whose
+ *  head is a `NameRef`.  Anything else (a member access, a call) isn't a
+ *  bare state-field bind, so returns undefined. */
+function bareBindName(value: Expression | undefined): string | undefined {
+  if (!value) return undefined;
+  if (isNameRef(value)) return value.name;
+  if (isPostfixChain(value) && value.suffixes.length === 0 && isNameRef(value.head)) {
+    return value.head.name;
+  }
+  return undefined;
+}
+
+/** `loom.file-upload-not-file-field` — a `FileUpload { …, bind: x }` (and
+ *  the auto-rendered form input of a `File`-typed field) must bind a
+ *  `File`-typed page `state` field.  Binding a non-`File` field would emit
+ *  a `field.onChange(fileRef)` write against a mistyped state slot; the
+ *  gap only surfaces later as a `tsc` mismatch, so reject it here.
+ *
+ *  Minimal, clear-case only: it resolves the `bind:` name against the
+ *  enclosing page/component/store `state {}` fields.  When the name can't
+ *  be resolved to a declared state field (an out-of-scope or dynamic ref),
+ *  it stays silent — that's a different diagnostic's concern. */
+export function checkFileUploadBinding(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "BuilderCall") continue;
+    const bc = node as BuilderCall;
+    if (bc.type !== "FileUpload") continue;
+    const bindEntry = bc.entries.find((e) => e.name === "bind");
+    if (!bindEntry) continue; // no bind: — the pack renders an unbound stub
+    const name = bareBindName(bindEntry.value);
+    if (name === undefined) continue;
+    // Resolve the state field within the nearest state-bearing container.
+    const container = AstUtils.getContainerOfType(
+      bc,
+      (n): n is AstNode => n.$type === "Page" || n.$type === "Component" || n.$type === "Store",
+    );
+    if (!container) continue;
+    let field: import("../generated/ast.js").StateField | undefined;
+    for (const inner of AstUtils.streamAllContents(container)) {
+      if (isStateField(inner) && inner.name === name) {
+        field = inner;
+        break;
+      }
+    }
+    if (!field) continue; // unresolved ref — not this check's concern
+    const t = resolveTypeRef(field.type);
+    if (t.kind === "primitive" && t.name === "File") continue;
+    accept(
+      "error",
+      `'FileUpload' must bind a 'File'-typed state field, but '${name}' is ${describeType(t)}. ` +
+        `Declare 'state { ${name}: File }' (a FileRef the upload writes back).`,
+      { node: bindEntry, property: "value", code: "loom.file-upload-not-file-field" },
+    );
+  }
+}
+
+/** Short human name for a resolved type, for the diagnostic message. */
+function describeType(t: DddType): string {
+  if (t.kind === "primitive") return `'${t.name}'`;
+  if (t.kind === "id") return `an id reference`;
+  if (t.kind === "enum") return `an enum`;
+  return `not a File`;
 }
 
 /** v2 hard cut: reject `Name(args)` invocation forms that v2 replaces

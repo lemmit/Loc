@@ -1,0 +1,14 @@
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <FormControl>
+                <Input type="file" data-testid="{{testId}}" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) { field.onChange(null); return; } const fd = new FormData(); fd.append("file", f); field.onChange(await api.upload("/files", fd)); }} />
+              </FormControl>
+              {field.value?.key ? <p className="text-sm text-muted-foreground">{field.value?.key}</p> : null}
+              <FormMessage />
+            </FormItem>
+          )}
+        />

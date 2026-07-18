@@ -1,0 +1,7 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <TextField label="{{label}}" type="file" data-testid="{{testId}}" InputLabelProps=\{{ shrink: true }} onChange={async (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (!f) { field.onChange(null); return; } const fd = new FormData(); fd.append("file", f); field.onChange(await api.upload("/files", fd)); }} error={!!fieldState.error} helperText={fieldState.error?.message ?? field.value?.key ?? ""} />
+          )}
+        />

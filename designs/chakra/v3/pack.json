@@ -72,7 +72,9 @@
     "form-op-module": "form-op-module.hbs",
     "primitive-multiline-field": "primitive-multiline-field.hbs",
     "primitive-select-field": "primitive-select-field.hbs",
-    "realtime-toast": "realtime-toast.hbs"
+    "realtime-toast": "realtime-toast.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "shellFiles": {
     "toaster": "src/lib/toaster.tsx"
@@ -557,6 +559,36 @@
         "named": [
           "Dialog",
           "Portal"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]
