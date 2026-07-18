@@ -41,20 +41,20 @@ async function repo(): Promise<string> {
 describe("node document capability filter (DEBT-02 slice 1)", () => {
   it("gates findById by the in-app predicate (hidden → not-found)", async () => {
     const r = await repo();
-    expect(r).toContain("const rec = cartFromDoc(row.data as CartDoc);");
+    expect(r).toContain("const rec = cartFromDoc(row.data as CartDoc, row.version);");
     expect(r).toContain("if (!((!rec.isDeleted))) return null;");
     expect(r).toContain("return rec;");
   });
 
   it("filters findManyByIds by the capability predicate", async () => {
     expect(await repo()).toContain(
-      "rows.map((r) => cartFromDoc(r.data as CartDoc)).filter((x) => (!x.isDeleted));",
+      "rows.map((r) => cartFromDoc(r.data as CartDoc, r.version)).filter((x) => (!x.isDeleted));",
     );
   });
 
   it("narrows findAll/list by the capability predicate", async () => {
     // The synthesized `findAll` has no own predicate → just the capability filter.
-    expect(await repo()).toContain("const all = rows.map((r) => cartFromDoc(r.data as CartDoc));");
+    expect(await repo()).toContain("const all = rows.map((r) => cartFromDoc(r.data as CartDoc, r.version));");
     expect(await repo()).toContain("all.filter((x) => (!x.isDeleted))");
   });
 
@@ -69,7 +69,7 @@ describe("node document capability filter (DEBT-02 slice 1)", () => {
     const files = await generateSystemFiles(noFilter);
     const key = [...files.keys()].find((k) => /repositories\/.*cart/i.test(k))!;
     const r = files.get(key!)!;
-    expect(r).toContain("return cartFromDoc(row.data as CartDoc);");
+    expect(r).toContain("return cartFromDoc(row.data as CartDoc, row.version);");
     expect(r).not.toContain("const rec =");
   });
 });
@@ -121,19 +121,19 @@ describe("node document principal capability filter (DEBT-02 Slice B)", () => {
   it("binds the fail-closed principal in findById and gates the rehydrated aggregate", async () => {
     const r = await principalRepo();
     expect(r).toContain("const currentUser = requireCurrentUser();");
-    expect(r).toContain("const rec = orderFromDoc(row.data as OrderDoc);");
+    expect(r).toContain("const rec = orderFromDoc(row.data as OrderDoc, row.version);");
     expect(r).toContain("if (!((rec.tenantId === currentUser.tenantId))) return null;");
   });
 
   it("binds the principal in findManyByIds and AND-s the in-app predicate", async () => {
     expect(await principalRepo()).toContain(
-      "rows.map((r) => orderFromDoc(r.data as OrderDoc)).filter((x) => (x.tenantId === currentUser.tenantId));",
+      "rows.map((r) => orderFromDoc(r.data as OrderDoc, r.version)).filter((x) => (x.tenantId === currentUser.tenantId));",
     );
   });
 
   it("narrows the synthesized findAll by the principal predicate", async () => {
     const r = await principalRepo();
-    expect(r).toContain("const all = rows.map((r) => orderFromDoc(r.data as OrderDoc));");
+    expect(r).toContain("const all = rows.map((r) => orderFromDoc(r.data as OrderDoc, r.version));");
     expect(r).toContain("all.filter((x) => (x.tenantId === currentUser.tenantId))");
   });
 

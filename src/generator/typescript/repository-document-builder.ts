@@ -63,6 +63,12 @@ export function buildDocumentRepositoryFile(
   // `repo.save(agg, expectedVersion)` regardless of saving shape.
   const versioned = aggregateIsVersioned(agg);
   const emitsDelete = !!agg.canonicalDestroy;
+  // Root rehydrate call — a versioned root takes the authoritative `version`
+  // COLUMN (`<rowVar>.version`), not the stale blob copy (see entityFromDocFn).
+  const fromDocOf = (rowVar: string): string =>
+    versioned
+      ? `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc, ${rowVar}.version)`
+      : `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc)`;
 
   const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
 
@@ -96,11 +102,11 @@ export function buildDocumentRepositoryFile(
     ...(capRec
       ? [
           ...(principalBind ? [principalBind] : []),
-          `    const rec = ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`,
+          `    const rec = ${fromDocOf("row")};`,
           `    if (!(${capRec})) return null;`,
           `    return rec;`,
         ]
-      : [`    return ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`]),
+      : [`    return ${fromDocOf("row")};`]),
     `  }`,
     "",
     `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
@@ -113,7 +119,7 @@ export function buildDocumentRepositoryFile(
     `    if (ids.length === 0) return [];`,
     ...(principalBind && capX ? [principalBind] : []),
     `    const rows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
-    `    return rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc))${capX ? `.filter((x) => ${capX})` : ""};`,
+    `    return rows.map((r) => ${fromDocOf("r")})${capX ? `.filter((x) => ${capX})` : ""};`,
     `  }`,
     "",
     // Versioned: the UPDATE is CAS-guarded on the expected version (from the
@@ -277,7 +283,7 @@ function documentFindMethod(
     `  async ${find.name}(${params}): Promise<${ret}> {`,
     ...(needsPrincipalBind ? [`    const currentUser = requireCurrentUser();`] : []),
     `    const rows = await this.db.select().from(schema.${tableName});`,
-    `    const all = rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc));`,
+    `    const all = rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc${aggregateIsVersioned(agg) ? ", r.version" : ""}));`,
     `    const result = ${selector};`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: ${rowsExpr}`)}`,
     `    return result;`,
@@ -341,9 +347,20 @@ export function entityFromDocFn(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const fnName = `${lowerFirst(entity.name)}FromDoc`;
+  // The `version` COLUMN is authoritative — the blob's copy lags a write (it's
+  // serialised at save time, before the column is bumped), so a versioned ROOT
+  // takes the column as a `version` param and ignores `d.version`.  Without
+  // this the loaded aggregate's version is stale, and the CAS `save` (which the
+  // route feeds `aggregate.version` when there's no `If-Match`) 409s on the
+  // next update.  Parity with the python document repo (`_x_from_doc(raw, version)`).
+  const versionedRoot = isRoot && aggregateIsVersioned(entity as EnrichedAggregateIR);
   const entries: string[] = [`id: Ids.${entity.name}Id(d.id)`];
   if (!isRoot) entries.push(`parentId: Ids.${rootName}Id(d.parentId)`);
   for (const f of entity.fields) {
+    if (versionedRoot && f.name === "version") {
+      entries.push(`version: version`);
+      continue;
+    }
     entries.push(`${f.name}: ${deserializeField(f.type, `d.${f.name}`, ctx)}`);
   }
   for (const c of entity.contains) {
@@ -354,7 +371,9 @@ export function entityFromDocFn(
     );
   }
   return lines(
-    `function ${fnName}(d: ${entity.name}Doc): ${entity.name} {`,
+    versionedRoot
+      ? `function ${fnName}(d: ${entity.name}Doc, version: number): ${entity.name} {`
+      : `function ${fnName}(d: ${entity.name}Doc): ${entity.name} {`,
     `  return ${entity.name}._rehydrate({ ${entries.join(", ")} });`,
     `}`,
   );

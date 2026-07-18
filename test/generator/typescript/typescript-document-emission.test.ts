@@ -52,10 +52,12 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
   it("repository round-trips through toDoc/fromDoc + _rehydrate", () => {
     const repo = files.get("db/repositories/cart-repository.ts")!;
     expect(repo).toContain("const data = cartToDoc(aggregate);");
-    expect(repo).toContain("return cartFromDoc(row.data as CartDoc);");
-    // fromDoc rebuilds through the same _rehydrate factory the normalised
-    // hydrate uses, rehydrating contained parts.
-    expect(repo).toContain("function cartFromDoc(d: CartDoc): Cart {");
+    // Versioned root: fromDoc takes the authoritative `version` COLUMN, not the
+    // stale blob copy — so `aggregate.version` is correct after a load and the
+    // CAS save doesn't 409 on the next update.
+    expect(repo).toContain("return cartFromDoc(row.data as CartDoc, row.version);");
+    expect(repo).toContain("function cartFromDoc(d: CartDoc, version: number): Cart {");
+    expect(repo).toContain("version: version");
     expect(repo).toContain("Cart._rehydrate({");
     expect(repo).toContain("items: (d.items ?? []).map((x) => cartItemFromDoc(x))");
     expect(repo).toContain(
@@ -73,7 +75,9 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
 
   it("finds evaluate in-memory over rehydrated documents", () => {
     const repo = files.get("db/repositories/cart-repository.ts")!;
-    expect(repo).toContain("const all = rows.map((r) => cartFromDoc(r.data as CartDoc));");
+    expect(repo).toContain(
+      "const all = rows.map((r) => cartFromDoc(r.data as CartDoc, r.version));",
+    );
     expect(repo).toContain("const result = all.filter((x) => x.customerId === customerId);");
     // No Drizzle column predicate against the document table for the find.
     expect(repo).not.toContain("schema.carts.customerId");
