@@ -1869,8 +1869,20 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
         // so the `shape(...)` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        if (a.persistedAs !== "eventLog" && shape !== "relational")
-          reject(where, `is persisted as shape(${shape})`);
+        // `shape(embedded)` IS supported (wave 2): the root stays queryable
+        // columns and each containment folds into a jsonb column, (de)serialised
+        // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
+        // analogue of the drizzle embedded repository).  Bounded to aggregates
+        // with no `Id[]` reference collections.  `shape(document)` (the whole
+        // aggregate as one opaque blob) stays gated.
+        if (a.persistedAs !== "eventLog" && shape !== "relational") {
+          if (shape === "embedded") {
+            if ((a.associations ?? []).length > 0)
+              reject(where, "is shape(embedded) with `Id[]` reference collections");
+          } else {
+            reject(where, `is persisted as shape(${shape})`);
+          }
+        }
         // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
         // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
         // `kind` — concrete repos read/write it scoped to their `kind`, a
@@ -1891,6 +1903,10 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // drizzle containment path).  Bounded to single-level FLAT parts (no
         // part-of-a-part, no collection field inside a part) on a plain state
         // aggregate — deeper nesting / inheritance / event-sourcing stay gated.
+        // Contained parts (relational child tables OR embedded jsonb) are v1-
+        // bounded to single-level FLAT parts (no part-of-a-part, no collection
+        // field inside a part), on a non-inheritance / non-event-sourced state
+        // aggregate.  Both shapes share the bound.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
           const flatType = (t: TypeIR): boolean =>
             (t.kind === "optional" ? t.inner : t).kind !== "array";

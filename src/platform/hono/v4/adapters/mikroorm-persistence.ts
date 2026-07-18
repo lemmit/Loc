@@ -15,9 +15,10 @@
 // system-checks.ts`) accepts the wired surface — relational + event-sourced
 // state, associations, retrievals, seeds, managed/audited fields, aggregate
 // inheritance (TPH `sharedTable` shared-Row + TPC `ownTable` per-concrete
-// tables), and single-level flat contained entity parts (relational child
-// tables) — and still rejects the not-yet-wired features (document/embedded
-// shape, deeper-nested parts, provenanced fields).
+// tables), single-level flat contained entity parts (relational child tables),
+// and `shape(embedded)` (root columns + jsonb containments) — and still rejects
+// the not-yet-wired features (`shape(document)`, deeper-nested parts,
+// provenanced fields).
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";

@@ -682,6 +682,75 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// shape(embedded) on mikroorm — wave 2.  The root stays queryable columns and
+// each containment folds into a jsonb column, (de)serialised through the shared
+// `<part>ToDoc`/`<part>FromDoc` helpers.  shape(document) stays gated.
+// ---------------------------------------------------------------------------
+describe("mikroorm — shape(embedded) (wave 2)", () => {
+  const EMB_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      aggregate TagList shape: embedded with crudish {
+        owner: string
+        contains lines: TagItem[]
+        entity TagItem { name: string  price: Money }
+      }
+      repository TagLists for TagList { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for shape(embedded)", async () => {
+    const { errors } = await emit(EMB_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits root columns + a jsonb containment column (typed unknown on the Row)", async () => {
+    const { files } = await emit(EMB_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("owner!: string;");
+    expect(entities).toContain("lines!: unknown;");
+    expect(entities).toContain('lines: { type: "json", columnType: "jsonb" }');
+    // No relational child table under embedded.
+    expect(entities).not.toContain("TagItemRow");
+  });
+
+  it("(de)serialises the containment through <part>ToDoc/<part>FromDoc", async () => {
+    const { files } = await emit(EMB_SRC);
+    const repo = files.get("api/db/repositories/tagList-repository.ts")!;
+    expect(repo).toContain("type TagItemDoc = {");
+    expect(repo).toContain("function tagItemToDoc");
+    expect(repo).toContain("function tagItemFromDoc");
+    // Read casts the jsonb cell, save serialises via toDoc, upsert on the Row.
+    expect(repo).toContain("((row.lines ?? []) as TagItemDoc[]).map((x) => tagItemFromDoc(x))");
+    expect(repo).toContain("lines: aggregate.lines.map((e) => tagItemToDoc(e))");
+    expect(repo).toContain("await em.upsert(TagListRow, rootRow)");
+  });
+
+  it("still rejects shape(document)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Cart shape: document with crudish { customer: string }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /shape\(document\)/.test(e))).toBe(
+      true,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Server-managed access fields (token / internal / secret) on mikroorm — the
 // access modifier shapes only the API wire surface, so the data-mapper stores
 // the field as an ordinary column that round-trips through the shared save /

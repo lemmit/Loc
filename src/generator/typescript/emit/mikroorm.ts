@@ -66,6 +66,9 @@ import { isRefCollection } from "../repository-associations-builder.js";
 import {
   deserializeField,
   docFieldType,
+  docTypeAlias,
+  entityFromDocFn,
+  entityToDocFn,
   findPredicate,
   serializeField,
 } from "../repository-document-builder.js";
@@ -310,9 +313,29 @@ function renderPartRowEntity(
 // db/entities.ts — Row classes + EntitySchema definitions.
 // ---------------------------------------------------------------------------
 
+/** Embedded-shape columns: the queryable root columns (via `columnsOf`) plus
+ *  one jsonb column per containment (typed `unknown` on the Row, cast in the
+ *  repo through `<Part>Doc`).  Mirrors the drizzle embedded table. */
+function embeddedColumnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
+  const cols = columnsOf(agg, ctx);
+  for (const c of agg.contains) {
+    cols.push({
+      prop: c.name,
+      mikroType: "json",
+      tsType: "unknown",
+      nullable: c.optional ?? false,
+      primary: false,
+      columnType: "jsonb",
+    });
+  }
+  return cols;
+}
+
 export function renderMikroEntities(
   aggs: readonly EnrichedAggregateIR[],
   ctx: EnrichedBoundedContextIR,
+  shapeOf: (agg: EnrichedAggregateIR) => "relational" | "embedded" | "document" = (a) =>
+    (a.savingShape as "relational" | "embedded" | "document" | undefined) ?? "relational",
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
@@ -331,9 +354,15 @@ export function renderMikroEntities(
     // Abstract bases own no table EXCEPT a TPH root, which owns the shared
     // table (a TPC / intermediate abstract base emits nothing).
     if (agg.isAbstract && !isTphBase(agg, aggs)) continue;
-    // TPH base → the one shared hierarchy table; else the aggregate's own
-    // Row (a TPC concrete carries its merged base+own fields via columnsOf).
-    const cols = isTphBase(agg, aggs) ? tphSharedColumns(agg, aggs, ctx) : columnsOf(agg, ctx);
+    // TPH base → the one shared hierarchy table; embedded → root columns +
+    // one jsonb column per containment; else the aggregate's own Row (a TPC
+    // concrete carries its merged base+own fields via columnsOf).
+    const embedded = shapeOf(agg) === "embedded";
+    const cols = isTphBase(agg, aggs)
+      ? tphSharedColumns(agg, aggs, ctx)
+      : embedded
+        ? embeddedColumnsOf(agg, ctx)
+        : columnsOf(agg, ctx);
     const cls = rowClassOf(agg.name);
     const schemaName = `${cls}Schema`;
     schemaNames.push(schemaName);
@@ -369,11 +398,14 @@ export function renderMikroEntities(
       blocks.push(block);
     }
     // Contained entity parts persist as parent-scoped child Row entities
-    // (relational shape), one table per declared part.
-    for (const part of agg.parts ?? []) {
-      const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
-      schemaNames.push(partSchema);
-      blocks.push(block);
+    // (relational shape only), one table per declared part.  Under embedded
+    // they fold into the jsonb containment columns above — no child tables.
+    if (!embedded) {
+      for (const part of agg.parts ?? []) {
+        const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
+        schemaNames.push(partSchema);
+        blocks.push(block);
+      }
     }
   }
   if (hasEventLog) {
@@ -1274,6 +1306,244 @@ export function renderMikroRepository(
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
       `import { AggregateNotFoundError${versioned ? ", ConcurrencyError" : ""} } from "../../domain/errors";`,
+      `import type { DomainEventDispatcher } from "../../domain/events";`,
+      `import { requestLog } from "../../obs/als";`,
+      "",
+      body,
+      "",
+    ) + "\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Embedded-shape (`shape(embedded)`) MikroORM repository.  The queryable
+// middle of the saving-shape spectrum: the aggregate ROOT stays real columns
+// (hydrated/saved like the relational path), while each CONTAINMENT folds into
+// one jsonb column — (de)serialised through the shared `<part>ToDoc` /
+// `<part>FromDoc` helpers the document repository uses.  No child tables.
+// ---------------------------------------------------------------------------
+
+/** Per-containment local-const decls that materialise the jsonb columns into
+ *  part instances, named `<c.name>` so `hydrateRootExpr`'s bare-name refs
+ *  resolve. */
+function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
+  return agg.contains.map((c) => {
+    const fromDoc = `${lowerFirst(c.partName)}FromDoc`;
+    if (c.collection)
+      return `${indent}const ${c.name} = ((${rowVar}.${c.name} ?? []) as ${c.partName}Doc[]).map((x) => ${fromDoc}(x));`;
+    if (c.optional)
+      return `${indent}const ${c.name} = ${rowVar}.${c.name} == null ? null : ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`;
+    return `${indent}const ${c.name} = ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`;
+  });
+}
+
+export function renderMikroEmbeddedRepository(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const row = rowClassOf(agg.name);
+  const idVar = `Ids.${agg.name}Id`;
+  const baseFilters = mikroContextFilters(agg);
+  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+
+  // Root save row: id + scalar column projection + one jsonb entry per
+  // containment (serialised through `<part>ToDoc`).
+  const rootEntries: string[] = ["id: aggregate.id as string"];
+  for (const f of scalarFields)
+    for (const e of projectFieldEntries(f, "aggregate", ctx))
+      rootEntries.push(`${e.fieldName}: ${e.expr}`);
+  for (const c of agg.contains) {
+    const toDoc = `${lowerFirst(c.partName)}ToDoc`;
+    if (c.collection) rootEntries.push(`${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`);
+    else if (c.optional)
+      rootEntries.push(
+        `${c.name}: aggregate.${c.name} == null ? null : ${toDoc}(aggregate.${c.name})`,
+      );
+    else rootEntries.push(`${c.name}: ${toDoc}(aggregate.${c.name}!)`);
+  }
+  const rootRow = `{ ${rootEntries.join(", ")} }`;
+
+  const audited = aggregateIsAudited(agg);
+  const upsertCall = audited
+    ? `    await em.upsert(${row}, stampInsert(rootRow));`
+    : `    await em.upsert(${row}, rootRow);`;
+
+  const dbg = (find: string, rowsExpr: string) =>
+    `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
+
+  const findMethods = (repo?.finds ?? []).map((f) => {
+    const name = lowerFirst(f.name);
+    const paged = pagedReturn(f.returnType);
+    const isList = f.returnType.kind === "array";
+    const ret = isList ? `${agg.name}[]` : `${agg.name} | null`;
+    const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
+    let filter: string;
+    try {
+      const caps = mikroContextFilters(agg, { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps });
+      filter = withContextFilters(f.filter ? whereToMikroFilter(f.filter) : "{}", caps);
+    } catch {
+      return lines(
+        `  async ${name}(${paged ? `${params}${params ? ", " : ""}page: number, pageSize: number, sort: string, dir: string` : params}): Promise<${paged ? `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }` : ret}> {`,
+        `    throw new Error("mikroorm v1: this find's predicate is not yet supported");`,
+        `  }`,
+      );
+    }
+    if (paged) {
+      const pagedParams = [
+        ...f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`),
+        "page: number",
+        "pageSize: number",
+        "sort: string",
+        "dir: string",
+      ].join(", ");
+      const sortable = sortableFields(agg)
+        .map((s) => JSON.stringify(s))
+        .join(", ");
+      return lines(
+        `  async ${name}(${pagedParams}): Promise<{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }> {`,
+        `    const em = this.em.fork();`,
+        `    const sortable = new Set<string>([${sortable}]);`,
+        `    const sortField = sortable.has(sort) ? sort : "id";`,
+        `    const orderBy: Record<string, "asc" | "desc"> = { [sortField]: dir === "desc" ? "desc" : "asc" };`,
+        `    const total = await em.count(${row}, ${filter});`,
+        `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+        `    const rows = await em.find(${row}, ${filter}, { limit: pageSize, offset: (page - 1) * pageSize, orderBy });`,
+        dbg(f.name, "rows.length"),
+        `    const items = rows.map((row) => {`,
+        ...embeddedHydrateLocals(agg, "row", "      "),
+        `      return ${hydrateRootExpr(agg, "row", ctx)};`,
+        `    });`,
+        `    return { items, page, pageSize, total, totalPages };`,
+        `  }`,
+      );
+    }
+    if (isList) {
+      return lines(
+        `  async ${name}(${params}): Promise<${agg.name}[]> {`,
+        `    const em = this.em.fork();`,
+        `    const rows = await em.find(${row}, ${filter});`,
+        dbg(f.name, "rows.length"),
+        `    return rows.map((row) => {`,
+        ...embeddedHydrateLocals(agg, "row", "      "),
+        `      return ${hydrateRootExpr(agg, "row", ctx)};`,
+        `    });`,
+        `  }`,
+      );
+    }
+    return lines(
+      `  async ${name}(${params}): Promise<${agg.name} | null> {`,
+      `    const em = this.em.fork();`,
+      `    const row = await em.findOne(${row}, ${filter});`,
+      `    if (row === null) return null;`,
+      ...embeddedHydrateLocals(agg, "row", "    "),
+      `    return ${hydrateRootExpr(agg, "row", ctx)};`,
+      `  }`,
+    );
+  });
+
+  const deleteMethod = agg.canonicalDestroy
+    ? lines(
+        `  async delete(id: ${idVar}): Promise<void> {`,
+        `    await this.em.fork().nativeDelete(${row}, ${withContextFilters("{ id: id as string }", [])});`,
+        `  }`,
+      )
+    : "";
+
+  const body = lines(
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
+    `  private readonly em: EntityManager;`,
+    `  private readonly events: DomainEventDispatcher;`,
+    `  constructor(`,
+    `    em: EntityManager,`,
+    `    events: DomainEventDispatcher,`,
+    `  ) {`,
+    `    this.em = em;`,
+    `    this.events = events;`,
+    `  }`,
+    "",
+    `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
+    `    const em = this.em.fork();`,
+    `    const row = await em.findOne(${row}, ${withContextFilters("{ id: id as string }", baseFilters)});`,
+    `    if (row === null) {`,
+    `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
+    `      return null;`,
+    `    }`,
+    ...embeddedHydrateLocals(agg, "row", "    "),
+    `    const loaded = ${hydrateRootExpr(agg, "row", ctx)};`,
+    `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
+    `    return loaded;`,
+    `  }`,
+    "",
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    `    const found = await this.findById(id);`,
+    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    `    return found;`,
+    `  }`,
+    "",
+    `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
+    `    if (ids.length === 0) return [];`,
+    `    const em = this.em.fork();`,
+    `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
+    `    return rows.map((row) => {`,
+    ...embeddedHydrateLocals(agg, "row", "      "),
+    `      return ${hydrateRootExpr(agg, "row", ctx)};`,
+    `    });`,
+    `  }`,
+    "",
+    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    `    const em = this.em.fork();`,
+    `    const rootRow = ${rootRow};`,
+    upsertCall,
+    `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
+    "",
+    `    for (const event of aggregate.pullEvents()) {`,
+    `      requestLog().info({ event: "event_dispatched", event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string });`,
+    `      await this.events.dispatch(event);`,
+    `    }`,
+    `  }`,
+    deleteMethod ? "" : null,
+    deleteMethod || null,
+    ...findMethods.flatMap((m) => ["", m]),
+    "",
+    toWireMethod(agg, ctx),
+    `}`,
+    "",
+    // Containment (de)serialisers — parts only; the root uses columns.
+    ...agg.parts.flatMap((p) => [docTypeAlias(p, false, agg.name, ctx), ""]),
+    ...agg.parts.flatMap((p) => [entityToDocFn(p, ctx), ""]),
+    ...agg.parts.flatMap((p) => [entityFromDocFn(p, false, agg.name, ctx), ""]),
+  );
+
+  const bodyScan = body
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  const candidates = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)];
+  const referenced = candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
+  const isValueUsed = (n: string): boolean =>
+    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
+  let voImportLine: string | false = false;
+  if (referenced.length > 0) {
+    const anyValue = referenced.some(isValueUsed);
+    voImportLine = anyValue
+      ? `import { ${referenced.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
+      : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
+  }
+  const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+
+  return (
+    lines(
+      "// Auto-generated.  Do not edit by hand.",
+      usesDecimal && `import Decimal from "decimal.js";`,
+      repoPortImportLine(agg.name),
+      `import { EntityManager } from "@mikro-orm/postgresql";`,
+      `import { ${row} } from "../entities";`,
+      audited && `import { stampInsert } from "../audit-stamp";`,
+      `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
+      voImportLine,
+      `import * as Ids from "../../domain/ids";`,
+      `import { AggregateNotFoundError } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
       `import { requestLog } from "../../obs/als";`,
       "",
