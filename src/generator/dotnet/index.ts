@@ -108,7 +108,13 @@ import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
-import { anyTimerUsesCron, renderTimerScheduler, timerServiceFqns } from "./emit/timer.js";
+import {
+  anyTimerUsesCron,
+  hangfireJobDiRegistrations,
+  hangfireRecurringRegistrations,
+  renderTimerScheduler,
+  timerServiceFqns,
+} from "./emit/timer.js";
 import {
   aggregateHasTableValueArray,
   joinEntityName,
@@ -821,7 +827,7 @@ function emitProjectFromContexts(
   // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
   // for-event's context (single-fire lock owner == DB owner).  Filter the
   // system's timers to the ones THIS deployable owns; a timer-free deployable
-  // stays byte-identical (no TimerScheduler.cs, no registration, no Cronos dep).
+  // stays byte-identical (no TimerScheduler.cs, no registration, no Hangfire dep).
   // EF-only — the tick's advisory lock rides `AppDbContext.Database`, which the
   // Dapper path (NpgsqlDataSource, no DbContext) doesn't have; a dapper timer
   // owner is a follow-up slice.
@@ -1594,7 +1600,7 @@ function emitProject(
     /** TimerSource scheduling (scheduling.md, M-T4.1): the owned timers this
      *  deployable emits `<Pascal>TimerService` BackgroundServices for.  Drives
      *  the `AddHostedService<…>()` registrations (Program.cs) and — when any
-     *  uses `cron:` — the Cronos NuGet ref (csproj).  Empty ⇒ byte-identical. */
+     *  uses `cron:` — the Hangfire NuGet refs (csproj).  Empty ⇒ byte-identical. */
     timers?: TimerSourceIR[];
     /** Dapper persistence-port DI (M-T6.9): the closed `AddScoped<…>` binding
      *  lines for the workflow / projection / event-store adapters (empty on the
@@ -1638,6 +1644,9 @@ function emitProject(
       orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,
       timerServices: timerServiceFqns(timers, ns),
+      hangfireCronTimers: anyTimerUsesCron(timers),
+      hangfireJobDiRegistrations: hangfireJobDiRegistrations(timers, ns),
+      hangfireRecurringRegistrations: hangfireRecurringRegistrations(timers, ns),
       dapperPortRegistrations: options?.dapperPortRegistrations,
     }),
   );
@@ -1658,7 +1667,7 @@ function emitProject(
       usingDapper,
       usesSpecifications,
       !!options?.oidc,
-      // Cronos ships only when an owned timerSource uses a real `cron:`
+      // Hangfire packages ship only when an owned timerSource uses a real `cron:`
       // expression (an `every:`-only deployable uses PeriodicTimer, no dep).
       anyTimerUsesCron(timers),
       !!options?.hasChannels,

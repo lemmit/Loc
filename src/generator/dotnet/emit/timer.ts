@@ -1,23 +1,24 @@
-// Timer scheduler emission (scheduling.md, M-T4.1) — the .NET half of Phase 1,
-// a fast-follow on the Hono `scheduler-builder.ts`.
+// Timer scheduler emission (scheduling.md) — the .NET backend, Phase 2 (durable).
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  This
-// emitter renders `Infrastructure/Scheduling/TimerScheduler.cs`: one
-// `BackgroundService` per owned timer that, on each tick, opens an EF Core
-// transaction, takes a TRANSACTION-SCOPED Postgres advisory lock (single-fire
-// across replicas), builds the tick event struct, and dispatches it through the
-// SAME `IDomainEventDispatcher` the sagas already route through — so an
-// `on(t: Tick)` / `create(t: Tick) by …` reactor fires with no new dispatch
-// machinery.
+// emitter renders `Infrastructure/Scheduling/TimerScheduler.cs`, splitting the
+// owned timers by cadence:
 //
-// The lock primitive mirrors the Hono reference exactly: `pg_try_advisory_xact_lock`
-// held on the transaction's single pinned connection and released automatically
-// when the tx commits — NOT a session-level `pg_advisory_lock` + `unlock`, which
-// leaks the unlock onto a different pooled connection.  `cron:` cadences drive a
-// Cronos next-occurrence loop; `every:` cadences drive a `PeriodicTimer`.
+//   • `cron:` timers run on **Hangfire** with **Hangfire.PostgreSql** storage.
+//     Hangfire's recurring-job scheduler is coordinated through its Postgres
+//     store (single-fire across replicas), persists each run, retries a failed
+//     job with backoff, and — because a recurring job's next execution is
+//     tracked in the store — **fires an overdue job on server start**, so a
+//     boundary missed while every replica was down runs on recovery (native
+//     missed-run; no watermark shim).  Standard 5-field cron, no translation.
 //
-// Emitted ONLY when the deployable owns at least one timerSource; a timer-free
-// deployable is byte-identical to before (no file, no registration, no dep).
+//   • `every:` (sub-minute) timers stay **in-process** (`PeriodicTimer` +
+//     transaction-scoped `pg_try_advisory_xact_lock` single-fire).  Durability is
+//     meaningless for a high-frequency poll and Hangfire cron is minute-granular.
+//
+// Every tick constructs its event struct and dispatches it through the SAME
+// `IDomainEventDispatcher` the sagas ride.  Emitted ONLY when the deployable owns
+// at least one timerSource; a timer-free deployable is byte-identical to before.
 
 import type { EventIR, FieldIR, TimerSourceIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -25,7 +26,7 @@ import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_ob
 
 /** Stable per-timer advisory-lock key — an FNV-1a hash of the timerSource name
  *  into a signed 32-bit int, IDENTICAL to the Hono `timerLockKey` derivation so
- *  a node and a .NET replica of the same timer contend on the SAME key. */
+ *  a node and a .NET replica of the same `every:` timer contend on the SAME key. */
 export function timerLockKey(name: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < name.length; i++) {
@@ -35,17 +36,23 @@ export function timerLockKey(name: string): number {
   return h | 0;
 }
 
-/** Whether any owned timer uses a real cron expression (vs a bare-interval
- *  `every:`).  Gates the `Cronos` using + the csproj `PackageReference`. */
+/** The `cron:` timers of a set — run on Hangfire. */
+export function cronTimers(timers: readonly TimerSourceIR[]): TimerSourceIR[] {
+  return timers.filter((ts) => ts.cadence.kind === "cron");
+}
+
+/** The `every:` timers of a set — run in-process (PeriodicTimer + advisory lock). */
+export function everyTimers(timers: readonly TimerSourceIR[]): TimerSourceIR[] {
+  return timers.filter((ts) => ts.cadence.kind === "every");
+}
+
+/** Whether any owned timer uses a real cron expression.  Gates the Hangfire
+ *  package references + the Hangfire DI block + recurring-job registration. */
 export function anyTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
 
-/** The C# value expression a scheduler tick uses to fill one tick-event field.
- *  A tick is infrastructure-emitted, so every field is synthesised: id fields
- *  get a fresh id (`<Id>.New()` — a new saga instance per tick), datetimes get
- *  the fire time (`DateTime.UtcNow`), and any other scalar gets a type-safe
- *  zero so the positional record ctor still compiles. */
+/** The C# value expression a scheduler tick uses to fill one tick-event field. */
 function tickFieldValue(field: FieldIR): string {
   const t = field.type;
   if (t.kind === "id") return `${t.targetName}Id.New()`;
@@ -71,13 +78,9 @@ function tickFieldValue(field: FieldIR): string {
       case "duration":
         return "TimeSpan.Zero";
       default:
-        // json (JsonElement) and any future scalar: `default` keeps the ctor
-        // call type-safe (ticks meaningfully carry only at/id).
         return "default!";
     }
   }
-  // enum / valueobject / entity — not meaningful tick fields; a type-safe
-  // default keeps the emitted `new <Event>(…)` compiling.
   return "default!";
 }
 
@@ -89,12 +92,66 @@ function tickStruct(event: EventIR | undefined, eventName: string): string {
   return `new ${eventName}(${args})`;
 }
 
-/** Render one `<Pascal>TimerService : BackgroundService`.  The tick body opens
- *  a transaction, tries the advisory lock, dispatches on success, and logs the
- *  catalog obs events (`timer_fired` / `timer_lock_contended` /
- *  `timer_emit_failed` / `timer_skipped_overlap`).  Cadence drives the loop:
- *  cron → Cronos next-occurrence delay loop; every → PeriodicTimer. */
-function renderTimerService(ts: TimerSourceIR, eventByName: Map<string, EventIR>): string {
+/** The Hangfire recurring-job id for a timer (stable across boots so
+ *  `AddOrUpdate` upserts the same schedule). */
+function jobId(ts: TimerSourceIR): string {
+  return `timer:${ts.name}`;
+}
+
+/** The job class name for a cron timer. */
+function jobClass(ts: TimerSourceIR): string {
+  return `${upperFirst(ts.name)}TimerJob`;
+}
+
+/** Render one Hangfire job class for a `cron:` timer.  Hangfire owns single-fire
+ *  (store-coordinated) + retry + missed-run replay, so the body just resolves
+ *  the dispatcher (Hangfire creates a DI scope per job) and dispatches.  On
+ *  failure it logs and rethrows so Hangfire's automatic retry engages. */
+function renderCronJob(ts: TimerSourceIR, eventByName: Map<string, EventIR>): string {
+  const cls = jobClass(ts);
+  const struct = tickStruct(eventByName.get(ts.event), ts.event);
+  const timerLit = `"${ts.name}"`;
+  const firedLog = renderDotnetLogCall("timerFired", [{ name: "timer", valueExpr: timerLit }]);
+  const failedLog = renderDotnetLogCallWithException("timerEmitFailed", "ex", [
+    { name: "timer", valueExpr: timerLit },
+    { name: "error", valueExpr: "ex.Message" },
+  ]);
+  return `/// <summary>timerSource ${ts.name} { for: ${ts.event}, cron: ${JSON.stringify(
+    ts.cadence.kind === "cron" ? ts.cadence.cron : "",
+  )} } — durable (Hangfire recurring job).  Single-fire + retry + missed-run
+/// replay owned by Hangfire; dispatches the tick through the in-process
+/// dispatcher the sagas ride.  Hangfire opens a DI scope per execution, so the
+/// scoped dispatcher resolves directly.</summary>
+public sealed class ${cls}
+{
+    private readonly IDomainEventDispatcher _events;
+    private readonly ILogger<${cls}> _log;
+
+    public ${cls}(IDomainEventDispatcher events, ILogger<${cls}> log)
+    {
+        _events = events;
+        _log = log;
+    }
+
+    public async Task ExecuteAsync()
+    {
+        try
+        {
+            await _events.DispatchAsync(${struct}, CancellationToken.None);
+            ${firedLog}
+        }
+        catch (Exception ex)
+        {
+            ${failedLog}
+            throw; // let Hangfire's automatic retry engage
+        }
+    }
+}`;
+}
+
+/** Render one `<Pascal>TimerService : BackgroundService` for an `every:` timer.
+ *  Unchanged from Phase 1: PeriodicTimer + transaction-scoped advisory lock. */
+function renderEveryService(ts: TimerSourceIR, eventByName: Map<string, EventIR>): string {
   const cls = `${upperFirst(ts.name)}TimerService`;
   const lockKey = timerLockKey(ts.name);
   const struct = tickStruct(eventByName.get(ts.event), ts.event);
@@ -110,41 +167,11 @@ function renderTimerService(ts: TimerSourceIR, eventByName: Map<string, EventIR>
     { name: "timer", valueExpr: timerLit },
     { name: "error", valueExpr: "ex.Message" },
   ]);
+  const everyMs = ts.cadence.kind === "every" ? ts.cadence.everyMs : 0;
 
-  // Per-cadence driver.  cron: Cronos parses the 5-field expression (or an
-  // `@nickname` macro) and yields the next UTC occurrence; every: a fixed
-  // PeriodicTimer interval.
-  const loop =
-    ts.cadence.kind === "cron"
-      ? `        var cron = Cronos.CronExpression.Parse(${JSON.stringify(ts.cadence.cron)});
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            var next = cron.GetNextOccurrence(DateTime.UtcNow, TimeZoneInfo.Utc);
-            if (next is null) break;
-            var delay = next.Value - DateTime.UtcNow;
-            if (delay > TimeSpan.Zero)
-            {
-                try { await Task.Delay(delay, stoppingToken); }
-                catch (OperationCanceledException) { break; }
-            }
-            await TickAsync(stoppingToken);
-        }`
-      : `        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(${ts.cadence.everyMs}));
-        try
-        {
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-            {
-                await TickAsync(stoppingToken);
-            }
-        }
-        catch (OperationCanceledException) { }`;
-
-  return `/// <summary>timerSource ${ts.name} { for: ${ts.event}, ${
-    ts.cadence.kind === "cron"
-      ? `cron: ${JSON.stringify(ts.cadence.cron)}`
-      : `every: ${ts.cadence.everyMs}ms`
-  } }.  Single-fire across replicas via a transaction-scoped advisory lock;
-/// dispatches the tick through the in-process dispatcher the sagas ride.</summary>
+  return `/// <summary>timerSource ${ts.name} { for: ${ts.event}, every: ${everyMs}ms } —
+/// in-process PeriodicTimer; single-fire across replicas via a transaction-scoped
+/// advisory lock; dispatches the tick through the in-process dispatcher.</summary>
 public sealed class ${cls} : BackgroundService
 {
     // FNV-1a hash of the timer name into a signed 32-bit int (identical to the
@@ -153,8 +180,6 @@ public sealed class ${cls} : BackgroundService
 
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<${cls}> _log;
-    // In-process no-overlap guard: a tick that overlaps a slow body on THIS
-    // replica is skipped (not queued), mirroring the Hono \`running\` flag.
     private int _running;
 
     public ${cls}(IServiceScopeFactory scopes, ILogger<${cls}> log)
@@ -165,7 +190,15 @@ public sealed class ${cls} : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-${loop}
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(${everyMs}));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                await TickAsync(stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private async Task TickAsync(CancellationToken cancellationToken)
@@ -181,11 +214,9 @@ ${loop}
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var events = scope.ServiceProvider.GetRequiredService<IDomainEventDispatcher>();
             // TRANSACTION-SCOPED advisory lock: held on the tx's single pinned
-            // connection and released automatically on commit — so there is no
-            // manual unlock to leak onto a different pooled connection (a plain
-            // session-level pg_advisory_lock + pool would).  pg_try_advisory_xact_lock
-            // is non-blocking: a peer replica's concurrent tick fails the try
-            // and skips.
+            // connection and released automatically on commit (no unlock to leak
+            // onto a different pooled connection).  Non-blocking: a peer replica's
+            // concurrent tick fails the try and skips.
             await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
             var locked = await db.Database
                 .SqlQuery<bool>($"SELECT pg_try_advisory_xact_lock({LockKey}) AS \\"Value\\"")
@@ -217,15 +248,20 @@ ${loop}
 
 /**
  * Render `Infrastructure/Scheduling/TimerScheduler.cs` for a deployable's owned
- * timers.  `eventByName` resolves each timer's `for:` event to its declared
- * field shape (for the tick struct).
+ * timers: Hangfire job classes (cron) + `BackgroundService`s (every).
  */
 export function renderTimerScheduler(
   timers: readonly TimerSourceIR[],
   eventByName: Map<string, EventIR>,
   ns: string,
 ): string {
-  const services = timers.map((ts) => renderTimerService(ts, eventByName)).join("\n\n");
+  const jobs = cronTimers(timers)
+    .map((ts) => renderCronJob(ts, eventByName))
+    .join("\n\n");
+  const services = everyTimers(timers)
+    .map((ts) => renderEveryService(ts, eventByName))
+    .join("\n\n");
+
   return `// Auto-generated — emitted only when this deployable owns timerSources (scheduling.md).
 using System;
 using System.Threading;
@@ -241,13 +277,41 @@ using ${ns}.Infrastructure.Persistence;
 
 namespace ${ns}.Infrastructure.Scheduling;
 
-${services}
+${[jobs, services].filter(Boolean).join("\n\n")}
 `;
 }
 
-/** The FULLY-QUALIFIED hosted-service type names Program.cs registers, one per
- *  owned timer (`AddHostedService<…>()`).  FQNs so Program.cs needs no extra
- *  `using` for the scheduling namespace. */
+/** The FULLY-QUALIFIED `every:`-timer hosted-service type names Program.cs
+ *  registers (`AddHostedService<…>()`).  Cron timers are Hangfire recurring jobs,
+ *  not hosted services. */
 export function timerServiceFqns(timers: readonly TimerSourceIR[], ns: string): string[] {
-  return timers.map((ts) => `${ns}.Infrastructure.Scheduling.${upperFirst(ts.name)}TimerService`);
+  return everyTimers(timers).map(
+    (ts) => `${ns}.Infrastructure.Scheduling.${upperFirst(ts.name)}TimerService`,
+  );
+}
+
+/** The `AddScoped<…Job>()` DI lines for the Hangfire cron-job classes (Hangfire
+ *  resolves each job from DI per execution). */
+export function hangfireJobDiRegistrations(timers: readonly TimerSourceIR[], ns: string): string[] {
+  return cronTimers(timers).map(
+    (ts) => `builder.Services.AddScoped<${ns}.Infrastructure.Scheduling.${jobClass(ts)}>();`,
+  );
+}
+
+/** The recurring-job registration lines (run after `app.Build()` inside a scope
+ *  that resolves `IRecurringJobManager` — the service-based API; the static
+ *  `RecurringJob` needs `JobStorage.Current`, which isn't set on the DI path).
+ *  One per cron timer, keyed by a stable id and the standard 5-field cron
+ *  expression (Hangfire's Cronos parser takes it verbatim). */
+export function hangfireRecurringRegistrations(
+  timers: readonly TimerSourceIR[],
+  ns: string,
+): string[] {
+  return cronTimers(timers).map((ts) => {
+    const fqn = `${ns}.Infrastructure.Scheduling.${jobClass(ts)}`;
+    const cron = (ts.cadence as { cron: string }).cron;
+    return `    recurring.AddOrUpdate<${fqn}>(${JSON.stringify(jobId(ts))}, job => job.ExecuteAsync(), ${JSON.stringify(
+      cron,
+    )});`;
+  });
 }

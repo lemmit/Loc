@@ -1,13 +1,13 @@
-// timerSource → .NET TimerScheduler emission (scheduling.md, M-T4.1).
+// timerSource → .NET TimerScheduler emission (scheduling.md, M-T4.1 + Phase 2).
 //
 // The .NET sibling of test/platform/hono-timer-scheduler.test.ts. Pins the
-// Phase-1 .NET deliverable at the lowest catching altitude: pure in-memory
-// `generateSystems` (no docker, no LOOM_* env). Asserts the emitted
-// TimerScheduler.cs shape (transaction-scoped advisory-lock single-fire,
-// dispatch through the existing in-process dispatcher, Cronos vs PeriodicTimer
-// per cadence, the tick struct), the Program.cs registration, the conditional
-// Cronos dep — and that a timer-free deployable is byte-identical (no scheduler
-// artifacts at all).
+// durable-driver shape at the lowest catching altitude: pure in-memory
+// `generateSystems` (no docker, no LOOM_* env). Asserts that `cron:` timers run
+// on Hangfire (a recurring job class + Hangfire.PostgreSql DI + IRecurringJobManager
+// registration with the standard cron, verbatim), `every:` timers keep the
+// in-process BackgroundService (PeriodicTimer + advisory lock), the Program.cs
+// wiring, the Hangfire deps (Cronos gone) — and that a timer-free deployable is
+// byte-identical.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -54,56 +54,65 @@ const get =
   (suffix: string): string =>
     [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";
 
-describe("timerSource → .NET TimerScheduler", () => {
-  it("emits TimerScheduler.cs with single-fire, dispatch, and per-cadence drivers", async () => {
+describe("timerSource → .NET durable TimerScheduler", () => {
+  it("runs cron: on a Hangfire job and every: on an in-process BackgroundService", async () => {
     const { model, errors } = await parseString(WITH_TIMERS);
     expect(errors).toEqual([]);
     const g = get(generateSystems(model).files);
 
     const scheduler = g("Infrastructure/Scheduling/TimerScheduler.cs");
     expect(scheduler).not.toBe("");
-    // One BackgroundService per owned timer.
-    expect(scheduler).toContain("public sealed class SweepTimerService : BackgroundService");
+
+    // cron: → a plain Hangfire job class (no advisory lock — Hangfire owns
+    // single-fire/retry/missed-run; injects the scoped dispatcher; rethrows so
+    // Hangfire's automatic retry engages).
+    expect(scheduler).toContain("public sealed class SweepTimerJob");
+    expect(scheduler).toContain("public async Task ExecuteAsync()");
+    expect(scheduler).toContain("await _events.DispatchAsync(");
+    expect(scheduler).toContain("throw; // let Hangfire's automatic retry engage");
+    // every: → the Phase-1 BackgroundService (PeriodicTimer + tx-scoped advisory lock).
     expect(scheduler).toContain("public sealed class HealthzTimerService : BackgroundService");
-    // Single-fire via a TRANSACTION-SCOPED advisory lock (auto-released on tx
-    // commit — a plain session lock + pool would leak the unlock onto a
-    // different connection). Keyed per timer via EF Core raw SQL.
     expect(scheduler).toContain("pg_try_advisory_xact_lock");
-    expect(scheduler).toContain("BeginTransactionAsync");
-    expect(scheduler).toContain("await tx.CommitAsync");
-    expect(scheduler).toContain("private const int LockKey =");
-    // No manual session-lock unlock (the tx commit releases it).
-    expect(scheduler).not.toContain("pg_advisory_unlock");
-    // Dispatches through the existing in-process dispatcher, inside the lock tx.
-    expect(scheduler).toContain("GetRequiredService<IDomainEventDispatcher>()");
-    expect(scheduler).toContain("await events.DispatchAsync(");
-    // Catalog obs events (cross-backend parity).
-    expect(scheduler).toContain('"timer_fired"');
-    expect(scheduler).toContain('"timer_lock_contended"');
-    expect(scheduler).toContain('"timer_emit_failed"');
-    expect(scheduler).toContain('"timer_skipped_overlap"');
-    // cron: → Cronos; every: → PeriodicTimer.
-    expect(scheduler).toContain('Cronos.CronExpression.Parse("*/5 * * * *")');
     expect(scheduler).toContain("new PeriodicTimer(TimeSpan.FromMilliseconds(15000))");
+
     // The tick struct: mint an id per tick, stamp the fire time.
     expect(scheduler).toContain("new SweepTick(SweepId.New(), DateTime.UtcNow)");
     expect(scheduler).toContain("new HealthTick(DateTime.UtcNow)");
+    // Catalog obs events.
+    expect(scheduler).toContain('"timer_fired"');
+    expect(scheduler).toContain('"timer_lock_contended"');
+    // Cronos is gone.
+    expect(scheduler).not.toContain("Cronos");
   });
 
-  it("registers each TimerService in Program.cs and adds Cronos only for cron timers", async () => {
+  it("wires Hangfire in Program.cs (storage + recurring job) and swaps Cronos for Hangfire deps", async () => {
     const { model } = await parseString(WITH_TIMERS);
     const g = get(generateSystems(model).files);
 
     const program = g("d/Program.cs");
+    expect(program).toContain("builder.Services.AddHangfire(cfg => cfg");
+    expect(program).toContain(".UsePostgreSqlStorage(");
+    expect(program).toContain("builder.Services.AddHangfireServer();");
     expect(program).toContain(
-      "builder.Services.AddHostedService<D.Infrastructure.Scheduling.SweepTimerService>();",
+      "builder.Services.AddScoped<D.Infrastructure.Scheduling.SweepTimerJob>();",
     );
+    // Service-based recurring registration with the standard cron, verbatim.
+    expect(program).toContain("GetRequiredService<IRecurringJobManager>()");
+    expect(program).toContain(
+      'recurring.AddOrUpdate<D.Infrastructure.Scheduling.SweepTimerJob>("timer:sweep", job => job.ExecuteAsync(), "*/5 * * * *");',
+    );
+    expect(program).toContain("using Hangfire;");
+    // every: timer stays an in-process hosted service; cron: is NOT.
     expect(program).toContain(
       "builder.Services.AddHostedService<D.Infrastructure.Scheduling.HealthzTimerService>();",
     );
+    expect(program).not.toContain("AddHostedService<D.Infrastructure.Scheduling.SweepTimerJob>");
 
     const csproj = g("d/D.csproj");
-    expect(csproj).toContain('<PackageReference Include="Cronos"');
+    expect(csproj).toContain('<PackageReference Include="Hangfire.AspNetCore"');
+    expect(csproj).toContain('<PackageReference Include="Hangfire.PostgreSql"');
+    expect(csproj).toContain('<PackageReference Include="Newtonsoft.Json"');
+    expect(csproj).not.toContain("Cronos");
   });
 
   it("is byte-identical for a timer-free deployable (no scheduler artifacts)", async () => {
@@ -113,9 +122,9 @@ describe("timerSource → .NET TimerScheduler", () => {
     expect(keys.some((k) => k.endsWith("Infrastructure/Scheduling/TimerScheduler.cs"))).toBe(false);
 
     const g = get(files);
-    expect(g("d/D.csproj")).not.toContain("Cronos");
+    expect(g("d/D.csproj")).not.toContain("Hangfire");
     const program = g("d/Program.cs");
     expect(program).not.toContain("TimerService");
-    expect(program).not.toContain("AddHostedService");
+    expect(program).not.toContain("AddHangfire");
   });
 });
