@@ -13,26 +13,12 @@ import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 // `web-bundle-boundary.test.ts` pins this.  (The Hono "ts" path below stays a
 // static import — it runs in-browser with no chunk fetch.)
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
-// Evolution-diff cores — all pure/browser-safe siblings of `system/index`
-// (NOT `system/index` itself, so the bundle-boundary test stays green):
-// the schema-migration deriver, its Postgres-SQL renderer, the wire-spec
-// builder, and the new semantic wire-contract differ.  They let the
-// playground surface the migration + contract delta a source change
-// implies — the "previous version" the stateless regen otherwise loses.
-import {
-  buildMigrations,
-  MigrationDestructiveError,
-} from "../../../src/system/migrations-builder.js";
-// NB: `memorySnapshotStore` is NOT imported from `system/snapshot.js` — that
-// module pulls `node:fs` (for `fsSnapshotStore`), which would drag it into the
-// MAIN worker bundle's static graph.  The in-memory store is trivial, so we
-// inline it here (`SnapshotStore` is a type-only import → no runtime edge) and
-// keep the main bundle fs-free, same discipline as the `system/index` split.
-import type { SnapshotStore } from "../../../src/system/snapshot.js";
-import type { SchemaSnapshot } from "../../../src/ir/types/migrations-ir.js";
-import { renderPgStep } from "../../../src/generator/sql-pg.js";
-import { buildWireSpec } from "../../../src/system/wire-spec.js";
-import { diffWireSpec } from "../../../src/system/wire-spec-diff.js";
+// The evolution-diff core (migration + wire-contract delta) lives in its own
+// pure, headless-testable module — the worker just serialises it over
+// postMessage.  It pulls the schema-migration deriver / SQL renderer / wire-
+// spec differ (all browser-safe siblings of `system/index`, so the bundle-
+// boundary test stays green).
+import { runEvolution } from "./evolution.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the
 // playground legacy single-context build targets the default Hono
 // backend and supplies that package's pins (B2.1).
@@ -46,16 +32,10 @@ import type {
   BuildDiagnostic,
   BuildRpcRequest,
   BuildRpcResponse,
-  EvolutionParams,
-  EvolutionResult,
-  EvolutionTree,
   GenerateResult,
-  MigrationView,
   SnapshotResult,
   VirtualFile,
-  WireChangeView,
 } from "./protocol.js";
-import type { VfsEntry, VfsPath } from "../vfs/types.js";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -385,225 +365,6 @@ function snapshotFromLoom(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Evolution diff — the migration + wire-contract delta between a pinned
-// baseline and the live edit.  Both sides are whole `.ddd` source TREES:
-// each is seeded into the worker VFS under an isolated prefix and lowered
-// through the project loader (`loadProjectFromVfs` → `lowerProject`), so
-// multi-file / import baselines resolve exactly as `ddd generate system`
-// would on disk (M-T8.11).  A single-file source is just the one-entry case.
-// The compiler lives in the worker, and every diff rides a shipped PURE core.
-// ---------------------------------------------------------------------------
-
-const BUCKET_LABEL: Record<string, string> = {
-  aggregates: "aggregate",
-  parts: "part",
-  valueObjects: "value object",
-};
-
-// Isolated VFS/URI prefixes the two diff sides load under — kept distinct
-// from the generate flow's `/workspace/...` tree and from each other so a
-// re-seed never clobbers live workspace state.  Both `inmemory:///…`
-// document URIs derive from these (see `docUriPrefix`).
-const CUR_PREFIX = "/evolution/current";
-const BASE_PREFIX = "/evolution/baseline";
-
-/** In-memory snapshot store — the browser twin of `fsSnapshotStore`,
- *  inlined to keep `node:fs` out of the main worker bundle (see the import
- *  note above).  Matches `memorySnapshotStore`'s contract exactly. */
-function memStore(initial: Record<string, SchemaSnapshot> = {}): SnapshotStore {
-  return { read: (module: string) => initial[module] ?? null };
-}
-
-/** Re-root an evolution tree's entries under `prefix` so both diff sides
- *  live in disjoint VFS namespaces.  Relative imports resolve within the
- *  re-rooted tree because every path is shifted by the same prefix. */
-function rerootEntries(prefix: VfsPath, files: VfsEntry[]): VfsEntry[] {
-  return files.map((e) =>
-    e.kind === "file"
-      ? { kind: "file", path: prefix + e.path, content: e.content }
-      : { kind: "dir", path: prefix + e.path },
-  );
-}
-
-/** The `inmemory:///…` document-URI prefix that `loadProjectFromVfs`
- *  assigns to files under a VFS `prefix` — mirrors its `vfsPathToUri`
- *  (`/evolution/current` → `inmemory:///evolution/current`). */
-function docUriPrefix(prefix: VfsPath): string {
-  return `inmemory:///${prefix.replace(/^\/+/, "")}`;
-}
-
-/** Drop every worker-VFS file and Langium document under `prefix` — run
- *  before seeding a side so a stale file/doc from a prior diff (e.g. a
- *  source the new tree removed) can't linger and pollute name resolution. */
-function clearEvolutionPrefix(prefix: VfsPath): void {
-  for (const p of workerVfs.listAll(prefix)) workerVfs.delete(p); // file-only; dirs are inert
-  const uriPrefix = docUriPrefix(prefix);
-  for (const doc of [...documents.all]) {
-    if (doc.uri.toString().startsWith(uriPrefix)) documents.deleteDocument(doc.uri);
-  }
-}
-
-/** Load one diff side into an isolated VFS prefix and lower it to an
- *  enriched IR.  Returns either the lowered model or the parse/import/
- *  lowering diagnostics that stopped it — never throws. */
-async function loadEvolutionTree(
-  tree: EvolutionTree,
-  prefix: VfsPath,
-): Promise<
-  { loom: EnrichedLoomModel; diagnostics: BuildDiagnostic[] } | { error: BuildDiagnostic[] }
-> {
-  clearEvolutionPrefix(prefix);
-  workerVfs.hydrate(rerootEntries(prefix, tree.files));
-  try {
-    const { all } = await loadProjectFromVfs(
-      prefix + tree.entryPath,
-      services.shared,
-      workerVfs,
-    );
-    const diagnostics = collectDiagnostics(all);
-    if (diagnostics.some((d) => d.severity === "error")) return { error: diagnostics };
-    const loom = enrichLoomModel(lowerProject(all.map((d) => d.parseResult?.value as Model)));
-    return { loom, diagnostics };
-  } catch (err) {
-    // Missing import / cycle (from the loader) or a lowering throw.
-    return { error: [loweringDiag(err)] };
-  }
-}
-
-async function handleEvolution(params: EvolutionParams): Promise<EvolutionResult> {
-  // Load the CURRENT tree first and fully lower it — its diagnostics are what
-  // the user acts on, and a broken current source can't be diffed.  We dispose
-  // its documents before loading the baseline so the two versions (which share
-  // aggregate/system names) can't cross-pollute Langium's global scope: one
-  // tree's docs live in the workspace at a time, mirroring the old single-file
-  // same-URI trick.  `curLoom` is a fully-resolved IR, independent of the docs.
-  const curLoaded = await loadEvolutionTree(params.current, CUR_PREFIX);
-  if ("error" in curLoaded) return { ok: false, diagnostics: curLoaded.error };
-  const curLoom = curLoaded.loom;
-  const curDiags = curLoaded.diagnostics;
-  clearEvolutionPrefix(CUR_PREFIX);
-  if (curLoom.systems.length === 0) {
-    return {
-      ok: true,
-      hasBaseline: false,
-      migrations: [],
-      wireChanges: [],
-      breaking: false,
-      diagnostics: [
-        {
-          severity: "warning",
-          message:
-            "Source has no `system` block — schema migrations and the wire contract are derived per system, so there is nothing to evolve yet.",
-          source: "loom-evolve",
-        },
-      ],
-    };
-  }
-
-  let baseSystemsByName = new Map<string, EnrichedLoomModel["systems"][number]>();
-  if (params.baseline && params.baseline.files.length > 0) {
-    const baseLoaded = await loadEvolutionTree(params.baseline, BASE_PREFIX);
-    if (!("error" in baseLoaded)) {
-      baseSystemsByName = new Map(baseLoaded.loom.systems.map((s) => [s.name, s]));
-    }
-    // A baseline that no longer loads/lowers (a since-removed feature, a
-    // missing import at that ref) is treated as absent rather than failing
-    // the whole diff — everything then reads Initial.
-    clearEvolutionPrefix(BASE_PREFIX);
-  }
-  const hasBaseline = baseSystemsByName.size > 0;
-
-  const migrations: MigrationView[] = [];
-  const wireChanges: WireChangeView[] = [];
-  let breaking = false;
-
-  for (const curSys of curLoom.systems) {
-    const baseSys = baseSystemsByName.get(curSys.name) ?? null;
-
-    // -- schema migration ---------------------------------------------------
-    // Seed a memory snapshot store from the baseline's stamped `.next`
-    // snapshots (an empty store ⇒ the baseline itself would be "Initial"),
-    // then derive the current source against it: the steps that come back
-    // ARE the pending migration.
-    const seed: Record<string, SchemaSnapshot> = {};
-    if (baseSys) {
-      for (const bm of buildMigrations(baseSys, memStore())) {
-        seed[bm.module] = bm.next;
-      }
-    }
-    const store = memStore(seed);
-    const destructiveByModule = new Map<string, string>();
-    let migs: ReturnType<typeof buildMigrations>;
-    try {
-      migs = buildMigrations(curSys, store);
-    } catch (err) {
-      if (err instanceof MigrationDestructiveError) {
-        destructiveByModule.set(err.module, err.message);
-        breaking = true;
-        // Re-derive with the gate OFF so the user still sees the (safe-
-        // sequence) steps the change implies, not just the refusal.
-        migs = buildMigrations(curSys, store, { allowDestructive: true });
-      } else {
-        return { ok: false, diagnostics: [...curDiags, migrationDiag(err)] };
-      }
-    }
-    for (const mig of migs) {
-      if (mig.steps.length === 0) continue; // clean regen ⇒ no-op, don't list
-      const isDestructive = destructiveByModule.has(mig.module);
-      migrations.push({
-        module: mig.module,
-        name: mig.name,
-        version: mig.version,
-        steps: mig.steps.map((s) => ({ op: s.op, sql: renderPgStep(s) })),
-        destructive: isDestructive,
-        destructiveMessage: destructiveByModule.get(mig.module),
-      });
-    }
-
-    // -- wire contract ------------------------------------------------------
-    // Only meaningful against a real baseline; with none, every shape is
-    // "new" and the contract diff would be noise.
-    if (baseSys) {
-      const diff = diffWireSpec(buildWireSpec(baseSys), buildWireSpec(curSys));
-      if (diff.breaking) breaking = true;
-      for (const c of diff.changes) {
-        wireChanges.push({
-          entity: `${BUCKET_LABEL[c.bucket] ?? c.bucket} ${c.entity}`,
-          field: c.field,
-          kind: c.kind,
-          breaking: c.breaking,
-          detail: c.detail,
-        });
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    hasBaseline,
-    migrations,
-    wireChanges,
-    breaking,
-    diagnostics: curDiags,
-  };
-}
-
-function loweringDiag(err: unknown): BuildDiagnostic {
-  return {
-    severity: "error",
-    message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
-    source: "loom-ir",
-  };
-}
-
-function migrationDiag(err: unknown): BuildDiagnostic {
-  return {
-    severity: "error",
-    message: `Migration derivation failed: ${err instanceof Error ? err.message : String(err)}`,
-    source: "loom-evolve",
-  };
-}
 
 /** Disambiguate `generate` / `snapshot` callers' two input forms.
  *  Exactly one of `text` or `entryPath` must be set.  Returning the
@@ -646,7 +407,7 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
         break;
       }
       case "evolution": {
-        response.result = await handleEvolution(req.params);
+        response.result = await runEvolution(req.params);
         break;
       }
       case "vfs.write": {

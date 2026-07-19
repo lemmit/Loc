@@ -85,29 +85,30 @@ test("editing the source surfaces a migration diff against a pinned baseline", a
 }) => {
   await wipeStorage(page);
 
-  const editor = page.locator(".monaco-editor").first();
+  // Edit through the automation seam (`window.__loomSetSource`, the same one
+  // system-builder/builder-page specs use) — it sets the whole model and
+  // dispatches onChange like a real edit, with none of the Monaco
+  // viewport/find-widget fragility of synthetic keystrokes.
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __loomSetSource?: unknown }).__loomSetSource === "function",
+  );
 
-  // Baseline commit WITHOUT the new field — a schema-neutral comment edit,
+  // Baseline commit WITHOUT the new field — a schema-neutral comment prepend,
   // waited past the autosave debounce so it lands as a commit that predates
   // `phone`.  (The boot import may also commit; either way rows.last() is a
   // pre-`phone` baseline.)
-  await editor.click();
-  await page.keyboard.press("Control+Home");
-  await page.keyboard.type(`// evolution-baseline ${Date.now()}\n`);
+  await page.evaluate(() => {
+    const w = window as unknown as { __loomSetSource: (t: string) => void; __loomGetSource: () => string };
+    w.__loomSetSource(`// evolution-baseline\n${w.__loomGetSource()}`);
+  });
   await page.waitForTimeout(AUTOSAVE_SETTLE_MS);
 
-  // Add a field to the Customer aggregate → a new column + wire field.  Reach
-  // the property line with Monaco's find (viewport-independent — the line need
-  // not be initially rendered), then append a sibling property.  No braces are
-  // typed, so auto-closing can't corrupt the edit.
-  await editor.click();
-  await page.keyboard.press("Control+f");
-  await page.keyboard.type("email: string");
-  await page.keyboard.press("Enter"); // jump to + reveal the first match
-  await page.keyboard.press("Escape"); // close find; cursor sits on the match
-  await page.keyboard.press("End");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("phone: string");
+  // Add a `phone` field to the Customer aggregate (which has `email: string`)
+  // → a new column + wire field.
+  await page.evaluate(() => {
+    const w = window as unknown as { __loomSetSource: (t: string) => void; __loomGetSource: () => string };
+    w.__loomSetSource(w.__loomGetSource().replace("email: string", "email: string\n        phone: string"));
+  });
   // Let the edit autosave-commit: HEAD now == live (both carry `phone`), so a
   // live-vs-HEAD diff would be empty — the diff must be pinned to the earlier
   // baseline instead.  This is the debounce-safe construction.
