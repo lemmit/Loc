@@ -6,6 +6,17 @@ import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
+import { runLiveAgent } from "./agent/live";
+import { createOpenAiCompatibleComplete } from "./agent/openai-transport";
+import {
+  type AgentSettings,
+  loadAgentSettings,
+  presetById,
+  saveAgentSettings,
+  settingsReady,
+} from "./agent/provider";
+import { buildSystemPrompt } from "./agent/system-prompt";
+import type { Complete, Message as AgentTranscriptMessage } from "../../src/tools/index.js";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type {
@@ -267,6 +278,11 @@ export default function App(): JSX.Element {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentRunning, setAgentRunning] = useState(false);
   const agentSignalRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+  // Live agent chat (M-T8.3): BYOK provider settings (persisted) + the raw
+  // Anthropic-shaped transcript carried across turns.  `agentMessages` above is
+  // the shared DISPLAY list (the demo and the live chat both render into it).
+  const [agentSettings, setAgentSettingsState] = useState<AgentSettings>(() => loadAgentSettings());
+  const agentTranscriptRef = useRef<AgentTranscriptMessage[]>([]);
   // Evolution-lifecycle surfaces (the Migrations dock tab): the derived
   // migration + wire-contract delta between the last-committed baseline
   // and the live edit, and the on-demand provenance snapshot capture.
@@ -1487,6 +1503,68 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Persist BYOK settings whenever they change.
+  function setAgentSettings(s: AgentSettings): void {
+    setAgentSettingsState(s);
+    saveAgentSettings(s);
+  }
+
+  // Send one live-chat turn: build the transport from the BYOK settings, run
+  // the real agent loop over the accumulated transcript, stream the folded
+  // display, reflect the agent's source edits into the editor, and generate.
+  async function sendAgentMessage(text: string): Promise<void> {
+    // Automation seam (mirrors `__loomSetSource`): an e2e/manual harness can
+    // inject a scripted transport, driving the live loop deterministically
+    // without a real provider key.
+    const injected = (window as unknown as { __loomAgentComplete?: Complete }).__loomAgentComplete;
+    if (agentRunning || !text.trim()) return;
+    if (!injected && !settingsReady(agentSettings)) return;
+    agentSignalRef.current = { cancelled: false };
+    setAgentRunning(true);
+    const preset = presetById(agentSettings.providerId);
+    const headers: Record<string, string> =
+      preset.id === "openrouter"
+        ? { "HTTP-Referer": "https://loom.build", "X-Title": "Loom playground" }
+        : {};
+    const complete =
+      injected ??
+      createOpenAiCompatibleComplete({
+        baseUrl: agentSettings.baseUrl,
+        apiKey: agentSettings.apiKey,
+        model: agentSettings.model,
+        headers,
+      });
+    try {
+      agentTranscriptRef.current = await runLiveAgent({
+        complete,
+        prompt: text,
+        currentSource: sourceRef.current,
+        history: agentTranscriptRef.current,
+        system: buildSystemPrompt(),
+        setMessages: setAgentMessages,
+        applySource: applyAgentSource,
+        triggerGenerate: () => void runGenerate(true),
+        signal: agentSignalRef.current,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAgentMessages((prev) => [
+        ...prev,
+        { id: `err${prev.length}`, role: "assistant", text: `⚠️ ${message}` },
+      ]);
+    } finally {
+      setAgentRunning(false);
+    }
+  }
+
+  // Reset the live chat (clears the display + the raw transcript so the next
+  // send starts a fresh conversation).
+  function clearAgentChat(): void {
+    agentSignalRef.current.cancelled = true;
+    agentTranscriptRef.current = [];
+    setAgentMessages([]);
+  }
+
   // Bundle every piece of state + every action into a single ctx
   // object that the shell + its panes consume.  Children destructure
   // what they need; no React context, no prop drilling.
@@ -1622,6 +1700,10 @@ export default function App(): JSX.Element {
     agentMessages,
     agentRunning,
     runAgentDemo: () => void runAgentDemo(),
+    agentSettings,
+    setAgentSettings,
+    sendAgentMessage: (text: string) => void sendAgentMessage(text),
+    clearAgentChat,
     runGenerate: () => void runGenerate(true),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),

@@ -11,6 +11,7 @@
 
 import type { MutableRefObject, ReactNode } from "react";
 import type { AgentMessage } from "../agent/demo";
+import type { AgentSettings } from "../agent/provider";
 import type { EditorHandle } from "../editor/LoomEditor";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
@@ -353,6 +354,16 @@ export interface LayoutCtx {
   agentRunning: boolean;
   /** Play (or replay) the scripted prose → `.ddd` → generate → green demo. */
   runAgentDemo: () => void;
+  /** BYOK provider settings for the LIVE chat (persisted to localStorage).
+   *  Empty key until the user configures a provider. */
+  agentSettings: AgentSettings;
+  setAgentSettings: (s: AgentSettings) => void;
+  /** Send one live-chat turn to the configured provider — drives the real
+   *  `loom_*` agent loop, streaming into `agentMessages` and reflecting the
+   *  agent's `.ddd` edits into the editor.  No-op until settings are ready. */
+  sendAgentMessage: (text: string) => void;
+  /** Clear the live chat (display + the carried transcript). */
+  clearAgentChat: () => void;
 
   // Actions
   runGenerate: () => void;
