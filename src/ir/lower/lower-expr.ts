@@ -63,13 +63,6 @@ import {
   type TemplateStr,
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
-
-/** No-arg collection ops that are call-style on every backend (`lines.first()`)
- *  and are NOT special-cased as property-style member access (unlike
- *  `count` / `length` / `distinct`).  Written property-style (`lines.first`)
- *  they must lower to the method-call IR, not a member IR, or the backends
- *  emit a `.first` field access on a list. */
-const NO_PAREN_CALL_COLLECTION_OPS = new Set(["first", "firstOrNull"]);
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { intrinsicFor, intrinsicReturnType } from "../../util/intrinsics.js";
@@ -109,6 +102,13 @@ import {
 } from "./lower-types.js";
 import { originFor } from "./origin.js";
 import { matchRepoRead, runCriterionMatcher } from "./repo-read.js";
+
+/** No-arg collection ops that are call-style on every backend (`lines.first()`)
+ *  and are NOT special-cased as property-style member access (unlike
+ *  `count` / `length` / `distinct`).  Written property-style (`lines.first`)
+ *  they must lower to the method-call IR, not a member IR, or the backends
+ *  emit a `.first` field access on a list. */
+const NO_PAREN_CALL_COLLECTION_OPS = new Set(["first", "firstOrNull"]);
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -781,7 +781,10 @@ function applySuffixToRecv(
   // `method-call` IR the working `lines.first()` form produces, so every
   // backend emits the op.  (Gated on a collection receiver so an entity/VO
   // field literally named `first` stays an ordinary member access.)
-  if (NO_PAREN_CALL_COLLECTION_OPS.has(ms.member) && collectionElementType(recvType) !== undefined) {
+  if (
+    NO_PAREN_CALL_COLLECTION_OPS.has(ms.member) &&
+    collectionElementType(recvType) !== undefined
+  ) {
     const mcIR: ExprIR = {
       kind: "method-call",
       receiver: recv,
