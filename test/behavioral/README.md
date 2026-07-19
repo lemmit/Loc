@@ -88,6 +88,25 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   can't reach hex.pm from Elixir's `:ssl` — set `HEX_MIRROR_URL` or run the
   repo's loopback hex mirror (CLAUDE.md → "Egress proxy wrinkle"); CI runners
   have direct hex.pm access, so no mirror is needed there.
+- **mikroorm** — the SAME emitted api e2e, run against a booted **generated
+  node/Hono backend on the MikroORM persistence adapter** (`persistence:
+  mikroorm`) over real HTTP (`run-mikroorm.mjs`). The default node tier
+  (`run.mjs`) boots Hono in-process on PGlite with the DEFAULT drizzle adapter;
+  MikroORM uses `@mikro-orm/postgresql`, which needs a REAL Postgres, not
+  PGlite, so this models the boot on the cross-backend runners: generate the
+  node system, boot the generated server as a real process (`npm install` +
+  `tsx index.ts`) against a real DB, and re-point the backend-agnostic api
+  suite at it. The corpus is LITERALLY the default node tier's (manifest
+  features + shared systems), with ONE source transform — a `persistence:
+  mikroorm` realization clause injected onto the `platform: node` deployable
+  before `generate system` — so the drained MikroORM adapter gets the SAME
+  runtime coverage as drizzle (schema applies via `orm.schema.updateSchema()`
+  at boot, CRUD round-trips), not merely tsc-compile coverage. Only the api
+  tier gates (the unit tier is pure-domain / persistence-independent, already
+  covered by `run.mjs`). Its own `behavioral-e2e-mikroorm.yml` workflow (a
+  `services: postgres` sidecar). Needs `node` + a reachable `DATABASE_URL`
+  (plain `postgres://` form); run: `node run-mikroorm.mjs`. `LOOM_BH_MIKRO_BASE`
+  dispatches at an already-running server (skips the npm install + boot).
 - **pagination** — the M-T1.1 / M-T2.6 runtime acceptance capstone
   (`pagination.mjs`, fixture `pagination.ddd`). Boots the generated Hono
   backend on PGlite (same in-process boot as `run.mjs`), then **seeds 1000

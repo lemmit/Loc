@@ -128,8 +128,14 @@ system D {
     expect(entities).toContain("export class OEventRow");
     expect(entities).toContain('tableName: "o_events"');
     expect(entities).toContain('streamType: { type: "string", primary: true }');
+    // `seq` is a real Postgres `bigserial` (sequence-backed DB default), NOT a
+    // bare `bigint autoincrement`: MikroORM's `updateSchema()` only turns an
+    // autoincrement PRIMARY into a serial, so on this non-PK column a bare
+    // `bigint` ships with no default and every event insert (which omits `seq`)
+    // fails the not-null constraint at runtime (caught by the mikroorm
+    // behavioral tier — run-mikroorm.mjs `ledger`).
     expect(entities).toContain(
-      'seq: { type: "number", columnType: "bigint", autoincrement: true }',
+      'seq: { type: "number", columnType: "bigserial", autoincrement: true }',
     );
     const repo = files.get("api/db/repositories/account-repository.ts")!;
     expect(repo).toContain("Account._fromEvents(");
@@ -138,6 +144,33 @@ system D {
     // The aggregate's stream is filtered + stamped by its stream_type.
     expect(repo).toContain('{ streamType: "Account", streamId: id as string }');
     expect(repo).toContain('r.streamType = "Account";');
+  });
+
+  // A `decimal` column is unbounded Postgres `numeric` (no precision/scale),
+  // matching the drizzle backend's `numeric(col)`.  MikroORM's bare `type:
+  // "decimal"` DEFAULTS to `numeric(10,0)` (scale 0), which rounds every
+  // fractional value to an integer on store (9.99 → 10) — a silent corruption
+  // caught by the mikroorm behavioral tier.  Only `money` keeps its fixed
+  // `numeric(19,4)`.
+  it("emits a scale-free numeric column for decimal (no numeric(10,0) rounding)", async () => {
+    const src = `
+system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish { amount: decimal }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('amount: { type: "decimal", columnType: "numeric" }');
+    expect(entities).not.toContain('columnType: "numeric(10,0)"');
   });
 });
 

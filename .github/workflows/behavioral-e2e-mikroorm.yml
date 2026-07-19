@@ -1,0 +1,96 @@
+name: Behavioral e2e — node/Hono (MikroORM)
+
+# M-T6.9 — the behavioral tier for the node/Hono backend on the MikroORM
+# persistence adapter (`persistence: mikroorm`). The default node tier
+# (behavioral-e2e.yml) boots Hono in-process on PGlite with the DEFAULT drizzle
+# adapter; MikroORM uses `@mikro-orm/postgresql`, which needs a REAL Postgres,
+# so this boots the GENERATED Hono backend as a real process against a
+# `services: postgres` sidecar and HTTP-dispatches the SAME emitted `test e2e`
+# api suite at it (backend-agnostic — written against the HTTP contract).
+#
+# The corpus is LITERALLY the default node tier's (manifest features + shared
+# systems), with one source transform: a `persistence: mikroorm` realization
+# clause injected onto the `platform: node` deployable before `generate system`.
+# So the drained MikroORM adapter gets the SAME runtime coverage as drizzle —
+# schema applies via `orm.schema.updateSchema()` at boot, CRUD round-trips —
+# not merely tsc-compile coverage.
+#
+# Reuses the boot pattern from the cross-backend behavioral runners
+# (run-dotnet.mjs / run-python.mjs): generate → npm install → boot → dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e-mikroorm.yml'
+  pull_request:
+    paths:
+      - 'src/generator/typescript/emit/mikroorm.ts'
+      - 'src/platform/hono/**'
+      - 'src/generator/_adapters/**'
+      - 'src/ir/**'
+      - 'src/generator/_expr/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-e2e-mikroorm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-mikroorm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: d
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/d
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      # Boots the generated Hono/mikroorm backend as a real process (npm install
+      # + `tsx index.ts`) against the Postgres sidecar and runs the emitted api
+      # e2e suite over HTTP. `updateSchema()` applies the schema at boot.
+      - name: Run node/mikroorm behavioral tier (api gate, real Postgres)
+        working-directory: test/behavioral
+        run: node run-mikroorm.mjs
