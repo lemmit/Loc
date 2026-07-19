@@ -823,7 +823,7 @@ system D {
     // The repository (de)serialises the whole aggregate through the snapshot.
     const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
     expect(repo).toContain(
-      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)!)",
+      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)! with { Version = __d.version })",
     );
     expect(repo).toContain(
       "System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json)",
