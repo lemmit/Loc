@@ -36,8 +36,38 @@ Fixed on `main`: `src/generator/typescript/repository-find-builder.ts:587` combi
 Update/mutating-op request DTOs now carry the SAME field-level wire constraints as create — mirrored from `agg.invariants`, filtered to `op.params` (invariants over fields the op doesn't take are dropped, exactly as the create path does). Landed on the four backends that lacked it: TS/Hono (`src/platform/hono/v4/routes-builder.ts:306` op-DTO `emitWireSchema`), .NET FluentValidation (`src/generator/dotnet/validator-emit.ts:77` `renderOperationValidator`), Java (`src/generator/java/emit/validator.ts:56` op loop), Python pydantic (`src/generator/python/routes-builder.ts` `opRequestModel` → `Field(...)` + `@model_validator`). **Phoenix was already at parity** (`update` routes through `base_changeset`'s `validatorBlock`) — lock-in test only. Also mirrored onto the client schemas (`src/generator/_frontend/api-module.ts:120`, `src/generator/svelte/api-builder.ts:78`). Applied uniformly to every public mutating op (closes the identical gap on custom mutators, not just `update`). One generator test per backend + Phoenix lock-in + frontend-client test; `page-emitter-equivalence` baseline re-captured (4 new `UpdateCommandValidator.cs` + 4 constrained routes/client files). Full fast suite green. Kept briefly as the record; delete next refresh.
 Sources: [generated-code-review-2026-06-30](../audits/generated-code-review-2026-06-30.md) SYS-1.
 
-## M-T6.9 — Adapter subsets: Dapper/MikroORM — `partial` · **L** · P3
-Both alternates reject big model slices (inheritance, nested parts, non-relational shapes, filters/provenance on mikroorm; seeds/subscriptions on dapper) and Dapper emits `NotImplementedException` stubs for out-of-subset predicates. Either drain the biggest rejections or declare the v1 subsets final (D-tag + docs), stopping the drip. The removed style/transport/runtime registries (2026-07-12) already resolved DEBT-21/22/25 — don't resurrect.
+## M-T6.9 — Adapter subsets: Dapper/MikroORM → FULL PARITY (drain) — `in-progress` · **XL** · P3
+**DECIDED 2026-07-18: DRAIN to full parity** (owner call — the v1 subsets should be fully supported, not declared final). Both alternates get widened until `loom.dapper-unsupported` / `loom.mikroorm-unsupported` reject nothing a full model throws at them; the gates then survive only as fail-fast for genuinely-impossible shapes (like the stamp gates). Landed incrementally, one feature × one adapter per slice, each behind its own `dotnet-build` / node build+e2e fixture; the shared `find-predicate-unsupported` subset-widening rides along per feature.
+
+**Wave 1 — MERGED 2026-07-18.** MikroORM (#2022): managed-access fields, find-predicate widening, `filter` predicates, `Id[]` pivot associations, seeds. Dapper (#2025): seeds, provenanced fields, principal stamps + filters, find-predicate widening (also fixed a latent EF-interceptor-on-Dapper bug).
+
+**Wave 2 — MERGED 2026-07-18.** MikroORM (#2045): aggregate inheritance (TPH via discriminator + TPC via per-concrete tables, native STI), contained entity parts (`contains`, relational child tables), `shape(embedded)` (jsonb-folded containments) — plus a bonus: `audited` ops on mikroorm were *silently emitting non-compiling* route handlers (the shared drizzle-shaped routes-builder seam) and are now an honest fail-fast gate. Dapper (#2044): `this.<refColl>.contains(x)` find-predicate → EXISTS join subquery (Dapper now matches the EF Core find subset), nested entity parts (`contains`, flat single-level child tables).
+
+**Wave 3 — MERGED 2026-07-18.** MikroORM (#2057): `shape(document)` (whole aggregate → one `(id,data,version)` jsonb Row) and **provenanced fields + `audited` ops** — the shared drizzle-shaped routes-builder history-flush was ported to the EntityManager (`db.transactional` + `tx.insert(AuditRecordRow/ProvenanceRecordRow)`) behind a `usingMikro` branch, drizzle emission byte-identical and proven unregressed (`corpus × tsc` `provenance`/`document` both pass). Dapper (#2063): `shape(document)` (jsonb blob), `shape(embedded)` (flat columns + per-containment jsonb), and **TPC** (`ownTable`) inheritance.
+
+**Wave 4 — MERGED 2026-07-18.** Dapper residue (#2076): `contains` on event-sourced aggregates, scalar/enum/VO/id **collection fields on a part** (jsonb list columns), `contains`+`Id[]` combined (the two hydrate passes compose), and **TPH** (`sharedTable`) inheritance (`kind`-discriminated shared table + per-concrete filtered repos — matches EF's actual output, which emits no polymorphic base reader for TPH, so none is shipped).
+
+**FINAL STATUS.** **MikroORM: fully drained** (except deeper-nested / collection-bearing contained parts — v1 bound). **Dapper: drained except three honest fail-fast gates** — (1) **part-in-part** (recursive child tables/hydration), (2) **TPH member that itself uses `contains`/`Id[]`** (child/join tables would need to FK the shared base row — EF's TPT-via-contains; flat-member TPH is done), (3) **workflow event subscriptions / outbox** — the one genuinely large gap: `AppDbContext` is woven through ≥8 workflow/outbox/projection emitters, so draining it means raw-Npgsql `ISagaStateStore`/`IWorkflowEventStore`/relay/read-controller + their DDL (well beyond a single clean `/warnaserror` commit). These three stay loud; pick up individually if needed.
+
+The pre-existing node **drizzle** `document`-shape regression (missing repo `delete` + arg-count) was fixed independently on `main` in **#2041**, clearing the `corpus × tsc` gate.
+
+Source-grounded rejection worklist (`validateDapperSupport` `system-checks.ts:1686`, `validateMikroOrmSupport` `:1786`), verified 2026-07-18:
+
+| Feature to drain | Dapper (.NET, vs efcore) | MikroORM (Node, vs drizzle) |
+|---|---|---|
+| `seed` data | ✗ reject | ✗ reject |
+| non-relational `shape(embedded)`/`shape(document)` | ✗ | ✗ |
+| aggregate inheritance (`abstract`/`extends`) | ✗ | ✗ |
+| nested entity parts (`contains`) | ✗ | ✗ |
+| reference-collection associations (`Id[]`) | ✓ already | ✗ |
+| `filter` capability predicates | ✓ non-principal; ✗ principal | ✗ all |
+| principal-referencing stamp values | ✗ | ✓ already (persist-time) |
+| provenanced fields | ✗ | ✗ |
+| server-managed access (`token`/`internal`/`secret`) | ✓ already | ✗ (except stamp/version) |
+| workflow event subscriptions / outbox | ✗ | (drizzle path) verify |
+| find-predicate SQL subset (`whereToSql`/`whereToMikroFilter`) | narrower than efcore | narrower than drizzle |
+
+MikroORM is a full data-mapper (native STI inheritance, embeddables, collections) so several of its slices are cheaper than the raw-SQL Dapper equivalents. Slice ordering + per-feature reference impls: [`docs/audits/target-gate-inventory-2026-07-18.md`](../audits/target-gate-inventory-2026-07-18.md) → drain plan. Don't resurrect the removed style/transport/runtime registries (2026-07-12, DEBT-21/22/25).
 Sources: DEBT-17/18, parity register adapter sub-matrix.
 
 ## M-T6.10 — Vanilla as a first-class adapter + `resolvePersistence()` — `done` · **M** · P3
@@ -85,3 +115,6 @@ Sources: this session's parameter-passing validation audit (repros under the aud
 
 ## M-T6.14 — Small parity leftovers — `open` · **S** · P3
 DEBT-12 Phoenix `verify_token` niche; DEBT-08 `envelope` carrier (deferred — no live use; signpost via M-T5.9a); saga/projection EF `HasColumnName` correlation-column bug (from S7 Slice C review); domain-seam log-catalog §3 residue ⚠ partly stale.
+
+## M-T6.19 — Java `shape(embedded)` jsonb id-array reference collections — `open` · **M** · P3
+`loom.java-embedded-refcoll-unsupported` (`system-checks.ts:1104-1123`) — a `shape(embedded)` aggregate with a `X id[]` reference collection is gated on Java because a jsonb id-array column routes through Hibernate's structured-JSON path, which bypasses the Jackson `FormatMapper` for `@Embeddable` typed ids and mis-serialises the list. Containments-as-json already work; only the id-array case is unmapped. Fix: a converter-based (`@Convert`/`AttributeConverter`) mapping so the id-array serialises through the FormatMapper, then drop the gate. +1 generator test on the gated `java-build` fixture. The **only** genuine target feature-gap not previously tracked by a mission (surfaced by the 2026-07-18 gate inventory, [`docs/audits/target-gate-inventory-2026-07-18.md`](../audits/target-gate-inventory-2026-07-18.md)). Workarounds exist (`shape(document)`, relational shape, host the context on node/dotnet), so P3.
