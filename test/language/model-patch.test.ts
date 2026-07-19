@@ -141,19 +141,25 @@ describe("applyPatches", () => {
     expect(errors).toEqual([]);
   });
 
-  it("rejects `add` into a deployable (its body is a positional grammar)", async () => {
+  it("adds a clause into a deployable (its body is order-independent)", async () => {
     const sys = `system Shop {
   context Sales { aggregate Order { total: int } }
-  deployable api {
-    platform: dotnet
+  ui WebApp with scaffold(subdomains: [Sales]) {}
+  deployable web {
+    platform: react
     contexts: [Sales]
   }
 }`;
     const r = await applyPatches(sys, [
-      { op: "add", target: "deployable api", source: "ui: WebApp" },
+      { op: "add", target: "deployable web", source: "ui: WebApp" },
     ]);
-    expect(r.ok).toBe(false);
-    expect(r.errors[0]?.message).toMatch(/not a container/);
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("ui: WebApp");
+    // The appended clause parses — the post-`platform` body is order-independent.
+    const { diagnostics } = await parseString(r.text);
+    expect(diagnostics.some((d) => (d.data as { code?: string })?.code === "parsing-error")).toBe(
+      false,
+    );
   });
 
   it("targets value-object members and adds into a value object", async () => {

@@ -12,10 +12,17 @@
 // Pure language-layer: AST + CST + addressOf only; no `ir/` edge.
 // ---------------------------------------------------------------------------
 
-import type { AstNode, LangiumDocument } from "langium";
+import { type AstNode, AstUtils, type LangiumDocument } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type { JsonFixHint } from "../diagnostics/contract.js";
-import { isAggregate } from "./generated/ast.js";
+import {
+  isAggregate,
+  isDeployable,
+  isProperty,
+  isSystem,
+  isUi,
+  type Property,
+} from "./generated/ast.js";
 import { addressOf } from "./print/outline.js";
 
 /** The declaration node directly inside an aggregate that encloses `node`
@@ -27,6 +34,39 @@ function enclosingMember(node: AstNode): AstNode | undefined {
     cur = cur.$container;
   }
   return undefined;
+}
+
+/** Fix a frontend deployable missing its `ui:` binding by appending
+ *  `ui: <UiName>` to the (order-independent) deployable body.  With exactly one
+ *  system-scope `ui { … }` block the binding is unambiguous (a single `add`);
+ *  with several, offer each as a `choose` option; with none there's nothing to
+ *  bind, so no fix is offered (the author must declare a `ui` block first). */
+function missingUiFix(
+  _d: Diagnostic,
+  _doc: LangiumDocument,
+  node: AstNode,
+): JsonFixHint | undefined {
+  if (!isDeployable(node)) return undefined;
+  const target = addressOf(node);
+  const system = AstUtils.getContainerOfType(node, isSystem);
+  if (!target || !system) return undefined;
+  const uis = system.members.filter(isUi);
+  if (uis.length === 0) return undefined;
+  if (uis.length === 1) {
+    return {
+      kind: "insert-decl",
+      summary: `Bind ui: ${uis[0].name}.`,
+      patch: { op: "add", target, source: `ui: ${uis[0].name}` },
+    };
+  }
+  return {
+    kind: "choose",
+    summary: "Bind one of the declared ui blocks.",
+    options: uis.map((u) => ({
+      summary: `ui: ${u.name}`,
+      patch: { op: "add", target, source: `ui: ${u.name}` },
+    })),
+  };
 }
 
 type FixHintProvider = (
@@ -90,12 +130,44 @@ const PROVIDERS: Record<string, FixHintProvider> = {
     };
   },
 
-  // NB: `loom.react-deployable-missing-ui` is intentionally NOT auto-fixed.
-  // The fix is `add ui: <Name>`, but the deployable body is a *positional*
-  // grammar (the `ui:` binding has a fixed slot), so the generic `add` op
-  // (append before `}`) produces invalid source.  It needs a position-aware
-  // "insert into a sequenced body" patch kind — tracked in
-  // docs/old/proposals/agent-tools-and-mcp.md §4c.
+  // `token status: Status?` → `token status: Status`.  A `token` field is
+  // echoed by the client on every update to identify the target / detect
+  // concurrency conflicts; a nullable token can't serve that role.  The repair
+  // is unambiguous — drop the optional `?` — so it's the same "remove the
+  // rejected marker" shape as `reserved-derived-on-vo`.  The `?` is the trailing
+  // marker of the type's CST, sliced out while the rest of the member (incl. any
+  // `= default`) is preserved verbatim.
+  "loom.token-nullable": (_d, _doc, node) => {
+    if (!isProperty(node)) return undefined;
+    const prop = node as Property;
+    const memberCst = prop.$cstNode;
+    const typeCst = prop.type?.$cstNode;
+    if (!prop.type?.optional || !memberCst || !typeCst) return undefined;
+    const target = addressOf(prop);
+    if (!target) return undefined;
+    const relStart = typeCst.offset - memberCst.offset;
+    const relEnd = relStart + typeCst.text.length;
+    if (relStart < 0 || relEnd > memberCst.text.length) return undefined;
+    const typeText = memberCst.text.slice(relStart, relEnd);
+    const fixedType = typeText.replace(/\?(\s*)$/, "$1"); // drop the trailing `?`
+    if (fixedType === typeText) return undefined;
+    const source = memberCst.text.slice(0, relStart) + fixedType + memberCst.text.slice(relEnd);
+    return {
+      kind: "replace-text",
+      summary: "Drop '?' — a token field must be non-optional.",
+      patch: { op: "replace", target, source },
+    };
+  },
+
+  // A frontend deployable (react/svelte/vue/angular) with no `ui:` binding →
+  // append `ui: <UiName>`.  The deployable body's post-`platform` clauses are
+  // order-independent, so the generic `add` op (append before `}`) is valid —
+  // the previous "positional, can't auto-fix" note was stale.  One provider,
+  // shared across the four per-platform codes.
+  "loom.react-deployable-missing-ui": missingUiFix,
+  "loom.svelte-deployable-missing-ui": missingUiFix,
+  "loom.vue-deployable-missing-ui": missingUiFix,
+  "loom.angular-deployable-missing-ui": missingUiFix,
 };
 
 /**

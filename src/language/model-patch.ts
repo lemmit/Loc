@@ -67,11 +67,14 @@ interface Edit {
 
 /** A container the `add` op can insert a member into — a node with a free-form
  *  `{ member* }` body where appending before the closing `}` is valid.
- *  Deliberately excludes `Deployable`: its body is a *positional* config
- *  grammar (the `ui:` / `serves:` / `hosts:` slots are ordered), so a generic
- *  append would land out of position and fail to parse. */
+ *  `Deployable` qualifies: after `platform:` its body clauses (`contexts:` /
+ *  `ui:` / `serves:` / `hosts:` / `port:` / …) are ORDER-INDEPENDENT (an
+ *  interleaving `(...)*` group in the grammar), so appending a well-formed
+ *  clause before the closing `}` parses — the earlier "positional" exclusion
+ *  was stale.  This is what lets the `*-deployable-missing-ui` fix-hint emit
+ *  `add ui: <Name>`. */
 function isContainer(node: AstNode): boolean {
-  return isBoundedContext(node) || isAggregate(node) || isValueObject(node);
+  return isBoundedContext(node) || isAggregate(node) || isValueObject(node) || isDeployable(node);
 }
 
 /** Walk the declaration tree (the same set `buildOutline` enumerates) building
