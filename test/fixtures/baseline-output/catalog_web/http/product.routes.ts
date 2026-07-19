@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { ProblemDetails, newApp } from "./problem-details";
+import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Product } from "../domain/product";
 import type { ProductRepository } from "../db/repositories/product-repository";
 import * as Ids from "../domain/ids";
@@ -68,6 +69,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const created = Product.create({ sku: body.sku, price: new Money(body.price.amount, body.price.currency) });
       await repo.save(created);
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "aggregate_created", aggregate: "Product", id: created.id as string });
+      recordDomainOperation("Product", "create");
       return c.json({ id: created.id as string }, 201);
     },
   );
@@ -162,6 +164,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Product", op: "update", id });
+      recordDomainOperation("Product", "update");
       const aggregate = await repo.getById(Ids.ProductId(id));
       const ifMatch = c.req.header("if-match");
       const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;
@@ -194,22 +197,27 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Product", message: err.message, status: 403 });
+      recordDomainFault("Product", "forbidden");
       return problem(403, "Forbidden", err.message);
     }
     if (err instanceof DisallowedError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "disallowed", aggregate: "Product", message: err.message, status: 409 });
+      recordDomainFault("Product", "disallowed");
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 400 });
+      recordDomainFault("Product", "domain_error");
       return problem(400, "Bad Request", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Product", status: 404 });
+      recordDomainFault("Product", "not_found");
       return problem(404, "Not Found", err.message);
     }
     if (err instanceof ConcurrencyError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Product", message: err.message, status: 409 });
+      recordDomainFault("Product", "conflict");
       return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {

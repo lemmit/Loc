@@ -183,6 +183,9 @@ export function buildRoutesFile(
   }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ProblemDetails, newApp } from "./problem-details";`);
+  // Domain metrics (M-T7.1): per-operation + per-fault counters, recorded at
+  // the same seams as the operation_invoked / fault log lines below.
+  lines.push(`import { recordDomainFault, recordDomainOperation } from "../obs/metrics";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
     // Audited / provenanced routes instantiate the repo inside a
@@ -630,6 +633,7 @@ export function buildRoutesFile(
     lines.push(
       `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
     );
+    lines.push(`      recordDomainOperation("${agg.name}", "create");`);
     if (emitTrace) {
       // wire_out — outbound payload shape (keys only).  Bound to a const
       // so `c.json` doesn't re-evaluate the payload expression alongside
@@ -935,22 +939,26 @@ export function buildRoutesFile(
   lines.push(
     `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
+  lines.push(`      recordDomainFault("${agg.name}", "forbidden");`);
   lines.push(`      return problem(403, "Forbidden", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DisallowedError) {`);
   lines.push(
     `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: err.message, status: ${disallowedStatus}`)}`,
   );
+  lines.push(`      recordDomainFault("${agg.name}", "disallowed");`);
   lines.push(`      return problem(${disallowedStatus}, "Disallowed", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
     `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
   );
+  lines.push(`      recordDomainFault("${agg.name}", "domain_error");`);
   lines.push(`      return problem(400, "Bad Request", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
+  lines.push(`      recordDomainFault("${agg.name}", "not_found");`);
   lines.push(`      return problem(404, "Not Found", err.message);`);
   lines.push(`    }`);
   // PG unique_violation (SQLSTATE 23505) — a `unique (...)` domain invariant
@@ -971,6 +979,7 @@ export function buildRoutesFile(
     lines.push(
       `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: ${uniquenessStatus}`)}`,
     );
+    lines.push(`      recordDomainFault("${agg.name}", "disallowed");`);
     lines.push(
       `      return problem(${uniquenessStatus}, "Conflict", \`A ${agg.name} with these values already exists.\`);`,
     );
@@ -991,6 +1000,7 @@ export function buildRoutesFile(
     lines.push(
       `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: ${concurrencyStatus}`)}`,
     );
+    lines.push(`      recordDomainFault("${agg.name}", "conflict");`);
     lines.push(`      return problem(${concurrencyStatus}, "Conflict", err.message);`);
     lines.push(`    }`);
   }
@@ -1194,6 +1204,7 @@ function emitOperationRoute(
   out.push(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
+  out.push(`    recordDomainOperation("${agg.name}", "${op.name}");`);
   // When the operation body references `currentUser`, the aggregate
   // method's signature picks up a trailing `currentUser: User`
   // parameter (see operationUsesCurrentUser).  The route reads the
@@ -1428,6 +1439,7 @@ function emitReturningOperationRoute(
   out.push(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
+  out.push(`    recordDomainOperation("${agg.name}", "${op.name}");`);
   const usesUser = operationUsesCurrentUser(op);
   if (usesUser) {
     out.push(
