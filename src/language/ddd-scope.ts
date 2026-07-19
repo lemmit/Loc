@@ -215,9 +215,11 @@ export class DddScopeProvider extends DefaultScopeProvider {
     // channel).  Events aren't globally exported, so widen here with the same
     // targeted-arm shape as the OnDecl/ProjectionOn/timerSource arms; the
     // local (same-document) declaration still wins via the default scope.
-    // Payloads (`handle` commands) deliberately stay context-local.
+    // Payloads (`handle` commands) and union variants deliberately stay
+    // context-local — the widening gates on the create-param position
+    // itself, not the broader `allowTransport`.
     const systemEventDescs = (): AstNodeDescription[] => {
-      if (!allowTransport) return [];
+      if (!inWorkflowCreateParam(context.container)) return [];
       const system = AstUtils.getContainerOfType(context.container, isSystem);
       if (!system) return [];
       return [...AstUtils.streamAllContents(system).filter(isEventDecl)].map((e) =>
@@ -430,6 +432,17 @@ function isTransportType(type: string): boolean {
  *  WorkflowCreateDecl | HandleDecl; we match it positionally so a `NamedType`
  *  elsewhere inside the workflow (a `let x: T` annotation, say) does not also
  *  pull transport types into scope. */
+/** True when `namedType` is the declared type of a workflow `create(...)`
+ *  parameter specifically — the event-subscription position the M-T4.4
+ *  system-wide event widening applies to.  Narrower than
+ *  `inWorkflowCommandParam` (which also covers `handle` params). */
+function inWorkflowCreateParam(namedType: AstNode | undefined): boolean {
+  const typeRef = namedType?.$container;
+  const param = typeRef?.$container;
+  if (param?.$type !== "Parameter") return false;
+  return param.$container?.$type === "WorkflowCreateDecl";
+}
+
 function inWorkflowCommandParam(namedType: AstNode | undefined): boolean {
   const typeRef = namedType?.$container;
   const param = typeRef?.$container;
