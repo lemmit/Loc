@@ -133,7 +133,12 @@ function primTypes(name: string): { mikro: string; ts: string; columnType?: stri
     case "long":
       return { mikro: "bigint", ts: "number" };
     case "decimal":
-      return { mikro: "decimal", ts: "string" };
+      // Unbounded `numeric` — matches the drizzle backend's `numeric(col)`
+      // (no precision/scale).  MikroORM's bare `type: "decimal"` DEFAULTS to
+      // `numeric(10,0)` (scale 0), which rounds every fractional value to an
+      // integer on store (9.99 → 10); pin `columnType: "numeric"` so the DDL
+      // is scale-free and fractional decimals survive the round-trip.
+      return { mikro: "decimal", ts: "string", columnType: "numeric" };
     case "money":
       return { mikro: "decimal", ts: "string", columnType: "numeric(19,4)" };
     case "bool":
@@ -634,8 +639,16 @@ export function renderMikroEntities(
         `  tableName: "${snake(ctx.name)}_events",`,
         "  properties: {",
         // `seq` — context-global monotonic cursor (bigserial), inert until the
-        // replay reader lands; not part of the PK.
-        '    seq: { type: "number", columnType: "bigint", autoincrement: true },',
+        // replay reader lands; not part of the PK.  Must be a real Postgres
+        // `bigserial` (sequence-backed DB DEFAULT), like the drizzle event
+        // store: MikroORM's `updateSchema()` only turns an autoincrement
+        // *primary* into a serial, so a bare `bigint autoincrement` on this
+        // non-PK column ships as a plain NOT NULL bigint with no default and
+        // every event insert (which omits `seq`) fails the not-null constraint.
+        // `columnType: "bigserial"` emits the sequence-backed column; the
+        // `autoincrement` flag keeps MikroORM treating it as DB-generated so it
+        // is left out of the insert column list.
+        '    seq: { type: "number", columnType: "bigserial", autoincrement: true },',
         // Composite `(stream_type, stream_id, version)` PK: every ES stream in
         // the context shares this table, discriminated by `streamType`.
         '    streamType: { type: "string", primary: true },',
