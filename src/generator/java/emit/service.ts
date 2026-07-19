@@ -14,6 +14,7 @@ import { upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import {
   collectJavaExprImports,
+  collectJavaTypeImports,
   javaValueTypeForId,
   renderJavaExpr,
   renderJavaType,
@@ -202,7 +203,11 @@ export function renderJavaService(
     .flatMap((f) => {
       const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
       const args = f.params.map((p) => p.name).join(", ");
-      for (const p of f.params) collectWireToDomainImports(p.type, imports);
+      // Finder params are DOMAIN-typed (`renderJavaType`) and passed straight
+      // through to the repository — collect the domain-type import (BigDecimal
+      // for decimal, UUID for a bare guid, …) to match the rendered signature,
+      // not the wire→domain collector (which only covers money/datetime).
+      for (const p of f.params) collectJavaTypeImports(p.type, imports);
       if (isPagedFind(f)) {
         const pagedParams = [params, "int page, int pageSize, String sort, String dir"]
           .filter(Boolean)
@@ -265,7 +270,7 @@ export function renderJavaService(
     imports.add("java.util.UUID");
   }
   if (anyLifecycleAudited) {
-    imports.add("com.fasterxml.jackson.databind.node.NullNode");
+    imports.add("tools.jackson.databind.node.NullNode");
   }
   // The audit-record actor reads `currentUserAccessor.user()` on an authed
   // system even when no operation otherwise uses the current user, so the

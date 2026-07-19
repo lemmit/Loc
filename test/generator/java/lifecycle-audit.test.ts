@@ -54,7 +54,7 @@ describe("java generator — audited lifecycle actions", () => {
 
   it("injects the AuditRecordRepository + the NullNode import", () => {
     expect(svc).toContain("private final AuditRecordRepository auditRecords;");
-    expect(svc).toContain("import com.fasterxml.jackson.databind.node.NullNode;");
+    expect(svc).toContain("import tools.jackson.databind.node.NullNode;");
   });
 
   it("audits the create with before=NullNode and after=wire(created) after the save", () => {

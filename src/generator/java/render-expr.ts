@@ -1007,7 +1007,7 @@ export function collectJavaTypeImports(t: TypeIR, into: Set<string> = new Set())
       if (t.name === "datetime") into.add("java.time.Instant");
       if (t.name === "duration") into.add("java.time.Duration");
       if (t.name === "guid") into.add("java.util.UUID");
-      if (t.name === "json") into.add("com.fasterxml.jackson.databind.JsonNode");
+      if (t.name === "json") into.add("tools.jackson.databind.JsonNode");
       return into;
     case "array":
       into.add("java.util.List");

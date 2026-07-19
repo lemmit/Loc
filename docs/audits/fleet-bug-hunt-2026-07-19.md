@@ -11,8 +11,21 @@ unique bugs**. None overlap in-flight open PRs.
 
 Snapshot: `main` @ `ad8aa3c` (plus the branch-local forms.ts record-threading
 fix). Like every file under `docs/audits/`, this is a snapshot — **not**
-authoritative for what ships today. Verify against fresh `main` before fixing;
-per instruction, none of these have been fixed by this audit.
+authoritative for what ships today. Verify against fresh `main` before fixing.
+
+> **Update (2026-07-19, follow-up PR):** section **E** (the Java backend's
+> incomplete Jackson-3 migration — E1/E2/E3) has been **fixed**: the stale
+> `com.fasterxml.jackson.databind`/`.core` references were repackaged to
+> `tools.jackson.*`, the Jackson-2-only mapper idioms migrated to the Jackson-3
+> builder API (`new ObjectMapper().findAndRegisterModules()` →
+> `JsonMapper.builder().findAndAddModules().build()`, and the `.visibility(…)`
+> builder calls → `.changeDefaultVisibility(vc -> vc.withVisibility(…))`), the
+> `openapi-customizer` swagger-core interop **kept** on Jackson 2 (swagger-core
+> is Jackson-2-based — its `Json.mapper()` throws the checked
+> `JsonProcessingException`), and the finder-param import collector corrected
+> (E3). Verified by `gradle testClasses bootJar` (JDK 25) on generated
+> document/`json`, event-sourced, OIDC-auth, and extern-resource projects. All
+> other sections below remain open.
 
 Severity legend: **build-break** — generated project fails its own compile
 gate; **wrong-value** — compiles but computes/serves incorrect results;
