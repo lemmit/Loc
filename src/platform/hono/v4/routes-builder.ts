@@ -1,3 +1,4 @@
+import { serverSourcedDefaultFields } from "../../../generator/_frontend/server-default.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   discriminatedUnionZod,
@@ -347,6 +348,20 @@ export function buildRoutesFile(
     lines.push(
       `const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`,
     );
+    // Prepare-response schema: the server-sourced-default fields (`now()` /
+    // `currentUser.*`) the create form fetches from `GET /prepare` to overlay
+    // its type-zero seed.  Emitted only when such a field exists — keyed by the
+    // shared `serverSourcedDefaultFields`, so the schema and the route handler
+    // below (and the frontend consumer) can never drift.
+    const prepareFields = serverSourcedDefaultFields(createInputFields(agg));
+    if (prepareFields.length > 0) {
+      const props = prepareFields
+        .map((f) => `${f.name}: ${zodForResponseField(f.type, false, ctx)}`)
+        .join(", ");
+      lines.push(
+        `const Prepare${agg.name}Response = z.object({ ${props} }).partial().openapi("Prepare${agg.name}Response");`,
+      );
+    }
     lines.push("");
   }
 
@@ -592,6 +607,54 @@ export function buildRoutesFile(
     lines.push(`    },`);
     lines.push(`  );`);
     lines.push("");
+  }
+
+  // Prepare — `GET /prepare` returns the server-sourced create defaults
+  // (`now()` / `currentUser.*`) the create form fetches to overlay its
+  // type-zero seed.  A static segment, so it registers BEFORE `GET /{id}`
+  // (same shadowing rule as the named finds below).  Emitted only when the
+  // aggregate has a server-sourced-default field.
+  if (emitCreate) {
+    const prepareFields = serverSourcedDefaultFields(createInputFields(agg));
+    if (prepareFields.length > 0) {
+      const needsPrincipal = prepareFields.some(
+        (f) => !(f.default.kind === "literal" && f.default.lit === "now"),
+      );
+      const entries = prepareFields
+        .map((f) => {
+          const value =
+            f.default.kind === "literal" && f.default.lit === "now"
+              ? "new Date().toISOString()"
+              : renderTsExpr(f.default);
+          return `${f.name}: ${value}`;
+        })
+        .join(", ");
+      lines.push(`  app.openapi(`);
+      lines.push(`    createRoute({`);
+      lines.push(`      method: "get",`);
+      lines.push(`      path: "/prepare",`);
+      lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
+      lines.push(`      operationId: "prepare${agg.name}",`);
+      lines.push(`      responses: {`);
+      lines.push(`        200: {`);
+      lines.push(`          description: "Server-sourced create defaults",`);
+      lines.push(
+        `          content: { "application/json": { schema: Prepare${agg.name}Response } },`,
+      );
+      lines.push(`        },`);
+      lines.push(`      },`);
+      lines.push(`    }),`);
+      lines.push(`    async (c) => {`);
+      if (needsPrincipal) {
+        lines.push(
+          `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+        );
+      }
+      lines.push(`      return c.json({ ${entries} }, 200);`);
+      lines.push(`    },`);
+      lines.push(`  );`);
+      lines.push("");
+    }
   }
 
   // Named find queries with STATIC paths (`find byHolder(...)` → GET

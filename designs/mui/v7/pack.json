@@ -629,5 +629,6 @@
       }
     ]
   },
-  "seedsOpFormRecord": true
+  "seedsOpFormRecord": true,
+  "seedsServerDefaults": true
 }

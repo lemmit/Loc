@@ -706,6 +706,10 @@ export interface AggregateFormState extends FormStateBase {
   /** Non-optional aggregate fields — optional fields are excluded
    *  from the create form, matching the scaffold New-page rule. */
   fields: AggregateIR["fields"];
+  /** The aggregate has a server-sourced-default field (`now()` /
+   *  `currentUser.*`), so a record-overlaying pack's `form-of-decls` fetches
+   *  `usePrepare<Agg>` and `reset`s the form once it resolves. */
+  hasServerDefaults?: boolean;
 }
 
 export interface WorkflowFormState extends FormStateBase {

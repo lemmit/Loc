@@ -34,6 +34,7 @@ import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { chainSingleFieldNative, refineClauseFor, takeSingleFieldChain } from "../zod-refine.js";
+import { serverSourcedDefaultFields } from "./server-default.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + TanStack Query hooks.
@@ -124,6 +125,18 @@ export function buildApiModule(
       ),
     );
     lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
+    // Prepare-response schema: the server-sourced-default fields (`now()` /
+    // `currentUser.*`) the create form fetches from `GET /<tag>/prepare` to
+    // overlay its type-zero seed.  Keyed by the SAME `serverSourcedDefaultFields`
+    // the Hono route emits, so schema and consumer can't drift.
+    const prepareFields = serverSourcedDefaultFields(requiredFields);
+    if (prepareFields.length > 0) {
+      const props = prepareFields.map((f) => `${f.name}: ${zodForRequest(f.type)}`).join(", ");
+      lines.push(`export const Prepare${agg.name}Response = z.object({ ${props} }).partial();`);
+      lines.push(
+        `export type Prepare${agg.name}Response = z.infer<typeof Prepare${agg.name}Response>;`,
+      );
+    }
     // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
     // the schema carries a real transform (a money field somewhere in the
     // create input), so `z.input` ≠ `z.output`.
@@ -337,6 +350,25 @@ export function buildApiModule(
     lines.push(`  });`);
     lines.push(`}`);
     lines.push("");
+
+    // usePrepare<Agg> — one-shot fetch of the server-sourced create defaults
+    // (`GET /<tag>/prepare`); the create form overlays them on its type-zero
+    // seed.  A plain `useQuery` (staleTime Infinity — the defaults are stable
+    // for the session).  Emitted only when a server-sourced default exists.
+    const prepFields = serverSourcedDefaultFields(createInputFields(agg));
+    if (prepFields.length > 0) {
+      lines.push(`export function usePrepare${agg.name}() {`);
+      lines.push(`  return useQuery({`);
+      lines.push(`    queryKey: [...${aggKey}, "prepare"],`);
+      lines.push(`    queryFn: async () => {`);
+      lines.push(`      const r = await api.get(\`/${tag}/prepare\`);`);
+      lines.push(`      return Prepare${agg.name}Response.parse(r);`);
+      lines.push(`    },`);
+      lines.push(`    staleTime: Number.POSITIVE_INFINITY,`);
+      lines.push(`  });`);
+      lines.push(`}`);
+      lines.push("");
+    }
   }
 
   // useDelete<Agg> — canonical hard delete (DELETE /<tag>/{id}).  Gated on
