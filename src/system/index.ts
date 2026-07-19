@@ -273,6 +273,11 @@ function emitSystem(
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
+  // Prometheus collector scrape config (M-T7.1) — mounted by the compose
+  // `prometheus` service; one job per backend deployable's /metrics.
+  if (metricsScrapeTargets(sys).length > 0) {
+    out.set("monitoring/prometheus.yml", renderPrometheusConfig(sys));
+  }
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
   // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
   // launch config per deployable whose platform implements `debugLaunch`,
@@ -548,6 +553,37 @@ function serviceSlug(name: string): string {
 // docker-compose.yml
 // ---------------------------------------------------------------------------
 
+/** The Prometheus scrape targets — every BACKEND deployable exposes
+ *  `GET /metrics` (M-T7.1); pure static frontends do not.  Each target is
+ *  the deployable's compose service name + the port it listens on inside
+ *  the compose network. */
+function metricsScrapeTargets(sys: SystemIR): Array<{ slug: string; port: number }> {
+  const targets: Array<{ slug: string; port: number }> = [];
+  for (const d of sys.deployables) {
+    const platform = platformFor(d.platform);
+    if (platform.isFrontend) continue;
+    const slug = serviceSlug(d.name);
+    const port = platform.composeService({ deployable: d, sys, slug }).internalPort;
+    targets.push({ slug, port });
+  }
+  return targets;
+}
+
+/** `monitoring/prometheus.yml` — the collector's scrape config, one job per
+ *  backend deployable, hitting its `/metrics` on the compose network.  Wired
+ *  into the `prometheus` service by `renderDockerCompose`. */
+function renderPrometheusConfig(sys: SystemIR): string {
+  const lines: string[] = ["# Auto-generated.", "global:", "  scrape_interval: 15s", ""];
+  lines.push("scrape_configs:");
+  for (const { slug, port } of metricsScrapeTargets(sys)) {
+    lines.push(`  - job_name: ${slug}`);
+    lines.push("    metrics_path: /metrics");
+    lines.push("    static_configs:");
+    lines.push(`      - targets: [${JSON.stringify(`${slug}:${port}`)}]`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 function renderDockerCompose(sys: SystemIR): string {
   const lines: string[] = [];
   lines.push("# Auto-generated.");
@@ -600,6 +636,19 @@ function renderDockerCompose(sys: SystemIR): string {
   const sidecars = renderStorageSidecars(sys);
   for (const svc of sidecars.services) {
     lines.push(...svc.map((l) => `  ${l}`));
+    lines.push("");
+  }
+  // Prometheus collector (M-T7.1): scrapes every backend's GET /metrics via
+  // the mounted scrape config (monitoring/prometheus.yml), so `docker compose
+  // up` gives a running monitoring surface out of the box (UI on :9090).
+  // No depends_on — Prometheus tolerates targets being down and retries.
+  if (metricsScrapeTargets(sys).length > 0) {
+    lines.push("  prometheus:");
+    lines.push("    image: prom/prometheus:v3.1.0");
+    lines.push("    volumes:");
+    lines.push("      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro");
+    lines.push("    ports:");
+    lines.push('      - "9090:9090"');
     lines.push("");
   }
   lines.push("volumes:");
