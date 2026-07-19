@@ -65,7 +65,9 @@ jobs:
           mkdir -p ci-flutter
           # Full interactive showcase — exercises every shipped tier:
           #   • Riverpod state + actions (Home's counter: state{count} + inc())
-          #   • a user component (Home's Tagline(text:) → a StatelessWidget)
+          #   • a stateless user component (Home's Tagline(text:) → a StatelessWidget)
+          #   • a stateful user component (Home's MiniCounter(start:): state{count} +
+          #     inc()/addN() → a StatefulWidget holding an immutable Model)
           #   • match await async effect (RestockProduct: await a Result-returning
           #     op → reify error variant → Dart-3 switch → state write)
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
@@ -107,6 +109,15 @@ jobs:
               framework: flutter
               api Shop: ShopApi
               component Tagline(text: string) { body: Card { Text { text } } }
+              component MiniCounter(start: int) {
+                state { count: int = start }
+                action inc() { count := count + 1 }
+                action addN(n: int) { count := count + n }
+                body: Card { Stack {
+                  Text { "MiniCounter: " + count },
+                  Button { "step", onClick: inc }
+                } }
+              }
               page Home {
                 route: "/"
                 state { count: int = 0 }
@@ -114,6 +125,7 @@ jobs:
                 body: Stack {
                   Heading { "Storefront", level: 1 },
                   Tagline(text: "Shop smarter"),
+                  MiniCounter(start: 10),
                   Text { "Taps: " + count },
                   Button { "+", onClick: inc },
                   Button { "Browse products", to: "/products" }
