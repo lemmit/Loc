@@ -174,6 +174,8 @@ renderer consumes it, so a PromQL query written once works everywhere.
 |---|---|---|---|
 | `http_requests_total` | counter | `method`, `route`, `status` | RED rate + errors |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` | RED duration (quantiles via `histogram_quantile`) |
+| `domain_operations_total` | counter | `aggregate`, `op` | Business throughput — every domain operation invoked (constructor is `op="create"`) |
+| `domain_faults_total` | counter | `aggregate`, `kind` | Recoverable domain faults (`domain_error`/`forbidden`/`not_found`/`conflict`/`disallowed`) — the business error rate |
 | `process_*`, `nodejs_*` | (default) | — | CPU, resident memory, event-loop lag, GC, open handles — from `collectDefaultMetrics()` |
 
 The two HTTP metrics are recorded at the **same request seam** as the
