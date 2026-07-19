@@ -62,6 +62,15 @@ now fixed; all corpus cases boot green on all five backends.
 
 ---
 
+## B18 🔴 elixir — a derived field has no domain-struct accessor (domain test can't read it)
+
+- **Where:** `src/generator/elixir/vanilla/` — the domain module (`domain-core-emit.ts`) emits no accessor for a `derived` field, and the domain-test emitter (`tests-emit.ts`) renders `o.<derived>` as a plain struct-field read.
+- **Repro:** `test/fixtures/corpus/core-domain.ddd` domain `test` with `expect(o.isDraft).toBe(true)` on elixir → the emitted `assert o.is_draft == true` fails: the Ecto schema has no `is_draft` field. Elixir computes the derived value **only inline at the wire boundary** (`order_controller.ex`: `"isDraft" => record.status == :Draft`), with no domain-level function or virtual struct field. node/java/dotnet/python all expose derived fields as a getter/property on the domain object, so `o.isDraft` works there.
+- **Impact:** a domain `test "…"` (unit tier) that reads a derived field is un-runnable on elixir only. The derived value's *wire* correctness is still covered by the api tier's read. Surfaced once the unit tier broadened past `sales` (which has no derived field).
+- **Status:** OPEN. `core-domain`'s domain test drops the derived assertion for now (keeping the enum/VO-decimal/containment/matcher assertions, which pass ×5). Fix = emit a derived accessor on the elixir domain module (`def is_draft(%__MODULE__{} = r), do: r.status == :Draft`, rendered via the same render-expr path as invariants/functions) and render derived member-access as that function call in `tests-emit.ts` — an elixir-only follow-up.
+
+---
+
 ## B17 ✅ elixir — pure `create` leaves a collection containment as `NotLoaded` (domain op crashes)
 
 - **Where:** `src/generator/elixir/vanilla/domain-core-emit.ts` (the pure-domain `create/1` core).
