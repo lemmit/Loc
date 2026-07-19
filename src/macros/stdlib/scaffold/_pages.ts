@@ -154,7 +154,14 @@ export function workflowIsObservable(wf: Workflow): boolean {
   const props = wf.members.filter(
     (m): m is Extract<Workflow["members"][number], { $type: "Property" }> => m.$type === "Property",
   );
-  const idProps = props.filter((p) => p.type.base.$type === "IdType" && !p.type.array);
+  // Match the IR's `instanceWireShape` gate, which counts state fields whose
+  // lowered type kind is exactly `id`.  An optional `X id?` lowers to
+  // `{kind:"optional", inner:{kind:"id"}}` (kind `optional`, not `id`), so it
+  // is NOT a correlation field there — exclude it here too, or the scaffold
+  // emits instance pages hitting an endpoint the IR never generated.
+  const idProps = props.filter(
+    (p) => p.type.base.$type === "IdType" && !p.type.array && !p.type.optional,
+  );
   return idProps.length === 1;
 }
 

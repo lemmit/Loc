@@ -88,6 +88,35 @@ describe("scaffold — observable workflow instance pages", () => {
     expect(detail.params.some((p) => p.name === "id")).toBe(true);
   });
 
+  it("does NOT synthesise instance pages when the sole id state field is optional", async () => {
+    // An optional `X id?` correlation field lowers to kind `optional`, not
+    // `id`, so the IR's `instanceWireShape` gate treats the workflow as
+    // non-observable and emits no instance surface. The scaffold gate must
+    // agree, or the pages reference an endpoint that was never generated.
+    const loom = await buildLoomModel(`
+      system Demo {
+        subdomain Sales {
+          context Orders {
+            aggregate Order { subject: string }
+            enum FulfillmentStatus { Pending, Shipped }
+            workflow Fulfillment {
+              orderId: Order id?
+              status: FulfillmentStatus
+              create(o: Order id) { let x = 1 }
+            }
+            repository Orders for Order { }
+          }
+        }
+        ui App with scaffold(workflows: [Fulfillment]) { }
+      }
+    `);
+    const names = uiPages(loom).map((p) => p.name);
+    expect(names).not.toContain("FulfillmentInstancesList");
+    expect(names).not.toContain("FulfillmentInstanceDetail");
+    // The command-triggered form facade is still produced.
+    expect(names).toContain("FulfillmentWorkflow");
+  });
+
   it("expands the bodies to QueryView trees over `<Wf>.instances.*`", async () => {
     const loom = await buildLoomModel(SRC);
     const pages = uiPages(loom);
