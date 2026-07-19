@@ -1,0 +1,109 @@
+name: Behavioral e2e — .NET (persistence: dapper)
+
+# The behavioral sibling of behavioral-e2e-dotnet.yml, forcing the .NET
+# backend's `persistence: dapper` adapter (raw Npgsql + hand-rolled SQL, no EF
+# Core).  It boots the SAME generated backend against a `services: postgres`
+# sidecar and HTTP-dispatches the SAME emitted `test e2e` api suite at it — the
+# ONLY delta is the realization clause `dotnet { persistence: dapper }` injected
+# on the deployable (run-dapper.mjs), so the drained Dapper adapter gets the
+# same RUNTIME coverage EF Core already has, not just the compile gate
+# (test/e2e/fixtures/dotnet-build/dapper*.ddd).
+#
+# This keeps the runtime-semantics RS-rules (docs/conformance-semantics.md)
+# honest for Dapper: camelCase keys both directions (RS-1), enum declared
+# casing (RS-2), no leaked columns (RS-3), temporal round-trip (RS-4), bool
+# create default (RS-6), value-object survival (RS-7), association round-trip
+# (RS-8).
+#
+# Reuses the proven boot recipe from behavioral-e2e-dotnet.yml (dotnet restore +
+# dotnet run against ConnectionStrings__Default).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e-dapper.yml'
+  pull_request:
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/dotnet/**'
+      - 'src/generator/_expr/**'
+      - 'src/platform/dotnet.ts'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-e2e-dapper.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-dapper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The .NET backend's native connection-string env var. Points at the
+      # postgres sidecar above (POSTGRES_DB: app).
+      ConnectionStrings__Default: Host=127.0.0.1;Port=5432;Database=app;Username=postgres;Password=postgres
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Pre-warm the NuGet HTTP cache. Without this every run pays the full
+      # cold restore against api.nuget.org. Key tracks the .NET emitter's
+      # csproj source so a dep-set change mints a fresh entry.
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-behavioral-${{ hashFiles('src/generator/dotnet/emit/program.ts') }}
+          restore-keys: |
+            nuget-behavioral-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run Dapper behavioral tier (api gate, real Postgres)
+        working-directory: test/behavioral
+        run: node run-dapper.mjs

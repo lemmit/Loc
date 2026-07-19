@@ -126,6 +126,7 @@ cd test/behavioral && npm ci
 node run.mjs          # Hono on PGlite — api + unit both gate (see test/behavioral/README.md)
 node run-python.mjs   # generated FastAPI    (behavioral-e2e-python.yml)
 node run-dotnet.mjs   # generated .NET/EF    (behavioral-e2e-dotnet.yml)
+node run-dapper.mjs   # generated .NET/Dapper — run-dotnet with persistence: dapper forced (behavioral-e2e-dapper.yml)
 node run-java.mjs     # generated Spring Boot (behavioral-e2e-java.yml)
 node run-elixir.mjs   # generated Phoenix    (behavioral-e2e-elixir.yml)
 node run-ui.mjs       # UI tier — vite-built React/Mantine frontend + Hono-on-PGlite origin, emitted *.ui.spec.ts Playwright round-trips (behavioral-ui-e2e.yml; non-React frontends run nightly via frontend-fullstack-e2e.yml)
