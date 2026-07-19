@@ -9,7 +9,7 @@ import {
   TextEdit,
 } from "vscode-languageserver";
 import { isMacroCall, type MacroCall } from "../generated/ast.js";
-import { unfoldMacro } from "./unfold-macro.js";
+import { enumerateScaffoldPageUnfolds, unfoldMacro } from "./unfold-macro.js";
 
 // ---------------------------------------------------------------------------
 // DddCodeActionProvider — quick-fixes for validator diagnostics tagged with a
@@ -27,8 +27,27 @@ export class DddCodeActionProvider implements CodeActionProvider {
     // Refactor: unfold a `with X(...)` macro call into its expanded
     // source.  Offered whenever the cursor sits inside a MacroCall
     // AST node (independent of any diagnostic).
-    const unfoldAction = this.maybeOfferUnfold(document, params);
-    if (unfoldAction) actions.push(unfoldAction);
+    const call = this.locateMacroCall(document, params);
+    if (call) {
+      // Whole-macro unfold (one level): "Unfold macro 'X'".
+      const result = unfoldMacro(document, call);
+      if (result) {
+        actions.push({
+          title: result.title,
+          kind: CodeActionKind.RefactorRewrite,
+          edit: { changes: { [document.textDocument.uri]: result.edits } },
+        });
+      }
+      // Per-page unfold (M-T1.5): "Unfold page 'Orders / Detail'" — eject one
+      // scaffolded page, leaving its siblings under the macro.
+      for (const opt of enumerateScaffoldPageUnfolds(document, call)) {
+        actions.push({
+          title: opt.result.title,
+          kind: CodeActionKind.RefactorRewrite,
+          edit: { changes: { [document.textDocument.uri]: opt.result.edits } },
+        });
+      }
+    }
     for (const diag of params.context.diagnostics) {
       switch (diag.code) {
         case "loom.framework-mismatch": {
@@ -66,30 +85,18 @@ export class DddCodeActionProvider implements CodeActionProvider {
     return actions;
   }
 
-  /** When the cursor sits inside a `MacroCall` AST node, offer a
-   * refactor that unfolds the macro into its expanded source.  The
-   * heavy lifting is in `unfold-macro.ts`; this method just locates
-   * the call from the cursor position and packages the result as a
-   * Refactor code action. */
-  private maybeOfferUnfold(
+  /** Locate the `MacroCall` AST node the cursor sits inside, if any — the
+   * anchor for both whole-macro unfold and per-page unfold.  The heavy lifting
+   * lives in `unfold-macro.ts`; this just resolves the call from the cursor. */
+  private locateMacroCall(
     document: LangiumDocument,
     params: CodeActionParams,
-  ): CodeAction | undefined {
+  ): MacroCall | undefined {
     const rootCst = document.parseResult?.value?.$cstNode;
     if (!rootCst) return undefined;
     const offset = document.textDocument.offsetAt(params.range.start);
     const leaf = CstUtils.findLeafNodeAtOffset(rootCst, offset);
-    const call = AstUtils.getContainerOfType(leaf?.astNode, isMacroCall) as MacroCall | undefined;
-    if (!call) return undefined;
-    const result = unfoldMacro(document, call);
-    if (!result) return undefined;
-    return {
-      title: result.title,
-      kind: CodeActionKind.RefactorRewrite,
-      edit: {
-        changes: { [document.textDocument.uri]: result.edits },
-      },
-    };
+    return AstUtils.getContainerOfType(leaf?.astNode, isMacroCall) as MacroCall | undefined;
   }
 }
 

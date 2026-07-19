@@ -52,7 +52,27 @@ Both slices are additive and can land in either order; slot injection is the
 cliff-*softener* (you never fall off), per-page unfold is the finer *escape
 hatch* (a smaller cliff). We build both so the gradient is continuous.
 
-### Slice A — Per-page unfold (cheaper; extends existing machinery)
+### Slice A — Per-page unfold (LANDED)
+
+**Shipped.** The LSP code-action provider now offers, alongside the whole-macro
+*"Unfold macro 'scaffold'"*, one *"Unfold page 'Orders / Detail'"* per page the
+macro produces. `enumerateScaffoldPageUnfolds` (`src/language/lsp/unfold-macro.ts`)
+runs the macro's **full** `invokeMacro` composition (a new executing invoker,
+vs. the one-level recording invoker) down to the leaf page-builders, flattens
+the produced tree to individual pages, and for the chosen page emits
+`area <Plural> { page <Role> { … } }` (loose page for ui-scope singletons like
+`Home`) as an **insert-only** edit — the `with scaffold(...)` clause is left in
+place, so scope-local override-by-name (`expander.ts:mergeScopedMembers`)
+suppresses exactly that scaffolded page while its siblings keep generating.
+Wired in `ddd-code-actions.ts`; tests in `test/macro/unfold-page.test.ts`
+(actions offered, single-page eject keeps the macro, re-parses clean,
+loose-singleton path). Byte-identity of the ejected body is inherited from the
+existing structural-print roundtrip guarantee. **Design note:** A1's "offered on
+each classified page" is realised as per-produced-page actions on the scaffold
+macro call itself (top-level `scaffold` included, via full execution) — no need
+to drill to `scaffoldAggregate` first.
+
+### Slice A — original design (extends existing machinery)
 
 A code action on a scaffolded page (or on the `with scaffold(...)` clause,
 scoped to one produced page) that ejects **that page's** walker-stdlib body as

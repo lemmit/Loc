@@ -32,17 +32,20 @@ import { AstUtils, type LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
 import type { MacroDefinition, OriginToken } from "../../macros/api/define.js";
 import { _withOrigin } from "../../macros/api/factories.js";
+import { area } from "../../macros/api/ui-factories.js";
 import { resolveMacroArgs } from "../../macros/expander.js";
 import { builtinCapabilities } from "../../macros/prelude.js";
 import { lookupMacro } from "../../macros/registry.js";
 import {
   type Aggregate,
+  type Area,
   type BoundedContext,
   type Capability,
   isAggregate,
   isCapability,
   type MacroCall,
   type Model,
+  type Page,
   type Ui,
   type WithClause,
 } from "../generated/ast.js";
@@ -524,4 +527,129 @@ function indent(text: string, prefix: string): string {
     .split("\n")
     .map((line) => (line.length > 0 ? prefix + line : line))
     .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Per-page unfold (M-T1.5 slice A) — eject ONE scaffolded page's body as
+// `.ddd` source while its siblings stay under the macro.
+//
+// Whole-`ui` unfold (above) removes the `with scaffold(...)` clause and ejects
+// every page.  Per-page unfold is the finer grain: for a `ui`-target macro
+// call it enumerates the pages the macro *fully* produces (executing the
+// `invokeMacro` composition all the way to the leaf page-builders, unlike the
+// recording one-level unfold above), and offers one eject per page.
+//
+// The chosen page is emitted wrapped in its `area <Plural> { … }` so the
+// scope-local override-by-name merge (`expander.ts:mergeScopedMembers`)
+// suppresses exactly that scaffolded page and leaves its siblings generated —
+// the same mechanism as an explicit `page <Name>` override (page-metamodel
+// §10).  The macro call is NOT rewritten (insert-only).
+// ---------------------------------------------------------------------------
+
+/** One offered per-page unfold: a stable `key`, a human `label`
+ * (`Orders / Detail`), and the workspace edits that eject that page. */
+export interface PageUnfoldOption {
+  key: string;
+  label: string;
+  result: UnfoldResult;
+}
+
+/** Enumerate the per-page unfolds available for a `ui`-target macro call.
+ * Returns [] for a non-`ui` host, an unknown macro, or a macro that produces
+ * no pages (so the caller offers nothing extra). */
+export function enumerateScaffoldPageUnfolds(
+  document: LangiumDocument,
+  call: MacroCall,
+): PageUnfoldOption[] {
+  const host = findCallHost(call);
+  if (!host || hostKindOf(host) !== "ui") return [];
+  const macro = lookupMacro(call.name);
+  if (!macro || macro.target !== "ui") return [];
+
+  const args = bindArgsForUnfold(document, macro, call);
+  const origin: OriginToken = {
+    _kind: "macro-origin",
+    macroName: call.name,
+    callNode: call,
+  };
+
+  let produced: ReadonlyArray<unknown>;
+  try {
+    produced = _withOrigin(origin, () =>
+      macro.expand({
+        target: host as never,
+        args: args as never,
+        origin,
+        invokeMacro: makeExecutingInvokeMacro(origin) as never,
+      }),
+    );
+  } catch {
+    return [];
+  }
+
+  // Flatten the produced tree to individual pages, remembering each page's
+  // enclosing area (loose singleton pages — Home / WorkflowsIndex / ViewsIndex
+  // — have none).
+  const found: Array<{ page: Page; areaName?: string; label: string }> = [];
+  const visit = (node: unknown, areaName?: string): void => {
+    if (!node || typeof node !== "object") return;
+    const t = (node as { $type?: string }).$type;
+    if (t === "Area") {
+      const an = (node as { name?: string }).name;
+      for (const m of (node as { members?: unknown[] }).members ?? []) visit(m, an);
+    } else if (t === "Page") {
+      const pn = String((node as { name?: string }).name ?? "");
+      if (!pn) return;
+      found.push({ page: node as Page, areaName, label: areaName ? `${areaName} / ${pn}` : pn });
+    }
+  };
+  for (const item of produced) {
+    const items = Array.isArray(item) ? item : [item];
+    for (const n of items) visit(n);
+  }
+
+  const options: PageUnfoldOption[] = [];
+  for (const { page: pg, areaName, label } of found) {
+    // Wrap the page in a fresh single-member area so override-by-name resolves
+    // at the same (area) scope as the scaffolded page; a loose singleton page
+    // ejects as-is.
+    const insertNode = areaName ? (area(areaName, [pg]) as Area) : pg;
+    const insertEdit = buildInsertEdit(document, host, [insertNode]);
+    if (!insertEdit) continue;
+    options.push({
+      key: label,
+      label,
+      result: { title: `Unfold page '${label}'`, edits: [insertEdit] },
+    });
+  }
+  return options;
+}
+
+/** An `invokeMacro` that actually executes child macros (recursively),
+ * returning their produced nodes — the opposite of the recording variant
+ * `makeRecordingInvokeMacro`, which stubs children to `[]` for the one-level
+ * unfold.  Per-page unfold needs the fully-materialised leaf pages, so it
+ * drives the whole composition. */
+function makeExecutingInvokeMacro(origin: OriginToken) {
+  const run = (
+    childName: string,
+    opts: { target: object; args?: Record<string, unknown> },
+  ): unknown[] => {
+    const child = lookupMacro(childName);
+    if (!child) return [];
+    try {
+      const out = _withOrigin(origin, () =>
+        child.expand({
+          target: opts.target as never,
+          args: (opts.args ?? {}) as never,
+          origin,
+          invokeMacro: run as never,
+        }),
+      );
+      return Array.isArray(out) ? [...out] : [out];
+    } catch {
+      return [];
+    }
+  };
+  return run;
 }
