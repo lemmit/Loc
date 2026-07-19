@@ -83,6 +83,9 @@ export function buildPyRoutesFile(
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
+  /** Non-hosted id targets branded in app/domain/ids.py (M-T4.4 — foreign
+   *  events / cross-context `X id` fields); candidates for the id import. */
+  extraIdNames: readonly string[] = [],
 ): string {
   const slug = snake(plural(agg.name));
   // Children-first so a nested part's `<Part>Response` is defined before the
@@ -200,8 +203,13 @@ export function buildPyRoutesFile(
   // aggregate's own fields) is imported. The old `agg.name + agg.fields` set
   // missed those, emitting e.g. `addLine(ProductId(...))` with `ProductId`
   // never imported → NameError at runtime (found by the python behavioral tier).
-  const idNames = ctx.aggregates
-    .map((a) => `${a.name}Id`)
+  // Foreign id brands (M-T4.4): a cross-context `X id` field wraps as
+  // `XId(...)` with X hosted elsewhere — `extraIdNames` (threaded from the
+  // orchestrator, same set renderPyIds brands) joins the candidate pool.
+  const idNames = [
+    ...ctx.aggregates.map((a) => `${a.name}Id`),
+    ...extraIdNames.map((n) => `${n}Id`),
+  ]
     .filter((n, i, arr) => refersTo(n) && arr.indexOf(n) === i)
     .sort();
 

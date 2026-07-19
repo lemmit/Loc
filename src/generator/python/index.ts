@@ -8,6 +8,7 @@ import type {
   EventIR,
   SystemIR,
   TimerSourceIR,
+  TypeIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import {
@@ -26,6 +27,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
+import { redisChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -37,6 +39,7 @@ import {
   buildPyBaseUnionFile,
   concretesOf,
 } from "./base-reader-builder.js";
+import { buildPyChannelsFile } from "./channels-builder.js";
 import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
 import { type OpFragment, renderPyAggregate } from "./emit/aggregate.js";
 import { emitPyAudit } from "./emit/audit.js";
@@ -122,8 +125,57 @@ export interface GeneratePythonArgs {
 export function generatePythonForContexts(args: GeneratePythonArgs): Map<string, string> {
   const out = new Map<string, string>();
   const slug = pythonProjectName(args.deployable.name);
-  const merged = mergeContexts(args.contexts);
+  const mergedBase = mergeContexts(args.contexts);
   const sourcemap = args.sourcemap;
+
+  // Broker bindings (channels.md; M-T4.4 slice 2b): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  Computed up front
+  // because they widen the merged vocabulary — a consumer deployable need not
+  // HOST the channel's owning context to react to its events; the wired
+  // binding carries the routing knowledge across deployables (mirrors the
+  // Hono orchestrator).
+  const channelBindings = redisChannelBindings(args.deployable, args.sys);
+  const hostedChannelNames = new Set(args.contexts.flatMap((c) => c.channels).map((ch) => ch.name));
+  // Wired-but-foreign channels join the carrier set as minimal ChannelIR
+  // stubs (slice-2 scope pins their knobs), so the dispatch derivation routes
+  // a hosted reactor off a channel declared in a non-hosted context.
+  const wiredForeignChannels = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: "broadcast" as const,
+      retention: "ephemeral" as const,
+    }));
+  const mergedPre: EnrichedBoundedContextIR = {
+    ...mergedBase,
+    channels: [...mergedBase.channels, ...wiredForeignChannels],
+  };
+  // Foreign events a hosted workflow consumes through a wired channel join
+  // the deployable's event vocabulary: `app/domain/events.py` needs the
+  // dataclass (the reactor handler constructs/matches it) and the
+  // DomainEvent union carries it.
+  const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
+  const mergedSubscriptions = dispatchSubscriptionsOf(mergedPre);
+  const foreignConsumedEvents = [...new Set(mergedSubscriptions.map((s) => s.event))]
+    .filter((name) => !knownEventNames.has(name))
+    .flatMap((name) => {
+      for (const sub of args.sys.subdomains) {
+        for (const c of sub.contexts) {
+          const ev = c.events.find((e) => e.name === name);
+          if (ev) return [ev];
+        }
+      }
+      return [];
+    });
+  const merged: EnrichedBoundedContextIR = {
+    ...mergedPre,
+    events: [...mergedBase.events, ...foreignConsumedEvents],
+  };
+  const hasChannels = channelBindings.length > 0;
+  // Consumer side only when a hosted WORKFLOW reactor subscribes (slice-2
+  // scope: projection folds stay on the in-process path).
+  const hasChannelConsumers = hasChannels && mergedSubscriptions.some((s) => !s.projection);
 
   // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
   // owner is DERIVED (no stamp): the deployable whose subdomain
@@ -155,11 +207,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // byte-identical.  Pinned within major 3 (the AsyncIOScheduler /
   // CronTrigger.from_crontab API the scheduler emits; 4.x is a rewrite).
   const timerDeps = hasTimers ? ["apscheduler>=3.10,<4"] : [];
+  // Broker transport (M-T4.4 slice 2b) — redis-py (MIT, design §6a) speaks
+  // RESP to the compose-provisioned Valkey sidecar; wiring-gated so a
+  // channel-less pyproject stays byte-identical.
+  const channelDeps = hasChannels ? ["redis>=5.2,<7"] : [];
   out.set(
     "pyproject.toml",
     renderPyproject(
       slug,
-      [...resources.deps, ...oidcDeps, ...timerDeps],
+      [...resources.deps, ...oidcDeps, ...timerDeps, ...channelDeps],
       [...resources.devDeps],
       hasTimers,
     ),
@@ -295,6 +351,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       !!oidc,
       explicitRouteApis,
       hasTimers,
+      hasChannels,
+      hasChannelConsumers,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -310,7 +368,24 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   }
 
   out.set("app/domain/__init__.py", "");
-  out.set("app/domain/ids.py", renderPyIds(merged));
+  // Foreign id brands (M-T4.4): id targets referenced by broker-consumed
+  // foreign events (and the correlating workflow state fields) whose owning
+  // aggregate this deployable doesn't host.
+  const hostedIdNames = new Set(
+    merged.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]),
+  );
+  const foreignIdNames = [
+    ...new Set(
+      [
+        ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+        ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
+      ]
+        .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
+        .map((t) => t.targetName)
+        .filter((n) => !hostedIdNames.has(n)),
+    ),
+  ];
+  out.set("app/domain/ids.py", renderPyIds(merged, foreignIdNames));
   // `ConcurrencyError` (+ its 409 handler) rides on either the `versioned`
   // guarded write's stale-write rejection or an event-sourced aggregate's
   // append-time `(stream_id, version)` 23505 collision — a concurrency-free app
@@ -373,8 +448,19 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     args.sys,
     dispatchOpFragments,
     resolveStreamContext,
+    hasChannels,
   );
   const hasDispatch = dispatchFile != null;
+  // Broker transport module (M-T4.4 slice 2b): the redis.asyncio driver,
+  // CloudEvents envelope codec, publish half of the tee, and — where a
+  // hosted reactor subscribes — the consumer loop.  Channel-less projects
+  // stay byte-identical.
+  if (hasChannels) {
+    out.set(
+      "app/channels.py",
+      buildPyChannelsFile(channelBindings, merged.events, hasChannelConsumers),
+    );
+  }
   if (dispatchFile != null) {
     out.set("app/dispatch.py", dispatchFile);
     if (sourcemap && dispatchOpFragments) {
@@ -514,7 +600,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       sourcemap?.file(repoPath, repoContent, repo?.origin ?? agg.origin, construct);
       pyPortSpecs.push({ aggName: agg.name, members: pyPortMembersFromSource(repoContent) });
       const routesPath = `app/http/${snake(agg.name)}_routes.py`;
-      const routesContent = buildPyRoutesFile(agg, repo, ctx, hasDispatch);
+      const routesContent = buildPyRoutesFile(agg, repo, ctx, hasDispatch, foreignIdNames);
       out.set(routesPath, routesContent);
       sourcemap?.file(routesPath, routesContent, agg.origin, construct);
       const tests = renderPyTestsFile(agg, ctx);
@@ -724,6 +810,8 @@ function renderMain(
   oidc = false,
   explicitRouteApis: string[] = [],
   hasTimers = false,
+  hasChannels = false,
+  hasChannelConsumers = false,
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -775,6 +863,13 @@ function renderMain(
     oidc ? "from app.auth.oidc import register_oidc_verifier" : null,
     oidc ? "from app.auth.oidc import router as auth_oidc_router" : null,
     oidc ? "from app.auth.verifier import assert_user_verifier_registered" : null,
+    hasChannels
+      ? `from app.channels import ${[
+          "close_channel_transports",
+          "init_channel_transports",
+          ...(hasChannelConsumers ? ["start_channel_consumers"] : []),
+        ].join(", ")}`
+      : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     "from app.db.transaction import TransactionMiddleware",
@@ -858,6 +953,12 @@ function renderMain(
     authRequired ? "    assert_user_verifier_registered()" : null,
     "    await run_migrations()",
     hasSeeds ? "    await run_seeds()" : null,
+    // Broker transport (channels.md; M-T4.4): one shared redis connection set
+    // per LOOM_CHANNEL_*_URL.  The publish tee inside make_dispatcher routes
+    // broker-bound events to the broker; the consumer loop feeds received
+    // envelopes into the same in-process dispatcher local reactors use.
+    hasChannels ? "    init_channel_transports()" : null,
+    hasChannelConsumers ? "    _channel_consumers = start_channel_consumers()" : null,
     // Durable-channel relay: at-least-once redelivery of `__loom_outbox`
     // rows, drained on a background task for the process lifetime.
     startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
@@ -869,6 +970,8 @@ function renderMain(
     "    yield",
     hasTimers ? "    _timer_scheduler.shutdown(wait=False)" : null,
     startsRelay ? "    _outbox_relay.cancel()" : null,
+    hasChannelConsumers ? "    _channel_consumers.cancel()" : null,
+    hasChannels ? "    await close_channel_transports()" : null,
     '    log("info", "server_shutdown", signal="SIGTERM")',
     '    log("info", "server_drained")',
     "",
