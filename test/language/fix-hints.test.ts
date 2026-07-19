@@ -93,6 +93,38 @@ describe("fix-hints", () => {
     expect(re.errors).toEqual([]); // the reserved-derived error is gone
   });
 
+  it("token-nullable: dropping '?' makes the token field non-optional (round-trip clean)", async () => {
+    const TOK = `context Sales {
+  aggregate Order {
+    etag: string? token
+    total: int
+  }
+}`;
+    const { doc, model, diagnostics } = await parseString(TOK);
+    const report = buildValidateReport({
+      modelPath: "m.ddd",
+      langiumDiagnostics: diagnostics,
+      doc,
+      irDiagnostics: [],
+      model,
+    });
+    const hint = report.diagnostics.find((d) => d.code === "loom.token-nullable");
+    expect(hint?.fixHint?.kind).toBe("replace-text");
+    expect(hint?.fixHint?.patch).toMatchObject({
+      op: "replace",
+      target: "aggregate Sales.Order.etag",
+      source: "etag: string token",
+    });
+
+    const applied = await applyPatches(TOK, [hint?.fixHint?.patch as ModelPatch]);
+    expect(applied.ok).toBe(true);
+    expect(applied.text).toContain("etag: string token");
+    // Re-validate: the token-nullable error is gone and it still parses.
+    const { diagnostics: after, errors } = await parseString(applied.text);
+    expect(after.some((d) => d.code === "loom.token-nullable")).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
   it("es-tph-forced-own-table: header-end inserts inheritanceUsing: ownTable", async () => {
     const TPH = `context Sales {
   abstract aggregate Party inheritanceUsing: sharedTable { name: string }

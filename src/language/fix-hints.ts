@@ -15,7 +15,7 @@
 import type { AstNode, LangiumDocument } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type { JsonFixHint } from "../diagnostics/contract.js";
-import { isAggregate } from "./generated/ast.js";
+import { isAggregate, isProperty, type Property } from "./generated/ast.js";
 import { addressOf } from "./print/outline.js";
 
 /** The declaration node directly inside an aggregate that encloses `node`
@@ -87,6 +87,35 @@ const PROVIDERS: Record<string, FixHintProvider> = {
       kind: "insert-decl",
       summary: "Use inheritanceUsing: ownTable.",
       patch: { op: "insert", target, position: "header-end", source: "inheritanceUsing: ownTable" },
+    };
+  },
+
+  // `token status: Status?` → `token status: Status`.  A `token` field is
+  // echoed by the client on every update to identify the target / detect
+  // concurrency conflicts; a nullable token can't serve that role.  The repair
+  // is unambiguous — drop the optional `?` — so it's the same "remove the
+  // rejected marker" shape as `reserved-derived-on-vo`.  The `?` is the trailing
+  // marker of the type's CST, sliced out while the rest of the member (incl. any
+  // `= default`) is preserved verbatim.
+  "loom.token-nullable": (_d, _doc, node) => {
+    if (!isProperty(node)) return undefined;
+    const prop = node as Property;
+    const memberCst = prop.$cstNode;
+    const typeCst = prop.type?.$cstNode;
+    if (!prop.type?.optional || !memberCst || !typeCst) return undefined;
+    const target = addressOf(prop);
+    if (!target) return undefined;
+    const relStart = typeCst.offset - memberCst.offset;
+    const relEnd = relStart + typeCst.text.length;
+    if (relStart < 0 || relEnd > memberCst.text.length) return undefined;
+    const typeText = memberCst.text.slice(relStart, relEnd);
+    const fixedType = typeText.replace(/\?(\s*)$/, "$1"); // drop the trailing `?`
+    if (fixedType === typeText) return undefined;
+    const source = memberCst.text.slice(0, relStart) + fixedType + memberCst.text.slice(relEnd);
+    return {
+      kind: "replace-text",
+      summary: "Drop '?' — a token field must be non-optional.",
+      patch: { op: "replace", target, source },
     };
   },
 
