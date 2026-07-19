@@ -508,7 +508,9 @@ system D {
     expect(repo).toContain("aggregate.Boxes.Select(__x => __x.ToSnapshot()).ToList()");
     const snaps = files.get("api/Domain/Carts/CartSnapshots.cs")!;
     // Nested Item's snapshot ParentId brands to its DIRECT parent Box, not Cart.
-    expect(snaps).toMatch(/record ItemSnapshot\s*\{\s*public ItemId Id \{ get; init; \}\s*public BoxId ParentId/);
+    expect(snaps).toMatch(
+      /record ItemSnapshot\s*\{\s*public ItemId Id \{ get; init; \}\s*public BoxId ParentId/,
+    );
   });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
@@ -742,6 +744,41 @@ system D {
     expect(repo).toContain(
       "notes = __lineItemsChild.Notes is null ? null : System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Notes)",
     );
+  });
+
+  // The one part-collection element kind that stays gated: a by-value array of a
+  // sibling ENTITY (a plain field, not a `contains`).  This is an impossible
+  // storage shape, not a Dapper gap — an un-owned entity collection has no
+  // relational identity/ownership model, and efcore only appears to accept it
+  // (it maps `List<Entity>` as a scalar Property that EF rejects at model-build).
+  // The precise message points at the two supported alternatives.
+  it("rejects a by-value ENTITY-array part field (impossible storage shape)", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S { context O {
+    aggregate Order with crudish {
+      customer: string
+      contains lineItems: LineItem[]
+      entity LineItem { sku: string  tags: Tag[] }
+      entity Tag { label: string }
+    }
+    repository Orders for Order { }
+  } }
+  storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
+    const { errors } = await emit(src);
+    // The gate fires with the sharpened message (element kind 'entity', with the
+    // `contains` / `id[]` guidance).
+    expect(
+      errors.some(
+        (e) =>
+          /persistence: dapper/.test(e) &&
+          /entity element kind 'entity'/i.test(e) &&
+          /contains tags/.test(e) &&
+          /tags: … id\[\]/.test(e),
+      ),
+    ).toBe(true);
   });
 });
 

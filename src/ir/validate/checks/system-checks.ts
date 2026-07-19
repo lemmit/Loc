@@ -1989,8 +1989,18 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // A scalar / enum / value-object / id COLLECTION field on a part IS
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
-        // primitive-collection JSON mapping); only an array whose element kind
-        // is outside that set stays gated (nothing in the corpus reaches it).
+        // primitive-collection JSON mapping).  The ONLY element kind left gated
+        // is `entity`: a part FIELD (not a `contains`) typed as an array of a
+        // sibling ENTITY.  That is an impossible storage shape rather than a
+        // Dapper gap — an un-owned by-value entity collection has no persistence
+        // identity/ownership model (a domain entity has no scalar column form and
+        // no snapshot DTO on the relational shape, so it cannot ride a jsonb
+        // list).  efcore only APPEARS to accept it — it COMPILES `List<Entity>`
+        // mapped as a plain scalar `Property`, but EF has no relational mapping
+        // for a collection of an entity type without owned-type config, so it is
+        // not a real backing store there either.
+        // The intended model is `contains <name>: <Entity>[]` (ownership) or
+        // `<name>: <Entity> id[]` (a reference collection) — both supported.
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
           for (const part of a.parts ?? []) {
@@ -1999,7 +2009,10 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
               if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
                 reject(
                   where,
-                  `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
+                  `has a part ('${part.name}') with a by-value collection field of ENTITY element ` +
+                    `kind '${pt.element.kind}' — an un-owned entity collection has no relational ` +
+                    `storage shape. Use 'contains ${pf.name}: …[]' (ownership) or ` +
+                    `'${pf.name}: … id[]' (a reference collection) instead`,
                 );
             }
           }
