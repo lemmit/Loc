@@ -11,6 +11,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
+import { unwrapOpt } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import {
@@ -162,6 +163,15 @@ function renderStateInit(field: StateFieldIR): string {
   return lit ?? angularTarget.defaultInitFor(field.type);
 }
 
+/** A `File`-typed `state {}` field (optional-unwrapped).  Its signal is typed
+ *  `signal<FileRef | null>(null)` (the uploaded ref + the `null` seed both
+ *  assign), and its writes go through `onFileUploadTo` — not a plain
+ *  `renderStateInit` zero value. */
+function isFileStateField(field: StateFieldIR): boolean {
+  const t = unwrapOpt(field.type);
+  return t.kind === "primitive" && t.name === "File";
+}
+
 function renderInitLiteral(e: ExprIR): string | undefined {
   if (e.kind === "literal") {
     if (e.lit === "string") return JSON.stringify(e.value);
@@ -174,6 +184,19 @@ function renderInitLiteral(e: ExprIR): string | undefined {
     return els.every((x): x is string => x !== undefined) ? `[${els.join(", ")}]` : undefined;
   }
   return undefined;
+}
+
+/** Register named imports on the walk result's `imports` map (drained into
+ *  the page's import lines).  Mirrors `addNg` on a `WalkResult` instead of a
+ *  `WalkContext`, so File-signal + `onFileUploadTo` imports merge with any
+ *  in-form `../../api/client` import into one line. */
+function addResultImport(result: WalkResult, from: string, ...names: string[]): void {
+  let set = result.imports.get(from);
+  if (!set) {
+    set = new Set<string>();
+    result.imports.set(from, set);
+  }
+  for (const n of names) set.add(n);
 }
 
 function indentTemplate(markup: string): string {
@@ -325,8 +348,38 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (result.usesState || derivedUsesState || actionUsesState) {
     coreSymbols.add("signal");
     for (const f of page.state) {
-      members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
+      // A `File`-typed field's signal holds a nullable `FileRef` (the uploaded
+      // ref, or `null` before/when cleared) — `signal<FileRef | null>(null)` —
+      // not the string zero `renderStateInit` would emit.  `FileUpload(bind:)`
+      // writes it via `onFileUploadTo`.
+      if (isFileStateField(f)) {
+        addResultImport(result, "../../api/client", "FileRef");
+        members.push(`  readonly ${f.name} = signal<FileRef | null>(null);`);
+      } else {
+        members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
+      }
     }
+  }
+
+  // Standalone `FileUpload(bind: <File state>)` — wire the component's
+  // `onFileUploadTo` method (uploads the picked file via `api.uploadFile`, then
+  // `set`s the returned `FileRef` into the passed signal) + its imports.  Only
+  // Angular reads `usesFileUpload`; the method is emitted once per page.
+  if (result.usesFileUpload) {
+    coreSymbols.add("WritableSignal");
+    addResultImport(result, "../../api/client", "api", "FileRef");
+    members.push(
+      [
+        "  async onFileUploadTo(event: Event, sig: WritableSignal<FileRef | null>): Promise<void> {",
+        "    const file = (event.target as HTMLInputElement).files?.[0];",
+        "    if (!file) {",
+        "      sig.set(null);",
+        "      return;",
+        "    }",
+        "    sig.set(await api.uploadFile(file));",
+        "  }",
+      ].join("\n"),
+    );
   }
   members.push(...derivedLines);
   members.push(...actionMethods);
@@ -861,6 +914,7 @@ function derivedCtx(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
   };
 }
 
