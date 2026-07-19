@@ -720,6 +720,17 @@ function exprRefsCurrentUser(e: ExprIR): boolean {
       return exprRefsCurrentUser(e.operand);
     case "method-call":
       return exprRefsCurrentUser(e.receiver) || e.args.some(exprRefsCurrentUser);
+    case "authz-filter":
+      // M-T9.9: the `scope` sentinel (deep/global read levels) references the
+      // principal through its claim sub-expressions, so it MUST route to the
+      // per-request `_currentUser` DbContext-field filter path (not the static
+      // per-entity config, where no `currentUser` is in scope).  `deny` is
+      // principal-free.  This hand-rolled walker has to mirror the shared
+      // `exprUsesCurrentUser`; before the sentinel got its own kind it was a
+      // `method-call` caught by the arm above.
+      return e.filter.kind === "scope"
+        ? exprRefsCurrentUser(e.filter.anchorClaim) || exprRefsCurrentUser(e.filter.tenantClaim)
+        : false;
     case "call":
       return e.args.some(exprRefsCurrentUser);
     case "ternary":
