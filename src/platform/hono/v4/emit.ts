@@ -9,7 +9,7 @@
 
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
-import { redisChannelBindings } from "../../../generator/_channels/bindings.js";
+import { brokerChannelBindings } from "../../../generator/_channels/bindings.js";
 import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
 import type { SourceMapRecorder } from "../../../generator/_trace/sourcemap.js";
 import {
@@ -374,20 +374,30 @@ export function generateTypeScriptForContexts(
   // wired binding is what carries the routing knowledge across deployables.
   const channelBindings =
     system && system.deployable.persistence !== "mikroorm"
-      ? redisChannelBindings(system.deployable, system.sys)
+      ? brokerChannelBindings(system.deployable, system.sys)
       : [];
+  // Durable broker-bound events (M-T4.4 slice 3): carried by a wired
+  // `queue`/`work` (or future `log`) channel — the producer path for these
+  // rides the outbox relay (design §5), never the inline tee.
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events),
+  );
   const mergedBase = mergeContexts(contexts);
   const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   // Wired-but-foreign channels join the carrier set as minimal ChannelIR
-  // stubs (slice-2 scope pins their knobs), so `deriveEventSubscriptions`
-  // routes a hosted reactor off a channel declared in a non-hosted context.
+  // stubs carrying the channel's REAL semantics knobs (a foreign `queue`/
+  // `work` channel must drive the consumer's idempotency markers), so
+  // `deriveEventSubscriptions` routes a hosted reactor off a channel
+  // declared in a non-hosted context.
   const wiredForeignChannels = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
     .map((b) => ({
       name: b.channelName,
       carries: b.events,
-      delivery: "broadcast" as const,
-      retention: "ephemeral" as const,
+      delivery: b.delivery,
+      retention: b.retention,
     }));
   const mergedSubscriptions = deriveEventSubscriptions(
     [...contexts.flatMap((c) => c.channels), ...wiredForeignChannels],
@@ -527,7 +537,10 @@ export function generateTypeScriptForContexts(
       }),
     );
   }
-  if (merged.workflows.length > 0) {
+  if (
+    merged.workflows.length > 0 ||
+    (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0)
+  ) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     // resourceName → sourceType, so workflow bodies can import their
     // resource-op verb helpers from the right client module (Phase 4).
@@ -617,6 +630,10 @@ export function generateTypeScriptForContexts(
       persistence: usingMikro ? "mikroorm" : "drizzle",
       explicitRouters,
       fileUpload,
+      // Durable broker-bound events must reach the outbox even from a
+      // deployable with no local reactor (M-T4.4 slice 3): the relay
+      // publishes them on drain.
+      forceOutbox: durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0,
     }),
   );
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
@@ -974,7 +991,8 @@ export function generateTypeScriptForContexts(
       withMoney: projectUsesMoney,
       withOidc: !!oidcAuth,
       withCronTimers: hasTimers && anyTimerUsesCron(ownedTimers),
-      withChannels: hasChannels,
+      withRedisChannels: hasChannels && channelBindings.some((b) => b.transport === "redis"),
+      withRabbitChannels: hasChannels && channelBindings.some((b) => b.transport === "rabbitmq"),
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -1005,7 +1023,10 @@ export function generateTypeScriptForContexts(
       // any context carries a durable channel AND the in-process dispatcher
       // is wired (subscriptions exist; drizzle persistence).
       !usingMikro &&
-        contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0),
+        (contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0) ||
+          // A durable-broker producer relays even without local subscribers:
+          // the drained rows publish to the broker (M-T4.4 slice 3).
+          (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0)),
       // Realtime tee: the relay's inner dispatcher rides through it so
       // relayed (durable) events reach the SSE wire too.
       !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
@@ -1084,7 +1105,10 @@ function projectPackageJson(
     withCronTimers?: boolean;
     /** M-T4.4 slice 2 — the `ioredis` broker-client dep, added only when the
      *  deployable wires a redis-bound channelSource via `channels:`. */
-    withChannels?: boolean;
+    withRedisChannels?: boolean;
+    /** M-T4.4 slice 3 — the `amqplib` broker-client dep (+ its types), added
+     *  only when the deployable wires a rabbitmq-bound channelSource. */
+    withRabbitChannels?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -1124,6 +1148,9 @@ function projectPackageJson(
     // Types for the node-cron scheduler dep (scheduling.md) — devDep so the
     // generated project's `tsc --noEmit` resolves `import cron from "node-cron"`.
     ...(opts.withCronTimers ? { "@types/node-cron": "^3.0.11" } : {}),
+    // Types for the amqplib broker dep (M-T4.4 slice 3) — devDep so the
+    // generated project's `tsc --noEmit` resolves `import amqp from "amqplib"`.
+    ...(opts.withRabbitChannels ? { "@types/amqplib": "^0.10.5" } : {}),
   };
   const dbScripts = mikro
     ? {}
@@ -1173,7 +1200,10 @@ function projectPackageJson(
           ...(opts.withCronTimers ? { "node-cron": "^3.0.3" } : {}),
           // Broker transport (M-T4.4 slice 2) — ioredis (MIT, design §6a)
           // speaks RESP to the compose-provisioned Valkey sidecar.
-          ...(opts.withChannels ? { ioredis: "^5.4.0" } : {}),
+          ...(opts.withRedisChannels ? { ioredis: "^5.4.0" } : {}),
+          // Broker transport (M-T4.4 slice 3) — amqplib (MIT, design §6a)
+          // speaks AMQP 0-9-1 to the compose-provisioned RabbitMQ sidecar.
+          ...(opts.withRabbitChannels ? { amqplib: "^0.10.4" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,
@@ -1380,7 +1410,13 @@ ${
           ? `import { createInProcessDispatcher${
               outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
             } } from "./http/workflows";\n`
-          : `import { NoopDomainEventDispatcher } from "./domain/events";\n`
+          : `import { NoopDomainEventDispatcher } from "./domain/events";\n${
+              // Pure producer of durable broker-bound events (M-T4.4 slice 3):
+              // the outbox captures on save; the relay publishes on drain.
+              outboxRelay
+                ? `import { createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`
+                : ""
+            }`
       }${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
         hasTimers ? `import { startTimerScheduler } from "./scheduler";\n` : ""
       }${
@@ -1445,7 +1481,18 @@ const channelTransports = createChannelTransports();
             ? "createApp(db, createOutboxDispatcher(db, inProcessEvents))"
             : "createApp(db)"
       };
-${hasChannelConsumers ? "const stopChannelConsumers = startChannelConsumers(channelTransports, inProcessEvents);\n" : ""}${outboxRelay ? "const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);\n" : ""}${
+${hasChannelConsumers ? "const stopChannelConsumers = startChannelConsumers(channelTransports, inProcessEvents);\n" : ""}${
+  outboxRelay
+    ? hasChannels
+      ? `// The relay's dispatcher rides the publish tee in RELAY mode: drained
+// durable events whose channel is broker-bound publish to the broker
+// (design §5 — outbox-drain → broker publish); the rest re-enter the
+// local chain.
+const stopOutboxRelay = startOutboxRelay(db, channelPublishTee(channelTransports, inProcessEvents, { fromRelay: true }));
+`
+      : "const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);\n"
+    : ""
+}${
   hasTimers
     ? `// Timer sources (scheduling.md): infrastructure fires tick events on a
 // wall-clock cadence, single-fire across replicas via a pg advisory lock.

@@ -1,6 +1,6 @@
 import {
+  brokerChannelBindings,
   channelTransportStorageNames,
-  redisChannelBindings,
 } from "../generator/_channels/bindings.js";
 import { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import { E2E_FIXTURES_TS } from "../generator/react/emit-templates.js";
@@ -797,6 +797,18 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
         `    timeout: 5s`,
         `    retries: 10`,
       ]);
+    } else if (s.type === "rabbitmq" && transportStorages.has(s.name)) {
+      // Official rabbitmq image (MPL 2.0 — design §6a); the management
+      // variant so operators (and the e2e DLQ probe) get rabbitmqadmin.
+      services.push([
+        `${slug}:`,
+        `  image: rabbitmq:4-management-alpine`,
+        `  healthcheck:`,
+        `    test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]`,
+        `    interval: 5s`,
+        `    timeout: 10s`,
+        `    retries: 15`,
+      ]);
     } else if (s.type === "s3") {
       const volume = `${slug}-data`;
       volumes.push(volume);
@@ -859,7 +871,7 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   // Broker bindings (channels.md; M-T4.4 slice 2): the deployable's wired
   // redis-bound channelSources — each injects its `LOOM_CHANNEL_<NAME>_URL`
   // env below and orders startup after the Valkey sidecar's healthcheck.
-  const brokerBindings = redisChannelBindings(d, sys);
+  const brokerBindings = brokerChannelBindings(d, sys);
   const brokerServices = [...new Set(brokerBindings.map((b) => serviceSlug(b.storageName)))];
   const lines: string[] = [];
   lines.push(`${slug}:`);
@@ -888,7 +900,11 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   for (const b of brokerBindings) {
-    lines.push(`    ${b.envVar}: ${JSON.stringify(`redis://${serviceSlug(b.storageName)}:6379`)}`);
+    const url =
+      b.transport === "rabbitmq"
+        ? `amqp://guest:guest@${serviceSlug(b.storageName)}:5672`
+        : `redis://${serviceSlug(b.storageName)}:6379`;
+    lines.push(`    ${b.envVar}: ${JSON.stringify(url)}`);
   }
   // CORS allowlist for a backend that a separate-origin frontend may call:
   // pin it to the frontend origins the topology declares (the generator knows
