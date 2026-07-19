@@ -214,7 +214,9 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
       : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
   const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
-    options?.hasChannelConsumers ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();" : ""
+    options?.hasChannelConsumers
+      ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
+      : ""
   }`;
   // Broker channels (M-T4.4): the publish tee becomes the outermost
   // IDomainEventDispatcher (its ctor takes the concrete inner), the shared
