@@ -220,6 +220,36 @@ interface Resolved {
   errors: PatchError[];
 }
 
+/** A `rename` patch expands to MANY edits — the declaration's name token plus
+ *  every use site the rename provider finds (cross-references included).  Driven
+ *  through the same `RenameProvider` the `loom_rename` tool uses, so `X id` refs
+ *  and expression uses stay resolved.  Offsets are taken against the ORIGINAL
+ *  document (the caller applies end-to-start). */
+async function renameEdits(
+  services: ReturnType<typeof createDddServices>,
+  doc: LangiumDocument<Model>,
+  node: AstNode,
+  patch: ModelPatch,
+): Promise<Edit[]> {
+  const newName = patch.source;
+  if (newName === undefined || newName.trim() === "") {
+    throw new Error(`'rename' requires 'source' (the new name)`);
+  }
+  const nameNode = services.Ddd.references.NameProvider.getNameNode(node);
+  if (!nameNode) throw new Error(`target '${patch.target}' has no name to rename`);
+  const wsEdit = await services.Ddd.lsp.RenameProvider?.rename(doc, {
+    textDocument: { uri: doc.textDocument.uri },
+    position: doc.textDocument.positionAt(nameNode.offset),
+    newName,
+  });
+  const changes = wsEdit?.changes?.[doc.textDocument.uri] ?? [];
+  return changes.map((te) => ({
+    start: doc.textDocument.offsetAt(te.range.start),
+    end: doc.textDocument.offsetAt(te.range.end),
+    newText: te.newText,
+  }));
+}
+
 /** Parse the source, resolve every patch target to an offset edit, and reject
  *  overlaps — the shared core of `applyPatches` (offset splice) and
  *  `resolvePatchEdits` (LSP ranges). */
@@ -244,7 +274,13 @@ async function resolve(source: string, patches: ModelPatch[]): Promise<Resolved>
       continue;
     }
     try {
-      edits.push({ edit: editFor(patch, node, source), patch });
+      if (patch.op === "rename") {
+        for (const edit of await renameEdits(services, doc, node, patch)) {
+          edits.push({ edit, patch });
+        }
+      } else {
+        edits.push({ edit: editFor(patch, node, source), patch });
+      }
     } catch (err) {
       errors.push({ patch, message: err instanceof Error ? err.message : String(err) });
     }
