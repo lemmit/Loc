@@ -50,7 +50,13 @@ Substantive drain complete on both adapters; the only residue is two niche Dappe
 
 **Wave 5 — MERGED 2026-07-19.** Dapper **workflow event subscriptions / outbox** (#2079): the last big gap. The saga/projection handlers already depend on the persistence-neutral `Domain.Common` ports, so the fix supplied the raw-Npgsql adapter side behind the dapper branch (new `dapper-workflow.ts`): `DapperPersistencePorts` (closed-generic `ISagaStateStore`/`IReadModelStore`/`IWorkflowEventStore` + `DapperUnitOfWork` over `NpgsqlDataSource`), an Npgsql outbox dispatcher + relay `BackgroundService` (same class names → shared Program.cs registration), the saga/projection/`__loom_outbox` DDL spliced into `DbSchema`, and Npgsql-backed workflow-instance/view read controllers. EF output byte-identical; `dotnet build /warnaserror` green on `dapper-outbox.ddd` + the `saga`/`outbox`/`eventsourced-workflow` corpus fixtures materialized as `persistence: dapper`.
 
-**FINAL STATUS.** **MikroORM: fully drained** (except deeper-nested / collection-bearing contained parts — v1 bound). **Dapper: drained except two niche shape edges** (both honest fail-fast): (1) **part-in-part** (recursive child tables/hydration), (2) **TPH member that itself uses `contains`/`Id[]`** (child/join tables would need to FK the shared base row — EF's TPT-via-contains; flat-member TPH is done). Both are edge shapes with clear workarounds; the substantive drain is complete on both adapters.
+**Wave 6 — MERGED 2026-07-19.** MikroORM nested `part-in-part` + collection-bearing parts (#2083, also fixed a latent `serializeField` VO-array arrow-return syntax bug); Dapper recursive `part-in-part` + TPH-with-`contains`/`Id[]` (#2084).
+
+**FINAL STATUS — relational surface fully drained on both adapters.** Remaining `loom.*-unsupported` rejects are all deep **feature-intersection** corners on the non-relational/ES/inheritance shapes:
+- **Dapper:** (a) `shape(embedded)` **+ part-in-part** — genuinely blocked by a **pre-existing shared-seam bug**: `ToSnapshot`/`FromSnapshot` mistypes a nested part's `State.ParentId` (e.g. `BoxId` vs `CartId`), so the fold doesn't compile; this is a cross-backend snapshot-seam bug, its own fix (NOT in `dapper.ts`'s relational path). (b) part-collection field with a **non-scalar element** (entity elements).
+- **MikroORM:** `shape(embedded)` **+** `Id[]`; **ES +** reference-collection associations; **ES +** nested parts; **aggregate-inheritance +** nested parts. (Dapper drained `contains`-on-ES by folding in-memory, so the MikroORM ES/inheritance intersections are likely drainable similarly — a follow-up.)
+
+The substantive drain is complete; what's left is narrow shape×shape intersections plus one shared snapshot-seam bugfix, each pickable individually.
 
 The pre-existing node **drizzle** `document`-shape regression (missing repo `delete` + arg-count) was fixed independently on `main` in **#2041**, clearing the `corpus × tsc` gate.
 
