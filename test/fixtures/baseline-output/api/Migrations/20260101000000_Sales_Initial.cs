@@ -37,8 +37,7 @@ CREATE TABLE ""orders"".""order_lines"" (
   ""product_id"" UUID NOT NULL,
   ""quantity"" INTEGER NOT NULL,
   PRIMARY KEY (""id""),
-  FOREIGN KEY (""order_id"") REFERENCES ""orders"".""orders"" ON DELETE CASCADE,
-  FOREIGN KEY (""product_id"") REFERENCES ""orders"".""products"" ON DELETE RESTRICT
+  FOREIGN KEY (""order_id"") REFERENCES ""orders"".""orders"" ON DELETE CASCADE
 );
 CREATE INDEX ""order_lines_order_id_idx"" ON ""orders"".""order_lines"" (""order_id"");
 CREATE INDEX ""order_lines_product_id_idx"" ON ""orders"".""order_lines"" (""product_id"");");

@@ -36,6 +36,7 @@ import {
   isPrimitiveType,
   isProperty,
   isSlotType,
+  isSystem,
   isValueObject,
   isWorkflow,
 } from "../../language/generated/ast.js";
@@ -526,6 +527,16 @@ export function findEventByName(env: Env, name: string): EventDecl | undefined {
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isEventDecl(m) && m.name === name) return m;
+  }
+  // Cross-context reactors (M-T4.4): `on(e: X)` / projection folds resolve
+  // events system-wide (the ddd-scope arm mirroring `timerSource for:`), so
+  // member typing must reach the same declarations — a local event shadows
+  // (checked above), else walk the enclosing system's other contexts.
+  let node: AstNode | undefined = env.ctx.$container;
+  while (node && !isSystem(node)) node = node.$container;
+  if (!node) return undefined;
+  for (const found of AstUtils.streamAllContents(node).filter(isEventDecl)) {
+    if (found.name === name) return found;
   }
   return undefined;
 }

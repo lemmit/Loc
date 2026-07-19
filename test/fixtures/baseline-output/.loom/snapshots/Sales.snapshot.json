@@ -42,11 +42,6 @@
           "column": "order_id",
           "refTable": "orders",
           "onDelete": "cascade"
-        },
-        {
-          "column": "product_id",
-          "refTable": "products",
-          "onDelete": "restrict"
         }
       ],
       "indexes": [

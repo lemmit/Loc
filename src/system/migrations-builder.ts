@@ -266,6 +266,19 @@ export function schemaFromModule(
   if (module.contexts.some((c) => durableEventTypes(c).size > 0)) {
     tables.push(outboxTableShape(module.name));
   }
+  // Cross-context id references get NO foreign key (M-T4.4): the SQL
+  // renderer qualifies an FK with the REFERENCING table's schema, so a
+  // reference into another context would point at a table that doesn't
+  // exist in that schema — and once contexts split across deployables the
+  // target lives in another database entirely.  Keep an FK only when its
+  // target table exists in the same (context) schema; the column and its
+  // index stay either way (id-only linkage, the cross-aggregate contract).
+  const bySchemaAndName = new Set(tables.map((t) => `${t.schema ?? ""}.${t.name}`));
+  for (const t of tables) {
+    t.foreignKeys = t.foreignKeys.filter((fk) =>
+      bySchemaAndName.has(`${t.schema ?? ""}.${fk.refTable}`),
+    );
+  }
   // The snapshot stays alphabetical (a stable, diff-friendly record);
   // `diffSchema` reorders the emitted `createTable` steps by FK
   // dependency so the SQL applies cleanly.

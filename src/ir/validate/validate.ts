@@ -210,7 +210,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateStampReadsBeforeFlush(c, diags);
     validateEventSourcedDiscipline(c, diags);
     validateProjections(c, diags);
-    validateWorkflows(c, diags);
+    validateWorkflows(
+      c,
+      diags,
+      allContexts(loom).flatMap((x) => x.events),
+    );
     // Explicit application-layer handlers (unfoldable-api-derivation.md, Layer 3):
     // queryHandler-read-only + commandHandler-single-aggregate layering contracts.
     validateApplicationHandlers(c, diags);

@@ -209,11 +209,28 @@ export class DddScopeProvider extends DefaultScopeProvider {
       inWorkflowCommandParam(context.container) || inUnionVariant(context.container);
     const aggregate = enclosingAggregate(context.container);
     const defaultScope = super.getScope(context);
+    // Event-triggered `create(e: X)` is a subscription position like `on(e: X)`
+    // — its event resolves system-wide (M-T4.4 cross-deployable choreography:
+    // a Shipping starter reacts to Orders' event received over a wired broker
+    // channel).  Events aren't globally exported, so widen here with the same
+    // targeted-arm shape as the OnDecl/ProjectionOn/timerSource arms; the
+    // local (same-document) declaration still wins via the default scope.
+    // Payloads (`handle` commands) and union variants deliberately stay
+    // context-local — the widening gates on the create-param position
+    // itself, not the broader `allowTransport`.
+    const systemEventDescs = (): AstNodeDescription[] => {
+      if (!inWorkflowCreateParam(context.container)) return [];
+      const system = AstUtils.getContainerOfType(context.container, isSystem);
+      if (!system) return [];
+      return [...AstUtils.streamAllContents(system).filter(isEventDecl)].map((e) =>
+        this.descriptions.createDescription(e, e.name),
+      );
+    };
     if (!aggregate) {
       // Outside an aggregate (operation-param-on-page, event field, workflow
       // command param, etc.): restrict to enums + value-objects + aggregates
       // from the default scope.  Entity parts are not addressable from there.
-      return this.filterScope(
+      const filtered = this.filterScope(
         defaultScope,
         (d) =>
           d.type === "EnumDecl" ||
@@ -221,6 +238,10 @@ export class DddScopeProvider extends DefaultScopeProvider {
           d.type === "Aggregate" ||
           (allowTransport && isTransportType(d.type)),
       );
+      // Only names the filtered scope can't already resolve — a same-document
+      // event stays the winner; the widening adds the foreign ones.
+      const extra = systemEventDescs().filter((d) => !filtered.getElement(d.name));
+      return extra.length > 0 ? this.createScope(extra, filtered) : filtered;
     }
     // Inside an aggregate: filter out entity-parts owned by *other*
     // aggregates.  Same-aggregate parts and all enums/VOs/aggregates pass.
@@ -411,6 +432,17 @@ function isTransportType(type: string): boolean {
  *  WorkflowCreateDecl | HandleDecl; we match it positionally so a `NamedType`
  *  elsewhere inside the workflow (a `let x: T` annotation, say) does not also
  *  pull transport types into scope. */
+/** True when `namedType` is the declared type of a workflow `create(...)`
+ *  parameter specifically — the event-subscription position the M-T4.4
+ *  system-wide event widening applies to.  Narrower than
+ *  `inWorkflowCommandParam` (which also covers `handle` params). */
+function inWorkflowCreateParam(namedType: AstNode | undefined): boolean {
+  const typeRef = namedType?.$container;
+  const param = typeRef?.$container;
+  if (param?.$type !== "Parameter") return false;
+  return param.$container?.$type === "WorkflowCreateDecl";
+}
+
 function inWorkflowCommandParam(namedType: AstNode | undefined): boolean {
   const typeRef = namedType?.$container;
   const param = typeRef?.$container;

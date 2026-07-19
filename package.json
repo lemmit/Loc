@@ -48,6 +48,7 @@
     "test:format-dotnet": "LOOM_DOTNET_FORMAT=1 vitest run test/e2e/generated-dotnet-format.test.ts",
     "test:phoenix": "LOOM_PHOENIX_VANILLA_BUILD=1 vitest run test/e2e/generated-elixir-vanilla-build.test.ts",
     "test:tenancy": "LOOM_TENANCY_E2E=1 vitest run test/e2e/tenancy-isolation.test.ts",
+    "test:channels": "LOOM_CHANNELS_E2E=1 vitest run test/e2e/channels-e2e.test.ts",
     "test:tenancy-python": "LOOM_TENANCY_E2E_PYTHON=1 vitest run test/e2e/tenancy-isolation-python.test.ts",
     "test:tenancy-java": "LOOM_TENANCY_E2E_JAVA=1 vitest run test/e2e/tenancy-isolation-java.test.ts",
     "test:tenancy-dotnet": "LOOM_TENANCY_E2E_DOTNET=1 vitest run test/e2e/tenancy-isolation-dotnet.test.ts",
