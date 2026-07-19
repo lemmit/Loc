@@ -32,13 +32,15 @@ describe("angular pack format groundwork", () => {
     // required for angular too — except the form/modal family, which Angular
     // renders inline via the `renderCreateForm` walker seam (or stubs), so it
     // ships no `form-of` / `field-input-*` / `form-*` / `modal` templates.
+    // `realtime-toast` is the exception among the TSX `form` set: Angular DOES
+    // require it (each pack renders the live-event toast into the
+    // RealtimeHandlersComponent — channels.md Part I), so it is NOT inline.
     const angularRendersInline = (name: string): boolean =>
       name === "primitive-form-of" ||
       name === "primitive-modal" ||
       name.startsWith("field-input-") ||
       name.startsWith("form-") ||
-      name === "op-dialog" ||
-      name === "realtime-toast";
+      name === "op-dialog";
     for (const name of tsx) {
       // Angular builds with `ng build`, so it emits `angular-json`
       // instead of the Vite world's `vite-config`.
