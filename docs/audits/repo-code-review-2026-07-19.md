@@ -42,24 +42,32 @@ cosmetic; **gate** — a CI/test weakness that lets a product bug ship green.
 
 | ID | Title | Severity | Disposition |
 |----|-------|----------|-------------|
-| C1 | `secret`/`internal` columns are accepted `?sort=` keys | security | LAND |
-| E1 | Java `X id[]` `.contains` find 500s at runtime | wrong-value (runtime) | LAND |
-| G1 | `ddd verify` false-VERIFIED off a suiteless duplicate-name result | wrong-value | LAND |
-| C2 | Optional `derived` fields wrongly `required` in `wire-spec.json` | wrong-value (artifact) | LAND |
-| D1 | TPH base reader omits `decimal.js` import (money-in-VO) | build-break | LAND |
-| F2 | Four Vue/Svelte packs emit duplicate `style=` → user `style:` dropped | wrong-value | LAND |
-| B1 | `saveResolver` not threaded to nested `computeSaves` → loop-body writes lost | wrong-value | LAND |
-| E2 | Python emits `ruff`-failing code (F841/E713/F401) | build-break | LAND |
-| H1 | Playground VFS seeder omits `angular/` → browser Angular gen throws | build-break (browser) | LAND |
-| G4 | Distinct deployables collapsing to one `serviceSlug` collide silently | boot-break | LAND |
-| B2 | Scaffold `workflowIsObservable` miscounts an optional id → phantom pages | wrong-value | LAND |
-| G-dap1 | `samePath` single-key match → wrong-file breakpoints | wrong-value (latent) | LAND |
-| A1 | Inherited aggregate fields invisible to type resolution (**= 07-18 L1, still live**) | build-break + fail-open | SURFACE |
+| C1 | `secret`/`internal` columns are accepted `?sort=` keys | security | **FIXED #2139** |
+| E1 | Java `X id[]` `.contains` find 500s at runtime | wrong-value (runtime) | **FIXED #2152** |
+| G1 | `ddd verify` false-VERIFIED off a suiteless duplicate-name result | wrong-value | **FIXED #2142** |
+| C2 | Optional `derived` fields wrongly `required` in `wire-spec.json` | wrong-value (artifact) | **FIXED #2141** |
+| D1 | TPH base reader omits `decimal.js` import (money-in-VO) | build-break | **FIXED #2144** |
+| B1 | `saveResolver` not threaded to nested `computeSaves` → loop-body writes lost | wrong-value | **FIXED #2148** |
+| E2 | Python emits `ruff`-failing code (F841/E713/F401) | build-break | **FIXED #2151** |
+| H1 | Playground VFS seeder omits `angular/` → browser Angular gen throws | build-break (browser) | **FIXED #2147** |
+| B2 | Scaffold `workflowIsObservable` miscounts an optional id → phantom pages | wrong-value | **FIXED #2143** |
+| G-dap1 | `samePath` single-key match → wrong-file breakpoints | wrong-value (latent) | **FIXED #2149** |
+| F2 | Four Vue/Svelte packs emit duplicate `style=` → user `style:` dropped | wrong-value | OPEN — deliberate cross-framework fix |
+| G4 | Distinct deployables collapsing to one `serviceSlug` collide silently | boot-break | OPEN — add a slug-uniqueness validator |
+| A1 | Inherited aggregate fields invisible to type resolution (**= 07-18 L1, still live**) | build-break + fail-open | SURFACE (belongs to the 07-18 L1–L4 member-lookup consolidation) |
 | F1 | Angular/Feliz silently drop non-`extern` user components | content-drop | SURFACE (design) |
 | I1–I4 | CI gate weaknesses (I1 = 07-18 CI4, still live) | gate | SURFACE |
 | G2/G3/G5/H2/H3/A-min/dap2 | Low/latent/cosmetic | low | note only |
 
-Disposition is updated as PRs land.
+Ten of the twelve confirmed product bugs landed as individual squash-merged PRs
+off fresh `main` (each with a failing-pre-fix regression test; E1 additionally
+verified end-to-end against a booted Java jar + Postgres). **F2** and **G4** are
+confirmed but deferred — F2 is a cross-framework style-merge (5 pack templates ×
+Vue/Svelte `style` vs `:style` semantics) better done deliberately than rushed;
+G4 wants a new slug-uniqueness validator. **A1** corroborates the 07-18 audit's
+L1 and is best fixed as part of that audit's L1–L4 member-lookup consolidation
+(one shared chain-aware/optional-aware helper across ~6 sites) rather than a
+point patch. The rest are design decisions (F1) or low/latent.
 
 ---
 
