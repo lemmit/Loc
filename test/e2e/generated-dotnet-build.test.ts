@@ -775,6 +775,51 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 5: PART-IN-PART (recursive containment).  A contained part
+    // that itself declares `contains` — each nested part gets its own child
+    // table FK'd to its DIRECT parent part (`labels.shipment_id`), not the root.
+    // Reads recurse bottom-up (grandchildren grouped by parent-part id, threaded
+    // into the parent's `Map(row, __childByOwner…)` signature); saves recurse the
+    // object graph; deletes rely on the FK cascade.  The dictionary-threaded
+    // `Map` params + nested `_Create(State)` seam are what /warnaserror compiles.
+    it("system `persistence: dapper` + part-in-part (recursive containment) — grandchild tables build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-nested-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-nested-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Grandchild tables FK their DIRECT parent part, not the aggregate root.
+        expect(schema).toContain("references shipments (id) on delete cascade");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS labels");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS stickers");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "OrderRepository.cs"),
+          "utf8",
+        );
+        // The parent part's `Map` takes the grandchild dictionaries and slots them.
+        expect(repo).toContain("MapShipment(ShipmentRow r,");
+        expect(repo).toContain("MapShipment(g.First(), __labelByOwner, __stickersByOwner)");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // M-T6.9 wave 4: a contained part carrying scalar / enum / value-object
     // COLLECTION fields (`tags: string[]`, `kinds: LineKind[]`, `charges:
     // Money[]`).  Each persists as one `jsonb` column on the child table
@@ -1143,6 +1188,55 @@ describe.skipIf(!ENABLED)(
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
         expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // M-T6.9 wave 5: TPH-WITH-CONTAINS — a `sharedTable` concrete carrying BOTH
+    // nested entity parts (incl. a part-in-part) AND an `X id[]` reference
+    // collection.  The concrete owns no table (rows live in the shared base
+    // `parties`), so its containment child tables + association join table FK
+    // the SHARED BASE row's id (EF's TPT-via-contains).  The shared `<Base>Id`
+    // threaded through the recursive `_Create(State)` seam is what /warnaserror
+    // compiles.
+    it("system `persistence: dapper` + TPH-with-contains — child/join tables FK the base, build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-tph-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-tph-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Concrete owns no state table; its child + join tables FK the base row.
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS notes");
+        expect(schema).toContain(
+          "party_id uuid not null references parties (id) on delete cascade",
+        );
+        // Part-in-part under the TPH concrete: the grandchild FKs its sibling part.
+        expect(schema).toContain("references notes (id) on delete cascade");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS customer_tags");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "CustomerRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("INSERT INTO notes (id, party_id,");
+        expect(repo).toContain("ParentId = new CustomerId(r.party_id),");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
       } finally {
         try {
           fs.rmSync(outDir, { recursive: true, force: true });

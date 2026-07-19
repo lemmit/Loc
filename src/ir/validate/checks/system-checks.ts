@@ -45,7 +45,6 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
-import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {
   dataSourceKindForAggregate,
@@ -1941,26 +1940,15 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // is a standalone table with the merged base fields (a normal Dapper
         // repository), and the polymorphic `find all <Base>` base reader is
         // persistence-agnostic (it delegates to each concrete's `All()`).  TPH
-        // (`sharedTable`) IS supported now for FLAT members — one shared table
-        // named for the base (id + `kind` discriminator + base columns + the
-        // nullable union of every concrete's own columns), each concrete repo
-        // targeting that table with a spliced `kind = '<Concrete>'` read filter +
-        // discriminator-literal INSERT, threading the shared `<Base>Id`.  Only a
-        // TPH member carrying `contains` (nested parts) or an `X id[]` reference
-        // collection stays gated — those child/join tables would need to FK the
-        // shared base row (a follow-up slice, matching EF's TPT-via-contains).
-        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates)) {
-          if ((a.contains ?? []).length > 0)
-            reject(
-              where,
-              "participates in TPH (sharedTable) inheritance with nested entity parts (`contains`)",
-            );
-          if ((a.associations ?? []).length > 0)
-            reject(
-              where,
-              "participates in TPH (sharedTable) inheritance with an `X id[]` reference collection",
-            );
-        }
+        // (`sharedTable`) IS supported too — one shared table named for the base
+        // (id + `kind` discriminator + base columns + the nullable union of
+        // every concrete's own columns), each concrete repo targeting that table
+        // with a spliced `kind = '<Concrete>'` read filter + discriminator-literal
+        // INSERT, threading the shared `<Base>Id`.  A TPH member carrying
+        // `contains` (nested parts) or an `X id[]` reference collection NOW
+        // composes with the containment child-table + association join-table
+        // passes: those child / join tables FK the SHARED BASE row's id (EF's
+        // TPT-via-contains under a TPH root), so no gate.
         if (isDocShape) continue;
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every
@@ -1986,18 +1974,28 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // ref-collection list on the reconstructed roots — the two hydrate
         // paths run in sequence, not exclusively.
         //
-        // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
-        // with its OWN containments).  A scalar / enum / value-object / id
-        // COLLECTION field on a part IS supported — it stores as one `jsonb`
-        // column holding the serialised list (System.Text.Json round-trip, the
-        // raw-Npgsql mirror of EF's primitive-collection JSON mapping); only an
-        // array whose element kind is outside that set stays gated (nothing in
-        // the corpus reaches it).
+        // Part-in-part (a contained part with its OWN `contains`) is now drained
+        // for the RELATIONAL child-table shape: `partChildrenOf` builds the
+        // containment TREE, each grandchild a table FK'd to its DIRECT parent
+        // part; hydration recurses bottom-up (children grouped by parent-part id,
+        // slotted into the parent's `Map`), save recurses the object graph, and
+        // delete relies on the FK cascade.  The `shape(embedded)` fold (one JSONB
+        // column per root containment) still gates a part-in-part — the nested
+        // snapshot fold is an untested follow-up, kept conservative.
+        //
+        // A scalar / enum / value-object / id COLLECTION field on a part IS
+        // supported — it stores as one `jsonb` column holding the serialised
+        // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
+        // primitive-collection JSON mapping); only an array whose element kind
+        // is outside that set stays gated (nothing in the corpus reaches it).
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
           for (const part of a.parts ?? []) {
-            if ((part.contains ?? []).length > 0)
-              reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
+            if (shape === "embedded" && (part.contains ?? []).length > 0)
+              reject(
+                where,
+                `contains a nested part-in-part ('${part.name}' has its own parts) under shape(embedded)`,
+              );
             for (const pf of part.fields) {
               const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
               if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))

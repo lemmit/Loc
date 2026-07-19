@@ -567,7 +567,12 @@ system D {
     expect(repo).toContain("DELETE FROM ship_infos WHERE order_id = @id");
   });
 
-  it("still rejects a part-in-part (nested containment)", async () => {
+  // M-T6.9 wave 5: a part-in-part (a contained part with its OWN `contains`) is
+  // now drained on the relational shape — the containment TREE recurses.  Each
+  // grandchild is a child table FK'd to its DIRECT parent part, hydration
+  // recurses bottom-up (grandchildren grouped by parent-part id + threaded into
+  // the parent's `Map`), save recurses the object graph, delete cascades.
+  it("drains a part-in-part (nested containment): grandchild tables + recursive hydrate/save", async () => {
     const src = `
 system D {
   api A from S
@@ -575,8 +580,14 @@ system D {
     context O {
       aggregate Order with crudish {
         customer: string
-        contains boxes: Box[]
-        entity Box { label: string  contains items: Item[]  entity Item { sku: string } }
+        contains box: Box
+        entity Box {
+          label: string
+          contains items: Item[]
+          contains tag: Tag?
+        }
+        entity Item { sku: string }
+        entity Tag { color: string }
       }
       repository Orders for Order { }
     }
@@ -585,8 +596,28 @@ system D {
   resource s { for: O, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the part-in-part gate is lifted for the relational shape
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // Root-level part FKs the aggregate; grandchildren FK their DIRECT parent part.
+    expect(schema).toContain("box_id uuid not null references boxes (id) on delete cascade");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS items");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS tags");
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // The parent part's Map threads the grandchild dictionaries; its ParentId is
+    // typed to the ROOT (Box.State.ParentId : OrderId), the grandchild's to Box.
+    expect(repo).toContain("private static Box MapBox(BoxRow r, Dictionary<");
+    expect(repo).toContain("ParentId = new OrderId(r.order_id),");
+    expect(repo).toContain("ParentId = new BoxId(r.box_id),");
+    // Hydration recurses: load box rows, expose their ids, load items/tags by
+    // box id, group children first, then map boxes with the child dicts.
+    expect(repo).toContain("var __boxIds = __boxRows.Select(x => x.id).ToArray();");
+    expect(repo).toContain("FROM items WHERE box_id = ANY(@ids)");
+    expect(repo).toContain("MapBox(g.First(), __itemsByOwner, __tagByOwner)");
+    // Save recurses the object graph — grandchild INSERT FKs the parent part's id.
+    expect(repo).toContain("if (aggregate.Box is { } __boxChild)");
+    expect(repo).toContain("foreach (var __itemsChild in __boxChild.Items)");
+    expect(repo).toContain("box_id = __boxChild.Id.Value");
   });
 
   // Wave 4: nested parts + a reference collection on the same aggregate now
@@ -878,29 +909,53 @@ system D {
     expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
   });
 
-  it("still rejects a TPH member carrying `contains` or a reference collection", async () => {
+  // M-T6.9 wave 5: a TPH concrete carrying `contains` / an `X id[]` reference
+  // collection now COMPOSES with the containment child-table + association
+  // join-table passes — the child / join tables FK the SHARED BASE row's id
+  // (EF's TPT-via-contains under a TPH root).
+  it("drains a TPH member with `contains` + a reference collection (child/join tables FK the base)", async () => {
     const src = `
 system D {
   api A from Registry
   subdomain Registry {
     context Parties {
+      aggregate Tag with crudish { label: string }
       abstract aggregate Party inheritanceUsing: sharedTable { name: string }
       aggregate Customer extends Party with crudish {
         creditLimit: int
         contains notes: Note[]
+        tags: Tag id[]
         entity Note { text: string }
       }
       repository Customers for Customer { }
+      repository Tags for Tag { }
     }
   }
   storage pg { type: postgres }
   resource s { for: Parties, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
-      true,
-    );
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the TPH-with-contains gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // The concrete owns no state table, but its child + join tables DO emit —
+    // FK'd to the shared base row (`parties`), not the (table-less) concrete.
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS notes");
+    expect(schema).toContain("party_id uuid not null references parties (id) on delete cascade");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS customer_tags");
+    const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // Containment child rows FK the shared base row (`party_id = aggregate.Id`);
+    // the part's State.ParentId is typed to the concrete (Note.State : CustomerId).
+    expect(repo).toContain("INSERT INTO notes (id, party_id, text)");
+    expect(repo).toContain("ParentId = new CustomerId(r.party_id),");
+    // The reference-collection join table threads the base row id through the
+    // shared `<Base>Id` (the concrete declares no id of its own).
+    expect(repo).toContain("INSERT INTO customer_tags (customer_id, tag_id)");
+    // Reads compose: hydrate the containment child tables, then post-set the
+    // ref-collection list on the reconstructed roots.
+    expect(repo).toContain("await HydrateAsync(conn, rows.ToList(), cancellationToken)");
+    expect(repo).toContain("LoadRefsAsync(conn,");
   });
 });
 
