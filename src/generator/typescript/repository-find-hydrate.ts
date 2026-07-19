@@ -159,6 +159,15 @@ function hydrateValueExpr(
   const bang = forceNonNull && !optional ? "!" : "";
   const colExpr = `${rowVar}.${fieldName}${bang}`;
   if (t.kind === "optional") {
+    // A value object has NO column of its own — it flattens to leaf columns
+    // (`billing` → `billing_street`, `billing_city`), so a `row.<field>` null
+    // probe is always `undefined == null` → true and would hydrate the VO to
+    // null even when the data is present.  The valueobject arm already emits
+    // the correct first-leaf-column guard when `optional` is true, so delegate
+    // to it rather than wrapping a (wrong) `row.<field>` guard around it.
+    if (t.inner.kind === "valueobject") {
+      return hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull, voSubfield);
+    }
     return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull, voSubfield)})`;
   }
   if (t.kind === "primitive") {

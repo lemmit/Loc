@@ -364,7 +364,14 @@ function projectValueEntries(
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (!vo) return [{ fieldName, expr: valueExpr }];
     return vo.fields.flatMap((vf) => {
-      const sub = `${valueExpr}.${vf.name}`;
+      // An OPTIONAL value object may be null on the domain object, so guard the
+      // parent deref — `aggregate.billing.street` throws when `billing` is null.
+      // When absent, every flattened column persists as null (the columns are
+      // nullable in the schema).  `optional` is threaded down so nested VO
+      // subfields inherit the guard.
+      const sub = optional
+        ? `(${valueExpr} == null ? null : ${valueExpr}.${vf.name})`
+        : `${valueExpr}.${vf.name}`;
       return projectValueEntries(`${fieldName}_${vf.name}`, vf.type, sub, ctx, optional);
     });
   }
