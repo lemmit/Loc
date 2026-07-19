@@ -81,10 +81,29 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
   return body;
 }
 
+// The wire shape a `File` field / FileUpload primitive round-trips (the
+// object-store reference the upload endpoint returns).
+export type FileRef = {
+  url: string;
+  key: string;
+  contentType: string;
+  size: number;
+};
+
 export const api = {
   get: (path: string) => request(path, { method: "GET" }),
   post: (path: string, body: unknown) =>
     request(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   upload: (path: string, form: FormData) => rawUpload(path, form),
+  // Convenience for the FileUpload primitive: wraps a single File in a
+  // FormData (the browser sets the multipart boundary) and POSTs it to the
+  // object-store endpoint, returning the FileRef.  Building the FormData here
+  // keeps it out of framework template scopes (Vue templates can't reference
+  // the FormData global).
+  uploadFile: (file: File): Promise<FileRef> => {
+    const form = new FormData();
+    form.append("file", file);
+    return rawUpload("/files", form) as Promise<FileRef>;
+  },
   delete: (path: string) => request(path, { method: "DELETE" }),
 };
