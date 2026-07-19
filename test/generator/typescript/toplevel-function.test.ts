@@ -9,14 +9,14 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   function isBlank(s: string): bool = s.trim().length == 0
-  function taxed(amount: int, pct: int): int = amount + amount * pct / 100
+  function taxed(amount: int, pct: int): decimal = amount + amount * pct / 100
 
   context Sales {
     aggregate Invoice {
       customerName: string
       net: int
       invariant !isBlank(customerName)
-      derived gross: int = taxed(net, 20)
+      derived gross: decimal = taxed(net, 20)
     }
     repository Invoices for Invoice { }
   }
