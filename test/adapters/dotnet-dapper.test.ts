@@ -327,20 +327,24 @@ system D {
       errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
     ).toBe(true);
   });
-  it("rejects a non-relational saving shape (shape: document)", async () => {
+  it("still rejects a non-relational saving shape outside {document, embedded} (part-in-part on embedded)", async () => {
+    // Embedded is supported for FLAT-part containments; a part-in-part stays
+    // gated (the conservative v1 embedded surface).
     const src = `
       system D {
         api A from S
         subdomain S { context O {
-          aggregate Cart shape: document with crudish { customer: string }
+          aggregate Cart shape: embedded with crudish {
+            customer: string
+            contains boxes: Box[]
+            entity Box { label: string  contains items: Item[]  entity Item { sku: string } }
+          }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
         deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /shape\(document\)/.test(e))).toBe(
-      true,
-    );
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
   });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
@@ -458,6 +462,189 @@ system D {
         (e) => /persistence: dapper/.test(e) && /reference-collection associations/.test(e),
       ),
     ).toBe(true);
+  });
+});
+
+// Document shape (`shape(document)`) on Dapper (M-T6.9 wave 3): the whole
+// aggregate persists as one JSONB `data` blob (a `(id, data, version)` table),
+// reusing the persistence-agnostic ToSnapshot/FromSnapshot round-trip; contained
+// parts + `X id[]` references fold into the blob (no child/join tables).  Finds
+// run in-memory over the rehydrated documents.
+describe("dapper document shape (contains + finds)", () => {
+  const DOC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      aggregate Cart shape: document with crudish {
+        customer: string
+        total:    Money
+        contains lines: CartLine[]
+        entity CartLine { sku: string  qty: int }
+      }
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects shape(document); emits a (id, data, version) blob table + JSONB repository", async () => {
+    const { files, errors } = await emit(DOC);
+    expect(errors).toEqual([]); // the dapper document gate is lifted
+    // Blob table (no per-field columns, no child/join tables).
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS carts (");
+    expect(schema).toContain("data jsonb not null");
+    expect(schema).toContain("version int not null");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines"); // parts fold into the blob
+    // The repository (de)serialises the whole aggregate through the snapshot.
+    const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
+    expect(repo).toContain(
+      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)!)",
+    );
+    expect(repo).toContain(
+      "System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json)",
+    );
+    expect(repo).toContain(
+      "ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = carts.version + 1 WHERE carts.version = @ExpectedVersion",
+    );
+    // Finds run in-memory over the rehydrated documents (no SQL WHERE).
+    expect(repo).toContain("var __all = __rows.Select(__d => Cart.FromSnapshot(");
+    expect(repo).toContain(".Where(x => x.Customer == customer).ToList();");
+    // Snapshot DTOs are emitted; the EF <Agg>Document POCO / configuration are NOT.
+    expect(files.has("api/Domain/Carts/CartSnapshots.cs")).toBe(true);
+    expect(files.has("api/Domain/Carts/CartDocument.cs")).toBe(false);
+    expect(
+      files.has("api/Infrastructure/Persistence/Configurations/CartDocumentConfiguration.cs"),
+    ).toBe(false);
+    // No EF AppDbContext on the Dapper deployable.
+    expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
+  });
+});
+
+// Embedded shape (`shape(embedded)`) on Dapper (M-T6.9 wave 3): flat root
+// columns PLUS one JSONB column per containment (the part sub-graph folds into
+// it via the ToSnapshot/FromSnapshot round-trip), no child tables.  The flat
+// `Map` hydrates each containment from its JSONB column.
+describe("dapper embedded shape (containments as jsonb columns)", () => {
+  const EMB = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      enum LineKind { Physical, Digital }
+      valueobject Money { amount: int  currency: string }
+      aggregate Cart shape: embedded with crudish {
+        customer: string
+        total:    Money
+        contains lines: CartLine[]
+        contains coupon: Coupon?
+        entity CartLine { sku: string  qty: int  kind: LineKind  price: Money }
+        entity Coupon { code: string  percent: int }
+      }
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects shape(embedded); folds containments into JSONB columns (no child tables)", async () => {
+    const { files, errors } = await emit(EMB);
+    expect(errors).toEqual([]); // the dapper embedded gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // Flat root columns + one jsonb column per containment; NO child tables.
+    expect(schema).toContain("customer text not null");
+    expect(schema).toContain("lines jsonb not null");
+    expect(schema).toContain("coupon jsonb"); // single optional → nullable
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS coupons");
+    const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
+    // The JSONB options field + the snapshot (de)serialisation.
+    expect(repo).toContain("private static readonly System.Text.Json.JsonSerializerOptions __json");
+    expect(repo).toContain(
+      "Lines = System.Text.Json.JsonSerializer.Deserialize<List<CartLineSnapshot>>(r.lines, __json)!.Select(CartLine.FromSnapshot).ToList()",
+    );
+    expect(repo).toContain(
+      "Coupon = r.coupon is null ? null : Coupon.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CouponSnapshot>(r.coupon, __json)!)",
+    );
+    expect(repo).toContain(
+      "lines = System.Text.Json.JsonSerializer.Serialize(aggregate.Lines.Select(__x => __x.ToSnapshot()).ToList(), __json)",
+    );
+    // Reads still go through the flat Map (no HydrateAsync child-table load).
+    expect(repo).toContain("private static Cart Map(Row r)");
+    expect(repo).not.toContain("HydrateAsync");
+    // Snapshot DTOs emitted; no EF document/owned config on the Dapper path.
+    expect(files.has("api/Domain/Carts/CartSnapshots.cs")).toBe(true);
+    expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
+  });
+});
+
+// TPC (`ownTable`) aggregate inheritance on Dapper (M-T6.9 wave 3): each
+// concrete is a standalone table carrying the MERGED base fields (a normal
+// Dapper repository); the abstract base owns no table; the polymorphic
+// `find all <Base>` base reader is persistence-agnostic (it delegates to each
+// concrete's `All()`).  TPH (`sharedTable`) stays gated.
+describe("dapper TPC (ownTable) aggregate inheritance", () => {
+  const TPC = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: ownTable {
+        name: string
+        email: string
+      }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+      aggregate Vendor extends Party with crudish { rating: int }
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects TPC inheritance; each concrete gets a standalone merged-field table", async () => {
+    const { files, errors } = await emit(TPC);
+    expect(errors).toEqual([]); // the dapper TPC inheritance gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // Standalone concrete tables carry base + own columns; the abstract base
+    // owns NO table.
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS vendors");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS parties");
+    const customer = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // The concrete's Map hydrates the merged (inherited + own) State fields.
+    expect(customer).toContain("Name = r.name,");
+    expect(customer).toContain("Email = r.email,");
+    expect(customer).toContain("CreditLimit = r.credit_limit,");
+    // The polymorphic base reader delegates to each concrete's All().
+    const base = files.get("api/Infrastructure/Repositories/PartyRepository.cs")!;
+    expect(base).toContain("result.AddRange(await _customerRepo.All(cancellationToken));");
+    expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
+  });
+
+  it("still rejects TPH (sharedTable) inheritance", async () => {
+    const src = TPC.replace("inheritanceUsing: ownTable", "inheritanceUsing: sharedTable");
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
+      true,
+    );
   });
 });
 

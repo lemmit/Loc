@@ -1,0 +1,58 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's EMBEDDED
+// SHAPE surface (M-T6.9 wave 3).  A `shape(embedded)` aggregate keeps its own
+// scalar / enum / value-object fields as FLAT columns, but folds each
+// containment into ONE JSONB column (the part sub-graph serialised through the
+// part's persistence-agnostic `ToSnapshot()` / `FromSnapshot(...)`) — no child
+// tables.  The flat `Map` hydrates each containment from its JSONB column.
+// Build under `dotnet build /warnaserror`.
+
+system DapperEmbedded {
+  api CartsApi from Sales
+
+  subdomain Sales {
+    context Carts {
+      enum LineKind { Physical, Digital }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Cart shape: embedded with crudish {
+        customer: string
+        total:    Money
+        note:     string?
+        contains lines:  CartLine[]
+        contains coupon: Coupon?
+
+        entity CartLine {
+          sku:   string
+          qty:   int
+          kind:  LineKind
+          price: Money
+        }
+
+        entity Coupon {
+          code:    string
+          percent: int
+        }
+      }
+
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource cartsState { for: Carts, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Carts]
+    dataSources: [cartsState]
+    serves: CartsApi
+    port: 8080
+  }
+}
