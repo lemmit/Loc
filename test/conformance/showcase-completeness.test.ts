@@ -174,10 +174,11 @@ function invokedNames(model: Model): Set<string> {
  *  missing pack template. Excluded from the walker-primitive coverage gate
  *  until it's backfilled across the other frontends and can join the shared
  *  fixture.
- *    - FileUpload: no HEEx renderer yet (renders on all 4 JSX frontends after
- *      4b). Kept out of `showcase.ddd` because `frontend-showcase-render` drives
- *      showcase through HEEx too, which can't render it (KNOWN_HEEX_GAPS). */
-const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set(["FileUpload"]);
+ *
+ *  EMPTY — `FileUpload` now renders on every frontend (the four JSX packs plus
+ *  the LiveView-native HEEx `allow_upload` flow), so it's exercised in
+ *  `showcase.ddd` like every other primitive. */
+const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set([]);
 
 describe("conformance: showcase.ddd completeness", () => {
   it(`parses and validates ${SHOWCASE} with no errors`, async () => {

@@ -56,15 +56,14 @@ const REGISTERED: Ratchet[] = [
     // the Projection/CommandHandler mid-flight entries).
     max: 14,
   },
-  // Walker primitives with a TSX renderer but no HEEx one.  `FileUpload`
-  // (M-T1.2 slice 4a) is React-only: LiveView uploads use
-  // allow_upload/live_file_input (a channel-streamed model), tracked for
-  // slice 4b — hence the single pinned entry.
+  // Walker primitives with a TSX renderer but no HEEx one.  Empty: every
+  // TSX-rendered primitive now has a HEEx renderer (FileUpload landed the
+  // LiveView-native allow_upload flow in M-T1.2 slice 4c).
   {
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",
     kind: "record",
-    max: 1,
+    max: 0,
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).
