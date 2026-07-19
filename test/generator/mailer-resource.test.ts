@@ -93,6 +93,37 @@ describe("mailer resource — cross-backend emission", () => {
     expect(find(files, /NotifyHandler\.cs$/)!).toMatch(/await SmtpResources\.Mail_Send\(/);
   });
 
+  it("dotnet csproj carries MailKit + suppresses its transitive NU1902 advisory", async () => {
+    const { files } = generateSystems(await parseValid(src("dotnet", "smtp")));
+    const csproj = find(files, /\.csproj$/)!;
+    expect(csproj).toMatch(/<PackageReference Include="MailKit" Version="[\d.]+" \/>/);
+    // The suppress keeps `dotnet build /warnaserror` (NuGet audit → NU1902)
+    // green against MailKit/MimeKit's moderate BouncyCastle advisory.
+    expect(csproj).toMatch(
+      /<NuGetAuditSuppress Include="https:\/\/github\.com\/advisories\/GHSA-9j88-vvj5-vhgr" \/>/,
+    );
+    expect(csproj).toMatch(
+      /<NuGetAuditSuppress Include="https:\/\/github\.com\/advisories\/GHSA-g7hc-96xr-gvvx" \/>/,
+    );
+  });
+
+  it("dotnet csproj emits no NuGetAuditSuppress when no mailer is consumed", async () => {
+    const { files } = generateSystems(
+      await parseValid(`
+system Sys {
+  subdomain D { context Sales {
+    aggregate Order with crudish { name: string }
+    repository Orders for Order { }
+  } }
+  api A from D
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable d { platform: dotnet, contexts: [Sales], dataSources: [salesState], serves: A, port: 4000 }
+}`),
+    );
+    expect(find(files, /\.csproj$/)!).not.toMatch(/NuGetAuditSuppress/);
+  });
+
   it("java emits SmtpResources.mailSend via Jakarta Mail + the call site", async () => {
     const { files } = generateSystems(await parseValid(src("java", "smtp")));
     const mod = find(files, /SmtpResources\.java$/)!;

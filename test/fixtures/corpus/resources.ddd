@@ -11,6 +11,7 @@ system RC {
           salesFiles.put("orders/" + name, name)
           salesJobs.enqueue(name)
           let info = crm.get("/customers")
+          mail.send(name, "Order archived", "Your order " + name + " was archived.")
         }
       }
     }
@@ -20,14 +21,16 @@ system RC {
   storage files { type: s3, config: { bucket: "app-files" } }
   storage jobs { type: rabbitmq }
   storage crmApi { type: restApi, config: { baseUrl: "http://crm:9000" } }
+  storage mailServer { type: smtp, config: { from: "no-reply@rc.test" } }
   resource salesState { for: Sales, kind: state, use: pg }
   resource salesFiles { for: Sales, kind: objectStore, use: files }
   resource salesJobs { for: Sales, kind: queue, use: jobs }
   resource crm { for: Sales, kind: api, use: crmApi }
+  resource mail { for: Sales, kind: mailer, use: mailServer }
   deployable d {
     platform: __PLATFORM__
     contexts: [Sales]
-    dataSources: [salesState, salesFiles, salesJobs, crm]
+    dataSources: [salesState, salesFiles, salesJobs, crm, mail]
     serves: A
     port: 4000
   }

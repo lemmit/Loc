@@ -1,0 +1,32 @@
+// Vanilla (plain Ecto/Phoenix) resource-clients fixture — exercises the
+// mailer (smtp → Swoosh) adapter alongside a state store, so
+// `mix compile --warnings-as-errors` covers the emitted Swoosh mailer
+// module + the `swoosh`/`gen_smtp` hex deps.  See
+// docs/old/proposals/email-resource-kind.md (M-T4.6).
+system Notify {
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        customerEmail: string
+      }
+      repository Orders for Order { }
+      workflow confirm {
+        create(customerEmail: string) {
+          mail.send(customerEmail, "Order confirmed", "Thanks for your order.")
+        }
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  storage mailServer { type: smtp, config: { from: "no-reply@notify.test" } }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  resource mail { for: Orders, kind: mailer, use: mailServer }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [ordersState, mail]
+    serves: OrdersApi
+    port: 4000
+  }
+}
