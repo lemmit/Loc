@@ -50,10 +50,16 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 
 const ENABLED = process.env.LOOM_A11Y_E2E === "1";
 const PACK = process.env.LOOM_A11Y_PACK ?? "mantine@v9";
+// Feliz (F#/Fable/Elmish) is NOT a Handlebars design pack — its `design:` slot
+// names a daisyUI theme, not a pack — so `packFormatForBuiltin` doesn't classify
+// it.  The matrix passes the bare `feliz` selector and the harness treats it as
+// its own format (dotnet fable → vite build → vite preview).
+const IS_FELIZ = PACK === "feliz";
+type A11yFormat = PackFormat | "feliz";
 // The pack's format IS the framework selector.  Default to React ("tsx") for a
 // pack name the format map doesn't know (a custom pack path), so an unexpected
 // value still exercises the (default) React path rather than crashing.
-const FORMAT: PackFormat = packFormatForBuiltin(PACK) ?? "tsx";
+const FORMAT: A11yFormat = IS_FELIZ ? "feliz" : (packFormatForBuiltin(PACK) ?? "tsx");
 // React drives the rich showcase example; the other frameworks drive the shared
 // scaffold system below (LOOM_A11Y_EXAMPLE only overrides the React path).
 const EXAMPLE = process.env.LOOM_A11Y_EXAMPLE ?? "examples/showcase.ddd";
@@ -63,11 +69,12 @@ const EXAMPLE = process.env.LOOM_A11Y_EXAMPLE ?? "examples/showcase.ddd";
 const GATE_IMPACTS = new Set(["serious", "critical"]);
 
 // The `platform:` keyword each pack format lowers to on the deployable.
-const PLATFORM_BY_FORMAT: Record<Exclude<PackFormat, "heex">, string> = {
+const PLATFORM_BY_FORMAT: Record<Exclude<A11yFormat, "heex">, string> = {
   tsx: "static", // `platform: static` is React's UI-only deployable kind.
   vue: "vue",
   svelte: "svelte",
   angular: "angular",
+  feliz: "feliz",
 };
 
 /** Shared scaffold system for the non-React frameworks — one subdomain, two
@@ -229,7 +236,7 @@ interface FrameworkProfile {
   preview: "vite" | "static";
 }
 
-function profileFor(format: PackFormat): FrameworkProfile {
+function profileFor(format: A11yFormat): FrameworkProfile {
   switch (format) {
     case "vue":
     case "tsx":
@@ -258,6 +265,20 @@ function profileFor(format: PackFormat): FrameworkProfile {
         buildCmd: "npx ng build",
         distSubdir: path.join("dist", "browser"),
         preview: "static",
+      };
+    case "feliz":
+      return {
+        platform: "feliz",
+        // The Feliz project's build-tool marker is `vite.config.js` (JS, not the
+        // TS the other vite frameworks emit) — unique to the feliz web dir.
+        projectMarker: "vite.config.js",
+        // Fable compiles the F# to JS, then vite bundles it — mirrors
+        // generated-feliz-build.yml.  The harness runs `npm install` first (for
+        // vite + fable-library-js), so this is just restore → fable → vite build.
+        buildCmd:
+          "dotnet tool restore && dotnet fable App.fsproj -o out --extension .js && npx vite build",
+        distSubdir: "dist",
+        preview: "vite",
       };
     case "heex":
       throw new Error("HEEx (Phoenix) is not a browser-previewable frontend for the axe gate");
@@ -299,7 +320,10 @@ describe.skipIf(!ENABLED)("generated frontend clears axe-core (preview + axe)", 
       FORMAT === "tsx"
         ? fs.readFileSync(path.join(repoRoot, EXAMPLE), "utf-8")
         : scaffoldSystem(profile.platform);
-    fs.writeFileSync(path.join(work, "main.ddd"), injectDesign(rawSrc, PACK, profile.platform));
+    // Feliz has no Handlebars `design:` pack to inject (its design slot is a
+    // daisyUI theme); scan the scaffold's default theme as-is.
+    const src = IS_FELIZ ? rawSrc : injectDesign(rawSrc, PACK, profile.platform);
+    fs.writeFileSync(path.join(work, "main.ddd"), src);
     run(`node ${cli} generate system ${work}/main.ddd -o ${work}/out`, repoRoot);
 
     const project = findProject(path.join(work, "out"), profile.projectMarker);
@@ -330,7 +354,19 @@ describe.skipIf(!ENABLED)("generated frontend clears axe-core (preview + axe)", 
           .analyze();
         for (const v of violations) {
           if (!GATE_IMPACTS.has(v.impact ?? "")) continue;
-          offenders.push(`${route}  [${v.impact}] ${v.id}: ${v.help} (${v.nodes.length} node(s))`);
+          // Log the offending node(s) — the selector + axe's failureSummary
+          // (for color-contrast this carries the fg/bg colours + the actual vs
+          // required ratio), so a red cell is directly actionable instead of
+          // an opaque "1 node(s)".
+          const nodeDetail = v.nodes
+            .map((n) => {
+              const summary = (n.failureSummary ?? "").replace(/\n/g, "\n         ");
+              return `      → ${n.target.join(" ")}${summary ? `\n         ${summary}` : ""}`;
+            })
+            .join("\n");
+          offenders.push(
+            `${route}  [${v.impact}] ${v.id}: ${v.help} (${v.nodes.length} node(s))\n${nodeDetail}`,
+          );
         }
       }
     } finally {

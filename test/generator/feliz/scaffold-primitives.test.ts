@@ -76,13 +76,13 @@ describe("feliz scaffold primitives", () => {
   it("emits IdLink cells + path-route Anchors", async () => {
     const app = await appFs(SCAFFOLD);
     // The id column links to the row's detail page (History-API PATH, not a hash).
+    // Plain `link` (not `link-primary`) — the primary colour fails WCAG AA
+    // contrast in several daisyUI themes (axe color-contrast).
     expect(app).toMatch(
-      /Html\.a \[ prop\.className "link link-primary"; prop\.href \("\/products\/" \+ \w+\.id\)/,
+      /Html\.a \[ prop\.className "link"; prop\.href \("\/products\/" \+ \w+\.id\)/,
     );
     // Breadcrumb anchors fold a literal route into a static PATH href.
-    expect(app).toContain(
-      'Html.a [ prop.className "link link-primary"; prop.href "/"; prop.text "Home" ]',
-    );
+    expect(app).toContain('Html.a [ prop.className "link"; prop.href "/"; prop.text "Home" ]');
   });
 
   // Reachability — a scaffold system must PARSE + VALIDATE cleanly.

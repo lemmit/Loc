@@ -58,6 +58,7 @@ jobs:
           - 'angularMaterial@v1' # angular
           - 'primeng@v1'        # angular
           - 'spartanNg@v1'      # angular
+          - 'feliz'             # feliz (F#/Fable) — dotnet fable → vite build
     timeout-minutes: 25
     name: axe × ${{ matrix.pack }}
     steps:
@@ -68,6 +69,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: package-lock.json
+
+      # Feliz alone needs the .NET SDK — `dotnet fable` compiles its F# to JS
+      # before vite bundles it (mirrors generated-feliz-build.yml).  The other
+      # (JSX/markup) frameworks build with vite/ng only, so skip the install.
+      - uses: actions/setup-dotnet@v4
+        if: matrix.pack == 'feliz'
+        with:
+          dotnet-version: '8.0'
 
       # Root install runs the `prepare` lifecycle (langium:generate) and pulls
       # the repo-side axe/playwright devDeps.
