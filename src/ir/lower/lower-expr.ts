@@ -270,6 +270,7 @@ function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
       left: acc,
       right: rhsIR,
       leftType: accType,
+      rightType: rhsType,
       resultType,
     };
     accType = resultType;
@@ -2137,7 +2138,14 @@ function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
     const ai = (order as readonly string[]).indexOf(a.name);
     const bi = (order as readonly string[]).indexOf(b.name);
     if (ai >= 0 && bi >= 0) {
-      return { kind: "primitive", name: order[Math.max(ai, bi)] as NumericName };
+      const widened = order[Math.max(ai, bi)] as NumericName;
+      // Division widens to `decimal` — the lowering mirror of the type-system's
+      // `arithmeticResult` rule, so the lowered binary's `resultType` stamp
+      // agrees.  `int / int` → decimal (fractional); `+ - * %` int-preserving.
+      if (op === "/" && (widened === "int" || widened === "long")) {
+        return { kind: "primitive", name: "decimal" };
+      }
+      return { kind: "primitive", name: widened };
     }
   }
   return a;

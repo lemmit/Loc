@@ -12,6 +12,7 @@ import {
   type BinaryExpr,
   type CallExpr,
   type ExprTarget,
+  isIntDivWidenedToDecimal,
   type MemberExpr,
   type MethodCallExpr,
   type NewExpr,
@@ -541,6 +542,9 @@ export const JAVA_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
   "long.abs": (recv) => `Math.abs(${recv})`,
   "decimal.abs": (recv) => `${recv}.abs()`,
   "money.abs": (recv) => `${recv}.abs()`,
+  // Truncating integer division (toward zero) — Java `int`/`long` `/` truncates natively.
+  "int.divTrunc": (recv, args) => `${recv} / ${args[0]}`,
+  "long.divTrunc": (recv, args) => `${recv} / ${args[0]}`,
   "int.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
   "int.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
@@ -803,6 +807,12 @@ function renderNew(
 
 function renderBinary(l: string, r: string, e: BinaryExpr): string {
   const lt = unwrapOptional(e.leftType);
+  // Integer division widened to decimal (`int / int` → decimal): int/long are
+  // primitives whose `/` is truncating integer division, so box both operands
+  // into BigDecimal and divide with the money-precision context.
+  if (isIntDivWidenedToDecimal(e)) {
+    return `java.math.BigDecimal.valueOf(${l}).divide(java.math.BigDecimal.valueOf(${r}), java.math.MathContext.DECIMAL128)`;
+  }
   // BigDecimal has no operators — arithmetic + comparisons dispatch
   // through methods.  `equals` is scale-sensitive (1.0 ≠ 1.00), so
   // equality routes through compareTo as well.

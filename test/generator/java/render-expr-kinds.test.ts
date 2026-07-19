@@ -502,6 +502,43 @@ describe("java renderJavaExpr — convert / match / list / lambda / object", () 
   });
 });
 
+describe("java renderJavaExpr — A1 int-division widening + divTrunc", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+
+  // `int / int` widens to `decimal`.  int/long are primitives whose `/` is
+  // truncating integer division, so both operands are boxed into BigDecimal
+  // and divided with the money-precision context.
+  it("renders int/int→decimal division via BigDecimal.valueOf(...).divide(...)", () => {
+    expect(
+      renderJavaExpr({
+        kind: "binary",
+        op: "/",
+        left: litInt("5"),
+        right: litInt("2"),
+        leftType: INT,
+        rightType: INT,
+        resultType: DECIMAL,
+      }),
+    ).toBe(
+      "java.math.BigDecimal.valueOf(5).divide(java.math.BigDecimal.valueOf(2), java.math.MathContext.DECIMAL128)",
+    );
+  });
+
+  // `a.divTrunc(b)` — Java int `/` already truncates toward zero.
+  it("renders the `divTrunc` intrinsic as native `recv / arg` (int `/` truncates)", () => {
+    expect(
+      renderJavaExpr({
+        kind: "method-call",
+        receiver: thisProp("a"),
+        member: "divTrunc",
+        args: [litInt("2")],
+        receiverType: INT,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.a / 2");
+  });
+});
+
 describe("java renderJavaType", () => {
   it("maps primitives to Java types", () => {
     expect(renderJavaType(INT)).toBe("int");

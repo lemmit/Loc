@@ -310,6 +310,9 @@ export const TS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "long.abs": (recv) => `Math.abs(${recv})`,
   "decimal.abs": (recv) => `Math.abs(${recv})`,
   "money.abs": (recv) => `${recv}.abs()`,
+  // Truncating integer division (toward zero) — `Math.trunc` on the float quotient.
+  "int.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
+  "long.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
   "int.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
   "decimal.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,

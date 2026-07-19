@@ -43,6 +43,7 @@ rather than silently degrading.
 | `abs` | `(): int` | yes |
 | `min` | `(other: int): int` | yes |
 | `max` | `(other: int): int` | yes |
+| `divTrunc` | `(divisor: int): int` | no |
 
 #### `long`
 
@@ -51,6 +52,7 @@ rather than silently degrading.
 | `abs` | `(): long` | yes |
 | `min` | `(other: long): long` | yes |
 | `max` | `(other: long): long` | yes |
+| `divTrunc` | `(divisor: long): long` | no |
 
 #### `decimal`
 

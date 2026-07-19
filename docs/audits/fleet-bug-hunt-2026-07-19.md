@@ -86,6 +86,24 @@ division is intended (TS → `Math.trunc(a / b)`, Python → `//`-with-sign-fix 
 result type to decimal, making C#/Java use decimal division). Either way all
 five renderers must agree.
 
+> **Update (2026-07-19, follow-up PR): A1 fixed — owner chose the fractional
+> semantics.** `int / int` (and `long/long`, `int/long`) now **widens to
+> `decimal`** in both type functions (`arithmeticResult`,
+> `binaryResultType`); `5 / 2` is `2.5` on every backend. `%`, `+`, `-`, `*`
+> stay int-preserving; money/decimal untouched. The binary IR gained
+> `rightType`, and a shared `isIntDivWidenedToDecimal` helper drives the three
+> backends whose native integer `/` was wrong: **.NET** `(decimal)(l) / r`,
+> **Java** `BigDecimal.valueOf(l).divide(BigDecimal.valueOf(r), DECIMAL128)`,
+> **Elixir** `Decimal.div(l, r)` (TS/Python already fractional — `decimal` is
+> `number`/`float` there). A deliberate truncating-division intrinsic
+> **`a.divTrunc(b)`** (int×int→int, toward zero; `queryable:false`) covers the
+> integer-division case: TS `Math.trunc(a/b)`, C#/Java `a / b`, Python
+> `int(a/b)`, Elixir `div(a,b)`. A `derived x: int = a / b` now **errors at
+> author time** (`type 'decimal' but declared type is 'int'`) — the intended
+> migration surface. Verified: `node tsc`, `python mypy --strict`, `dotnet
+> build /warnaserror`, `gradle testClasses bootJar` (JDK 25) all green on the
+> emitted projects. **A2 below is NOT fixed by this** — see its note.
+
 ### A2. `avg(λ)` over an int projection truncates on .NET; the same desugar doesn't compile on Java *(wrong-value / build-break)*
 
 `avg` desugars (`src/ir/lower/lower-expr.ts:659-705`) to
@@ -105,6 +123,16 @@ corroborated that Java's emission from the same desugar
 Primary file: `src/generator/dotnet/render-expr.ts:779` (sum leaf) + the
 desugar. Fix: coerce the numerator (or the division) to decimal for non-money
 numeric projections on the typed backends.
+
+> **Note (2026-07-19): A2 is NOT fixed by A1 — still open.** A1's decimal
+> division keys on `isIntDivWidenedToDecimal` (both operand *types* integral).
+> The `avg` desugar stamps its `/` node with `leftType: decimal` (numPrim),
+> so it correctly does not match — but its *operands* still render as `int`
+> (`.Sum(int)` / `.Count()`), so .NET's avg keeps truncating and Java's still
+> doesn't compile. The real fix belongs in the `avg` desugar itself: stamp the
+> division's operand types as `int` (so `isIntDivWidenedToDecimal` fires and
+> every backend boxes to decimal), or wrap `sum(λ)` in a decimal `convert`.
+> Tracked as its own follow-up.
 
 ### A3. Python `%` is floored modulo; every other backend truncates *(wrong-value)*
 

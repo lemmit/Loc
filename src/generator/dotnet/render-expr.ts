@@ -17,6 +17,7 @@ import {
   type BinaryExpr,
   type CallExpr,
   type ExprTarget,
+  isIntDivWidenedToDecimal,
   type MemberExpr,
   type MethodCallExpr,
   type NewExpr,
@@ -352,6 +353,11 @@ function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boo
     const liftedLeft = liftScalarToSelfId(e.right, e.left, left);
     if (liftedLeft) return `${liftedLeft} ${e.op} ${right}`;
   }
+  // Integer division widened to decimal (`int / int` → decimal): C# `int / int`
+  // truncates, so cast the numerator to `decimal` to force fractional division.
+  if (isIntDivWidenedToDecimal(e)) {
+    return `(decimal)(${left}) / ${right}`;
+  }
   return `${left} ${e.op} ${right}`;
 }
 
@@ -628,6 +634,9 @@ export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "long.abs": (recv) => `Math.Abs(${recv})`,
   "decimal.abs": (recv) => `Math.Abs(${recv})`,
   "money.abs": (recv) => `Math.Abs(${recv})`,
+  // Truncating integer division (toward zero) — C# `int`/`long` `/` truncates natively.
+  "int.divTrunc": (recv, args) => `${recv} / ${args[0]}`,
+  "long.divTrunc": (recv, args) => `${recv} / ${args[0]}`,
   // Two-value LEAST/GREATEST (the catalogue contract), not the LINQ
   // aggregates.
   "int.min": (recv, args) => `Math.Min(${recv}, ${args[0]})`,

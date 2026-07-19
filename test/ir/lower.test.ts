@@ -344,3 +344,44 @@ describe("lowering — A4 avg(λ) desugars to count/sum/count", () => {
     expect((qtyLam.body as Extract<ExprIR, { kind: "member" }>).memberType).toEqual(INT);
   });
 });
+
+// A1 — `int / int` division WIDENS to `decimal` (5 / 2 == 2.5).  The lowered
+// binary node stamps `resultType: decimal` (mirrors the type-system's
+// `arithmeticResult`), carries the new `rightType` alongside `leftType`, and
+// leaves `%`/`+`/`-`/`*` int-preserving.
+const DIV_SRC = `
+  context Shop {
+    aggregate Calc {
+      a: int
+      b: int
+      derived q: decimal = a / b
+      derived m: int = a % b
+    }
+    repository Calcs for Calc { }
+  }
+`;
+
+describe("lowering — A1 int-division widening", () => {
+  async function derivedBinary(name: string): Promise<Extract<ExprIR, { kind: "binary" }>> {
+    const loom = await buildLoomModel(DIV_SRC);
+    const calc = allAggregates(loom).find((x) => x.name === "Calc")!;
+    const d = calc.derived.find((x) => x.name === name)!;
+    expect(d, name).toBeDefined();
+    expect(d.expr.kind).toBe("binary");
+    return d.expr as Extract<ExprIR, { kind: "binary" }>;
+  }
+
+  it("stamps `int / int` with resultType decimal and both operand types int", async () => {
+    const div = await derivedBinary("q");
+    expect(div.op).toBe("/");
+    expect(div.resultType).toEqual(DECIMAL);
+    expect(div.leftType).toEqual(INT);
+    expect(div.rightType).toEqual(INT);
+  });
+
+  it("keeps `int % int` int-preserving (resultType int)", async () => {
+    const mod = await derivedBinary("m");
+    expect(mod.op).toBe("%");
+    expect(mod.resultType).toEqual(INT);
+  });
+});

@@ -659,6 +659,40 @@ describe("ts renderTsExpr — lambda, new, list, object", () => {
   });
 });
 
+describe("ts renderTsExpr — A1 int-division widening + divTrunc", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+
+  // `int / int` widens to `decimal`.  On TS `decimal` is `number` (already
+  // fractional), so the division stays the native `/` — no cast/box.
+  it("renders int/int→decimal division as native `/` (number is already fractional)", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "/",
+        left: litInt("5"),
+        right: litInt("2"),
+        leftType: INT,
+        rightType: INT,
+        resultType: DECIMAL,
+      }),
+    ).toBe("5 / 2");
+  });
+
+  // `a.divTrunc(b)` — truncating integer division toward zero.
+  it("renders the `divTrunc` intrinsic as `Math.trunc(recv / arg)`", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("a"),
+        member: "divTrunc",
+        args: [litInt("2")],
+        receiverType: INT,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.trunc(this._a / 2)");
+  });
+});
+
 describe("ts renderTsType — generic carriers (P3b)", () => {
   it("renders `paged` as its monomorphized inline record shape", () => {
     const t: TypeIR = {

@@ -166,3 +166,24 @@ describe("literal promotion — narrowing is NOT admitted", () => {
     );
   });
 });
+
+describe("A1 — int/int division widens to decimal (declared `int` no longer type-checks)", () => {
+  it("`derived bad: int = a / b` (a, b int) now errors — the division widened to decimal", async () => {
+    // A1 migration surface: `int / int` used to stay `int`; it now widens to
+    // `decimal` (5 / 2 == 2.5), so a division bound to a declared `int` is a
+    // type mismatch.  Authors who want truncating division write `a.divTrunc(b)`.
+    const { errors } = await parseString(`
+      context X {
+        aggregate Foo {
+          a: int
+          b: int
+          derived bad: int = a / b
+        }
+        repository Foos for Foo { }
+      }
+    `);
+    expect(errors.join("\n")).toMatch(
+      /Derived 'bad' has expression of type 'decimal' but declared type is 'int'/,
+    );
+  });
+});

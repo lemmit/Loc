@@ -102,7 +102,8 @@ describe("type-system — membersOfType (single source for member completion)", 
       "replace",
       "split",
     ]);
-    expect(names({ kind: "primitive", name: "int" })).toEqual(["abs", "min", "max"]);
+    expect(names({ kind: "primitive", name: "int" })).toEqual(["abs", "min", "max", "divTrunc"]);
+    expect(names({ kind: "primitive", name: "long" })).toEqual(["abs", "min", "max", "divTrunc"]);
     expect(names({ kind: "primitive", name: "money" })).toEqual([
       "abs",
       "min",
