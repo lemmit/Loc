@@ -1297,48 +1297,14 @@ export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   validateStampSupport(sys, diags, STAMP_BACKENDS[4]);
 }
 
-export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  for (const dep of sys.deployables) {
-    if (platformFamily(dep.platform) !== "java") continue;
-    for (const ctxName of dep.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      // `shape(embedded)` reference collections: the jsonb id-array
-      // column would route through Hibernate's structured-JSON path for
-      // registered @Embeddable ids (not the Jackson FormatMapper), which
-      // mis-serialises the typed-id list.  Gate until a converter-based
-      // mapping lands; containments-as-json are supported.
-      for (const agg of ctx.aggregates) {
-        const enriched = agg as EnrichedAggregateIR;
-        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
-        if (shape !== "embedded" || enriched.persistedAs === "eventLog") continue;
-        for (const f of agg.fields) {
-          const t = f.type.kind === "optional" ? f.type.inner : f.type;
-          if (t.kind === "array" && t.element.kind === "id") {
-            diags.push({
-              severity: "error",
-              message:
-                `Deployable '${dep.name}' (platform java) hosts shape(embedded) aggregate ` +
-                `'${ctxName}.${agg.name}' with reference collection '${f.name}' — jsonb id-array ` +
-                `columns are not yet mapped on the java backend (Hibernate's structured-JSON ` +
-                `path bypasses the Jackson FormatMapper for @Embeddable ids). ` +
-                `Use shape(document), the relational shape, or host on a node / dotnet deployable.`,
-              source: `${sys.name}/${dep.name}`,
-              code: "loom.java-embedded-refcoll-unsupported",
-            });
-          }
-        }
-      }
-      // Nested part-in-part containments (single AND collection) now map on
-      // java: a part FKs to its DIRECT parent (`directParentOf`, shared with
-      // migrations-builder), so the `@OneToOne`/`@OneToMany` join column matches
-      // the Flyway DDL and a collection nested below the root keeps its
-      // hierarchy.  (Was: `loom.java-single-containment-unsupported`.)
-    }
-  }
-}
+// M-T6.19: `shape(embedded)` reference collections (`X id[]`) now map on
+// java.  The jsonb id-array column rides a per-target `AttributeConverter`
+// (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
+// `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
+// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce
+// — instead of the structured-JSON aggregate path that bypassed it.  (Was:
+// `loom.java-embedded-refcoll-unsupported`.)  Nested part-in-part
+// containments (single AND collection) likewise map (`directParentOf`).
 
 // ---------------------------------------------------------------------------
 // Java read-model backstop gates.  Cross-aggregate view `follows` and VO-typed

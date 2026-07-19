@@ -125,6 +125,12 @@ const FIXTURES: Array<[string, string]> = [
   // shape: embedded: containments fold into jsonb columns via the
   // Hibernate JSON FormatMapper; scalar columns stay queryable.
   ["test/e2e/fixtures/java-build/embedded.ddd", "emb_api"],
+  // M-T6.19: shape: embedded WITH a reference collection (`X id[]`) — the
+  // jsonb id-array column rides a per-target AttributeConverter
+  // (<Target>IdJsonListConverter) that unwraps List<XId> to a plain
+  // List<String> so the FormatMapper serialises ["v1","v2"].  Boot-verified:
+  // create → jsonb ["uuid","uuid"] → getById/byCode round-trip the ids.
+  ["test/e2e/fixtures/java-build/embedded-refcoll.ddd", "emb_ref_api"],
   // DEBT-02: a capability `filter` on an embedded aggregate — the root scalars
   // are real columns, so it rides @SQLRestriction (static SQL) on the root
   // entity, exactly like the relational path (no in-app filtering).

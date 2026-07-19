@@ -1,0 +1,35 @@
+// shape: embedded with a reference collection (`X id[]`) — the jsonb
+// id-array column rides a per-target AttributeConverter so the bare id
+// `value`s serialise through the Jackson FormatMapper (M-T6.19).
+system EMBREF {
+  subdomain D {
+    context Shop {
+      aggregate Tag with crudish {
+        label: string
+      }
+      aggregate Order shape: embedded, with crudish {
+        code: string
+        tagIds: Tag id[]
+        contains items: Item[]
+        entity Item { sku: string  qty: int }
+        operation addItem(sku: string, qty: int) {
+          items += Item { sku: sku, qty: qty }
+        }
+      }
+      repository Tags for Tag { }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable embRefApi {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 8082
+  }
+}

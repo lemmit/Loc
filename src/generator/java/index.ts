@@ -77,7 +77,7 @@ import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaExternHook } from "./emit/extern.js";
-import { renderJavaId } from "./emit/ids.js";
+import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
@@ -438,6 +438,27 @@ function emitProjectFromContexts(
           agg.origin,
           idConstruct,
         );
+      }
+      // `shape(embedded)` reference collections fold into a jsonb id-array
+      // column, mapped via a per-target `AttributeConverter` (domain.ids) so
+      // the FormatMapper serialises the bare id `value`s.  Emitted once per
+      // distinct target id type across the project (identical content dedups
+      // in `out`).
+      const aggShape = effectiveSavingShape(
+        agg,
+        system?.sys ? resolveDataSourceConfig(agg, ctx, system.sys) : undefined,
+      );
+      if (aggShape === "embedded" && agg.persistedAs !== "eventLog") {
+        for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
+          place(
+            `${assoc.targetAgg}IdJsonListConverter.java`,
+            "id",
+            renderJavaIdListConverter(assoc.targetAgg, assoc.valueType, basePkg),
+            undefined,
+            agg.origin,
+            idConstruct,
+          );
+        }
       }
     }
     for (const e of ctx.enums) {

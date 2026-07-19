@@ -35,14 +35,9 @@ const CASE = process.env.LOOM_CORPUS_JAVA_CASE;
 // each line is a precise, reproducible bug report).  Widen the gate by FIXING
 // the emitter, then dropping the entry.
 const JAVA_COMPILE_SKIP: Record<string, string> = {
-  // (provenance: now emitted + gradle-clean on java — W2 — so it gates here.)
-  // PLATFORM LIMITATION (generate-time error): a shape: embedded aggregate with a
-  // reference-collection (`X id[]`) jsonb id-array column isn't mapped on java
-  // (Hibernate's structured-JSON path bypasses the Jackson FormatMapper for
-  // @Embeddable ids).  Documented; use shape: document/relational or host on
-  // node/dotnet.
-  embedded:
-    "PLATFORM LIMITATION: jsonb id-array column unmapped on java (shape: embedded + ref collection)",
+  // (empty — M-T6.19 closed the last java compile-tier skip: a shape: embedded
+  //  aggregate's `X id[]` reference collection now maps via a per-target
+  //  AttributeConverter, gradle-clean + boot-verified.)
 };
 
 // Every corpus feature the manifest declares to generate on `java`, minus the
