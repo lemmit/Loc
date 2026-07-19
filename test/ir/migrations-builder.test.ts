@@ -705,6 +705,92 @@ system Shop {
   });
 });
 
+describe("buildMigrations — sibling reference-collection targetFk cascade (M-T2.1 b)", () => {
+  // Module `Sales` owns the renamed aggregate; module `Fulfilment` owns a
+  // SIBLING aggregate whose reference collection targets it — so the join
+  // table's `targetFk` column lives in ANOTHER module than the rename intent.
+  const SRC = (aggName: string) => `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate ${aggName} { total: int }
+      repository Orders for ${aggName} { }
+    }
+  }
+  subdomain Fulfilment {
+    context Shipping {
+      aggregate Shipment { parcels: ${aggName} id[] }
+      repository Shipments for Shipment { }
+    }
+  }
+  deployable sales { platform: node, contexts: [Orders], port: 3000 }
+  deployable ship { platform: node, contexts: [Shipping], port: 3001 }
+}`;
+
+  const build = async () => {
+    const oldLoom = await buildLoomModel(SRC("Order"));
+    const oldSys = oldLoom.systems[0]!;
+    const byModule = (sys: typeof oldSys, name: string) =>
+      sys.subdomains.find((s) => s.name === name)!;
+    const baseSales: SchemaSnapshot = {
+      ...schemaFromModule(byModule(oldSys, "Sales")),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const baseFulfilment: SchemaSnapshot = {
+      ...schemaFromModule(byModule(oldSys, "Fulfilment")),
+      lastVersion: BASE_TIMESTAMP,
+    };
+    const newLoom = await buildLoomModel(
+      `${SRC("PurchaseOrder")}\nmigration "rename-order" { Order -> PurchaseOrder }`,
+    );
+    const out = buildMigrations(
+      newLoom.systems[0]!,
+      memorySnapshotStore({ Sales: baseSales, Fulfilment: baseFulfilment }),
+      { tableRenameIntents: newLoom.tableRenameIntents },
+    );
+    return out;
+  };
+
+  it("renames the sibling join table's targetFk column across modules — no destructive step anywhere", async () => {
+    const out = await build();
+    const fulfilment = out.find((m) => m.module === "Fulfilment")!;
+    // The join table `shipment_parcels` lives in Fulfilment; its `order_id`
+    // targetFk cascades to `purchase_order_id` even though the rename intent
+    // belongs to Sales.
+    expect(
+      fulfilment.steps.some(
+        (s) =>
+          s.op === "renameColumn" &&
+          s.table === "shipment_parcels" &&
+          s.from === "order_id" &&
+          s.to === "purchase_order_id",
+      ),
+    ).toBe(true);
+    // The whole point: an aggregate rename emits ZERO destructive steps
+    // anywhere in the system (both modules).
+    const destructive = out.flatMap((m) =>
+      m.steps.filter(
+        (s) =>
+          s.op === "dropTable" ||
+          s.op === "dropColumn" ||
+          (s.op === "addColumn" && !s.column.nullable && s.column.default === undefined),
+      ),
+    );
+    expect(destructive).toEqual([]);
+    // …and the join table's derived targetFk index rides along via renameIndex
+    // (slice a), not a drop+recreate.
+    expect(
+      fulfilment.steps.some(
+        (s) =>
+          s.op === "renameIndex" &&
+          s.from === "shipment_parcels_order_id_idx" &&
+          s.to === "shipment_parcels_purchase_order_id_idx",
+      ),
+    ).toBe(true);
+    expect(fulfilment.steps.some((s) => s.op === "dropIndex" || s.op === "addIndex")).toBe(false);
+  });
+});
+
 describe("buildMigrations — migration-block rename intent (M-T2.1)", () => {
   const RENAME_SRC = `
 system Shop {

@@ -1564,6 +1564,45 @@ function resolveTableRenames(
       });
     }
   }
+
+  // Sibling reference-collection `targetFk` cascade (M-T2.1 b).  A join table
+  // for `Sibling.xs: New id[]` carries a `targetFk` column named for the
+  // RENAMED aggregate (`new_id`, formerly `old_id`).  That join table is owned
+  // by the SIBLING, which may live in ANOTHER module, so the primary cascade
+  // above (owner-scoped, `New`'s own tables) never reaches it — leaving the
+  // column change to the destructive gate.  This second pass runs THIS module's
+  // aggregates against the GLOBAL intent list and emits the `old_id -> new_id`
+  // column rename on every join table this module owns whose association points
+  // at a renamed aggregate.  Guarded downstream by baseline existence, so a
+  // join table that predates the rename (or a same-generation add) is dropped.
+  const intentByNewAgg = new Map<string, TableRenameIntentIR>();
+  for (const ri of intents) {
+    if (ri.fromAggregate !== ri.toAggregate) intentByNewAgg.set(ri.toAggregate, ri);
+  }
+  if (intentByNewAgg.size > 0) {
+    for (const ctx of module.contexts) {
+      for (const agg of ctx.aggregates) {
+        for (const assoc of agg.associations) {
+          const ri = intentByNewAgg.get(assoc.targetAgg);
+          if (!ri) continue;
+          // The renamed aggregate's OWN associations are the primary cascade's
+          // job (ownerFk, above); the disambiguated self-collision column
+          // (`target_id`) embeds no stem, so there's nothing to cascade.
+          if (assoc.ownerAgg === ri.toAggregate) continue;
+          const newStem = snake(ri.toAggregate);
+          if (assoc.targetFk !== `${newStem}_id`) continue;
+          const oldStem = snake(ri.fromAggregate);
+          if (oldStem === newStem) continue;
+          columnRenames.push({
+            table: assoc.joinTable,
+            schema: schemaOf(agg, ctx),
+            from: `${oldStem}_id`,
+            to: assoc.targetFk,
+          });
+        }
+      }
+    }
+  }
   return { tableRenames, columnRenames, dataFixups };
 }
 
