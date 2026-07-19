@@ -712,7 +712,7 @@ system D {
 // concrete is a standalone table carrying the MERGED base fields (a normal
 // Dapper repository); the abstract base owns no table; the polymorphic
 // `find all <Base>` base reader is persistence-agnostic (it delegates to each
-// concrete's `All()`).  TPH (`sharedTable`) stays gated.
+// concrete's `All()`).  TPH (`sharedTable`) is drained in wave 4 (below).
 describe("dapper TPC (ownTable) aggregate inheritance", () => {
   const TPC = `
 system D {
@@ -759,12 +759,117 @@ system D {
     expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
   });
 
-  it("still rejects TPH (sharedTable) inheritance", async () => {
-    const src = TPC.replace("inheritanceUsing: ownTable", "inheritanceUsing: sharedTable");
+  it("still rejects a TPH member carrying `contains` or a reference collection", async () => {
+    const src = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        contains notes: Note[]
+        entity Note { text: string }
+      }
+      repository Customers for Customer { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
-      true,
+    expect(
+      errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e)),
+    ).toBe(true);
+  });
+});
+
+// TPH (`sharedTable`) aggregate inheritance on Dapper (M-T6.9 wave 4): the whole
+// hierarchy maps to ONE `kind`-discriminated table named for the abstract base
+// (id + `kind` + base columns + the nullable union of every concrete's own
+// columns).  Each concrete Dapper repo targets that table with a spliced
+// `kind = '<Concrete>'` read filter + discriminator-literal INSERT, threading
+// the shared `<Base>Id` (the concrete declares no id of its own).
+describe("dapper TPH (sharedTable) aggregate inheritance", () => {
+  const TPH = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable {
+        name: string
+        email: string
+      }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+      aggregate Vendor extends Party with crudish { rating: int  active: bool }
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects TPH; emits one shared kind-discriminated table", async () => {
+    const { files, errors } = await emit(TPH);
+    expect(errors).toEqual([]); // the dapper TPH inheritance gate is lifted for flat members
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // ONE shared table named for the base; the concretes own no table.
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS parties");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS vendors");
+    // id + kind + base columns (not null) + the UNION of concrete columns
+    // (nullable — a row of one kind leaves the other kind's columns NULL).
+    expect(schema).toContain("kind text not null");
+    expect(schema).toContain("name text not null");
+    expect(schema).toContain("credit_limit integer,"); // nullable (no "not null")
+    expect(schema).toContain("rating integer,");
+    expect(schema).toContain("active boolean");
+    expect(schema).not.toMatch(/credit_limit integer not null/);
+  });
+
+  it("the concrete repo targets the shared table, filters + inserts the discriminator, threads the base id", async () => {
+    const { files } = await emit(TPH);
+    const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // Shared base id class, not a per-concrete CustomerId.
+    expect(repo).toContain(
+      "public async Task<Customer?> GetByIdAsync(PartyId id, CancellationToken cancellationToken = default)",
     );
+    expect(repo).toContain(
+      "public async Task<IReadOnlyList<Customer>> FindManyByIdsAsync(IReadOnlyList<PartyId> ids,",
+    );
+    expect(repo).toContain("Id = new PartyId(r.id),");
+    // Every SELECT splices `kind = 'Customer'` into its WHERE.
+    expect(repo).toContain("FROM parties WHERE id = @id AND kind = 'Customer'");
+    expect(repo).toContain("FROM parties WHERE id = ANY(@ids) AND kind = 'Customer'");
+    expect(repo).toContain("FROM parties WHERE kind = 'Customer'"); // findAll
+    expect(repo).toContain("(email = @email) AND kind = 'Customer'"); // named find
+    // INSERT writes the discriminator literal into the shared table.
+    expect(repo).toContain(
+      "INSERT INTO parties (id, kind, name, email, credit_limit, version) VALUES (@id, 'Customer', @name, @email, @credit_limit, 1)",
+    );
+  });
+
+  it("the abstract base emits the mapped entity but NO EF configuration on Dapper", async () => {
+    const { files } = await emit(TPH);
+    // The persistence-agnostic base entity (owns the shared PartyId) is emitted.
+    const base = files.get("api/Domain/Parties/Party.cs")!;
+    expect(base).toContain("public abstract class Party");
+    expect(base).toContain("public PartyId Id");
+    // No EF configuration (it would reference Microsoft.EntityFrameworkCore).
+    expect(files.has("api/Infrastructure/Persistence/Configurations/PartyConfiguration.cs")).toBe(
+      false,
+    );
+    // No polymorphic base repository (parity with the EF .NET path, which emits
+    // none for TPH — the concretes carry their own repos).
+    expect(files.has("api/Infrastructure/Repositories/PartyRepository.cs")).toBe(false);
   });
 });
 

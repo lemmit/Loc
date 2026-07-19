@@ -1945,11 +1945,26 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // is a standalone table with the merged base fields (a normal Dapper
         // repository), and the polymorphic `find all <Base>` base reader is
         // persistence-agnostic (it delegates to each concrete's `All()`).  TPH
-        // (`sharedTable` — one shared table + `kind` discriminator hydration)
-        // stays gated: the discriminator-switch construction seam isn't wired on
-        // the Dapper repository yet.
-        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates))
-          reject(where, "participates in TPH (sharedTable) aggregate inheritance");
+        // (`sharedTable`) IS supported now for FLAT members — one shared table
+        // named for the base (id + `kind` discriminator + base columns + the
+        // nullable union of every concrete's own columns), each concrete repo
+        // targeting that table with a spliced `kind = '<Concrete>'` read filter +
+        // discriminator-literal INSERT, threading the shared `<Base>Id`.  Only a
+        // TPH member carrying `contains` (nested parts) or an `X id[]` reference
+        // collection stays gated — those child/join tables would need to FK the
+        // shared base row (a follow-up slice, matching EF's TPT-via-contains).
+        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates)) {
+          if ((a.contains ?? []).length > 0)
+            reject(
+              where,
+              "participates in TPH (sharedTable) inheritance with nested entity parts (`contains`)",
+            );
+          if ((a.associations ?? []).length > 0)
+            reject(
+              where,
+              "participates in TPH (sharedTable) inheritance with an `X id[]` reference collection",
+            );
+        }
         if (isDocShape) continue;
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every

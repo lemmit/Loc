@@ -33,6 +33,12 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  isTphBase,
+  isTphConcrete,
+  ownFieldsOf,
+  tphConcretesOf,
+} from "../../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -108,8 +114,10 @@ function unwrapOptional(t: TypeIR): { type: TypeIR; nullable: boolean } {
   return t.kind === "optional" ? { type: t.inner, nullable: true } : { type: t, nullable: false };
 }
 
-/** The id column — every aggregate has one. */
-function idColumn(agg: EnrichedAggregateIR): DapperColumn {
+/** The id column — every aggregate has one.  `idClass` names the strongly-typed
+ *  id struct the hydrate mints; it defaults to `<Agg>Id` but a TPH concrete
+ *  passes its shared base's `<Base>Id` (the concrete declares no id of its own). */
+function idColumn(agg: EnrichedAggregateIR, idClass = `${agg.name}Id`): DapperColumn {
   const { sql, cs } = idTypes(agg.idValueType);
   return {
     col: "id",
@@ -119,7 +127,7 @@ function idColumn(agg: EnrichedAggregateIR): DapperColumn {
     cast: "",
     save: "aggregate.Id.Value",
     stateProp: "Id",
-    hydrate: `new ${agg.name}Id(r.id)`,
+    hydrate: `new ${idClass}(r.id)`,
   };
 }
 
@@ -307,12 +315,16 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
   };
 }
 
-function columnsOf(agg: EnrichedAggregateIR, embedded = false): DapperColumn[] {
+function columnsOf(
+  agg: EnrichedAggregateIR,
+  embedded = false,
+  idClass = `${agg.name}Id`,
+): DapperColumn[] {
   // Reference-collection fields (`X id[]`) live in their join tables, not as
   // root columns — see the association load/save blocks in the repository.
   const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
   return [
-    idColumn(agg),
+    idColumn(agg, idClass),
     ...agg.fields.filter((f) => !assocFields.has(f.name)).map((f) => fieldColumn(f)),
     // One co-located `<field>_provenance` lineage column per provenanced field.
     ...agg.fields.filter((f) => f.provenanced).map(provColumn),
@@ -634,12 +646,27 @@ export function renderDapperRepository(
    *  part snapshots) instead of a child table.  Adds the STJ `__json` options
    *  field the containment (de)serialisation uses. */
   embedded = false,
+  /** TPH (`sharedTable`) concrete: the aggregate persists to the shared table
+   *  named for `baseName`, discriminated by a `kind` column carrying
+   *  `discriminator` (this concrete's name).  Every SELECT splices `kind = '…'`
+   *  into its WHERE; every INSERT writes the `kind` literal; the id class is the
+   *  shared `<Base>Id` (this concrete declares no id of its own).  Undefined for
+   *  a standalone aggregate / TPC concrete (byte-identical off this path). */
+  tph?: { baseName: string; discriminator: string },
 ): string {
-  const table = tableOf(agg.name);
+  const idClass = tph ? `${tph.baseName}Id` : `${agg.name}Id`;
+  const table = tableOf(tph ? tph.baseName : agg.name);
   const sqlCtx: WhereSqlCtx = { agg, table };
-  const cols = columnsOf(agg, embedded);
+  const cols = columnsOf(agg, embedded, idClass);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
+  // TPH INSERT splices the `kind` discriminator literal right after `id` (the
+  // SELECT `colList` stays discriminator-free — the discriminator lives in the
+  // spliced WHERE filter, not the projected columns).
+  const insertColList = tph
+    ? [cols[0]!.col, "kind", ...cols.slice(1).map((c) => c.col)].join(", ")
+    : colList;
+  const kindLiteral = tph ? `'${tph.discriminator.replace(/'/g, "''")}'` : "";
   // Lifecycle stamps (`stamp onCreate/onUpdate { field: expr }` →
   // `contextStamps`).  EF applies these via SaveChangesInterceptor (writing the
   // stamped column through EF metadata, so the entity's `{ get; private set; }`
@@ -716,6 +743,19 @@ export function renderDapperRepository(
   const versionedInsertVals = cols
     .map((c) => (c.col === versionCol ? "1" : `@${c.col}${c.cast}`))
     .join(", ");
+  // TPH INSERT VALUES: the `kind` literal follows the `id` value (matching
+  // `insertColList`).  Off the TPH path these equal `insertVals` /
+  // `versionedInsertVals` (byte-identical).
+  const insertValsTph = tph
+    ? [`@${cols[0]!.col}${cols[0]!.cast}`, kindLiteral, ...cols.slice(1).map((c) => `@${c.col}${c.cast}`)].join(", ")
+    : insertVals;
+  const versionedInsertValsTph = tph
+    ? [
+        `@${cols[0]!.col}${cols[0]!.cast}`,
+        kindLiteral,
+        ...cols.slice(1).map((c) => (c.col === versionCol ? "1" : `@${c.col}${c.cast}`)),
+      ].join(", ")
+    : versionedInsertVals;
   const versionedSetClause = upsertSetNoVersion
     ? `${upsertSetNoVersion}, ${versionCol} = ${table}.${versionCol} + 1`
     : `${versionCol} = ${table}.${versionCol} + 1`;
@@ -723,12 +763,12 @@ export function renderDapperRepository(
     ? [
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
         "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
-        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${versionedInsertVals}) ON CONFLICT (id) DO UPDATE SET ${versionedSetClause} WHERE ${table}.${versionCol} = @ExpectedVersion", new { ${saveParams}, ExpectedVersion = __expected }, cancellationToken: cancellationToken));`,
+        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${versionedInsertValsTph}) ON CONFLICT (id) DO UPDATE SET ${versionedSetClause} WHERE ${table}.${versionCol} = @ExpectedVersion", new { ${saveParams}, ExpectedVersion = __expected }, cancellationToken: cancellationToken));`,
         `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
       ]
     : [
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
+        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${insertValsTph}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
       ];
 
   // Capability filters (`filter !this.isDeleted`, `filter this.tenantId ==
@@ -742,7 +782,11 @@ export function renderDapperRepository(
   // (loud) rather than silently dropping the filter — half-applying a
   // soft-delete/tenant filter would be a correctness hole.
   const capabilityFilters = agg.contextFilters ?? [];
-  const filterSql: string | null =
+  // The TPH discriminator predicate (`kind = '<Concrete>'`) is ANDed into every
+  // SELECT alongside the capability filters — the raw-SQL mirror of EF's
+  // per-derived-type discriminator filter, so a concrete repo never reads a
+  // sibling's rows out of the shared table.
+  const capabilityFilterSql: string | null =
     capabilityFilters.length > 0
       ? capabilityFilters
           .map((p) => {
@@ -757,6 +801,9 @@ export function renderDapperRepository(
           })
           .join(" AND ")
       : null;
+  const filterSql: string | null =
+    [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSql].filter((s) => s !== null).join(" AND ") ||
+    null;
   const andFilter = (existingWhere: boolean): string =>
     filterSql ? `${existingWhere ? " AND " : " WHERE "}${filterSql}` : "";
   // Principal-filter param bindings appended to every SELECT's parameter object
@@ -1142,7 +1189,7 @@ export function renderDapperRepository(
             "        });",
             "",
           ]),
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default)`,
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value${princSuffix} }, cancellationToken: cancellationToken));`,
@@ -1165,7 +1212,7 @@ export function renderDapperRepository(
           : ["        return r is null ? null : Map(r);"]),
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
@@ -1537,13 +1584,48 @@ export function renderDapperSchema(
 ): string {
   // Event-sourced aggregates own no per-aggregate table — their stream lives in
   // the shared per-context `<ctx>_events` log emitted after this map.  Document
-  // aggregates own one `(id, data, version)` blob table.  An ABSTRACT base owns
-  // no table of its own: a TPC (`ownTable`) base's rows live in each concrete's
-  // standalone table (with the merged base fields), so it emits no DDL.  (A TPH
-  // base WOULD own the shared table, but TPH stays validator-gated on Dapper.)
+  // aggregates own one `(id, data, version)` blob table.  A TPC (`ownTable`)
+  // ABSTRACT base owns no table of its own (its rows live in each concrete's
+  // standalone table with the merged base fields), so it emits no DDL — but a
+  // TPH (`sharedTable`) ABSTRACT base DOES own the single shared table (`id` +
+  // `kind` discriminator + base columns + the nullable UNION of every concrete's
+  // own columns), and each TPH CONCRETE owns no table of its own.
   const stateTables = aggs
-    .filter((agg) => agg.persistedAs !== "eventLog" && !agg.isAbstract)
+    .filter((agg) => {
+      if (agg.persistedAs === "eventLog") return false;
+      // TPH concrete: its rows live in the shared base table — no own DDL.
+      if (isTphConcrete(agg, aggs)) return false;
+      // Abstract base: emits DDL only when it's a TPH base (owns the shared
+      // table); a TPC base owns nothing.
+      if (agg.isAbstract) return isTphBase(agg, aggs);
+      return true;
+    })
     .map((agg) => {
+      // TPH shared table: `id` + `kind` + base columns + the nullable union of
+      // every concrete's own columns.  A concrete row leaves the sibling
+      // concretes' columns NULL (hence nullable); the `kind` discriminator picks
+      // the concrete on read (the repo splices `kind = '<Concrete>'`).
+      if (isTphBase(agg, aggs)) {
+        const baseCols = columnsOf(agg); // id + base own fields (+version)
+        const seen = new Set(baseCols.map((c) => c.col));
+        const unionCols: DapperColumn[] = [];
+        for (const concrete of tphConcretesOf(agg, aggs)) {
+          for (const f of ownFieldsOf(concrete, agg)) {
+            const c = fieldColumn(f);
+            if (seen.has(c.col)) continue;
+            seen.add(c.col);
+            // A sibling concrete's column is absent on other kinds → nullable.
+            unionCols.push({ ...c, nullable: true });
+          }
+        }
+        const ddlCols = [
+          `    ${baseCols[0]!.col} ${baseCols[0]!.sql} primary key`,
+          "    kind text not null",
+          ...baseCols.slice(1).map((c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`),
+          ...unionCols.map((c) => `    ${c.col} ${c.sql}`),
+        ];
+        return `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${ddlCols.join(",\n")}\n);`;
+      }
       // Document shape: the whole aggregate is one JSONB `data` column.  No
       // per-field columns, no child/join tables — the graph folds into the blob.
       if (documentAggNames.has(agg.name)) {

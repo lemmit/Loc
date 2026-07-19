@@ -898,6 +898,9 @@ function emitAggregate(
 ): void {
   const aggFolder = plural(agg.name);
   const construct = `${ctx.name}.${agg.name}`;
+  // Persistence selection (needed as early as the abstract-base branch below —
+  // a Dapper TPH base owns its shared table via DbSchema, not an EF config).
+  const usingDapperEarly = emitCtx?.deployable.persistence === "dapper";
   // Per-aggregate placement (D-REALIZATION-AXES `directoryLayout:`): route the
   // aggregate's domain + persistence files through the deployable's RESOLVED
   // layout adapter (threaded via emitCtx), falling back to byLayer in the
@@ -938,28 +941,35 @@ function emitAggregate(
   // concretes).  Either way, stop — everything below is per concrete aggregate.
   if (agg.isAbstract) {
     if (isTphBase(agg, ctx.aggregates)) {
-      // The TPH base owns the single shared table (`ToTable`) — it must carry
-      // the SAME dataSource schema/tablePrefix the migration stamps on that
-      // table (the owning context's Postgres schema), else EF issues
-      // `INSERT INTO "vehicles"` while the migration created
-      // `"fleet"."vehicles"` → `relation "vehicles" does not exist` at runtime.
-      const baseDs = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
+      // The TPH base owns the single shared table.  Emit the mapped abstract
+      // entity (owns the shared `<Base>Id`) on every persistence axis.
       place(
         `${agg.name}.cs`,
         "entity",
         renderAbstractBaseEntity(agg, ns, { tph: true }),
         agg.origin,
       );
-      place(
-        `${agg.name}Configuration.cs`,
-        "ef-configuration",
-        renderConfiguration(agg, ns, ctx, {
-          schema: baseDs?.schema,
-          tablePrefix: baseDs?.tablePrefix,
-          tph: { role: "base", concretes: tphConcretesOf(agg, ctx.aggregates) },
-        }),
-        agg.origin,
-      );
+      // EF path: the base's EntityTypeConfiguration owns the table (`ToTable` +
+      // `HasDiscriminator`) — it must carry the SAME dataSource schema/tablePrefix
+      // the migration stamps on that table (the owning context's Postgres schema),
+      // else EF issues `INSERT INTO "vehicles"` while the migration created
+      // `"fleet"."vehicles"` → `relation "vehicles" does not exist` at runtime.
+      // Dapper path: DbSchema owns the shared-table DDL (renderDapperSchema — id +
+      // `kind` + base + nullable union of concrete columns), so no EF config is
+      // emitted (it would reference Microsoft.EntityFrameworkCore, absent here).
+      if (!usingDapperEarly) {
+        const baseDs = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
+        place(
+          `${agg.name}Configuration.cs`,
+          "ef-configuration",
+          renderConfiguration(agg, ns, ctx, {
+            schema: baseDs?.schema,
+            tablePrefix: baseDs?.tablePrefix,
+            tph: { role: "base", concretes: tphConcretesOf(agg, ctx.aggregates) },
+          }),
+          agg.origin,
+        );
+      }
     } else {
       place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns), agg.origin);
     }
@@ -1163,7 +1173,17 @@ function emitAggregate(
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
         : isDoc
           ? renderDapperDocumentRepository(agg, repoWithViews, ns, findBodies)
-          : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals, actorIdProp, isEmbedded),
+          : renderDapperRepository(
+              agg,
+              repoWithViews,
+              ns,
+              aggRetrievals,
+              actorIdProp,
+              isEmbedded,
+              // TPH concrete: persist to the shared base table, discriminated by
+              // `kind = '<Concrete>'`, threading the shared `<Base>Id`.
+              tphBase ? { baseName: tphBase.name, discriminator: agg.name } : undefined,
+            ),
       repoOrigin,
     );
     if (isDoc || isEmbedded) {

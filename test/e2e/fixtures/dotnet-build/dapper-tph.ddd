@@ -1,0 +1,42 @@
+// Dapper TPH (`sharedTable`) inheritance fixture (M-T6.9 wave 4): an abstract
+// base + concrete subtypes share ONE `kind`-discriminated table named for the
+// base.  DbSchema emits the shared table (id + `kind` + base columns + the
+// nullable union of every concrete's own columns); each concrete Dapper repo
+// targets that table with a spliced `kind = '<Concrete>'` read filter and a
+// discriminator-literal INSERT, threading the shared `<Base>Id`.  Build under
+// `dotnet build /warnaserror`.
+system DapperTph {
+  api PartiesApi from Registry
+
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable {
+        name:  string
+        email: string
+      }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+      aggregate Vendor extends Party with crudish {
+        rating: int
+        active: bool
+      }
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+
+  storage pg { type: postgres }
+  resource partiesState { for: Parties, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Parties]
+    dataSources: [partiesState]
+    serves: PartiesApi
+    port: 8080
+  }
+}

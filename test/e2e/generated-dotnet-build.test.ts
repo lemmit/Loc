@@ -1046,5 +1046,53 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // M-T6.9 wave 4: the Dapper adapter's TPH (`sharedTable`) inheritance
+    // surface — one `kind`-discriminated shared table named for the abstract
+    // base (id + kind + base columns + the nullable union of every concrete's
+    // own columns); each concrete repo targets that table with a spliced
+    // `kind = '<Concrete>'` filter + discriminator-literal INSERT, threading
+    // the shared `<Base>Id`.  Build under /warnaserror.
+    it("system `persistence: dapper` + TPH inheritance — shared kind-discriminated table builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-tph-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-tph.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // ONE shared table named for the base; concretes own none.
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS parties");
+        expect(schema).toContain("kind text not null");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "CustomerRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("FROM parties WHERE kind = 'Customer'");
+        expect(repo).toContain("INSERT INTO parties (id, kind,");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );
