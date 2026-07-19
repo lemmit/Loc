@@ -38,7 +38,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -91,6 +91,15 @@ const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 // than a silent codegen crash.
 const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
 
+// query-time projection (read-path-architecture.md rev.13): the always-current
+// read model (`projection X { from … where … join … select … }`, no folds) is
+// emitted by each backend whose emitter has ported the `view` full-form read.
+// A backend NOT in `PROJECTION_QT_SUPPORTED` has no emitter for it, so gate a
+// query-time projection hosted on such a deployable with an honest diagnostic
+// until its port lands — the same reviewed-gap discipline as the paged gate.
+// Node is the first (PR-C).
+const PROJECTION_QT_SUPPORTED = new Set(["node"]);
+
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
   for (const d of sys.deployables) {
@@ -108,6 +117,29 @@ export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagn
           code: "loom.paged-query-handler-unsupported-backend",
           message: `queryHandler '${h.name}' returns a \`paged\` envelope, which is currently only emitted on the node (Hono) backend; deployable '${d.name}' (platform '${d.platform}') can't generate it yet.`,
           source: `${c.name}/${h.name}`,
+        });
+      }
+    }
+  }
+}
+
+export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    // Only backend platforms emit read routes; the ones in
+    // `PROJECTION_QT_SUPPORTED` have ported the query-time emit.  Frontends /
+    // non-backend platforms host no read model and are skipped.
+    if (!platformOwnsBackend(d.platform) || PROJECTION_QT_SUPPORTED.has(d.platform)) continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-query-time-unsupported",
+          message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which is currently only emitted on the node (Hono) backend; deployable '${d.name}' (platform '${d.platform}') can't generate it yet. Express the read as a 'view' or a folded 'projection', or host it on a node deployable.`,
+          source: `${c.name}/${p.name}`,
         });
       }
     }

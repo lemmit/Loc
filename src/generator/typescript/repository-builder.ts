@@ -9,6 +9,7 @@ import {
   aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
+  isQueryTimeProjection,
   viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
@@ -172,6 +173,21 @@ export function buildRepositoryFile(
       bypassCaps: view.bypassCaps,
     }));
 
+  // Query-time projections (read-path-architecture.md rev.13) sourced from this
+  // aggregate synthesise the SAME kind of parameterless-find repository read a
+  // full-form view does — `repo.<projName>()` returns the filtered aggregate
+  // rows the projection route then follows (`join`) + projects (`select`).  A
+  // parameterised projection's `where` still lowers criterion params away at
+  // compile time, so the synthesised find stays parameterless like a view's.
+  const projectionFinds: FindIR[] = ctx.projections
+    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
+    .map((p) => ({
+      name: lowerFirst(p.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
+      filter: p.query?.filter,
+    }));
+
   // Individual methods, hoisted so the same strings feed BOTH the class body
   // AND the derived repository PORT (audit S7 — the concrete `implements` a
   // domain-side `<Agg>RepositoryPort`; the members are extracted from these
@@ -190,7 +206,9 @@ export function buildRepositoryFile(
   const deleteM = agg.canonicalDestroy ? deleteMethod(agg, ctx) : null;
   // Find / view queries — capability filter AND-ed into each read.
   const findMs = (repo?.finds ?? []).map((find) => findQueryMethod(agg, find, ctx, filterPred));
-  const viewFindMs = viewFinds.map((find) => findQueryMethod(agg, find, ctx, filterPred));
+  const viewFindMs = [...viewFinds, ...projectionFinds].map((find) =>
+    findQueryMethod(agg, find, ctx, filterPred),
+  );
   // `run<Name>` per context retrieval targeting this aggregate.
   const runMs = aggRetrievals.map((r) => runMethod(agg, r, ctx, filterPred));
   const toWireM = toWireMethod(agg, ctx);

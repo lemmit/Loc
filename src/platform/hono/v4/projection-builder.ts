@@ -4,6 +4,7 @@ import type {
   ProjectionIR,
   ProjectionOnIR,
 } from "../../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
 
@@ -32,16 +33,21 @@ import { zodForResponse } from "./routes-builder.js";
 /** Emit `http/projections.ts` for a context that declares ≥1 projection.
  *  Empty string when none (the file is then not written). */
 export function buildProjectionsFile(ctx: EnrichedBoundedContextIR): string {
-  if (ctx.projections.length === 0) return "";
+  // FOLDED (materialized) projections only — the event-folded read model with a
+  // physical row table + by-key routes.  Query-time projections
+  // (read-path-architecture.md rev.13) have no folds / table and are emitted by
+  // `buildQueryProjectionsFile` (http/query-projections.ts) instead.
+  const folded = ctx.projections.filter(isMaterializedProjection);
+  if (folded.length === 0) return "";
 
   const body: string[] = [];
-  for (const p of ctx.projections) body.push(...emitResponseSchemas(p), "");
-  for (const p of ctx.projections) {
+  for (const p of folded) body.push(...emitResponseSchemas(p), "");
+  for (const p of folded) {
     body.push(...emitStateHelpers(p), "");
     for (const h of p.handlers) body.push(...emitFoldHandler(p, h), "");
   }
-  body.push(...emitProjectionTee(ctx.projections), "");
-  body.push(...emitProjectionRoutes(ctx.projections));
+  body.push(...emitProjectionTee(folded), "");
+  body.push(...emitProjectionRoutes(folded));
   const bodyText = body.join("\n");
 
   // Enum zod schemas are inlined (a `<E>Schema` referenced by a response DTO);
