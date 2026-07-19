@@ -5,6 +5,7 @@ import {
   type WorkflowStmtTarget,
 } from "../../../generator/_workflow/stmt-target.js";
 import type { OpFragment } from "../../../generator/typescript/emit/aggregate.js";
+import { mikroWorkflowRowClass } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr, renderTsType } from "../../../generator/typescript/render-expr.js";
 import { renderTsStatements } from "../../../generator/typescript/render-stmt.js";
 import {
@@ -37,6 +38,13 @@ import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
+
+/** The `db` handle's TS type in an emitted workflow function signature —
+ *  `EntityManager` under the MikroORM adapter (`persistence: mikroorm`), the
+ *  Drizzle `NodePgDatabase` otherwise.  Threaded from `buildWorkflowsFile`. */
+const wfDbType = (usingMikro: boolean): string =>
+  usingMikro ? "EntityManager" : "NodePgDatabase<typeof schema>";
+
 import {
   emitWorkflowFoldHelpers,
   emitWorkflowStreamSerializers,
@@ -87,6 +95,10 @@ export function buildWorkflowsFile(
    *  multi-context deployable.  Absent → the merged `ctx.name` (byte-identical
    *  for single-context systems). */
   resolveStreamContext?: (name: string) => string | undefined,
+  /** `persistence: mikroorm` — emit the workflow correlation-state store
+   *  (load/save/list) against the MikroORM EntityManager + Row entities instead
+   *  of Drizzle.  Default false keeps the Drizzle output byte-identical. */
+  usingMikro = false,
 ): string {
   if (ctx.workflows.length === 0) return buildProducerOutboxFile(ctx);
   // Build the body first; imports are derived from what the body actually
@@ -199,7 +211,7 @@ export function buildWorkflowsFile(
   const hasHttpRoutes =
     ctx.workflows.some(emitsCommandRoute) || ctx.workflows.some((w) => !!w.instanceWireShape);
   body.push(`export function workflowsRoutes(`);
-  body.push(`  ${hasHttpRoutes ? "db" : "_db"}: NodePgDatabase<typeof schema>,`);
+  body.push(`  ${hasHttpRoutes ? "db" : "_db"}: ${wfDbType(usingMikro)},`);
   body.push(`  ${hasHttpRoutes ? "events" : "_events"}: DomainEventDispatcher,`);
   body.push(`): OpenAPIHono {`);
   // `newApp()` from `./problem-details` pre-wires the validation hook
@@ -219,7 +231,7 @@ export function buildWorkflowsFile(
   // event-triggered-only saga still has instances to observe.
   for (const wf of ctx.workflows) {
     if (!wf.instanceWireShape) continue;
-    body.push(...emitInstanceRoutes(wf).map((l) => `  ${l}`));
+    body.push(...emitInstanceRoutes(wf, usingMikro).map((l) => `  ${l}`));
     body.push("");
   }
 
@@ -264,6 +276,7 @@ export function buildWorkflowsFile(
         esInstanceWorkflows.length > 0,
         opFragments,
         resolveStreamContext,
+        usingMikro,
       ),
     );
   }
@@ -334,6 +347,18 @@ export function buildWorkflowsFile(
   // typed default (`new Decimal(0)`) and arithmetic need decimal.js.
   if (/(?<!\.)\bDecimal\b/.test(bodyStr)) imports.push(`import Decimal from "decimal.js";`);
   if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+  // MikroORM store branch (usingMikro): the workflow correlation store runs on
+  // the EntityManager over the generated Row entities (db/entities.ts) instead
+  // of Drizzle.  Both imports are body-scan-gated so a drizzle build never sees
+  // them (byte-identical) and a mikro build with no state store drops them.
+  if (/(?<!\.)\bEntityManager\b/.test(bodyStr))
+    imports.push(`import { EntityManager } from "@mikro-orm/postgresql";`);
+  const workflowRowsReferenced = ctx.workflows
+    .filter((w) => !w.eventSourced && !!w.correlationField)
+    .map(mikroWorkflowRowClass)
+    .filter((n) => new RegExp(`\\b${n}\\b`).test(bodyStr));
+  if (workflowRowsReferenced.length > 0)
+    imports.push(`import { ${workflowRowsReferenced.join(", ")} } from "../db/entities";`);
   // The persisted-workflow load helper filters by the correlation column.
   const drizzleOps = ["and", "asc", "eq", "isNull", "lt"].filter((op) =>
     new RegExp(`(?<!\\.)\\b${op}\\(`).test(bodyStr),
@@ -735,10 +760,11 @@ function emitInstanceResponseSchemas(wf: WorkflowIR): string[] {
  *  wire shape.  The route prefix nests under the already-mounted `/workflows`
  *  router, so `/<snake>/instances` does not collide with the bare-path POST
  *  command. */
-function emitInstanceRoutes(wf: WorkflowIR): string[] {
+function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
   const T = upperFirst(wf.name);
   const slug = snake(wf.name);
   const table = `schema.${lowerFirst(plural(wf.name))}`;
+  const rowClass = mikroWorkflowRowClass(wf);
   const corr = wf.correlationField as string;
   const helpers = esHelperNames(wf);
   const out: string[] = [];
@@ -758,6 +784,8 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`  async (httpCtx) => {`);
   if (wf.eventSourced) {
     out.push(`    const rows = await ${helpers.loadAll}(db);`);
+  } else if (usingMikro) {
+    out.push(`    const rows = await db.find(${rowClass}, {});`);
   } else {
     out.push(`    const rows = await db.select().from(${table});`);
   }
@@ -804,6 +832,9 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
     out.push(`    const __stream = await ${helpers.load}(db, ${idAsKey});`);
     out.push(`    if (__stream.length === 0) throw new AggregateNotFoundError("not_found");`);
     out.push(`    const row = ${helpers.fold}(${idAsKey}, __stream);`);
+  } else if (usingMikro) {
+    out.push(`    const row = await db.findOne(${rowClass}, { ${corr}: id });`);
+    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
   } else {
     out.push(
       `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
@@ -840,6 +871,9 @@ function emitSubscriptionHandlers(
   /** Owning-context resolver for the shared `<ctx>_events` log const — see
    *  `buildWorkflowsFile`. */
   resolveStreamContext?: (name: string) => string | undefined,
+  /** `persistence: mikroorm` — emit the correlation-state store + `db` param
+   *  types against the MikroORM EntityManager.  Default false → drizzle. */
+  usingMikro = false,
 ): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
@@ -861,7 +895,7 @@ function emitSubscriptionHandlers(
       out.push(
         ...(wf.eventSourced
           ? emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext })
-          : emitWorkflowStateHelpers(wf)),
+          : emitWorkflowStateHelpers(wf, usingMikro)),
       );
       out.push("");
       helperDone.add(wf.name);
@@ -905,6 +939,7 @@ function emitSubscriptionHandlers(
             ctx,
             sub.trigger === "create" && (wf.subscriptions ?? []).some((o) => o.event === sub.event),
             opFragments,
+            usingMikro,
           )
         : emitHandlerFn(
             fn,
@@ -918,6 +953,7 @@ function emitSubscriptionHandlers(
             ctx,
             durableEventTypes(ctx).size > 0,
             opFragments,
+            usingMikro,
           )),
     );
     out.push("");
@@ -925,7 +961,7 @@ function emitSubscriptionHandlers(
     list.push(fn);
     byEvent.set(sub.event, list);
   }
-  out.push(...emitDispatcherFactory(byEvent));
+  out.push(...emitDispatcherFactory(byEvent, usingMikro));
   const durable = durableEventTypes(ctx);
   if (durable.size > 0) {
     out.push("");
@@ -1022,20 +1058,40 @@ function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
 /** `loadX` / `saveX` for a workflow's persisted correlation row, plus the row
  *  type.  `loadX` reads by the correlation column; `saveX` upserts on it.
  *  Keyed off the Drizzle table the schema emitter produces (PR #991). */
-function emitWorkflowStateHelpers(wf: WorkflowIR): string[] {
+function emitWorkflowStateHelpers(wf: WorkflowIR, usingMikro = false): string[] {
   const T = upperFirst(wf.name);
   const table = `schema.${lowerFirst(plural(wf.name))}`;
   const corr = wf.correlationField as string;
+  const dbType = wfDbType(usingMikro);
+  if (usingMikro) {
+    // MikroORM store: the correlation Row IS the state type; load reads by the
+    // correlation PK (`findOne`), save upserts on it (`em.upsert`).  The
+    // EntityManager owns the schema (updateSchema at boot), so no migration.
+    const rowClass = mikroWorkflowRowClass(wf);
+    return [
+      `type ${T}State = ${rowClass};`,
+      `async function load${T}(`,
+      `  db: ${dbType},`,
+      `  key: string,`,
+      `): Promise<${T}State | undefined> {`,
+      `  const row = await db.findOne(${rowClass}, { ${corr}: key });`,
+      `  return row ?? undefined;`,
+      `}`,
+      `async function save${T}(db: ${dbType}, state: ${T}State): Promise<void> {`,
+      `  await db.upsert(${rowClass}, state);`,
+      `}`,
+    ];
+  }
   return [
     `type ${T}State = typeof ${table}.$inferInsert;`,
     `async function load${T}(`,
-    `  db: NodePgDatabase<typeof schema>,`,
+    `  db: ${dbType},`,
     `  key: string,`,
     `): Promise<${T}State | undefined> {`,
     `  const rows = await db.select().from(${table}).where(eq(${table}.${corr}, key)).limit(1);`,
     `  return rows[0];`,
     `}`,
-    `async function save${T}(db: NodePgDatabase<typeof schema>, state: ${T}State): Promise<void> {`,
+    `async function save${T}(db: ${dbType}, state: ${T}State): Promise<void> {`,
     `  await db.insert(${table}).values(state).onConflictDoUpdate({ target: ${table}.${corr}, set: state });`,
     `}`,
   ];
@@ -1115,10 +1171,12 @@ function emitHandlerFn(
    *  construct as the workflow's command-route body (a reactor/starter body
    *  belongs to the same workflow). */
   opFragments?: OpFragment[],
+  /** `persistence: mikroorm` — the `db` handle is the EntityManager. */
+  usingMikro = false,
 ): string[] {
   const out: string[] = [];
   out.push(`export async function ${fn}(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  db: ${wfDbType(usingMikro)},`);
   out.push(`  events: DomainEventDispatcher,`);
   out.push(`  ${paramName}: Events.${eventName},`);
   out.push(`): Promise<void> {`);
@@ -1243,12 +1301,14 @@ function emitEventSourcedHandlerFn(
   /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
    *  fragment-only discipline and construct id. */
   opFragments?: OpFragment[],
+  /** `persistence: mikroorm` — the `db` handle is the EntityManager. */
+  usingMikro = false,
 ): string[] {
   const out: string[] = [];
   const corr = wf.correlationField as string;
   const helpers = esHelperNames(wf);
   out.push(`export async function ${fn}(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  db: ${wfDbType(usingMikro)},`);
   out.push(`  events: DomainEventDispatcher,`);
   out.push(`  ${paramName}: Events.${eventName},`);
   out.push(`): Promise<void> {`);
@@ -1360,10 +1420,10 @@ function buildProducerOutboxFile(ctx: EnrichedBoundedContextIR): string {
   return `${out.join("\n")}\n`;
 }
 
-function emitDispatcherFactory(byEvent: Map<string, string[]>): string[] {
+function emitDispatcherFactory(byEvent: Map<string, string[]>, usingMikro = false): string[] {
   const out: string[] = [];
   out.push(`export function createInProcessDispatcher(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  db: ${wfDbType(usingMikro)},`);
   out.push(`): DomainEventDispatcher {`);
   out.push(`  const dispatcher: DomainEventDispatcher = {`);
   out.push(`    async dispatch(event: Events.DomainEvent): Promise<void> {`);

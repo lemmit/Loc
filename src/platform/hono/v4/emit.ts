@@ -566,6 +566,7 @@ export function generateTypeScriptForContexts(
       resourceSourceTypes,
       workflowOpFragments,
       resolveStreamContext,
+      usingMikro,
     );
     out.set("http/workflows.ts", workflowsContent);
     if (sourcemap && workflowOpFragments) {

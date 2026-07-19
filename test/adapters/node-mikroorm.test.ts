@@ -375,6 +375,46 @@ describe("mikroorm — `filter` capability predicates", () => {
   });
 });
 
+describe("mikroorm — principal-referencing (tenancy) `filter` predicates", () => {
+  const PRINCIPAL_SRC = `system M {
+  user { id: guid  tenantId: string }
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Account with crudish {
+        tenantId: string
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required }
+}`;
+
+  it("applies (not drops) the tenant scope via the ambient requireCurrentUser()", async () => {
+    const { files, errors } = await emit(PRINCIPAL_SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/account-repository.ts")!;
+    // The principal accessor import is pulled in.
+    expect(repo).toContain('import { requireCurrentUser } from "../../auth/middleware";');
+    // findById ANDs the tenant scope onto the id lookup.
+    expect(repo).toContain(
+      "await em.findOne(AccountRow, { $and: [{ id: id as string }, { tenantId: requireCurrentUser().tenantId }] });",
+    );
+    // A declared find's own `where` is joined with the tenant scope.
+    expect(repo).toContain(
+      "await em.find(AccountRow, { $and: [{ balance: { $gte: min } }, { tenantId: requireCurrentUser().tenantId }] });",
+    );
+    // The scope is a real FilterQuery, not a dropped/stubbed predicate.
+    expect(repo).not.toContain("this find's predicate is not yet supported");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // `Id[]` reference-collection associations (wave 1) — persist as composite-PK
 // pivot Row entities (the MikroORM analogue of the drizzle join table): bulk-
@@ -1433,5 +1473,173 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
 }`;
     const { errors } = await emit(src);
     expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
+  });
+});
+
+describe("mikroorm — value-object collections (`<VO>[]` root fields)", () => {
+  const VC_SRC = `
+system M {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: decimal  currency: string }
+      aggregate Invoice with crudish {
+        reference: string
+        lineItems: Money[]
+        surcharges: Money[]?
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer throws `unsupported field kind 'array'` at generate", async () => {
+    const { errors } = await emit(VC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds each VO array onto one inline jsonb column (not a child table)", async () => {
+    const { files } = await emit(VC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('lineItems: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('surcharges: { type: "json", columnType: "jsonb", nullable: true }');
+    // No id-less child table for the collections (the drizzle path) — the whole
+    // array rides on the Invoice row.
+    expect(entities).not.toContain("invoice_line_items");
+  });
+
+  it("serialises on save and deserialises (rebuilding the VOs) on read", async () => {
+    const { files } = await emit(VC_SRC);
+    const repo = files.get("api/db/repositories/invoice-repository.ts")!;
+    // Save: VO elements → plain objects in the jsonb array.
+    expect(repo).toContain(
+      "lineItems: aggregate.lineItems.map((x) => ({ amount: x.amount, currency: x.currency }))",
+    );
+    // Read: the inline jsonb column is deserialised into a `<field>` local the
+    // shared `_rehydrate` references.
+    expect(repo).toContain(
+      "const lineItems = (row.lineItems ?? []).map((x) => new Money(Number(x.amount), x.currency));",
+    );
+    expect(repo).toContain("Invoice._rehydrate({");
+  });
+});
+
+describe("mikroorm — context-level `view`s → synthesised repository reads", () => {
+  const VIEW_SRC = `
+system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        code: string
+        total: int
+      }
+      repository Orders for Order { }
+      view BigOrders = Order where total >= 1000
+      view SmallOrders = Order where total < 100
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("emits a parameterless <view>() query method per context view", async () => {
+    const { files, errors } = await emit(VIEW_SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("async bigOrders(): Promise<Order[]> {");
+    expect(repo).toContain("async smallOrders(): Promise<Order[]> {");
+    // The bare-field view `where total >= 1000` (a `this-prop` ref, not
+    // `this.total`) lowers to a real FilterQuery, not a runtime-throwing stub.
+    expect(repo).toContain("await em.find(OrderRow, { total: { $gte: 1000 } });");
+    expect(repo).toContain("await em.find(OrderRow, { total: { $lt: 100 } });");
+    expect(repo).not.toContain("this find's predicate is not yet supported");
+  });
+});
+
+describe("mikroorm — workflow (saga) correlation store is persistence-neutral", () => {
+  const SAGA_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment {
+        find byOrder(order: Order id): Shipment? where this.orderRef == order
+      }
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+      workflow OrderFulfillment {
+        orderId: Order id
+        attempts: int
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource wfState { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [wfState]  serves: A  port: 8080 }
+}`;
+
+  it("emits a MikroORM Row entity for the workflow correlation table", async () => {
+    const { files, errors } = await emit(SAGA_SRC);
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class OrderFulfillmentRow {");
+    expect(entities).toContain('tableName: "order_fulfillments"');
+    expect(entities).toContain('orderId: { type: "string", primary: true }');
+    expect(entities).toContain('attempts: { type: "integer" }');
+  });
+
+  it("workflows.ts uses the EntityManager, never drizzle-orm", async () => {
+    const { files } = await emit(SAGA_SRC);
+    const wf = files.get("api/http/workflows.ts")!;
+    // No drizzle imports/operators/schema handle leak (the boot-crash cause).
+    expect(wf).not.toContain("drizzle-orm");
+    expect(wf).not.toContain("NodePgDatabase");
+    expect(wf).not.toMatch(/\bschema\./);
+    // The correlation store runs on the EntityManager + Row entity.
+    expect(wf).toContain('import { EntityManager } from "@mikro-orm/postgresql";');
+    expect(wf).toContain('import { OrderFulfillmentRow } from "../db/entities";');
+    expect(wf).toContain("await db.findOne(OrderFulfillmentRow, { orderId: key });");
+    expect(wf).toContain("await db.upsert(OrderFulfillmentRow, state);");
+  });
+
+  it("createApp defaults events to the in-process dispatcher (saga cascade fires)", async () => {
+    const { files } = await emit(SAGA_SRC);
+    const httpIndex = files.get("api/http/index.ts")!;
+    expect(httpIndex).toContain(
+      'import { createInProcessDispatcher, workflowsRoutes } from "./workflows";',
+    );
+    expect(httpIndex).toContain("events: DomainEventDispatcher = createInProcessDispatcher(db),");
   });
 });
