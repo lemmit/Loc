@@ -49,6 +49,69 @@ describe("this-relative op-form seeding (mantine)", () => {
     expect(tsx!).toMatch(/OrderResponse/);
   });
 
+  // The instance can also be a QueryView data-lambda binding (a hand-written
+  // Detail-shaped page) — there the trigger must pass the RENDERED receiver
+  // (`<hook>.data`, non-null-asserted past the closure-lost `data &&`
+  // narrowing), not the raw source name (which is not a JS identifier in the
+  // emitted scope), and `<Agg>Response` must be imported explicitly (the
+  // shell's props-interface channel only covers component params).
+  const LAMBDA_SRC = `
+    system S {
+      subdomain Sales {
+        context Sales {
+          aggregate Order {
+            customerId: string
+            note:       string
+            derived display: string = customerId
+            operation confirm(memo: string = this.customerId) { note := memo }
+          }
+          repository Orders for Order { }
+        }
+      }
+      api SalesApi from Sales
+      ui WebApp {
+        api Sales: SalesApi
+        page OrderConsole(id: Order id) {
+          route: "/orders/:id"
+          body: QueryView {
+            of: Sales.Order.byId(id),
+            single: true,
+            empty: Empty { "not found" },
+            data: o => Card { Modal { OperationForm { o.confirm }, trigger: Button { "Confirm" }, title: "Confirm" } }
+          }
+        }
+      }
+      deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
+      deployable web { platform: static targets: api ui: WebApp { Sales: api } port: 3001 }
+    }
+  `;
+
+  it("passes the rendered receiver + imports the Response type for a QueryView data-lambda instance", async () => {
+    const files = await generateSystemFiles(LAMBDA_SRC);
+    const tsx = files.get("web/src/pages/order_console.tsx");
+    expect(tsx, "OrderConsole page generated").toBeDefined();
+    // Trigger passes the RENDERED lambda binding (non-null-asserted), not the
+    // raw source name `o` (undefined in the emitted scope).
+    expect(tsx!).toMatch(/openConfirmModal\(confirm, orderById\.data!\)/);
+    expect(tsx!).not.toMatch(/openConfirmModal\(confirm, o\)/);
+    // The Response type the record prop is typed as is imported (the shell
+    // imports it for component params only, not data-lambda bindings).
+    expect(tsx!).toMatch(/import \{[^}]*\bOrderResponse\b[^}]*\} from "\.\.\/api\/order"/);
+  });
+
+  it("passes the rendered receiver on shadcn's self-contained OpModal too", async () => {
+    const files = await generateSystemFiles(
+      LAMBDA_SRC.replace(
+        "ui: WebApp { Sales: api } port: 3001",
+        'ui: WebApp { Sales: api } design: "shadcn@v4" port: 3001',
+      ),
+    );
+    const tsx = files.get("web/src/pages/order_console.tsx");
+    expect(tsx, "OrderConsole page generated").toBeDefined();
+    expect(tsx!).toMatch(/<ConfirmOpModal mut=\{ confirm \} record=\{ orderById\.data! \} \/>/);
+    expect(tsx!).toMatch(/import \{[^}]*\bOrderResponse\b[^}]*\} from "\.\.\/api\/order"/);
+  });
+
   it("threads the record on shadcn (self-contained OpModal) too", async () => {
     const files = await generateSystemFiles(
       SRC.replace(

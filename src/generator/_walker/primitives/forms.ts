@@ -615,7 +615,8 @@ function emitFormOfOperation(
   // record — but only when the active pack threads a `record` prop into the
   // op-form component (`seedsOpFormRecord`) AND some default actually reads
   // `this`.  Inside the component the record is the prop `record`; the trigger
-  // passes the in-scope instance (`instanceName`, e.g. `data`) as that prop.
+  // passes the rendered in-scope receiver (e.g. `order`, or `<hook>.data` for a
+  // QueryView data-lambda binding) as that prop.
   const wantsRecord =
     ctx.pack.manifest.seedsOpFormRecord === true &&
     fieldsForHelpers.some((f) => defaultUsesThis(f.default));
@@ -647,9 +648,13 @@ function emitFormOfOperation(
     `use${upperFirst(op.name)}${agg.name}`,
   );
   // The threaded record prop is typed as the aggregate's response type
-  // (`<Agg>Response`) — already imported by the shell's instance/param
-  // type-import channel (the op-form's instance receiver is that type), so no
-  // extra import here (a second one would duplicate the binding).
+  // (`<Agg>Response`).  When the instance is a function-top param (a component
+  // prop) the shell's props-interface channel already imports it — importing it
+  // again would duplicate the binding — so only add the import for a data-lambda
+  // binding (a page's QueryView `data`), whose type the shell does NOT import.
+  if (wantsRecord && !ctx.paramNames.has(instanceName)) {
+    addImport(ctx, `../api/${lowerFirst(agg.name)}`, `${agg.name}Response`);
+  }
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -671,8 +676,20 @@ function emitFormOfOperation(
     triggerLabel: humanize(op.name),
     triggerPrimary: true,
     // When a this-relative default was seeded, the trigger passes the in-scope
-    // instance (`instanceName`) as the component's `record` prop.
-    ...(wantsRecord ? { recordVar: instanceName, recordType: `${agg.name}Response` } : {}),
+    // instance as the component's `record` prop — the RENDERED receiver
+    // expression (`order`, or `<hook>.data` for a QueryView data-lambda
+    // binding), not the raw source name.  The lambda-binding form is
+    // non-null-asserted: the QueryView's `data &&` guard proves it present,
+    // but that narrowing doesn't survive into the trigger's onClick closure
+    // (same rationale as the Angular target's `renderQueryDataAccess`).
+    ...(wantsRecord
+      ? {
+          recordVar: ctx.paramNames.has(instanceName)
+            ? emitExpr(opRef.receiver, ctx)
+            : `${emitExpr(opRef.receiver, ctx)}!`,
+          recordType: `${agg.name}Response`,
+        }
+      : {}),
   });
   // No inline JSX — the Modal primitive renders the trigger and
   // the shell emits the module-scope form component.
