@@ -280,36 +280,65 @@ function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … })
   const { … } = useForm<NoteOrderRequest>({ defaultValues: { memo: record.customerId } });
 ```
 
-### Server-sourced defaults — the `prepare` endpoint
+### Server-sourced defaults — applied per-request in the create path
 
-An **ambient** default the client can't evaluate — `now()` or `currentUser.<claim>`
-— is computed by the **server** and fetched into the create form. When an
-aggregate has such a field default, the Hono backend emits `GET /<plural>/prepare`
-returning just those keys (evaluated exactly as the audit stamps are: `now()` →
-`new Date().toISOString()`, `currentUser.<claim>` off the ambient request
-principal), and every **React** pack's create form fetches it (`usePrepare<Agg>`)
-and `reset`s the form over its type-zero seed once it resolves —
-`keepDirtyValues` so a slow response never clobbers what the user typed.
+An **ambient** field default the client can't evaluate — `now()` or
+`currentUser.<claim>` — is *a stamp the client may override*: if the request
+carries the field, the server uses it; if it's omitted, the server computes the
+value **per-request** at create time, exactly like an audit/tenant stamp. So the
+field is **wire-optional** and every backend's create path **coalesces** it,
+reusing that backend's stamp value renderer + ambient-principal accessor. (This
+is the authoritative mechanism — the `/prepare` endpoint below is only a React
+UX affordance on top.)
 
 ```ddd
 aggregate Order with crudish { customerId: string  createdAt: datetime = now() }
 ```
 ```ts
-// GET /orders/prepare → { createdAt: new Date().toISOString() }
-const __prep = usePrepareOrder();
+// Hono — the create field is optional; the factory coalesces per-request
+createdAt: z.coerce.date().optional(),
+const created = Order.create({ customerId: body.customerId,
+  createdAt: body.createdAt !== undefined ? body.createdAt : new Date() });
+```
+```python
+# Python — optional model field + coalesce in the handler
+createdAt: datetime | None = None
+created_at=body.createdAt if body.createdAt is not None else datetime.now(UTC)
+```
+
+A `currentUser.<claim>` default binds the ambient principal the same way
+(`request.OwnerId is null ? RequestContext.Current!.CurrentUser!.TenantId : …`
+on .NET, `current_user.tenant_id` off the request scope on Python/Java/Elixir).
+All five backends do this; the default is authoritative server-side, so a raw
+client that never touches the form still gets the real, per-request value. A
+**constant** default (`status: string = "draft"`) is unchanged — it stays a
+serializer default (`.default("draft")` / `= "draft"`), which has no
+evaluated-once-at-boot problem; only the non-constant (server-sourced) set
+switches to optional-wire + coalesce, keyed by the shared `isServerSourcedDefault`
+predicate. A **sequence** or **cross-aggregate lookup** default is still deferred
+(not yet server-sourced) and keeps falling back to the type-zero seed.
+
+**The React `prepare` UX layer.** So the create form can *show* the user the
+value the server will default to (still editable), the backend also emits
+`GET /<plural>/prepare` returning just the server-sourced keys, and every
+**React** pack's create form fetches it (`usePrepare<Agg>`) and `reset`s the
+form over its type-zero seed once it resolves — `keepDirtyValues` so a slow
+response never clobbers what the user typed:
+
+```ts
+const __prep = usePrepareOrder();                                   // GET /orders/prepare
 const form = useForm({ resolver, defaultValues: { customerId: "", createdAt: "" } });
 useEffect(() => { if (__prep.data) form.reset({ ...{ customerId: "", createdAt: "" }, ...__prep.data }, { keepDirtyValues: true }); }, [__prep.data]);
 ```
 
-The classification is one shared predicate (`serverSourcedDefaultFields`), so the
-endpoint's keys and the form's fetched keys can't drift. The overlay is React-only
-for now, gated per pack by `manifest.seedsServerDefaults` — the `usePrepare<Agg>` +
-`reset` hooks are RHF-shaped, so a **Vue/Svelte/Angular** pack renders the plain
-create form and degrades to the type-zero seed (the Hono `/prepare` endpoint still
-emits; the non-React frontends just don't consume it yet — no dangling import).
-Fan-out in progress: the other backends (`.NET`/Java/Python/Elixir) and the
-non-React overlays; a **sequence** or **cross-aggregate lookup** default is still
-deferred (not yet server-sourced).
+The endpoint keys and the form's fetched keys both derive from
+`serverSourcedDefaultFields`, so they can't drift. The overlay is React-only,
+gated per pack by `manifest.seedsServerDefaults` — the hooks are RHF-shaped, so a
+**Vue/Svelte/Angular** pack renders the plain create form (no overlay, no
+dangling import). That's purely cosmetic: with or without the overlay, the
+**server** applies the default on submit, so a non-React frontend is fully
+correct — it just doesn't pre-fill the field.
+
 Everything outside this tier falls back to the type-zero seed: a `this.<field>`
 on the by-name op form or a non-threading pack, and the still-deferred sources
 above. `ParamIR.default` is carried in the IR for a future backend that applies
