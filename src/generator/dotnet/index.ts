@@ -1,4 +1,4 @@
-import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
+import { deriveEventSubscriptions, enrichLoomModel } from "../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
@@ -10,6 +10,7 @@ import type {
   RepositoryIR,
   SystemIR,
   TimerSourceIR,
+  TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
@@ -36,6 +37,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
+import { redisChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -69,6 +71,7 @@ import {
   renderAuditWriter,
   renderAuditWriterInterface,
 } from "./emit/audit.js";
+import { renderDotnetChannels } from "./emit/channels.js";
 import {
   renderDapperDocumentRepository,
   renderDapperEventSourcedRepository,
@@ -86,6 +89,7 @@ import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-l
 import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
 import { renderExternHookImpl } from "./emit/extern.js";
+import { renderId } from "./emit/ids.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -285,9 +289,31 @@ function emitProjectFromContexts(
   // enricher-stored `eventSubscriptions`; OR them in so a projection-only context
   // still gets the Mediator dispatcher + IDomainEvent notification plumbing (the
   // fold handlers, discovered by assembly scan, otherwise never run).
-  const hasSubscriptions = contexts.some(
-    (c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0,
+  // Broker bindings (channels.md; M-T4.4 slice 6a): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  A wired-but-foreign
+  // channel joins the carrier set as a stub with its REAL semantics knobs, so
+  // the subscription derivation routes a hosted reactor off a channel declared
+  // in a non-hosted context (mirrors the Hono/Python orchestrators).
+  const channelBindings = system ? redisChannelBindings(system.deployable, system.sys) : [];
+  const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
+  const wiredForeignChannels = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: b.delivery,
+      retention: b.retention,
+    }));
+  const mergedSubscriptions = deriveEventSubscriptions(
+    [...contexts.flatMap((c) => c.channels), ...wiredForeignChannels],
+    contexts.flatMap((c) => c.workflows),
+    contexts.flatMap((c) => c.projections ?? []),
   );
+  const hasChannels = channelBindings.length > 0;
+  const hasChannelConsumers = hasChannels && mergedSubscriptions.some((sub) => !sub.projection);
+  const hasSubscriptions =
+    contexts.some((c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0) ||
+    hasChannelConsumers;
   // Persistence-neutral `ConcurrencyConflictException` — only the Dapper
   // adapter needs it (its version-CAS `SaveAsync` throws it; the EF path keys
   // its 409 arm on `DbUpdateConcurrencyException` instead), so gate the emit on
@@ -381,7 +407,81 @@ function emitProjectFromContexts(
   // Union the hosted contexts into one synthetic context (ambient enums / VOs
   // deduped by name — see src/ir/util/merge-contexts.ts).  `name` is this
   // deployable's namespace rather than the first context's.
-  const merged: EnrichedBoundedContextIR = { ...mergeContexts(contexts), name: ns };
+  const mergedBase = mergeContexts(contexts);
+  // Foreign events a hosted workflow consumes through a wired channel join
+  // the deployable's event vocabulary (record class + DomainEvent routing).
+  const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
+  const foreignConsumedEvents = system
+    ? [...new Set(mergedSubscriptions.map((sub) => sub.event))]
+        .filter((name) => !knownEventNames.has(name))
+        .flatMap((name) => {
+          for (const sub of system.sys.subdomains) {
+            for (const c of sub.contexts) {
+              const ev = c.events.find((e) => e.name === name);
+              if (ev) return [ev];
+            }
+          }
+          return [];
+        })
+    : [];
+  const merged: EnrichedBoundedContextIR = {
+    ...mergedBase,
+    name: ns,
+    events: [...mergedBase.events, ...foreignConsumedEvents],
+    eventSubscriptions: mergedSubscriptions,
+  };
+  // Foreign vocabulary emission (M-T4.4): the consumed foreign events' record
+  // classes + the id brands they (and correlating workflow state) reference.
+  for (const ev of foreignConsumedEvents) {
+    out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
+  }
+  if (system) {
+    const hostedIdNames = new Set(
+      contexts.flatMap((c) =>
+        c.aggregates.flatMap((a) => [a.name, ...a.parts.map((pt) => pt.name)]),
+      ),
+    );
+    const foreignIdNames = [
+      ...new Set(
+        [
+          ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+          ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
+        ]
+          .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
+          .map((t) => t.targetName)
+          .filter((n) => !hostedIdNames.has(n)),
+      ),
+    ];
+    for (const name of foreignIdNames) {
+      let idValueType = "uuid";
+      for (const sub of system.sys.subdomains) {
+        for (const c of sub.contexts) {
+          const agg = c.aggregates.find((a) => a.name === name);
+          if (agg) idValueType = agg.idValueType;
+        }
+      }
+      out.set(`Domain/Ids/${name}Id.cs`, renderId(name, idValueType, ns));
+    }
+  }
+  // Broker transport module (M-T4.4 slice 6a) — channel-less projects stay
+  // byte-identical.
+  if (hasChannels && system) {
+    out.set(
+      "Infrastructure/Channels/ChannelTransport.cs",
+      renderDotnetChannels(
+        ns,
+        channelBindings,
+        merged.events,
+        hasChannelConsumers,
+        system.sys,
+        hasSubscriptions && durableEventTypes(merged).size > 0
+          ? "OutboxDomainEventDispatcher"
+          : hasSubscriptions
+            ? "InProcessDomainEventDispatcher"
+            : "NoopDomainEventDispatcher",
+      ),
+    );
+  }
   // In-process dispatch (channels.md): one `INotificationHandler<TEvent>` per
   // channel-routed reactor / event-create, derived over the merged context so
   // a reactor in one hosted context can route off another's channel.
@@ -743,6 +843,8 @@ function emitProjectFromContexts(
   }
   emitProject(merged, ns, out, {
     timers: hasTimers ? ownedTimers : [],
+    hasChannels,
+    hasChannelConsumers,
     authRequired,
     actorIdProp,
     usesValidators,
@@ -1463,6 +1565,9 @@ function emitProject(
     emitTrace?: boolean;
     usingDapper?: boolean;
     hasSubscriptions?: boolean;
+    /** Broker channels (M-T4.4 slice 6a) — see renderProgram/renderCsproj. */
+    hasChannels?: boolean;
+    hasChannelConsumers?: boolean;
     /** Transactional outbox (dispatch-delivery-semantics.md): registers the
      *  outbox-wrapping dispatcher + the relay BackgroundService. */
     hasOutbox?: boolean;
@@ -1525,6 +1630,8 @@ function emitProject(
       emitTrace,
       usingDapper,
       hasSubscriptions: !!options?.hasSubscriptions,
+      hasChannels: !!options?.hasChannels,
+      hasChannelConsumers: !!options?.hasChannelConsumers,
       hasOutbox: !!options?.hasOutbox,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
@@ -1554,6 +1661,7 @@ function emitProject(
       // Cronos ships only when an owned timerSource uses a real `cron:`
       // expression (an `every:`-only deployable uses PeriodicTimer, no dep).
       anyTimerUsesCron(timers),
+      !!options?.hasChannels,
     ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));
