@@ -1852,13 +1852,13 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 // ---------------------------------------------------------------------------
 // `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
 //
-// The .NET Dapper adapter is a MINIMAL-v1 alternate persistence: relational,
-// state-based, flat aggregates whose fields are scalar / enum / value-object /
-// single id-ref.  This rejects — with a clear, actionable error — any model
-// feature dapper v1 doesn't emit, so a selection either works end-to-end or
-// fails fast at validate time (rather than producing a non-compiling project).
-// efcore (the default) supports the full surface, so this only fires for an
-// explicit `persistence: dapper`.
+// The .NET Dapper adapter is now at FULL PARITY with EF Core (M-T6.9, drained
+// across 7 waves): every relational/document/embedded/ES/inheritance shape,
+// containment (incl. recursive part-in-part), associations, audit/provenance,
+// managed fields, retrievals, seeds, and the workflow outbox all emit.  This
+// check now fires ONLY for a genuinely-impossible shape (an un-owned by-value
+// entity-array part field — no relational storage form on any adapter), a
+// fail-fast guard like the category-A stamp guard.
 // ---------------------------------------------------------------------------
 // Element kinds a Dapper part collection field can round-trip as one `jsonb`
 // column (System.Text.Json list serialisation) — kept in lockstep with
@@ -1882,9 +1882,9 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         severity: "error",
         message:
           `Deployable '${dep.name}' selects 'persistence: dapper', but ${subject} ${reason}. ` +
-          `The Dapper adapter is minimal in v1 (relational, state-based, flat aggregates with ` +
-          `scalar / enum / value-object / id-ref fields). Use 'persistence: efcore' for this model, ` +
-          `or remove the unsupported feature.`,
+          `The Dapper adapter is at full parity with EF Core (M-T6.9); the only shapes it now ` +
+          `rejects have no relational persistence mapping at all (efcore included) — restructure ` +
+          `the model as the message suggests.`,
         source: `${sys.name}/${dep.name}`,
         code: "loom.dapper-unsupported",
       });
@@ -2045,11 +2045,12 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 // `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d).
 //
 // The node/hono MikroORM adapter is the SECOND node persistence backend
-// (alongside the default `drizzle`), minimal in v1: relational, state-based,
-// flat aggregates with scalar / enum / value-object / id-ref fields.  Mirrors
-// the dapper gate — reject any feature mikroorm v1 doesn't emit so a selection
-// either works end-to-end or fails fast at validate time.  drizzle supports the
-// full surface, so this only fires for an explicit `persistence: mikroorm`.
+// (alongside the default `drizzle`), now at FULL PARITY with drizzle (M-T6.9,
+// drained across 7 waves): every shape/inheritance/containment/association/
+// audit/provenance/managed-field/seed/ES intersection emits.  This check now
+// fires ONLY for a genuinely-impossible shape (an abstract inheritance base
+// that owns its own `contains` — the base has no repository and concretes do
+// not inherit its parts, so its tables would have no reader/writer).
 //
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
@@ -2072,9 +2073,9 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         severity: "error",
         message:
           `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject} ${reason}. ` +
-          `The MikroORM adapter is minimal in v1 (relational, state-based, flat aggregates with ` +
-          `scalar / enum / value-object / id-ref fields). Use 'persistence: drizzle' for this model, ` +
-          `or remove the unsupported feature.`,
+          `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
+          `rejects have no relational persistence mapping at all (drizzle included) — restructure ` +
+          `the model as the message suggests.`,
         source: `${sys.name}/${dep.name}`,
         code: "loom.mikroorm-unsupported",
       });

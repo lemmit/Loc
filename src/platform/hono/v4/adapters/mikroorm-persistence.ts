@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// mikroorm — a real (minimal-v1) PersistenceAdapter for the node/hono platform.
+// mikroorm — a full-parity PersistenceAdapter for the node/hono platform (drained to Drizzle parity, M-T6.9).
 // The SECOND node persistence backend, selected by `persistence: mikroorm`
 // (alongside the default `drizzle`).
 //

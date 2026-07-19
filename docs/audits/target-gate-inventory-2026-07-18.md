@@ -38,8 +38,8 @@ re-checked against the emitters/validators as they ship today.
 
 | Gate | Disposition |
 |---|---|
-| `dapper-unsupported` (.NET) | M-T6.9 — Dapper is the **v1 subset** alternate to the default EF Core. **Being drained to full parity.** |
-| `mikroorm-unsupported` (**Node**, not .NET) | M-T6.9 — MikroORM is the **Node** subset alternate to the default Drizzle. **Being drained to full parity.** |
+| `dapper-unsupported` (.NET) | M-T6.9 — Dapper was the v1 subset alternate to EF Core. **DRAINED to full parity (2026-07-19, 7 waves);** now fires only for one impossible shape (un-owned entity-array part field). |
+| `mikroorm-unsupported` (**Node**, not .NET) | M-T6.9 — MikroORM was the Node subset alternate to Drizzle. **DRAINED to full parity (2026-07-19);** now fires only for one impossible shape (abstract inheritance base owning `contains`). |
 
 The owner's call: fully support both, don't declare them final. After draining, each gate
 survives only as a fail-fast for genuinely-impossible shapes (like the category-A stamp

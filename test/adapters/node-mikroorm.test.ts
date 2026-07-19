@@ -1,8 +1,8 @@
-// mikroorm — minimal-v1 PersistenceAdapter for node/hono (D-REALIZATION-AXES
-// Phase 5d).  `persistence: mikroorm` emits an idiomatic MikroORM db/ layer
-// (EntitySchema model + EntityManager repositories) alongside the default
-// drizzle, reusing the persistence-agnostic domain layer; the validator gates
-// the unsupported feature surface.
+// mikroorm — full-parity PersistenceAdapter for node/hono (D-REALIZATION-AXES
+// Phase 5d; drained to Drizzle parity in M-T6.9).  `persistence: mikroorm`
+// emits an idiomatic MikroORM db/ layer (EntitySchema model + EntityManager
+// repositories) alongside the default drizzle, reusing the persistence-agnostic
+// domain layer; the validator now gates only genuinely-impossible shapes.
 
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";

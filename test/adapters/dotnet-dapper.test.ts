@@ -1,7 +1,8 @@
-// dapper — minimal-v1 PersistenceAdapter for dotnet (D-REALIZATION-AXES Phase
-// 5c).  `persistence: dapper` emits an Npgsql/Dapper Infrastructure (repository,
-// DbSchema, connection wiring, deps) reusing the persistence-agnostic Domain
-// layer, and the validator gates the unsupported feature surface.
+// dapper — full-parity PersistenceAdapter for dotnet (D-REALIZATION-AXES Phase
+// 5c; drained to EF-Core parity in M-T6.9).  `persistence: dapper` emits an
+// Npgsql/Dapper Infrastructure (repository, DbSchema, connection wiring, deps)
+// reusing the persistence-agnostic Domain layer; the validator now gates only
+// genuinely-impossible shapes.
 
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
