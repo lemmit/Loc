@@ -226,6 +226,8 @@ export function realtimeRoutes(): OpenAPIHono { /* app.get("/events", streamSSE(
 ```
 ::: end
 
+**Rooms + policy-derived routing (v1 — Hono/node).** In a **tenant-owned** context the wire scopes delivery by the tenant `DataKey` (`currentUser.tenantId`, the equality part of the `tenantOwned` read filter `this.tenantId == currentUser.tenantId`) instead of broadcasting to all. The relay's connection registry becomes `Map<tenant, Set<Subscriber>>`: a connection joins its own tenant room from the **verified principal** at connect (never a client-supplied room), and a tenant-scoped event (one whose payload references a `tenantOwned` aggregate) is routed to the **emitter's tenant room only — never cross-tenant**. When the tenant can't be derived at publish (an event dispatched outside a request — outbox drain / timer), delivery degrades to a **refetch ticket** (`{ type, <id fields> }`, no payload) so nothing privileged over-delivers; the authorised read is always the gate. A context with **no** `tenantOwned` aggregate keeps the byte-identical v1 broadcast wire. The other SSE backends (.NET / Java / Python) still broadcast to all — a `loom.realtime-tenant-broadcast` **warning** flags the resulting cross-tenant payload over-delivery until per-tenant rooms port there; Phoenix/LiveView re-renders server-side through the authorised read, so raw payloads never cross the boundary. A UI whose target backend can't relay a subscribed channel (it neither hosts the channel's context nor binds it) is rejected with `loom.relay-target-not-subscribed`.
+
 ### The `.loom/asyncapi.yaml` artefact
 
 The channel surface is also published as an AsyncAPI 3.0 document — the messaging analogue of the OpenAPI spec the api emits:
