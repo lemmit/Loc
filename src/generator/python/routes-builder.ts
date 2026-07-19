@@ -4,7 +4,6 @@ import {
   forCreateInput,
   wireFieldsFor,
 } from "../../ir/enrich/wire-projection.js";
-import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -52,6 +51,7 @@ import {
 } from "../../util/error-defaults.js";
 import { messageCode } from "../../util/message-code.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";

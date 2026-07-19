@@ -103,7 +103,9 @@ describe("server-sourced create-path defaults — .NET", () => {
     expect(dto).toMatch(/record CreateOrderRequest\([\s\S]*string\? CreatedAt = null[\s\S]*\)/);
     const ctrl = fileEndingWith(files, "OrdersController.cs");
     // Per-request coalesce at the create command construction.
-    expect(ctrl).toMatch(/request\.CreatedAt is null \? DateTime\.UtcNow : DateTime\.Parse\(request\.CreatedAt/);
+    expect(ctrl).toMatch(
+      /request\.CreatedAt is null \? DateTime\.UtcNow : DateTime\.Parse\(request\.CreatedAt/,
+    );
   });
 
   it("a currentUser.* default coalesces to the ambient principal", async () => {

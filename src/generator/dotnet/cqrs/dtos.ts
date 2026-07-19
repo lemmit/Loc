@@ -3,7 +3,6 @@ import {
   emitsRestCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
-import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -14,6 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
 import {
   aggregateResponseParams,

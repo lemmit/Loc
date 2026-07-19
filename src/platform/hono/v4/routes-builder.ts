@@ -342,7 +342,10 @@ export function buildRoutesFile(
             !info.isCollection;
           return {
             name: f.name,
-            base: plainBool && d !== undefined && !serverSourced ? "z.coerce.boolean()" : zodFor(f.type),
+            base:
+              plainBool && d !== undefined && !serverSourced
+                ? "z.coerce.boolean()"
+                : zodFor(f.type),
             default: d && !serverSourced ? wireDefaultLiteral(f.type, d) : undefined,
             optional: serverSourced || undefined,
           };
