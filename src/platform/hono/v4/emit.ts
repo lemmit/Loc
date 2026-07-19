@@ -28,6 +28,7 @@ import {
   mikroConnectionSetup,
   renderMikroBaseReader,
   renderMikroConfig,
+  renderMikroDocumentRepository,
   renderMikroEmbeddedRepository,
   renderMikroEntities,
   renderMikroEventSourcedRepository,
@@ -444,8 +445,11 @@ export function generateTypeScriptForContexts(
   if (usingMikro) {
     out.set(
       "db/entities.ts",
-      renderMikroEntities(merged.aggregates, merged, (agg) =>
-        effectiveSavingShape(agg, resolveDataSource?.(agg)),
+      renderMikroEntities(
+        merged.aggregates,
+        merged,
+        (agg) => effectiveSavingShape(agg, resolveDataSource?.(agg)),
+        { audit: emitAudit, provenance: emitProvenance },
       ),
     );
     out.set("mikro-orm.config.ts", renderMikroConfig());
@@ -676,13 +680,16 @@ export function generateTypeScriptForContexts(
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       const repoContent = usingMikro
         ? // mikroorm: event-sourced aggregates use the EntityManager event
-          // store (appliers, MikroORM edition); `shape(embedded)` folds
-          // containments into jsonb columns; `shape(document)` stays gated.
+          // store (appliers, MikroORM edition); `shape(document)` folds the
+          // whole tree into one jsonb blob; `shape(embedded)` folds only the
+          // containments into jsonb columns.
           agg.persistedAs === "eventLog"
           ? renderMikroEventSourcedRepository(agg, repo, ctx)
-          : shape === "embedded"
-            ? renderMikroEmbeddedRepository(agg, repo, ctx)
-            : renderMikroRepository(agg, repo, ctx)
+          : shape === "document"
+            ? renderMikroDocumentRepository(agg, repo, ctx)
+            : shape === "embedded"
+              ? renderMikroEmbeddedRepository(agg, repo, ctx)
+              : renderMikroRepository(agg, repo, ctx)
         : agg.persistedAs === "eventLog"
           ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
           : shape === "document"
@@ -710,7 +717,15 @@ export function generateTypeScriptForContexts(
         }
       } else {
         const routesPath = `http/${lowerFirst(agg.name)}.routes.ts`;
-        const routesContent = buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace);
+        const routesContent = buildRoutesFile(
+          agg,
+          repo,
+          ctx,
+          emitAudit,
+          emitProvenance,
+          emitTrace,
+          usingMikro,
+        );
         out.set(routesPath, routesContent);
         sourcemap?.file(routesPath, routesContent, agg.origin, construct);
       }

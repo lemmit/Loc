@@ -2064,15 +2064,14 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // columns and each containment folds into a jsonb column, (de)serialised
         // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
         // analogue of the drizzle embedded repository).  Bounded to aggregates
-        // with no `Id[]` reference collections.  `shape(document)` (the whole
-        // aggregate as one opaque blob) stays gated.
-        if (a.persistedAs !== "eventLog" && shape !== "relational") {
-          if (shape === "embedded") {
-            if ((a.associations ?? []).length > 0)
-              reject(where, "is shape(embedded) with `Id[]` reference collections");
-          } else {
-            reject(where, `is persisted as shape(${shape})`);
-          }
+        // with no `Id[]` reference collections.  `shape(document)` IS supported
+        // (wave 3): the whole aggregate tree collapses to one `(id, data,
+        // version)` jsonb blob round-tripped through the shared doc
+        // (de)serialisers — no per-field / containment / pivot columns, so
+        // reference collections + parts ride inside the blob (unbounded).
+        if (a.persistedAs !== "eventLog" && shape === "embedded") {
+          if ((a.associations ?? []).length > 0)
+            reject(where, "is shape(embedded) with `Id[]` reference collections");
         }
         // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
         // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
@@ -2129,27 +2128,19 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // the persist-time stamp (`stampInsert` in `em.upsert`) and the default-
         // on `version` token by the guarded version-CAS `nativeUpdate` — both
         // already supported.
-        for (const f of a.fields) {
-          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-        }
-        // Per-operation / lifecycle `audited` writes a `provenance_records`-style
-        // history row inside the route's save transaction via the SHARED
-        // (drizzle-shaped) routes-builder — `db.transaction(...tx.insert(
-        // schema.auditRecords)...)`.  On mikroorm `db` is the EntityManager (no
-        // drizzle `.transaction`, no `schema` module), so that handler doesn't
-        // compile.  Porting the transactional flush to the EntityManager API is
-        // the same seam that gates provenanced fields (provenance-flush port,
-        // deferred wave-2 follow-up); until then, fail fast rather than emit a
-        // non-compiling handler.  NOTE: persist-time audit STAMPING (`auditable`
-        // / `with audit` → `stampInsert` in `em.upsert`) is unaffected and stays
-        // supported — this only gates the per-op/lifecycle `audited` FLAG.
-        const auditedOps = a.operations.filter((o) => o.audited).map((o) => o.name);
-        if (auditedOps.length > 0)
-          reject(where, `has 'audited' operation(s) ${auditedOps.join(", ")}`);
-        const auditedLifecycle = [...(a.creates ?? []), ...(a.destroys ?? [])].some(
-          (o) => o.audited,
-        );
-        if (auditedLifecycle) reject(where, "has an 'audited' create/destroy lifecycle action");
+        // Provenanced fields ARE supported (wave 3): each `<field>_provenance`
+        // co-located lineage jsonb column rides the mikro Row + save projection
+        // (the shared `provColumnEntries`/`hydrateRootExpr` seams), and the
+        // per-write history flush runs on the EntityManager — see below.
+        //
+        // Per-operation / lifecycle `audited` writes ARE supported (wave 3): the
+        // history row that the SHARED (drizzle-shaped) routes-builder writes in
+        // the save transaction is now ported to the EntityManager API behind a
+        // `usingMikro` branch — `db.transactional(...em.insert(AuditRecordRow /
+        // ProvenanceRecordRow, {...}))` over the mikro history-Row entities, with
+        // the save joining the same transaction via the repos' fork
+        // `keepTransactionContext`.  Persist-time audit STAMPING (`auditable` /
+        // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
       }
     }
   }
