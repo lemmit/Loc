@@ -90,6 +90,7 @@ import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
 import { renderExternHookImpl } from "./emit/extern.js";
 import { renderId } from "./emit/ids.js";
+import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -106,7 +107,6 @@ import {
 } from "./emit/provenance.js";
 import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
-import { renderHttpMetrics } from "./emit/metrics.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import {
