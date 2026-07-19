@@ -49,7 +49,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   exprUsesCurrentUser,
   findUsesCurrentUser,
   isQueryTimeProjection,
@@ -2673,7 +2673,9 @@ function baseReaderImports(
       ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
       : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
   }
-  return { voImportLine, usesMoney: concretes.some(aggregateUsesMoney) };
+  // Deep check — a concrete with money only inside a VO field still hydrates
+  // via `new Decimal(...)`, so gate the import on the VO-aware predicate.
+  return { voImportLine, usesMoney: concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects)) };
 }
 
 /** TPH (`sharedTable`) read-only `<Base>Repository` — scans the shared Row and

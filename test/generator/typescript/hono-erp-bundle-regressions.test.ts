@@ -148,4 +148,28 @@ describe("Hono ERP-bundle generator regressions", () => {
     expect(del, "delete targets shared base table").toContain("schema.contacts");
     expect(del, "delete must NOT target the subtype table").not.toContain("schema.personContacts");
   });
+
+  it("the TPH base reader imports decimal.js when a concrete has money inside a value object", async () => {
+    // `Car.price: Money` where `Money.amount: money` — the concrete's only
+    // money usage is inside a VO. The base reader's hydrate recurses into the
+    // VO and emits `new Decimal(...)`, but the import gate keyed on the SHALLOW
+    // `aggregateUsesMoney` (which doesn't resolve into VO fields), so the file
+    // used `Decimal` without importing it → TS2304.
+    const files = await gen(`
+      valueobject Money { amount: money  currency: string }
+      context Catalog {
+        abstract aggregate Product inheritanceUsing: sharedTable { title: string }
+        aggregate Car extends Product { price: Money }
+        aggregate Bike extends Product { note: string }
+        aggregate Depot { anchor: Product id }
+        repository Cars for Car { }
+        repository Bikes for Bike { }
+        repository Depots for Depot { }
+      }
+    `);
+    const baseReader = files.get("db/repositories/product-repository.ts") ?? "";
+    expect(baseReader, "TPH base reader emitted").not.toEqual("");
+    expect(baseReader, "base reader hydrates money via Decimal").toContain("new Decimal(");
+    expect(baseReader, "base reader imports decimal.js").toContain('from "decimal.js"');
+  });
 });
