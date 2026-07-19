@@ -189,10 +189,53 @@ function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
           : `new ${type.targetName}Id(r.${col})`,
       };
     }
+    case "array": {
+      // A scalar/enum/value-object collection field (`tags: string[]`,
+      // `stops: Money[]`) — stored as ONE `jsonb` column holding the serialised
+      // list, the raw-Npgsql mirror of EF's primitive-collection / owned-array
+      // JSON mapping.  The whole `List<T>` round-trips through System.Text.Json
+      // (enums as numbers, VOs as objects — internal to the column, so the wire
+      // shape still comes from the domain object).  Nullable (`string[]?`)
+      // stores JSON `null`.
+      const elemCs = arrayElemCs(type.element);
+      const listCs = `List<${elemCs}>`;
+      return {
+        col,
+        sql: "jsonb",
+        nullable,
+        rowCs: nullable ? "string?" : "string",
+        cast: "::jsonb",
+        save: nullable
+          ? `${acc} is null ? null : System.Text.Json.JsonSerializer.Serialize(${acc})`
+          : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
+        stateProp: prop,
+        hydrate: nullable
+          ? `r.${col} is null ? (${listCs}?)null : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`
+          : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`,
+      };
+    }
     default:
       throw new Error(
         `dapper: unsupported field kind '${type.kind}' on '${f.name}' (validator gap)`,
       );
+  }
+}
+
+/** The C# element type for a collection field's element (used to type the
+ *  `List<T>` a jsonb array column round-trips).  Mirrors the scalar arms of
+ *  `fieldColumn`: primitive → its C# type, enum / value-object → the declared
+ *  type name, id → the strongly-typed `<Target>Id`. */
+function arrayElemCs(elem: TypeIR): string {
+  switch (elem.kind) {
+    case "primitive":
+      return primTypes(elem.name).cs;
+    case "enum":
+    case "valueobject":
+      return elem.name;
+    case "id":
+      return `${elem.targetName}Id`;
+    default:
+      throw new Error(`dapper: unsupported array element kind '${elem.kind}' (validator gap)`);
   }
 }
 

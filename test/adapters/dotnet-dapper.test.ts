@@ -500,6 +500,64 @@ system D {
       ),
     ).toBe(true);
   });
+
+  // Wave 4: a scalar / enum / value-object collection field ON a part is no
+  // longer rejected — each stores as one `jsonb` column on the child table
+  // holding the System.Text.Json-serialised list (the raw-Npgsql mirror of EF's
+  // primitive-collection JSON mapping).
+  it("accepts scalar/enum/VO collection fields on a part (jsonb list columns)", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      enum LineKind { Physical, Digital }
+      valueobject Money { amount: int  currency: string }
+      aggregate Order with crudish {
+        customer: string
+        contains lineItems: LineItem[]
+        entity LineItem {
+          sku: string
+          tags: string[]
+          kinds: LineKind[]
+          charges: Money[]
+          notes: string[]?
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the part-collection-field gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("tags jsonb not null");
+    expect(schema).toContain("kinds jsonb not null");
+    expect(schema).toContain("charges jsonb not null");
+    expect(schema).toContain("notes jsonb"); // optional → nullable (no "not null")
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Row DTO carries the list columns as jsonb-backed strings.
+    expect(repo).toContain("public string tags { get; set; } = default!;");
+    expect(repo).toContain("public string? notes { get; set; }");
+    // Save serialises the list; hydrate deserialises to the typed List<T>.
+    expect(repo).toContain("tags = System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Tags)");
+    expect(repo).toContain(
+      "Tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(r.tags)!,",
+    );
+    expect(repo).toContain(
+      "Kinds = System.Text.Json.JsonSerializer.Deserialize<List<LineKind>>(r.kinds)!,",
+    );
+    expect(repo).toContain(
+      "Charges = System.Text.Json.JsonSerializer.Deserialize<List<Money>>(r.charges)!,",
+    );
+    // Optional list handles null on both save + hydrate.
+    expect(repo).toContain(
+      "notes = __lineItemsChild.Notes is null ? null : System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Notes)",
+    );
+  });
 });
 
 // Document shape (`shape(document)`) on Dapper (M-T6.9 wave 3): the whole

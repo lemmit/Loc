@@ -1863,6 +1863,17 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 // efcore (the default) supports the full surface, so this only fires for an
 // explicit `persistence: dapper`.
 // ---------------------------------------------------------------------------
+// Element kinds a Dapper part collection field can round-trip as one `jsonb`
+// column (System.Text.Json list serialisation) — kept in lockstep with
+// `arrayElemCs` in `src/generator/dotnet/emit/dapper.ts` (ir/validate may not
+// import generator/, so the two lists are mirrored, not shared).
+const DAPPER_ARRAY_ELEM_KINDS: ReadonlySet<string> = new Set([
+  "primitive",
+  "enum",
+  "valueobject",
+  "id",
+]);
+
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -1959,8 +1970,13 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // `contains` (in any shape) needs no gate on an event-sourced aggregate.
         //
         // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
-        // with its OWN containments), a reference-collection field on a part,
-        // and nested parts combined with reference-collection associations.
+        // with its OWN containments) and nested parts combined with
+        // reference-collection associations.  A scalar / enum / value-object /
+        // id COLLECTION field on a part IS supported now — it stores as one
+        // `jsonb` column holding the serialised list (System.Text.Json
+        // round-trip, the raw-Npgsql mirror of EF's primitive-collection JSON
+        // mapping); only an array whose element kind is outside that set stays
+        // gated (nothing in the corpus reaches it).
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
           if ((a.associations ?? []).length > 0) {
@@ -1975,8 +1991,11 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
                 reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
               for (const pf of part.fields) {
                 const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
-                if (pt.kind === "array")
-                  reject(where, `contains a part ('${part.name}') with a collection field`);
+                if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
+                  reject(
+                    where,
+                    `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
+                  );
               }
             }
           }
