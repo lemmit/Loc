@@ -296,7 +296,7 @@ function renderEventStore(ns: string, ctxName: string): string[] {
 
 /** The single `Infrastructure/Persistence/DapperPersistencePorts.cs` carrying
  *  every Dapper port adapter for the deployable's workflow / projection surface. */
-export function renderDapperPersistencePorts(
+function renderDapperPersistencePorts(
   ns: string,
   workflows: readonly WorkflowIR[],
   projections: readonly ProjectionIR[],
