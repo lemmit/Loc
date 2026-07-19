@@ -98,6 +98,13 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
+    /** Broker channels (M-T4.4 slice 6a): the deployable wires a redis-bound
+     *  channelSource — register the ChannelTransports singleton and wrap the
+     *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
+    hasChannels?: boolean;
+    /** A hosted reactor subscribes to a carried event — start the consumer
+     *  BackgroundService feeding envelopes into the in-process dispatch. */
+    hasChannelConsumers?: boolean;
     /** Dapper persistence-port DI (M-T6.9): the CLOSED `AddScoped<…>` binding
      *  lines for the workflow / projection / event-store adapters.  Computed in
      *  index.ts (it holds the pre-merge context names the event stores key
@@ -116,11 +123,35 @@ export function renderProgram(
   // subscriptions, register the Mediator-notification dispatcher (Scoped — it
   // depends on the scoped IMediator) so emitted events reach their reactor /
   // starter handlers.  Otherwise the default no-op stands (byte-identical).
-  const dispatcherRegistration = options?.hasOutbox
+  const innerRegistration = options?.hasOutbox
     ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
       : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
+  // Broker channels (M-T4.4): the publish tee becomes the outermost
+  // IDomainEventDispatcher (its ctor takes the concrete inner), the shared
+  // transports register once, and — where reactors live — the consumer loop
+  // runs as a hosted service feeding the in-process dispatch.
+  const dispatcherRegistration = options?.hasChannels
+    ? `${innerRegistration
+        .split("\n")
+        .map((l) =>
+          l.startsWith("builder.Services.AddScoped<IDomainEventDispatcher") ||
+          l.startsWith("builder.Services.AddSingleton<IDomainEventDispatcher")
+            ? l
+                .replace("AddScoped<IDomainEventDispatcher, ", "AddScoped<")
+                .replace("AddSingleton<IDomainEventDispatcher, ", "AddSingleton<")
+                .replace(">();", ">();")
+            : l,
+        )
+        .join(
+          "\n",
+        )}\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+        options?.hasChannelConsumers
+          ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
+          : ""
+      }`
+    : innerRegistration;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
   // TimerSource scheduling (scheduling.md, M-T4.1): one hosted
@@ -338,7 +369,7 @@ using System.Text.Json;
 ${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
-using ${ns}.Infrastructure.Events;${authUsing}
+using ${ns}.Infrastructure.Events;${options?.hasChannels ? `\nusing ${ns}.Infrastructure.Channels;` : ""}${authUsing}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -786,10 +817,16 @@ export function renderCsproj(
   usesSpecifications: boolean = false,
   oidc: boolean = false,
   withCronTimers: boolean = false,
+  withRedisChannels: boolean = false,
 ): string {
   // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
   // block.
+  // Broker channel transport (M-T4.4 slice 6a) — StackExchange.Redis (MIT,
+  // design §6a) speaks RESP to the compose-provisioned Valkey sidecar.
+  const redisChannelRef = withRedisChannels
+    ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
     : "";
@@ -913,7 +950,7 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;
