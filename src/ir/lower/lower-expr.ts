@@ -63,6 +63,13 @@ import {
   type TemplateStr,
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
+
+/** No-arg collection ops that are call-style on every backend (`lines.first()`)
+ *  and are NOT special-cased as property-style member access (unlike
+ *  `count` / `length` / `distinct`).  Written property-style (`lines.first`)
+ *  they must lower to the method-call IR, not a member IR, or the backends
+ *  emit a `.first` field access on a list. */
+const NO_PAREN_CALL_COLLECTION_OPS = new Set(["first", "firstOrNull"]);
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { intrinsicFor, intrinsicReturnType } from "../../util/intrinsics.js";
@@ -763,6 +770,27 @@ function applySuffixToRecv(
         recvType: { kind: "enum", name: enumName },
       };
     }
+  }
+  // A no-paren `first` / `firstOrNull` on a COLLECTION receiver is the
+  // collection op in PROPERTY style.  The type system blesses it (typing
+  // `lines.first` as the element / `lines.firstOrNull` as `element?`), but —
+  // unlike `count` / `length` / `distinct`, which every backend special-cases
+  // as a property-style member — the backends only render the CALL form of
+  // these, so a bare `member` IR emits `.first` / `.first_or_null` as a field
+  // access on a list (a runtime crash on every backend).  Lower it to the SAME
+  // `method-call` IR the working `lines.first()` form produces, so every
+  // backend emits the op.  (Gated on a collection receiver so an entity/VO
+  // field literally named `first` stays an ordinary member access.)
+  if (NO_PAREN_CALL_COLLECTION_OPS.has(ms.member) && collectionElementType(recvType) !== undefined) {
+    const mcIR: ExprIR = {
+      kind: "method-call",
+      receiver: recv,
+      member: ms.member,
+      args: [],
+      receiverType: recvType,
+      isCollectionOp: true,
+    };
+    return { recv: mcIR, recvType: memberType(recvType, ms.member, env) };
   }
   // Non-call MemberSuffix — preserve `stepInto` semantics on the IR
   // node's `memberType` (matches the legacy MemberAccess lowering),

@@ -207,6 +207,20 @@ Elixir `record.lines.first_or_null.label` (BadMapError at runtime —
 lower a bare collection-op MemberSuffix to `method-call` with
 `isCollectionOp` regardless of parens.
 
+> **Update (2026-07-19, follow-up PR): C1 fixed.** The shared lowering
+> (`lower-expr.ts`) now converts a property-style `first`/`firstOrNull` on a
+> collection receiver to the SAME `method-call` IR the `lines.first()` call
+> form produces, so every backend emits the op instead of a `.first`/
+> `.first_or_null` field access. Scoped to `first`/`firstOrNull` (the no-arg
+> ops backends DON'T handle property-style) and gated on a collection receiver,
+> so `count`/`length`/`distinct` and an entity field named `first` are
+> untouched. Verified: all five backends now emit the op (`(this._lines)[0]`,
+> `List.first(record.lines)`, `.stream().findFirst()`, `self._lines[0] if …`,
+> `.FirstOrDefault()`); node project `tsc --noEmit`-clean; IR + regression
+> tests (a prior test that pinned the buggy `member` shape was corrected).
+> (C2 — .NET `firstOrNull()` returning `default(T)` on value-type collections
+> — is a distinct wrong-value bug, still open below.)
+
 ### C2. .NET `firstOrNull()` over a value-type collection returns `default(T)`, not null *(wrong-value)*
 
 `firstOrNull` → `.FirstOrDefault()` (`src/generator/dotnet/render-expr.ts:787`).

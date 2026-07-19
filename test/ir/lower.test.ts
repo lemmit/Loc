@@ -133,9 +133,16 @@ describe("lowering — A4 collection-op result types", () => {
   it("types `map(l => l.qty)` (qty: int) as int[]", async () => {
     // Trailing `.first` reads the map result: its receiver type is the array
     // produced by the map, and the ELEMENT is `int` (the lambda body type) —
-    // not the `string` fallback.
-    const first = await derivedExpr("firstQty");
+    // not the `string` fallback.  A property-style `.first` / `.firstOrNull`
+    // lowers to the collection-op METHOD-CALL (so backends emit the op, not a
+    // `.first` field access on a list — a crash), so the node is a method-call.
+    const loom = await buildLoomModel(A4_SRC);
+    const order = allAggregates(loom).find((a) => a.name === "Order")!;
+    const d = order.derived.find((x) => x.name === "firstQty")!;
+    const first = d.expr as Extract<ExprIR, { kind: "method-call" }>;
+    expect(first.kind).toBe("method-call");
     expect(first.member).toBe("first");
+    expect(first.isCollectionOp).toBe(true);
     expect(first.receiverType).toEqual(INT_ARR);
   });
 
@@ -166,6 +173,50 @@ describe("lowering — A4 collection-op result types", () => {
     const len = await derivedExpr("labelLen");
     expect(len.member).toBe("length");
     expect(len.receiverType).toEqual({ kind: "primitive", name: "string" });
+  });
+});
+
+// C1 — property-style `first` / `firstOrNull` on a COLLECTION field (no parens)
+// must lower to the collection-op METHOD-CALL, exactly like the `lines.first()`
+// call form, so every backend emits the op instead of a `.first` /
+// `.first_or_null` field access on a list (a runtime crash).  A field literally
+// named `first` on an ENTITY stays an ordinary member access.
+describe("lowering — property-style first/firstOrNull → method-call (C1)", () => {
+  const SRC = `
+    context Shop {
+      aggregate Cart {
+        contains lines: CartLine[]
+        derived firstLabel: string? = lines.firstOrNull.label
+        derived firstQty: int = lines.first.qty
+        entity CartLine { label: string  qty: int }
+      }
+      repository Carts for Cart { }
+    }
+  `;
+
+  async function head(name: string): Promise<Extract<ExprIR, { kind: "method-call" }>> {
+    const loom = await buildLoomModel(SRC);
+    const cart = allAggregates(loom).find((a) => a.name === "Cart")!;
+    // Both deriveds trail a `.label` / `.qty` member off the op result, so the
+    // op node is the derived expr's RECEIVER.
+    const d = cart.derived.find((x) => x.name === name)!;
+    const outer = d.expr as Extract<ExprIR, { kind: "member" }>;
+    return outer.receiver as Extract<ExprIR, { kind: "method-call" }>;
+  }
+
+  it("lowers `lines.firstOrNull` to an isCollectionOp method-call", async () => {
+    const op = await head("firstLabel");
+    expect(op.kind).toBe("method-call");
+    expect(op.member).toBe("firstOrNull");
+    expect(op.isCollectionOp).toBe(true);
+    expect(op.args).toEqual([]);
+  });
+
+  it("lowers `lines.first` to an isCollectionOp method-call", async () => {
+    const op = await head("firstQty");
+    expect(op.kind).toBe("method-call");
+    expect(op.member).toBe("first");
+    expect(op.isCollectionOp).toBe(true);
   });
 });
 
