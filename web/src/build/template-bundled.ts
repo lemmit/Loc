@@ -39,8 +39,9 @@ const templateSources = import.meta.glob<string>(
 
 // Eager raw glob of every pack-agnostic shared-template source.
 // One glob covers every shared-source sibling dir — the TSX set
-// (vite/, api/, docker/), the SvelteKit set (sveltekit/), and the Vue
-// set (vue/, which rides the same api/+docker/ as TSX).  The loader
+// (vite/, api/, docker/), the SvelteKit set (sveltekit/), the Vue set
+// (vue/, which rides the same api/+docker/ as TSX), and the Angular set
+// (angular/, its own ng-build host layer).  The loader
 // picks the active subset per pack `format`; seeding the union here is
 // harmless (unused dirs just sit in the VFS).
 const sharedSources = import.meta.glob<string>(
@@ -50,6 +51,7 @@ const sharedSources = import.meta.glob<string>(
     "../../../docker/*.hbs",
     "../../../sveltekit/*.hbs",
     "../../../vue/*.hbs",
+    "../../../angular/*.hbs",
   ],
   { eager: true, query: "?raw", import: "default" },
 );
@@ -92,7 +94,7 @@ function parseDesignPath(
  *  the top-level dir name plus filename.  Used to project each
  *  shared template into the VFS at `/<dir>/<file>`. */
 function parseSharedPath(globPath: string): { dir: string; file: string } | null {
-  const m = globPath.match(/\/(vite|api|docker|sveltekit|vue)\/([^/]+\.hbs)$/);
+  const m = globPath.match(/\/(vite|api|docker|sveltekit|vue|angular)\/([^/]+\.hbs)$/);
   if (!m) return null;
   return { dir: m[1], file: m[2] };
 }
