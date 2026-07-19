@@ -747,7 +747,11 @@ export function renderDapperRepository(
   // `insertColList`).  Off the TPH path these equal `insertVals` /
   // `versionedInsertVals` (byte-identical).
   const insertValsTph = tph
-    ? [`@${cols[0]!.col}${cols[0]!.cast}`, kindLiteral, ...cols.slice(1).map((c) => `@${c.col}${c.cast}`)].join(", ")
+    ? [
+        `@${cols[0]!.col}${cols[0]!.cast}`,
+        kindLiteral,
+        ...cols.slice(1).map((c) => `@${c.col}${c.cast}`),
+      ].join(", ")
     : insertVals;
   const versionedInsertValsTph = tph
     ? [
@@ -802,8 +806,9 @@ export function renderDapperRepository(
           .join(" AND ")
       : null;
   const filterSql: string | null =
-    [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSql].filter((s) => s !== null).join(" AND ") ||
-    null;
+    [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSql]
+      .filter((s) => s !== null)
+      .join(" AND ") || null;
   const andFilter = (existingWhere: boolean): string =>
     filterSql ? `${existingWhere ? " AND " : " WHERE "}${filterSql}` : "";
   // Principal-filter param bindings appended to every SELECT's parameter object

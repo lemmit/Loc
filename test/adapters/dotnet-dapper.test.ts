@@ -568,7 +568,9 @@ system D {
     expect(repo).toContain("public string tags { get; set; } = default!;");
     expect(repo).toContain("public string? notes { get; set; }");
     // Save serialises the list; hydrate deserialises to the typed List<T>.
-    expect(repo).toContain("tags = System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Tags)");
+    expect(repo).toContain(
+      "tags = System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Tags)",
+    );
     expect(repo).toContain(
       "Tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(r.tags)!,",
     );
@@ -779,9 +781,9 @@ system D {
   deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
 }`;
     const { errors } = await emit(src);
-    expect(
-      errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
+      true,
+    );
   });
 });
 
