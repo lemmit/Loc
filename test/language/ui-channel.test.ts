@@ -84,13 +84,45 @@ describe("ui channel subscription — validation", () => {
     );
   });
 
-  it("rejects a non-toast statement in an `on` handler body (v1)", async () => {
+  it("rejects a non-toast/non-refetch statement in an `on` handler body", async () => {
     const { errors } = await parseString(
       sys(`
         channel Orders: Fulfillment.Lifecycle
         on Orders.OrderPlaced(e) { navigate("/orders") }
       `),
     );
-    expect(errors.some((e) => /v1 supports only 'toast\(/.test(e))).toBe(true);
+    // The unsupported-statement diagnostic keeps its `loom.ui-handler-unsupported`
+    // code and now lists both supported actions.
+    expect(errors.some((e) => /supports 'toast\(.*\) and 'refetch\(/.test(e))).toBe(true);
+  });
+
+  it("accepts a `refetch(<Aggregate>)` action alongside a toast", async () => {
+    const { errors } = await parseString(
+      sys(`
+        channel Orders: Fulfillment.Lifecycle
+        on Orders.OrderPlaced(e) { toast("shipped") refetch(Order) }
+      `),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects a `refetch(<Unknown>)` naming no declared aggregate", async () => {
+    const { errors } = await parseString(
+      sys(`
+        channel Orders: Fulfillment.Lifecycle
+        on Orders.OrderPlaced(e) { refetch(Nope) }
+      `),
+    );
+    expect(errors.some((e) => /Unknown refetch target 'Nope'/.test(e))).toBe(true);
+  });
+
+  it("rejects an argument-less `refetch()`", async () => {
+    const { errors } = await parseString(
+      sys(`
+        channel Orders: Fulfillment.Lifecycle
+        on Orders.OrderPlaced(e) { refetch() }
+      `),
+    );
+    expect(errors.some((e) => /needs at least one aggregate to refetch/.test(e))).toBe(true);
   });
 });

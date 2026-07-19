@@ -225,4 +225,27 @@ describe("realtime live-event handlers — React (`on <channel>.<Event>`)", () =
     const appKey = [...files.keys()].find((k) => k.endsWith("web_app/src/App.tsx"));
     expect(files.get(appKey ?? "") ?? "").not.toContain("RealtimeHandlers");
   });
+
+  it("a `refetch(Order)` handler invalidates the aggregate's query cache", async () => {
+    // Same `["orders"]` key `useCreateOrder`/`useDeleteOrder` invalidate on
+    // success — a realtime event refetches through the identical cache entry.
+    const refetchUi = HANDLERS_UI.replace(
+      'on Orders.OrderPlaced(e) { toast("Order " + e.order + " placed") }',
+      'on Orders.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }',
+    );
+    const system = REALTIME_SYSTEM.replace(
+      / {2}ui WebApp \{[\s\S]*?\n {2}\}/,
+      refetchUi.trimStart().replace(/^/, "  "),
+    );
+    const model = await parseValid(system);
+    const { files } = generateSystems(model);
+    const key = [...files.keys()].find((k) =>
+      k.endsWith("web_app/src/components/RealtimeHandlers.tsx"),
+    );
+    const rh = files.get(key ?? "") ?? "";
+    expect(rh).toContain('import { useQueryClient } from "@tanstack/react-query";');
+    expect(rh).toContain("const qc = useQueryClient();");
+    expect(rh).toContain('case "OrderPlaced":');
+    expect(rh).toContain('qc.invalidateQueries({ queryKey: ["orders"] });');
+  });
 });
