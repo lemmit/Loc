@@ -108,6 +108,13 @@ export function buildPyDispatchFile(
    *  `queue`/`work` channel — their producer path rides the outbox relay,
    *  which publishes on drain (design §5) instead of redelivering locally. */
   durableBrokerEvents: ReadonlySet<string> = new Set(),
+  /** Realtime SSE wire (channels.md Part I): a `delivery: broadcast` channel
+   *  makes `make_dispatcher` wrap the in-process dispatcher in the
+   *  `RealtimeDispatcher` tee (from `app/realtime.py`), so dispatched events
+   *  also reach connected browsers.  Forces the dispatcher file to exist even
+   *  when no workflow/projection subscribes (broadcast-only), so the repos'
+   *  drained events flow through the tee. */
+  hasRealtime = false,
 ): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
   // Durable tier: events on a `retention: log | work` channel route
@@ -117,7 +124,7 @@ export function buildPyDispatchFile(
   const hasOutbox = durableEvents.length > 0;
   const durableBroker = durableBrokerEvents.size > 0;
   if (subs.length === 0) {
-    if (!hasChannels) return null;
+    if (!hasChannels) return hasRealtime ? buildRealtimeOnlyDispatch() : null;
     if (hasOutbox && durableBroker) {
       // Workflow-less durable-broker producer (design §5): the outbox
       // captures durable emits in the request transaction and the relay
@@ -130,7 +137,9 @@ export function buildPyDispatchFile(
         "",
         "",
         "def make_dispatcher(session: AsyncSession) -> ChannelTeeDispatcher:",
-        "    return ChannelTeeDispatcher(OutboxDispatcher(session, NoopDomainEventDispatcher()))",
+        hasRealtime
+          ? "    return ChannelTeeDispatcher(OutboxDispatcher(session, RealtimeDispatcher(NoopDomainEventDispatcher())))"
+          : "    return ChannelTeeDispatcher(OutboxDispatcher(session, NoopDomainEventDispatcher()))",
       );
       const ppScan = ppBody.replace(/"(?:\\.|[^"\\])*"/g, '""');
       const ppRefers = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(ppScan);
@@ -175,15 +184,20 @@ export function buildPyDispatchFile(
           ? `from app.domain.value_objects import ${ppVoEnumNames.join(", ")}`
           : null,
         "from app.obs.log import log",
+        ...(hasRealtime ? ["from app.realtime import RealtimeDispatcher"] : []),
         "",
         ppBody,
         "",
       );
     }
     // Pure producer: no reactor handlers — the dispatcher IS the tee over
-    // the Noop, so an aggregate's drained events reach the broker while
+    // the Noop (with the realtime tee inside it when broadcast events are
+    // UI-observable), so an aggregate's drained events reach the broker while
     // everything un-routed stays a no-op (parity with Hono's
     // `channelPublishTee(transports, NoopDomainEventDispatcher)`).
+    const producerInner = hasRealtime
+      ? "RealtimeDispatcher(NoopDomainEventDispatcher())"
+      : "NoopDomainEventDispatcher()";
     return lines(
       `"""In-process event dispatch (channels.md).  Auto-generated.`,
       "",
@@ -196,13 +210,14 @@ export function buildPyDispatchFile(
       "",
       "from app.channels import publish_event",
       "from app.domain.events import DomainEvent, NoopDomainEventDispatcher",
+      ...(hasRealtime ? ["from app.realtime import RealtimeDispatcher"] : []),
       "",
       channelTeeClass("NoopDomainEventDispatcher"),
       "",
       "",
       "def make_dispatcher(_session: AsyncSession) -> ChannelTeeDispatcher:",
       "    # The tee needs no db access; signature parity with the saga shape.",
-      "    return ChannelTeeDispatcher(NoopDomainEventDispatcher())",
+      `    return ChannelTeeDispatcher(${producerInner})`,
       "",
     );
   }
@@ -276,14 +291,17 @@ export function buildPyDispatchFile(
   // tier) → ChannelTeeDispatcher (broker tier).  The tee is outermost so a
   // broker-routed ephemeral event publishes without touching the outbox —
   // the two routing sets are disjoint by the compat matrix.
-  const innerExpr = hasOutbox
-    ? "OutboxDispatcher(session, InProcessDispatcher(session))"
+  const innerCore = hasRealtime
+    ? "RealtimeDispatcher(InProcessDispatcher(session))"
     : "InProcessDispatcher(session)";
+  const innerExpr = hasOutbox ? `OutboxDispatcher(session, ${innerCore})` : innerCore;
   const returnType = hasChannels
     ? '"ChannelTeeDispatcher"'
     : hasOutbox
       ? '"OutboxDispatcher"'
-      : "InProcessDispatcher";
+      : hasRealtime
+        ? "RealtimeDispatcher"
+        : "InProcessDispatcher";
   const dispatcher = lines(
     "class InProcessDispatcher:",
     '    """Routes each emitted event to its subscribed workflow handlers;',
@@ -301,6 +319,11 @@ export function buildPyDispatchFile(
     "",
     "",
     ...(hasChannels ? [channelTeeClass("DomainEventDispatcher"), "", ""] : []),
+    // Realtime tee (channels.md Part I): wrap the in-process dispatcher so
+    // dispatched events also reach the SSE wire.  Chain, innermost →
+    // outermost: InProcess → Realtime → Outbox → ChannelTee — ephemeral
+    // events stream inline, durable ones stream when the relay redelivers,
+    // and broker-routed events publish from the outermost tee (mirrors Hono).
     `def make_dispatcher(session: AsyncSession) -> ${returnType}:`,
     hasChannels ? `    return ChannelTeeDispatcher(${innerExpr})` : `    return ${innerExpr}`,
   );
@@ -310,7 +333,7 @@ export function buildPyDispatchFile(
     ...handlers,
     dispatcher,
     ...(hasOutbox
-      ? ["", "", outboxBlock(durableEvents, { durableBroker, pureProducer: false })]
+      ? ["", "", outboxBlock(durableEvents, { durableBroker, pureProducer: false, hasRealtime })]
       : []),
   );
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -404,6 +427,7 @@ export function buildPyDispatchFile(
     ].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
+    hasRealtime ? "from app.realtime import RealtimeDispatcher" : null,
     ...resourceImports,
     // `in_child_context` frames workflow reactor handlers; `log` is the reactor
     // drop-log.  A projection-only dispatch file uses neither (pure folds), so
@@ -800,12 +824,18 @@ function esHandlerFn(
  *  is broker-bound publish via `publish_event_from_relay` (envelope id =
  *  row id) instead of redelivering locally.  `pureProducer` drops the
  *  handler-side pieces (`_current_event_id`, `_dispatch_chained`, the local
- *  redelivery) — the workflow-less producer shape wraps the Noop. */
+ *  redelivery) — the workflow-less producer shape wraps the Noop.
+ *  `hasRealtime` (channels.md Part I): the relay redelivers through the same
+ *  realtime-teed in-process dispatcher as the request path (mirrors Hono),
+ *  so durable broadcast events reach the SSE wire when redelivered. */
 function outboxBlock(
   durableEvents: EventIR[],
-  opts: { durableBroker: boolean; pureProducer: boolean },
+  opts: { durableBroker: boolean; pureProducer: boolean; hasRealtime?: boolean },
 ): string {
   if (opts.pureProducer) return pureProducerOutboxBlock(durableEvents);
+  const relayDispatcher = opts.hasRealtime
+    ? "RealtimeDispatcher(InProcessDispatcher(session))"
+    : "InProcessDispatcher(session)";
   const toArms = durableEvents.flatMap((ev, i) => [
     `    ${i === 0 ? "if" : "elif"} isinstance(event, ${ev.name}):`,
     `        return {${ev.fields.map((f) => `"${f.name}": ${toPayload(`event.${snake(f.name)}`, f.type)}`).join(", ")}}`,
@@ -893,7 +923,7 @@ function outboxBlock(
           "                    await session.commit()",
           "            else:",
           "                async with AsyncSession(engine) as session:",
-          "                    await InProcessDispatcher(session).dispatch(event)",
+          `                    await ${relayDispatcher}.dispatch(event)`,
           "                    await session.execute(",
           "                        update(LoomOutboxRow)",
           "                        .where(LoomOutboxRow.id == event_id)",
@@ -903,7 +933,7 @@ function outboxBlock(
         ]
       : [
           "            async with AsyncSession(engine) as session:",
-          "                await InProcessDispatcher(session).dispatch(",
+          `                await ${relayDispatcher}.dispatch(`,
           "                    _event_from_payload(event_type, payload)",
           "                )",
           "                await session.execute(",
@@ -1052,6 +1082,38 @@ function pureProducerOutboxBlock(durableEvents: EventIR[]): string {
     "",
     `def start_outbox_relay() -> "asyncio.Task[None]":`,
     "    return asyncio.create_task(_run_outbox_relay())",
+
+/** The minimal `app/dispatch.py` for a deployable whose ONLY event routing is
+ *  the realtime SSE wire — a `delivery: broadcast` channel with no workflow /
+ *  projection subscriber.  `make_dispatcher` still exists (so every repository
+ *  drains through it), returning the `RealtimeDispatcher` tee around an
+ *  empty in-process dispatcher.  Byte-identical shape to the subscribed path's
+ *  scaffolding, minus the handlers. */
+function buildRealtimeOnlyDispatch(): string {
+  return lines(
+    `"""In-process event dispatch (channels.md).  Auto-generated."""`,
+    "",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "",
+    "from app.domain.events import DomainEvent",
+    "from app.realtime import RealtimeDispatcher",
+    "",
+    "",
+    "class InProcessDispatcher:",
+    `    """Routes each emitted event to its subscribed workflow handlers;`,
+    "    a handler's own emits re-enter, so choreography chains run.",
+    `    """`,
+    "",
+    "    def __init__(self, session: AsyncSession) -> None:",
+    "        self._session = session",
+    "",
+    "    async def dispatch(self, event: DomainEvent) -> None:",
+    "        return None",
+    "",
+    "",
+    "def make_dispatcher(session: AsyncSession) -> RealtimeDispatcher:",
+    "    return RealtimeDispatcher(InProcessDispatcher(session))",
+    "",
   );
 }
 

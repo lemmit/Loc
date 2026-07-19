@@ -4,7 +4,18 @@
 // and the per-backend dispatch wiring, so "which events are durable" has one
 // definition.
 
-import type { BoundedContextIR } from "../types/loom-ir.js";
+import type { BoundedContextIR, Platform } from "../types/loom-ir.js";
+
+/** Backends that emit the realtime SSE wire (`GET /realtime/events`).  The
+ *  frontend realtime client (`src/generator/_frontend/realtime.ts`) is
+ *  byte-identical against every one of them, so its emit gate keys on this
+ *  set rather than on a single backend.  Kept in one place so adding a
+ *  realtime-serving backend flips both the backend emit and the client emit. */
+export function backendServesRealtime(platform: Platform | undefined): boolean {
+  return (
+    platform === "node" || platform === "dotnet" || platform === "java" || platform === "python"
+  );
+}
 
 /** Event types carried by a channel that asks for durability
  *  (`retention: log | work`).  These route through the transactional
