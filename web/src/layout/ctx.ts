@@ -10,6 +10,7 @@
 // instead of the whole ctx — see ProblemsPanel for an example.
 
 import type { MutableRefObject, ReactNode } from "react";
+import type { AgentMessage } from "../agent/demo";
 import type { EditorHandle } from "../editor/LoomEditor";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
@@ -119,7 +120,14 @@ export type MobileCodeView =
 /** Identifiers for the desktop bottom dock's tabs.  Defined here (rather
  *  than in DevToolsDock) so `LayoutCtx` can carry the active-tab state
  *  without a ctx→DevToolsDock→ctx import cycle; DevToolsDock re-exports it. */
-export type DockTab = "output" | "backend" | "tests" | "migrations" | "history" | "auth";
+export type DockTab =
+  | "output"
+  | "agent"
+  | "backend"
+  | "tests"
+  | "migrations"
+  | "history"
+  | "auth";
 
 export interface LayoutCtx {
   isDesktop: boolean;
@@ -337,6 +345,14 @@ export interface LayoutCtx {
   // Share-link feedback
   copied: boolean;
   copyShareLink: () => void;
+
+  // Agent demo (the Agent dock tab) — the deterministic M-T8.3 wedge: a scripted
+  // agent turns prose into a validated `.ddd` and a generated stack, running the
+  // real browser-safe `loom_*` tools.  Messages stream as the transcript plays.
+  agentMessages: AgentMessage[];
+  agentRunning: boolean;
+  /** Play (or replay) the scripted prose → `.ddd` → generate → green demo. */
+  runAgentDemo: () => void;
 
   // Actions
   runGenerate: () => void;
