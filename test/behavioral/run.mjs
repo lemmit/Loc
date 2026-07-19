@@ -28,12 +28,17 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { featureCases, sharedSystemCases } from "./cases.mjs";
+import { DEV_CLAIMS, featureCases, sharedSystemCases } from "./cases.mjs";
+import { startMockIssuer } from "./oidc-mock.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 const WORK = join(HERE, ".work");
 const SHIM = join(HERE, "vitest-shim.mjs");
+
+/** The in-process mock OIDC issuer, started on demand when the corpus contains
+ *  an `auth {}` (OIDC) system.  `null` until then; runCase reads its token. */
+let oidc = null;
 
 /** Recursively collect files under `dir` matching `pred`. */
 function walk(dir, pred, out = []) {
@@ -62,8 +67,40 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles, traceFile }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken }) {
   const J = JSON.stringify;
+  // When the deployable is `auth: required` the generated boot module
+  // (index.ts) registers a verifier before serving — but we boot via
+  // `createApp` (http/index.ts), which does NOT, so `verifyUserOrThrow` would
+  // throw "No user verifier is registered".  Re-register the SAME verifier the
+  // generated boot module would, matched to the auth flavour:
+  //   • devstub — no `auth {}` block: re-register the dev-stub (accept every
+  //     request as a built-in admin; merge base64-`x-loom-dev-claims` over it),
+  //     so the E2E_DEV_CLAIMS principal resolves exactly as it does at runtime.
+  //   • oidc — an `auth {}` block: register the generated OIDC verifier
+  //     unchanged (validates the bearer JWT against the issuer's JWKS).  The
+  //     mock issuer (oidc-mock.mjs) + OIDC_ISSUER env stand in for Keycloak;
+  //     the bearer token is forwarded via E2E_BEARER_TOKEN.  No short-circuit —
+  //     the real JWT path runs.
+  let authImport = "";
+  let authRegister = "";
+  if (authMode === "oidc") {
+    authImport = `import { registerOidcVerifier } from ${J(join(deplDir, "auth", "oidc.ts"))};`;
+    authRegister = "registerOidcVerifier();";
+  } else if (authMode === "devstub") {
+    authImport = `import { registerUserVerifier } from ${J(join(deplDir, "auth", "verifier.ts"))};`;
+    authRegister = `registerUserVerifier((req) => {
+    const base = { id: "00000000-0000-0000-0000-000000000000", tenantId: "admin" };
+    const injected = req.headers.get("x-loom-dev-claims");
+    if (!injected) return base;
+    try {
+      return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };
+    } catch {
+      return base;
+    }
+  });`;
+  }
+  const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
@@ -71,6 +108,7 @@ import { createHarness, runTests } from ${J(join(REPO, "web/src/testing/harness.
 import { computeVerification } from ${J(join(REPO, "src/verify/verification.ts"))};
 import { createApp } from ${J(join(deplDir, "http/index.ts"))};
 import * as schema from ${J(join(deplDir, "db/schema.ts"))};
+${authImport}
 import { drizzle } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { is, Table } from "drizzle-orm";
@@ -80,6 +118,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const E2E_FILE = ${J(e2eFile)};
+const DEV_CLAIMS = ${J(DEV_CLAIMS)};
 const UNIT_FILES = ${J(unitFiles)};
 const TRACE_FILE = ${J(traceFile)};
 const SHIM = ${J(SHIM)};
@@ -88,6 +127,7 @@ export async function run() {
   const pglite = new PGlite();
   await pglite.exec(synthDDL(schema, { is, Table, getTableConfig }));
   const db = drizzle(pglite, { schema });
+  ${authRegister}
   const app = createApp(db);
 
   const dispatch = async (req) => {
@@ -100,7 +140,7 @@ export async function run() {
   const out = [];
   if (E2E_FILE) {
     const compile = async (ts) => (await esbuildTransform(ts, { loader: "ts", format: "cjs" })).code;
-    const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch });
+    const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: { E2E_DEV_CLAIMS: DEV_CLAIMS${bearerEnv} } });
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
   }
 
@@ -160,9 +200,20 @@ async function runCase(c) {
     const unitFiles = walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"));
 
     const traceFile = join(genDir, ".loom", "traceability.json");
+    // Auth flavour drives verifier re-registration (see entrySource):
+    //   • auth/oidc.ts present → OIDC (`auth {}` block): register the real OIDC
+    //     verifier + forward a mock-issuer bearer token.
+    //   • auth/verifier.ts only → dev-stub (`auth: required`, no block).
+    //   • neither → auth-less.
+    const authMode = existsSync(join(deplDir, "auth", "oidc.ts"))
+      ? "oidc"
+      : existsSync(join(deplDir, "auth", "verifier.ts"))
+        ? "devstub"
+        : "none";
+    const bearerToken = authMode === "oidc" ? oidc?.token ?? null : null;
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile }));
+    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     return await run();
@@ -194,6 +245,16 @@ const exampleCases = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8"))
 const corpus = [...features, ...shared, ...exampleCases].filter(
   (c) => only.length === 0 || only.includes(c.name),
 );
+
+// Stand up the in-process mock OIDC issuer once if any case carries an
+// `auth {}` (OIDC) block — the `auth:` in `auth: required` is a plain marker
+// (dev-stub), the `auth {` block is the OIDC provider config.  Setting
+// OIDC_ISSUER before any generated `auth/oidc.ts` module is imported is what
+// lets its boot-time `const ISSUER = process.env.OIDC_ISSUER` capture the mock.
+if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
+  oidc = await startMockIssuer();
+  process.env.OIDC_ISSUER = oidc.issuer;
+}
 
 // Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted
 // aggregate `test`). A boot/infra error, or a FAILING requirement in the
@@ -230,6 +291,8 @@ for (const c of corpus) {
     }
   }
 }
+
+await oidc?.stop();
 
 const reqTail = reqFailing ? `, ${reqFailing} requirement(s) FAILING` : "";
 process.stdout.write(`\n${pass} passed, ${fail} failed${reqTail}${errored ? `, ${errored} cases errored` : ""}\n`);

@@ -26,4 +26,17 @@ system SimpleAuth {
     port: 4000
     auth: required
   }
+
+  // The behavioural harness authenticates as the canonical principal
+  // (`role: "agent"`; see cases.mjs DEV_CLAIMS).  `close()` is guarded by
+  // `requires currentUser.role == "agent"`, so it must SUCCEED for this
+  // principal — a backend that fails to resolve `currentUser` from the
+  // dev-stub claims (or mis-evaluates the guard) rejects the op and the
+  // read still shows `open == true`.
+  test e2e "requires-guarded op succeeds for the authenticated agent principal" against d {
+    let t = api.tickets.create({ subject: "Broken login", open: true })
+    api.tickets.close(t)
+    let read = api.tickets.getById(t)
+    expect(read.open).toBe(false)
+  }
 }

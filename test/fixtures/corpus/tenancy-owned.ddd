@@ -41,4 +41,23 @@ system TenantOwned {
     port: 4000
     auth: required
   }
+
+  // The behavioural harness authenticates as the canonical principal
+  // (`tenantId: "acme"`; see cases.mjs DEV_CLAIMS).  Unlike tenancy-filter
+  // (explicit user-set `tenantId` field), `tenantOwned` STAMPS the tenant
+  // column from the principal on create and AND-s a `tenant == principal`
+  // filter into every read.  A single principal can't seed a cross-tenant
+  // row (the stamp overrides), so this asserts the round-trip instead: a
+  // created invoice's stamped tenant matches the read filter, so the
+  // principal sees its OWN row.  A backend that mis-stamps (leaves the
+  // built-in default) or over-filters returns 0 — the capability is broken
+  // there.  `crossTenant Plan` carries NO filter, so it round-trips too.
+  test e2e "tenantOwned stamps the principal's tenant so same-tenant reads round-trip" against d {
+    api.invoices.create({ number: "INV-1", amountDue: 100 })
+    let mine = api.invoices.byNumber({ n: "INV-1" })
+    expect(mine.length).toBe(1)
+    let p = api.plans.create({ code: "PRO", monthlyPrice: 50 })
+    let readPlan = api.plans.getById(p)
+    expect(readPlan.code).toBe("PRO")
+  }
 }

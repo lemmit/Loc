@@ -106,6 +106,33 @@ function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
  *  the caller falls back to the generic expression renderer (a bare
  *  `object` literal would otherwise render as a C# `new { … }`, which is
  *  not a valid argument to the positional `Create(...)`). */
+/** Coerce a raw test literal to a strongly-typed C# factory / operation
+ *  parameter.  The domain surface takes strong types (`CustomerId` — a
+ *  `record struct CustomerId(Guid Value)` — / `DateTime` / …) where the test
+ *  writes a bare string; enums already render as `Enum.Value` refs.  Only the
+ *  string-literal types need a cast: ids (wrap in the Id struct; a `guid`
+ *  value type wraps the string in `Guid.Parse` first) and `datetime`
+ *  (`DateTime.Parse`, round-trip kind so the `Z` offset is honoured). */
+function coerceLiteralToCsType(
+  type: { kind: string; name?: string; targetName?: string; valueType?: string },
+  v: ExprIR,
+  rendered: string,
+): string {
+  // Only a raw STRING literal needs coercion — `now` renders as `DateTime.UtcNow`
+  // (already the target type), a ref is already typed, etc.  Wrapping those in
+  // `DateTime.Parse(...)` / an Id ctor would break them.
+  if (v.kind !== "literal" || v.lit !== "string") return rendered;
+  if (type.kind === "id" && type.targetName) {
+    return type.valueType === "guid"
+      ? `new ${type.targetName}Id(Guid.Parse(${rendered}))`
+      : `new ${type.targetName}Id(${rendered})`;
+  }
+  if (type.kind === "primitive" && type.name === "datetime") {
+    return `DateTime.Parse(${rendered}, null, System.Globalization.DateTimeStyles.RoundtripKind)`;
+  }
+  return rendered;
+}
+
 function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
   if (e.kind !== "method-call" || e.member !== "create" || e.args.length !== 1) return null;
   const objArg = e.args[0];
@@ -113,7 +140,12 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
   if (objArg?.kind !== "object" || receiver.kind !== "ref") return null;
   const agg = ctx.aggregates.find((a) => a.name === receiver.name);
   if (!agg) return null;
-  const provided = objArg.fields.map((f) => `${f.name}: ${renderCsExpr(f.value)}`);
+  const typeByName = new Map(createInputFields(agg).map((f) => [f.name, f.type]));
+  const provided = objArg.fields.map((f) => {
+    const t = typeByName.get(f.name);
+    const rendered = renderCsExpr(f.value);
+    return `${f.name}: ${t ? coerceLiteralToCsType(t, f.value, rendered) : rendered}`;
+  });
   const named = new Set(objArg.fields.map((f) => f.name));
   const omitted = createInputFields(agg)
     .filter((f) => !named.has(f.name))
@@ -200,13 +232,26 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
  *  trailing `User currentUser` parameter).  Everything else defers to
  *  `renderCreateCall` (typed `create({…})` input) / `renderCsExpr`. */
 function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
-  if (e.kind === "method-call" && e.receiverType.kind === "entity" && !e.isCollectionOp) {
+  if (
+    e.kind === "method-call" &&
+    e.receiverType.kind === "entity" &&
+    !e.isCollectionOp &&
+    !e.isIntrinsicMatcher
+  ) {
     const entityName = e.receiverType.name;
     const agg = ctx.aggregates.find((a) => a.name === entityName);
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op) {
+      // Coerce each arg to the operation's declared param type (an id-typed
+      // param takes the Id struct, not the raw guid string), then thread the
+      // synthetic actor for a currentUser-gated op.
       const recv = renderTestExpr(e.receiver, ctx);
-      const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
+      const args = e.args.map((a, i) => {
+        const rendered = renderTestExpr(a, ctx);
+        const p = op.params[i];
+        return p ? coerceLiteralToCsType(p.type, a, rendered) : rendered;
+      });
+      if (operationUsesCurrentUser(op)) args.push(TEST_ACTOR);
       return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
     }
   }

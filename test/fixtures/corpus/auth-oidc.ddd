@@ -40,4 +40,20 @@ system Helpdesk {
     port: 4000
     auth: required
   }
+
+  // Unlike the dev-stub cluster, this system has an `auth {}` block → the
+  // generated OIDC verifier validates a real bearer JWT against the issuer's
+  // JWKS.  The behavioural harness stands up an in-process mock issuer
+  // (test/behavioral/oidc-mock.mjs) in place of Keycloak and forwards a signed
+  // token via E2E_BEARER_TOKEN whose `realm_access.roles == "agent"` satisfies
+  // `requires currentUser.role == "agent"`.  The real JWT path runs end to end:
+  // discovery → JWKS → signature/issuer verify → claim projection → guard.  A
+  // backend whose verifier rejects the valid token, or mis-maps the role claim,
+  // fails to close the ticket and the read still shows `open == true`.
+  test e2e "OIDC-verified agent principal satisfies the requires-guarded op" against d {
+    let t = api.tickets.create({ subject: "SSO broken", open: true })
+    api.tickets.close(t)
+    let read = api.tickets.getById(t)
+    expect(read.open).toBe(false)
+  }
 }

@@ -62,6 +62,26 @@ now fixed; all corpus cases boot green on all five backends.
 
 ---
 
+## B17 ✅ elixir — pure `create` leaves a collection containment as `NotLoaded` (domain op crashes)
+
+- **Where:** `src/generator/elixir/vanilla/domain-core-emit.ts` (the pure-domain `create/1` core).
+- **Repro:** `test/behavioral/systems/sales.ddd` domain `test` block on elixir — `Order.create(...)` then `order.add_line(...)` → `** (ArgumentError)` on `:erlang.++(#Ecto.Association.NotLoaded<…>, [line])`; `confirm()` → `Protocol.UndefinedError (Enumerable not implemented for Ecto.Association.NotLoaded)` on `Enum.count(order.lines)`. A freshly-built Ecto struct's `has_many` defaults to `Ecto.Association.NotLoaded`, and the pure-domain path never loads it. The op bodies guard with `record.lines || []`, but `NotLoaded` is a truthy struct so the guard doesn't catch it.
+- **Impact:** any aggregate with a relational collection containment (`contains … []`) whose domain `test` mutates the collection crashes on elixir — the pure-domain (no-DB) tier only. The HTTP path is unaffected (rows are DB-preloaded → a real list). Surfaced only once the elixir behavioural runner gained a **unit tier** (`mix test`) — the domain tests compiled but were never executed before.
+- **Fix:** `create/1` now initialises every collection containment to `[]` on the applied struct (`{:ok, %{record | lines: []}}` via a `with`), so the pure-domain shape matches the loaded/persisted one. Embedded `embeds_many` already default to `[]` (harmless reset).
+- **Verification:** `run-elixir.mjs sales` green (unit `mix test` 3/3 + api 4/4) in docker `hexpm/elixir`; was 3 failures before. The api tier (which persists + reads lines) stays green, confirming the reset doesn't disturb persistence.
+
+---
+
+## B16 ✅ java + dotnet — domain-test emitter passes raw literals where the factory/op wants a strong type
+
+- **Where:** `src/generator/java/emit/tests.ts` + `src/generator/dotnet/emit/tests.ts` (the `test "…"` → JUnit/xUnit emitters).
+- **Repro:** `test/behavioral/systems/sales.ddd` domain `test` on java/dotnet — the emitted `Order.create(customerId: "…guid…", …, placedAt: "…iso…")` and `order.addLine("…guid…", 2)` don't COMPILE: the domain factory/op take strong types (`CustomerId`/`ProductId` records wrapping `UUID`/`Guid`, `Instant`/`DateTime`) but the test rendered the DSL string literal verbatim (`String cannot be converted to CustomerId` / `to Instant`). Enums were fine (they render as `Enum.Value` refs). Never caught because the `sales` java/dotnet domain test was never compiled in CI (build gates fixture-scope, and the behavioural runners didn't run the unit tier).
+- **Impact:** any domain `test` that constructs an aggregate or calls an op with an id/datetime argument fails to compile on java + dotnet — the pure-domain unit tier. node/python are structurally typed (branded strings), so unaffected; elixir is dynamic.
+- **Fix:** a shared per-backend coercion (`coerceLiteralToJavaType` / `coerceLiteralToCsType`) wraps id literals in the Id type (a `guid` value type wraps the string in `UUID.fromString` / `Guid.Parse` first) and `datetime` literals in `Instant.parse` / `DateTime.Parse`, at both the `create` inputs and the operation-call args (the op signature resolved via the method-call's `receiverType`). Mirrors wire.ts's `wireToDomain` but from a raw literal.
+- **Verification:** `run-java.mjs sales` + `run-dotnet.mjs sales` green (unit 3/3 + api 4/4); was a compile failure before.
+
+---
+
 ## B15 ✅ java — a find with an ID-typed query param 500s (no `String → <Agg>Id` converter)
 
 - **Where:** `src/generator/java/emit/api.ts` (find-route controller param binding).

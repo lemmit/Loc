@@ -28,7 +28,11 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { DEV_CLAIMS, featureCases, parseTrx, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { startMockIssuer } from "./oidc-mock.mjs";
+
+/** In-process mock OIDC issuer, started when the corpus has an `auth {}` case. */
+let oidc = null;
 
 /** .NET `Host=…;Port=…;Database=…;Username=…;Password=…` → a `pg` URL. */
 function dotnetPgUrl(cs) {
@@ -115,8 +119,9 @@ async function waitForReady(base, timeoutMs = 60_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted .NET server. */
-function entrySource(e2eFile) {
+function entrySource(e2eFile, bearerToken) {
   const J = JSON.stringify;
+  const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
 import { runTests } from ${J(join(REPO, "web/src/testing/harness.ts"))};
@@ -124,6 +129,8 @@ import { transform as esbuildTransform } from "esbuild";
 import { readFileSync } from "node:fs";
 
 const E2E_FILE = ${J(e2eFile)};
+const DEV_CLAIMS = ${J(DEV_CLAIMS)};
+const BEARER_ENV = { E2E_DEV_CLAIMS: DEV_CLAIMS${bearerEnv} };
 const BASE = ${J(BASE)};
 
 export async function run() {
@@ -141,7 +148,7 @@ export async function run() {
     r.headers.forEach((v, k) => { headers[k] = v; });
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() } };
   };
-  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch });
+  const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: BEARER_ENV });
   return await runTests(cases);
 }
 `;
@@ -161,7 +168,42 @@ async function runCase(c) {
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
     if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <dotnet>`)");
 
+    // OIDC (`auth {}` block) → point the backend at the in-process mock issuer
+    // + forward its signed token.  NO_PROXY keeps the loopback JWKS fetch off
+    // any ambient proxy.  Detect from source (the emitted verifier path is
+    // backend-specific).
+    const isOidc = /\n\s*auth\s*\{/.test(c.source);
+    const oidcEnv =
+      isOidc && oidc
+        ? { OIDC_ISSUER: oidc.issuer, OIDC_CLIENT_ID: "loom-behavioural", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" }
+        : {};
+    const bearerToken = isOidc && oidc ? oidc.token : null;
+
+    // Pure-domain unit tier (`test "…"` → xUnit).  DB-free; collected before
+    // the api boot and prepended to the results.
+    const unitResults = [];
+
     if (!EXTERNAL_BASE) {
+      // Run the emitted domain xUnit suite (if any) — pure domain, no DB.  TRX
+      // logger gives per-test outcomes; a build/run throw with no parsed cases
+      // is surfaced rather than silently dropped.
+      const testProj = walk(deplDir, (p) => p.endsWith("Tests.csproj"))[0] ?? null;
+      if (testProj) {
+        const trxDir = join(deplDir, ".loom-trx");
+        rmSync(trxDir, { recursive: true, force: true });
+        let dotnetErr = null;
+        try {
+          execFileSync("dotnet", ["test", testProj, "--logger", "trx;LogFileName=results.trx", "--results-directory", trxDir], { cwd: deplDir, stdio: "pipe" });
+        } catch (e) {
+          dotnetErr = e;
+        }
+        const trx = existsSync(trxDir) ? walk(trxDir, (p) => p.endsWith(".trx"))[0] : null;
+        if (trx) unitResults.push(...parseTrx(readFileSync(trx, "utf8")));
+        if (unitResults.length === 0 && dotnetErr) {
+          unitResults.push({ tier: "unit", name: "dotnet test", status: "fail", error: "dotnet test produced no results (build error?)" });
+        }
+      }
+
       // Clean DB per case (context-named schemas), else the 2nd case collides.
       await resetDatabase(dotnetPgUrl(CONNECTION_STRING));
       // Restore then boot the app. Migrations auto-apply at startup (before
@@ -176,6 +218,7 @@ async function runCase(c) {
           PORT: String(PORT),
           ASPNETCORE_URLS: `http://127.0.0.1:${PORT}`,
           ConnectionStrings__Default: CONNECTION_STRING,
+          ...oidcEnv,
         },
       });
       let serverLog = "";
@@ -188,10 +231,10 @@ async function runCase(c) {
 
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource(e2eFile));
+    writeFileSync(entry, entrySource(e2eFile, bearerToken));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
-    return await run();
+    return [...unitResults, ...(await run())];
   } finally {
     if (server?.pid && !server.killed) {
       // Kill the whole process group (dotnet run spawns the app as a child).
@@ -211,6 +254,11 @@ const corpus = [...(await featureCases("dotnet", "dotnet", WORK)), ...sharedSyst
   (c) => only.length === 0 || only.includes(c.name),
 );
 
+// Stand up the mock OIDC issuer once if any case carries an `auth {}` block.
+if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
+  oidc = await startMockIssuer();
+}
+
 let pass = 0;
 let fail = 0;
 let errored = 0;
@@ -227,10 +275,12 @@ for (const c of corpus) {
   for (const r of results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
-    process.stdout.write(`  ${ok ? "✓" : "✗"} [api] ${r.name}\n`);
+    process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
 }
+
+await oidc?.stop();
 
 process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
 process.exit(fail > 0 || errored > 0 ? 1 : 0);

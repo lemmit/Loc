@@ -37,6 +37,10 @@ export interface RunApiTestsOpts {
   source: string;
   compile: TsCompile;
   dispatch: (req: SerializedRequest) => Promise<DispatchResult>;
+  /** Values exposed to the suite as `process.env` — the emitted `__authHeaders`
+   *  reads `E2E_DEV_CLAIMS` (dev-stub principal) / `E2E_BEARER_TOKEN` (OIDC) from
+   *  here.  Empty by default (auth-less systems need nothing). */
+  env?: Record<string, string | undefined>;
 }
 
 /** Register the suite (run `describe`/`it`, NOT the test bodies) so the
@@ -63,7 +67,7 @@ export async function loadApiTests(opts: RunApiTestsOpts): Promise<TestCase[]> {
     process: { env: Record<string, string | undefined> },
   ) => void;
   runSuite(harness.describe, harness.it, harness.expect, fetchImpl, {
-    env: {},
+    env: opts.env ?? {},
   });
   return harness.tests;
 }

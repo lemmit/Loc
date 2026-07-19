@@ -19,6 +19,40 @@ import pg from "pg";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
+
+/** Parse a JUnit-XML report string into `{ tier: "unit", name, status, error }`
+ *  rows — the shared shape every runner's unit tier returns.  Passing cases
+ *  self-close (`<testcase … />`); a failure/error nests a `<failure>`/`<error>`
+ *  child.  Emitted by pytest (`--junitxml`) and gradle (`build/test-results`). */
+export function parseJUnitXml(xml) {
+  const results = [];
+  const re = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const name = /\bname="([^"]*)"/.exec(m[1])?.[1] ?? "(unknown)";
+    const inner = m[2] ?? "";
+    const failed = /<(?:failure|error)\b/.test(inner);
+    const failMsg = /<(?:failure|error)\b[^>]*\bmessage="([^"]*)"/.exec(inner)?.[1];
+    results.push({ tier: "unit", name, status: failed ? "fail" : "pass", error: failed ? (failMsg ?? "assertion failed") : undefined });
+  }
+  return results;
+}
+
+/** Parse a VS Test `.trx` report (`dotnet test --logger trx`) into the same
+ *  `{ tier: "unit", name, status, error }` rows.  TRX carries one
+ *  `<UnitTestResult testName="…" outcome="Passed|Failed">` per test; a failure
+ *  nests `<Output><ErrorInfo><Message>…`. */
+export function parseTrx(xml) {
+  const results = [];
+  const re = /<UnitTestResult\b([^>]*?)(?:\/>|>([\s\S]*?)<\/UnitTestResult>)/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const name = /\btestName="([^"]*)"/.exec(m[1])?.[1] ?? "(unknown)";
+    const outcome = /\boutcome="([^"]*)"/.exec(m[1])?.[1] ?? "";
+    const failed = outcome !== "Passed";
+    const msg = /<Message>([\s\S]*?)<\/Message>/.exec(m[2] ?? "")?.[1]?.trim();
+    results.push({ tier: "unit", name, status: failed ? "fail" : "pass", error: failed ? (msg ?? outcome) : undefined });
+  }
+  return results;
+}
 const CORPUS_DIR = join(REPO, "test/fixtures/corpus");
 const SYSTEMS_DIR = join(HERE, "systems");
 
@@ -61,6 +95,17 @@ export async function featureCases(backendKey, platformClause, workDir) {
   }
   return cases;
 }
+
+/** The canonical dev-stub principal every behavioural runner authenticates as.
+ *  Injected via `E2E_DEV_CLAIMS` → the emitted `__authHeaders` base64-encodes it
+ *  into the `x-loom-dev-claims` header that each backend's dev-stub auth verifier
+ *  merges over its built-in identity (the exact mechanism tenancy-e2e uses).
+ *  Only STRING claims are honoured on the non-node backends, so keep it to
+ *  strings keyed by the declared `user` field name.  Inert for auth-less systems
+ *  (no middleware reads it).  Fixtures in the tenancy/auth cluster assert against
+ *  THIS principal — an in-tenant row uses `tenantId: "acme"`, an out-of-tenant
+ *  row any other value; a `requires currentUser.role == "agent"` op is satisfied. */
+export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", role: "agent" });
 
 /** Reset a shared Postgres to a pristine state before a case boots.  The backend
  *  runners (java/dotnet/python/elixir) boot against ONE external DB and each
@@ -112,6 +157,7 @@ const BEHAVIOURAL_SKIP = {
     // `shape: document` aggregate now emits a matching `DeleteAsync` on the
     // document-repo impl, so the interface/impl method sets agree; repository.ts.)
   },
+  java: {},
   elixir: {
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
