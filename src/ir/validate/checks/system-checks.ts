@@ -46,6 +46,7 @@ import {
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { opHasProvSite } from "../../util/prov-id.js";
+import { realtimeRoomPlan } from "../../util/realtime-rooms.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -689,6 +690,107 @@ export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): v
           `doesn't list the binding. Once traffic rides the broker this consumer would ` +
           `silently receive nothing. Add \`channels: [${csNames[0]}]\` to '${dep.name}'.`,
         source: `${sys.name}/${dep.name}`,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime relay obligation (channels.md — "the edge relay").  A browser
+// speaks SSE only to the backend its frontend `targets:`, so for that backend
+// to relay a channel to the UI it must itself SUBSCRIBE the channel — either
+// by hosting the channel's owning context (today's single-hop wire) or by
+// wiring a `channelSource` binding for it (the broker relay, M-T4.4 redis
+// bindings).  A UI whose target does neither can't legally be served the
+// events, so the `on <channel>.<Event>` handlers would silently receive
+// nothing — error rather than drop.
+//
+// This is the frontend-relay half `validateChannelWiring` explicitly defers
+// (its `loom.channel-consumer-unwired` skips frontends "consume via M-T1.10
+// realtime").
+export function validateRelayTargetNotSubscribed(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const byName = new Map(sys.deployables.map((d) => [d.name, d]));
+  // channel name -> owning context (channels are context members; bare names
+  // are system-unique per the channelSource resolution rule).
+  const channelOwner = new Map<string, string>();
+  for (const m of sys.subdomains)
+    for (const c of m.contexts)
+      for (const ch of c.channels ?? []) channelOwner.set(ch.name, c.name);
+  const csByName = new Map((sys.channelSources ?? []).map((cs) => [cs.name, cs]));
+
+  for (const d of sys.deployables) {
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui) continue;
+      // Only channels the ui actually consumes via an `on <chan>.<Event>`
+      // handler impose the relay obligation — a bare `channel` param that no
+      // handler reads routes nothing.
+      const consumed = new Set((ui.notifications ?? []).map((n) => n.paramName));
+      const subscribed = (ui.channelParams ?? []).filter((p) => consumed.has(p.name));
+      if (subscribed.length === 0) continue;
+      // The relay is the target backend (a `static` frontend), or the
+      // deployable itself when a backend hosts its own ui (dotnet/phoenix).
+      const relay = (d.targetName ? byName.get(d.targetName) : undefined) ?? d;
+      const relayHosts = new Set(relay.contextNames);
+      const relayBinds = new Set<string>();
+      for (const csName of relay.channelSourceNames ?? []) {
+        const cs = csByName.get(csName);
+        if (cs) relayBinds.add(cs.channelName);
+      }
+      for (const p of subscribed) {
+        const owner = channelOwner.get(p.channelName) ?? p.contextName;
+        if (relayHosts.has(owner) || relayBinds.has(p.channelName)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.relay-target-not-subscribed",
+          message:
+            `Deployable '${d.name}': ui '${uiName}' subscribes to channel ` +
+            `'${p.channelName}' (context '${owner}') via an 'on ${p.name}.<Event>' handler, ` +
+            `but its relay backend '${relay.name}' neither hosts '${owner}' nor binds the ` +
+            `channel — the SSE relay can't legally serve those events, so the handler receives ` +
+            `nothing. Host '${owner}' on '${relay.name}', or add a channelSource for ` +
+            `'${p.channelName}' to its 'channels:' clause.`,
+          source: d.name,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime tenant-broadcast honesty (channels.md — "rooms + policy-derived
+// routing v1").  The Hono/node backend scopes realtime delivery by the tenant
+// DataKey (per-tenant rooms); the other SSE backends (.NET / Java / Python)
+// still broadcast every carried event to every connected browser.  In a
+// tenant-owned context that means a tenant-scoped event's payload crosses the
+// tenant boundary on the wire — the authorized refetch remains the gate, but
+// the payload itself is over-delivered.  Warn so the per-backend rollout gap
+// is a reviewed decision, not a silent cross-tenant leak.  (Phoenix/LiveView
+// re-renders server-side through the authorized read, so it is not in this
+// set — `backendServesRealtime` already excludes it.)
+export function validateRealtimeTenantBroadcast(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const d of sys.deployables) {
+    if (!backendServesRealtime(d.platform) || d.platform === "node") continue;
+    for (const ctxName of d.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      const plan = realtimeRoomPlan(ctx);
+      if (!plan.tenantScoped) continue;
+      diags.push({
+        severity: "warning",
+        code: "loom.realtime-tenant-broadcast",
+        message:
+          `Deployable '${d.name}' (platform '${d.platform}') serves realtime for tenant-owned ` +
+          `context '${ctxName}', but its SSE wire broadcasts every carried event to every ` +
+          `connected browser — tenant-scoped event payloads (${[...plan.tenantEventTypes]
+            .sort()
+            .join(", ")}) cross the tenant boundary on the wire. Per-tenant rooms ship on the ` +
+          `node/Hono backend; on '${d.platform}' the authorized refetch remains the gate, but ` +
+          `the payload is over-delivered until rooms land there.`,
+        source: d.name,
       });
     }
   }

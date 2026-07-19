@@ -68,6 +68,8 @@ import {
   validatePythonStampSupport,
   validateQueryTimeProjectionBackend,
   validateReactIdReferences,
+  validateRealtimeTenantBroadcast,
+  validateRelayTargetNotSubscribed,
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
@@ -163,6 +165,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validateUiRealtimeSupport(sys, diags);
+    validateRelayTargetNotSubscribed(sys, diags);
+    validateRealtimeTenantBroadcast(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
