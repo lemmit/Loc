@@ -329,6 +329,17 @@ so the attribute closes at the inner quote (TS1382). Visible text is correctly
 escaped; only attribute sites are not. Fix: brace-wrap the JS literal
 (`label={"…"}`) or use the existing `escapeHtmlAttr` (a11y-emit.ts).
 
+> **Update (2026-07-19, follow-up PR): F3 fixed.** Both `unwrapAsAttr` and
+> `testidAttr` now HTML-entity-escape the value inside `attr="…"` via the
+> existing `escapeHtmlAttr` (brace-wrapping was rejected — Vuetify/Vue also
+> splice `label={{{labelAttr}}}`, where `{…}` is literal text, not an
+> expression; entity escaping decodes in attribute values on JSX, Vue, Svelte,
+> and Angular alike). Byte-identical to the previous `JSON.stringify` form for
+> any value with no `" & < >` (the `acme.ddd` baseline fixture is unchanged).
+> Verified: a page with `"`/`&`/`<` in a `label:` and a `testid:` now
+> `tsc --noEmit`-clean; regression test (React + Vue) in
+> `text-escaping-cross-target`.
+
 ### F4/F5. Vue and Svelte action-button auth gates render the literal text "null" *(UX)*
 
 `controls.ts:270` passes the JSX render-nothing sentinel `"null"` as the else
