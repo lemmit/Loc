@@ -226,3 +226,45 @@ describe("server-sourced create-path defaults — Java", () => {
     expect(svc).not.toMatch(/CurrentUserAccessor/);
   });
 });
+
+const ELIXIR = (field: string, extra = "") => `
+  system S {
+    ${extra}
+    subdomain Sales {
+      context Sales {
+        aggregate Order with crudish {
+          customerId: string
+          ${field}
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    storage db { type: postgres }
+    resource st { for: Sales, kind: state, use: db }
+    deployable api { platform: elixir contexts: [Sales] dataSources: [st] serves: SalesApi port: 3000${extra ? " auth: required" : ""} }
+  }
+`;
+
+describe("server-sourced create-path defaults — Elixir (Phoenix)", () => {
+  it("a now() default coalesces into the wire params before the changeset", async () => {
+    const files = await generateSystemFiles(ELIXIR("createdAt: datetime = now()"));
+    const ctrl = fileEndingWith(files, "controllers/order_controller.ex");
+    expect(ctrl).toMatch(
+      /\|> Map\.put\("createdAt", params\["createdAt"\] \|\| DateTime\.utc_now\(\)\)/,
+    );
+    // A now()-only default needs no principal bind in the create action.
+    expect(ctrl).not.toMatch(/def create\(conn, params\) do\n\s*current_user =/);
+  });
+
+  it("a currentUser.* default binds current_user and coalesces", async () => {
+    const files = await generateSystemFiles(
+      ELIXIR("ownerId: string = currentUser.tenantId", "user { tenantId: string }"),
+    );
+    const ctrl = fileEndingWith(files, "controllers/order_controller.ex");
+    expect(ctrl).toMatch(/current_user = Map\.get\(conn\.assigns, :current_user\)/);
+    expect(ctrl).toMatch(
+      /\|> Map\.put\("ownerId", params\["ownerId"\] \|\| current_user\.tenant_id\)/,
+    );
+  });
+});
