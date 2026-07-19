@@ -30,6 +30,13 @@ export function sortableFields(agg: AggregateIR): string[] {
     // read wire without becoming a `?sort=` option).  `id` is source `"id"`, so
     // this only drops the token property; declared token fields are none today.
     if (f.source === "property" && f.access === "token") continue;
+    // `secret` (client write-only, never disclosed in any read) and `internal`
+    // (server-managed, excluded from API reads by `forApiRead`) columns are not
+    // part of the read surface — but they still live in `wireShape`, so without
+    // this guard they became accepted `?sort=` keys, turning a hidden column
+    // into a controllable ordering oracle (binary-searchable via pagination).
+    // Match exactly the set `forApiRead` hides.
+    if (f.access === "secret" || f.access === "internal") continue;
     if (f.type.kind === "primitive" || f.type.kind === "enum") out.push(f.name);
   }
   // `id` is always sortable and the stable default; guarantee it leads even if a
