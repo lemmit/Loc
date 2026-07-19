@@ -300,6 +300,31 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
   // belong to `from <Criterion>(args)`, not `when`); the validator reports
   // a param reference rather than letting it lower as a free name.
   if (op.when) ir.when = lowerExpr(op.when, env);
+  // `requires Expr` — the authorization gate (authorization.md §11.3).  A
+  // header `requires` is semantically a relocated first-body `requires`
+  // statement: a bool pre-check that denies with 403 (`ForbiddenError` /
+  // `ForbiddenException` / `:forbidden`) before the domain body runs.  It is
+  // therefore lowered as a synthetic `requires` StmtIR prepended to the body,
+  // reusing every backend's existing `requires`→403 rendering with no new
+  // emitter code (a POINT gate — proposal §"scopes" line: operation params +
+  // currentUser + resource).  Unlike `when`, params ARE in scope (an authz
+  // check is routinely arg-aware), and `this` resolves against the loaded
+  // aggregate (post-load evaluation, before mutations run).
+  if (op.gate) {
+    let gateEnv = env;
+    for (const p of op.params) {
+      gateEnv = withLocal(gateEnv, p.name, "param", lowerType(p.type, env));
+    }
+    ir.statements = [
+      {
+        kind: "requires",
+        expr: lowerExpr(op.gate, gateEnv),
+        source: cstText(op.gate),
+        origin: originFor(op),
+      },
+      ...ir.statements,
+    ];
+  }
   ir.origin = originFor(op);
   return ir;
 }

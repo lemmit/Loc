@@ -217,7 +217,16 @@ function lowerWorkflowCreate(
     eventBinding = c.params[0].name;
     eventRef = t.kind === "entity" ? t.name : undefined;
   }
-  const statements: WorkflowStmtIR[] = [];
+  // `requires Expr` — the authorization gate (authorization.md §11.3).  A
+  // relocated first-body `requires` statement: a bool pre-check that denies
+  // with 403 before the orchestration runs.  Lowered in the param-bound env
+  // (currentUser + the create's command params; a saga starter has no `this`
+  // instance) and prepended, reusing the workflow renderer's `requires`→403
+  // (`ensure(_, :forbidden)` / `ForbiddenError`) path with no new emitter.
+  const gateEnv = inner;
+  const statements: WorkflowStmtIR[] = c.gate
+    ? [{ kind: "requires", expr: lowerExpr(c.gate, gateEnv), source: cstText(c.gate) }]
+    : [];
   for (const s of c.body) {
     const lowered = lowerWorkflowStatement(
       s,
@@ -261,7 +270,12 @@ function lowerHandle(
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
-  const statements: WorkflowStmtIR[] = [];
+  // `requires Expr` — authorization gate (authorization.md §11.3), lowered as a
+  // prepended 403 pre-check in the param-bound env (currentUser + command
+  // params).  See `lowerWorkflowCreate`.
+  const statements: WorkflowStmtIR[] = h.gate
+    ? [{ kind: "requires", expr: lowerExpr(h.gate, inner), source: cstText(h.gate) }]
+    : [];
   for (const s of h.body) {
     const lowered = lowerWorkflowStatement(
       s,

@@ -120,6 +120,28 @@ export function checkOperation(op: Operation, agg: Aggregate, accept: Validation
   for (const p of op.params) bindings.set(p.name, { type: paramType(p), origin: p });
   let env: Env = makeEnv(envForAggregate(agg), bindings, { aggregate: agg });
 
+  // `requires Expr` — the authorization gate (authorization.md §11.3): a bool
+  // pre-check (403) over `currentUser` + the operation params + the loaded
+  // `this` resource.  Unlike `when`, params ARE in scope (an authz decision is
+  // routinely arg-aware).  It types to bool exactly like an in-body `requires`
+  // statement (which is what it lowers to); a non-bool gate is rejected here.
+  if (op.gate) {
+    const gt = typeOf(op.gate, env);
+    if (gt.kind !== "primitive" || gt.name !== "bool") {
+      accept("error", `'requires' must be of type 'bool', got '${typeToString(gt)}'.`, {
+        node: op,
+        property: "gate",
+      });
+    }
+    if (op.private) {
+      accept(
+        "warning",
+        `'requires' has no effect on private operation '${op.name}' — it has no HTTP entry point, so no authorization gate is emitted.`,
+        { node: op, property: "gate" },
+      );
+    }
+  }
+
   for (const stmt of op.body) {
     env = checkStatement(stmt, agg, op, env, accept);
   }
