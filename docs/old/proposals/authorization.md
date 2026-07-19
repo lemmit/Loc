@@ -499,7 +499,15 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
    seams, the named fns inline into the `requires` gate. (Field masking — item 6 —
    is the deferred remainder.)
 3. **Operation/view/workflow gates** → handler pre-checks (403); relocate
-   gating out of domain bodies. *(Still proposed.)*
+   gating out of domain bodies. *(Header `requires` clause SHIPPED for
+   operations + workflow `create`/`handle` — the write-side twin of the shipped
+   find/view gate; lowers to a front-of-body `requires` StmtIR reusing every
+   backend's `requires`→403 path. Operation gate is post-load — `currentUser` +
+   params + `this` resource, per the §"scopes" table. Workflow `handle` gate is
+   lowered but inert until `handle` command routes are surfaced. See
+   [`docs/auth.md`](../../auth.md) → "Header `requires` clause". The richer
+   parameterized `policy {}` point-gates — item 2's declarative surface — remain
+   proposed.)*
 4. **TS/Hono + Phoenix/Ecto parity** for phases 2–3.
 5. **`exists <Aggregate>` quantifier** (reuse view resolution + new EXISTS
    rendering) for domain-relationship and `Share`-aggregate access.
