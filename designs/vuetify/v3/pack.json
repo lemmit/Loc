@@ -3,6 +3,7 @@
   "version": "v3",
   "format": "vue",
   "stack": "vue1",
+  "seedsOpFormRecord": true,
   "emits": {
     "primitive-alert": "primitive-alert.hbs",
     "primitive-anchor": "primitive-anchor.hbs",
