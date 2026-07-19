@@ -487,12 +487,22 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     expect(errors.some((e) => /persistence: mikroorm/.test(e) && needle.test(e))).toBe(true);
   };
 
-  // A genuinely-impossible shape still fails fast (the reject surface survives
-  // as a guard, not a subset boundary) — a nested/collection-bearing part.
-  it("still rejects a nested entity part (deeper nesting)", () =>
+  // Nested parts (part-in-part) are now supported (recursive child tables).
+  it("no longer rejects a nested entity part (part-in-part)", async () => {
+    const { errors } = await emit(
+      sys(
+        "mikroorm",
+        "contains lines: Line[]  entity Line { contains sub: Sub[] }  entity Sub { x: int }",
+      ),
+    );
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+
+  // A collection field INSIDE a part stays gated in this slice (drained next).
+  it("still rejects a collection-bearing entity part (array-typed part field)", () =>
     rejects(
-      "contains lines: Line[]  entity Line { contains sub: Sub[]  entity Sub { x: int } }",
-      /nested/,
+      "contains lines: Line[]  entity Line { tags: string[] }",
+      /collection-bearing entity part/,
     ));
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
@@ -743,8 +753,7 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
     expect(repo).toContain("await em.nativeDelete(OrderLineRow, { parentId: id as string });");
   });
 
-  it("still rejects a part that itself contains a part (deeper nesting)", async () => {
-    const src = `system M {
+  const NESTED_SRC = `system M {
   api A from S
   subdomain S {
     context O {
@@ -754,8 +763,8 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
         entity Box {
           label: string
           contains items: Item[]
-          entity Item { sku: string }
         }
+        entity Item { sku: string }
       }
       repository Orders for Order { }
     }
@@ -764,8 +773,44 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
   resource s { for: O, kind: state, use: pg }
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /entity part/.test(e))).toBe(true);
+
+  it("no longer trips loom.mikroorm-unsupported for a part-in-part (nested)", async () => {
+    const { errors } = await emit(NESTED_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+
+  it("emits a child Row per nested part, keyed by its DIRECT parent", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class BoxRow");
+    expect(entities).toContain("export class ItemRow");
+    expect(entities).toContain('tableName: "boxes"');
+    expect(entities).toContain('tableName: "items"');
+  });
+
+  it("recursively bulk-loads + hydrates the nested level keyed by the direct parent", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Deepest-first bulk-load: Box rows, then Item rows scoped to the box ids.
+    expect(repo).toContain("const itemsByParent = new Map<string, Item[]>();");
+    expect(repo).toContain(
+      "await em.find(ItemRow, { parentId: { $in: boxesRows.map((r) => r.id) } }",
+    );
+    // Nested Item brands its parentId to BoxId (its direct parent), not OrderId.
+    expect(repo).toContain("parentId: Ids.BoxId(r.parentId)");
+  });
+
+  it("recursively diff-syncs + cascade-deletes the nested level on save/delete", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Save recurses into box.items, stamping the nested FK from tree position.
+    expect(repo).toContain("for (const child of aggregate.boxes)");
+    expect(repo).toContain("for (const child1 of child.items)");
+    expect(repo).toContain("parentId: child.id as string");
+    // Delete cascades deepest-first (no DB FK): collect box ids, clear items.
+    expect(repo).toContain("const boxesDelIds = (await em.find(BoxRow,");
+    expect(repo).toContain("await em.nativeDelete(ItemRow, { parentId: { $in: boxesDelIds } });");
+    expect(repo).toContain("await em.nativeDelete(BoxRow, { parentId: id as string });");
   });
 });
 
