@@ -805,5 +805,37 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // MikroORM shape(embedded) + `Id[]` reference collections: the reference
+    // collection folds onto the root as a jsonb id-string array (no pivot
+    // table), containments fold to their own jsonb columns, the queryable root
+    // stays real columns, and the versioned (crudish) save is the guarded CAS
+    // write.  Type-checks under tsc.
+    it("system `persistence: mikroorm` + shape(embedded) + Id[] reference collection — folds, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-emb-assoc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-embedded-assoc.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No pivot Row entity — the reference collection folds onto the root.
+        expect(entities).not.toContain("TeamRosterRow");
+        expect(entities).toContain("roster!: string[];");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

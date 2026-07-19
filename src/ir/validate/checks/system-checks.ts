@@ -25,7 +25,6 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -2089,21 +2088,21 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape(...)` axis is moot — skip that check for it.
-        const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        // so the `shape(...)` axis is moot for it — every saving shape is now
+        // supported (no per-shape reject remains), so the shape need not be
+        // resolved here.
         // `shape(embedded)` IS supported (wave 2): the root stays queryable
         // columns and each containment folds into a jsonb column, (de)serialised
         // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
-        // analogue of the drizzle embedded repository).  Bounded to aggregates
-        // with no `Id[]` reference collections.  `shape(document)` IS supported
-        // (wave 3): the whole aggregate tree collapses to one `(id, data,
-        // version)` jsonb blob round-tripped through the shared doc
+        // analogue of the drizzle embedded repository).  An `Id[]` reference
+        // collection FOLDS onto the root as one jsonb id-string array (no pivot
+        // table — `embeddedColumnsOf` + the embedded repo's hydrate/save fold),
+        // the embedded analogue of the relational pivot and the mirror of the
+        // drizzle `emitEmbeddedTable` ref-collection column.  `shape(document)`
+        // IS supported (wave 3): the whole aggregate tree collapses to one `(id,
+        // data, version)` jsonb blob round-tripped through the shared doc
         // (de)serialisers — no per-field / containment / pivot columns, so
         // reference collections + parts ride inside the blob (unbounded).
-        if (a.persistedAs !== "eventLog" && shape === "embedded") {
-          if ((a.associations ?? []).length > 0)
-            reject(where, "is shape(embedded) with `Id[]` reference collections");
-        }
         // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
         // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
         // `kind` — concrete repos read/write it scoped to their `kind`, a

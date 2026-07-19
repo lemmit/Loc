@@ -927,10 +927,15 @@ describe("mikroorm — shape(embedded) (wave 2)", () => {
     expect(repo).toContain("type TagItemDoc = {");
     expect(repo).toContain("function tagItemToDoc");
     expect(repo).toContain("function tagItemFromDoc");
-    // Read casts the jsonb cell, save serialises via toDoc, upsert on the Row.
+    // Read casts the jsonb cell; save serialises via toDoc.  `crudish` makes the
+    // aggregate versioned, so the save is the guarded optimistic-concurrency
+    // write (findOne → insert / version-CAS nativeUpdate), not a blind upsert.
     expect(repo).toContain("((row.lines ?? []) as TagItemDoc[]).map((x) => tagItemFromDoc(x))");
     expect(repo).toContain("lines: aggregate.lines.map((e) => tagItemToDoc(e))");
-    expect(repo).toContain("await em.upsert(TagListRow, rootRow)");
+    expect(repo).toContain("await em.insert(TagListRow, { id: aggregate.id as string,");
+    expect(repo).toContain("await em.nativeUpdate(TagListRow,");
+    expect(repo).toContain('throw new ConcurrencyError("TagList", aggregate.id as string)');
+    expect(repo).not.toContain("await em.upsert(TagListRow, rootRow)");
   });
 });
 
@@ -1230,5 +1235,69 @@ describe("mikroorm — event-sourced intersections (in-memory fold)", () => {
     // No containment child-table plumbing (bulk-load maps / diff-sync upserts).
     expect(repo).not.toContain("ByParent");
     expect(repo).not.toContain("parentId");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shape(embedded) + `Id[]` reference collections — the reference collection
+// FOLDS onto the root as one jsonb id-string array (no pivot table), the
+// embedded analogue of the relational pivot and the mirror of the drizzle
+// `emitEmbeddedTable` ref-collection column.  Containments still fold to their
+// own jsonb columns; the queryable root stays real columns.
+// ---------------------------------------------------------------------------
+describe("mikroorm — shape(embedded) + Id[] reference collections (fold)", () => {
+  const EMB_ASSOC_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Player with crudish { name: string }
+      aggregate Team shape: embedded with crudish {
+        name: string
+        roster: Player id[]
+        contains badges: Badge[]
+        entity Badge { label: string }
+      }
+      repository Players for Player { }
+      repository Teams for Team {
+        find byName(name: string): Team[] where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for shape(embedded) with an Id[]", async () => {
+    const { errors } = await emit(EMB_ASSOC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the reference collection into a jsonb id-string array on the root Row (no pivot table)", async () => {
+    const { files } = await emit(EMB_ASSOC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    // The `Id[]` field is a jsonb column on the embedded root Row…
+    expect(entities).toContain('roster: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain("roster!: string[];");
+    // …and the containment its own jsonb column.
+    expect(entities).toContain('badges: { type: "json", columnType: "jsonb" }');
+    // No pivot Row entity under embedded.
+    expect(entities).not.toContain("TeamRosterRow");
+    expect(entities).not.toContain('tableName: "team_roster"');
+  });
+
+  it("folds the id-string array on save and re-brands it on read", async () => {
+    const { files } = await emit(EMB_ASSOC_SRC);
+    const repo = files.get("api/db/repositories/team-repository.ts")!;
+    // Save: the id[] serialises to a plain string array on the root row.
+    expect(repo).toContain("roster: aggregate.roster.map((x) => x as string)");
+    // Read: the jsonb array re-brands to the target id (a bare `<field>` local
+    // hydrateRootExpr resolves).
+    expect(repo).toContain(
+      "const roster = ((row.roster ?? []) as string[]).map((s) => Ids.PlayerId(s));",
+    );
+    // No pivot-table plumbing (bulk-load maps / full-list-replace).
+    expect(repo).not.toContain("RosterRow");
+    expect(repo).not.toContain("nativeDelete(TeamRoster");
   });
 });
