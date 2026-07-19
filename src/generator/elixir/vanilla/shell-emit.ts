@@ -56,6 +56,13 @@ export function emitVanillaShellFiles(
   schedulerChildren: string[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+  // Swoosh boots its default API client (Hackney) when the `:swoosh`
+  // application starts — even for the SMTP adapter, which sends through
+  // gen_smtp and needs no HTTP client.  The smtp mailer pulls `swoosh` +
+  // `gen_smtp` but NOT `hackney`, so left alone the app crashes at boot with
+  // "missing hackney dependency".  When Swoosh is present with no HTTP adapter
+  // (ses/sendgrid pull `hackney`), disable the api_client so `:swoosh` starts.
+  const swooshSmtpOnly = "swoosh" in extraHexDeps && !("hackney" in extraHexDeps);
   out.set(
     "mix.exs",
     renderVanillaMixExs(appName, appModule, extraHexDeps, authEnabled && oidc, hasLiveView),
@@ -123,7 +130,7 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
-  out.set("config/config.exs", renderVanillaConfig(appName, appModule));
+  out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly));
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
   out.set("config/runtime.exs", renderVanillaRuntime(appName, appModule));
@@ -637,12 +644,19 @@ end
 `;
 }
 
-function renderVanillaConfig(appName: string, appModule: string): string {
+function renderVanillaConfig(appName: string, appModule: string, swooshSmtpOnly = false): string {
+  // gen_smtp-backed Swoosh (the smtp mailer) needs no HTTP API client; disable
+  // the default so `:swoosh` boots without hackney.  Omitted entirely when no
+  // smtp-only mailer is present, so a mailer-free app's config is unchanged.
+  const swooshConfig = swooshSmtpOnly
+    ? `\n# smtp mailer (Swoosh.Adapters.SMTP via gen_smtp) uses no HTTP API client.\nconfig :swoosh, :api_client, false\n`
+    : "";
   return `import Config
 
 config :${appName},
   ecto_repos: [${appModule}.Repo],
   generators: [timestamp_type: :utc_datetime]
+${swooshConfig}
 
 config :${appName}, ${appModule}Web.Endpoint,
   url: [host: "localhost"],
