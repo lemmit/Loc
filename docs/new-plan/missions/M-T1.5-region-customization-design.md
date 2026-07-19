@@ -1,9 +1,12 @@
 # M-T1.5 — Region-level customization / UI unfold (design)
 
-> **Status: design-in-progress (draft PR claim).** Resolves the mission's
-> unsettled fork by committing to **both** rungs (named override slots +
-> per-page unfold), sequenced as two independent slices. Design-first: no
-> implementation code in this PR.
+> **Status: Slice A shipped; Slice B descoped (not required — 2026-07-19).**
+> Per-page unfold (Slice A) is the delivered cliff-softener. Named override
+> slots (Slice B) are **not being built** — kept below as design-record only,
+> demand-pulled: revive it only if a concrete case needs region-fill on a
+> still-generated page that per-page unfold (eject the page, then edit) can't
+> serve. Both rungs were designed; the owner's call is that the unfold rung
+> suffices.
 > Sources: `docs/audits/architecture-weak-spots-2026-07.md` §1 (the
 > customization-cliff), `docs/page-metamodel.md` §10 (override-by-name) /
 > §5.2 + §9 (`slot` / `Slot`) / §14 (open questions),
@@ -119,7 +122,12 @@ per produced page; the existing whole-`ui` unfold stays as *"Unfold all"*.
 "All `Order` pages" is three invocations — no separate per-aggregate action
 (consistent with scaffold's "list what you want, not what you don't" ethos).
 
-### Slice B — Named override slots (the true cliff-softener)
+### Slice B — Named override slots (DESIGN-RECORD ONLY — not being built)
+
+> Descoped 2026-07-19: not required. Per-page unfold covers the practical need.
+> The design below is retained so a future demand-pull starts from a settled
+> plan rather than a blank page — do not treat it as open work.
+
 
 Let a scaffolded page stay model-owned while a `.ddd` author fills a declared
 slot with custom markup — no ejection, page keeps regenerating.
@@ -215,6 +223,6 @@ fails CI, so a slot can't silently skip HEEx/Feliz. Validator obligations:
 
 ## Sequencing
 
-Slice A first (self-contained, no emitter fan-out, immediate DX win), Slice B
-second. All three design questions (A1/B1/B2) are now resolved above, so both
-slices are implementation-ready; neither blocks the other.
+Slice A shipped (self-contained, no emitter fan-out, immediate DX win). Slice B
+descoped as not-required — no further work planned; the design above is record
+only, revived only on a concrete demand-pull.
