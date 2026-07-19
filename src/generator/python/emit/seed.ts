@@ -77,7 +77,10 @@ export function buildPySeedFile(
     "import asyncio",
     refersTo("math") ? "import math" : null,
     "import os",
-    refersTo("datetime") ? "from datetime import UTC, datetime" : null,
+    // Seed rows coerce a datetime field via `datetime.fromisoformat(...)`; they
+    // never construct `datetime.now(UTC)`, so importing `UTC` here trips ruff
+    // F401 (imported but unused).
+    refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     "",
     "from sqlalchemy import text",
