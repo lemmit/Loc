@@ -135,18 +135,24 @@ test("multi-file workspace surfaces the evolution diff (no single-file gate)", a
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  // Acme is the flagship multi-file example — main.ddd imports a dozen
-  // companion `.ddd` files.  The old evolution diff lowered a single
-  // `parse(text)` per side, so it gated multi-file workspaces behind a note;
-  // now both trees seed the worker VFS and lower via the project loader.
-  await selectExample(page, /Acme/);
+  // A small multi-file import project (`main.ddd` + `shared/money.ddd` +
+  // `shared/currency.ddd`) — the same `loadProjectFromVfs` path the flagship
+  // Acme uses, but light enough to diff quickly and deterministically.  The old
+  // evolution diff lowered a single `parse(text)` per side, so it gated
+  // multi-file workspaces behind a note; now both trees lower via the project
+  // loader.  `selectExample` waits for the "0 errors" badge, so the workspace is
+  // fully seeded before we diff.
+  await selectExample(page, /root-level shared types/);
 
   await page.getByTestId("devtools-tab-migrations").click();
   await expect(page.getByTestId("migrations-panel")).toBeVisible();
 
-  // The diff sections render for the multi-file workspace (live == baseline on
-  // load ⇒ "no schema changes", but reaching the section at all proves the
-  // import graph resolved rather than throwing an unresolved-import error).
+  // Drive the diff explicitly rather than racing the on-open auto-run.
+  await page.getByTestId("evolution-refresh").click();
+
+  // The diff sections render for the multi-file workspace — reaching the section
+  // at all proves the import graph resolved rather than throwing an
+  // unresolved-import error (the old single-file behaviour).
   await expect(page.getByTestId("evolution-migrations")).toBeVisible({
     timeout: 30_000,
   });

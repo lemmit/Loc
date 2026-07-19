@@ -26,6 +26,32 @@ function tree(content: string): EvolutionTree {
   };
 }
 
+// A minimal MULTI-FILE project: main.ddd imports work.ddd (the `Work`
+// subdomain), the exact shape the playground's multi-file baselines feed
+// through `loadProjectFromVfs`.  Cross-document `[Work]` references only
+// resolve if both docs land in the same (isolated) workspace.
+const MF_WORK = `subdomain Work {
+  context Work {
+    enum Status { Todo, Doing, Done }
+    aggregate Task with crudish { title: string status: Status derived isDone: bool = status == Done }
+  }
+}`;
+const MF_MAIN = `import "./work.ddd"
+system TaskTracker {
+  ui Board with scaffold(subdomains: [Work]) {}
+  storage primary { type: postgres }
+  resource workState { for: Work, kind: state, use: primary }
+  deployable api { platform: node contexts: [Work] dataSources: [workState] port: 3000 }
+  deployable board { platform: react targets: api ui: Board port: 3001 }
+}`;
+const multiFileTree = (): EvolutionTree => ({
+  entryPath: "/workspace/main.ddd",
+  files: [
+    { kind: "file", path: "/workspace/main.ddd", content: MF_MAIN },
+    { kind: "file", path: "/workspace/work.ddd", content: MF_WORK },
+  ],
+});
+
 describe("runEvolution", () => {
   it("smoke: current == baseline lowers to ok with no changes (not 'Diff failed')", async () => {
     const r = await runEvolution({ baseline: tree(SALES), current: tree(SALES) });
@@ -35,6 +61,34 @@ describe("runEvolution", () => {
     expect(ok.migrations).toEqual([]);
     expect(ok.wireChanges).toEqual([]);
     expect(ok.breaking).toBe(false);
+  });
+
+  it("resolves a multi-file / import baseline (both trees, both sides)", async () => {
+    // The M-T8.11 headline: import graphs must lower on BOTH diff sides.  A
+    // shared workspace would cross-bind the `[Work]` refs; isolation keeps each
+    // side's import graph its own.  current == baseline ⇒ clean diff.
+    const r = await runEvolution({ baseline: multiFileTree(), current: multiFileTree() });
+    expect(r.ok).toBe(true);
+    const ok = r as EvolutionOk;
+    expect(ok.hasBaseline).toBe(true);
+    expect(ok.migrations).toEqual([]);
+    expect(ok.wireChanges).toEqual([]);
+  });
+
+  it("edit-driven multi-file: a field added in an imported file surfaces a migration", async () => {
+    const editedWork = MF_WORK.replace("title: string", "title: string note: string");
+    const current: EvolutionTree = {
+      entryPath: "/workspace/main.ddd",
+      files: [
+        { kind: "file", path: "/workspace/main.ddd", content: MF_MAIN },
+        { kind: "file", path: "/workspace/work.ddd", content: editedWork },
+      ],
+    };
+    const r = await runEvolution({ baseline: multiFileTree(), current });
+    expect(r.ok).toBe(true);
+    const ok = r as EvolutionOk;
+    const sql = ok.migrations.flatMap((m) => m.steps.map((s) => s.sql)).join("\n");
+    expect(sql).toMatch(/note/i);
   });
 
   it("runs repeatedly without cross-run contamination (the isolation guarantee)", async () => {
