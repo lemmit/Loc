@@ -61,6 +61,7 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -215,6 +216,24 @@ function provColumnsOf(fields: readonly FieldIR[]): MikroColumn[] {
     }));
 }
 
+/** One jsonb column carrying a value-object collection field (`Money[]`) stored
+ *  INLINE on the owner row.  Unlike the drizzle backend (id-less child table),
+ *  the MikroORM adapter folds a root VO array onto a single serialised jsonb
+ *  column — the mirror of the part-collection `collectionFieldColumn` path.  The
+ *  Row TS type is the DOC shape of the array (`{ amount: number; currency:
+ *  string }[]`); an optional `<VO>[]?` adds `| null`. */
+function valueCollectionColumn(f: FieldIR, ctx: EnrichedBoundedContextIR): MikroColumn {
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return {
+    prop: f.name,
+    mikroType: "json",
+    tsType: docFieldType(inner, ctx),
+    nullable: f.type.kind === "optional" || (f.optional ?? false),
+    primary: false,
+    columnType: "jsonb",
+  };
+}
+
 function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const id: MikroColumn = {
     prop: "id",
@@ -224,9 +243,18 @@ function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): Mik
     primary: true,
   };
   // `Id[]` reference collections persist as pivot tables (join-Row entities),
-  // not columns on the aggregate row — skip them here.
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
-  return [id, ...scalarFields.flatMap((f) => fieldColumns(f, ctx)), ...provColumnsOf(agg.fields)];
+  // not columns on the aggregate row — skip them here.  Value-object collections
+  // (`<VO>[]`) fold onto one inline jsonb column each (see valueCollectionColumn).
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
+  const valueCollFields = agg.fields.filter((f) => isValueCollectionType(f.type));
+  return [
+    id,
+    ...scalarFields.flatMap((f) => fieldColumns(f, ctx)),
+    ...valueCollFields.map((f) => valueCollectionColumn(f, ctx)),
+    ...provColumnsOf(agg.fields),
+  ];
 }
 
 /** TPH shared-table columns (aggregate-inheritance.md, sharedTable): one Row
@@ -1005,6 +1033,29 @@ function assocSaveLines(agg: EnrichedAggregateIR, emVar: string, indent: string)
 /** The array-hydration statement(s) binding `rows` → `${targetVar}`.  With
  *  associations it bulk-loads the pivot maps and assembles each row's list in a
  *  block; without, it stays the byte-identical single `.map(...)`. */
+/** The value-object collection fields of an aggregate (`<VO>[]` root fields) —
+ *  each stored INLINE as one jsonb column on the owner row. */
+function valueCollFieldsOf(agg: EnrichedAggregateIR): FieldIR[] {
+  return agg.fields.filter((f) => isValueCollectionType(f.type));
+}
+
+/** Per-row value-collection decls binding `<field>` from the owner row's inline
+ *  jsonb column (`const lineItems = (row.lineItems ?? []).map((x) => new Money(
+ *  Number(x.amount), x.currency));`).  No DB round-trip — the array rides on the
+ *  root row, so this is pure deserialisation.  The value-collection analogue of
+ *  `assocRowDeclLines`; empty for an aggregate without VO collections, so the
+ *  output stays byte-identical. */
+function valueCollRowDeclLines(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  rowVar: string,
+  indent: string,
+): string[] {
+  return valueCollFieldsOf(agg).map(
+    (f) => `${indent}const ${f.name} = ${deserializeField(f.type, `${rowVar}.${f.name}`, ctx)};`,
+  );
+}
+
 function assocHydrateBind(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
@@ -1015,7 +1066,9 @@ function assocHydrateBind(
 ): string[] {
   const hy = hydrateRootExpr(agg, "row", ctx);
   const head = keyword === "return" ? "return" : `const ${targetVar} =`;
-  const hasChildren = (agg.associations ?? []).length > 0 || (agg.contains ?? []).length > 0;
+  const hasValueColls = valueCollFieldsOf(agg).length > 0;
+  const hasChildren =
+    (agg.associations ?? []).length > 0 || (agg.contains ?? []).length > 0 || hasValueColls;
   if (!hasChildren) {
     return [`${indent}${head} rows.map((row) => ${hy});`];
   }
@@ -1026,6 +1079,7 @@ function assocHydrateBind(
     `${indent}${head} rows.map((row) => {`,
     ...assocRowDeclLines(agg, "row", `${indent}  `),
     ...containRowDeclLines(agg, "row", `${indent}  `),
+    ...valueCollRowDeclLines(agg, ctx, "row", `${indent}  `),
     `${indent}  return ${hy};`,
     `${indent}});`,
   ];
@@ -1358,10 +1412,26 @@ export function renderMikroRepository(
   const baseFilters = [...mikroContextFilters(agg), ...kindClause];
   // `Id[]` reference collections persist in pivot tables, not columns, so they
   // are excluded from the aggregate-row save projection (synced separately).
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  // Value-object collections (`<VO>[]`) fold onto one inline jsonb column each,
+  // serialised through the shared `serializeField` (VO elements → plain objects,
+  // money/id → strings) — the root analogue of the part-collection jsonb column.
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
+  const valueCollFields = valueCollFieldsOf(agg);
+  const valueCollEntries = valueCollFields.map((f) => ({
+    fieldName: f.name,
+    expr: serializeField(f.type, `aggregate.${f.name}`, ctx),
+  }));
   const hasAssocs = (agg.associations ?? []).length > 0;
   const hasContains = (agg.contains ?? []).length > 0;
+  const hasValueColls = valueCollFields.length > 0;
   const hasChildren = hasAssocs || hasContains;
+  // Whether a read must declare per-row hydrate locals before the `_rehydrate`
+  // (associations / contained parts / value-object collections all bind a bare
+  // `<field>` local `hydrateRootExpr` references).  A plain flat aggregate has
+  // none, so its single-row reads stay the byte-identical inline expression.
+  const hasHydrateLocals = hasChildren || hasValueColls;
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
@@ -1374,6 +1444,7 @@ export function renderMikroRepository(
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...scalarFields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
+    ...valueCollEntries,
     ...provEntries,
   ]);
 
@@ -1415,12 +1486,14 @@ export function renderMikroRepository(
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...nonVersionEntries,
+    ...valueCollEntries,
     ...provEntries,
     { fieldName: "version", expr: "1" },
   ]);
   const updateData = projectionObject("aggregate", [
     ...kindProjection,
     ...nonVersionEntries,
+    ...valueCollEntries,
     ...provEntries,
     { fieldName: "version", expr: "expected + 1" },
   ]);
@@ -1507,8 +1580,10 @@ export function renderMikroRepository(
       );
     }
     // Single-row find: load the children inline (owner id known) then
-    // hydrate, mirroring findById.
-    if (hasChildren) {
+    // hydrate, mirroring findById.  Value-object collections need a per-row
+    // local too (deserialised off the row's inline jsonb column), so the block
+    // form fires for them as well as for associations / contained parts.
+    if (hasHydrateLocals) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name} | null> {`,
         `    const em = this.em.fork({ keepTransactionContext: true });`,
@@ -1516,6 +1591,7 @@ export function renderMikroRepository(
         `    if (row === null) return null;`,
         ...assocInlineLoadLines(agg, "em", "row.id", "    "),
         ...containInlineLoadLines(agg, ctx, "em", "row.id", "    "),
+        ...valueCollRowDeclLines(agg, ctx, "row", "    "),
         `    return ${hydrate("row")};`,
         `  }`,
       );
@@ -1621,6 +1697,7 @@ export function renderMikroRepository(
     `    }`,
     ...assocInlineLoadLines(agg, "em", "id as string", "    "),
     ...containInlineLoadLines(agg, ctx, "em", "id as string", "    "),
+    ...valueCollRowDeclLines(agg, ctx, "row", "    "),
     `    const loaded = ${hydrate("row")};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -1728,7 +1805,12 @@ export function renderMikroRepository(
  *  jsonb id-string array (re-branded to the target id), the embedded analogue of
  *  the relational pivot-table load and the mirror of the drizzle embedded
  *  `hydrateLocals` ref-collection branch. */
-function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
+function embeddedHydrateLocals(
+  agg: EnrichedAggregateIR,
+  rowVar: string,
+  indent: string,
+  ctx: EnrichedBoundedContextIR,
+): string[] {
   const out: string[] = [];
   for (const f of agg.fields) {
     if (f.type.kind !== "array" || f.type.element.kind !== "id") continue;
@@ -1736,6 +1818,12 @@ function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent:
     out.push(
       `${indent}const ${f.name} = ((${rowVar}.${f.name} ?? []) as string[]).map((s) => Ids.${target}Id(s));`,
     );
+  }
+  // Value-object collections (`<VO>[]`) fold onto an inline jsonb column, so
+  // deserialise each into its `<field>` local (the embedded analogue of the
+  // relational `valueCollRowDeclLines`).
+  for (const f of valueCollFieldsOf(agg)) {
+    out.push(`${indent}const ${f.name} = ${deserializeField(f.type, `${rowVar}.${f.name}`, ctx)};`);
   }
   for (const c of agg.contains) {
     const fromDoc = `${lowerFirst(c.partName)}FromDoc`;
@@ -1761,11 +1849,14 @@ export function renderMikroEmbeddedRepository(
   const row = rowClassOf(agg.name);
   const idVar = `Ids.${agg.name}Id`;
   const baseFilters = mikroContextFilters(agg);
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
 
   // Root save row: id + scalar column projection + one jsonb id-string array
   // per `Id[]` reference collection (folded onto the root, no pivot table) +
-  // one jsonb entry per containment (serialised through `<part>ToDoc`).
+  // one jsonb array per value-object collection (serialised through the shared
+  // `serializeField`) + one jsonb entry per containment (via `<part>ToDoc`).
   const rootEntries: string[] = ["id: aggregate.id as string"];
   for (const f of scalarFields)
     for (const e of projectFieldEntries(f, "aggregate", ctx))
@@ -1773,6 +1864,8 @@ export function renderMikroEmbeddedRepository(
   for (const f of agg.fields)
     if (isRefCollection(f.type))
       rootEntries.push(`${f.name}: aggregate.${f.name}.map((x) => x as string)`);
+  for (const f of valueCollFieldsOf(agg))
+    rootEntries.push(`${f.name}: ${serializeField(f.type, `aggregate.${f.name}`, ctx)}`);
   for (const c of agg.contains) {
     const toDoc = `${lowerFirst(c.partName)}ToDoc`;
     if (c.collection) rootEntries.push(`${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`);
@@ -1854,7 +1947,7 @@ export function renderMikroEmbeddedRepository(
         `    const rows = await em.find(${row}, ${filter}, { limit: pageSize, offset: (page - 1) * pageSize, orderBy });`,
         dbg(f.name, "rows.length"),
         `    const items = rows.map((row) => {`,
-        ...embeddedHydrateLocals(agg, "row", "      "),
+        ...embeddedHydrateLocals(agg, "row", "      ", ctx),
         `      return ${hydrateRootExpr(agg, "row", ctx)};`,
         `    });`,
         `    return { items, page, pageSize, total, totalPages };`,
@@ -1868,7 +1961,7 @@ export function renderMikroEmbeddedRepository(
         `    const rows = await em.find(${row}, ${filter});`,
         dbg(f.name, "rows.length"),
         `    return rows.map((row) => {`,
-        ...embeddedHydrateLocals(agg, "row", "      "),
+        ...embeddedHydrateLocals(agg, "row", "      ", ctx),
         `      return ${hydrateRootExpr(agg, "row", ctx)};`,
         `    });`,
         `  }`,
@@ -1879,7 +1972,7 @@ export function renderMikroEmbeddedRepository(
       `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const row = await em.findOne(${row}, ${filter});`,
       `    if (row === null) return null;`,
-      ...embeddedHydrateLocals(agg, "row", "    "),
+      ...embeddedHydrateLocals(agg, "row", "    ", ctx),
       `    return ${hydrateRootExpr(agg, "row", ctx)};`,
       `  }`,
     );
@@ -1912,7 +2005,7 @@ export function renderMikroEmbeddedRepository(
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
     `      return null;`,
     `    }`,
-    ...embeddedHydrateLocals(agg, "row", "    "),
+    ...embeddedHydrateLocals(agg, "row", "    ", ctx),
     `    const loaded = ${hydrateRootExpr(agg, "row", ctx)};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -1929,7 +2022,7 @@ export function renderMikroEmbeddedRepository(
     `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
     `    return rows.map((row) => {`,
-    ...embeddedHydrateLocals(agg, "row", "      "),
+    ...embeddedHydrateLocals(agg, "row", "      ", ctx),
     `      return ${hydrateRootExpr(agg, "row", ctx)};`,
     `    });`,
     `  }`,

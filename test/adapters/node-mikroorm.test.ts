@@ -1435,3 +1435,54 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
     expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
   });
 });
+
+describe("mikroorm — value-object collections (`<VO>[]` root fields)", () => {
+  const VC_SRC = `
+system M {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: decimal  currency: string }
+      aggregate Invoice with crudish {
+        reference: string
+        lineItems: Money[]
+        surcharges: Money[]?
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer throws `unsupported field kind 'array'` at generate", async () => {
+    const { errors } = await emit(VC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds each VO array onto one inline jsonb column (not a child table)", async () => {
+    const { files } = await emit(VC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('lineItems: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('surcharges: { type: "json", columnType: "jsonb", nullable: true }');
+    // No id-less child table for the collections (the drizzle path) — the whole
+    // array rides on the Invoice row.
+    expect(entities).not.toContain("invoice_line_items");
+  });
+
+  it("serialises on save and deserialises (rebuilding the VOs) on read", async () => {
+    const { files } = await emit(VC_SRC);
+    const repo = files.get("api/db/repositories/invoice-repository.ts")!;
+    // Save: VO elements → plain objects in the jsonb array.
+    expect(repo).toContain(
+      "lineItems: aggregate.lineItems.map((x) => ({ amount: x.amount, currency: x.currency }))",
+    );
+    // Read: the inline jsonb column is deserialised into a `<field>` local the
+    // shared `_rehydrate` references.
+    expect(repo).toContain(
+      "const lineItems = (row.lineItems ?? []).map((x) => new Money(Number(x.amount), x.currency));",
+    );
+    expect(repo).toContain("Invoice._rehydrate({");
+  });
+});

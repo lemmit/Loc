@@ -79,11 +79,6 @@ function walk(dir, pred, out = []) {
 // BEHAVIOURAL_SKIP (which is keyed by platform clause and would wrongly skip the
 // drizzle tier too). See the PR body's "MikroORM runtime gaps" register.
 const MIKRO_SKIP = {
-  // A value-object array field ON THE AGGREGATE ROOT (`lineItems: Money[]`): the
-  // mikroorm entity emitter throws `unsupported field kind 'array'` at generate
-  // (the drizzle backend stores it as an ordinal child table + reconstructs the
-  // VOs on hydrate; the mikroorm adapter has no equivalent path).
-  "value-collections": "VO-array aggregate field unsupported by the mikroorm entity emitter",
   // A where-filtered `view` lowers to a repository query method (`bigOrders()`);
   // the mikroorm repository builder emits findById/getById/all/save/delete but
   // NOT the view-derived query methods, so `http/views.ts` calls a missing fn.
