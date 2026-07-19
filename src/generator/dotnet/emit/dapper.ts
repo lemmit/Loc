@@ -515,8 +515,16 @@ function hydrateSubtree(pc: PartChild, parentIdsVar: string): { loads: string[];
  *  private `HydrateAsync` that bulk-loads every containment level for a page of
  *  root rows and reconstructs each root through `_Create(State)` with its
  *  (recursively nested) children in place. */
-function containmentMembers(agg: EnrichedAggregateIR, children: PartChild[]): string[] {
-  const rootStateBody = columnsOf(agg).map((c) => `                ${c.stateProp} = ${c.hydrate},`);
+function containmentMembers(
+  agg: EnrichedAggregateIR,
+  children: PartChild[],
+  idClass = `${agg.name}Id`,
+): string[] {
+  // The root's `State.Id` hydrate mints the SHARED base id class for a TPH
+  // concrete (`idClass`), matching the concrete's `State.Id : <Base>Id`.
+  const rootStateBody = columnsOf(agg, false, idClass).map(
+    (c) => `                ${c.stateProp} = ${c.hydrate},`,
+  );
   const rowClasses = flattenParts(children).map(partRowAndMap);
   // Per root-level child: its full subtree loads (top-down) then dicts
   // (bottom-up).  For a flat child this is `[rowsQuery, dict]` — the exact
@@ -1028,7 +1036,7 @@ export function renderDapperRepository(
     (pc) =>
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
   );
-  const containMembers = hasContains ? containmentMembers(agg, partChildren) : [];
+  const containMembers = hasContains ? containmentMembers(agg, partChildren, idClass) : [];
 
   // Provenance flush (provenance.md): drain the per-write lineage buffer and
   // append one `provenance_records` row per write, on the SAME connection as

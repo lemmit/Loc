@@ -909,29 +909,53 @@ system D {
     expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
   });
 
-  it("still rejects a TPH member carrying `contains` or a reference collection", async () => {
+  // M-T6.9 wave 5: a TPH concrete carrying `contains` / an `X id[]` reference
+  // collection now COMPOSES with the containment child-table + association
+  // join-table passes — the child / join tables FK the SHARED BASE row's id
+  // (EF's TPT-via-contains under a TPH root).
+  it("drains a TPH member with `contains` + a reference collection (child/join tables FK the base)", async () => {
     const src = `
 system D {
   api A from Registry
   subdomain Registry {
     context Parties {
+      aggregate Tag with crudish { label: string }
       abstract aggregate Party inheritanceUsing: sharedTable { name: string }
       aggregate Customer extends Party with crudish {
         creditLimit: int
         contains notes: Note[]
+        tags: Tag id[]
         entity Note { text: string }
       }
       repository Customers for Customer { }
+      repository Tags for Tag { }
     }
   }
   storage pg { type: postgres }
   resource s { for: Parties, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
-      true,
-    );
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the TPH-with-contains gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // The concrete owns no state table, but its child + join tables DO emit —
+    // FK'd to the shared base row (`parties`), not the (table-less) concrete.
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS notes");
+    expect(schema).toContain("party_id uuid not null references parties (id) on delete cascade");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS customer_tags");
+    const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // Containment child rows FK the shared base row (`party_id = aggregate.Id`);
+    // the part's State.ParentId is typed to the concrete (Note.State : CustomerId).
+    expect(repo).toContain("INSERT INTO notes (id, party_id, text)");
+    expect(repo).toContain("ParentId = new CustomerId(r.party_id),");
+    // The reference-collection join table threads the base row id through the
+    // shared `<Base>Id` (the concrete declares no id of its own).
+    expect(repo).toContain("INSERT INTO customer_tags (customer_id, tag_id)");
+    // Reads compose: hydrate the containment child tables, then post-set the
+    // ref-collection list on the reconstructed roots.
+    expect(repo).toContain("await HydrateAsync(conn, rows.ToList(), cancellationToken)");
+    expect(repo).toContain("LoadRefsAsync(conn,");
   });
 });
 

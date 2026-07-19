@@ -1,0 +1,67 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's
+// TPH-WITH-CONTAINS surface (M-T6.9 wave 5).  A `sharedTable` (TPH) concrete
+// (`Customer extends Party`) carries BOTH a `contains` (nested entity parts,
+// including a part-in-part) AND an `X id[]` reference collection.  The whole
+// hierarchy lives in ONE `kind`-discriminated table named for the base
+// (`parties`); the concrete owns no table of its own, so its containment child
+// tables + association join table FK the SHARED BASE row's id (EF's
+// TPT-via-contains under a TPH root).  Build under `dotnet build /warnaserror` —
+// the shared `<Base>Id`-threaded `_Create(State)` seam + the child/join FK
+// wiring against the table-less concrete are the type-sensitive parts.
+
+system DapperTphParts {
+  api RegistryApi from Registry
+
+  subdomain Registry {
+    context Parties {
+      enum NoteKind { Internal, Public }
+
+      aggregate Tag with crudish {
+        label: string
+      }
+
+      abstract aggregate Party inheritanceUsing: sharedTable {
+        name:  string
+        email: string
+      }
+
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        // nested entity parts (incl. a part-in-part) hanging off the shared base row
+        contains notes: Note[]
+        contains profile: Profile?
+        // reference collection — the join table's ownerFk holds the base row id
+        tags: Tag id[]
+
+        entity Note {
+          text: string
+          kind: NoteKind
+          // part-in-part under a TPH concrete
+          contains stamps: Stamp[]
+        }
+        entity Stamp { at: datetime }
+        entity Profile { bio: string }
+      }
+
+      aggregate Vendor extends Party with crudish {
+        rating: int
+      }
+
+      repository Customers for Customer { }
+      repository Vendors for Vendor { }
+      repository Tags for Tag { }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource partiesState { for: Parties, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Parties]
+    dataSources: [partiesState]
+    serves: RegistryApi
+    port: 8080
+  }
+}

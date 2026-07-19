@@ -1196,5 +1196,54 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // M-T6.9 wave 5: TPH-WITH-CONTAINS — a `sharedTable` concrete carrying BOTH
+    // nested entity parts (incl. a part-in-part) AND an `X id[]` reference
+    // collection.  The concrete owns no table (rows live in the shared base
+    // `parties`), so its containment child tables + association join table FK
+    // the SHARED BASE row's id (EF's TPT-via-contains).  The shared `<Base>Id`
+    // threaded through the recursive `_Create(State)` seam is what /warnaserror
+    // compiles.
+    it("system `persistence: dapper` + TPH-with-contains — child/join tables FK the base, build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-tph-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-tph-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Concrete owns no state table; its child + join tables FK the base row.
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS notes");
+        expect(schema).toContain(
+          "party_id uuid not null references parties (id) on delete cascade",
+        );
+        // Part-in-part under the TPH concrete: the grandchild FKs its sibling part.
+        expect(schema).toContain("references notes (id) on delete cascade");
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS customer_tags");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "CustomerRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("INSERT INTO notes (id, party_id,");
+        expect(repo).toContain("ParentId = new CustomerId(r.party_id),");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );
