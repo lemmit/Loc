@@ -56,7 +56,7 @@ createRoute({ method: "get",  path: "/",      operationId: "listOrders",  /* …
 
 ```
 Storage:     'storage' name=LooseName '{' ('type' ':' StorageType) ('instance' ':' …)? ('connection' ':' ConnectionSource)? ('config' ':' '{' … '}')? '}'
-StorageType: postgres | mysql | sqlite | inMemory | redis | elastic | meilisearch | kafka | clickhouse | bigquery | s3 | rabbitmq | nats | restApi
+StorageType: postgres | mysql | sqlite | inMemory | redis | elastic | meilisearch | kafka | clickhouse | bigquery | s3 | rabbitmq | nats | restApi | smtp | ses | sendgrid
 ```
 
 A `storage` is a **physical store or service** — a typed, reusable slot (one postgres can back several deployables). `type:` names a built-in sourceType; the `config { k: v }` map carries vendor parameters validated per sourceType against the registry's config schema (`src/util/source-types.ts`): an unknown key is a warning, a wrong-typed value is an error, a missing required key (e.g. `s3` needs `bucket`) is an error.
@@ -83,7 +83,7 @@ volumes:
   blobs-data: {}
 ```
 
-> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` / `rabbitmq` (the object-store / queue clients) and `redis` / `nats` (channel transports). The remaining `StorageType` values parse and validate but emit nothing — an honest forward-compat gap.
+> **Generator support is narrower than the grammar.** Only `postgres` / `inMemory` have full backend codegen, plus `s3` / `rabbitmq` (the object-store / queue clients), `restApi` (http api client), `smtp` / `ses` / `sendgrid` (the mailer clients), and `redis` / `nats` (channel transports). The remaining `StorageType` values parse and validate but emit nothing — an honest forward-compat gap.
 
 ### Connection sources
 
@@ -103,7 +103,7 @@ The four forms lower to a `ConnectionSourceIR` (`kind: service | env | secret | 
 
 ```
 Resource:       'resource' name=LooseName '{' ('for' ':' [BoundedContext]) ('kind' ':' DataSourceKind) ('use' ':' [Storage]) … '}'
-DataSourceKind: state | eventLog | snapshot | cache | replica | objectStore | queue | api
+DataSourceKind: state | eventLog | snapshot | cache | replica | objectStore | queue | api | mailer
 ```
 
 A `resource` (formerly `dataSource` — the deployable's `dataSources:` *clause* keeps the old name) is the **configured binding**: it says context `for:` needs data of role `kind:`, served by storage `use:`. A backend deployable lists the resources it wires under `dataSources:`.
@@ -132,6 +132,7 @@ resource ordersState {
 | `objectStore` | blob storage | s3 |
 | `queue` | message queue | rabbitmq |
 | `api` | external HTTP API | restApi |
+| `mailer` | outbound email | smtp, ses, sendgrid |
 
 ```ddd
 resource bad { for: Orders, kind: state, use: blobs }
@@ -154,7 +155,7 @@ Each optional knob is gated to the kinds / storage types where it's meaningful (
 | `readonly` | read-only binding | — |
 | `shape` | `relational` \| `embedded` \| `document` saving shape | — |
 
-The `state` resource above drives the schema-migration owner and the connection wiring for its backend; the `objectStore` / `queue` / `api` kinds are *consumed* from workflow bodies via an ambient handle and a closed per-kind verb vocabulary (`files.put(…)`, `jobs.enqueue(…)`, `api.get(…)`) — that surface is documented in [`../resources.md`](../resources.md) ("Consuming a resource from a workflow"); see also [Workflows](13-workflows.md).
+The `state` resource above drives the schema-migration owner and the connection wiring for its backend; the `objectStore` / `queue` / `api` / `mailer` kinds are *consumed* from workflow bodies via an ambient handle and a closed per-kind verb vocabulary (`files.put(…)`, `jobs.enqueue(…)`, `api.get(…)`, `mail.send(to, subject, body)`) — that surface is documented in [`../resources.md`](../resources.md) ("Consuming a resource from a workflow"); see also [Workflows](13-workflows.md).
 
 ### The `.loom/datasources.md` artefact
 

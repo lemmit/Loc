@@ -356,7 +356,7 @@ public void transferCredit(TransferCreditRequest request) {
 
 ## Resource consumption
 
-`objectStore` / `queue` / `api` resources are *used*, not persisted to. A workflow calls them through an **ambient handle** (the resource name, in scope like `currentUser`) and a closed per-kind verb vocabulary — `objectStore`: `put` / `get` / `list` / `signedUrl` / `delete`; `queue`: `enqueue` / `publish`; `api`: `get` / `post`. The verbs are **workflows-only**, capability-gated (an unknown verb is `loom.resource-verb-invalid`), and **forbidden inside a transactional span** (`loom.resource-op-in-transaction` — an external effect can't roll back with the DB).
+`objectStore` / `queue` / `api` / `mailer` resources are *used*, not persisted to. A workflow calls them through an **ambient handle** (the resource name, in scope like `currentUser`) and a closed per-kind verb vocabulary — `objectStore`: `put` / `get` / `list` / `signedUrl` / `delete`; `queue`: `enqueue` / `publish`; `api`: `get` / `post`; `mailer`: `send(to, subject, body)`. The verbs are **workflows-only**, capability-gated (an unknown verb is `loom.resource-verb-invalid`), and **forbidden inside a transactional span** (`loom.resource-op-in-transaction` — an external effect can't roll back with the DB).
 
 ```ddd
 resource files { for: Sales, kind: objectStore, use: bucket }
@@ -401,4 +401,4 @@ public void archiveOrder(ArchiveOrderRequest request) {
 ```
 ::: end
 
-The dev `docker-compose` gains a sidecar per object-store / queue storage (MinIO for `s3`, `rabbitmq`); deployables with no such resource are byte-identical. See [`../resources.md`](../resources.md) for the kind × verb × backend matrix and interface selection.
+The dev `docker-compose` gains a sidecar per object-store / queue / smtp-mailer storage (MinIO for `s3`, `rabbitmq`, **Mailpit** for `smtp`); deployables with no such resource are byte-identical. See [`../resources.md`](../resources.md) for the kind × verb × backend matrix and interface selection.
