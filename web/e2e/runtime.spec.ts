@@ -64,7 +64,7 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     });
   });
 
-  await test.step("GET /products → 200 []", async () => {
+  await test.step("GET /products → 200 empty page", async () => {
     await page.getByTestId("btn-send").click();
     try {
       await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
@@ -78,7 +78,10 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
       console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
       throw e;
     }
-    await expect(page.getByTestId("resp-body")).toHaveText(/^\[\]$/);
+    // The implicit `all` find is paged-by-default (M-T2.6, DEBT-28): the
+    // relational Product findAll returns the `{items,page,pageSize,total,
+    // totalPages}` envelope, not a bare `[]`.  Empty table → `items:[]`.
+    await expect(page.getByTestId("resp-body")).toHaveText(/"items":\s*\[\]/);
   });
 
   await test.step("Endpoint picker discovers the OpenAPI contract", async () => {
@@ -155,11 +158,14 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
     const text = await page.getByTestId("resp-body").textContent();
     expect(text, "list response body").toBeTruthy();
+    // Paged envelope (see the empty-page step above): the product rides in
+    // `items`, with `total` reflecting the single inserted row.
     const parsed = JSON.parse(text!);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].sku).toBe("PW-1");
-    expect(parsed[0].price.amount).toBe(9.99);
-    expect(parsed[0].price.currency).toBe("USD");
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+    expect(parsed.items[0].sku).toBe("PW-1");
+    expect(parsed.items[0].price.amount).toBe(9.99);
+    expect(parsed.items[0].price.currency).toBe("USD");
   });
 
   await test.step("Database console runs SQL against PGlite", async () => {
