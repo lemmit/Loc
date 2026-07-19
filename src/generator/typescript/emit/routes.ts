@@ -36,6 +36,10 @@ export function renderHttpIndex(
      *  `<resource>$getBytes`).  Absent → no `/files` routes emitted
      *  (byte-identical output). */
     fileUpload?: { resource: string; sourceType: string };
+    /** M-T4.4 slice 3: durable events ride a broker-bound `queue`/`work`
+     *  channel — the outbox must capture them even when this deployable hosts
+     *  no reactor (a pure producer), so the relay can publish on drain. */
+    forceOutbox?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -105,7 +109,8 @@ export function renderHttpIndex(
   // default dispatcher wraps the in-process one — durable events are
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
-  const wireOutbox = wireDispatcher && durableEventTypes(ctx).size > 0;
+  const wireOutbox =
+    (wireDispatcher || (!!options?.forceOutbox && !usingMikro)) && durableEventTypes(ctx).size > 0;
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.
@@ -135,6 +140,11 @@ export function renderHttpIndex(
         : `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
       : `import { workflowsRoutes } from "./workflows";`
     : null;
+  // Pure-producer outbox wire (M-T4.4 slice 3): createOutboxDispatcher lives
+  // in ./workflows (emitted for durable-broker producers even without
+  // workflows); the workflow import above only covers the hasWorkflows case.
+  const outboxImport =
+    wireOutbox && !hasWorkflows ? `import { createOutboxDispatcher } from "./workflows";` : null;
   const workflowMount = hasWorkflows
     ? `  app.route("${API_BASE_PATH}/workflows", workflowsRoutes(db, events));`
     : null;
@@ -223,6 +233,7 @@ export function renderHttpIndex(
       authImport,
       ...aggregateImports,
       workflowImport,
+      outboxImport,
       realtimeImport,
       viewImport,
       projectionImport,

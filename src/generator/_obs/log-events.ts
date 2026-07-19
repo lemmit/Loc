@@ -161,6 +161,15 @@ export const LogEvents = {
     level: "warn",
     fields: ["address", "type", "error"],
   },
+  // M-T4.4 slice 3 / M-T4.3 dead-letter surface: a poisoned message exhausts
+  // its bounded retries (or is malformed beyond parsing) and parks in the
+  // transport's dead-letter spot (`loom.dlq.<address>` on RabbitMQ) — kept,
+  // not lost, and announced once.
+  channelDeadLettered: {
+    event: "channel_dead_lettered",
+    level: "warn",
+    fields: ["address", "type", "id", "attempts", "error"],
+  },
 
   timerFired: { event: "timer_fired", level: "info", fields: ["timer"] },
   timerSkippedOverlap: { event: "timer_skipped_overlap", level: "info", fields: ["timer"] },

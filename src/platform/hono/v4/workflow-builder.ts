@@ -88,7 +88,7 @@ export function buildWorkflowsFile(
    *  for single-context systems). */
   resolveStreamContext?: (name: string) => string | undefined,
 ): string {
-  if (ctx.workflows.length === 0) return "";
+  if (ctx.workflows.length === 0) return buildProducerOutboxFile(ctx);
   // Build the body first; imports are derived from what the body actually
   // references (keeps the generated import line free of dead names per the
   // generated-code Biome gate). Aggregate / repository / VO / enum imports
@@ -1334,6 +1334,32 @@ function emitEventSourcedHandlerFn(
  *  switches on `event.type` and fans each event out to its handlers, passing
  *  itself so a handler's own emits re-enter.  `createApp` installs this as the
  *  default dispatcher (replacing Noop) when the context has subscriptions. */
+/** Workflow-less durable-broker PRODUCER shape (M-T4.4 slice 3): the
+ *  deployable hosts no reactor, but its durable events ride a broker-bound
+ *  `queue`/`work` channel — the outbox must capture them (routes wire
+ *  `createOutboxDispatcher`) and the relay publishes them on drain
+ *  (index.ts wraps the relay dispatcher in the channel tee).  The
+ *  in-process dispatcher is the empty fan-out.  A workflow-less context
+ *  with no durable events keeps returning "" (byte-identical). */
+function buildProducerOutboxFile(ctx: EnrichedBoundedContextIR): string {
+  const durable = durableEventTypes(ctx);
+  if (durable.size === 0) return "";
+  const out: string[] = [
+    "// Auto-generated.  Do not edit by hand.",
+    `import type { DomainEventDispatcher } from "../domain/events";`,
+    `import type * as Events from "../domain/events";`,
+    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    `import { and, asc, eq, isNull, lt } from "drizzle-orm";`,
+    `import * as schema from "../db/schema";`,
+    `import { baseLogger } from "../obs/log";`,
+    "",
+  ];
+  out.push(...emitDispatcherFactory(new Map()));
+  out.push("");
+  out.push(...emitOutboxMachinery(durable));
+  return `${out.join("\n")}\n`;
+}
+
 function emitDispatcherFactory(byEvent: Map<string, string[]>): string[] {
   const out: string[] = [];
   out.push(`export function createInProcessDispatcher(`);
