@@ -491,6 +491,9 @@ function printDeployable(node: Deployable): string {
     items.push(`channels: [${node.channelRefs.map((r) => r.$refText).join(", ")}]`);
   }
   if (node.targets) items.push(`targets: ${node.targets.$refText}`);
+  if (node.hosts.length > 0) {
+    items.push(`hosts: [${node.hosts.map((h) => h.$refText).join(", ")}]`);
+  }
   if (node.serves.length > 0) {
     items.push(`serves: ${node.serves.map((s) => s.$refText).join(", ")}`);
   }

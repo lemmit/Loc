@@ -142,6 +142,9 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
 const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
   "primitive-form-of",
   "primitive-modal",
+  // FileUpload (M-T1.2 slice 4b) is a JSX/web primitive (multipart POST +
+  // bind); the Flutter mobile pack defers it alongside the other inputs.
+  "primitive-file-upload",
   "primitive-field",
   "primitive-multiline-field",
   "primitive-number-field",
