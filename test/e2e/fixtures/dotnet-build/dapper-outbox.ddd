@@ -1,0 +1,98 @@
+// M-T6.9 compile-gate fixture: workflow event subscriptions / outbox on the
+// `persistence: dapper` .NET adapter.  Exercises the full Dapper workflow
+// surface that used to inject the EF AppDbContext (the last drained gate):
+//
+//   - a state-based saga (`OrderFulfillment`) over a DURABLE channel
+//     (`delivery: queue`, `retention: log`) → the raw-Npgsql outbox dispatcher
+//     + relay BackgroundService + `__loom_outbox` DDL + the `last_event_id`
+//     idempotent-consumer marker column,
+//   - the closed-generic Dapper `ISagaStateStore<OrderFulfillmentState>` port
+//     adapter (DapperPersistencePorts.cs) + its saga-state table in DbSchema,
+//   - an EVENT-SOURCED workflow (`Reconcile`) → the per-context Dapper
+//     `IWorkflowEventStore<<Ctx>EventRecord>` over the shared `<ctx>_events` log,
+//   - the workflow-instances read controller reading through NpgsqlDataSource,
+//   - a workflow-sourced VIEW (`ReconcileDone`) folding the ES stream via Dapper.
+//
+// Built under `dotnet build /warnaserror`, proving the whole path compiles with
+// no EF AppDbContext and no NotImplementedException on the Dapper deployable.
+
+system DapperOutbox {
+  api FulfillmentApi from Fulfillment
+
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment {
+        find byOrder(order: Order id): Shipment? where this.orderRef == order
+      }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      event Reconciled { order: Order id }
+
+      // A DURABLE channel routes its events through the outbox + at-least-once
+      // relay (retention: log).
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested, Reconciled
+        delivery: queue
+        retention: log
+      }
+
+      // State-based saga with persisted correlation (mutable `<Wf>State` row).
+      workflow OrderFulfillment {
+        orderId: Order id
+        attempts: int
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+
+      // Event-sourced workflow — folds its own emitted events into state,
+      // persisting as the shared `<ctx>_events` stream (no saga-state table).
+      workflow Reconcile eventSourced {
+        orderId: Order id
+        done: bool
+        create(p: OrderPlaced) by p.order {
+          emit Reconciled { order: p.order }
+        }
+        apply(r: Reconciled) { done := true }
+      }
+
+      // Workflow-sourced view over the ES workflow's instance read model —
+      // group-folds `<ctx>_events` via Dapper, filter applied in-memory.
+      view ReconcileDone = Reconcile where this.done
+    }
+  }
+
+  storage pg { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
+  resource fulfillmentLog { for: Fulfillment, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState, fulfillmentLog]
+    serves: FulfillmentApi
+    port: 8080
+  }
+}

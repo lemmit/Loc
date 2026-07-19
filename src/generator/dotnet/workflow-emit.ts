@@ -47,6 +47,7 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
+import { dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
 import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
@@ -62,6 +63,7 @@ import {
   workflowAllocateInitializer,
   workflowStateClass,
   workflowStateDbSet,
+  workflowStateTable,
 } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -2080,7 +2082,7 @@ export function emitWorkflowInstanceReads(
   ns: string,
   out: Map<string, string>,
   ownerOf: OwnerOf,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; usingDapper?: boolean },
 ): void {
   const observable = ctx.workflows.filter((wf) => !!wf.instanceWireShape);
   if (observable.length === 0) return;
@@ -2092,7 +2094,14 @@ export function emitWorkflowInstanceReads(
   }
   out.set(
     `Api/${ctx.name}WorkflowInstancesController.cs`,
-    renderInstancesController(ctx, ns, observable, ownerOf, options?.routePrefix),
+    renderInstancesController(
+      ctx,
+      ns,
+      observable,
+      ownerOf,
+      options?.routePrefix,
+      !!options?.usingDapper,
+    ),
   );
 }
 
@@ -2131,11 +2140,17 @@ function renderInstancesController(
   workflows: WorkflowIR[],
   ownerOf: OwnerOf,
   routePrefix?: string,
+  usingDapper = false,
 ): string {
   const className = `${ctx.name}WorkflowInstancesController`;
   const route = `${routePrefix ?? ""}workflows`;
   const usings = new Set<string>();
   const blocks: string[] = [];
+  // Dapper reads through NpgsqlDataSource with raw SQL: state sagas SELECT the
+  // saga table into a per-workflow `Row` + `Map` to the state POCO (M-T6.9),
+  // and event-sourced workflows QueryAsync the `<ctx>_events` log then fold —
+  // the same `instanceWireShape` projection + routes as the EF path.
+  const rowMapDecls: string[] = [];
   for (const wf of workflows) {
     const slug = snake(wf.name);
     const T = upperFirst(wf.name);
@@ -2149,13 +2164,13 @@ function renderInstancesController(
       shape
         .map((f) => projectToResponse(`${rowVar}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
-    // The read body diverges on `wf.eventSourced`: a state-based saga selects
-    // the `<Wf>State` EF DbSet directly, while an event-sourced workflow folds
-    // the per-correlation `<wf>_events` stream — LIST loads every event row,
-    // groups by StreamId, and folds each through `_FromEvents` (mirroring the
-    // ES-aggregate `_LoadAll` group-fold); byId loads one stream + folds it.
-    // The `instanceWireShape` projection, operationIds, and route paths are
-    // identical to the state path, so cross-backend OpenAPI parity holds.
+    // The read body diverges on `wf.eventSourced`: a state-based saga reads the
+    // `<Wf>State` saga row, while an event-sourced workflow folds the
+    // per-correlation `<ctx>_events` stream — LIST loads every event row, groups
+    // by StreamId, and folds each through `_FromEvents`; byId loads one stream +
+    // folds it.  The `instanceWireShape` projection, operationIds, and route
+    // paths are identical across shapes AND persistence adapters, so
+    // cross-backend OpenAPI parity holds.
     let listBody: string;
     let byIdBody: string;
     // The `{id}` param binds the correlation id's CLR value type (Guid / int /
@@ -2164,19 +2179,69 @@ function renderInstancesController(
     // (docs/old/plans/non-guid-id-http-params.md).
     const corrClr = csIdValueClrType(workflowCorrIdValueType(wf));
     if (wf.eventSourced) {
-      const eventSet = esEventDbSet(wf, ownerOf);
       const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       const corrId = esCorrIdClass(wf);
+      if (usingDapper) {
+        const rec = `global::${ns}.Infrastructure.Persistence.Events.${esEventRecordClass(wf, ownerOf)}`;
+        const table = `${snake(ownerOf(wf.name))}_events`;
+        const cols =
+          "seq AS Seq, stream_type AS StreamType, stream_id AS StreamId, version AS Version, type AS Type, data AS Data, occurred_at AS OccurredAt";
+        listBody =
+          `        await using var conn = await _db.OpenConnectionAsync();\n` +
+          `        var __rows = (await conn.QueryAsync<${rec}>(new CommandDefinition("SELECT ${cols} FROM ${table} WHERE stream_type = @st ORDER BY stream_id, version", new { st = "${st}" }))).ToList();\n` +
+          `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(${csIdFromString("g.Key", corrClr)}), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
+          `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
+        byIdBody =
+          `        var __sid = id.ToString();\n` +
+          `        await using var conn = await _db.OpenConnectionAsync();\n` +
+          `        var __rows = (await conn.QueryAsync<${rec}>(new CommandDefinition("SELECT ${cols} FROM ${table} WHERE stream_type = @st AND stream_id = @sid ORDER BY version", new { st = "${st}", sid = __sid }))).ToList();\n` +
+          `        if (__rows.Count == 0) return NotFound();\n` +
+          `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
+          `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
+      } else {
+        const eventSet = esEventDbSet(wf, ownerOf);
+        listBody =
+          `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
+          `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(${csIdFromString("g.Key", corrClr)}), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
+          `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
+        byIdBody =
+          `        var __sid = id.ToString();\n` +
+          `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
+          `        if (__rows.Count == 0) return NotFound();\n` +
+          `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
+          `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
+      }
+    } else if (usingDapper) {
+      const stateFqn = `global::${ns}.Infrastructure.Persistence.Workflows.${workflowStateClass(wf)}`;
+      const stateCols = dapperWorkflowStateColumns(wf, false);
+      const pkCol = snake(wf.correlationField as string);
+      const table = workflowStateTable(wf);
+      const rowCls = `${T}Row`;
+      const mapFn = `Map${T}`;
+      rowMapDecls.push(
+        `    private sealed class ${rowCls}\n    {\n` +
+          stateCols
+            .map(
+              (c) =>
+                `        public ${c.rowCs} ${c.col} { get; set; }${c.nullable ? "" : " = default!;"}`,
+            )
+            .join("\n") +
+          `\n    }\n` +
+          `    private static ${stateFqn} ${mapFn}(${rowCls} r) => new()\n    {\n` +
+          stateCols.map((c) => `        ${c.stateProp} = ${c.hydrate},`).join("\n") +
+          `\n    };`,
+      );
+      const selCols = stateCols.map((c) => c.col).join(", ");
       listBody =
-        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
-        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(${csIdFromString("g.Key", corrClr)}), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
+        `        await using var conn = await _db.OpenConnectionAsync();\n` +
+        `        var rows = (await conn.QueryAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table}"))).Select(${mapFn});\n` +
         `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
       byIdBody =
-        `        var __sid = id.ToString();\n` +
-        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
-        `        if (__rows.Count == 0) return NotFound();\n` +
-        `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
+        `        await using var conn = await _db.OpenConnectionAsync();\n` +
+        `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table} WHERE ${pkCol} = @id", new { id }));\n` +
+        `        if (__row is null) return NotFound();\n` +
+        `        var x = ${mapFn}(__row);\n` +
         `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
     } else {
       listBody =
@@ -2205,13 +2270,20 @@ function renderInstancesController(
     );
   }
   const extraUsings = [...usings].sort().map((n) => `using ${n};`);
+  const persistenceUsings = usingDapper
+    ? "using Dapper;\nusing Npgsql;"
+    : "using Microsoft.EntityFrameworkCore;";
+  const ctorField = usingDapper
+    ? `    private readonly NpgsqlDataSource _db;\n    public ${className}(NpgsqlDataSource db) => _db = db;`
+    : `    private readonly AppDbContext _db;\n    public ${className}(AppDbContext db) => _db = db;`;
+  const memberDecls = usingDapper && rowMapDecls.length > 0 ? `${rowMapDecls.join("\n")}\n\n` : "";
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
+${persistenceUsings}${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
 using ${ns}.Application.Workflows;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
@@ -2224,10 +2296,9 @@ namespace ${ns}.Api;
 [Route("${route}")]
 public sealed class ${className} : ControllerBase
 {
-    private readonly AppDbContext _db;
-    public ${className}(AppDbContext db) => _db = db;
+${ctorField}
 
-${blocks.join("\n")}
+${memberDecls}${blocks.join("\n")}
 }
 `;
 }

@@ -75,6 +75,13 @@ import {
   renderDapperRepository,
   renderDapperSchema,
 } from "./emit/dapper.js";
+import {
+  dapperPortRegistrations,
+  dapperWorkflowTables,
+  emitDapperWorkflowInfra,
+  renderDapperOutboxDispatcher,
+  renderDapperOutboxRelay,
+} from "./emit/dapper-workflow.js";
 import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
 import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
@@ -347,11 +354,18 @@ function emitProjectFromContexts(
     // `commandHandler` / `queryHandler` Mediator records + handlers.  A no-op
     // for a context that declares none.
     emitExplicitHandlers(ctx, ns, out);
-    emitWorkflowInstanceReads(ctx, ns, out, ownerOf, { routePrefix });
+    emitWorkflowInstanceReads(ctx, ns, out, ownerOf, {
+      routePrefix,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
     // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
     emitProjectionReads(ctx, ns, out, { routePrefix });
-    emitViews(ctx, ns, out, { routePrefix, sourcemap });
+    emitViews(ctx, ns, out, {
+      routePrefix,
+      sourcemap,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A1): one
   // ControllerBase per served api whose `route` list is non-empty, dispatching
@@ -379,21 +393,35 @@ function emitProjectFromContexts(
     emitProjectionDispatch(merged, ns, out);
   }
   // Transactional outbox (dispatch-delivery-semantics.md): durable channels
-  // (`retention: log | work`) record their events in __loom_outbox (EF
-  // entity over the MigrationsIR-owned table) and a relay BackgroundService
-  // delivers them at-least-once.  EF persistence only — the Dapper outbox is
-  // a follow-up slice.
+  // (`retention: log | work`) record their events in __loom_outbox and a relay
+  // BackgroundService delivers them at-least-once.  BOTH persistence adapters
+  // now emit it (M-T6.9): efcore maps the EF `OutboxMessage` entity onto the
+  // MigrationsIR-owned table; dapper INSERTs/UPDATEs the same __loom_outbox
+  // (DbSchema-owned DDL) through raw Npgsql.  The `OutboxDelivery` AsyncLocal
+  // carrier + the dispatcher/relay class NAMES are identical, so Program.cs's
+  // registration lines are shared.
   const durableTypes = [...new Set(contexts.flatMap((c) => [...durableEventTypes(c)]))].sort();
-  const hasOutbox =
-    hasSubscriptions && system?.deployable.persistence !== "dapper" && durableTypes.length > 0;
+  const outboxUsesDapper = system?.deployable.persistence === "dapper";
+  const hasOutbox = hasSubscriptions && durableTypes.length > 0;
   if (hasOutbox) {
     out.set("Domain/Common/OutboxDelivery.cs", renderOutboxDelivery(ns));
-    out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
-    out.set(
-      "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
-      renderOutboxDispatcher(ns, durableTypes),
-    );
-    out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+    if (outboxUsesDapper) {
+      out.set(
+        "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
+        renderDapperOutboxDispatcher(ns, durableTypes),
+      );
+      out.set(
+        "Infrastructure/Events/OutboxRelayService.cs",
+        renderDapperOutboxRelay(ns, durableTypes),
+      );
+    } else {
+      out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
+      out.set(
+        "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
+        renderOutboxDispatcher(ns, durableTypes),
+      );
+      out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+    }
   }
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
@@ -454,6 +482,17 @@ function emitProjectFromContexts(
   const docAggSet = documentAggNames(contexts, system?.sys);
   const embAggSet = embeddedAggNames(contexts, system?.sys);
   if (usingDapper) {
+    // Workflow / saga / outbox / projection DDL (M-T6.9): the raw-Npgsql
+    // siblings of the EF-migration-owned tables, spliced into DbSchema.cs
+    // alongside the aggregate / event-log / provenance tables.  The
+    // `<ctx>_events` log itself is already carried by `eventLogContexts`.
+    const dapperWfDurable = durableEventTypes(merged).size > 0;
+    const dapperWorkflowDdl = dapperWorkflowTables(
+      merged.workflows,
+      merged.projections,
+      dapperWfDurable,
+      hasOutbox,
+    );
     out.set(
       "Infrastructure/Persistence/DbSchema.cs",
       renderDapperSchema(
@@ -462,8 +501,24 @@ function emitProjectFromContexts(
         eventLogContexts(contexts).map((c) => snake(c.name)),
         docAggSet,
         embAggSet,
+        dapperWorkflowDdl,
       ),
     );
+    // Workflow / saga / event-store / projection port adapters + the reused
+    // persistence-neutral row POCOs (M-T6.9) — the raw-Npgsql siblings of the
+    // EF PersistencePorts.cs; the EF configs / AppDbContext are NOT emitted.
+    emitDapperWorkflowInfra(
+      ns,
+      merged.workflows,
+      merged.projections,
+      eventLogContexts(contexts).map((c) => c.name),
+      dapperWfDurable,
+      out,
+    );
+    // Event-sourced workflow fold classes (Application/Workflows/<Wf>State.cs)
+    // are persistence-neutral (JSON codec over the event stream) — reused
+    // verbatim on the Dapper path, driven by the same `<ctx>_events` log.
+    emitEventSourcedWorkflowFiles(merged.workflows, ns, out, ownerOf);
     // The shared provenance lineage SDK (ProvLineage) — the entity's co-located
     // `<Field>Provenance` property is typed by it.  The EF ProvenanceRecord POCO
     // / EntityTypeConfiguration are NOT emitted (EF-only); the Dapper repository
@@ -702,6 +757,17 @@ function emitProjectFromContexts(
     hasOutbox,
     hasAudit,
     hasProvenance,
+    // Dapper persistence-port DI (M-T6.9): closed bindings keyed off the
+    // pre-merge event-log context names — computed here (index has `contexts`)
+    // and threaded to Program.cs.  Empty on the EF path (it uses open generics).
+    dapperPortRegistrations: usingDapper
+      ? dapperPortRegistrations(
+          ns,
+          merged.workflows,
+          merged.projections,
+          eventLogContexts(contexts).map((c) => c.name),
+        )
+      : [],
     resourceNugetDeps: resourceEmission.nugetDeps,
     oidc: !!(authRequired && system?.sys.auth),
     // Tenant hierarchy (multi-tenancy P2.2): the registry opts into
@@ -1425,6 +1491,10 @@ function emitProject(
      *  the `AddHostedService<…>()` registrations (Program.cs) and — when any
      *  uses `cron:` — the Cronos NuGet ref (csproj).  Empty ⇒ byte-identical. */
     timers?: TimerSourceIR[];
+    /** Dapper persistence-port DI (M-T6.9): the closed `AddScoped<…>` binding
+     *  lines for the workflow / projection / event-store adapters (empty on the
+     *  EF path). */
+    dapperPortRegistrations?: string[];
   },
 ): void {
   // Scrutor scan (+ package ref) is needed when the project emits any
@@ -1461,6 +1531,7 @@ function emitProject(
       orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,
       timerServices: timerServiceFqns(timers, ns),
+      dapperPortRegistrations: options?.dapperPortRegistrations,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;

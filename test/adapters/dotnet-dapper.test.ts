@@ -344,7 +344,12 @@ system D {
     );
   });
 
-  it("rejects workflow event subscriptions (saga handlers + outbox need the EF AppDbContext)", async () => {
+  // M-T6.9: workflow event subscriptions are now WIRED on the Dapper adapter.
+  // The saga handlers depend on the persistence-neutral Domain.Common ports,
+  // whose raw-Npgsql adapters (DapperPersistencePorts.cs) replace the EF ones;
+  // the saga-state table lands in DbSchema and the instances read controller
+  // reads through NpgsqlDataSource.
+  it("accepts a state saga (ephemeral channel); emits the Dapper saga store, no outbox", async () => {
     const src = `
       system D {
         api A from S
@@ -359,10 +364,122 @@ system D {
         resource s { for: O, kind: state, use: pg }
         deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
       }`;
-    const { errors } = await emit(src);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the workflow-subscription gate is lifted
+    // The persistence-neutral saga handler injects ISagaStateStore<WState>;
+    // the Dapper closed adapter replaces the EF one (no AppDbContext).
+    const ports = files.get("api/Infrastructure/Persistence/DapperPersistencePorts.cs")!;
+    expect(ports).toBeDefined();
+    expect(ports).toContain(
+      "public sealed class DapperWStateStore : ISagaStateStore<global::Api.Infrastructure.Persistence.Workflows.WState>",
+    );
+    expect(ports).toContain("private readonly NpgsqlDataSource _db;");
+    expect(ports).toContain("public sealed class DapperUnitOfWork : IUnitOfWork");
+    expect(ports).not.toContain("AppDbContext");
+    // The saga-state table ships in DbSchema (not an EF migration).
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")!).toContain(
+      "CREATE TABLE IF NOT EXISTS ws (",
+    );
+    // Ephemeral channel → NO outbox (no durable events).
+    expect(files.has("api/Infrastructure/Events/OutboxRelayService.cs")).toBe(false);
+    // The workflow instances read controller reads through NpgsqlDataSource.
+    const ctrl = files.get("api/Api/OWorkflowInstancesController.cs")!;
+    expect(ctrl).toContain("private readonly NpgsqlDataSource _db;");
+    expect(ctrl).not.toContain("AppDbContext");
+    // No EF PersistencePorts / DbContext on the Dapper deployable.
+    expect(files.has("api/Infrastructure/Persistence/PersistencePorts.cs")).toBe(false);
+    expect(files.has("api/Infrastructure/Persistence/AppDbContext.cs")).toBe(false);
+    // Program.cs binds the closed Dapper port + the saga store (no open generics).
+    const program = files.get("api/Program.cs")!;
+    expect(program).toContain(
+      "builder.Services.AddScoped<Api.Domain.Common.IUnitOfWork, Api.Infrastructure.Persistence.DapperUnitOfWork>();",
+    );
+    expect(program).toContain("Api.Infrastructure.Persistence.DapperWStateStore>();");
+  });
+
+  it("accepts a durable channel; emits the Dapper outbox dispatcher + relay + __loom_outbox DDL", async () => {
+    const src = `
+      system D {
+        api A from S
+        subdomain S { context O {
+          aggregate Order with crudish { customer: string }
+          repository Orders for Order { }
+          event OrderPlaced { order: Order id }
+          channel Lifecycle { carries: OrderPlaced  delivery: queue  retention: log }
+          workflow W { orderId: Order id  create(p: OrderPlaced) by p.order { } }
+        } }
+        storage pg { type: postgres }
+        resource s { for: O, kind: state, use: pg }
+        deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+      }`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    // Dapper outbox dispatcher + relay — raw Npgsql, no AppDbContext / EF.
+    const dispatcher = files.get("api/Infrastructure/Events/OutboxDomainEventDispatcher.cs")!;
+    expect(dispatcher).toContain("private readonly NpgsqlDataSource _db;");
+    expect(dispatcher).toContain("INSERT INTO __loom_outbox (type, payload)");
+    expect(dispatcher).not.toContain("AppDbContext");
+    const relay = files.get("api/Infrastructure/Events/OutboxRelayService.cs")!;
+    expect(relay).toContain(": BackgroundService");
+    expect(relay).toContain("FROM __loom_outbox WHERE dispatched_at IS NULL");
+    expect(relay).not.toContain("Microsoft.EntityFrameworkCore");
+    // The __loom_outbox DDL ships in DbSchema (not an EF migration); the EF
+    // OutboxMessage POCO is NOT emitted on the Dapper path.
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")!).toContain(
+      "CREATE TABLE IF NOT EXISTS __loom_outbox (",
+    );
+    expect(files.has("api/Infrastructure/Persistence/OutboxMessage.cs")).toBe(false);
+    // The idempotent-consumer marker column rides the durable saga table.
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")!).toContain(
+      "last_event_id text",
+    );
+    // Program.cs registers the same three dispatcher/relay lines the EF path uses.
+    const program = files.get("api/Program.cs")!;
+    expect(program).toContain("builder.Services.AddHostedService<OutboxRelayService>();");
+    expect(program).toContain(
+      "builder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();",
+    );
+  });
+
+  it("accepts an event-sourced workflow; emits the Dapper event store over <ctx>_events", async () => {
+    const src = `
+      system D {
+        api A from S
+        subdomain S { context O {
+          aggregate Order with crudish { customer: string }
+          repository Orders for Order { }
+          event OrderPlaced { order: Order id }
+          event Paid { order: Order id }
+          channel Lifecycle { carries: OrderPlaced, Paid  delivery: broadcast  retention: ephemeral }
+          workflow W eventSourced {
+            orderId: Order id
+            amount: int
+            create(p: OrderPlaced) by p.order { emit Paid { order: p.order } }
+            apply(pr: Paid) { amount := amount + 1 }
+          }
+        } }
+        storage pg { type: postgres }
+        resource s { for: O, kind: state, use: pg }
+        resource wf { for: O, kind: eventLog, use: pg }
+        deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s, wf]  serves: A  port: 8080 }
+      }`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const ports = files.get("api/Infrastructure/Persistence/DapperPersistencePorts.cs")!;
+    // Per-context Dapper event store over the shared <ctx>_events log.
+    expect(ports).toContain(
+      "public sealed class DapperOEventRecordStore : IWorkflowEventStore<global::Api.Infrastructure.Persistence.Events.OEventRecord>",
+    );
+    expect(ports).toContain("FROM o_events WHERE stream_type = @streamType");
+    // The persistence-neutral event-record POCO is reused (no EF config).
+    expect(files.has("api/Infrastructure/Persistence/Events/OEventRecord.cs")).toBe(true);
     expect(
-      errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
-    ).toBe(true);
+      files.has("api/Infrastructure/Persistence/Configurations/OEventRecordConfiguration.cs"),
+    ).toBe(false);
+    // The <ctx>_events log ships in DbSchema.
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")!).toContain(
+      "CREATE TABLE IF NOT EXISTS o_events (",
+    );
   });
   it("still rejects a non-relational saving shape outside {document, embedded} (part-in-part on embedded)", async () => {
     // Embedded is supported for FLAT-part containments; a part-in-part stays

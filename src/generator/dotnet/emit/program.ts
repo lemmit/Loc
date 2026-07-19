@@ -98,6 +98,11 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
+    /** Dapper persistence-port DI (M-T6.9): the CLOSED `AddScoped<…>` binding
+     *  lines for the workflow / projection / event-store adapters.  Computed in
+     *  index.ts (it holds the pre-merge context names the event stores key
+     *  off).  Consumed only when `usingDapper` — the EF path uses open generics. */
+    dapperPortRegistrations?: string[];
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -201,8 +206,14 @@ using (var seedScope = app.Services.CreateScope())
   // — the exact gate PersistencePorts.cs is emitted under (index.ts).
   const usesPersistencePorts =
     (ctx.workflows?.length ?? 0) > 0 || (ctx.projections?.length ?? 0) > 0;
+  // The Dapper path binds CLOSED port implementations (one per workflow /
+  // projection / event-log context — no open-generic AppDbContext adapter),
+  // computed in index.ts (it has the pre-merge context names the closed event
+  // stores key off) and threaded in.  The EF path keeps the open generics.
   const portsDi = usesPersistencePorts
-    ? `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+    ? usingDapper
+      ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
+      : `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
