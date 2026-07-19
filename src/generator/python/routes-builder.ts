@@ -51,6 +51,7 @@ import {
 } from "../../util/error-defaults.js";
 import { messageCode } from "../../util/message-code.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
@@ -217,7 +218,9 @@ export function buildPyRoutesFile(
     `"""${agg.name} HTTP routes + wire DTOs.  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
-    refersTo("datetime") ? "from datetime import datetime" : null,
+    refersTo("datetime")
+      ? `from datetime import ${refersTo("UTC") ? "UTC, datetime" : "datetime"}`
+      : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
@@ -240,7 +243,16 @@ export function buildPyRoutesFile(
       // A find `requires` gate that reads currentUser binds `current_user: User`.
       emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
       (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
-      (publicOps.length > 0 && stampUsesUser(agg, "update"))
+      (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
+      // A `currentUser.*` create-field default binds `current_user: User` in
+      // the create handler for its per-request coalesce.
+      (hasCreateFactory(agg) &&
+        forCreateInput(agg.fields).some(
+          (f) =>
+            f.default !== undefined &&
+            isServerSourcedDefault(f.default) &&
+            exprUsesCurrentUser(f.default),
+        ))
       ? "from app.auth.user import User"
       : null,
     "from app.db.engine import get_session",
@@ -676,6 +688,16 @@ export function requestFieldDecl(
   defaultExpr?: ExprIR,
 ): string {
   const base = requestPyType(t, ctx);
+  // A SERVER-SOURCED default (`now()` / `currentUser.*`) must NOT be a Pydantic
+  // field default: the expression is evaluated once at class definition (module
+  // load), so `= datetime.now(UTC)` freezes every omitted row to boot time, and
+  // `= current_user.tenant_id` is an outright import-time AttributeError (the
+  // module-level `current_user` is the accessor function, not a request user).
+  // Emit the field as optional (`| None = None`); the create handler coalesces
+  // the per-request value.
+  if (defaultExpr && isServerSourcedDefault(defaultExpr)) {
+    return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
+  }
   if (defaultExpr) return `${base} = ${renderPyExpr(defaultExpr)}`;
   const isOpt = optional || t.kind === "optional";
   if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
@@ -780,13 +802,31 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     );
   }
   const inputs = forCreateInput(agg.fields);
+  // A server-sourced field default (`now()` / `currentUser.*`) is applied
+  // per-request HERE (the request field is optional): the factory arg coalesces
+  // the client's value with the freshly-evaluated default.  In the handler body
+  // `renderPyExpr` yields `datetime.now(UTC)` / `current_user.<claim>` off the
+  // request-scoped local — authoritative server-side, not frozen at import.
   const args = inputs
-    .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)
+    .map((f) => {
+      const wire = pyWireToDomain(`body.${f.name}`, f.type, ctx);
+      if (f.default !== undefined && isServerSourcedDefault(f.default)) {
+        return `${snake(f.name)}=${wire} if body.${f.name} is not None else ${renderPyExpr(f.default)}`;
+      }
+      return `${snake(f.name)}=${wire}`;
+    })
     .join(", ");
   // Lifecycle stamps (audit / softDelete): apply onCreate stamps right before
   // the persist.  A principal-referencing stamp threads `current_user` off the
-  // request scope (the route then takes a `request: Request` param).
-  const stampUsesPrincipal = stampUsesUser(agg, "create");
+  // request scope (the route then takes a `request: Request` param).  A
+  // `currentUser.*` field default needs the same binding.
+  const defaultUsesPrincipal = inputs.some(
+    (f) =>
+      f.default !== undefined &&
+      isServerSourcedDefault(f.default) &&
+      !(f.default.kind === "literal" && f.default.lit === "now"),
+  );
+  const stampUsesPrincipal = stampUsesUser(agg, "create") || defaultUsesPrincipal;
   const sig = [
     `body: Create${agg.name}Request`,
     ...(stampUsesPrincipal ? ["request: Request"] : []),

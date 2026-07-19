@@ -13,6 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
 import {
   aggregateResponseParams,
@@ -301,6 +302,21 @@ export function emitRequestDtos(
       // params is wire- and call-safe; sort the defaulted (optional) params
       // after the required ones so the record always compiles.
       const d = wireCreateDefault(f);
+      // A SERVER-SOURCED default (`now()` / `currentUser.*`) is NOT a
+      // compile-time-constant record default — `renderCsExpr(now())` is
+      // `DateTime.UtcNow`, which C# rejects as a default parameter value
+      // (CS1736).  Emit the field as a NULLABLE optional param (`Type? Name =
+      // null`) instead; the create command construction coalesces the
+      // per-request value (`request.Name is null ? <now()/currentUser.*> :
+      // <parse>`) — the .NET twin of the Hono optional-wire + coalesce.
+      const serverSourced = d !== undefined && isServerSourcedDefault(d);
+      if (serverSourced) {
+        const wt = wireType(f.type, ctx, "request");
+        return {
+          hasDefault: true,
+          s: dtoParam(wt.endsWith("?") ? wt : `${wt}?`, upperFirst(f.name), "request", "null"),
+        };
+      }
       return {
         hasDefault: d !== undefined,
         s: dtoParam(

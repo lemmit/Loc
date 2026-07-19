@@ -1,4 +1,7 @@
-import { serverSourcedDefaultFields } from "../../../generator/_frontend/server-default.js";
+import {
+  isServerSourcedDefault,
+  serverSourcedDefaultFields,
+} from "../../../generator/_frontend/server-default.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   discriminatedUnionZod,
@@ -319,6 +322,13 @@ export function buildRoutesFile(
           // `.default(...)` lands AFTER any `.min`/`.max` chain (a
           // `ZodDefault` has no `.min`).
           const d = f.default;
+          // A SERVER-SOURCED default (`now()` / `currentUser.*`) cannot be a
+          // wire `.default(...)`: a Zod default literal is evaluated ONCE at
+          // schema-build (module load), so `.default(new Date())` freezes every
+          // omitted row to the server's boot time.  Instead the field is
+          // wire-OPTIONAL and the create handler coalesces the per-request
+          // value (`body.X ?? <now()/currentUser.*>`) — see the factory call.
+          const serverSourced = d !== undefined && isServerSourcedDefault(d);
           // A non-nullable bool's `.default(false)` normally comes from
           // `zodFor` (the implicit bool rule).  When the field carries an
           // EXPLICIT default we drop that baked-in `.default(false)` and let
@@ -332,8 +342,12 @@ export function buildRoutesFile(
             !info.isCollection;
           return {
             name: f.name,
-            base: plainBool && d !== undefined ? "z.coerce.boolean()" : zodFor(f.type),
-            default: d ? wireDefaultLiteral(f.type, d) : undefined,
+            base:
+              plainBool && d !== undefined && !serverSourced
+                ? "z.coerce.boolean()"
+                : zodFor(f.type),
+            default: d && !serverSourced ? wireDefaultLiteral(f.type, d) : undefined,
+            optional: serverSourced || undefined,
           };
         }),
         agg.invariants,
@@ -544,11 +558,35 @@ export function buildRoutesFile(
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const body = c.req.valid("json");`);
+    // A server-sourced default (`now()` / `currentUser.*`) is applied
+    // per-request HERE, not as a frozen wire `.default(...)`: the field is
+    // wire-optional, so the factory arg coalesces the client's value with the
+    // freshly-evaluated default (`body.X ?? new Date()`, `?? currentUser.*`).
+    // This makes the default authoritative server-side (a raw client that omits
+    // it still gets the real value) and fixes the boot-time-frozen `now()`.
+    const serverDefaulted = requiredFields.filter(
+      (f) => f.default !== undefined && isServerSourcedDefault(f.default),
+    );
+    // A `currentUser.*` default needs the ambient principal bound (a bare
+    // `now()` does not) — the same accessor the `/prepare` route uses.
+    if (serverDefaulted.some((f) => !(f.default!.kind === "literal" && f.default!.lit === "now"))) {
+      lines.push(
+        `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+      );
+    }
     // Wrap each wire-shape field into the typed factory argument (brand
     // ids, instantiate value objects).  Avoids `as never` and lets
     // strict tsc catch shape drift between Zod and the domain class.
     const createArgs = requiredFields
-      .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
+      .map((f) => {
+        const wire = wireToDomainExpr(`body.${f.name}`, f.type, ctx);
+        if (f.default !== undefined && isServerSourcedDefault(f.default)) {
+          // `renderTsExpr` yields the DOMAIN-typed value (`new Date()`, not the
+          // wire ISO string), matching the factory's expected type.
+          return `${f.name}: body.${f.name} !== undefined ? ${wire} : ${renderTsExpr(f.default)}`;
+        }
+        return `${f.name}: ${wire}`;
+      })
       .join(", ");
     lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
     // Lifecycle stamps (createdAt/createdBy/…) are NO LONGER set here.
@@ -1839,7 +1877,7 @@ export function emitWireSchema(
   // `ZodDefault` that no longer exposes `.min`/`.max` — emitting
   // `.default(3).min(1)` is a type error that poisons the whole object
   // schema's inferred type (every `body.<field>` then becomes `unknown`).
-  fields: { name: string; base: string; default?: string }[],
+  fields: { name: string; base: string; default?: string; optional?: boolean }[],
   invariants: InvariantIR[],
   available: ReadonlySet<string>,
 ): string[] {
@@ -1868,9 +1906,13 @@ export function emitWireSchema(
     if (patterns) {
       for (const p of patterns) schema = chainSingleFieldNative(schema, p);
     }
-    // `.default(...)` last: it wraps the (now constrained) schema in a
-    // ZodDefault, so any `.min`/`.max` must already be applied above.
+    // `.default(...)` / `.optional()` last: each wraps the (now constrained)
+    // schema in a ZodDefault / ZodOptional, so any `.min`/`.max` must already
+    // be applied above.  A server-sourced default (`now()`/`currentUser.*`) is
+    // wire-OPTIONAL (the server applies the real value per-request in the
+    // create handler) rather than carrying a frozen `.default(...)` literal.
     if (f.default !== undefined) schema = `${schema}.default(${f.default})`;
+    else if (f.optional) schema = `${schema}.optional()`;
     out.push(`  ${f.name}: ${schema},`);
   }
   out.push(`}).openapi("${openapiName}")${refines.join("")};`);

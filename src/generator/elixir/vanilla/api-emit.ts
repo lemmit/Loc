@@ -14,7 +14,10 @@
 // extension shape byte-identical to the other backends) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import { emitsRestCreate as sharedEmitsRestCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createInputFields,
+  emitsRestCreate as sharedEmitsRestCreate,
+} from "../../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -26,14 +29,17 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
+import { renderExpr as renderElixirExpr } from "../render-expr.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
@@ -269,11 +275,33 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
   // requires `auth: required` for a principal stamp).  Non-principal stamps
   // (`createdAt := now()`) need no actor, so the write seam stays byte-identical.
   const stampPrincipal = stampUsesPrincipal(agg);
+  // Server-sourced field defaults (`now()` / `currentUser.*`): applied
+  // per-request in the create action by coalescing the wire params BEFORE the
+  // changeset (`params["createdAt"] || DateTime.utc_now()`), so an omitted key
+  // materialises the real per-request value instead of failing `validate_required`
+  // — the Phoenix twin of the node/.NET/python/java coalesce.
+  const serverDefaults = createInputFields(agg).filter(
+    (f) => f.default !== undefined && isServerSourcedDefault(f.default),
+  );
+  const defaultUsesPrincipal = serverDefaults.some((f) => exprUsesCurrentUser(f.default));
+  // The wire keys are camelCase (`params` is the raw JSON body); the changeset
+  // snake-cases them downstream, so coalesce on the camelCase key here.
+  const createParamDefaults =
+    serverDefaults.length === 0
+      ? ""
+      : `    params =\n      params\n${serverDefaults
+          .map(
+            (f) =>
+              `      |> Map.put(${JSON.stringify(f.name)}, params[${JSON.stringify(f.name)}] || ${renderElixirExpr(f.default as NonNullable<typeof f.default>)})`,
+          )
+          .join("\n")}\n`;
   // The create action has no read-filter `cuBind`, so bind `current_user` there
-  // when a principal stamp needs it.
-  const createCuBind = stampPrincipal
-    ? "    current_user = Map.get(conn.assigns, :current_user)\n"
-    : "";
+  // when a principal stamp OR a `currentUser.*` field default needs it.  The
+  // params coalesce runs after the bind (it may read `current_user`).
+  const createCuBind =
+    stampPrincipal || defaultUsesPrincipal
+      ? `    current_user = Map.get(conn.assigns, :current_user)\n${createParamDefaults}`
+      : createParamDefaults;
   const createActor = stampPrincipal ? ", current_user" : "";
   // The update action already binds `current_user` when the aggregate has a
   // principal READ filter; bind it here too when only a principal stamp needs

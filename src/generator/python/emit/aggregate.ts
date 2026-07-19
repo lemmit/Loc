@@ -252,7 +252,12 @@ export function renderPyAggregate(
     bodyUsesCast ? "from typing import cast" : null,
     usesDatetime || exprImports.has("timedelta")
       ? `from datetime import ${[
-          ...(usesDatetime ? ["UTC", "datetime"] : []),
+          // `UTC` only when the body actually stamps `datetime.now(UTC)` (a
+          // server-init seed / fold-from-zero) — a plain datetime FIELD uses
+          // the type but never `UTC`, so importing it unconditionally is a stale
+          // F401 (ruff --warnings-as-errors).  `usesDatetime` gates the type.
+          ...(refersTo("UTC") ? ["UTC"] : []),
+          ...(usesDatetime ? ["datetime"] : []),
           ...(exprImports.has("timedelta") ? ["timedelta"] : []),
         ].join(", ")}`
       : null,
