@@ -113,27 +113,42 @@ export async function startPostgres(label: string): Promise<PgParts> {
   };
 }
 
+// Mailpit is started with SMTP AUTH REQUIRED (MP_SMTP_AUTH) — not accept-any —
+// so a backend that ignores the credentials in MAIL_URL fails to deliver and
+// its e2e cell goes red.  That is the point: this proves each backend actually
+// authenticates.  ALLOW_INSECURE lets the auth happen over the plain (no-TLS)
+// dev connection.
+export const MAILPIT_USER = "loom";
+export const MAILPIT_PASS = "s3cr3t";
+
 export interface Mailpit {
-  /** `host:port` SMTP endpoint the backend's MAIL_URL points at. */
+  /** `host:port` SMTP endpoint (no credentials). */
   smtp: string;
+  /** `smtp://user:pass@host:port` — the authenticated URL for MAIL_URL. */
+  authUrl: string;
   /** REST inbox base (`http://host:port`). */
   api: string;
   stop: () => void;
 }
 
-/** Spin (or reuse) a Mailpit sidecar (SMTP endpoint + REST inbox). */
+/** Spin (or reuse) a Mailpit sidecar (auth-required SMTP endpoint + REST inbox). */
 export async function startMailpit(label: string): Promise<Mailpit> {
   const smtpOverride = process.env.LOOM_MAILPIT_SMTP;
   const apiOverride = process.env.LOOM_MAILPIT_API;
   if (smtpOverride && apiOverride) {
-    return { smtp: smtpOverride, api: apiOverride.replace(/\/$/, ""), stop: () => {} };
+    return {
+      smtp: smtpOverride,
+      authUrl: `smtp://${MAILPIT_USER}:${MAILPIT_PASS}@${smtpOverride}`,
+      api: apiOverride.replace(/\/$/, ""),
+      stop: () => {},
+    };
   }
   const name = `loom-mailpit-${label}-${process.pid}`;
   const smtpPort = await freePort();
   const apiPort = await freePort();
   execSync(
     `docker run -d --rm --name ${name} ` +
-      `-e MP_SMTP_AUTH_ACCEPT_ANY=1 -e MP_SMTP_AUTH_ALLOW_INSECURE=1 ` +
+      `-e MP_SMTP_AUTH=${MAILPIT_USER}:${MAILPIT_PASS} -e MP_SMTP_AUTH_ALLOW_INSECURE=1 ` +
       `-p ${smtpPort}:1025 -p ${apiPort}:8025 axllent/mailpit:latest`,
     { stdio: "pipe", timeout: 60_000 },
   );
@@ -150,6 +165,7 @@ export async function startMailpit(label: string): Promise<Mailpit> {
   }
   return {
     smtp: `127.0.0.1:${smtpPort}`,
+    authUrl: `smtp://${MAILPIT_USER}:${MAILPIT_PASS}@127.0.0.1:${smtpPort}`,
     api,
     stop: () => {
       try {

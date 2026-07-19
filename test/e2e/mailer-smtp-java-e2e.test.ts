@@ -90,7 +90,7 @@ describe.skipIf(!ENABLED)(
             SPRING_DATASOURCE_URL: `jdbc:postgresql://${pg.host}:${pg.port}/${pg.db}`,
             SPRING_DATASOURCE_USERNAME: pg.user,
             SPRING_DATASOURCE_PASSWORD: pg.password,
-            MAIL_URL: `smtp://${mailpit.smtp}`,
+            MAIL_URL: mailpit.authUrl,
             SERVER_PORT: String(port),
           },
           stdio: ["ignore", "pipe", "pipe"],

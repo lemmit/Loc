@@ -96,7 +96,7 @@ describe.skipIf(!ENABLED)(
           env: {
             ...process.env,
             DATABASE_URL: dbUrl,
-            MAIL_URL: `smtp://${mailpit.smtp}`,
+            MAIL_URL: mailpit.authUrl,
             PHX_SERVER: "true",
             PORT: String(port),
             MIX_ENV: "dev",

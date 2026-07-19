@@ -96,6 +96,15 @@ kind `email`. Every mailer sourceType requires a `from:` config key (`ses` also
 accepts a `region:`), and `smtp` gains a **Mailpit** dev sidecar in the emitted
 `docker-compose.yml` (a catch-all SMTP server with a web inbox on `:8025`).
 
+**Credentials never live in `.ddd` source.** They ride the connection URL at
+runtime: the `smtp` client reads `<RESOURCE>_URL` (default `smtp://<name>:1025`,
+the auth-less dev Mailpit), and when that URL carries userinfo
+(`smtp://user:pass@relay:587`) every backend authenticates — with STARTTLS when
+available, or implicit TLS for `smtps://`. Provider sourceTypes read a
+per-runtime key (`SENDGRID_API_KEY`; SES uses the AWS credential chain +
+`<RESOURCE>_REGION`). Point `<RESOURCE>_URL` / the provider key at an env var or
+secret in your deployment to send through a real relay.
+
 The validator rejects a `kind` on an incompatible sourceType
 (`loom.kind-incompatible`). The persistence kinds (`state`/`snapshot`/`replica`)
 are modelled internally as capabilities under a `database` infra-kind; that

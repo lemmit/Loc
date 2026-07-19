@@ -80,7 +80,7 @@ describe.skipIf(!ENABLED)(
             env: {
               ...process.env,
               DATABASE_URL: `postgresql+asyncpg://${pg.user}:${pg.password}@${pg.host}:${pg.port}/${pg.db}`,
-              MAIL_URL: `smtp://${mailpit.smtp}`,
+              MAIL_URL: mailpit.authUrl,
               PORT: String(port),
             },
             stdio: ["ignore", "pipe", "pipe"],
