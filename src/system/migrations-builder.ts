@@ -1108,6 +1108,13 @@ export function applyDestructivePolicy(
     (s) =>
       s.op === "dropTable" ||
       s.op === "dropColumn" ||
+      // A column type change is destructive: it emits `ALTER COLUMN ... TYPE t
+      // USING col::t`, which fails at apply time on any row that doesn't cast
+      // (`string -> int` on a non-numeric value) or silently truncates
+      // (`decimal -> int`).  Loom's type surface exposes no intra-family width
+      // distinctions (a single `int`/`decimal`/`string`), so every type change
+      // is a cross-representation change — none is a provably-safe widening.
+      s.op === "alterColumnType" ||
       isBlockingNotNullAdd(s) ||
       (s.op === "alterColumnNullable" && !s.nullable && !safeFlips.has(s)),
   );
@@ -1565,7 +1572,13 @@ function resolveRenames(
     const agg = ctx.aggregates.find((a) => a.name === ri.aggregate);
     if (!agg) continue;
     out.push({
-      table: plural(snake(ri.aggregate)),
+      // A TPH concrete owns NO table of its own — its columns live on the TPH
+      // root's shared table.  Route through `tableOwnerName` (as resolveBackfills
+      // / resolveTableRenames do) so a `rename Concrete.x -> y` targets the base
+      // table; `plural(snake(ri.aggregate))` would index the rename under a
+      // nonexistent `concretes` table, so diffTable would never see it and the
+      // declared rename would silently degrade to a drop+add (data loss).
+      table: plural(snake(tableOwnerName(agg, ctx.aggregates))),
       schema: schemaOf(agg, ctx),
       from: snake(ri.from),
       to: snake(ri.to),
