@@ -53,7 +53,7 @@ Sources: [error-handling-and-failure-sink](../old/proposals/error-handling-and-f
 The `loom.store-lifetime-unsupported` gate is RETIRED (`store-checks.ts:12,77` — "supported on every frontend"); the parity register's "gated on all targets" row was stale. Residual worth a look before deleting this entry: LiveView in-memory tier + `flow`/`machine` stay demand-pulled per [frontend-state-management](../old/proposals/frontend-state-management.md).
 
 ## M-T1.10 — Realtime beyond toast — `partial` · **L** · P2
-`on <channel>.<Event>` handlers are toast-only (`loom.ui-handler-unsupported`); SSE ships on Hono+React/Vue/Svelte only. Slices: richer handler bodies (refetch/invalidate binding), .NET + Phoenix realtime wire, then rooms/edge-relay/policy-derived routing (blocked on T3 authorization item 3).
+`on <channel>.<Event>` handlers are toast-only (`loom.ui-handler-unsupported`; `UiNotificationIR` has no slot for anything else); SSE ships on Hono+React/Vue/Svelte only. Verified 2026-07-18: the backend gap is wider than ".NET + Phoenix" — **Java and Python** emit no realtime wire either, and on the frontend **Angular and Feliz silently drop** `channel`/`on` (compiles clean, emits nothing — no validator gate). Slices: richer handler bodies (refetch/invalidate binding), .NET/Phoenix/Java(/Python) realtime wire (Phoenix natively via `Phoenix.PubSub.subscribe` + `handle_info`, no SSE client), Feliz + Angular consumption (+ an honesty gate for targets without the wire), then rooms/edge-relay/policy-derived routing (blocked on T3 authorization item 3 = M-T3.2 item 3, operation/workflow `requires` gates — verified unstarted).
 Sources: [channels](../old/proposals/channels.md) realtime sections, global-plan T3.7.
 
 ## M-T1.11 — i18n — `open` · **XL** · P2
