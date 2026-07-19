@@ -123,7 +123,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "loom_apply_patch",
     description:
-      "Apply node-addressed model patches to a .ddd source. Each patch is { op: add|replace|remove|insert, target: <node address>, source?: <.ddd text>, position? }. add appends a member to a free-body container; replace/remove edit the targeted node; insert places source before/after a sibling or at header-end (before the target's opening '{', for header clauses). Atomic — if any patch fails to resolve, nothing is applied. Returns the patched source or per-patch errors.",
+      "Apply node-addressed model patches to a .ddd source. Each patch is { op: add|replace|remove|insert|rename, target: <node address>, source?: <.ddd text>, position? }. add appends a member to a free-body container; replace/remove edit the targeted node; insert places source before/after a sibling or at header-end (before the target's opening '{', for header clauses); rename changes a declaration's name and every cross-reference to it (source is the new name). Atomic — if any patch fails to resolve, nothing is applied. Returns the patched source or per-patch errors.",
     inputSchema: {
       type: "object",
       properties: {
@@ -134,16 +134,16 @@ export const TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              op: { type: "string", enum: ["add", "replace", "remove", "insert"] },
+              op: { type: "string", enum: ["add", "replace", "remove", "insert", "rename"] },
               target: {
                 type: "string",
                 description:
-                  "Canonical node address, e.g. 'aggregate Sales.Order.status' or 'context Sales' (an add target is the container).",
+                  "Canonical node address, e.g. 'aggregate Sales.Order.status' or 'context Sales' (an add target is the container; a rename target is the declaration).",
               },
               source: {
                 type: "string",
                 description:
-                  ".ddd text for the new/replacement node (required for add/replace/insert).",
+                  ".ddd text for the new/replacement node (required for add/replace/insert); the new name for rename.",
               },
               position: {
                 type: "string",

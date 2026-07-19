@@ -141,6 +141,36 @@ describe("applyPatches", () => {
     expect(errors).toEqual([]);
   });
 
+  it("renames a declaration and every cross-reference to it", async () => {
+    const src = `context Sales {
+  aggregate Order {
+    customer: Customer id
+  }
+  aggregate Customer {
+    name: string
+  }
+}
+`;
+    const r = await applyPatches(src, [
+      { op: "rename", target: "aggregate Sales.Customer", source: "Client" },
+    ]);
+    expect(r.ok).toBe(true);
+    // The declaration renamed…
+    expect(r.text).toContain("aggregate Client");
+    // …and the `Customer id` cross-reference followed.
+    expect(r.text).toContain("customer: Client id");
+    expect(r.text).not.toContain("Customer");
+    // The result re-parses with no linking errors (the ref stayed resolved).
+    const { errors } = await parseString(r.text);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects a rename with no new name", async () => {
+    const r = await applyPatches(MODEL, [{ op: "rename", target: "aggregate Sales.Order" }]);
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]?.message).toMatch(/requires 'source'/);
+  });
+
   it("adds a clause into a deployable (its body is order-independent)", async () => {
     const sys = `system Shop {
   context Sales { aggregate Order { total: int } }
