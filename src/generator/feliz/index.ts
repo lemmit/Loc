@@ -942,6 +942,11 @@ function renderAppFs(
         asyncEffects.flatMap((e) => e.extraErrorPayloads),
       )
     : { domain: "", decoders: "" };
+  // A `File`-typed AGGREGATE wire field decodes to the `FileRef` record, so the
+  // `type FileRef` + `fileRefDecoder` must ship AHEAD of the domain decoders that
+  // reference it (F# is order-sensitive).  Detected off the rendered records
+  // (`wireFieldType` spells a File field `FileRef`).
+  const hasFileWire = wire.domain.includes("FileRef");
   // Multi-variant async effects emit a discriminated-union outcome type, placed
   // right after the domain records (its cases reference them).
   const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);
@@ -1038,7 +1043,8 @@ function renderAppFs(
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
     // the UI-gate claims decode, AND the FileRef upload decoder.
-    (hasReads || hasForms || hasEffects || pageGate || hasFileState) && "open Thoth.Json",
+    (hasReads || hasForms || hasEffects || pageGate || hasFileState || hasFileWire) &&
+      "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
     // Browser.Dom provides `window` for the auth sign-in/out redirects.
     authUi && "open Browser.Dom",
@@ -1056,6 +1062,12 @@ function renderAppFs(
     pageGate && user ? renderCurrentUserDecoder(user) : false,
     authUi && "",
     authUi && (pageGate ? AUTH_MODULE_CLAIMS : AUTH_MODULE),
+    // FileRef record + decoder — emitted whenever a `File`-typed state field
+    // exists (its Model field is `FileRef option`, `Api.uploadFile` decodes one)
+    // OR a `File` aggregate wire field decodes to a `FileRef`.  Placed BEFORE the
+    // domain decoders (which reference `fileRefDecoder`) + Model + the Api module.
+    (hasFileState || hasFileWire) && "",
+    (hasFileState || hasFileWire) && renderFileRefType(),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
@@ -1064,11 +1076,6 @@ function renderAppFs(
     hasReads && REMOTE_TYPE,
     hasWire && "",
     hasWire && wire.decoders,
-    // FileRef record + decoder — emitted whenever a `File`-typed state field
-    // exists (its Model field is `FileRef option`, `Api.uploadFile` decodes one).
-    // Placed before Model + the Api module, both of which reference it.
-    hasFileState && "",
-    hasFileState && renderFileRefType(),
     // Multi-variant async-effect outcome unions (after the records they wrap).
     asyncOutcomes ? "" : false,
     asyncOutcomes || undefined,

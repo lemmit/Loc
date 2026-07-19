@@ -1625,6 +1625,9 @@ export function renderAsyncOutcomeTypes(effects: readonly FelizAsyncEffect[]): s
  *  contract: an enum value arrives as its string name, so it decodes to a
  *  plain `string` (a proper DU decoder is a follow-up). */
 function wireFieldType(t: TypeIR): string {
+  // A `File` wire field is the fixed `FileRef` record (`renderFileRefType`),
+  // not a scalar — decoded via `fileRefDecoder`.
+  if (t.kind === "primitive" && t.name === "File") return "FileRef";
   switch (t.kind) {
     case "enum":
       return "string";
@@ -1652,6 +1655,8 @@ export function decoderExprFor(t: TypeIR): string {
           return "Decode.bool";
         case "datetime":
           return "Decode.datetimeUtc";
+        case "File":
+          return "fileRefDecoder"; // the fixed FileRef record (renderFileRefType)
         default:
           return "Decode.string"; // string, json
       }
@@ -1802,10 +1807,14 @@ export function renderWireTypes(
   // to its base so the record spells exactly one ` option` and the decoder pairs
   // `get.Optional.Field` with the base decoder (`get.Optional` already yields
   // `'T option`), instead of double-wrapping `string option option`.
-  const fieldOptional = (f: WireRecord["fields"][number]): boolean =>
-    f.optional || f.type.kind === "optional";
   const fieldBase = (f: WireRecord["fields"][number]): TypeIR =>
     f.type.kind === "optional" ? f.type.inner : f.type;
+  // A `File` wire field is ALWAYS typed `FileRef option` (decoded via
+  // `get.Optional.Field`), even when required — so `FileLink`'s `Some`/`None`
+  // guard is uniform (a required File is always `Some`), mirroring the
+  // always-truthy guard the JSX frontends emit.
+  const fieldOptional = (f: WireRecord["fields"][number]): boolean =>
+    f.optional || f.type.kind === "optional" || typeIsFile(fieldBase(f));
 
   // A record that references another (a value object / entity part field) forms
   // a mutually-recursive group — F# is order-sensitive, so `type Order = { …
