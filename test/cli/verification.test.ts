@@ -115,6 +115,43 @@ describe("computeVerification", () => {
     expect(v.requirements.R2.verdict).toBe("FAILING");
   });
 
+  it("refuses to attribute a suiteless result to a name shared by two tests", async () => {
+    const loom = await build(`
+      requirement R1 { type: UserStory  title: "a" }
+      requirement R2 { type: UserStory  title: "b" }
+      system S {
+        subdomain M { context C {
+          aggregate Alpha { operation go() {}  test "create works" verifies T1 {} }
+          aggregate Beta  { operation go() {}  test "create works" verifies T2 {} }
+        } }
+        deployable api { platform: node  contexts: [C] }
+      }
+      testCase T1 verifies R1 { covers [ M.C.Alpha.go ] }
+      testCase T2 verifies R2 { covers [ M.C.Beta.go ] }
+    `);
+    // One suiteless "create works" result. It cannot be attributed to either
+    // Alpha's or Beta's test (the name is shared), so NEITHER requirement may
+    // be marked VERIFIED off it — both stay UNVERIFIED (their tests didn't
+    // unambiguously run). Pre-fix this single pass marked BOTH VERIFIED.
+    const v = verify(loom, [{ name: "create works", status: "pass" }]);
+    expect(v.testCases.T1.status).toBe("UNVERIFIED");
+    expect(v.testCases.T2.status).toBe("UNVERIFIED");
+    expect(v.requirements.R1.verdict).toBe("UNVERIFIED");
+    expect(v.requirements.R2.verdict).toBe("UNVERIFIED");
+  });
+
+  it("still attributes a suiteless result when the name is unique", async () => {
+    const loom = await build(SOURCE);
+    // No suite on the unit result, but "valid credentials are accepted" is a
+    // unique test name → safe to attribute.
+    const v = verify(loom, [
+      { name: "valid credentials are accepted", status: "pass" },
+      { name: "session can be started", suite: "Shop e2e", status: "pass" },
+    ]);
+    expect(v.testCases["TC-001"].status).toBe("VERIFIED");
+    expect(v.requirements["AC-001"].verdict).toBe("VERIFIED");
+  });
+
   it("reports results that match no declared test, and is deterministic", async () => {
     const loom = await build(SOURCE);
     const results: TestOutcome[] = [
