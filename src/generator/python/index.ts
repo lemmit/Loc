@@ -76,7 +76,7 @@ import {
 } from "./repository-port-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
-import { renderPyTimerScheduler } from "./scheduler-builder.js";
+import { anyPyTimerUsesCron, renderPyTimerScheduler } from "./scheduler-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
 import {
   buildPyWorkflowsFile,
@@ -188,6 +188,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return sub?.migrationsOwner === args.deployable.name;
   });
   const hasTimers = ownedTimers.length > 0;
+  // A durable (`cron:`) timer pulls the procrastinate job store; an every-only
+  // deployable stays on the in-process asyncio path with no extra dependency.
+  const hasDurableTimers = anyPyTimerUsesCron(ownedTimers);
 
   // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
   // React SPA — routers move under /api/*, main.py serves wwwroot/ with
@@ -202,11 +205,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
   // in pyproject only under an `auth { oidc }` block.
   const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
-  // APScheduler drives the owned timerSources (cron / interval jobs); added
-  // only when this deployable owns a timer, so a timer-free project stays
-  // byte-identical.  Pinned within major 3 (the AsyncIOScheduler /
-  // CronTrigger.from_crontab API the scheduler emits; 4.x is a rewrite).
-  const timerDeps = hasTimers ? ["apscheduler>=3.10,<4"] : [];
+  // Durable timer store: procrastinate drives the owned `cron:` timerSources
+  // (Postgres-native periodic tasks — store-coordinated single-fire + missed-run
+  // catch-up).  psycopg[binary] bundles libpq so the python:3.13-slim image needs
+  // no apt libpq (the domain layer's asyncpg driver doesn't ship one).  Both are
+  // added ONLY when this deployable owns a cron timer; an every-only (or
+  // timer-free) project stays byte-identical.
+  const timerDeps = hasDurableTimers ? ["procrastinate>=3,<4", "psycopg[binary]>=3.2,<4"] : [];
   // Broker transport (M-T4.4 slice 2b) — redis-py (MIT, design §6a) speaks
   // RESP to the compose-provisioned Valkey sidecar; wiring-gated so a
   // channel-less pyproject stays byte-identical.
@@ -217,7 +222,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       slug,
       [...resources.deps, ...oidcDeps, ...timerDeps, ...channelDeps],
       [...resources.devDeps],
-      hasTimers,
     ),
   );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
@@ -633,11 +637,6 @@ function renderPyproject(
   slug: string,
   extraDeps: readonly string[] = [],
   extraDevDeps: readonly string[] = [],
-  /** scheduling.md, M-T4.1 — APScheduler ships no `py.typed` marker, so a
-   *  per-module override silences mypy's `import-untyped` under `--strict`.
-   *  Added only when the deployable owns a timer, keeping a timer-free
-   *  pyproject byte-identical. */
-  withTimers = false,
 ): string {
   const dep = (r: string) => `  "${r}",`;
   return lines(
@@ -676,12 +675,6 @@ function renderPyproject(
     `python_version = "3.13"`,
     "strict = true",
     "",
-    // APScheduler (timerSource driver) ships no py.typed marker; ignore the
-    // missing stubs for its modules so `--strict` doesn't flag import-untyped.
-    withTimers ? "[[tool.mypy.overrides]]" : null,
-    withTimers ? `module = "apscheduler.*"` : null,
-    withTimers ? "ignore_missing_imports = true" : null,
-    withTimers ? "" : null,
     "[tool.pytest.ini_options]",
     `asyncio_mode = "auto"`,
     `pythonpath = ["."]`,
@@ -964,11 +957,13 @@ function renderMain(
     startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
     startsRelay ? '    log("info", "outbox_relay_started")' : null,
     // Timer sources (scheduling.md): infrastructure fires tick events on a
-    // wall-clock cadence, single-fire across replicas via a pg advisory lock.
-    hasTimers ? "    _timer_scheduler = start_timer_scheduler()" : null,
+    // wall-clock cadence.  `cron:` timers run as durable procrastinate periodic
+    // jobs (store-coordinated single-fire + missed-run catch-up); `every:` timers
+    // run in-process, single-fire across replicas via a pg advisory lock.
+    hasTimers ? "    _timer_scheduler = await start_timer_scheduler()" : null,
     '    log("info", "server_listening", port=_PORT)',
     "    yield",
-    hasTimers ? "    _timer_scheduler.shutdown(wait=False)" : null,
+    hasTimers ? "    await _timer_scheduler.stop()" : null,
     startsRelay ? "    _outbox_relay.cancel()" : null,
     hasChannelConsumers ? "    _channel_consumers.cancel()" : null,
     hasChannels ? "    await close_channel_transports()" : null,

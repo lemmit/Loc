@@ -176,8 +176,20 @@ keyed by the cadence bucket / competing-consumer queue) is not implemented — a
 Phase-3 durability item.
 
 A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
-boot wiring — byte-identical to before. (`.NET` and the other backends are
-in-progress; see M-T4.1.)
+boot wiring — byte-identical to before.
+
+**Phase-2 durable drivers (M-T4.1).** The advisory-lock path above is the
+*in-process* tier — correct for `every:` (sub-minute) cadences but at-least-once.
+`cron:` timers additionally get a **durable, store-coordinated** driver per
+backend, so a boundary missed while every replica was down is replayed once on
+recovery (missed-run catch-up) and fires exactly once across replicas
+(single-fire), with retries. Each backend uses its ecosystem's Postgres-native
+job store: **Python → procrastinate** (`@app.periodic` periodic tasks; the
+`periodic_defers` table is the single-fire/catch-up ledger; the worker runs
+in-process in the FastAPI lifespan). The `every:` tier stays the in-process
+asyncio interval loop + `pg_try_advisory_xact_lock` described above. (Other
+backends land their own durable driver — pg-boss / Hangfire / JobRunr / Oban —
+under the same split; see M-T4.1.)
 
 ### Per-aggregate detail
 
