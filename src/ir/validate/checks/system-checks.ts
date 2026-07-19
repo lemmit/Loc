@@ -1923,11 +1923,11 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // below are moot for it — skip them.  shape(embedded) is still gated.
         // shape(embedded) IS supported too (Dapper edition): flat root columns
         // PLUS one JSONB column per containment (the part sub-graph folds into
-        // it via the ToSnapshot/FromSnapshot round-trip), no child tables.  The
-        // v1 embedded surface is FLAT-part containments — a part-in-part, a
-        // part-collection field, and a contains+association combo stay gated by
-        // the shared containment block below (conservative; snapshots could fold
-        // them, but they're an untested follow-up).
+        // it via the ToSnapshot/FromSnapshot round-trip), no child tables.  A
+        // part-in-part folds through the same snapshot recursion (the nested
+        // `<Part>Snapshot` records + FromSnapshot loop), so it is supported —
+        // only a part-collection field whose element kind is outside the
+        // jsonb-serialisable set stays gated by the shared containment block.
         const isDocShape = a.persistedAs !== "eventLog" && shape === "document";
         if (
           a.persistedAs !== "eventLog" &&
@@ -1975,33 +1975,44 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // paths run in sequence, not exclusively.
         //
         // Part-in-part (a contained part with its OWN `contains`) is now drained
-        // for the RELATIONAL child-table shape: `partChildrenOf` builds the
-        // containment TREE, each grandchild a table FK'd to its DIRECT parent
+        // for BOTH shapes.  RELATIONAL child-table shape: `partChildrenOf` builds
+        // the containment TREE, each grandchild a table FK'd to its DIRECT parent
         // part; hydration recurses bottom-up (children grouped by parent-part id,
         // slotted into the parent's `Map`), save recurses the object graph, and
         // delete relies on the FK cascade.  The `shape(embedded)` fold (one JSONB
-        // column per root containment) still gates a part-in-part — the nested
-        // snapshot fold is an untested follow-up, kept conservative.
+        // column per root containment) folds a part-in-part too — the containment
+        // column serialises `part.ToSnapshot()`, whose `<Part>Snapshot` recurses
+        // into the part's own `contains` (nested snapshot records + the
+        // FromSnapshot rehydrate loop), so the whole subtree round-trips through
+        // the one column.  No gate.
         //
         // A scalar / enum / value-object / id COLLECTION field on a part IS
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
-        // primitive-collection JSON mapping); only an array whose element kind
-        // is outside that set stays gated (nothing in the corpus reaches it).
+        // primitive-collection JSON mapping).  The ONLY element kind left gated
+        // is `entity`: a part FIELD (not a `contains`) typed as an array of a
+        // sibling ENTITY.  That is an impossible storage shape rather than a
+        // Dapper gap — an un-owned by-value entity collection has no persistence
+        // identity/ownership model (a domain entity has no scalar column form and
+        // no snapshot DTO on the relational shape, so it cannot ride a jsonb
+        // list).  efcore only APPEARS to accept it — it COMPILES `List<Entity>`
+        // mapped as a plain scalar `Property`, but EF has no relational mapping
+        // for a collection of an entity type without owned-type config, so it is
+        // not a real backing store there either.
+        // The intended model is `contains <name>: <Entity>[]` (ownership) or
+        // `<name>: <Entity> id[]` (a reference collection) — both supported.
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
           for (const part of a.parts ?? []) {
-            if (shape === "embedded" && (part.contains ?? []).length > 0)
-              reject(
-                where,
-                `contains a nested part-in-part ('${part.name}' has its own parts) under shape(embedded)`,
-              );
             for (const pf of part.fields) {
               const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
               if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
                 reject(
                   where,
-                  `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
+                  `has a part ('${part.name}') with a by-value collection field of ENTITY element ` +
+                    `kind '${pt.element.kind}' — an un-owned entity collection has no relational ` +
+                    `storage shape. Use 'contains ${pf.name}: …[]' (ownership) or ` +
+                    `'${pf.name}: … id[]' (a reference collection) instead`,
                 );
             }
           }

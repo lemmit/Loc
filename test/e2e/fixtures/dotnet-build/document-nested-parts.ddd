@@ -1,0 +1,41 @@
+// `shape(document)` DOCUMENT SHAPE with PART-IN-PART (recursive containment) —
+// .NET (efcore) compile gate.  `Cart` folds its whole read model into one JSONB
+// `data` blob via the `ToSnapshot()` / `FromSnapshot(...)` round-trip; a nested
+// part (`Box` contains `Slip` + `Item`s) must brand its snapshot `ParentId` to
+// its DIRECT parent's id class (`BoxId`), NOT the aggregate root's (`CartId`) —
+// otherwise the snapshot record's `ParentId` diverges from the entity's own
+// `State.ParentId` and the field copies fail to compile under /warnaserror.
+// Regresses the snapshot-seam nested-ParentId mistyping.
+//
+// Bare `context {…}` (not a `system {…}` wrapper) so legacy
+// `ddd generate dotnet` emits a single buildable project, matching the other
+// fixtures in this suite.
+context Carts {
+
+  valueobject Money {
+    amount:   int
+    currency: string
+  }
+
+  aggregate Cart shape: document with crudish {
+    customer: string
+    contains boxes: Box[]
+
+    entity Box {
+      label: string
+      // single part-in-part
+      contains slip: Slip
+      // collection part-in-part
+      contains items: Item[]
+    }
+    entity Slip { note: string }
+    entity Item {
+      sku:   string
+      price: Money
+    }
+  }
+
+  repository Carts for Cart {
+    find byCustomer(customer: string): Cart[] where this.customer == customer
+  }
+}

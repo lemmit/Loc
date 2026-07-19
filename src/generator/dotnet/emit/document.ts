@@ -4,6 +4,7 @@ import type {
   EntityPartIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { csValueTypeForId, renderCsType } from "../render-expr.js";
@@ -129,7 +130,14 @@ export function renderDocumentConfiguration(
 export function renderSnapshots(agg: EnrichedAggregateIR, ns: string): string {
   const records = [
     snapshotRecord(agg, true, agg.name),
-    ...agg.parts.map((p) => snapshotRecord(p, false, agg.name)),
+    // A nested part's `ParentId` is branded by its DIRECT parent's id class (a
+    // sibling part for a part-in-part), not the aggregate root's — otherwise the
+    // snapshot record's `ParentId` type diverges from the entity's own
+    // `State.ParentId` / `e.ParentId` (typed by `directParentName` in
+    // emit/entity.ts) and the `ToSnapshot()` / `FromSnapshot(...)` field copies
+    // fail to compile.  Root-level parts resolve to the root, so single-level
+    // output is byte-identical.
+    ...agg.parts.map((p) => snapshotRecord(p, false, directParentName(agg, p.name, agg.name))),
   ];
   return (
     lines(
@@ -150,11 +158,14 @@ export function renderSnapshots(agg: EnrichedAggregateIR, ns: string): string {
 function snapshotRecord(
   entity: AggregateIR | EntityPartIR,
   isRoot: boolean,
-  rootName: string,
+  /** The DIRECT parent entity's name — a sibling part for a nested (part-in-part)
+   *  part, else the aggregate root.  Brands the part's `ParentId` id class so it
+   *  matches the entity's own `State.ParentId`.  Unused for the root record. */
+  parentName: string,
 ): string[] {
   const props: string[] = [];
   props.push(`    public ${entity.name}Id Id { get; init; }`);
-  if (!isRoot) props.push(`    public ${rootName}Id ParentId { get; init; }`);
+  if (!isRoot) props.push(`    public ${parentName}Id ParentId { get; init; }`);
   for (const f of entity.fields) {
     props.push(
       `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; init; }${snapshotInit(f.type)}`,
