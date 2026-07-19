@@ -99,6 +99,28 @@ function segments(p: string): string[] {
   return p.split(/[\\/]+/).filter(Boolean);
 }
 
+/** Do two paths refer to the same file? True when the SHORTER path's
+ *  segments are a full trailing suffix of the longer — so an absolute path
+ *  matches an out-dir-relative key on their shared tail
+ *  (`/proj/main.ddd` ≡ `main.ddd`), but two files that merely share a
+ *  basename do NOT (`orders/main.ddd` ≠ `payments/main.ddd`).
+ *
+ *  Stricter than `matchPath`, which accepts ANY ≥1-segment shared suffix.
+ *  That leniency is correct for `matchPath`'s N-key disambiguation role
+ *  (a tie across keys → `undefined`), but wrong for a PAIRWISE identity
+ *  test: calling `matchPath(p, [q])` with a single key can never tie, so it
+ *  reports a match on a shared basename alone. */
+export function isSamePath(a: string, b: string): boolean {
+  const as = segments(a);
+  const bs = segments(b);
+  const min = Math.min(as.length, bs.length);
+  if (min === 0) return false;
+  for (let n = 0; n < min; n++) {
+    if (as[as.length - 1 - n] !== bs[bs.length - 1 - n]) return false;
+  }
+  return true;
+}
+
 /** Longest-suffix match of `candidate` against `keys` (`map.files` keys),
  *  compared path-segment by path-segment from the end — so `order.ts`
  *  never spuriously matches `border.ts`, and an absolute local path
