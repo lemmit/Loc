@@ -93,21 +93,30 @@ describe("feliz scaffold primitives", () => {
 
   // `Html.text` needs a `string`.  A value that is provably a string from its
   // own structure (a Yes/No conditional of string literals) is passed straight
-  // to `Html.text`; a non-string field (money → decimal) KEEPS the `string (…)`
-  // cast — without it `dotnet fable` rejects `Html.text (decimal)`.  The
-  // accessor's *resolved* type is unreliable for untyped scaffold rows, so the
-  // cast is dropped only for the structurally-provable case.
-  it("drops the redundant cast on a Yes/No bool, keeps it on a money field", async () => {
-    const withBool = SCAFFOLD.replace(
+  // to `Html.text`; a non-string numeric field (decimal → F# `decimal`) KEEPS
+  // the `string (…)` cast — without it `dotnet fable` rejects
+  // `Html.text (decimal)`.  The accessor's *resolved* type is unreliable for
+  // untyped scaffold rows, so the cast is dropped only for the
+  // structurally-provable case.  (A `money` field no longer flows through
+  // `Html.text` at all — it renders via the `Money` formatter primitive, a
+  // `tabular-nums` span — but its value expression still keeps the `string (…)`
+  // cast.)
+  it("drops the redundant cast on a Yes/No bool, keeps it on a numeric field", async () => {
+    const withMore = SCAFFOLD.replace(
       "aggregate Product with crudish { name: string  price: money }",
-      "aggregate Product with crudish { name: string  price: money  active: bool }",
+      "aggregate Product with crudish { name: string  price: money  qty: decimal  active: bool }",
     );
-    const app = await appFs(withBool);
+    const app = await appFs(withMore);
     // Bool renders as a string-valued conditional — no `string (…)` wrap.
     expect(app).toContain('Html.text ((if row.active then "Yes" else "No"))');
     expect(app).not.toContain('string ((if row.active then "Yes" else "No"))');
-    // Money stays coerced (it is a `decimal` in F#, which `Html.text` can't take).
-    expect(app).toContain("Html.text (string (row.price))");
+    // A decimal stays coerced (it is a `decimal` in F#, which `Html.text` can't
+    // take) — the Html.text string-cast path.
+    expect(app).toContain("Html.text (string (row.qty))");
+    // Money renders via the Money primitive (tabular-nums span) and keeps the
+    // string-cast on its value expression.
+    expect(app).toContain('prop.className "tabular-nums"');
+    expect(app).toContain("prop.text (string (row.price))");
   });
 
   // An empty container (the detail's operations area when the aggregate has no
