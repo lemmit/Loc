@@ -1,0 +1,25 @@
+// MikroORM shape(embedded) + Id[] reference collections: the queryable root
+// stays real columns, each containment folds into a jsonb column, and an `Id[]`
+// reference collection folds onto the root as one jsonb id-string array (no
+// pivot table — the embedded analogue of the relational pivot).  tsc-checked.
+system Roster {
+  subdomain Core {
+    context Teams {
+      aggregate Player with crudish { name: string }
+      valueobject Rank { tier: string  points: int }
+      aggregate Team shape: embedded with crudish {
+        name: string
+        roster: Player id[]
+        contains badges: Badge[]
+        entity Badge { label: string  rank: Rank }
+      }
+      repository Players for Player { }
+      repository Teams for Team {
+        find byName(name: string): Team[] where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Teams, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }, contexts: [Teams], dataSources: [s], port: 4000 }
+}

@@ -927,10 +927,15 @@ describe("mikroorm — shape(embedded) (wave 2)", () => {
     expect(repo).toContain("type TagItemDoc = {");
     expect(repo).toContain("function tagItemToDoc");
     expect(repo).toContain("function tagItemFromDoc");
-    // Read casts the jsonb cell, save serialises via toDoc, upsert on the Row.
+    // Read casts the jsonb cell; save serialises via toDoc.  `crudish` makes the
+    // aggregate versioned, so the save is the guarded optimistic-concurrency
+    // write (findOne → insert / version-CAS nativeUpdate), not a blind upsert.
     expect(repo).toContain("((row.lines ?? []) as TagItemDoc[]).map((x) => tagItemFromDoc(x))");
     expect(repo).toContain("lines: aggregate.lines.map((e) => tagItemToDoc(e))");
-    expect(repo).toContain("await em.upsert(TagListRow, rootRow)");
+    expect(repo).toContain("await em.insert(TagListRow, { id: aggregate.id as string,");
+    expect(repo).toContain("await em.nativeUpdate(TagListRow,");
+    expect(repo).toContain('throw new ConcurrencyError("TagList", aggregate.id as string)');
+    expect(repo).not.toContain("await em.upsert(TagListRow, rootRow)");
   });
 });
 
@@ -1124,5 +1129,276 @@ describe("mikroorm — persist-time audit stamping", () => {
     expect(repo).toContain('throw new ConcurrencyError("Order",');
     expect(repo).not.toContain("stampInsert");
     expect(repo).not.toContain("onConflictExcludeFields");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Event-sourced (`persistedAs: eventLog`) intersections — an ES aggregate has
+// no state table (its truth is the `<ctx>_events` stream), so a reference
+// collection (`Id[]`) and contained parts fold IN-MEMORY from the stream via
+// the `apply(...)` bodies (`_fromEvents`) rather than pivot / child tables.
+// Mirrors the .NET Dapper ES path (parts/associations ride in the folded
+// aggregate, no relational join/child table).
+// ---------------------------------------------------------------------------
+describe("mikroorm — event-sourced intersections (in-memory fold)", () => {
+  const ES_ASSOC_SRC = `system D {
+  subdomain S {
+    context O {
+      aggregate Player with crudish { name: string }
+      event Recruited { squad: Squad id, player: Player id }
+      event Named { squad: Squad id, name: string }
+      aggregate Squad persistedAs: eventLog {
+        name: string
+        roster: Player id[]
+        create form(name: string) { emit Named { squad: id, name: name } }
+        operation recruit(player: Player id) { emit Recruited { squad: id, player: player } }
+        apply(e: Named) { name := e.name }
+        apply(e: Recruited) { roster += e.player }
+      }
+      repository Players for Player { }
+      repository Squads for Squad { }
+    }
+  }
+  storage pg { type: postgres }
+  resource sq { for: O, kind: eventLog, use: pg }
+  resource pl { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [sq, pl]  port: 8080 }
+}`;
+
+  it("no longer rejects an Id[] reference collection on an event-sourced aggregate", async () => {
+    const { errors } = await emit(ES_ASSOC_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the reference collection in-memory (no pivot Row entity, stream fold only)", async () => {
+    const { files } = await emit(ES_ASSOC_SRC);
+    // The ES aggregate contributes no state / pivot table — only the shared
+    // per-context event-log Row.
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("SquadRosterRow");
+    expect(entities).not.toContain('tableName: "squad_roster"');
+    expect(entities).toContain("export class OEventRow");
+    const repo = files.get("api/db/repositories/squad-repository.ts")!;
+    // Reconstructed purely from the folded stream…
+    expect(repo).toContain("Squad._fromEvents(");
+    // …and never touches a pivot table (no nativeDelete / insert of join rows).
+    expect(repo).not.toContain("RosterRow");
+    // The reference collection rides the wire straight off the folded aggregate.
+    expect(repo).toContain("roster: root.roster.map((a) => (a as string))");
+  });
+
+  const ES_PARTS_SRC = `system D {
+  subdomain S {
+    context O {
+      event Placed { order: Order id, customer: string }
+      event Boxed { order: Order id, label: string }
+      aggregate Order persistedAs: eventLog {
+        customer: string
+        contains boxes: Box[]
+        entity Box {
+          label: string
+          contains items: Item[]
+        }
+        entity Item { sku: string }
+        create place(customer: string) { emit Placed { order: id, customer: customer } }
+        operation addBox(label: string) { emit Boxed { order: id, label: label } }
+        apply(e: Placed) { customer := e.customer }
+        apply(e: Boxed) { boxes += Box { label: e.label } }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource ol { for: O, kind: eventLog, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [ol]  port: 8080 }
+}`;
+
+  it("no longer rejects nested contained parts on an event-sourced aggregate", async () => {
+    const { errors } = await emit(ES_PARTS_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the nested parts in-memory (no child Row tables) and imports the part classes for toWire", async () => {
+    const { files } = await emit(ES_PARTS_SRC);
+    // No relational child tables for the folded containment tree.
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("BoxRow");
+    expect(entities).not.toContain("ItemRow");
+    expect(entities).toContain("export class OEventRow");
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("Order._fromEvents(");
+    // toWire projects the part shapes, so the part classes must be in scope
+    // even though the event store never touches a child table.
+    expect(repo).toContain('import { Order, Box, Item } from "../../domain/order";');
+    // No containment child-table plumbing (bulk-load maps / diff-sync upserts).
+    expect(repo).not.toContain("ByParent");
+    expect(repo).not.toContain("parentId");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shape(embedded) + `Id[]` reference collections — the reference collection
+// FOLDS onto the root as one jsonb id-string array (no pivot table), the
+// embedded analogue of the relational pivot and the mirror of the drizzle
+// `emitEmbeddedTable` ref-collection column.  Containments still fold to their
+// own jsonb columns; the queryable root stays real columns.
+// ---------------------------------------------------------------------------
+describe("mikroorm — shape(embedded) + Id[] reference collections (fold)", () => {
+  const EMB_ASSOC_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Player with crudish { name: string }
+      aggregate Team shape: embedded with crudish {
+        name: string
+        roster: Player id[]
+        contains badges: Badge[]
+        entity Badge { label: string }
+      }
+      repository Players for Player { }
+      repository Teams for Team {
+        find byName(name: string): Team[] where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for shape(embedded) with an Id[]", async () => {
+    const { errors } = await emit(EMB_ASSOC_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the reference collection into a jsonb id-string array on the root Row (no pivot table)", async () => {
+    const { files } = await emit(EMB_ASSOC_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    // The `Id[]` field is a jsonb column on the embedded root Row…
+    expect(entities).toContain('roster: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain("roster!: string[];");
+    // …and the containment its own jsonb column.
+    expect(entities).toContain('badges: { type: "json", columnType: "jsonb" }');
+    // No pivot Row entity under embedded.
+    expect(entities).not.toContain("TeamRosterRow");
+    expect(entities).not.toContain('tableName: "team_roster"');
+  });
+
+  it("folds the id-string array on save and re-brands it on read", async () => {
+    const { files } = await emit(EMB_ASSOC_SRC);
+    const repo = files.get("api/db/repositories/team-repository.ts")!;
+    // Save: the id[] serialises to a plain string array on the root row.
+    expect(repo).toContain("roster: aggregate.roster.map((x) => x as string)");
+    // Read: the jsonb array re-brands to the target id (a bare `<field>` local
+    // hydrateRootExpr resolves).
+    expect(repo).toContain(
+      "const roster = ((row.roster ?? []) as string[]).map((s) => Ids.PlayerId(s));",
+    );
+    // No pivot-table plumbing (bulk-load maps / full-list-replace).
+    expect(repo).not.toContain("RosterRow");
+    expect(repo).not.toContain("nativeDelete(TeamRoster");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aggregate-inheritance participant + contained parts — a CONCRETE subtype
+// (`extends` a base) that also `contains` a nested part tree.  The repository
+// composes the inheritance `kind` scope with the containment hydrate pass: the
+// part child tables FK the row that owns the concrete (the shared TPH row / the
+// concrete's own TPC table).  Only an ABSTRACT base with its own parts stays
+// gated (no repository owns it; concretes don't inherit its `contains`).
+// ---------------------------------------------------------------------------
+describe("mikroorm — aggregate-inheritance participant + contained parts", () => {
+  const inhParts = (layout: "sharedTable" | "ownTable") => `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum CardNetwork { Visa, Mastercard, Amex }
+      valueobject Money { amount: int  currency: string }
+      abstract aggregate PaymentMethod inheritanceUsing: ${layout} {
+        holderName: string
+        last4: string
+      }
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        contains charges: Charge[]
+        entity Charge {
+          amount: Money
+          contains splits: Split[]
+        }
+        entity Split { label: string }
+      }
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+      }
+      repository CreditCards for CreditCard { }
+      repository BankAccounts for BankAccount { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("TPH concrete + nested parts no longer trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(inhParts("sharedTable"));
+    expect(errors).toEqual([]);
+  });
+
+  it("TPH emits child Row tables for the concrete's nested parts (FK the shared base row)", async () => {
+    const { files } = await emit(inhParts("sharedTable"));
+    const entities = files.get("api/db/entities.ts")!;
+    // The shared base table + a child table per contained part.
+    expect(entities).toContain('tableName: "payment_methods"');
+    expect(entities).toContain("export class ChargeRow");
+    expect(entities).toContain("export class SplitRow");
+    // No per-concrete Row under TPH (its columns live in the shared table).
+    expect(entities).not.toContain("class CreditCardRow");
+    const repo = files.get("api/db/repositories/creditCard-repository.ts")!;
+    // The repo composes the `kind` scope (reads/writes the shared PaymentMethodRow)…
+    expect(repo).toContain("PaymentMethodRow");
+    expect(repo).toContain('{ kind: "CreditCard" }');
+    // …with the containment child-table hydrate + diff-sync.
+    expect(repo).toContain("ChargeRow");
+    expect(repo).toContain("await em.upsert(ChargeRow,");
+    expect(repo).toContain("await em.nativeDelete(ChargeRow,");
+  });
+
+  it("TPC concrete + nested parts no longer trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(inhParts("ownTable"));
+    expect(errors).toEqual([]);
+  });
+
+  it("TPC emits the concrete's own table + child Row tables for its nested parts", async () => {
+    const { files } = await emit(inhParts("ownTable"));
+    const entities = files.get("api/db/entities.ts")!;
+    // Each concrete owns its table; the parts FK the concrete's own row.
+    expect(entities).toContain('tableName: "credit_cards"');
+    expect(entities).toContain("export class ChargeRow");
+    expect(entities).toContain("export class SplitRow");
+  });
+
+  it("still rejects an ABSTRACT inheritance base with its own contained parts (no repository owns it)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      abstract aggregate Doc inheritanceUsing: sharedTable {
+        title: string
+        contains tags: Tag[]
+        entity Tag { label: string }
+      }
+      aggregate Article extends Doc with crudish { body: string }
+      repository Articles for Article { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
   });
 });

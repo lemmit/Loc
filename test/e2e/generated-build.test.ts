@@ -746,5 +746,128 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // MikroORM ES + `Id[]` reference collections: an event-sourced aggregate
+    // whose `apply(...)` bodies fold a reference collection in-memory from the
+    // stream (no pivot table — ES has no state table).  Type-checks under tsc.
+    it("system `persistence: mikroorm` + event sourcing + Id[] reference collection — folds in-memory, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-es-assoc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-es-assoc.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No pivot Row entity for the folded reference collection.
+        expect(entities).not.toContain("SquadRosterRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
+    // MikroORM ES + nested contained parts: an event-sourced aggregate whose
+    // `apply(...)` bodies rebuild a nested containment tree in-memory from the
+    // stream (no child tables — ES has no state table).  Type-checks under tsc.
+    it("system `persistence: mikroorm` + event sourcing + nested parts — folds in-memory, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-es-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-es-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No relational child tables for the folded containment tree.
+        expect(entities).not.toContain("BoxRow");
+        expect(entities).not.toContain("ItemRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
+    // MikroORM shape(embedded) + `Id[]` reference collections: the reference
+    // collection folds onto the root as a jsonb id-string array (no pivot
+    // table), containments fold to their own jsonb columns, the queryable root
+    // stays real columns, and the versioned (crudish) save is the guarded CAS
+    // write.  Type-checks under tsc.
+    it("system `persistence: mikroorm` + shape(embedded) + Id[] reference collection — folds, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-emb-assoc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-embedded-assoc.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No pivot Row entity — the reference collection folds onto the root.
+        expect(entities).not.toContain("TeamRosterRow");
+        expect(entities).toContain("roster!: string[];");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
+    // MikroORM aggregate-inheritance (TPH sharedTable) + nested contained parts:
+    // a concrete subtype whose contained part tree FKs the SHARED base row.  The
+    // repository composes the inheritance `kind` scope with the containment
+    // hydrate/diff-sync pass.  Type-checks under tsc.
+    it("system `persistence: mikroorm` + aggregate inheritance + nested parts — composes, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-inh-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-inheritance-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // The concrete's contained parts get child tables even though it owns no
+        // Row of its own under TPH (they FK the shared base row).
+        expect(entities).toContain("export class ChargeRow");
+        expect(entities).toContain("export class SplitRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

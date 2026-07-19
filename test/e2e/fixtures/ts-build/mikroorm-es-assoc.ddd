@@ -1,0 +1,28 @@
+// MikroORM event-sourcing + Id[] reference collections: an event-sourced
+// aggregate whose `apply(...)` bodies fold a reference collection in-memory
+// from the stream (no pivot table — ES has no state table).  tsc-checked.
+system Roster {
+  subdomain Core {
+    context Squads {
+      aggregate Player with crudish { name: string }
+      event Recruited { squad: Squad id, player: Player id }
+      event Named { squad: Squad id, name: string }
+      aggregate Squad persistedAs: eventLog {
+        name: string
+        roster: Player id[]
+        create form(name: string) { emit Named { squad: id, name: name } }
+        operation recruit(player: Player id) { emit Recruited { squad: id, player: player } }
+        apply(e: Named) { name := e.name }
+        apply(e: Recruited) { roster += e.player }
+      }
+      repository Players for Player { }
+      repository Squads for Squad {
+        find byName(name: string): Squad? where this.name == name
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource squadLog { for: Squads, kind: eventLog, use: pg }
+  resource playerState { for: Squads, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }, contexts: [Squads], dataSources: [squadLog, playerState], port: 4000 }
+}

@@ -25,7 +25,6 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -2100,21 +2099,21 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape(...)` axis is moot — skip that check for it.
-        const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        // so the `shape(...)` axis is moot for it — every saving shape is now
+        // supported (no per-shape reject remains), so the shape need not be
+        // resolved here.
         // `shape(embedded)` IS supported (wave 2): the root stays queryable
         // columns and each containment folds into a jsonb column, (de)serialised
         // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
-        // analogue of the drizzle embedded repository).  Bounded to aggregates
-        // with no `Id[]` reference collections.  `shape(document)` IS supported
-        // (wave 3): the whole aggregate tree collapses to one `(id, data,
-        // version)` jsonb blob round-tripped through the shared doc
+        // analogue of the drizzle embedded repository).  An `Id[]` reference
+        // collection FOLDS onto the root as one jsonb id-string array (no pivot
+        // table — `embeddedColumnsOf` + the embedded repo's hydrate/save fold),
+        // the embedded analogue of the relational pivot and the mirror of the
+        // drizzle `emitEmbeddedTable` ref-collection column.  `shape(document)`
+        // IS supported (wave 3): the whole aggregate tree collapses to one `(id,
+        // data, version)` jsonb blob round-tripped through the shared doc
         // (de)serialisers — no per-field / containment / pivot columns, so
         // reference collections + parts ride inside the blob (unbounded).
-        if (a.persistedAs !== "eventLog" && shape === "embedded") {
-          if ((a.associations ?? []).length > 0)
-            reject(where, "is shape(embedded) with `Id[]` reference collections");
-        }
         // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
         // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
         // `kind` — concrete repos read/write it scoped to their `kind`, a
@@ -2124,11 +2123,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // `Id[]` reference-collection associations ARE supported on a state
         // aggregate: each persists as a composite-PK pivot Row entity, bulk-
         // loaded on read and full-list-replaced on save (the MikroORM analogue
-        // of the drizzle join table).  Event-sourced aggregates reconstruct
-        // from their event stream (no pivot sync), so associations there stay
-        // gated until that path is wired.
-        if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
-          reject(where, "has reference-collection associations on an event-sourced aggregate");
+        // of the drizzle join table).  On an EVENT-SOURCED aggregate they need
+        // no pivot table at all — an ES aggregate has no state table (its truth
+        // is the `<ctx>_events` stream), so the reference collection folds
+        // IN-MEMORY from the stream via the `apply(...)` bodies (`_fromEvents`),
+        // exactly as on drizzle.  The relational pivot emitters never run for an
+        // ES aggregate (the entities loop skips it), so there is nothing to gate.
         // Contained entity parts ARE supported (relational child tables): each
         // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
         // on read and diff-synced on save (the MikroORM analogue of the drizzle
@@ -2139,15 +2139,27 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
         // field on a part (array of scalar / enum / VO / id) folds into one jsonb
         // column (shared serialise/deserialise), the mirror of the Dapper
-        // part-collection path.  Only event-sourced / aggregate-inheritance
-        // participants with parts stay gated — their storage shape (event stream
-        // / shared-or-per-concrete inheritance table) has no relational
-        // child-table home, so the containment tree is genuinely unmappable.
+        // part-collection path.  An EVENT-SOURCED aggregate's parts fold
+        // IN-MEMORY from the event stream (the `apply(...)` bodies rebuild the
+        // containment tree through `_fromEvents`) — an ES aggregate has no state
+        // table, so the relational child-table emitters never run for it; the
+        // parts ride in the folded aggregate exactly as on the .NET Dapper ES
+        // path, so there is nothing to gate.  A CONCRETE aggregate-inheritance
+        // participant (`extends` a base) composes the inheritance repo with the
+        // containment hydrate pass: its part child tables FK the row that owns
+        // the concrete (the shared TPH row / the concrete's own TPC table), so
+        // the containment tree round-trips like any state aggregate's parts (the
+        // relational repo already emits both).  Only an ABSTRACT inheritance base
+        // with its OWN parts stays gated — an abstract base owns no repository
+        // (validator-forbidden) and concretes do not inherit its `contains`, so
+        // its part tables would have no reader/writer: genuinely unmappable.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          if (a.persistedAs === "eventLog")
-            reject(where, "contains nested entity parts on an event-sourced aggregate");
-          else if (a.isAbstract || a.extendsAggregate)
-            reject(where, "contains nested entity parts on an aggregate-inheritance participant");
+          if (a.isAbstract)
+            reject(
+              where,
+              "contains nested entity parts on an abstract aggregate-inheritance base " +
+                "(the base owns no repository, and concretes do not inherit its parts)",
+            );
         }
         // `filter` capability predicates ARE supported: the repository ANDs each
         // non-principal predicate (a MikroORM FilterQuery) into every root read

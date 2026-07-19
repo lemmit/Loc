@@ -383,10 +383,26 @@ function documentColumnsOf(): MikroColumn[] {
 }
 
 /** Embedded-shape columns: the queryable root columns (via `columnsOf`) plus
- *  one jsonb column per containment (typed `unknown` on the Row, cast in the
- *  repo through `<Part>Doc`).  Mirrors the drizzle embedded table. */
+ *  one jsonb column per `Id[]` reference collection (the id-string array folds
+ *  onto the root row — no pivot table under embedded) and one jsonb column per
+ *  containment (typed `unknown` on the Row, cast in the repo through
+ *  `<Part>Doc`).  Mirrors the drizzle `emitEmbeddedTable`. */
 function embeddedColumnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const cols = columnsOf(agg, ctx);
+  // `Id[]` reference collections fold onto the root as a jsonb id-string array
+  // (the embedded analogue of the relational pivot table) — `columnsOf` skips
+  // them, so add them here, keeping the field's declared nullability.
+  for (const f of agg.fields) {
+    if (!isRefCollection(f.type)) continue;
+    cols.push({
+      prop: f.name,
+      mikroType: "json",
+      tsType: "string[]",
+      nullable: f.optional ?? false,
+      primary: false,
+      columnType: "jsonb",
+    });
+  }
   for (const c of agg.contains) {
     cols.push({
       prop: c.name,
@@ -519,7 +535,18 @@ export function renderMikroEntities(
     if (agg.persistedAs === "eventLog") continue;
     // TPH concretes (aggregate-inheritance.md, sharedTable) own no Row — their
     // columns live in the base's shared table, emitted once for the base below.
-    if (isTphConcrete(agg, aggs)) continue;
+    // …but a TPH concrete's contained parts still need their own child tables:
+    // each part FKs the SHARED base row (the concrete has no table of its own),
+    // and the part row's `parentId` holds that shared-table row id — which is
+    // exactly the concrete's id (TPT-via-`contains`).  Mirrors emit/schema.ts.
+    if (isTphConcrete(agg, aggs)) {
+      for (const part of agg.parts ?? []) {
+        const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
+        schemaNames.push(partSchema);
+        blocks.push(block);
+      }
+      continue;
+    }
     // Abstract bases own no table EXCEPT a TPH root, which owns the shared
     // table (a TPC / intermediate abstract base emits nothing).
     if (agg.isAbstract && !isTphBase(agg, aggs)) continue;
@@ -566,8 +593,9 @@ export function renderMikroEntities(
     );
     // `Id[]` reference-collection associations persist as pivot Row entities
     // (composite-PK join tables), one per declared collection field.  Under
-    // document they ride inside the blob as id-string arrays — no pivot table.
-    if (!document)
+    // document (whole blob) OR embedded (id-string array folded onto the root
+    // jsonb column, see `embeddedColumnsOf`) they ride inline — no pivot table.
+    if (!document && !embedded)
       for (const assoc of agg.associations ?? []) {
         const { block, schemaName: joinSchema } = renderJoinRowEntity(assoc);
         schemaNames.push(joinSchema);
@@ -1683,16 +1711,33 @@ export function renderMikroRepository(
 
 /** Per-containment local-const decls that materialise the jsonb columns into
  *  part instances, named `<c.name>` so `hydrateRootExpr`'s bare-name refs
- *  resolve. */
+ *  resolve.  Also materialises each `Id[]` reference collection from its folded
+ *  jsonb id-string array (re-branded to the target id), the embedded analogue of
+ *  the relational pivot-table load and the mirror of the drizzle embedded
+ *  `hydrateLocals` ref-collection branch. */
 function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
-  return agg.contains.map((c) => {
+  const out: string[] = [];
+  for (const f of agg.fields) {
+    if (f.type.kind !== "array" || f.type.element.kind !== "id") continue;
+    const target = f.type.element.targetName;
+    out.push(
+      `${indent}const ${f.name} = ((${rowVar}.${f.name} ?? []) as string[]).map((s) => Ids.${target}Id(s));`,
+    );
+  }
+  for (const c of agg.contains) {
     const fromDoc = `${lowerFirst(c.partName)}FromDoc`;
     if (c.collection)
-      return `${indent}const ${c.name} = ((${rowVar}.${c.name} ?? []) as ${c.partName}Doc[]).map((x) => ${fromDoc}(x));`;
-    if (c.optional)
-      return `${indent}const ${c.name} = ${rowVar}.${c.name} == null ? null : ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`;
-    return `${indent}const ${c.name} = ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`;
-  });
+      out.push(
+        `${indent}const ${c.name} = ((${rowVar}.${c.name} ?? []) as ${c.partName}Doc[]).map((x) => ${fromDoc}(x));`,
+      );
+    else if (c.optional)
+      out.push(
+        `${indent}const ${c.name} = ${rowVar}.${c.name} == null ? null : ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`,
+      );
+    else
+      out.push(`${indent}const ${c.name} = ${fromDoc}(${rowVar}.${c.name} as ${c.partName}Doc);`);
+  }
+  return out;
 }
 
 export function renderMikroEmbeddedRepository(
@@ -1705,12 +1750,16 @@ export function renderMikroEmbeddedRepository(
   const baseFilters = mikroContextFilters(agg);
   const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
 
-  // Root save row: id + scalar column projection + one jsonb entry per
-  // containment (serialised through `<part>ToDoc`).
+  // Root save row: id + scalar column projection + one jsonb id-string array
+  // per `Id[]` reference collection (folded onto the root, no pivot table) +
+  // one jsonb entry per containment (serialised through `<part>ToDoc`).
   const rootEntries: string[] = ["id: aggregate.id as string"];
   for (const f of scalarFields)
     for (const e of projectFieldEntries(f, "aggregate", ctx))
       rootEntries.push(`${e.fieldName}: ${e.expr}`);
+  for (const f of agg.fields)
+    if (isRefCollection(f.type))
+      rootEntries.push(`${f.name}: aggregate.${f.name}.map((x) => x as string)`);
   for (const c of agg.contains) {
     const toDoc = `${lowerFirst(c.partName)}ToDoc`;
     if (c.collection) rootEntries.push(`${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`);
@@ -1726,6 +1775,29 @@ export function renderMikroEmbeddedRepository(
   const upsertCall = audited
     ? `    await em.upsert(${row}, stampInsert(rootRow));`
     : `    await em.upsert(${row}, rootRow);`;
+
+  // Versioned optimistic-concurrency save (M-T3.4, default-on via `crudish`) —
+  // the embedded analogue of the relational `versionedSaveLines` and the drizzle
+  // embedded builder's guarded write.  `rootEntries` already carries `version:
+  // aggregate.version` (a projected field); the guarded path drops it and stamps
+  // the CAS value itself (1 on insert, expected + 1 on the update).  A
+  // non-versioned embedded aggregate keeps the byte-identical bare upsert.
+  const versioned = aggregateIsVersioned(agg);
+  const rootEntriesNoVersion = rootEntries.filter((e) => !e.startsWith("version:"));
+  const rootRowInsert = `{ ${rootEntriesNoVersion.join(", ")}, version: 1 }`;
+  const rootRowUpdate = `{ ${rootEntriesNoVersion.join(", ")}, version: expected + 1 }`;
+  const insertValues = audited ? `stampInsert(${rootRowInsert})` : rootRowInsert;
+  const updateSet = audited ? `stampUpdate(${rootRowUpdate})` : rootRowUpdate;
+  const versionedSaveLines = [
+    `    const expected = expectedVersion ?? aggregate.version;`,
+    `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
+    `    if (existing === null) {`,
+    `      await em.insert(${row}, ${insertValues});`,
+    `    } else {`,
+    `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, ${updateSet});`,
+    `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+    `    }`,
+  ];
 
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
@@ -1849,10 +1921,11 @@ export function renderMikroEmbeddedRepository(
     `    });`,
     `  }`,
     "",
-    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    versioned
+      ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+      : `  async save(aggregate: ${agg.name}): Promise<void> {`,
     `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const rootRow = ${rootRow};`,
-    upsertCall,
+    ...(versioned ? versionedSaveLines : [`    const rootRow = ${rootRow};`, upsertCall]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -1897,11 +1970,11 @@ export function renderMikroEmbeddedRepository(
       repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
-      audited && `import { stampInsert } from "../audit-stamp";`,
+      audited && `import { stampInsert${versioned ? ", stampUpdate" : ""} } from "../audit-stamp";`,
       `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
-      `import { AggregateNotFoundError } from "../../domain/errors";`,
+      `import { AggregateNotFoundError${versioned ? ", ConcurrencyError" : ""} } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
       `import { requestLog } from "../../obs/als";`,
       "",
@@ -2332,7 +2405,10 @@ export function renderMikroEventSourcedRepository(
       repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${eventRow} } from "../entities";`,
-      `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
+      // The aggregate root + any contained entity parts (folded in-memory from
+      // the stream) — `toWire` projects the part shapes, so their classes must
+      // be in scope even though the ES store never touches a child table.
+      `import { ${[agg.name, ...(agg.parts ?? []).map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
       `import type * as Events from "../../domain/events";`,

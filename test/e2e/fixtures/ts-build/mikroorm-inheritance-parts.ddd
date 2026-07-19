@@ -1,0 +1,36 @@
+// MikroORM aggregate-inheritance (TPH sharedTable) + contained parts: a concrete
+// subtype that also `contains` a nested part tree.  The part child tables FK the
+// SHARED base row (the concrete has no table of its own); the repository
+// composes the inheritance `kind` scope with the containment hydrate pass.
+// tsc-checked.
+system Wallet {
+  subdomain Core {
+    context Methods {
+      enum CardNetwork { Visa, Mastercard, Amex }
+      valueobject Money { amount: int  currency: string }
+      abstract aggregate PaymentMethod inheritanceUsing: sharedTable {
+        holderName: string
+        last4: string
+      }
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        contains charges: Charge[]
+        entity Charge {
+          amount: Money
+          contains splits: Split[]
+        }
+        entity Split { label: string }
+      }
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+      }
+      repository CreditCards for CreditCard {
+        find byNetwork(network: CardNetwork): CreditCard[] where this.network == network
+      }
+      repository BankAccounts for BankAccount { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Methods, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }, contexts: [Methods], dataSources: [s], port: 4000 }
+}
