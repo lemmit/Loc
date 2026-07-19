@@ -857,7 +857,9 @@ seam because Dart list literals are comma-separated.
 
 `Modal { trigger: Button(…), OperationForm(of:, op:) }` renders as a trigger `ElevatedButton` whose `onPressed` opens an `AlertDialog` wrapping the op-form widget (`showDialog`); the op-form pops its own route on success, dismissing the dialog.  `WorkflowForm(runs: <wf>)` renders as a `StatefulWidget` (like `CreateForm`) that POSTs the workflow params to the command route `/workflows/<wf>`.
 
-Known frontier: scalar/value-object array inputs, `UserComponent`, inline `:=` view writes, and `match await` async effects are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
+`match await <api>.<Agg>.<op>()` (async effect) projects an **async Riverpod Notifier method** (`Future<void> <action>(String id) async`): it POSTs the instance op to `/<coll>/$id/<op>`, reifies a non-2xx ProblemDetails back into the error variant (clobbering the wire `type` tag), then a Dart-3 `switch` over `result['type']` reifies each arm via `fromJson` and runs the arm body as a `state.copyWith` write.  The page-shell binds the action as an id-capturing closure (`final <a> = () => notifier.<a>(id);`) so the button's bare `<a>()` call is unchanged (`riverpod-emit.ts`).
+
+Known frontier: scalar/value-object array inputs, `UserComponent`, and inline `:=` view writes are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 

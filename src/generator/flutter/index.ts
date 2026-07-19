@@ -230,6 +230,7 @@ function renderPage(
   // stay plain `StatelessWidget`s (Track A/B/C skeleton).
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
   const consumer = stateful || usedApiHooks.size > 0;
+  const apiParamNames = new Map(ui.apiParams.map((p) => [p.name, p.apiName]));
   const source = consumer
     ? renderConsumerPage(
         page,
@@ -237,6 +238,7 @@ function renderPage(
         { usesState, usedActions, usedApiHooks, usesRouteId, stateful, hostsForm },
         bodyWidget,
         contexts,
+        apiParamNames,
       )
     : renderStatelessPage(page, className, bodyWidget, { usesRouteId, hostsForm });
 
@@ -313,10 +315,28 @@ function renderConsumerPage(
   b: ConsumerBindings,
   bodyWidget: string,
   contexts: EnrichedBoundedContextIR[],
+  apiParamNames: ReadonlyMap<string, string>,
 ): string {
+  // Project reactive state / actions first — its `asyncEffectActions` decide
+  // whether the page needs the route `id` (an async-effect method takes it).
+  let projSource = "";
+  let providerName = "";
+  let asyncEffectActions = new Set<string>();
+  if (b.stateful) {
+    const proj = renderRiverpod(page, contexts, apiParamNames);
+    projSource = proj.source;
+    providerName = proj.providerName;
+    asyncEffectActions = proj.asyncEffectActions;
+  }
+  const usesAsyncEffect = [...b.usedActions].some((a) => asyncEffectActions.has(a));
+  // A `match await` effect's Notifier method takes the route id, so bind it even
+  // when no byId read did.
+  const needsId = b.usesRouteId || usesAsyncEffect;
+
   const bindings: string[] = [];
-  // Route `id` first — a byId read's `ref.watch(<var>Provider(id))` reads it.
-  if (b.usesRouteId) {
+  // Route `id` first — a byId read's `ref.watch(<var>Provider(id))` and an
+  // async-effect closure both read it.
+  if (needsId) {
     bindings.push("    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';");
   }
   // QueryView read hoists (`final <var> = ref.watch(<var>Provider…);`).
@@ -332,16 +352,18 @@ function renderConsumerPage(
     }));
     bindings.push(...flutterTarget.renderApiHoisting(uses));
   }
-  // Reactive state / actions — only when the page projects them.
-  let projSource = "";
   if (b.stateful) {
-    const proj = renderRiverpod(page, contexts);
-    projSource = proj.source;
-    if (b.usesState) bindings.push(`    final state = ref.watch(${proj.providerName});`);
+    if (b.usesState) bindings.push(`    final state = ref.watch(${providerName});`);
     if (b.usedActions.size > 0) {
-      bindings.push(`    final notifier = ref.read(${proj.providerName}.notifier);`);
+      bindings.push(`    final notifier = ref.read(${providerName}.notifier);`);
       for (const a of [...b.usedActions].sort()) {
-        bindings.push(`    final ${a} = notifier.${a};`);
+        // An async-effect action's method takes the route id; bind it as an
+        // id-capturing closure so the button's `<a>()` call stays unchanged.
+        bindings.push(
+          asyncEffectActions.has(a)
+            ? `    final ${a} = () => notifier.${a}(id);`
+            : `    final ${a} = notifier.${a};`,
+        );
       }
     }
   }
@@ -351,9 +373,16 @@ function renderConsumerPage(
   ];
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
-  // `Action(<instance>.<op>)` buttons POST inline via `apiUri(` — import http +
-  // the base-URL helper when the body references it.
-  if (bodyWidget.includes("apiUri(")) {
+  // A `match await` Notifier method decodes JSON, POSTs via `apiUri`, and reifies
+  // wire models — so the file needs dart:convert + http + config + models when the
+  // projection uses them.
+  if (projSource.includes("jsonDecode") || projSource.includes("jsonEncode")) {
+    imports.push("import 'dart:convert';");
+  }
+  if (projSource.includes(".fromJson(")) imports.push("import '../models.dart';");
+  // `Action(<instance>.<op>)` buttons and async-effect methods POST inline via
+  // `apiUri(` — import http + the base-URL helper when either references it.
+  if (bodyWidget.includes("apiUri(") || projSource.includes("apiUri(")) {
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
   return `${lines(
