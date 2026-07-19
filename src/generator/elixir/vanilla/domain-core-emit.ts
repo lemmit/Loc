@@ -1,13 +1,14 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  EnrichedAggregateIR,
   FunctionIR,
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
-import type { RenderCtx } from "../render-expr.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { bodyUsesParam, renderFunctionBodyLines } from "./function-emit.js";
@@ -108,6 +109,58 @@ export function renderAggregatePureCore(
   // is `%__MODULE__{}` — this IS the aggregate's own schema module.
   for (const fn of agg.functions ?? []) {
     out.push("", ...renderPureFunction(`${appModule}.${ctxModule}`, fn));
+  }
+  // Derived fields (§B18) — an Ecto struct carries no computed field, so a
+  // `derived isDraft: bool = …` has no `record.is_draft` to read (the wire path
+  // computes it inline).  Expose each PURE derived as an accessor function on the
+  // schema module (`def is_draft(record), do: record.status == :Draft`) so a
+  // domain `test` can read it exactly like node/java/dotnet/python's getter.
+  for (const line of derivedAccessorLines(
+    `${appModule}.${ctxModule}`,
+    agg as EnrichedAggregateIR,
+  )) {
+    out.push(line);
+  }
+  return out;
+}
+
+/** The derived-field names that get a pure-core accessor on the aggregate schema
+ *  module.  A derived whose expression can't render as a pure struct function
+ *  (e.g. it references a repository find) is omitted — no accessor emitted, no
+ *  codegen crash.  Shared with `tests-emit.ts` so a domain test reading a derived
+ *  routes to `Agg.<derived>(record)` exactly when an accessor exists (and skips
+ *  honestly otherwise, rather than emitting a `KeyError`-raising struct read). */
+export function pureDerivedAccessorNames(
+  contextModule: string,
+  agg: EnrichedAggregateIR,
+): Set<string> {
+  const names = new Set<string>();
+  const rc: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla", agg };
+  for (const d of agg.derived) {
+    if (d.name === "inspect") continue; // the synthesized redaction derived (inspect-emit.ts owns it)
+    try {
+      renderExpr(d.expr, rc);
+      names.add(d.name);
+    } catch {
+      // Non-pure derived — leave it to the wire path; no domain accessor.
+    }
+  }
+  return names;
+}
+
+/** `def <derived>(%__MODULE__{} = record), do: <expr>` lines for each pure derived
+ *  (blank-line separated, schema-module body indent), mirroring `pureDerivedAccessorNames`. */
+function derivedAccessorLines(contextModule: string, agg: EnrichedAggregateIR): string[] {
+  const emit = pureDerivedAccessorNames(contextModule, agg);
+  const rc: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla", agg };
+  const out: string[] = [];
+  for (const d of agg.derived) {
+    if (!emit.has(d.name)) continue;
+    out.push(
+      "",
+      `  @doc "Pure derived \`${d.name}\` — computed from struct state (no persistence)."`,
+      `  def ${snake(d.name)}(%__MODULE__{} = record), do: ${renderExpr(d.expr, rc)}`,
+    );
   }
   return out;
 }

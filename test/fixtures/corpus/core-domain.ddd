@@ -20,17 +20,16 @@ system CoreShop {
         // Pure-domain (unit) test — exercised on every backend's unit tier.
         // Stresses enum construction, a `Money` value-object literal (decimal),
         // a collection containment (`lines` folds a Line), an enum-valued
-        // matcher, and a decimal matcher — the cross-backend coercion surface.
-        // (Derived-field access — `o.isDraft` — is deliberately NOT asserted
-        // here: elixir computes derived fields only inline at the wire boundary,
-        // with no domain-struct accessor, so a domain test can't read them there
-        // yet. Tracked as B18 in docs/audits/behavioral-parity-bugs-2026-07.md;
-        // the derived value is still covered by the api tier's read.)
+        // matcher, a decimal matcher, and a derived-field read (`o.isDraft`) —
+        // the cross-backend coercion surface.  All five backends expose the
+        // derived as a domain accessor (elixir via the B18 pure-core accessor).
         test "place transitions a draft order and folds a line" {
           let o = Order.create({ code: "CD1", status: Draft, total: Money { amount: 10.00, currency: "USD" } })
+          expect(o.isDraft).toBe(true)
           o.addLine("S1", 2)
           o.place()
           expect(o.status).toBe(Placed)
+          expect(o.isDraft).toBe(false)
           expect(o.lines.count).toBe(1)
           expect(o.total.amount).toBe(10.00)
         }

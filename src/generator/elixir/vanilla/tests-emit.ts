@@ -1,5 +1,6 @@
 import type {
   AggregateIR,
+  EnrichedAggregateIR,
   ExprIR,
   OperationIR,
   TestIR,
@@ -7,6 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
+import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto/Phoenix) domain `test "..."` → runnable ExUnit, ported 1:1 from
@@ -43,6 +45,11 @@ interface Env {
    *  these can lower a `expect(VO{bad}).toThrow()` to `assert {:error, _} =
    *  <VO>.new(…)`; a VO without invariants has no module, so such a test skips. */
   validatableVos: Set<string>;
+  /** Aggregate `derived` fields exposed as a pure-core accessor
+   *  (`Agg.<derived>(record)`) — B18.  A derived read routes to the accessor when
+   *  its name is here; a derived NOT here has no pure accessor (non-relational or
+   *  non-pure expression), so reading it degrades to `@tag :skip`. */
+  derivedAccessors: Set<string>;
 }
 
 const MATCHER_OP: Record<string, string> = {
@@ -109,6 +116,7 @@ export function renderVanillaAggregateTestModule(
     aggMod: `${contextModule}.${upperFirst(agg.name)}`,
     ctxModule: contextModule,
     validatableVos,
+    derivedAccessors: pureDerivedAccessorNames(contextModule, agg as EnrichedAggregateIR),
   };
   const blocks = agg.tests.map((t) => renderTest(t, env));
   const body = blocks.flatMap((block) => ["", ...block.map((l) => (l === "" ? "" : `  ${l}`))]);
@@ -243,6 +251,18 @@ function vtExpr(e: ExprIR, env: Env): string {
         e.member === "length"
       ) {
         return `String.length(${recv})`;
+      }
+      // A derived-field read has no struct field on elixir — route it to the
+      // pure-core accessor `Agg.<derived>(record)` (B18) when the receiver is the
+      // aggregate itself.  A derived without a pure accessor (non-pure expression)
+      // can't be read in a domain test → skip honestly.
+      if (e.receiver.kind === "ref" && env.agg.derived.some((d) => d.name === e.member)) {
+        if (!env.derivedAccessors.has(e.member)) {
+          throw new UnsupportedTestShapeError(
+            `derived '${e.member}' has no pure accessor on vanilla (its expression isn't purely renderable)`,
+          );
+        }
+        return `${env.aggMod}.${snake(e.member)}(${recv})`;
       }
       return `${recv}.${snake(e.member)}`;
     }
