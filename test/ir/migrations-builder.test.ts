@@ -839,6 +839,63 @@ migration "rename-qty" { Order.qty -> quantity }
     });
     expect(out[0]!.steps).toEqual([]);
   });
+
+  // Regression (docs/audits/repo-code-review-2026-07.md S1): a TPH concrete owns
+  // NO table of its own — its columns live on the TPH root's shared table.  A
+  // `rename Concrete.x -> y` must target the BASE table (`parties`), not a
+  // nonexistent `<concrete>s` table; otherwise diffTable never sees the intent
+  // and the declared rename silently degrades to a drop+add (data loss).
+  const TPH_RENAME_SRC = `
+system Reg {
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable {
+        name: string
+      }
+      aggregate Customer extends Party {
+        creditCap: int
+      }
+      repository Customers for Customer { }
+    }
+  }
+  deployable api { platform: node, contexts: [Parties], port: 3000 }
+}
+migration "rename-credit" { Customer.creditLimit -> creditCap }
+`;
+
+  it("routes a TPH concrete rename onto the base's shared table", async () => {
+    const loom = await buildLoomModel(TPH_RENAME_SRC);
+    const sys = loom.systems[0]!;
+    // Baseline carries the OLD column name `credit_limit` on the SHARED base
+    // table `parties` (the concrete has no table).
+    const next = schemaFromModule(sys.subdomains[0]!);
+    const baseline = withModifiedTable(
+      { ...next, lastVersion: BASE_TIMESTAMP },
+      "parties",
+      (t) => ({
+        ...t,
+        columns: t.columns.map((c) =>
+          c.name === "credit_cap" ? { ...c, name: "credit_limit" } : c,
+        ),
+      }),
+    );
+    const out = buildMigrations(sys, memorySnapshotStore({ Registry: baseline }), {
+      renameIntents: loom.renameIntents,
+    });
+    const steps = out[0]!.steps;
+    expect(
+      steps.some(
+        (s) =>
+          s.op === "renameColumn" &&
+          s.table === "parties" &&
+          s.from === "credit_limit" &&
+          s.to === "credit_cap",
+      ),
+    ).toBe(true);
+    // NOT degraded to a drop+add (which would lose the column's data).
+    expect(steps.some((s) => s.op === "dropColumn")).toBe(false);
+    expect(steps.some((s) => s.op === "addColumn")).toBe(false);
+  });
 });
 
 describe("buildMigrations", () => {
@@ -1450,6 +1507,36 @@ describe("A8.3 — destructive-change gate", () => {
         module: "M",
       }),
     ).toThrow(MigrationDestructiveError);
+  });
+
+  // Regression (docs/audits/repo-code-review-2026-07.md S2): a same-column TYPE
+  // change emits `alterColumnType` (`ALTER ... TYPE t USING col::t`), which can
+  // fail at apply time (`string -> int` on a non-numeric row) or truncate
+  // (`decimal -> int`).  It must be gated by the destructive policy — previously
+  // it slipped through ungated.
+  it("gates a same-column type change (alterColumnType) behind --allow-destructive", () => {
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [idCol, { name: "total", type: { kind: "text" as const }, nullable: false }]),
+      ],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [idCol, { name: "total", type: { kind: "int" as const }, nullable: false }]),
+      ],
+    };
+    const raw = diffSchema(prev, next);
+    // Sanity: the diff is a same-column type change, not a drop+add.
+    expect(raw.some((s) => s.op === "alterColumnType")).toBe(true);
+    // Gated off by default.
+    expect(() =>
+      applyDestructivePolicy(raw, prev, { allowDestructive: false, module: "M" }),
+    ).toThrow(MigrationDestructiveError);
+    // Passes through under --allow-destructive.
+    const allowed = applyDestructivePolicy(raw, prev, { allowDestructive: true, module: "M" });
+    expect(allowed.some((s) => s.op === "alterColumnType")).toBe(true);
   });
 
   it("blocks a NOT-NULL add without a default on an existing table unless allowed", () => {
