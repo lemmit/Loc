@@ -264,8 +264,9 @@ const STORE: Case = {
  *  plain styled elements) all ship the required template surface. */
 /** File upload (M-T1.2 slice 4b) — a `File` aggregate field in a CreateForm
  *  renders a native file input wired through `onFileUpload` into a
- *  `FormControl<FileRef | null>`.  (The standalone `FileUpload(bind:)` on
- *  Angular renders a bare input — functionally deferred — but still builds.) */
+ *  `FormControl<FileRef | null>`; the standalone `FileUpload(bind: <File
+ *  state>)` (the `Up` page) wires a `signal<FileRef | null>` through the
+ *  component's `onFileUploadTo` method.  Both paths must tsc-build. */
 const FILE: Case = {
   name: "file",
   angularDir: "web",
@@ -277,6 +278,9 @@ const FILE: Case = {
       ui WebApp {
         page NewDoc { route: "/new"  title: "New"
           body: Stack { CreateForm { of: Attachment } } }
+        page Up { route: "/up"  title: "Upload"
+          state { doc: File }
+          body: Stack { FileUpload { "Doc", bind: doc } } }
       }
       api DocsApi from Media
       storage primary { type: postgres }

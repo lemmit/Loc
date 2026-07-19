@@ -852,6 +852,7 @@ function dummyCtx(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
   };
 }
 

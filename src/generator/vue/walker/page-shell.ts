@@ -1294,6 +1294,7 @@ function buildDerivedLines(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
       // Share the body's store-usage map so a store read in a derived
       // expression records into the shell's store wiring (Stage 5).
       usedStores,
@@ -1395,6 +1396,7 @@ function buildActionLines(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
       // Share the body's store-usage map so a store action called ONLY from
       // an action handler (`discard() { Cart.clear() }`) drives the shell's
       // store import + member bind (Stage 5).

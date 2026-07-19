@@ -797,6 +797,7 @@ function prepareIndexHtmlVM(deployable: DeployableIR, ui: UiIR): Record<string, 
     canonical: metadata?.canonical,
     favicon: deployable.favicon,
     usesCodeBlock: false,
+    usesFileUpload: false,
   };
 }
 

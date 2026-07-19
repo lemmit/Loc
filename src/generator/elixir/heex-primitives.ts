@@ -841,6 +841,34 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   return `<span${testidAttr}>${valueHeex}</span>`;
 }
 
+/** `FileLink(<file-ref>)` → a plain download anchor for a `File` field.  The
+ *  `File` wire value is a JSON map (`%{"url" => …, "key" => …}`, string keys —
+ *  Ecto `:map`), so `url`/`key` read via bracket access.  Null-guarded: an
+ *  optional `File?` that is `nil` renders an em-dash (a required `File` is
+ *  always truthy). */
+export function renderFileLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
+  const valueArg = namedArg(expr, "value") ?? positionals[0];
+  if (!valueArg) return `<span${testidAttr}>—</span>`;
+  const recv = renderExpr(valueArg, { ...ctx, position: "template" });
+  return `<%= if ${recv} do %><a href={${recv}["url"]} download${testidAttr}><%= ${recv}["key"] %></a><% else %><span>—</span><% end %>`;
+}
+
+/** The value of a named arg on a call, or undefined. */
+function namedArg(expr: Extract<ExprIR, { kind: "call" }>, name: string): ExprIR | undefined {
+  for (let i = 0; i < expr.args.length; i++) {
+    if (expr.argNames?.[i] === name) return expr.args[i];
+  }
+  return undefined;
+}
+
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
 export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
@@ -1253,6 +1281,75 @@ export function renderSelectField(
 }
 export function renderToggle(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return controlledInput(expr, ctx, "checkbox");
+}
+
+/** `FileUpload { "Label", bind: <File state> }` → a LiveView-native file input.
+ *
+ *  Unlike the JSX frontends (which POST the file to `/files` and bind the
+ *  returned FileRef), Phoenix has no such endpoint — LiveView streams uploads
+ *  over its own channel.  So this renders the idiomatic `allow_upload` flow: a
+ *  `<.live_file_input>` inside a `phx-change` form, an `allow_upload/3` seeded
+ *  in `mount/3` (with `auto_upload: true`), and a `handle_<field>_progress/3`
+ *  consumer that persists the completed entry and assigns the resulting FileRef
+ *  map (`%{ "url", "key", "contentType", "size" }` — the wire FileRef shape)
+ *  into the bound `:<field>` page-state assign.  The `allow_upload` +
+ *  progress-consumer emission is driven by the `UploadBinding` this pushes onto
+ *  `ctx.uploadBindings` (consumed in liveview-emit.ts); the `phx-change`
+ *  validate handler (required for a live-file-input form) is hoisted here the
+ *  same way `controlledInput` hoists its write-back clause.
+ *
+ *  An unbound (or non-`File`-state) `bind:` renders a disabled plain file input
+ *  — there's nothing to two-way bind to — mirroring `controlledInput`'s stub. */
+export function renderFileUpload(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  let label = "";
+  let bind: string | undefined;
+  let testid = "";
+  let seenPositional = false;
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      seenPositional = true;
+    } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const labelText = label ? escapeHeexText(label) : "";
+  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const field = bind ? snake(bind) : undefined;
+  if (!field || !ctx.stateNames.has(field)) {
+    // Nothing to two-way bind to — a disabled plain file input, so the page
+    // still renders (validators catch a genuinely-unresolvable bind upstream).
+    return `<label class="block text-sm font-medium">${labelText}<input type="file" disabled${testidAttr} /></label>`;
+  }
+  // One allow_upload / progress consumer per bound field (mount + module body).
+  if (!ctx.uploadBindings.some((u) => u.field === field)) {
+    ctx.uploadBindings.push({ field });
+  }
+  // A live-file-input form must carry a `phx-change`; hoist the (no-op) clause
+  // once per field.  `phx-submit` reuses it so an accidental Enter can't trigger
+  // a native (page-navigating) submit.
+  const validateEvent = `validate_${field}`;
+  if (!ctx.handlers.some((h) => h.name === validateEvent)) {
+    ctx.handlers.push({
+      name: validateEvent,
+      paramsPattern: "_params",
+      body: [`    {:noreply, socket}`],
+    });
+  }
+  return [
+    `<form phx-change="${validateEvent}" phx-submit="${validateEvent}" class="loom-file-upload">`,
+    `  <label class="block text-sm font-medium">`,
+    labelText ? `    ${labelText}` : "",
+    `    <.live_file_input upload={@uploads.${field}}${testidAttr} />`,
+    `  </label>`,
+    `</form>`,
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
 }
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`

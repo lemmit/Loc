@@ -579,8 +579,8 @@ system DevPlatform {
 
         // Project detail — covers the remaining layout primitives:
         // Group / Grid / Container / Tabs / Field / NumberField /
-        // PasswordField / Toggle / Loader / Image / Avatar / Slot / Card /
-        // Stat / Badge / Divider / Money / KeyValueRow / Modal.
+        // PasswordField / Toggle / FileUpload / FileLink / Loader / Image / Avatar / Slot /
+        // Card / Stat / Badge / Divider / Money / KeyValueRow / Modal.
         page ProjectDetail(id: Project id) {
             route: "/projects/:id"
             title: "Project"
@@ -588,6 +588,7 @@ system DevPlatform {
                 editing: bool = false
                 draftName: string = ""
                 level: int = 1
+                attachment: File
             }
             // Named async action driving a `match await` over a union-returning
             // remote op (Stage 2) — exercises AwaitExpr + MatchStmt +
@@ -623,6 +624,8 @@ system DevPlatform {
                                 NumberField { "Level", bind: level },
                                 PasswordField { "Token" },
                                 Toggle { "Editing", bind: editing },
+                                FileUpload { "Attachment", bind: attachment },
+                                FileLink { attachment },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" },
                                 Button { "Reserve", onClick: reserveNow }

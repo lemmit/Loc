@@ -99,6 +99,7 @@ function notifierCtx(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
     usesFragment: false,
     externFunctions: new Set(),
     usedExternFunctions: new Set(),

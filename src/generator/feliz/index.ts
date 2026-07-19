@@ -19,6 +19,7 @@ import type {
   UserIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
@@ -57,6 +58,7 @@ import {
   collectPageActions,
   collectPageAsyncEffects,
   collectPageBoundState,
+  collectPageFileUploads,
   collectPageForms,
   collectPageMutations,
   collectPageOperationForms,
@@ -65,6 +67,7 @@ import {
   type FelizAction,
   type FelizAsyncEffect,
   type FelizBoundState,
+  type FelizFileUpload,
   type FelizForm,
   type FelizMutation,
   type FelizOperationForm,
@@ -77,6 +80,7 @@ import {
   renderApiModule,
   renderAsyncOutcomeTypes,
   renderEncoders,
+  renderFileRefType,
   renderFormTypes,
   renderValidation,
   renderViewModule,
@@ -694,6 +698,21 @@ function boundStateForUi(ui: UiIR): FelizBoundState[] {
   return out;
 }
 
+/** A ui's standalone `FileUpload(bind:)` state fields across ALL pages (deduped
+ *  by name) — each gets a `Select<Field>File`/`<Field>Uploaded` Msg pair + upload
+ *  update arms so the picked file uploads and the returned FileRef lands. */
+function fileUploadsForUi(ui: UiIR): FelizFileUpload[] {
+  const seen = new Set<string>();
+  const out: FelizFileUpload[] = [];
+  for (const page of ui.pages)
+    for (const u of collectPageFileUploads(page))
+      if (!seen.has(u.name)) {
+        seen.add(u.name);
+        out.push(u);
+      }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -828,13 +847,18 @@ function renderAppFs(
   }
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
+  // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
+  // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
+  const fileUploads = fileUploadsForUi(ui);
+  const hasFileUploads = fileUploads.length > 0;
   // Any form with a message-bearing (required) field → the `View.fieldError`
   // helper must ship even on a form-only page that has no reads.
   const hasFieldErrors = formRecords.some(formHasFieldErrors);
   // Http/Api are needed for reads, mutations, forms (POST) AND async effects
-  // (POST + decode); the auth probe also uses `Http.get`.  The Thoth
-  // record/decoder layer is needed for reads AND async effects (the op's
-  // `type`-tagged 200 body); the `Remote`/View envelope is reads-only.
+  // (POST + decode); the auth probe also uses `Http.get`; a FileUpload POSTs
+  // its bytes to /files.  The Thoth record/decoder layer is needed for reads
+  // AND async effects (the op's `type`-tagged 200 body); the `Remote`/View
+  // envelope is reads-only.
   const hasHttp =
     hasReads ||
     mutations.length > 0 ||
@@ -842,7 +866,8 @@ function renderAppFs(
     authUi ||
     hasEffects ||
     pageGate ||
-    opActions.length > 0;
+    opActions.length > 0 ||
+    hasFileUploads;
   const hasWire = hasReads || hasEffects;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
@@ -859,6 +884,9 @@ function renderAppFs(
     s.state.map((f) => ({ name: storeModelField(s.name, f.name), type: f.type, init: f.init })),
   );
   const state = [...combinedState(ui), ...storeStateFields];
+  // Any `File`-typed state field → the `FileRef` record + decoder must ship (the
+  // field is a `FileRef option` in the Model, and `Api.uploadFile` decodes one).
+  const hasFileState = state.some((f) => typeIsFile(f.type));
   // Async-effect actions project to their own trigger/result Msg cases + update
   // arms, so they're excluded from the plain action Msg/update path.
   const actions = combinedActions(ui).filter((a) => !asyncEffectActions.has(a.name));
@@ -887,6 +915,7 @@ function renderAppFs(
     pageGate,
     opActions,
     boundState,
+    fileUploads,
   );
   const update = renderUpdate(
     actions,
@@ -903,6 +932,7 @@ function renderAppFs(
     pageGate,
     opActions,
     boundState,
+    fileUploads,
   );
   const wire = hasWire
     ? renderWireTypes(
@@ -912,6 +942,11 @@ function renderAppFs(
         asyncEffects.flatMap((e) => e.extraErrorPayloads),
       )
     : { domain: "", decoders: "" };
+  // A `File`-typed AGGREGATE wire field decodes to the `FileRef` record, so the
+  // `type FileRef` + `fileRefDecoder` must ship AHEAD of the domain decoders that
+  // reference it (F# is order-sensitive).  Detected off the rendered records
+  // (`wireFieldType` spells a File field `FileRef`).
+  const hasFileWire = wire.domain.includes("FileRef");
   // Multi-variant async effects emit a discriminated-union outcome type, placed
   // right after the domain records (its cases reference them).
   const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);
@@ -924,6 +959,7 @@ function renderAppFs(
         workflowForms,
         asyncEffects,
         opActions,
+        hasFileUploads,
       )
     : "";
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
@@ -1006,11 +1042,14 @@ function renderAppFs(
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
-    // AND the UI-gate claims decode.
-    (hasReads || hasForms || hasEffects || pageGate) && "open Thoth.Json",
+    // the UI-gate claims decode, AND the FileRef upload decoder.
+    (hasReads || hasForms || hasEffects || pageGate || hasFileState || hasFileWire) &&
+      "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
     // Browser.Dom provides `window` for the auth sign-in/out redirects.
     authUi && "open Browser.Dom",
+    // A FileUpload mints its multipart FormData via the JS-interop escape hatch.
+    hasFileUploads && "open Fable.Core.JsInterop",
     // Auth session gate — SessionState (gates the Model) + the Auth probe module.
     // Under a page gate the probe decodes the verified claims into `CurrentUser`
     // (record + decoder ahead of the claims-variant Auth module); a gate-free
@@ -1023,6 +1062,12 @@ function renderAppFs(
     pageGate && user ? renderCurrentUserDecoder(user) : false,
     authUi && "",
     authUi && (pageGate ? AUTH_MODULE_CLAIMS : AUTH_MODULE),
+    // FileRef record + decoder — emitted whenever a `File`-typed state field
+    // exists (its Model field is `FileRef option`, `Api.uploadFile` decodes one)
+    // OR a `File` aggregate wire field decodes to a `FileRef`.  Placed BEFORE the
+    // domain decoders (which reference `fileRefDecoder`) + Model + the Api module.
+    (hasFileState || hasFileWire) && "",
+    (hasFileState || hasFileWire) && renderFileRefType(),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
@@ -1078,7 +1123,12 @@ function renderAppFs(
 // Fable.SimpleHttp for the fetch, Thoth.Json for the decoders.  A read-free
 // (Counter-class) app omits them so its project stays minimal.
 // A multi-page ui additionally pulls in Feliz.Router for URL routing.
-function fsproj(hasHttp: boolean, needsRouter: boolean, authUi = false): string {
+function fsproj(
+  hasHttp: boolean,
+  needsRouter: boolean,
+  authUi = false,
+  hasFileUploads = false,
+): string {
   const wireRefs = hasHttp
     ? `
     <PackageReference Include="Fable.SimpleHttp" Version="3.6.0" />
@@ -1088,11 +1138,14 @@ function fsproj(hasHttp: boolean, needsRouter: boolean, authUi = false): string 
     ? `
     <PackageReference Include="Feliz.Router" Version="4.0.0" />`
     : "";
-  // The auth gate's sign-in/out redirects use `window` (Fable.Browser.Dom).
-  const authRef = authUi
-    ? `
+  // The auth gate's sign-in/out redirects use `window`, and a `FileUpload`'s
+  // `Browser.Types.File`/`FormData.Create()` come from Fable.Browser.Dom too —
+  // reference it once when either needs it.
+  const browserDomRef =
+    authUi || hasFileUploads
+      ? `
     <PackageReference Include="Fable.Browser.Dom" Version="2.14.0" />`
-    : "";
+      : "";
   return `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -1104,7 +1157,7 @@ function fsproj(hasHttp: boolean, needsRouter: boolean, authUi = false): string 
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="4.3.0" />
     <PackageReference Include="Feliz" Version="2.8.0" />
-    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${routerRef}${wireRefs}${authRef}
+    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${routerRef}${wireRefs}${browserDomRef}
   </ItemGroup>
 </Project>
 `;
@@ -1301,15 +1354,19 @@ export function generateFelizForContexts(
     operationFormsForUi(ui, contexts).length > 0 ||
     workflowFormsForUi(ui, contexts).length > 0;
   const hasEffects = asyncEffectsForUi(ui, contexts).length > 0;
+  // A standalone `FileUpload(bind:)` POSTs bytes via `Api.uploadFile` (Http) and
+  // needs `Browser.Types.File`/`FormData` (Fable.Browser.Dom).
+  const hasFileUploads = fileUploadsForUi(ui).length > 0;
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||
     mutationsForUi(ui, contexts).length > 0 ||
     anyForm ||
     authUi ||
-    hasEffects;
+    hasEffects ||
+    hasFileUploads;
   const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
   out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user));
-  out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi));
+  out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));

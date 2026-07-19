@@ -794,10 +794,10 @@ export type ColumnKind =
   | { tag: "bool" }
   | { tag: "numeric" } // decimal / money / int / long — bare text
   | { tag: "enum" }
-  | { tag: "file" } // File — its `url` shown as text (a `File` renders as the
-  //                   FileRef object, which is not a ReactNode; render the
-  //                   download path instead.  A clickable FileLink display
-  //                   primitive is the cross-frontend slice-4b follow-up.)
+  | { tag: "file" } // File (required or optional) — a `FileLink` download anchor
+  //                   (`<a href={ref.url} download>{ref.key}</a>`).  A raw `File`
+  //                   is the FileRef object, not a ReactNode; `FileLink` renders
+  //                   the anchor and null-guards optional `File?` to an em-dash.
   | { tag: "text" }; // string / guid / json / fallback
 
 export interface ScaffoldColumn {
@@ -826,9 +826,10 @@ function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
       return callExpr("EnumBadge", [{ value: receiver() }]);
     case "file":
       // A `File` field is the FileRef object `{ url, key, contentType, size }` —
-      // rendering it directly is a non-ReactNode tsc error.  Show its `url`
-      // (the download path) as text; the served Response `File` is non-null.
-      return callExpr("Text", [{ value: memberAccess(receiver(), "url") }]);
+      // rendering it directly is a non-ReactNode tsc error.  `FileLink` renders a
+      // clickable download `<a href={ref.url} download>{ref.key}</a>`, null-guarded
+      // so an optional `File?` (null) shows an em-dash instead of a broken anchor.
+      return callExpr("FileLink", [{ value: receiver() }]);
     default: // "numeric" | "text"
       return callExpr("Text", [{ value: receiver() }]);
   }
@@ -902,10 +903,10 @@ function kindForType(type: TypeRef, voAsText: boolean): ColumnKind | null {
       case "long":
         return { tag: "numeric" };
       case "File":
-        // Optional `File?` is deferred (its cell needs null-safe access) —
-        // skip it from scaffold columns/rows for now; a required `File`
-        // renders its download path (see `typedCell` "file").
-        return type.optional ? null : { tag: "file" };
+        // Required AND optional `File?` render as a `FileLink` download anchor
+        // (see `typedCell` "file") — `FileLink` null-guards, so an optional File
+        // that is null shows an em-dash rather than a broken cell.
+        return { tag: "file" };
       default: // string / guid / json — plain text
         return { tag: "text" };
     }

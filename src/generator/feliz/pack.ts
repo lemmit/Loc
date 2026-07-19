@@ -563,6 +563,22 @@ function primitiveSelectField(c: Ctx): string {
   return formControl(c, input);
 }
 
+/** FileUpload — a daisyUI file input bound to a `File`-typed state field.  On
+ *  select it dispatches `Select<Field>File` carrying the picked browser file
+ *  (Feliz's typed `onChange (File -> unit)` overload reads `files.[0]`); the MVU
+ *  update arm POSTs it to `/files` via `Api.uploadFile` and stores the returned
+ *  `FileRef` on the Model (`<Field> = Some ref`).  An unresolved bind renders an
+ *  uncontrolled stub (no dispatch) so the page still compiles. */
+function primitiveFileUpload(c: Ctx): string {
+  const bind = String(c.bind ?? "").trim();
+  const cls = 'prop.className "file-input file-input-bordered w-full"';
+  const input =
+    c.hasBind && bind !== ""
+      ? `Html.input [ ${cls}; prop.type'.file; prop.onChange (fun (file: Browser.Types.File) -> dispatch (Select${upperFirst(bind)}File file)) ]`
+      : `Html.input [ ${cls}; prop.type'.file ]`;
+  return formControl(c, input);
+}
+
 /** Toggle — a controlled daisyUI checkbox toggle bound to a bool state field.
  *  Renders the label inline (daisyUI's `label cursor-pointer` row) rather than
  *  above, matching the toggle's horizontal affordance. */
@@ -690,6 +706,7 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-password-field": primitivePasswordField,
   "primitive-number-field": primitiveNumberField,
   "primitive-select-field": primitiveSelectField,
+  "primitive-file-upload": primitiveFileUpload,
   "primitive-toggle": primitiveToggle,
   "primitive-modal-controlled": primitiveModalControlled,
 };

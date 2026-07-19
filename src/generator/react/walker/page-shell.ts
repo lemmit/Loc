@@ -226,6 +226,7 @@ export function renderCustomLayoutPage(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
     };
     const exprStr = emitExpr(d.expr, dctx);
     if (dctx.usesState) usesStateForDerived = true;
@@ -279,6 +280,7 @@ export function renderCustomLayoutPage(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
       externFunctions,
       usedExternFunctions,
       // Share the body walk's store-usage map so a store referenced ONLY from
@@ -336,6 +338,7 @@ export function renderCustomLayoutPage(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -854,6 +857,7 @@ export function renderUserComponentFile(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
     };
     const exprStr = emitExpr(d.expr, dctx);
     if (dctx.usesState) usesStateForDerived = true;
@@ -900,6 +904,7 @@ export function renderUserComponentFile(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      usesFileUpload: false,
       externFunctions,
       usedExternFunctions,
       // Share the body walk's store-usage map so a store referenced ONLY from
@@ -1229,6 +1234,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
   };
   return emitExpr(expr, dummy);
 }

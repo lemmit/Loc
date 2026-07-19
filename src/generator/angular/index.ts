@@ -359,6 +359,7 @@ export function generateAngularForContexts(
       canonical: undefined,
       favicon: undefined,
       usesCodeBlock: false,
+      usesFileUpload: false,
     }),
   );
   out.set("src/api/client.ts", pack.render("api-client", { hasDelete, hasAuthUi: authUi }));

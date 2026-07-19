@@ -363,6 +363,23 @@ export const felizTarget: WalkerTarget = {
     return `Html.button [ prop.className "btn btn-error"; prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
   },
 
+  // `FileLink(<file-ref>)` → a plain daisyUI download anchor.  Feliz forks the
+  // shared primitive because its "markup" is F# (`Html.a [ … ]`), not an HTML
+  // string.  A `File` wire field is a `FileRef option` (always — see wire.ts), so
+  // the guard is a `Some`/`None` match: `Some` hrefs the `url` and labels with the
+  // `key`; `None` (an unset optional `File?`) renders an em-dash.
+  renderFileLink: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const named = argNames.indexOf("value");
+    const arg = named >= 0 ? call.args[named] : (call.args ?? []).find((_, i) => !argNames[i]);
+    if (!arg) return null;
+    const recv = emitExpr(arg, ctx);
+    const anchor =
+      'Html.a [ prop.className "link link-primary"; prop.href __f.url; prop.download __f.key; prop.text __f.key ]';
+    return `(match ${recv} with Some __f -> ${anchor} | None -> Html.text "—")`;
+  },
+
   // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
   // `<Op><Agg> id` (the route id bound by the detail page's view fn).  The
   // trigger `Msg` + POST `Cmd` + refetch-on-success live in `update`/`Api` (wired

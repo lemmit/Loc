@@ -1,1 +1,1 @@
-<label class="loom-field">{{#if labelText}}<span class="loom-label">{{{labelText}}}</span>{{/if}}<input type="file"{{{testidAttr}}} />{{#if hasError}}@if ( {{{error}}} ) {<span class="loom-error">\{{ {{{error}}} }}</span>}{{/if}}</label>
+<label class="loom-field">{{#if labelText}}<span class="loom-label">{{{labelText}}}</span>{{/if}}<input type="file"{{{testidAttr}}}{{#if hasBind}} (change)="onFileUploadTo($event, {{bind}})"{{/if}} />{{#if hasError}}@if ( {{{error}}} ) {<span class="loom-error">\{{ {{{error}}} }}</span>}{{/if}}</label>

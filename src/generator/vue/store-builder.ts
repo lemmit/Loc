@@ -144,6 +144,7 @@ function storeActionCtx(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
     usedStores: new Map(),
   };
 }

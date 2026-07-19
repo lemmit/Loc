@@ -192,6 +192,9 @@ export function emitFileUpload(
   // file to `/files` (multipart via `api.upload`) and writes the returned
   // `FileRef` back through the setter.  Mirrors `emitField`'s bind shape.
   void depth;
+  // Flag the walk so the Angular page-shell wires the `onFileUploadTo`
+  // component method + its imports (unread on the other frontends).
+  ctx.usesFileUpload = true;
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
