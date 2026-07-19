@@ -87,8 +87,8 @@ import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaExternHook } from "./emit/extern.js";
 import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
-import { emitJavaMigrations } from "./emit/migrations.js";
 import { renderHttpMetrics } from "./emit/metrics.js";
+import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
   renderLifecycleCatalog,

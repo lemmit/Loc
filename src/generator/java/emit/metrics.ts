@@ -1,5 +1,5 @@
-import { Metrics } from "../../_obs/metrics.js";
 import { lines } from "../../../util/code-builder.js";
+import { Metrics } from "../../_obs/metrics.js";
 
 // ---------------------------------------------------------------------------
 // Prometheus HTTP metrics for the Java/Spring Boot backend — the
