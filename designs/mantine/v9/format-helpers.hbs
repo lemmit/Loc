@@ -83,7 +83,7 @@ export function NumberValue({ value, decimals = 0 }: { value: number | string | 
  *  fractional digits; pass `currency` to switch (e.g. "EUR") and
  *  `decimals` to override scale.  Empty values render as the
  *  shared dimmed em-dash. */
-export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | null | undefined; currency?: string; decimals?: number }) {
+export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | { toString(): string } | null | undefined; currency?: string; decimals?: number }) {
   if (isEmpty(value)) return <EmptyValue />;
   const n = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(n)) return <Text component="span">{String(value)}</Text>;

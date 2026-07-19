@@ -38,6 +38,14 @@ authoritative for what ships today. Verify against fresh `main` before fixing.
 > and `mypy --strict` on the emitted FastAPI project, plus regression tests in
 > both backends. Other sections remain open.
 
+> **Update (2026-07-19, follow-up PR):** section **F1** (scaffolded `money`
+> field rendered a `Decimal` as a React child) has been **fixed** — money now
+> emits the `Money` formatter primitive and the eight React packs' `MoneyValue`
+> accepts the `Decimal` structurally (see §F1 note). Verifying F1 surfaced a
+> **new, distinct** build-break, **F1b** (the scaffolded money *form*'s RHF
+> resolver input≠output typing), documented at §F1b and **not yet fixed**.
+> Other sections remain open.
+
 Severity legend: **build-break** — generated project fails its own compile
 gate; **wrong-value** — compiles but computes/serves incorrect results;
 **boot-break** — generated stack fails to start/migrate; **UX** — visible
@@ -266,6 +274,42 @@ But money deserializes client-side to a decimal.js `Decimal` instance
 throws "Objects are not valid as a React child". Unexercised by CI — every
 matrix example models money as a value object. Fix: give money its own
 ColumnKind (Money primitive or `.toString()`).
+
+> **Update (2026-07-19, follow-up PR): F1 fixed.** `money` gets its own
+> `{ tag: 'money' }` ColumnKind that emits the `Money` formatter primitive
+> (`<MoneyValue value={row.total} />`), and the eight React packs' `MoneyValue`
+> `value` param is widened structurally to `number | string | { toString():
+> string } | null | undefined` (the same pattern the Svelte packs already use
+> so it accepts a `Decimal` without importing decimal.js). `int`/`decimal`/
+> `long` stay `numeric` (plain numbers). Verified: the scaffolded list/detail
+> cells now `tsc`-clean; regression test in `walker-formatters`. **NOTE — a
+> *second*, distinct money-scaffold build-break surfaced during F1 verification
+> and is NOT yet fixed (see F1b).**
+
+### F1b. Scaffolded create/update **form** over a bare `money` field fails `tsc` (RHF resolver input≠output) *(build-break — NEW, not in the original 33)*
+
+Discovered while verifying F1. A scaffolded `CreateForm`/`UpdateForm` (or op/
+workflow form) over an aggregate with a bare `money` field emits
+`useForm<Create<Agg>Request>({ resolver: zodResolver(Create<Agg>Request), … })`.
+`Create<Agg>Request` is the schema's **output** type (`z.infer`/`z.output` —
+`total: Decimal`), but `zodResolver` types the resolver's **input** as
+`z.input` (`total: string | Decimal`, because `moneySchema` is a transform). So
+`Resolver<{total: string | Decimal}, …>` is not assignable to the
+`Resolver<{total: Decimal}, …>` the single-generic `useForm` expects → TS2322/
+TS2345 in `new.tsx` + `detail.tsx`. Money is the only field type whose
+`z.input ≠ z.output`, so only bare-`money` forms hit it (the matrix's
+money-as-VO cases have `amount: decimal`, input=output). Untested for the same
+reason as F1.
+
+Fix direction: emit the RHF three-generic form
+`useForm<Create<Agg>FormState, unknown, Create<Agg>Request>` (the `FormState` =
+`z.input` alias is already emitted by `api-module.ts` `dualTypeAliases`
+whenever a request reaches money), **conditionally** — only when the form
+reaches money, since the `FormState` alias is only emitted then — and add the
+`FormState` type import. Spans `form-of-decls` / `form-op-module` /
+`form-runs-decls` across the 8 React packs + the form-context builder. A
+focused cross-pack change; tracked here as its own item rather than rushed into
+the F1 PR.
 
 ### F2. `match { … }` in expression/text position silently emits `undefined` *(wrong-value, all JSX frontends)*
 
