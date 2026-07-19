@@ -7,6 +7,7 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
 // Hono/Drizzle document-persistence emission (`normalised(false)`).
@@ -126,5 +127,49 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     // byCustomer is a real indexed SQL WHERE on the root column — NOT in-memory.
     expect(repo).toContain(".where(eq(schema.wishlists.customerId, customerId))");
     expect(repo).not.toContain("FromDoc(row.data");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Optional single containment (`contains coupon: Coupon?`) on a document
+// aggregate.  Regression for the document-builder null-safety bug: the
+// `toDoc`/`fromDoc` helpers and the `Doc` type alias handled a collection
+// containment and a required single containment, but a nullable single
+// containment was serialised/deserialised through the non-null `partToDoc`/
+// `partFromDoc` helpers and typed as a non-null `PartDoc`, so an unset value
+// TS2345'd under `tsc --noEmit` (and dereferenced `null` at runtime).  The
+// embedded builder always handled this; the document builder was missed.
+// ---------------------------------------------------------------------------
+describe("Hono/Drizzle document — optional single containment is null-safe", () => {
+  const SRC = `
+    context Shop {
+      aggregate Cart shape: document {
+        note: string
+        contains coupon: Coupon?
+        contains items: CartLine[]
+        create(note: string) { note := note }
+        entity Coupon { code: string }
+        entity CartLine { sku: string  qty: int }
+      }
+      repository Carts for Cart { }
+    }
+  `;
+
+  it("guards the optional containment in the Doc type + toDoc + fromDoc", async () => {
+    const model = await parseValid(SRC);
+    const files = generateTypeScript(model, HONO_V4_PINS);
+    const repo = files.get("db/repositories/cart-repository.ts")!;
+    expect(repo, "cart-repository.ts generated").toBeDefined();
+    // Type alias: nullable single containment is `PartDoc | null`.
+    expect(repo).toContain("coupon: CouponDoc | null");
+    // Serialize: null-guarded, not a bare `couponToDoc(a.coupon)` (which the
+    // `Coupon | null` getter would fail to type-check against).
+    expect(repo).toContain("coupon: a.coupon == null ? null : couponToDoc(a.coupon)");
+    expect(repo).not.toMatch(/coupon: couponToDoc\(a\.coupon\)/);
+    // Deserialize: null-guarded, not a bare `couponFromDoc(d.coupon)`.
+    expect(repo).toContain("coupon: d.coupon == null ? null : couponFromDoc(d.coupon)");
+    expect(repo).not.toMatch(/coupon: couponFromDoc\(d\.coupon\)/);
+    // The required collection containment is unchanged.
+    expect(repo).toContain("items: a.items.map((e) => cartLineToDoc(e))");
   });
 });

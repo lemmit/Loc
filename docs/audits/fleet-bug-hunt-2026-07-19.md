@@ -27,6 +27,17 @@ authoritative for what ships today. Verify against fresh `main` before fixing.
 > document/`json`, event-sourced, OIDC-auth, and extern-resource projects. All
 > other sections below remain open.
 
+> **Update (2026-07-19, follow-up PR):** section **D1** (document-shape
+> repository breaking on an optional single containment) has been **fixed** —
+> in **both** the TypeScript and the Python document builders (the audit
+> flagged TS; Python had the identical bug and was fixed with it). The
+> `toDoc`/`fromDoc` helpers and the `Doc` type now None/null-guard a nullable
+> single containment (`coupon == null ? null : couponToDoc(coupon)` /
+> `(None if a.coupon is None else _coupon_to_doc(a.coupon))`), mirroring the
+> embedded builders. Verified by `tsc --noEmit` on the emitted Hono project
+> and `mypy --strict` on the emitted FastAPI project, plus regression tests in
+> both backends. Other sections remain open.
+
 Severity legend: **build-break** — generated project fails its own compile
 gate; **wrong-value** — compiles but computes/serves incorrect results;
 **boot-break** — generated stack fails to start/migrate; **UX** — visible
