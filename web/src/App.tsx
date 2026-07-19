@@ -1533,6 +1533,7 @@ export default function App(): JSX.Element {
         apiKey: agentSettings.apiKey,
         model: agentSettings.model,
         headers,
+        stream: true,
       });
     try {
       agentTranscriptRef.current = await runLiveAgent({

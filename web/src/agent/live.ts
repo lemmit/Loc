@@ -210,30 +210,42 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
     },
   ];
 
-  // Show the user's bubble immediately (before the model responds).  We render
-  // the RAW prompt, not the source-seeded text, so the chat stays readable.
-  const displayMessages: Message[] = [
-    ...history,
-    { role: "user", content: [{ type: "text", text: prompt }] },
-  ];
-  setMessages(foldTranscript(displayMessages, true));
+  // Render the raw transcript, swapping the seeded first user turn back to the
+  // plain prompt (so context isn't shown in the bubble) and appending any
+  // in-flight streamed text as a provisional assistant bubble.
+  const render = (running: boolean, streamingText: string): void => {
+    const display = messages.map((m, i) =>
+      i === history.length && m.role === "user"
+        ? { role: "user" as const, content: [{ type: "text" as const, text: prompt }] }
+        : m,
+    );
+    const bubbles = foldTranscript(display, running);
+    if (streamingText) {
+      bubbles.push({ id: "streaming", role: "assistant", text: streamingText, pending: true });
+    }
+    setMessages(bubbles);
+  };
+
+  // Show the user's bubble immediately (before the model responds).
+  render(true, "");
 
   let lastSource: string | null = latestSourceFrom(history);
+  let streaming = "";
 
   await runAgent({
     complete,
     messages,
     system,
     maxSteps: deps.maxSteps ?? 12,
+    onTextDelta: (t) => {
+      streaming += t;
+      render(true, streaming);
+    },
     onMessage: () => {
-      // Re-render from the raw transcript, swapping the seeded first user turn
-      // back to the plain prompt so context isn't shown in the bubble.
-      const display = messages.map((m, i) =>
-        i === history.length && m.role === "user"
-          ? { role: "user" as const, content: [{ type: "text" as const, text: prompt }] }
-          : m,
-      );
-      setMessages(foldTranscript(display, true));
+      // The completed turn is now in `messages` — clear the provisional buffer
+      // and re-render from the real transcript.
+      streaming = "";
+      render(true, "");
 
       // Reflect the newest source into the editor as soon as it appears.
       const src = latestSourceFrom(messages);
@@ -248,12 +260,7 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
 
   // Settle: final render (not pending) + a real generate if the agent produced
   // a model.
-  const finalDisplay = messages.map((m, i) =>
-    i === history.length && m.role === "user"
-      ? { role: "user" as const, content: [{ type: "text" as const, text: prompt }] }
-      : m,
-  );
-  setMessages(foldTranscript(finalDisplay, false));
+  render(false, "");
   if (lastSource) triggerGenerate();
 
   return messages;
