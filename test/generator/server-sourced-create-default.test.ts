@@ -124,3 +124,57 @@ describe("server-sourced create-path defaults — .NET", () => {
     expect(dto).toMatch(/string Status = "draft"/);
   });
 });
+
+const PYTHON = (field: string, extra = "") => `
+  system S {
+    ${extra}
+    subdomain Sales {
+      context Sales {
+        aggregate Order with crudish {
+          customerId: string
+          ${field}
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    storage db { type: postgres }
+    resource st { for: Sales, kind: state, use: db }
+    deployable api { platform: python contexts: [Sales] dataSources: [st] serves: SalesApi port: 3000${extra ? " auth: required" : ""} }
+  }
+`;
+
+describe("server-sourced create-path defaults — Python", () => {
+  it("a now() default is optional and coalesced per-request (not frozen at import)", async () => {
+    const files = await generateSystemFiles(PYTHON("createdAt: datetime = now()"));
+    const routes = fileEndingWith(files, "http/order_routes.py");
+    // Optional model field — NOT a class-def-frozen `= datetime.now(UTC)`.
+    expect(routes).toMatch(/createdAt:\s*datetime \| None = None/);
+    expect(routes).not.toMatch(/createdAt:\s*datetime = datetime\.now/);
+    // Per-request coalesce in the handler.
+    expect(routes).toMatch(
+      /created_at=body\.createdAt if body\.createdAt is not None else datetime\.now\(UTC\)/,
+    );
+    // The route imports UTC for the coalesce.
+    expect(routes).toMatch(/from datetime import UTC, datetime/);
+  });
+
+  it("a currentUser.* default binds the request principal (no import-time NameError)", async () => {
+    const files = await generateSystemFiles(
+      PYTHON("ownerId: string = currentUser.tenantId", "user { tenantId: string }"),
+    );
+    const routes = fileEndingWith(files, "http/order_routes.py");
+    // NOT `ownerId: str = current_user.tenant_id` (that AttributeErrors at import).
+    expect(routes).toMatch(/ownerId:\s*str \| None = None/);
+    expect(routes).toMatch(/current_user: User = request\.state\.current_user/);
+    expect(routes).toMatch(
+      /owner_id=body\.ownerId if body\.ownerId is not None else current_user\.tenant_id/,
+    );
+  });
+
+  it("a CONSTANT default is unchanged — still a Pydantic field default", async () => {
+    const files = await generateSystemFiles(PYTHON(`status: string = "draft"`));
+    const routes = fileEndingWith(files, "http/order_routes.py");
+    expect(routes).toMatch(/status:\s*str = "draft"/);
+  });
+});
