@@ -1,0 +1,96 @@
+name: Hono mailer smtp (runtime e2e)
+
+# Boots the generated Hono backend from `mailer-e2e.ddd` against a throwaway
+# postgres (migrations apply at boot) and a **Mailpit** sidecar (a catch-all
+# SMTP server that also exposes a queryable REST inbox), drives
+#   POST /api/workflows/notify   → mail.send("inbox@test.local", "Hello…", note)
+# then asserts the message actually landed — from / to / subject / body — by
+# polling Mailpit's REST API.  The mocked-SMTP-server test the M-T4.6 plan
+# asked for (docs/old/proposals/email-resource-kind.md §6).
+#
+# This is the assertion the compile gates can't make: `corpus × tsc` proves
+# the emitted nodemailer client type-checks, but only a boot proves
+# `mail.send(...)` reaches an SMTP server and delivers the declared envelope.
+#
+# Uses `services:` containers (postgres + mailpit) rather than a
+# docker-in-runner sidecar, handed to the suite via LOOM_MAIL_PG_URL /
+# LOOM_MAILPIT_{SMTP,API}, so the harness skips its own docker sidecars.
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling to the
+# obs-e2e / tenancy-e2e jobs; same rationale (a docker-heavy boot is a runner
+# burst for a runtime regression acceptable to catch one merge later; the
+# structural + compile tiers are per-PR).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/typescript/**'
+      - 'src/platform/hono/**'
+      - 'src/ir/resource-verbs.ts'
+      - 'src/util/source-types.ts'
+      - 'test/e2e/mailer-smtp-e2e.test.ts'
+      - 'test/e2e/support/mailpit-harness.ts'
+      - 'test/e2e/fixtures/mailer-e2e.ddd'
+      - 'package.json'
+      - '.github/workflows/hono-email-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hono-email-e2e:
+    runs-on: ubuntu-latest
+    # Cold path: ~3-4min (npm install of the generated project).  8min cap.
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:latest
+        env:
+          MP_SMTP_AUTH_ACCEPT_ANY: 1
+          MP_SMTP_AUTH_ALLOW_INSECURE: 1
+        ports:
+          - 1025:1025
+          - 8025:8025
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run Hono mailer smtp runtime e2e
+        env:
+          LOOM_EMAIL_E2E: '1'
+          LOOM_MAIL_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app
+          LOOM_MAILPIT_SMTP: 127.0.0.1:1025
+          LOOM_MAILPIT_API: http://127.0.0.1:8025
+        run: npm run test:email -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Hono mailer smtp runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the run step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated Hono backend against postgres + Mailpit, drives POST /api/workflows/notify, and asserts the mail.send(...) message landed in the Mailpit inbox with the declared from/to/subject/body envelope.' >> $GITHUB_STEP_SUMMARY

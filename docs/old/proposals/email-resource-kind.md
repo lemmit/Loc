@@ -282,15 +282,20 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   the client dep, and that `mail.send(...)` renders the call.
 - **Compose:** `test/system/storage-sidecars.test.ts` — smtp emits Mailpit;
   ses/sendgrid emit none.
-- **TODO — runtime e2e with a mocked SMTP server.** Add an opt-in e2e leg
-  (`LOOM_EMAIL_E2E`-gated, sibling to the `obs-*`/`tenancy` legs) that boots the
-  generated backend against a **Mailpit** sidecar (`type: smtp` → the same dev
-  image the compose arm emits), drives a workflow that calls `mail.send(...)`,
-  then asserts the message landed by polling Mailpit's HTTP API
-  (`GET /api/v1/messages` → assert recipient/subject/body). Mailpit is ideal here
-  because it exposes both a real SMTP endpoint *and* a queryable REST inbox, so the
-  assertion needs no provider mocking. Start with Hono, then fan across backends as
-  a matrix (the `k8s-e2e.yml` / obs-gate pattern). For `ses`/`sendgrid` sourceTypes,
+- **✓ DONE (part of 4.6-email-b) — runtime e2e with a mocked SMTP server.** Opt-in
+  leg `test/e2e/mailer-smtp-e2e.test.ts` (`LOOM_EMAIL_E2E`-gated, sibling to the
+  `obs-*`/`tenancy` legs) boots the generated **Hono** backend from
+  `test/e2e/fixtures/mailer-e2e.ddd` against a throwaway postgres (migrations
+  apply) + a **Mailpit** sidecar (`test/e2e/support/mailpit-harness.ts` — the
+  same dev image the compose arm emits), drives `POST /api/workflows/notify`
+  (→ `mail.send("inbox@test.local", "Hello from Loom", note)`), then asserts the
+  message landed by polling Mailpit's REST inbox (`GET /api/v1/messages` +
+  `/api/v1/message/:id` → from / to / subject / body). Mailpit is ideal because
+  it exposes both a real SMTP endpoint *and* a queryable REST inbox, so the
+  assertion needs no provider mocking. CI: `.github/workflows/hono-email-e2e.yml`
+  (`services:` postgres + mailpit, push-to-main + dispatch, not per-PR).
+  Fanning across the other four backends is a follow-on matrix (the assertion is
+  backend-agnostic; only the boot differs). For `ses`/`sendgrid` sourceTypes,
   a captured-request fake (or the provider's sandbox) is a later, separate concern —
   smtp+Mailpit covers the domain path end to end.
 - **Fixtures + build gates:** add a `resource … kind: email` + a `mail.send`
@@ -316,7 +321,11 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   fails on `NU1902` — bumping the version does **not** clear it. Wiring the .NET
   mailer into the compile gate therefore needs a `<NuGetAuditSuppress Include="…">`
   for those two advisories in the emitted `.csproj` (the C# itself compiles 0/0).
-  SES/SendGrid paths per backend still need their own compile pass.
+  SES/SendGrid paths per backend still need their own compile pass. **The
+  `LOOM_EMAIL_E2E` Mailpit runtime leg also landed here** — a Hono boot that
+  drives `mail.send(...)` and asserts delivery into a Mailpit inbox
+  (`test/e2e/mailer-smtp-e2e.test.ts`, `hono-email-e2e.yml`); cross-backend
+  fanning is a follow-on matrix.
 - **4.6-email-c (later, own proposal)** — templated email: a `send(to,
   template, data)` verb over declared `template { subject, body }` entries
   (i18n-ready — the old §5.2 richer surface), HTML bodies, multi-recipient/cc/bcc.
