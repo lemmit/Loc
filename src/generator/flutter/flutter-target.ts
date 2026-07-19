@@ -20,13 +20,16 @@
 // success.  `renderAction` (one-click op button), `renderModal` (a trigger
 // button that opens an op-form `AlertDialog`), and `renderWorkflowForm` (a
 // `WorkflowForm(runs:)` posting to `/workflows/<wf>`) also ship.  Still DEFERRED
-// to full parity (omitted → they fall back to the shared diagnostic-comment
-// path): `renderUserComponent` and the interactive-table / store seams.
+// success.  `renderUserComponent` ships too (a `Foo(...)` call → a Dart widget
+// constructor; the component widget is emitted by `component-emit.ts`).  Still
+// DEFERRED to full parity (omitted → they fall back to the shared
+// diagnostic-comment path): the interactive-table / store seams.
 
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
+import { emitExpr } from "../_walker/walker-core.js";
 import { DART_LEAVES, dartString, dartZeroValue } from "./dart-expr.js";
 import {
   createFormWidgetName,
@@ -380,6 +383,39 @@ export const flutterTarget: WalkerTarget = {
     const wf = runsArg?.kind === "ref" ? ctx.workflowsByName.get(runsArg.name) : undefined;
     if (!wf) return null;
     return `const ${workflowFormWidgetName(wf.name)}()`;
+  },
+
+  // A user-component invocation (`InfoBox(label: "hi", count: 3)`) → a Dart
+  // widget constructor call `InfoBox(label: 'hi', count: 3)`.  Positional args
+  // map to the component's declared params by position; named args by name (the
+  // Angular precedent).  The component widget class is emitted by index.ts from
+  // `ctx.userComponents`; the seam only NAMES it (returns null → the shared
+  // "unknown component" comment when the name isn't a threaded component, e.g. a
+  // stateful / extern one this slice defers).
+  renderUserComponent: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const params = ctx.userComponents.get(call.name);
+    if (!params) return null;
+    ctx.usedUserComponents.add(call.name);
+    const argNames = call.argNames ?? [];
+    const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
+    const entries: string[] = [];
+    let cursor = 0;
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i]!;
+      const named = argNames[i];
+      let paramName: string | undefined;
+      if (named !== undefined) {
+        paramName = named;
+      } else {
+        while (cursor < params.length && filledByName.has(params[cursor]!.name)) cursor += 1;
+        paramName = params[cursor]?.name;
+        if (paramName !== undefined) cursor += 1;
+      }
+      if (paramName === undefined) continue;
+      entries.push(`${paramName}: ${emitExpr(arg, ctx)}`);
+    }
+    return `${call.name}(${entries.join(", ")})`;
   },
 
   // --- Type-default seam ---------------------------------------------------

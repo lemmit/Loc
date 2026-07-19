@@ -860,7 +860,9 @@ seam because Dart list literals are comma-separated.
 
 `match await <api>.<Agg>.<op>()` (async effect) projects an **async Riverpod Notifier method** (`Future<void> <action>(String id) async`): it POSTs the instance op to `/<coll>/$id/<op>`, reifies a non-2xx ProblemDetails back into the error variant (clobbering the wire `type` tag), then a Dart-3 `switch` over `result['type']` reifies each arm via `fromJson` and runs the arm body as a `state.copyWith` write.  The page-shell binds the action as an id-capturing closure (`final <a> = () => notifier.<a>(id);`) so the button's bare `<a>()` call is unchanged (`riverpod-emit.ts`).
 
-Known frontier: scalar/value-object array inputs, `UserComponent`, and inline `:=` view writes are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
+A user `component Foo(params) { body }` emits a Dart `StatelessWidget` into `lib/components.dart` (one final field per param, the walked body as `build`); an invocation `Foo(a: x)` renders as a widget constructor call and the page imports `../components.dart` (`component-emit.ts`).  Only USED stateless, value-param, no-read presentational components are emitted; a stateful component (its own Notifier), an `extern` component, or a read-bearing / slot / children component falls back to the diagnostic comment.
+
+Known frontier: scalar/value-object array form inputs, the deferred user-component variants above (stateful / extern / slot / children), are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier.  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
