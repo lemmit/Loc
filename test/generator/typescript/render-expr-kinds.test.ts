@@ -341,6 +341,45 @@ describe("ts renderTsExpr — A4 reductions min(λ)/max(λ)", () => {
       "((this._items).length ? (this._items).map((x) => x.price).reduce((__a, __b) => (__b.gt(__a) ? __b : __a)) : null)",
     );
   });
+
+  // sortBy over a money projection: decimal.js `Decimal`'s `<`/`>` coerce via
+  // valueOf() → lexicographic order, so the comparator must use `.lt`/`.gt`
+  // (same money special-case as min/max).  A non-money projection stays native.
+  it("renders a money `sortBy(λ)` via decimal.js `.lt`/`.gt` (native `<` mis-sorts Decimals)", () => {
+    expect(renderTsExpr(mc("sortBy", [moneyLambda]))).toBe(
+      "[...(this._items)].sort((__a, __b) => { const ka = ((x) => x.price)(__a), kb = ((x) => x.price)(__b); return ka.lt(kb) ? -1 : ka.gt(kb) ? 1 : 0; })",
+    );
+  });
+
+  it("renders a descending money `sortBy(λ, true)` via `.lt`/`.gt`", () => {
+    expect(renderTsExpr(mc("sortBy", [moneyLambda, litBool("true")]))).toBe(
+      "[...(this._items)].sort((__a, __b) => { const ka = ((x) => x.price)(__a), kb = ((x) => x.price)(__b); return kb.lt(ka) ? -1 : kb.gt(ka) ? 1 : 0; })",
+    );
+  });
+});
+
+describe("ts renderTsExpr — money `contains` value-equality", () => {
+  const moneyArr: TypeIR = { kind: "array", element: MONEY };
+  const strArr: TypeIR = { kind: "array", element: STRING };
+  const mc = (receiverType: TypeIR, arg: ExprIR): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("prices"),
+    member: "contains",
+    args: [arg],
+    receiverType,
+    isCollectionOp: true,
+  });
+
+  it("renders `money[].contains(x)` as a `.some(x => x.eq(v))` value-equality scan", () => {
+    // `.includes` uses reference identity on decimal.js Decimals → always false.
+    expect(renderTsExpr(mc(moneyArr, thisProp("target")))).toBe(
+      "(this._prices).some((__x) => __x.eq(this._target))",
+    );
+  });
+
+  it("keeps a non-money `contains` on `.includes` (byte-identical)", () => {
+    expect(renderTsExpr(mc(strArr, litStr("x")))).toBe('(this._prices).includes("x")');
+  });
 });
 
 describe("ts renderTsExpr — sum type-awareness (money folds decimal.js)", () => {

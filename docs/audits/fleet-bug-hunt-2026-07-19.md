@@ -149,6 +149,15 @@ SameValueZero, i.e. reference identity for `Decimal` objects —
 `List<decimal>.Contains` is value-equal and correct. Fix: emit
 `recv.some(p => p.eq(value))` for money element types.
 
+> **Update (2026-07-19, follow-up PR): B1 + B2 fixed.** The TS collection
+> renderers now money-special-case both ops, reusing the existing min/max
+> pattern: `sortBy` compares projected money keys with `.lt`/`.gt`
+> (`projectionBodyIsMoney`); `money[].contains(x)` emits
+> `recv.some(__x => __x.eq(x))` (new `receiverElementIsMoney`). Non-money
+> stays native `<`/`.includes` (byte-identical). Verified: emitted `cart.ts`
+> uses `.lt`/`.gt` + `.eq`, `tsc --noEmit`-clean; unit tests in
+> `render-expr-kinds`. (B3 — the Elixir `sortBy` sibling — remains open below.)
+
 ### B3. Elixir `sortBy` uses structural term ordering on datetime/decimal keys *(wrong-value)*
 
 `Enum.sort_by(recv, mapper)` (`src/generator/elixir/render-expr.ts:767-770`)
