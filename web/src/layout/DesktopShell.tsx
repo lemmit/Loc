@@ -17,7 +17,7 @@ import {
 } from "react-resizable-panels";
 import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
-import { DevToolsDock, type DockTab } from "./DevToolsDock";
+import { DevToolsDock } from "./DevToolsDock";
 import { ExplorerTree } from "../preview/ExplorerTree";
 import { FileViewer } from "../preview/FileViewer";
 import { SourceFilesTree } from "./SourceFilesTree";
@@ -73,15 +73,10 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
     // primary explorer now; "Generated" is for browsing emitted output.
     "user",
   );
-  // Coerce tab values persisted before Problems/Generator/Bundler were
-  // folded into the consolidated Output panel.
-  const [dockTabRaw, setDockTab] = usePersistedState<
-    DockTab | "problems" | "generator" | "bundler"
-  >("loom.desktop.dockTab", "output");
-  const dockTab: DockTab =
-    dockTabRaw === "problems" || dockTabRaw === "generator" || dockTabRaw === "bundler"
-      ? "output"
-      : dockTabRaw;
+  // Dock-tab state lives on the ctx now (lifted to App), so a panel inside
+  // the dock — History's "diff as baseline" — can reveal a sibling tab
+  // (Migrations) with context.  The legacy-alias coercion moved to App.
+  const { dockTab, setDockTab } = ctx;
 
   const onPickGenerated = (path: string): void => {
     const file = files.find((f) => f.path === path);

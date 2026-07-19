@@ -23,7 +23,7 @@
 
 import * as git from "isomorphic-git";
 
-import type { VfsEntry, VfsListener, VfsPath } from "../../vfs/types.js";
+import type { VfsEntry, VfsFileEntry, VfsListener, VfsPath } from "../../vfs/types.js";
 import { asFsClient, type GitFs } from "./git-fs.js";
 
 /** Normalise a VFS path: enforce leading `/`, collapse `..`/`.`, reject
@@ -420,6 +420,52 @@ export class GitStore {
     } catch {
       return undefined;
     }
+  }
+
+  /** Read every file under `root` (default `/workspace`) as it existed at
+   *  `ref` (default `HEAD`), projected to the `VfsFileEntry` union — the
+   *  multi-file sibling of `readFileAtRef`.  Only `.ddd` source is returned
+   *  (generated output under `/workspace/generated` is skipped), which is
+   *  exactly the tree the evolution diff seeds into the build worker to
+   *  resolve `import "./x.ddd"` against a pinned baseline.  Returns `[]`
+   *  when the ref is absent (empty repo / no commit yet) — the caller reads
+   *  that as "no baseline". */
+  async readTreeAtRef(
+    root: VfsPath = "/workspace",
+    ref = "HEAD",
+  ): Promise<VfsFileEntry[]> {
+    const norm = normalizePath(root);
+    let oid: string;
+    try {
+      oid = await git.resolveRef({ fs: this.fsc, dir: this.dir, ref });
+    } catch {
+      return [];
+    }
+    const out: VfsFileEntry[] = [];
+    await git.walk({
+      fs: this.fsc,
+      dir: this.dir,
+      trees: [git.TREE({ ref: oid })],
+      map: async (filepath, entries) => {
+        if (filepath === ".") return;
+        const abs = ABSOLUTE(filepath);
+        if (!underPrefix(abs, norm)) return;
+        // Only `.ddd` sources; the generated tree isn't a diff input and
+        // may not even be committed.
+        if (!abs.endsWith(".ddd")) return;
+        const [entry] = entries as Array<git.WalkerEntry | null>;
+        if (entry && (await entry.type()) === "blob") {
+          const { blob } = await git.readBlob({
+            fs: this.fsc,
+            dir: this.dir,
+            oid: await entry.oid(),
+          });
+          out.push({ kind: "file", path: abs, content: new TextDecoder().decode(blob) });
+        }
+      },
+    });
+    out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return out;
   }
 
   /** The `/workspace` files a commit changed relative to its first parent

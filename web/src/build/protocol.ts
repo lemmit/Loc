@@ -115,12 +115,30 @@ export interface EvolutionFail {
 
 export type EvolutionResult = EvolutionOk | EvolutionFail;
 
-/** `evolution` lowers two whole sources and diffs the derived artifacts.
- *  Single-entry text only (v1) — a multi-file/import baseline would need
- *  both trees seeded into the worker VFS; see M-T8.11. */
+/** One side of an evolution diff — a whole `.ddd` source tree plus the
+ *  entry file to load it from.  The worker seeds `files` into its VFS
+ *  under an isolated prefix and walks transitive `import`s from
+ *  `entryPath` through `loadProjectFromVfs`, so multi-file / import
+ *  projects resolve exactly as `ddd generate system` would.  A
+ *  single-file source is just the one-entry case. */
+export interface EvolutionTree {
+  /** Absolute VFS path of the entry file within `files`, e.g.
+   *  `/workspace/main.ddd`. */
+  entryPath: string;
+  /** The project's `.ddd` sources (and any empty dirs).  Relative
+   *  `import "./x.ddd"` statements resolve against these. */
+  files: VfsEntry[];
+}
+
+/** `evolution` lowers two whole source TREES and diffs the derived
+ *  artifacts.  Both the pinned baseline (read from a git ref) and the
+ *  live edit are seeded into the worker VFS and lowered through the
+ *  project loader, so multi-file / import baselines resolve (M-T8.11).
+ *  `baseline` is `null` when there's no prior version (empty repo /
+ *  first commit) — every shape then reads as "Initial". */
 export interface EvolutionParams {
-  baselineText: string;
-  currentText: string;
+  baseline: EvolutionTree | null;
+  current: EvolutionTree;
 }
 
 /** A single VFS entry shipped over the wire — file entries carry

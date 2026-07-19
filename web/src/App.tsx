@@ -68,6 +68,7 @@ import {
   DEFAULT_AUTH_STUB,
   devClaimsHeader,
   formatUnsupportedDeployables,
+  type DockTab,
   type LayoutCtx,
   type MobileCodeView,
   type MobileTab,
@@ -266,6 +267,9 @@ export default function App(): JSX.Element {
   // and the live edit, and the on-demand provenance snapshot capture.
   const [evolution, setEvolution] = useState<EvolutionResult | null>(null);
   const [evolutionRunning, setEvolutionRunning] = useState(false);
+  // Baseline ref the Migrations tab diffs against — shared (not panel-local)
+  // so the History tab can pin a milestone as the baseline in one click.
+  const [evolutionBaselineRef, setEvolutionBaselineRef] = useState("HEAD");
   const [snapshotResult, setSnapshotResult] = useState<SnapshotResult | null>(null);
   const [snapshotRunning, setSnapshotRunning] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
@@ -291,6 +295,19 @@ export default function App(): JSX.Element {
       : activeTabRaw === "problems"
         ? "output"
         : activeTabRaw;
+
+  // Desktop bottom-dock tab — lifted from DesktopShell so a panel inside
+  // the dock (History) can reveal a sibling (Migrations) with a pinned
+  // baseline.  Coerce values persisted before Problems/Generator/Bundler
+  // were folded into the consolidated Output panel.
+  const [dockTabRaw, setDockTabRaw] = usePersistedState<
+    DockTab | "problems" | "generator" | "bundler"
+  >("loom.desktop.dockTab", "output");
+  const dockTab: DockTab =
+    dockTabRaw === "problems" || dockTabRaw === "generator" || dockTabRaw === "bundler"
+      ? "output"
+      : dockTabRaw;
+  const setDockTab = (t: DockTab): void => setDockTabRaw(t);
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
@@ -1326,24 +1343,44 @@ export default function App(): JSX.Element {
   );
 
   // Derive the migration + wire-contract delta the live edit implies vs the
-  // last-committed baseline (`HEAD:/workspace/main.ddd`).  The heavy lowering
-  // of BOTH sources happens in the build worker; here we only fetch the
-  // baseline blob and thread the two texts through.  v1 is single-file only —
-  // a multi-file/import baseline would need both trees seeded into the worker
-  // VFS (M-T8.11), so the panel gates on `sourceFiles.size`.
+  // last-committed baseline.  The heavy lowering of BOTH source trees happens
+  // in the build worker; here we assemble the two trees — the live workspace
+  // sources (active file carrying the editor's un-persisted text) and the
+  // baseline tree read from git at `ref` — and hand them over.  Multi-file /
+  // import projects resolve because the whole `.ddd` tree is shipped, not a
+  // single file (M-T8.11).
   async function runEvolutionDiff(ref = "HEAD"): Promise<void> {
     const client = buildClientRef.current;
     if (!client) return;
     setEvolutionRunning(true);
     try {
-      const current = sourceRef.current;
-      // Baseline = the active file at `ref` — `HEAD` (last save) by default,
-      // or any commit the user pins from History.  Absent store (ephemeral
-      // session) or no such commit ⇒ empty baseline, which the worker reads
-      // as "no previous version" (everything Initial).
+      // Current tree = every workspace `.ddd` source from the controller
+      // snapshot, with the active file overridden by the editor's live text
+      // (which may be ahead of the persisted mirror).  Mirrors the generate
+      // flow's VFS seed (all files, active last) so the diff sees exactly
+      // what a generate would.
+      const s = sourcesRef.current.controller.snapshot();
+      const entryPath = s.activePath;
+      const currentFiles: VfsEntry[] = [];
+      for (const [path, content] of s.files) {
+        if (path === entryPath) continue;
+        currentFiles.push({ kind: "file", path, content });
+      }
+      currentFiles.push({ kind: "file", path: entryPath, content: sourceRef.current });
+
+      // Baseline = the whole `/workspace` `.ddd` tree at `ref` — `HEAD` (last
+      // save) by default, or any commit pinned from the picker / History.
+      // Absent store (ephemeral session) or no commit at that ref ⇒ `null`
+      // baseline, which the worker reads as "no previous version" (Initial).
+      const baselineFiles =
+        (await workspace.store?.readTreeAtRef("/workspace", ref)) ?? [];
       const baseline =
-        (await workspace.store?.readFileAtRef("/workspace/main.ddd", ref)) ?? "";
-      const result = await client.evolution(baseline, current);
+        baselineFiles.length > 0 ? { entryPath, files: baselineFiles } : null;
+
+      const result = await client.evolution({
+        baseline,
+        current: { entryPath, files: currentFiles },
+      });
       setEvolution(result);
     } catch (err) {
       setEvolution({
@@ -1359,6 +1396,17 @@ export default function App(): JSX.Element {
     } finally {
       setEvolutionRunning(false);
     }
+  }
+
+  // Pin `ref` as the evolution baseline, reveal the Migrations dock tab, and
+  // run the diff — the one-click "diff against this milestone" wired from the
+  // History tab (and the Migrations tab's own baseline picker).  Desktop-only
+  // navigation (the Migrations tab lives in the desktop dock); on mobile the
+  // baseline still pins and the diff still runs.
+  function pinEvolutionBaseline(ref: string): void {
+    setEvolutionBaselineRef(ref);
+    setDockTab("migrations");
+    void runEvolutionDiff(ref);
   }
 
   // Download the generated project tree as a single .zip — the bridge out of
@@ -1518,6 +1566,8 @@ export default function App(): JSX.Element {
     setLiveMode,
     activeTab,
     setActiveTab,
+    dockTab,
+    setDockTab,
     codeView,
     setCodeView,
     testResults,
@@ -1542,6 +1592,8 @@ export default function App(): JSX.Element {
     evolution,
     evolutionRunning,
     runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
+    evolutionBaselineRef,
+    pinEvolutionBaseline,
     snapshotResult,
     snapshotRunning,
     runCaptureSnapshot: () => void runCaptureSnapshot(),
