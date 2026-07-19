@@ -29,6 +29,10 @@ export interface OpenAiTransportConfig {
   headers?: Record<string, string>;
   temperature?: number;
   maxTokens?: number;
+  /** Stream the response (SSE `chat.completions.chunk`s) and surface text
+   *  fragments through the request's `onTextDelta`.  Tool calls are still only
+   *  returned in the resolved `Completion`.  Defaults false. */
+  stream?: boolean;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -131,19 +135,100 @@ export function fromOpenAiMessage(message: OaiMessage): Completion {
   return { content, stop_reason };
 }
 
+/** One streamed `chat.completions.chunk` delta (only the fields we accumulate). */
+interface OaiStreamDelta {
+  content?: string | null;
+  tool_calls?: {
+    index: number;
+    id?: string;
+    function?: { name?: string; arguments?: string };
+  }[];
+}
+
+/** Consume an SSE `chat.completions` stream to one accumulated `Completion`,
+ *  surfacing text fragments through `onTextDelta` as they arrive.  Tool-call
+ *  fragments are reassembled by index (id + name land on the first fragment,
+ *  the arguments string streams across many).  Exported for unit testing. */
+export async function accumulateSseStream(
+  stream: ReadableStream<Uint8Array>,
+  onTextDelta?: (text: string) => void,
+): Promise<Completion> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+
+  const handleData = (payload: string): void => {
+    if (payload === "[DONE]") return;
+    let parsed: { choices?: { delta?: OaiStreamDelta }[] };
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return; // keep-alive / comment line
+    }
+    const delta = parsed.choices?.[0]?.delta;
+    if (!delta) return;
+    if (typeof delta.content === "string" && delta.content) {
+      text += delta.content;
+      onTextDelta?.(delta.content);
+    }
+    for (const tc of delta.tool_calls ?? []) {
+      const entry = toolAcc.get(tc.index) ?? { id: "", name: "", args: "" };
+      if (tc.id) entry.id = tc.id;
+      if (tc.function?.name) entry.name = tc.function.name;
+      if (tc.function?.arguments) entry.args += tc.function.arguments;
+      toolAcc.set(tc.index, entry);
+    }
+  };
+
+  const drainLines = (): void => {
+    let nl = buffer.indexOf("\n");
+    while (nl !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line.startsWith("data:")) handleData(line.slice(5).trim());
+      nl = buffer.indexOf("\n");
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    drainLines();
+  }
+  buffer += decoder.decode();
+  buffer += "\n";
+  drainLines();
+
+  const message: OaiMessage = { role: "assistant", content: text || null };
+  const calls = [...toolAcc.entries()].sort((a, b) => a[0] - b[0]);
+  if (calls.length > 0) {
+    message.tool_calls = calls.map(([, e]) => ({
+      id: e.id,
+      type: "function",
+      function: { name: e.name, arguments: e.args },
+    }));
+  }
+  return fromOpenAiMessage(message);
+}
+
 /** Build a `Complete` bound to one BYOK provider config.  The returned closure
- *  is exactly the injection point `runAgent` expects. */
+ *  is exactly the injection point `runAgent` expects — streaming (SSE) when
+ *  `config.stream`, otherwise a single JSON round-trip. */
 export function createOpenAiCompatibleComplete(config: OpenAiTransportConfig): Complete {
   const f = config.fetchImpl ?? globalThis.fetch;
   const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
-  return async ({ messages, tools, system }) => {
+  return async ({ messages, tools, system, onTextDelta }) => {
     const body: Record<string, unknown> = {
       model: config.model,
       messages: toOpenAiMessages(messages, system),
       tools: toOpenAiTools(tools),
       tool_choice: "auto",
     };
+    if (config.stream) body.stream = true;
     if (config.temperature !== undefined) body.temperature = config.temperature;
     if (config.maxTokens !== undefined) body.max_tokens = config.maxTokens;
 
@@ -158,6 +243,9 @@ export function createOpenAiCompatibleComplete(config: OpenAiTransportConfig): C
       const detail = await res.text().catch(() => "");
       throw new Error(`Provider request failed (${res.status})${detail ? `: ${detail}` : ""}`);
     }
+
+    if (config.stream && res.body) return accumulateSseStream(res.body, onTextDelta);
+
     const data = (await res.json()) as { choices?: { message: OaiMessage }[] };
     const message = data.choices?.[0]?.message;
     if (!message) throw new Error("Provider returned no choices");

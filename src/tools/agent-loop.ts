@@ -66,11 +66,17 @@ export interface Completion {
 /** The injected LLM call — the ONLY transport-specific dependency.  Given the
  *  running conversation + the tool specs (+ optional system prompt), returns the
  *  next assistant turn.  The playground supplies an Anthropic/proxy-backed
- *  implementation; tests supply a scripted one. */
+ *  implementation; tests supply a scripted one.
+ *
+ *  `onTextDelta` is an OPTIONAL streaming hook: a transport that streams calls
+ *  it with each text fragment as it arrives (the returned `Completion` is still
+ *  the fully-accumulated turn, so a non-streaming consumer ignores it).  Tool
+ *  calls are not streamed — they only appear in the resolved `Completion`. */
 export type Complete = (req: {
   messages: Message[];
   tools: ToolSpec[];
   system?: string;
+  onTextDelta?: (text: string) => void;
 }) => Promise<Completion>;
 
 /** The catalog as provider-neutral tool specs — the tool definitions an LLM
@@ -124,6 +130,10 @@ export interface RunAgentOptions {
   /** Called after each appended message (assistant turn, then the tool-result
    *  user turn) — lets a UI stream the conversation. */
   onMessage?: (message: Message) => void;
+  /** Forwarded to `complete` — a streaming transport calls it with each text
+   *  fragment of the in-flight assistant turn (before `onMessage` lands the
+   *  completed turn). */
+  onTextDelta?: (text: string) => void;
 }
 
 export interface RunAgentResult {
@@ -137,12 +147,12 @@ export interface RunAgentResult {
  *  cap is hit).  Transport-neutral — the `complete` call is the only injection
  *  point, so the same loop serves the playground, a CLI, or a test. */
 export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
-  const { complete, messages, system, onMessage } = opts;
+  const { complete, messages, system, onMessage, onTextDelta } = opts;
   const maxSteps = opts.maxSteps ?? 12;
   const tools = toolSpecs();
 
   for (let step = 1; step <= maxSteps; step++) {
-    const completion = await complete({ messages, tools, system });
+    const completion = await complete({ messages, tools, system, onTextDelta });
     const assistant: Message = { role: "assistant", content: completion.content };
     messages.push(assistant);
     onMessage?.(assistant);
