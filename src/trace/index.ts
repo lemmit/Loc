@@ -10,4 +10,4 @@ export { annotateTrace, LineIndex } from "./annotate.js";
 export type { ParsedFrame } from "./frames.js";
 export { parseFrames } from "./frames.js";
 export type { Resolution, SourceMap, WireOriginRef, WireRegion } from "./resolve.js";
-export { matchPath, resolveFrame, toOriginRef } from "./resolve.js";
+export { isSamePath, matchPath, resolveFrame, toOriginRef } from "./resolve.js";

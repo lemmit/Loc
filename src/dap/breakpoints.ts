@@ -23,8 +23,8 @@
 import type { SourceRef } from "../ir/types/origin.js";
 import { resolveToSource } from "../ir/types/origin.js";
 import {
+  isSamePath,
   LineIndex,
-  matchPath,
   type SourceMap,
   toOriginRef,
   type WireRegion,
@@ -55,12 +55,14 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): b
 }
 
 /** Does `sourcePath` (a region origin's recorded path) refer to the same
- *  `.ddd` file as `dddPath` (the requested path)? Reuses `matchPath` (the
- *  same longest-suffix matcher `resolveFrame` uses) rather than a second
- *  hand-rolled comparison — `dddPath` plays the "candidate" role, matched
- *  against the single-element key list `[sourcePath]`. */
+ *  `.ddd` file as `dddPath` (the requested path)? Uses `isSamePath` (a
+ *  full-suffix segment match) rather than `matchPath` with a single-element
+ *  key list: `matchPath` only rejects on a TIE across multiple keys, so a
+ *  one-key call reported a match on a shared basename alone
+ *  (`orders/main.ddd` vs `payments/main.ddd`) — then the caller compared byte
+ *  offsets from two different files' coordinate systems. */
 function samePath(sourcePath: string, dddPath: string): boolean {
-  return matchPath(dddPath, [sourcePath]) !== undefined;
+  return isSamePath(sourcePath, dddPath);
 }
 
 /**
