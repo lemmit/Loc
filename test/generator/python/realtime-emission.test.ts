@@ -90,7 +90,9 @@ describe("realtime SSE wire — Python (delivery: broadcast)", () => {
     expect(rt).toContain(
       'REALTIME_EVENT_TYPES: frozenset[str] = frozenset({"OrderPlaced", "ShipmentRequested"})',
     );
-    expect(rt).toContain('@realtime_router.get("/realtime/events")');
+    // include_in_schema=False: the SSE stream stays out of the OpenAPI doc
+    // (node/.NET/Java exclude theirs too — the cross-backend parity contract).
+    expect(rt).toContain('@realtime_router.get("/realtime/events", include_in_schema=False)');
     expect(rt).toContain('media_type="text/event-stream"');
     expect(rt).toContain('yield "event: ping\\ndata: \\n\\n"');
     // camelCase JSON with the `type` tag; branded-str ids + StrEnum are wire-safe.

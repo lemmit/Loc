@@ -62,8 +62,8 @@ public sealed class RealtimeHub
         // matches the frontend's expectations.
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-        options.Converters.Add(new ${ns}.Serialization.CanonicalInstantJsonConverter());
-        options.Converters.Add(new ${ns}.Serialization.CanonicalInstantOffsetJsonConverter());
+        options.Converters.Add(new global::${ns}.Serialization.CanonicalInstantJsonConverter());
+        options.Converters.Add(new global::${ns}.Serialization.CanonicalInstantOffsetJsonConverter());
         return options;
     }
 

@@ -121,7 +121,10 @@ export function buildPyRealtimeFile(ctx: BoundedContextIR): string | null {
     "realtime_router = APIRouter()",
     "",
     "",
-    `@realtime_router.get("/realtime/events")`,
+    // Excluded from the OpenAPI schema: the SSE stream is transport plumbing,
+    // not a REST operation — node/.NET exclude theirs too, and the
+    // conformance-parity gate compares the specs across backends.
+    `@realtime_router.get("/realtime/events", include_in_schema=False)`,
     "async def realtime_events() -> StreamingResponse:",
     `    """One long-lived SSE stream per browser connection, with a 15s`,
     `    keep-alive ping so proxies don't idle the connection out."""`,
