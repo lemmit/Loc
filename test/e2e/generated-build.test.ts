@@ -746,5 +746,64 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // MikroORM ES + `Id[]` reference collections: an event-sourced aggregate
+    // whose `apply(...)` bodies fold a reference collection in-memory from the
+    // stream (no pivot table — ES has no state table).  Type-checks under tsc.
+    it("system `persistence: mikroorm` + event sourcing + Id[] reference collection — folds in-memory, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-es-assoc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-es-assoc.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No pivot Row entity for the folded reference collection.
+        expect(entities).not.toContain("SquadRosterRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
+    // MikroORM ES + nested contained parts: an event-sourced aggregate whose
+    // `apply(...)` bodies rebuild a nested containment tree in-memory from the
+    // stream (no child tables — ES has no state table).  Type-checks under tsc.
+    it("system `persistence: mikroorm` + event sourcing + nested parts — folds in-memory, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-es-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-es-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // No relational child tables for the folded containment tree.
+        expect(entities).not.toContain("BoxRow");
+        expect(entities).not.toContain("ItemRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

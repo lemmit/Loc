@@ -1,0 +1,30 @@
+// MikroORM event-sourcing + nested contained parts: an event-sourced aggregate
+// whose `apply(...)` bodies rebuild a nested containment tree in-memory from the
+// stream (no relational child tables — ES has no state table).  tsc-checked.
+system Warehouse {
+  subdomain Core {
+    context Orders {
+      event Placed { order: Order id, customer: string }
+      event Boxed { order: Order id, label: string }
+      aggregate Order persistedAs: eventLog {
+        customer: string
+        contains boxes: Box[]
+        entity Box {
+          label: string
+          contains items: Item[]
+        }
+        entity Item { sku: string }
+        create place(customer: string) { emit Placed { order: id, customer: customer } }
+        operation addBox(label: string) { emit Boxed { order: id, label: label } }
+        apply(e: Placed) { customer := e.customer }
+        apply(e: Boxed) { boxes += Box { label: e.label } }
+      }
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource orderLog { for: Orders, kind: eventLog, use: pg }
+  deployable api { platform: node { persistence: mikroorm }, contexts: [Orders], dataSources: [orderLog], port: 4000 }
+}

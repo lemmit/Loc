@@ -2113,11 +2113,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // `Id[]` reference-collection associations ARE supported on a state
         // aggregate: each persists as a composite-PK pivot Row entity, bulk-
         // loaded on read and full-list-replaced on save (the MikroORM analogue
-        // of the drizzle join table).  Event-sourced aggregates reconstruct
-        // from their event stream (no pivot sync), so associations there stay
-        // gated until that path is wired.
-        if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
-          reject(where, "has reference-collection associations on an event-sourced aggregate");
+        // of the drizzle join table).  On an EVENT-SOURCED aggregate they need
+        // no pivot table at all — an ES aggregate has no state table (its truth
+        // is the `<ctx>_events` stream), so the reference collection folds
+        // IN-MEMORY from the stream via the `apply(...)` bodies (`_fromEvents`),
+        // exactly as on drizzle.  The relational pivot emitters never run for an
+        // ES aggregate (the entities loop skips it), so there is nothing to gate.
         // Contained entity parts ARE supported (relational child tables): each
         // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
         // on read and diff-synced on save (the MikroORM analogue of the drizzle
@@ -2128,14 +2129,15 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
         // field on a part (array of scalar / enum / VO / id) folds into one jsonb
         // column (shared serialise/deserialise), the mirror of the Dapper
-        // part-collection path.  Only event-sourced / aggregate-inheritance
-        // participants with parts stay gated — their storage shape (event stream
-        // / shared-or-per-concrete inheritance table) has no relational
-        // child-table home, so the containment tree is genuinely unmappable.
+        // part-collection path.  An EVENT-SOURCED aggregate's parts fold
+        // IN-MEMORY from the event stream (the `apply(...)` bodies rebuild the
+        // containment tree through `_fromEvents`) — an ES aggregate has no state
+        // table, so the relational child-table emitters never run for it; the
+        // parts ride in the folded aggregate exactly as on the .NET Dapper ES
+        // path, so there is nothing to gate.  Aggregate-inheritance participants
+        // with parts stay gated (drained separately).
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          if (a.persistedAs === "eventLog")
-            reject(where, "contains nested entity parts on an event-sourced aggregate");
-          else if (a.isAbstract || a.extendsAggregate)
+          if (a.isAbstract || a.extendsAggregate)
             reject(where, "contains nested entity parts on an aggregate-inheritance participant");
         }
         // `filter` capability predicates ARE supported: the repository ANDs each

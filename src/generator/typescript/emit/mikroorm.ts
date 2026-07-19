@@ -2332,7 +2332,10 @@ export function renderMikroEventSourcedRepository(
       repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${eventRow} } from "../entities";`,
-      `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
+      // The aggregate root + any contained entity parts (folded in-memory from
+      // the stream) — `toWire` projects the part shapes, so their classes must
+      // be in scope even though the ES store never touches a child table.
+      `import { ${[agg.name, ...(agg.parts ?? []).map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
       `import type * as Events from "../../domain/events";`,

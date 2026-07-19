@@ -1126,3 +1126,109 @@ describe("mikroorm — persist-time audit stamping", () => {
     expect(repo).not.toContain("onConflictExcludeFields");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Event-sourced (`persistedAs: eventLog`) intersections — an ES aggregate has
+// no state table (its truth is the `<ctx>_events` stream), so a reference
+// collection (`Id[]`) and contained parts fold IN-MEMORY from the stream via
+// the `apply(...)` bodies (`_fromEvents`) rather than pivot / child tables.
+// Mirrors the .NET Dapper ES path (parts/associations ride in the folded
+// aggregate, no relational join/child table).
+// ---------------------------------------------------------------------------
+describe("mikroorm — event-sourced intersections (in-memory fold)", () => {
+  const ES_ASSOC_SRC = `system D {
+  subdomain S {
+    context O {
+      aggregate Player with crudish { name: string }
+      event Recruited { squad: Squad id, player: Player id }
+      event Named { squad: Squad id, name: string }
+      aggregate Squad persistedAs: eventLog {
+        name: string
+        roster: Player id[]
+        create form(name: string) { emit Named { squad: id, name: name } }
+        operation recruit(player: Player id) { emit Recruited { squad: id, player: player } }
+        apply(e: Named) { name := e.name }
+        apply(e: Recruited) { roster += e.player }
+      }
+      repository Players for Player { }
+      repository Squads for Squad { }
+    }
+  }
+  storage pg { type: postgres }
+  resource sq { for: O, kind: eventLog, use: pg }
+  resource pl { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [sq, pl]  port: 8080 }
+}`;
+
+  it("no longer rejects an Id[] reference collection on an event-sourced aggregate", async () => {
+    const { errors } = await emit(ES_ASSOC_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the reference collection in-memory (no pivot Row entity, stream fold only)", async () => {
+    const { files } = await emit(ES_ASSOC_SRC);
+    // The ES aggregate contributes no state / pivot table — only the shared
+    // per-context event-log Row.
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("SquadRosterRow");
+    expect(entities).not.toContain('tableName: "squad_roster"');
+    expect(entities).toContain("export class OEventRow");
+    const repo = files.get("api/db/repositories/squad-repository.ts")!;
+    // Reconstructed purely from the folded stream…
+    expect(repo).toContain("Squad._fromEvents(");
+    // …and never touches a pivot table (no nativeDelete / insert of join rows).
+    expect(repo).not.toContain("RosterRow");
+    // The reference collection rides the wire straight off the folded aggregate.
+    expect(repo).toContain("roster: root.roster.map((a) => (a as string))");
+  });
+
+  const ES_PARTS_SRC = `system D {
+  subdomain S {
+    context O {
+      event Placed { order: Order id, customer: string }
+      event Boxed { order: Order id, label: string }
+      aggregate Order persistedAs: eventLog {
+        customer: string
+        contains boxes: Box[]
+        entity Box {
+          label: string
+          contains items: Item[]
+        }
+        entity Item { sku: string }
+        create place(customer: string) { emit Placed { order: id, customer: customer } }
+        operation addBox(label: string) { emit Boxed { order: id, label: label } }
+        apply(e: Placed) { customer := e.customer }
+        apply(e: Boxed) { boxes += Box { label: e.label } }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource ol { for: O, kind: eventLog, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [ol]  port: 8080 }
+}`;
+
+  it("no longer rejects nested contained parts on an event-sourced aggregate", async () => {
+    const { errors } = await emit(ES_PARTS_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("folds the nested parts in-memory (no child Row tables) and imports the part classes for toWire", async () => {
+    const { files } = await emit(ES_PARTS_SRC);
+    // No relational child tables for the folded containment tree.
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).not.toContain("BoxRow");
+    expect(entities).not.toContain("ItemRow");
+    expect(entities).toContain("export class OEventRow");
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("Order._fromEvents(");
+    // toWire projects the part shapes, so the part classes must be in scope
+    // even though the event store never touches a child table.
+    expect(repo).toContain('import { Order, Box, Item } from "../../domain/order";');
+    // No containment child-table plumbing (bulk-load maps / diff-sync upserts).
+    expect(repo).not.toContain("ByParent");
+    expect(repo).not.toContain("parentId");
+  });
+});
