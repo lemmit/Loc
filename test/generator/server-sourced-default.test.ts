@@ -51,6 +51,17 @@ describe("server-sourced create defaults (Hono + React shadcn)", () => {
     );
   });
 
+  it("overlays via a destructured `reset` on the non-`form.` React packs", async () => {
+    // mantine/mui/chakra destructure `useForm` — the overlay adds `reset` to the
+    // destructure (only when needed) and calls it, rather than `form.reset`.
+    const files = await generateSystemFiles(
+      SYS("createdAt: datetime = now()").replace('design: "shadcn@v4"', 'design: "mantine@v9"'),
+    );
+    const newPage = findBySuffix(files, "orders/new.tsx");
+    expect(newPage).toMatch(/\{ register, handleSubmit, setError, reset,/);
+    expect(newPage).toMatch(/if \(__prep\.data\) reset\(\{ \.\.\..*\.\.\.__prep\.data \}/);
+  });
+
   it("evaluates currentUser.* server-side against the ambient principal", async () => {
     const files = await generateSystemFiles(
       SYS("ownerId: string = currentUser.tenantId", "user { tenantId: string }"),
