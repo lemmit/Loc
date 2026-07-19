@@ -3,6 +3,7 @@ import { forCreateInput } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
+  ChannelIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -12,6 +13,7 @@ import type {
   RepositoryIR,
   SystemIR,
   TimerSourceIR,
+  TypeIR,
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
@@ -34,6 +36,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
+import { redisChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -56,6 +59,11 @@ import {
   renderAuditRecordRepository,
 } from "./emit/audit.js";
 import { renderAuthFiles } from "./emit/auth.js";
+import {
+  type ChannelConsumerHandler,
+  LETTUCE_CORE_VERSION,
+  renderJavaChannelFiles,
+} from "./emit/channels.js";
 import {
   renderAggregateNotFoundException,
   renderAuditableInterface,
@@ -296,6 +304,29 @@ function emitProjectFromContexts(
   for (const [name, content] of resourceEmission.files) {
     place(name, "resource-client", content);
   }
+  // Broker bindings (channels.md; M-T4.4 slice 6b): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  A wired-but-foreign
+  // channel joins the per-context dispatcher derivation as a stub with its
+  // REAL semantics knobs, so a hosted reactor routes off a channel declared in
+  // a non-hosted context (mirrors the Hono/Python/.NET orchestrators).  Every
+  // broker-carried event type is broker-routed: its dispatcher handlers drop
+  // the local @EventListener (design §4 delivery uniformity) and are invoked
+  // by the ChannelConsumerService on delivery instead.
+  const channelBindings = system ? redisChannelBindings(system.deployable, system.sys) : [];
+  const hasChannels = channelBindings.length > 0;
+  const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
+  const wiredForeignChannels: ChannelIR[] = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: b.delivery,
+      retention: b.retention,
+    }));
+  const brokerEvents = new Set(channelBindings.flatMap((b) => b.events));
+  // Dispatcher handler methods for broker-routed events, collected across the
+  // per-context loop below — the ChannelConsumerService's dispatch table.
+  const consumerHandlers: ChannelConsumerHandler[] = [];
   // Fullstack mode (`ui:` on a java deployable): the SPA owns the
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
@@ -687,6 +718,8 @@ function emitProjectFromContexts(
         statePkg: pkgFor("infra-persistence"),
         stateRepoPkg: pkgFor("spring-data-repository"),
         contextSchema: ctxSchema,
+        extraChannels: hasChannels ? wiredForeignChannels : undefined,
+        brokerEvents: hasChannels ? brokerEvents : undefined,
       },
       dispatcherOpFragments,
     );
@@ -699,6 +732,16 @@ function emitProjectFromContexts(
         undefined,
         undefined,
         dispatcherOpFragments,
+      );
+      consumerHandlers.push(
+        ...dispatcher.handlers
+          .filter((h) => brokerEvents.has(h.event))
+          .map((h) => ({
+            dispatcherClass: `${ctx.name}Dispatcher`,
+            dispatcherPkg: pkgFor("workflow-service"),
+            method: h.method,
+            event: h.event,
+          })),
       );
     }
     // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
@@ -865,6 +908,66 @@ function emitProjectFromContexts(
     if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
   }
 
+  // Broker transport (M-T4.4 slice 6b) — channel-less projects stay
+  // byte-identical.  Foreign vocabulary first (Hono/Python/.NET parity): a
+  // consumed foreign event's record class + the id brands it (and correlating
+  // workflow state) reference join the deployable's domain packages.
+  if (hasChannels && system) {
+    const knownEventNames = new Set(contexts.flatMap((c) => c.events).map((e) => e.name));
+    const foreignConsumedEvents = [...new Set(consumerHandlers.map((h) => h.event))]
+      .filter((name) => !knownEventNames.has(name))
+      .flatMap((name) => {
+        for (const sub of system.sys.subdomains) {
+          for (const c of sub.contexts) {
+            const ev = c.events.find((e) => e.name === name);
+            if (ev) return [ev];
+          }
+        }
+        return [];
+      });
+    for (const ev of foreignConsumedEvents) {
+      place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
+    }
+    const hostedIdNames = new Set(
+      contexts.flatMap((c) =>
+        c.aggregates.flatMap((a) => [a.name, ...a.parts.map((pt) => pt.name)]),
+      ),
+    );
+    const foreignIdNames = [
+      ...new Set(
+        [
+          ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+          ...contexts
+            .flatMap((c) => c.workflows)
+            .flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
+        ]
+          .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
+          .map((t) => t.targetName)
+          .filter((n) => !hostedIdNames.has(n)),
+      ),
+    ];
+    for (const name of foreignIdNames) {
+      let idValueType = "uuid";
+      for (const sub of system.sys.subdomains) {
+        for (const c of sub.contexts) {
+          const agg = c.aggregates.find((a) => a.name === name);
+          if (agg) idValueType = agg.idValueType;
+        }
+      }
+      place(`${name}Id.java`, "id", renderJavaId(name, idValueType, basePkg));
+    }
+    const carriedEvents = [...contexts.flatMap((c) => c.events), ...foreignConsumedEvents];
+    for (const [name, content] of renderJavaChannelFiles(
+      basePkg,
+      channelBindings,
+      carriedEvents,
+      consumerHandlers,
+      system.sys,
+    )) {
+      place(name, "config", content);
+    }
+  }
+
   // Explicit transport bindings (unfoldable-api-derivation.md, A2): one
   // `@RestController` per served api, dispatching each `route <M> "<path>" ->
   // <Ctx>.<Handler>` to its handler bean.  Routes to non-hosted contexts are
@@ -990,7 +1093,12 @@ function emitProjectFromContexts(
       oidc,
       // Durable cron timerSources (scheduling.md Phase 2) add the JobRunr core dep.
       jobrunr: ownsCronTimer,
-      extraDeps: resourceEmission.deps,
+      extraDeps: {
+        ...resourceEmission.deps,
+        // Redis pub/sub channel driver (M-T4.4 slice 6b) — wiring-gated so a
+        // channel-less build.gradle.kts stays byte-identical.
+        ...(hasChannels ? { "io.lettuce:lettuce-core": LETTUCE_CORE_VERSION } : {}),
+      },
       // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the
       // `.smap` sidecars themselves are rendered later, system-side, from

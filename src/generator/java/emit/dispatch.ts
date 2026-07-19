@@ -1,5 +1,6 @@
 import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";
 import type {
+  ChannelIR,
   EnrichedBoundedContextIR,
   EventSubscriptionIR,
   ExprIR,
@@ -53,6 +54,17 @@ export interface DispatchCtx {
    *  stream in native SQL so it matches the migration DDL.  Undefined ⇒
    *  unqualified (binding-free system). */
   contextSchema?: string;
+  /** Wired-but-foreign broker channels (M-T4.4 backend fan-out): stubs with
+   *  their REAL delivery/retention knobs, widening the subscription
+   *  derivation so a hosted reactor routes off a channel declared in a
+   *  non-hosted context (mirrors the Hono/Python/.NET orchestrators). */
+  extraChannels?: ChannelIR[];
+  /** Event types carried by a broker-bound channel this deployable wires —
+   *  their handlers DROP the local `@EventListener` (design §4 delivery
+   *  uniformity: broker-bound events publish and are received through the
+   *  subscription; the ChannelConsumerService invokes these methods on
+   *  delivery instead of Spring's local fan-out). */
+  brokerEvents?: ReadonlySet<string>;
 }
 
 interface ResolvedHandler {
@@ -168,12 +180,16 @@ export function renderJavaDispatcher(
    *  recorder is present, so a no-`--sourcemap` run pays no per-statement
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
-): { name: string; content: string } | null {
+): { name: string; content: string; handlers: { method: string; event: string }[] } | null {
   // Re-derive over the (possibly merged) context WITH projections — the
   // enricher-stored `ctx.eventSubscriptions` omits projection folds (it derives
   // without them), so a projection-only context would otherwise get no
   // dispatcher.  Mirrors python's `dispatchSubscriptionsOf`.
-  const subs = deriveEventSubscriptions(ctx.channels, ctx.workflows, ctx.projections);
+  const subs = deriveEventSubscriptions(
+    [...ctx.channels, ...(dctx.extraChannels ?? [])],
+    ctx.workflows,
+    ctx.projections,
+  );
   if (subs.length === 0) return null;
 
   const className = `${ctx.name}Dispatcher`;
@@ -200,6 +216,18 @@ export function renderJavaDispatcher(
     );
 
   const methods: string[] = [];
+  // Handler index (method name × event type) returned to the orchestrator —
+  // the ChannelConsumerService dispatches received broker envelopes through
+  // exactly these methods, so the naming rules live here, not re-derived in
+  // the channels emitter.  A broker-routed handler loses its @EventListener
+  // line (design §4 — see DispatchCtx.brokerEvents).
+  const handlers: { method: string; event: string }[] = [];
+  const pushHandler = (method: string, event: string, ls: string[]): void => {
+    handlers.push({ method, event });
+    methods.push(
+      ...(dctx.brokerEvents?.has(event) ? ls.filter((l) => l !== "    @EventListener") : ls),
+    );
+  };
   for (const sub of subs) {
     // Projection fold (projection.md): a pure read-model upsert, not a saga.
     // Load-or-allocate the row keyed by the correlation column, write each `:=`
@@ -210,7 +238,11 @@ export function renderJavaDispatcher(
       if (!proj) continue;
       const on = proj.handlers.find((h) => h.event === sub.event && h.param === sub.param);
       if (!on) continue;
-      methods.push(...renderProjectionFold(proj, on, sub, imports));
+      pushHandler(
+        `on${upperFirst(proj.name)}On${upperFirst(sub.event)}`,
+        sub.event,
+        renderProjectionFold(proj, on, sub, imports),
+      );
       if (!touchedProjections.some((p) => p.name === proj.name)) touchedProjections.push(proj);
       continue;
     }
@@ -227,8 +259,10 @@ export function renderJavaDispatcher(
       const onResolved = onSub ? resolveHandler(wf, onSub) : null;
       if (!createResolved || !onSub || !onResolved) continue;
       const construct = `${ctx.name}.${wf.name}`;
-      methods.push(
-        ...renderEsMergedHandler(
+      pushHandler(
+        `on${upperFirst(wf.name)}${upperFirst(sub.event)}`,
+        sub.event,
+        renderEsMergedHandler(
           ctx,
           wf,
           sub,
@@ -246,8 +280,10 @@ export function renderJavaDispatcher(
     const resolved = resolveHandler(wf, sub);
     if (!resolved) continue;
     const construct = `${ctx.name}.${wf.name}`;
-    methods.push(
-      ...(wf.eventSourced
+    pushHandler(
+      handlerName(sub),
+      sub.event,
+      wf.eventSourced
         ? renderEsHandler(
             ctx,
             wf,
@@ -258,7 +294,7 @@ export function renderJavaDispatcher(
             dctx.contextSchema,
             opFragments,
           )
-        : renderHandler(ctx, wf, sub, resolved, imports, construct, opFragments)),
+        : renderHandler(ctx, wf, sub, resolved, imports, construct, opFragments),
     );
   }
   if (methods.length === 0) return null;
@@ -362,6 +398,7 @@ export function renderJavaDispatcher(
 
   return {
     name: `${className}.java`,
+    handlers,
     content: lines(
       `package ${dctx.pkg};`,
       ``,
