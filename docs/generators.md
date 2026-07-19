@@ -29,7 +29,8 @@ node, EF Core on .NET). Persistence is a selectable realization axis —
 `platform: dotnet { persistence: dapper }`, `platform: node { persistence:
 mikroorm }` — see the "Realization axes" section of [`platforms.md`](platforms.md).
 The alternates (`dapper`, `mikroorm`) share the domain layer below and only
-swap the repository/schema layer (minimal-v1 surface, validator-gated).
+swap the repository/schema layer; both are now at full parity with their
+default (M-T6.9) — see [`platforms.md`](platforms.md) → "Realization axes".
 
 > **Scope note.** The construct-by-construct matrix below tracks the three
 > reference platforms (TypeScript/Hono, .NET, React) for readability — it maps

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// dapper — a real (minimal-v1) PersistenceAdapter for the dotnet platform
+// dapper — a full-parity PersistenceAdapter for the dotnet platform (drained to EF-Core parity, M-T6.9)
 // (D-REALIZATION-AXES Phase 5c).  Selected by `persistence: dapper`.
 //
 // The orchestrator (`generator/dotnet/index.ts`) branches on the deployable's

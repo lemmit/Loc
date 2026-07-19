@@ -111,14 +111,16 @@ available. The matured axis today is **`persistence:`**:
 
 - **The default (`efcore` / `drizzle`) is the full-surface adapter** — every
   aggregate shape, inheritance, associations, audit/provenance, etc.
-- **The alternates (`dapper`, `mikroorm`) are minimal-v1**: relational,
-  state-based, flat aggregates with scalar / enum / value-object / single
-  id-ref fields, CRUD + simple finds. Anything outside that (document/
-  embedded shape, associations, nested parts, inheritance, event-sourcing,
-  audit/provenance/managed fields, retrievals, seeds) is rejected at
-  validate time (`loom.dapper-unsupported` / `loom.mikroorm-unsupported`)
-  with an actionable message — use the default for that model, or drop the
-  unsupported feature. The alternates share the generated **domain layer**
+- **The alternates (`dapper`, `mikroorm`) are now at FULL PARITY** with their
+  default (M-T6.9, drained across 7 waves): every relational / document /
+  embedded / event-sourced / inheritance (TPH+TPC) shape, containment (incl.
+  recursive part-in-part), associations, filters, audit / provenance / managed
+  fields, retrievals, seeds, and the workflow outbox all emit. `dapper` ≡ EF
+  Core; `mikroorm` ≡ Drizzle. `loom.dapper-unsupported` /
+  `loom.mikroorm-unsupported` now fire ONLY for one genuinely-impossible shape
+  each (Dapper: an un-owned by-value entity-array part *field*; MikroORM: an
+  abstract inheritance base owning its own `contains`) — fail-fast guards, not
+  subset boundaries. The alternates share the generated **domain layer**
   with the default and only swap the persistence layer (Dapper SQL
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.
