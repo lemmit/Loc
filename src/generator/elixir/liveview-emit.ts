@@ -43,6 +43,7 @@ import {
   defaultInitFor,
   type HandleEventClause,
   renderRequiresGuard,
+  type UploadBinding,
   walkBodyToHeex,
 } from "./heex-walker.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
@@ -425,6 +426,7 @@ function renderLiveView(a: RenderArgs): string {
   const {
     page,
     liveModule,
+    appName,
     appModule,
     ui,
     aggregatesByName,
@@ -477,6 +479,7 @@ function renderLiveView(a: RenderArgs): string {
     contextModuleByAggName,
     aggregatesByName,
     usedStores,
+    walked.uploadBindings,
   );
   const handleParams = renderHandleParams(
     page,
@@ -507,6 +510,11 @@ function renderLiveView(a: RenderArgs): string {
     renderCreateEventClauses(walked.formBindings, contextModuleByAggName, createSuccessRoute) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName);
 
+  // `FileUpload` progress consumers — one `handle_<field>_progress/3` per
+  // upload binding, referenced by the `allow_upload(..., progress: &…/3)` mount
+  // seam.  Persists the completed entry and assigns the FileRef into state.
+  const uploadHandlers = renderUploadProgressHandlers(walked.uploadBindings, appName);
+
   return `# Auto-generated.
 defmodule ${liveModule} do
   use ${webModule}, :live_view
@@ -514,7 +522,7 @@ ${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
-${handleEventClauses}
+${handleEventClauses}${uploadHandlers}
   @impl true
   def render(assigns) do
     ~H"""
@@ -558,6 +566,11 @@ function renderMount(
    *  (defaults from the store module's `defstruct`).  The matching `alias` is
    *  emitted by `renderLiveView` so `%Cart{}` resolves. */
   usedStores: readonly string[] = [],
+  /** FileUpload bindings — each adds one `|> allow_upload(:<field>, …,
+   *  auto_upload: true, progress: &handle_<field>_progress/3)` pipe step so the
+   *  matching `<.live_file_input upload={@uploads.<field>}>` resolves and
+   *  uploads stream in. */
+  uploadBindings: readonly UploadBinding[] = [],
 ): string {
   const assigns: string[] = [];
   for (const f of page.state) {
@@ -568,6 +581,14 @@ function renderMount(
   // Per-store assign — one `%<Store>{}` (struct defaults) per used store.
   for (const storeName of usedStores) {
     assigns.push(`      |> assign(:${snake(storeName)}, %${upperFirst(storeName)}{})`);
+  }
+  // FileUpload allow_upload — one per bound `FileUpload` field.  `auto_upload`
+  // streams the entry on selection; the `progress:` consumer (emitted by
+  // `renderUploadProgressHandlers`) persists it and assigns the FileRef.
+  for (const ub of uploadBindings) {
+    assigns.push(
+      `      |> allow_upload(:${ub.field}, accept: :any, max_entries: 1, auto_upload: true, progress: &handle_${ub.field}_progress/3)`,
+    );
   }
   // Option-list loads for `X id` form fields.  The label is the record id
   // (no `:display` calculation on the vanilla path).  The auto-`findAll` is
@@ -827,6 +848,47 @@ function renderCreateEventClauses(
         {:noreply, assign(socket, :form, to_form(changeset))}
     end
   end\n`;
+}
+
+/** One `handle_<field>_progress/3` per `FileUpload` binding.  Referenced by the
+ *  mount `allow_upload(..., progress: &…/3)` seam.  On a completed entry it
+ *  consumes the upload, copies the bytes into `priv/static/uploads/`, and
+ *  assigns the resulting FileRef map (`%{ "url", "key", "contentType", "size" }`
+ *  — the wire FileRef shape) into the bound `:<field>` state assign; an
+ *  in-flight entry is a no-op.  `appName` is the OTP app (`:phoenix_app`) whose
+ *  `priv/` receives the file. */
+function renderUploadProgressHandlers(
+  uploadBindings: readonly UploadBinding[],
+  appName: string,
+): string {
+  if (uploadBindings.length === 0) return "";
+  return `\n${uploadBindings
+    .map(
+      (ub) => `  defp handle_${ub.field}_progress(:${ub.field}, entry, socket) do
+    if entry.done? do
+      file_ref =
+        consume_uploaded_entry(socket, entry, fn %{path: path} ->
+          filename = entry.uuid <> "_" <> entry.client_name
+          dest = Path.join([Application.app_dir(:${appName}, "priv/static/uploads"), filename])
+          File.mkdir_p!(Path.dirname(dest))
+          File.cp!(path, dest)
+
+          {:ok,
+           %{
+             "url" => "/uploads/" <> filename,
+             "key" => filename,
+             "contentType" => entry.client_type,
+             "size" => entry.client_size
+           }}
+        end)
+
+      {:noreply, assign(socket, :${ub.field}, file_ref)}
+    else
+      {:noreply, socket}
+    end
+  end\n`,
+    )
+    .join("\n")}`;
 }
 
 /** "adjust_credit" → "Adjust credit" — sentence-case the snake op

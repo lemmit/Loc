@@ -69,6 +69,7 @@ import {
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
   renderField as renderFieldHeex,
+  renderFileUpload as renderFileUploadHeex,
   renderFor as renderForHeex,
   renderForm as renderFormHeex,
   renderGrid as renderGridHeex,
@@ -373,13 +374,15 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { labelled: "associate" },
   },
   // A standalone file-upload input bound to a `File`-typed state field.
-  // No `heex` renderer: LiveView uploads use `allow_upload`/`live_file_input`
-  // (a channel-streamed model, not the JSX POST-then-bind flow) — deferred to
-  // slice 4b and pinned in `heex-parity.test.ts`.
+  // The JSX frontends POST the file to `/files` and bind the returned FileRef;
+  // Phoenix has no such endpoint, so the HEEx renderer uses the LiveView-native
+  // `allow_upload`/`<.live_file_input>` flow (a channel-streamed upload consumed
+  // into the bound state assign) — see heex-primitives.ts::renderFileUpload.
   FileUpload: {
     group: "layout",
     admissibleInSource: true,
     tsx: emitFileUpload,
+    heex: renderFileUploadHeex,
     a11y: { labelled: "associate" },
   },
   // --- Display -----------------------------------------------------------

@@ -112,6 +112,10 @@ export interface WalkResult {
    *  store in `mount/3` and adds the matching `alias <App>Web.Stores.<Store>`.
    *  Empty when the body touches no store. */
   usedStores: string[];
+  /** `FileUpload { …, bind: <File state> }` inputs in this body — the emitter
+   *  wires each into an `allow_upload/3` (mount) + `handle_<field>_progress/3`
+   *  consumer.  Empty when the body has no FileUpload. */
+  uploadBindings: UploadBinding[];
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
@@ -161,6 +165,20 @@ export interface QueryBinding {
   /** Aggregate PascalCase name resolved from the `of:` query call,
    *  used to build the `<Ctx>.get_<agg>!` / `list_<agg>s` call. */
   aggregate: string;
+}
+
+/** A `FileUpload { …, bind: <File state> }` in a page body — the LiveView
+ *  native analogue of the JSX POST-then-bind flow.  The emitter turns each
+ *  into an `allow_upload(:<field>, …, auto_upload: true, progress:
+ *  &handle_<field>_progress/3)` in `mount/3` plus a `handle_<field>_progress/3`
+ *  consumer that persists the entry and assigns the resulting `FileRef` map
+ *  into the bound `:<field>` state assign.  See `renderFileUpload`
+ *  (heex-primitives.ts) and `renderMount` / `renderUploadProgressHandlers`
+ *  (liveview-emit.ts). */
+export interface UploadBinding {
+  /** snake-cased page-state field the FileRef is written into — also the
+   *  `allow_upload` key and the `@uploads.<field>` template reference. */
+  field: string;
 }
 
 export interface WalkContext {
@@ -226,6 +244,12 @@ export interface WalkContext {
    *  mutation survives the `{...ctx}` shallow copies nested renders make (like
    *  the other accumulator Sets above), surfaced as `WalkResult.usedStores`. */
   usedStores: Set<string>;
+  /** FileUpload bindings discovered as the walker visits `FileUpload(…)` calls
+   *  (heex-primitives.ts::renderFileUpload).  Surfaced as
+   *  `WalkResult.uploadBindings`; drives mount `allow_upload` + the progress
+   *  consumer.  An array (mutation survives `{...ctx}` shallow copies, like the
+   *  other accumulator arrays above). */
+  uploadBindings: UploadBinding[];
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Module-qualified bounded-context name keyed by entity-part name
@@ -337,6 +361,7 @@ export function walkBodyToHeex(
     slotUsed: { value: false },
     tabSeq: { value: 0 },
     usedStores: new Set(),
+    uploadBindings: [],
     position: "template",
     instanceTypes,
     authEnabled,
@@ -402,6 +427,7 @@ export function walkBodyToHeex(
     usesSlot: ctx.slotUsed.value,
     idOptionsBindings: [...ctx.idOptionsBindings],
     usedStores: [...ctx.usedStores],
+    uploadBindings: ctx.uploadBindings,
   };
 }
 
@@ -1680,6 +1706,7 @@ function renderRequiresGuardAt(
     slotUsed: { value: false },
     tabSeq: { value: 0 },
     usedStores: new Set(),
+    uploadBindings: [],
     position,
     partContextModule: new Map(),
     contextModuleByAggName: new Map(),
