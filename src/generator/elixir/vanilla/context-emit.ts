@@ -20,10 +20,12 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   OperationIR,
+  StmtIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
+import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
@@ -378,8 +380,13 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   // collection.  `__ref_id_list/1` normalises a preloaded relationship (target
   // structs) — or an already-raw id list — to a list of id strings;
   // `__resolve_refs/2` loads those ids back to target structs for `put_assoc`.
+  // `__ref_id_list/1` is needed by BOTH the mutation path and a read-only
+  // `contains` membership test; `__resolve_refs/2` (and its `import Ecto.Query`)
+  // only by the mutation path.  Gate them separately so a contains-only op
+  // doesn't emit an unused `__resolve_refs` (a `--warnings-as-errors` break).
+  const mutatesRefColl = contextMutatesRefColl(ctx);
   const refCollHelpers = contextUsesRefCollOp(ctx)
-    ? `\n${renderContextRefCollHelpers(appModule)}\n`
+    ? `\n${renderContextRefCollHelpers(appModule, mutatesRefColl)}\n`
     : "";
 
   // Shared relational-containment helper — emitted once per context module when
@@ -417,7 +424,7 @@ defmodule ${facadeMod} do
   handlers (workflows need
   \`<op>_<agg>(record, params)\` for cross-aggregate calls in the
   workflow body).  Plain Elixir context module.
-  """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
+  """${requireLogger}${mutatesRefColl ? "\n  import Ecto.Query" : ""}
 
 ${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}end
 `;
@@ -454,10 +461,33 @@ function contextEmitsEvent(ctx: BoundedContextIR): boolean {
   );
 }
 
+/** True when an op statement's expression tree contains a `this.<refColl>.contains(x)`
+ *  membership test — a `contains` method-call whose receiver is a reference
+ *  collection (`X id[]` → receiverType array<id>).  render-expr lowers that to
+ *  `Enum.member?(__ref_id_list(...), x)`, so the helper must be emitted even when
+ *  the op only READS the collection (a precondition) and never `+=`/`-=`es it. */
+function stmtHasRefCollContains(s: StmtIR): boolean {
+  let found = false;
+  walkStmtExprsDeep(s, (e) => {
+    if (
+      e.kind === "method-call" &&
+      e.member === "contains" &&
+      e.receiverType.kind === "array" &&
+      e.receiverType.element.kind === "id"
+    ) {
+      found = true;
+    }
+  });
+  return found;
+}
+
 /** Does any non-CRUD named operation in the context append/remove through a
- *  reference collection (`X id[]` → `many_to_many`)?  Gates the shared
- *  `__ref_id_list` / `__resolve_refs` helper emission. */
-function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
+ *  reference collection (`X id[]` → `many_to_many`)?  Gates `__resolve_refs/2`
+ *  (+ its `import Ecto.Query`) — the WRITE helper `put_assoc` needs to load ids
+ *  back to structs.  A read-only `contains` never touches it, so keeping this
+ *  gate mutation-only avoids an emitted-but-unused `__resolve_refs` under
+ *  `--warnings-as-errors`. */
+function contextMutatesRefColl(ctx: BoundedContextIR): boolean {
   return ctx.aggregates.some((agg) => {
     if (isEventSourced(agg)) return false;
     const names = refCollFieldNames(agg);
@@ -471,6 +501,23 @@ function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
             s.collection &&
             names.has(snake(s.target.segments[0] ?? "")),
         ),
+    );
+  });
+}
+
+/** Does the context need the `__ref_id_list/1` helper — i.e. any non-CRUD op
+ *  either mutates a reference collection OR tests membership over one
+ *  (`this.<refColl>.contains(x)`, which render-expr lowers to
+ *  `Enum.member?(__ref_id_list(...), x)`)?  The read path needs `__ref_id_list`
+ *  even when the op never `+=`/`-=`es the collection. */
+function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
+  if (contextMutatesRefColl(ctx)) return true;
+  return ctx.aggregates.some((agg) => {
+    if (isEventSourced(agg)) return false;
+    if (refCollFieldNames(agg).size === 0) return false;
+    return (agg.operations ?? []).some(
+      (op) =>
+        !CRUD_RESERVED_NAMES.has(op.name) && op.statements.some((s) => stmtHasRefCollContains(s)),
     );
   });
 }
@@ -548,8 +595,8 @@ function renderPutAssocPartsHelper(): string {
 
 /** The two private helpers a context module emits when a named op mutates a
  *  reference collection. */
-function renderContextRefCollHelpers(appModule: string): string {
-  return `  # Normalise a reference-collection value to a list of id strings — a
+function renderContextRefCollHelpers(appModule: string, includeResolve: boolean): string {
+  const refIdList = `  # Normalise a reference-collection value to a list of id strings — a
   # preloaded \`many_to_many\` is a list of target structs; a not-yet-loaded one
   # (or already-raw id list) passes through.
   defp __ref_id_list(%Ecto.Association.NotLoaded{}), do: []
@@ -559,13 +606,18 @@ function renderContextRefCollHelpers(appModule: string): string {
       id -> to_string(id)
     end)
   end
-  defp __ref_id_list(_), do: []
+  defp __ref_id_list(_), do: []`;
+  // `__resolve_refs` (and its `from` → `import Ecto.Query`) is only used by the
+  // write path (`put_assoc`).  A read-only `contains` op omits it so it isn't
+  // emitted-but-unused under `--warnings-as-errors`.
+  const resolveRefs = `
 
   # Load reference-collection ids back to target structs for \`put_assoc\`.
   defp __resolve_refs(ids, target_mod) do
     ids = ids |> List.wrap() |> Enum.map(&to_string/1)
     ${appModule}.Repo.all(from(t in target_mod, where: t.id in ^ids))
   end`;
+  return includeResolve ? refIdList + resolveRefs : refIdList;
 }
 
 // Named operation functions per aggregate operation.  `<op>_<agg>(record,

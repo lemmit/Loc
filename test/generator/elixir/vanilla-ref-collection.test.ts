@@ -103,4 +103,71 @@ describe("vanilla `X id[]` reference collections", () => {
     expect(repo).toContain("join: join_row in assoc(record, :party)");
     expect(repo).toContain("where: join_row.id == ^pokemon");
   });
+
+  // Regression (docs/audits/repo-code-review-2026-07.md E2): a `contains` over a
+  // reference collection in an OPERATION BODY (a precondition) must render the
+  // in-memory membership form `Enum.member?(__ref_id_list(record.<field>), x)`,
+  // NOT the removed Ash `exists(<field>_through, id == ^arg(:x))` filter, which
+  // referenced undefined `exists/2`/`arg/1`/`<field>_through` → `mix compile`
+  // failed on the generated project.  The context must also emit `__ref_id_list/1`
+  // even when the op only READS the collection (no `+=`/`-=`).
+  it("a contains precondition in an op body renders in-memory membership, not Ash exists", async () => {
+    const src = `
+system RC2 {
+  subdomain Roster {
+    context Roster {
+      aggregate Pokemon with crudish { species: string }
+      aggregate Trainer with crudish {
+        name: string
+        party: Pokemon id[]
+        operation adopt(pokemon: Pokemon id) {
+          precondition !(this.party.contains(pokemon))
+          party += pokemon
+        }
+      }
+      repository Trainers for Trainer {}
+      repository Pokemons for Pokemon {}
+    }
+  }
+  api RApi from Roster
+  storage pg { type: postgres }
+  resource st { for: Roster, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Roster], dataSources: [st], serves: RApi, port: 4000 }
+}`;
+    const ctxMod = file(await generateSystemFiles(src), "/roster.ex");
+    expect(ctxMod).toContain("Enum.member?(__ref_id_list(record.party), pokemon)");
+    expect(ctxMod).not.toContain("exists(");
+    expect(ctxMod).not.toContain("^arg(");
+    // The helper the membership form depends on is emitted (a READ alone arms it).
+    expect(ctxMod).toContain("defp __ref_id_list(");
+  });
+
+  // Same shape but the op ONLY reads the collection (no `+=`) — the helper gate
+  // must still arm, or the emitted `__ref_id_list` call is undefined.
+  it("emits __ref_id_list even when a contains-only op never mutates the collection", async () => {
+    const src = `
+system RC3 {
+  subdomain Roster {
+    context Roster {
+      aggregate Pokemon with crudish { species: string }
+      aggregate Trainer with crudish {
+        name: string
+        party: Pokemon id[]
+        operation ensureUnseen(pokemon: Pokemon id) {
+          precondition !(this.party.contains(pokemon))
+        }
+      }
+      repository Trainers for Trainer {}
+      repository Pokemons for Pokemon {}
+    }
+  }
+  api RApi from Roster
+  storage pg { type: postgres }
+  resource st { for: Roster, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Roster], dataSources: [st], serves: RApi, port: 4000 }
+}`;
+    const ctxMod = file(await generateSystemFiles(src), "/roster.ex");
+    expect(ctxMod).toContain("Enum.member?(__ref_id_list(record.party), pokemon)");
+    expect(ctxMod).toContain("defp __ref_id_list(");
+  });
 });
