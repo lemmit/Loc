@@ -103,6 +103,13 @@ export function hydrateEntityExpr(
   rowVar: string,
   agg: EnrichedAggregateIR,
   ctx: BoundedContextIR,
+  /** Opt-in override for a COLLECTION (array-typed) part field.  Drizzle stores
+   *  scalar/enum arrays as native array columns (the default passthrough reads
+   *  `row.<field>` directly), so it passes nothing.  A backend that instead
+   *  stores a part's collection field as a serialised jsonb column (MikroORM)
+   *  supplies this to (de)serialise the element type on read — kept off the
+   *  shared path so drizzle output stays byte-identical. */
+  opts?: { collectionField?: (f: FieldIR, rowVar: string) => string },
 ): string {
   const fields: string[] = [];
   fields.push(`id: Ids.${part.name}Id(${rowVar}.id)`);
@@ -110,6 +117,11 @@ export function hydrateEntityExpr(
   // not the aggregate root — matching the schema FK it was loaded through.
   fields.push(`parentId: Ids.${directParentName(agg, part.name, agg.name)}Id(${rowVar}.parentId)`);
   for (const f of part.fields) {
+    const arr = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (opts?.collectionField && arr.kind === "array") {
+      fields.push(`${f.name}: ${opts.collectionField(f, rowVar)}`);
+      continue;
+    }
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
   fields.push(...provHydrateEntries(part.fields, rowVar));

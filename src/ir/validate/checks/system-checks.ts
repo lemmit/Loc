@@ -28,7 +28,6 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
-  EntityPartIR,
   ExprIR,
   FunctionIR,
   OperationIR,
@@ -2124,29 +2123,22 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // Contained entity parts ARE supported (relational child tables): each
         // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
         // on read and diff-synced on save (the MikroORM analogue of the drizzle
-        // containment path).  NESTED parts (part-in-part) are supported too — a
+        // containment path).  NESTED parts (part-in-part) are supported — a
         // nested part FKs to its DIRECT parent part's row (`directParentName`,
         // shared with migrations-builder), recursively loaded (deepest-first
         // `<nc>ByParent` maps) / saved (tree-position-stamped FK) / cascade-
         // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
-        // field on a part folds into one jsonb column (shared serialise/
-        // deserialise), the mirror of the Dapper part-collection path.  Only
-        // event-sourced / aggregate-inheritance participants stay gated (their
-        // storage shape has no relational child-table home).
+        // field on a part (array of scalar / enum / VO / id) folds into one jsonb
+        // column (shared serialise/deserialise), the mirror of the Dapper
+        // part-collection path.  Only event-sourced / aggregate-inheritance
+        // participants with parts stay gated — their storage shape (event stream
+        // / shared-or-per-concrete inheritance table) has no relational
+        // child-table home, so the containment tree is genuinely unmappable.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          const flatType = (t: TypeIR): boolean =>
-            (t.kind === "optional" ? t.inner : t).kind !== "array";
-          const partNoCollectionField = (p: EntityPartIR): boolean =>
-            p.fields.every((f) => flatType(f.type));
           if (a.persistedAs === "eventLog")
             reject(where, "contains nested entity parts on an event-sourced aggregate");
           else if (a.isAbstract || a.extendsAggregate)
             reject(where, "contains nested entity parts on an aggregate-inheritance participant");
-          else if (!(a.parts ?? []).every(partNoCollectionField))
-            reject(
-              where,
-              "contains a collection-bearing entity part (a part with an array-typed field)",
-            );
         }
         // `filter` capability predicates ARE supported: the repository ANDs each
         // non-principal predicate (a MikroORM FilterQuery) into every root read

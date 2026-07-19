@@ -417,7 +417,12 @@ export function serializeField(t: TypeIR, accessor: string, ctx: EnrichedBounded
   }
   if (t.kind === "array") {
     if (t.element.kind === "id") return `${accessor}.map((x) => x as string)`;
-    return `${accessor}.map((x) => ${serializeField(t.element, "x", ctx)})`;
+    const elem = serializeField(t.element, "x", ctx);
+    // A value-object element serialises to an object literal — parenthesise it
+    // so it's a valid arrow RETURN (`(x) => ({...})`), not an arrow BLOCK body
+    // (`(x) => {...}`, a syntax error).  Mirrors the wire builder's `({...})`.
+    const body = t.element.kind === "valueobject" ? `(${elem})` : elem;
+    return `${accessor}.map((x) => ${body})`;
   }
   return accessor;
 }

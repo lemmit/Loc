@@ -293,10 +293,33 @@ function renderJoinRowEntity(assoc: AssociationIR): { block: string; schemaName:
  *  `OrderLineRow`), its own child table keyed by a `parentId` FK. */
 const partRowClassOf = (partName: string): string => `${partName}Row`;
 
+/** True when a field type is a COLLECTION (array of scalar / enum / VO / id),
+ *  optionally optional-wrapped — the shape a part stores as one jsonb column. */
+function isCollectionFieldType(t: TypeIR): boolean {
+  return (t.kind === "optional" ? t.inner : t).kind === "array";
+}
+
+/** One jsonb column carrying a part's collection field's serialised list.  The
+ *  Row TS type is the DOC shape of the array (`string[]`, `{ amount: number;
+ *  currency: string }[]`, …); the `nullable` flag adds `| null` for an optional
+ *  collection. */
+function collectionFieldColumn(f: FieldIR, ctx: EnrichedBoundedContextIR): MikroColumn {
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return {
+    prop: f.name,
+    mikroType: "json",
+    tsType: docFieldType(inner, ctx),
+    nullable: f.type.kind === "optional",
+    primary: false,
+    columnType: "jsonb",
+  };
+}
+
 /** Render one child Row entity + EntitySchema for a contained entity part.
  *  Columns: `id` (PK), `parentId` (FK to the owner), then the part's own
- *  fields (scalar / enum / VO-flattened / id).  MikroORM owns the schema, so
- *  no explicit FK/index — the parent-scoped reads carry the relationship. */
+ *  fields (scalar / enum / VO-flattened / id; a collection field folds into one
+ *  jsonb column).  MikroORM owns the schema, so no explicit FK/index — the
+ *  parent-scoped reads carry the relationship. */
 function renderPartRowEntity(
   part: EntityPartIR,
   ctx: EnrichedBoundedContextIR,
@@ -306,7 +329,9 @@ function renderPartRowEntity(
   const cols: MikroColumn[] = [
     { prop: "id", mikroType: "string", tsType: "string", nullable: false, primary: true },
     { prop: "parentId", mikroType: "string", tsType: "string", nullable: false, primary: false },
-    ...part.fields.filter((f) => !isRefCollection(f.type)).flatMap((f) => fieldColumns(f, ctx)),
+    ...part.fields.flatMap((f) =>
+      isCollectionFieldType(f.type) ? [collectionFieldColumn(f, ctx)] : fieldColumns(f, ctx),
+    ),
   ];
   const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
   const propLines = cols.map((c) => {
@@ -971,14 +996,34 @@ function assocHydrateBind(
 // `Id[]` association machinery — bulk-load into a `<name>ByParent` map on the
 // array reads, inline-load on findById, diff-sync on save.  The domain root
 // hydrates each containment from a bare `<name>` local (hydrateRootExpr), so
-// these helpers just supply those locals.  v1 is bounded to single-level flat
-// parts (validator-gated), so a part row never nests further.
+// these helpers just supply those locals.  NESTED parts (part-in-part) recurse
+// (deepest-first loads / tree-position-stamped saves / cascade deletes), and a
+// COLLECTION field on a part folds into one jsonb column — so the full
+// containment tree round-trips (validator only gates event-sourced /
+// aggregate-inheritance participants, which have no relational child-table home).
 // ---------------------------------------------------------------------------
 
 /** The entity part a containment names (undefined if malformed — validator-
  *  gated, so callers no-op). */
 function partForContainment(agg: EnrichedAggregateIR, c: ContainmentIR): EntityPartIR | undefined {
   return (agg.parts ?? []).find((p) => p.name === c.partName);
+}
+
+/** The MikroORM part hydrate — `hydrateEntityExpr` with the collection-field
+ *  override wired in: a part's array field is stored as one serialised jsonb
+ *  column, so it (de)serialises through the shared `deserializeField` (VO/id/
+ *  money elements reconstructed) rather than the drizzle native-array
+ *  passthrough.  For a part with no collection field this is byte-identical to a
+ *  bare `hydrateEntityExpr` (the override never fires). */
+function mikroHydrateEntity(
+  part: EntityPartIR,
+  rowVar: string,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  return hydrateEntityExpr(part, rowVar, agg, ctx, {
+    collectionField: (f, rv) => deserializeField(f.type, `${rv}.${f.name}`, ctx),
+  });
 }
 
 /** Save projection for a child part row — `{ id, parentId, <fields> }`,
@@ -989,7 +1034,9 @@ function partForContainment(agg: EnrichedAggregateIR, c: ContainmentIR): EntityP
  *  construction-time parentId (a `new Label` inside a `new Shipment` has no
  *  shipment id yet), so the recursive save passes the enclosing loop variable's
  *  id as `parentIdExpr` — mirroring the drizzle `entityProjection` FK-stamp
- *  rule. */
+ *  rule.  A COLLECTION field folds into one jsonb column, serialised through the
+ *  shared `serializeField` (the MikroORM json column stores the plain value
+ *  directly — VOs flattened to plain objects, ids/money to strings). */
 function partProjection(
   part: EntityPartIR,
   varExpr: string,
@@ -999,9 +1046,11 @@ function partProjection(
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
     { fieldName: "parentId", expr: parentIdExpr ?? `${varExpr}.parentId as string` },
-    ...part.fields
-      .filter((f) => !isRefCollection(f.type))
-      .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    ...part.fields.flatMap((f) =>
+      isCollectionFieldType(f.type)
+        ? [{ fieldName: f.name, expr: serializeField(f.type, `${varExpr}.${f.name}`, ctx) }]
+        : projectFieldEntries(f, varExpr, ctx),
+    ),
   ]);
 }
 
@@ -1035,7 +1084,7 @@ function nestedContainMikroLoads(
         `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}[]>();`,
         `${indent}for (const r of ${rowsLocal}) {`,
         `${indent}  const list = ${nc.name}ByParent.get(r.parentId) ?? [];`,
-        `${indent}  list.push(${hydrateEntityExpr(ncPart, "r", agg, ctx)});`,
+        `${indent}  list.push(${mikroHydrateEntity(ncPart, "r", agg, ctx)});`,
         `${indent}  ${nc.name}ByParent.set(r.parentId, list);`,
         `${indent}}`,
       );
@@ -1044,7 +1093,7 @@ function nestedContainMikroLoads(
         `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}>();`,
         `${indent}for (const r of ${rowsLocal}) {`,
         `${indent}  if (${nc.name}ByParent.has(r.parentId)) continue;`,
-        `${indent}  ${nc.name}ByParent.set(r.parentId, ${hydrateEntityExpr(ncPart, "r", agg, ctx)});`,
+        `${indent}  ${nc.name}ByParent.set(r.parentId, ${mikroHydrateEntity(ncPart, "r", agg, ctx)});`,
         `${indent}}`,
       );
     }
@@ -1073,25 +1122,25 @@ function containInlineLoadLines(
     if (c.collection) {
       if (!hasNested)
         return [
-          `${indent}const ${c.name} = (await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } })).map((r) => ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+          `${indent}const ${c.name} = (await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } })).map((r) => ${mikroHydrateEntity(part, "r", agg, ctx)});`,
         ];
       const rows = `${c.name}Rows`;
       return [
         `${indent}const ${rows} = await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } });`,
         ...nestedContainMikroLoads(part, rows, emVar, indent, agg, ctx),
-        `${indent}const ${c.name} = ${rows}.map((r) => ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `${indent}const ${c.name} = ${rows}.map((r) => ${mikroHydrateEntity(part, "r", agg, ctx)});`,
       ];
     }
     if (!hasNested)
       return [
         `${indent}const ${c.name}Row = await ${emVar}.findOne(${prow}, { parentId: ${ownerIdExpr} });`,
-        `${indent}const ${c.name} = ${c.name}Row === null ? null : ${hydrateEntityExpr(part, `${c.name}Row`, agg, ctx)};`,
+        `${indent}const ${c.name} = ${c.name}Row === null ? null : ${mikroHydrateEntity(part, `${c.name}Row`, agg, ctx)};`,
       ];
     const rows = `${c.name}Rows`;
     return [
       `${indent}const ${rows} = await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } });`,
       ...nestedContainMikroLoads(part, rows, emVar, indent, agg, ctx),
-      `${indent}const ${c.name} = ${rows}.length === 0 ? null : ${hydrateEntityExpr(part, `${rows}[0]!`, agg, ctx)};`,
+      `${indent}const ${c.name} = ${rows}.length === 0 ? null : ${mikroHydrateEntity(part, `${rows}[0]!`, agg, ctx)};`,
     ];
   });
 }
@@ -1125,7 +1174,7 @@ function containMapLoadLines(
         mapDecl,
         `${indent}for (const r of ${rows}) {`,
         `${indent}  const list = ${map}.get(r.parentId) ?? [];`,
-        `${indent}  list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `${indent}  list.push(${mikroHydrateEntity(part, "r", agg, ctx)});`,
         `${indent}  ${map}.set(r.parentId, list);`,
         `${indent}}`,
       ];
@@ -1134,7 +1183,7 @@ function containMapLoadLines(
       rowsDecl,
       ...nested,
       mapDecl,
-      `${indent}for (const r of ${rows}) ${map}.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+      `${indent}for (const r of ${rows}) ${map}.set(r.parentId, ${mikroHydrateEntity(part, "r", agg, ctx)});`,
     ];
   });
 }

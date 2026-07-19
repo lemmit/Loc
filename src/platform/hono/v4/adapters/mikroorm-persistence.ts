@@ -15,12 +15,14 @@
 // system-checks.ts`) accepts the wired surface — relational + event-sourced
 // state, associations, retrievals, seeds, managed/audited fields, aggregate
 // inheritance (TPH `sharedTable` shared-Row + TPC `ownTable` per-concrete
-// tables), single-level flat contained entity parts (relational child tables),
-// `shape(embedded)` (root columns + jsonb containments), `shape(document)`
-// (the whole tree as one `(id, data, version)` jsonb blob), provenanced fields
-// (co-located lineage column + EntityManager history flush), and per-op /
-// lifecycle `audited` writes — and still rejects the not-yet-wired features
-// (deeper-nested parts).
+// tables), contained entity parts (relational child tables) INCLUDING nested
+// part-in-part (recursive child tables) and collection-bearing parts (a jsonb
+// column per array-typed part field), `shape(embedded)` (root columns + jsonb
+// containments), `shape(document)` (the whole tree as one `(id, data, version)`
+// jsonb blob), provenanced fields (co-located lineage column + EntityManager
+// history flush), and per-op / lifecycle `audited` writes.  The only remaining
+// containment reject is genuinely-unmappable: parts on an event-sourced /
+// aggregate-inheritance aggregate (no relational child-table home).
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";
