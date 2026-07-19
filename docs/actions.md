@@ -280,12 +280,37 @@ function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … })
   const { … } = useForm<NoteOrderRequest>({ defaultValues: { memo: record.customerId } });
 ```
 
-Everything else falls back to the type-zero seed: a `this.<field>` op default on
-a pack that doesn't thread the record (Svelte / Angular / Feliz), and any
-ambient / lookup source (`now()`, `currentUser.*`, a sequence, a cross-aggregate
-read) — the server-`prepare`-endpoint tier. `ParamIR.default` is still carried in the IR for
-a future backend that applies it server-side (today none do — op params are
-required on the wire and the form always seeds + sends them).
+### Server-sourced defaults — the `prepare` endpoint
+
+An **ambient** default the client can't evaluate — `now()` or `currentUser.<claim>`
+— is computed by the **server** and fetched into the create form. When an
+aggregate has such a field default, the Hono backend emits `GET /<plural>/prepare`
+returning just those keys (evaluated exactly as the audit stamps are: `now()` →
+`new Date().toISOString()`, `currentUser.<claim>` off the ambient request
+principal), and the React **shadcn** create form fetches it (`usePrepare<Agg>`)
+and `reset`s the form over its type-zero seed once it resolves —
+`keepDirtyValues` so a slow response never clobbers what the user typed.
+
+```ddd
+aggregate Order with crudish { customerId: string  createdAt: datetime = now() }
+```
+```ts
+// GET /orders/prepare → { createdAt: new Date().toISOString() }
+const __prep = usePrepareOrder();
+const form = useForm({ resolver, defaultValues: { customerId: "", createdAt: "" } });
+useEffect(() => { if (__prep.data) form.reset({ ...{ customerId: "", createdAt: "" }, ...__prep.data }, { keepDirtyValues: true }); }, [__prep.data]);
+```
+
+The classification is one shared predicate (`serverSourcedDefaultFields`), so the
+endpoint's keys and the form's fetched keys can't drift. Fan-out in progress: the
+other backends (`.NET`/Java/Python/Elixir) and the other frontend packs render the
+unchanged form and keep the type-zero fallback until ported; a **sequence** or
+**cross-aggregate lookup** default is still deferred (not yet server-sourced).
+Everything outside this tier falls back to the type-zero seed: a `this.<field>`
+on the by-name op form or a non-threading pack, and the still-deferred sources
+above. `ParamIR.default` is carried in the IR for a future backend that applies
+op-param defaults server-side (today none do — op params are required on the wire
+and the form always seeds + sends them).
 
 ## Further reading
 

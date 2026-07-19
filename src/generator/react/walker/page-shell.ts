@@ -632,6 +632,9 @@ function renderFormOfWiring(
     useController,
     defaultValuesTs,
     hasDefaultOnSubmit: onSubmitJs === null,
+    // A record-overlaying pack (`form-of-decls` renders the server-default
+    // overlay) fetches `usePrepare<Agg>` and `reset`s once it resolves.
+    hasServerDefaults: state.hasServerDefaults === true,
   };
   const decls = pack.render("form-of-decls", tplCtx);
   return {

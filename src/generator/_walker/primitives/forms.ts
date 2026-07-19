@@ -15,6 +15,7 @@ import {
   initialValuesTs,
   needsController,
 } from "../../_frontend/form-helpers.js";
+import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
 import { renderFormField } from "../render-form-field.js";
 import {
@@ -477,6 +478,15 @@ function emitFormOfAggregate(
     `Create${agg.name}Request`,
     `useCreate${agg.name}`,
   );
+  // Server-sourced defaults (`now()` / `currentUser.*`): the create form fetches
+  // them from `usePrepare<Agg>` and overlays them on the type-zero seed (a pack
+  // whose `form-of-decls` renders the overlay — `hasServerDefaults`).  Register
+  // the hook + `useEffect` here; a pack that ignores the flag emits neither.
+  const hasServerDefaults = serverSourcedDefaultFields(createInputFields(agg)).length > 0;
+  if (hasServerDefaults) {
+    addImport(ctx, `../api/${lowerFirst(agg.name)}`, `usePrepare${agg.name}`);
+    addImport(ctx, "react", "useEffect");
+  }
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
@@ -491,6 +501,7 @@ function emitFormOfAggregate(
     fieldHtmls: prepared.fieldHtmls,
     fieldArrays: prepared.fieldArrays,
     onSubmitJs,
+    hasServerDefaults,
   });
   const slug = snake(plural(agg.name));
   return renderFormOfPrimitive(ctx, call, depth, testidNamespace, prepared.fieldHtmls, onSubmitJs, {
