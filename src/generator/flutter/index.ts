@@ -18,6 +18,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   PageIR,
+  ParamIR,
   SystemIR,
   UiIR,
   WorkflowIR,
@@ -26,6 +27,11 @@ import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
+import {
+  type ComponentWalkCtx,
+  emittableComponentParams,
+  renderComponentsFile,
+} from "./component-emit.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
 import {
@@ -105,14 +111,38 @@ export function generateFlutterForContexts(
   // home page when the ui declares no pages of its own.
   const aggregates = contexts.flatMap((c) => c.aggregates.map((a) => a.name));
 
+  // Emittable user components (stateless, value-param, no-read) → threaded into
+  // the page walker so a `Foo(...)` invocation resolves to the generated widget.
+  const componentCtx: ComponentWalkCtx = {
+    apiParams: ui?.apiParams ?? [],
+    aggregatesByName,
+    bcByAggregate,
+  };
+  const componentParams: ReadonlyMap<string, readonly ParamIR[]> = ui
+    ? emittableComponentParams(ui.components, componentCtx)
+    : new Map();
+
   const pages = ui?.pages ?? [];
-  const rendered = pages.map((page) => ({
-    page,
-    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate, {
+  const usedComponents = new Set<string>();
+  const rendered = pages.map((page) => {
+    const r = renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate, {
       workflowsByName,
       bcByWorkflow,
-    }),
-  }));
+      componentParams,
+    });
+    for (const name of r.usedComponents) usedComponents.add(name);
+    return { page, ...r };
+  });
+
+  if (ui && usedComponents.size > 0) {
+    const componentsFile = renderComponentsFile(
+      ui.components,
+      usedComponents,
+      componentParams,
+      componentCtx,
+    );
+    if (componentsFile) out.set("lib/components.dart", componentsFile);
+  }
 
   // `AppConfig`/`apiUri` is shared by the read providers, the form widgets, AND
   // `Action(<instance>.<op>)` buttons (which POST inline via `apiUri(`).  Emit it
@@ -168,6 +198,9 @@ interface RenderedPage {
   className: string;
   routePath: string;
   source: string;
+  /** User components this page invokes — collected so the ui emits their
+   *  widgets into `lib/components.dart`. */
+  usedComponents: ReadonlySet<string>;
 }
 
 /** Render one `ui` page into a Flutter `StatelessWidget` whose `build` returns
@@ -181,9 +214,10 @@ function renderPage(
   workflows: {
     workflowsByName: ReadonlyMap<string, WorkflowIR>;
     bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>;
+    componentParams: ReadonlyMap<string, readonly ParamIR[]>;
   },
 ): Omit<RenderedPage, "page"> {
-  const { workflowsByName, bcByWorkflow } = workflows;
+  const { workflowsByName, bcByWorkflow, componentParams } = workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -203,6 +237,7 @@ function renderPage(
   let usesRouteId = false;
   const usedActions = new Set<string>();
   let usedApiHooks = new Map<string, ApiHookUse>();
+  const usedComponents = new Set<string>();
   if (page.body) {
     const result = walkBody(
       page.body,
@@ -210,7 +245,7 @@ function renderPage(
       flutterPack(),
       paramNames,
       stateNames,
-      new Map(), // userComponents
+      componentParams, // userComponents — a Foo(...) call resolves to the widget
       ui.apiParams,
       aggregatesByName,
       bcByAggregate, // form seams resolve enum / value-object types here
@@ -222,6 +257,7 @@ function renderPage(
     usesRouteId = result.usesRouteId;
     usedApiHooks = result.usedApiHooks;
     for (const a of result.usedActions ?? []) usedActions.add(a);
+    for (const c of result.usedUserComponents) usedComponents.add(c);
   }
 
   // A page becomes a Riverpod `ConsumerWidget` (bound to `ref`) when it either
@@ -231,18 +267,19 @@ function renderPage(
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
   const consumer = stateful || usedApiHooks.size > 0;
   const apiParamNames = new Map(ui.apiParams.map((p) => [p.name, p.apiName]));
+  const usesComponent = usedComponents.size > 0;
   const source = consumer
     ? renderConsumerPage(
         page,
         className,
-        { usesState, usedActions, usedApiHooks, usesRouteId, stateful, hostsForm },
+        { usesState, usedActions, usedApiHooks, usesRouteId, stateful, hostsForm, usesComponent },
         bodyWidget,
         contexts,
         apiParamNames,
       )
-    : renderStatelessPage(page, className, bodyWidget, { usesRouteId, hostsForm });
+    : renderStatelessPage(page, className, bodyWidget, { usesRouteId, hostsForm, usesComponent });
 
-  return { fileBase, className, routePath, source };
+  return { fileBase, className, routePath, source, usedComponents };
 }
 
 /** What a `ConsumerWidget` page's `build` binds — reactive state/actions (Track
@@ -255,6 +292,8 @@ interface ConsumerBindings {
   stateful: boolean;
   /** Page hosts a form widget → imports `../forms.dart`. */
   hostsForm: boolean;
+  /** Page invokes a user component → imports `../components.dart`. */
+  usesComponent: boolean;
 }
 
 /** Display-only page → a plain `StatelessWidget`.  The body references no
@@ -269,10 +308,11 @@ function renderStatelessPage(
   page: PageIR,
   className: string,
   bodyWidget: string,
-  opts: { usesRouteId: boolean; hostsForm: boolean },
+  opts: { usesRouteId: boolean; hostsForm: boolean; usesComponent: boolean },
 ): string {
   const imports = ["import 'package:flutter/material.dart';"];
   if (opts.hostsForm) imports.push("import '../forms.dart';");
+  if (opts.usesComponent) imports.push("import '../components.dart';");
   // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
   // page-body reference to it — so import http + the base-URL helper on demand.
   if (bodyWidget.includes("apiUri(")) {
@@ -373,6 +413,7 @@ function renderConsumerPage(
   ];
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
+  if (b.usesComponent) imports.push("import '../components.dart';");
   // A `match await` Notifier method decodes JSON, POSTs via `apiUri`, and reifies
   // wire models — so the file needs dart:convert + http + config + models when the
   // projection uses them.
