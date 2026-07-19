@@ -13,6 +13,7 @@ import {
   clickWorkspaceCreate,
   dumpPreviewDiagnostics,
   fatalConsoleErrors,
+  waitForBundle,
   waitForPlaygroundReady,
 } from "./_helpers";
 
@@ -57,9 +58,7 @@ test("mui@v7 preview boots without runtime errors", async ({ page }) => {
   }
 
   await page.getByTestId("btn-bundle").click();
-  await expect(
-    page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 600_000 });
+  await waitForBundle(page);
 
   // The boot button lives on the dock's Runtime tab (not the default Output
   // tab), so switch to it first — otherwise btn-boot never mounts.

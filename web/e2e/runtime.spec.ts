@@ -14,6 +14,7 @@ import {
   browserCanReachNetwork,
   fatalConsoleErrors,
   selectExample,
+  waitForBundle,
   waitForPlaygroundReady,
 } from "./_helpers";
 
@@ -49,9 +50,7 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
 
   await test.step("Bundle", async () => {
     await page.getByTestId("btn-bundle").click();
-    await expect(page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/)).toBeVisible({
-      timeout: 600_000,
-    });
+    await waitForBundle(page);
   });
 
   await test.step("Boot", async () => {

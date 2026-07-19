@@ -142,6 +142,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
         {((honoBundleResult && !honoBundleResult.ok) ||
           (reactBundleResult && !reactBundleResult.ok)) && (
           <Box
+            data-testid="bundle-errors"
             p="xs"
             style={{
               borderTop: "1px solid var(--mantine-color-dark-4)",

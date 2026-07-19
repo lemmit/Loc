@@ -175,3 +175,29 @@ export async function clickWorkspaceCreate(page: Page): Promise<void> {
     await expect(create).toBeHidden({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
 }
+
+// Wait for the in-browser Hono bundle to settle, racing the success banner
+// against the footer's error state.
+//
+// Why not just `expect(successBanner).toBeVisible({ timeout: 600_000 })`:
+// the bundler worker already caps a single run at 180s (RUN_TIMEOUT_MS in
+// vfs-bundler-client.ts) and, on any failure — an esbuild error, a dep that
+// won't resolve, or a network stall that trips that cap — settles the result
+// to `{ ok: false }`.  The footer then reads `bundle: N error(s)` and the
+// Files pane shows the worker's message.  A success-only wait ignores that
+// settled failure and burns the whole 600s before reporting a useless
+// "locator not found", hiding *why* the bundle broke.  Racing the two states
+// fails fast with the real message while keeping the generous ceiling for a
+// legitimately-slow cold npm install on the happy path.
+export async function waitForBundle(page: Page, timeout = 600_000): Promise<void> {
+  const ok = page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/);
+  const failed = page.getByText(/bundle: \d+ error\(s\)/);
+  await expect(ok.or(failed).first()).toBeVisible({ timeout });
+  if (await failed.isVisible()) {
+    // Surface the worker's actual diagnostic (the auto-rendered bundle-error
+    // drawer in the Files pane) so the failure is actionable, not just a count.
+    const drawer = page.getByTestId("bundle-errors");
+    const detail = (await drawer.count()) ? await drawer.innerText().catch(() => "") : "";
+    throw new Error(`In-browser bundle failed (${await failed.innerText()}).\n${detail}`.trim());
+  }
+}

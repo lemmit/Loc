@@ -15,6 +15,7 @@ import {
   clickWorkspaceCreate,
   dumpPreviewDiagnostics,
   fatalConsoleErrors,
+  waitForBundle,
   waitForPlaygroundReady,
 } from "./_helpers";
 
@@ -91,9 +92,7 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
   const tBundleStart = Date.now();
   await page.getByTestId("btn-bundle").click();
   try {
-    await expect(
-      page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/),
-    ).toBeVisible({ timeout: 600_000 });
+    await waitForBundle(page);
   } finally {
     // Always log the install-path breakdown — even on bundle timeout — so
     // we can tell what the worker actually did with its 5 minutes.
