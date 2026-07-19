@@ -135,3 +135,19 @@ jobs:
       - name: flutter build web (the real compile gate)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter build web --release
+      # Native mobile surface (Phase 3) — prove the SAME emitted Dart source
+      # compiles for Android too.  `make prepare` (flutter create --platforms)
+      # materialises the native folders the SDK owns; `flutter build apk` is the
+      # native "is the Dart real" gate.  Java 17 + the Android SDK are set up here
+      # (subosito/flutter-action provides Flutter; the app runs no native plugins
+      # so a stock SDK + debug build suffice).  iOS needs a macOS host — deferred.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: flutter create android platform + build apk
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          flutter create --platforms=android .
+          flutter build apk --debug

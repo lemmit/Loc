@@ -117,6 +117,17 @@ export function generateFlutterForContexts(
   out.set("web/index.html", renderWebIndexHtml(title));
   out.set("web/manifest.json", renderWebManifest(pkg, title));
   out.set("Dockerfile", DOCKERFILE);
+  // Native mobile surface (Phase 3).  The emitted project is a plain Flutter app
+  // — it builds for web (served by the Dockerfile above) AND, with the platform
+  // folders materialised, for Android/iOS.  We deliberately do NOT vendor the
+  // large `android/`/`ios/` scaffolds (Gradle wrappers, manifests, Xcode
+  // projects — boilerplate the Flutter SDK owns); the Makefile prepares them on
+  // demand via `flutter create --platforms=…` (Flutter's supported "add a
+  // platform to an existing project" flow), keeping the generated tree lean and
+  // the native capability a pure function of the SDK.  Web-vs-native is a build
+  // target, not a modelling mode — both are always available.
+  out.set("Makefile", renderMakefile(pkg));
+  out.set("README.md", renderReadme(title, pkg));
 
   return out;
 }
@@ -379,6 +390,69 @@ flutter:
 
 const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
 `;
+
+/** `Makefile` — the build entry points for every surface.  `prepare`
+ *  materialises the native platform folders on demand (they aren't vendored —
+ *  see the emission note); `web` / `apk` / `ipa` build each surface from the one
+ *  shared Dart source.  `API_BASE_URL` threads through as a `--dart-define`
+ *  (mirrors the compose env the Dockerfile injects). */
+function renderMakefile(pkg: string): string {
+  return `# ${pkg} — Loom-generated Flutter app.
+# One Dart source, three build surfaces.  Override the API base with
+#   make apk API_BASE_URL=https://api.example.com/api
+API_BASE_URL ?= /api
+DEFINE = --dart-define=API_BASE_URL=$(API_BASE_URL)
+
+.PHONY: prepare web apk ipa analyze clean
+
+# Materialise the android/ + ios/ platform folders (owned by the Flutter SDK,
+# not vendored here).  Idempotent — re-running only fills what's missing.
+prepare:
+	flutter create --platforms=android,ios .
+
+web:
+	flutter build web --release $(DEFINE)
+
+apk: prepare
+	flutter build apk --release $(DEFINE)
+
+ipa: prepare
+	flutter build ipa --release $(DEFINE)
+
+analyze:
+	flutter analyze
+
+clean:
+	flutter clean
+`;
+}
+
+/** `README.md` — how to run and build the generated app, per surface. */
+function renderReadme(title: string, pkg: string): string {
+  return `# ${title}
+
+A Loom-generated Flutter (Material 3) app on Riverpod — \`${pkg}\`.
+
+One Dart source builds three surfaces from the same UI:
+
+| Surface | Command | Notes |
+|---|---|---|
+| Web | \`make web\` | Served by the included \`Dockerfile\` in the compose stack. |
+| Android | \`make apk\` | Runs \`flutter create --platforms=android,ios .\` first (materialises the native folders the SDK owns), then \`flutter build apk\`. Needs the Android SDK. |
+| iOS | \`make ipa\` | Same prepare step; needs Xcode / a macOS host. |
+
+The API base URL is a build-time define (default \`/api\`):
+
+\`\`\`sh
+make apk API_BASE_URL=https://api.example.com/api
+\`\`\`
+
+> Native platform folders (\`android/\`, \`ios/\`) are **not** vendored — they're
+> boilerplate the Flutter SDK owns, so \`make prepare\` generates them on demand.
+> Web-vs-native is a build target, not a modelling mode: both are always
+> available from the one \`ui\`.
+`;
+}
 
 /** `web/index.html` — the loader shell `flutter build web` requires.  `base
  *  href` is the `$FLUTTER_BASE_HREF` placeholder the build rewrites; the app
