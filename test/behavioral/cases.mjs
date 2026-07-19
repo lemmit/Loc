@@ -19,6 +19,40 @@ import pg from "pg";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
+
+/** Parse a JUnit-XML report string into `{ tier: "unit", name, status, error }`
+ *  rows — the shared shape every runner's unit tier returns.  Passing cases
+ *  self-close (`<testcase … />`); a failure/error nests a `<failure>`/`<error>`
+ *  child.  Emitted by pytest (`--junitxml`) and gradle (`build/test-results`). */
+export function parseJUnitXml(xml) {
+  const results = [];
+  const re = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const name = /\bname="([^"]*)"/.exec(m[1])?.[1] ?? "(unknown)";
+    const inner = m[2] ?? "";
+    const failed = /<(?:failure|error)\b/.test(inner);
+    const failMsg = /<(?:failure|error)\b[^>]*\bmessage="([^"]*)"/.exec(inner)?.[1];
+    results.push({ tier: "unit", name, status: failed ? "fail" : "pass", error: failed ? (failMsg ?? "assertion failed") : undefined });
+  }
+  return results;
+}
+
+/** Parse a VS Test `.trx` report (`dotnet test --logger trx`) into the same
+ *  `{ tier: "unit", name, status, error }` rows.  TRX carries one
+ *  `<UnitTestResult testName="…" outcome="Passed|Failed">` per test; a failure
+ *  nests `<Output><ErrorInfo><Message>…`. */
+export function parseTrx(xml) {
+  const results = [];
+  const re = /<UnitTestResult\b([^>]*?)(?:\/>|>([\s\S]*?)<\/UnitTestResult>)/g;
+  for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    const name = /\btestName="([^"]*)"/.exec(m[1])?.[1] ?? "(unknown)";
+    const outcome = /\boutcome="([^"]*)"/.exec(m[1])?.[1] ?? "";
+    const failed = outcome !== "Passed";
+    const msg = /<Message>([\s\S]*?)<\/Message>/.exec(m[2] ?? "")?.[1]?.trim();
+    results.push({ tier: "unit", name, status: failed ? "fail" : "pass", error: failed ? (msg ?? outcome) : undefined });
+  }
+  return results;
+}
 const CORPUS_DIR = join(REPO, "test/fixtures/corpus");
 const SYSTEMS_DIR = join(HERE, "systems");
 

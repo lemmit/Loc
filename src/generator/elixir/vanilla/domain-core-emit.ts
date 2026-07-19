@@ -69,11 +69,32 @@ export function renderAggregatePureCore(
   const ctxModule = upperFirst(ctx.name);
   const changesetMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}Changeset`;
 
+  // Relational containments (`has_many`) default to `Ecto.Association.NotLoaded`
+  // on a freshly-built struct — but the pure-domain path never loads them, and
+  // the in-memory op bodies treat a collection as a list (`record.lines ++ [x]`,
+  // `Enum.count(record.lines)`).  `NotLoaded` is truthy, so the `|| []` guard in
+  // those bodies doesn't catch it → `** (ArgumentError)`.  Initialise every
+  // collection containment to `[]` on create so the pure-domain (no-DB) path
+  // matches the loaded/persisted shape.  (Embedded `embeds_many` already default
+  // to `[]`; the reset is harmless there.)
+  const collectionContainments = agg.contains.filter((c) => c.collection).map((c) => snake(c.name));
+  const createBody =
+    collectionContainments.length === 0
+      ? [
+          `    ${changesetMod}.base_changeset(%__MODULE__{}, attrs)`,
+          "    |> Ecto.Changeset.apply_action(:insert)",
+        ]
+      : [
+          "    with {:ok, record} <-",
+          `           ${changesetMod}.base_changeset(%__MODULE__{}, attrs)`,
+          "           |> Ecto.Changeset.apply_action(:insert) do",
+          `      {:ok, %{record | ${collectionContainments.map((n) => `${n}: []`).join(", ")}}}`,
+          "    end",
+        ];
   const out: string[] = [
     `  @doc "Pure create core — validates + applies the changeset in memory (no persistence)."`,
     "  def create(attrs) when is_map(attrs) do",
-    `    ${changesetMod}.base_changeset(%__MODULE__{}, attrs)`,
-    "    |> Ecto.Changeset.apply_action(:insert)",
+    ...createBody,
     "  end",
   ];
   for (const op of agg.operations) {

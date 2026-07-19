@@ -28,7 +28,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { DEV_CLAIMS, featureCases, parseJUnitXml, resetDatabase, sharedSystemCases } from "./cases.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
 /** In-process mock OIDC issuer, started when the corpus has an `auth {}` case. */
@@ -183,6 +183,10 @@ async function runCase(c) {
         : {};
     const bearerToken = isOidc && oidc ? oidc.token : null;
 
+    // Pure-domain unit tier (`test "…"` → JUnit), collected in the gradle pass
+    // below and prepended to the api results.
+    const unitResults = [];
+
     if (!EXTERNAL_BASE) {
       // Clean schema per case: each case emits its own migrations at a fixed
       // version, so a shared DB would fail Flyway validation on the 2nd case.
@@ -193,8 +197,34 @@ async function runCase(c) {
       await resetDatabase(pgUrl);
       // Build the runnable jar, then boot it. Flyway migrations auto-apply at
       // startup (before the server listens), so a listening port already
-      // implies a migrated schema.
-      execFileSync("gradle", ["--no-daemon", "-q", "bootJar"], { cwd: deplDir, stdio: "pipe" });
+      // implies a migrated schema.  When the system declared domain `test "…"`
+      // blocks (→ src/test/java), run them in the SAME gradle pass: `test`
+      // executes the pure-domain JUnit suite (DB-free), `--continue` still
+      // produces the jar even if a unit test fails, so the api tier below still
+      // boots and reports.  Results parsed from build/test-results/test/*.xml.
+      const hasUnit = existsSync(join(deplDir, "src", "test", "java"));
+      const gradleArgs = hasUnit
+        ? ["--no-daemon", "-q", "--continue", "test", "bootJar"]
+        : ["--no-daemon", "-q", "bootJar"];
+      let gradleErr = null;
+      try {
+        execFileSync("gradle", gradleArgs, { cwd: deplDir, stdio: "pipe" });
+      } catch (e) {
+        gradleErr = e;
+        if (!hasUnit) throw e; // no unit tests → a bootJar failure is fatal as before
+      }
+      if (hasUnit) {
+        const xmlDir = join(deplDir, "build", "test-results", "test");
+        if (existsSync(xmlDir)) {
+          for (const x of walk(xmlDir, (p) => p.endsWith(".xml"))) unitResults.push(...parseJUnitXml(readFileSync(x, "utf8")));
+        }
+        // A gradle throw with no parsed cases means the test task never ran
+        // (e.g. a test-source compile error) — surface it rather than silently
+        // dropping the unit tier.
+        if (unitResults.length === 0 && gradleErr) {
+          unitResults.push({ tier: "unit", name: "gradle test", status: "fail", error: "gradle test produced no results (compile error?)" });
+        }
+      }
       const jar = readdirSync(join(deplDir, "build", "libs")).find(
         (f) => f.endsWith(".jar") && !f.endsWith("-plain.jar"),
       );
@@ -230,7 +260,7 @@ async function runCase(c) {
     writeFileSync(entry, entrySource(e2eFile, bearerToken));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
-    return await run();
+    return [...unitResults, ...(await run())];
   } finally {
     if (server?.pid && !server.killed) {
       // Kill the whole process group.
@@ -272,7 +302,7 @@ for (const c of corpus) {
   for (const r of results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
-    process.stdout.write(`  ${ok ? "✓" : "✗"} [api] ${r.name}\n`);
+    process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
 }

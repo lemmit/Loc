@@ -184,6 +184,10 @@ async function runCase(c) {
         : {};
     const bearerToken = isOidc && oidc ? oidc.token : null;
 
+    // Pure-domain unit tier (`test "…"` → ExUnit).  Collected below (after deps
+    // are fetched) and prepended to the api results.
+    const unitResults = [];
+
     if (!EXTERNAL_BASE) {
       // Fetch hex deps, create + migrate the schema, then boot the server.
       // Migrations auto-apply here (before phx.server), so a listening port
@@ -191,6 +195,36 @@ async function runCase(c) {
       execFileSync("mix", ["local.hex", "--force"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
       execFileSync("mix", ["local.rebar", "--force"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
       execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
+
+      // Run the emitted ExUnit domain suite (pure domain — no DB tables — but
+      // `mix test` boots the app in :test env, so the `api_test` DB must exist
+      // for the Repo pool to connect).  ExUnit has no JUnit dep, so gate on the
+      // "N tests, M failures" summary line.
+      const testDir = join(deplDir, "test");
+      const hasUnit = existsSync(testDir) && walk(testDir, (p) => p.endsWith("_test.exs")).length > 0;
+      if (hasUnit) {
+        const testEnv = mixEnv({ MIX_ENV: "test" });
+        try {
+          execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: testEnv });
+        } catch {
+          /* db may already exist */
+        }
+        let out = "";
+        try {
+          out = execFileSync("mix", ["test"], { cwd: deplDir, encoding: "utf8", env: testEnv });
+        } catch (e) {
+          out = `${e?.stdout ?? ""}${e?.stderr ?? ""}`;
+        }
+        const m = /(\d+) tests?, (\d+) failures?/.exec(out);
+        if (m) {
+          const total = Number(m[1]);
+          const failures = Number(m[2]);
+          unitResults.push({ tier: "unit", name: `mix test (${total} tests)`, status: failures === 0 ? "pass" : "fail", error: failures === 0 ? undefined : `${failures} failure(s)` });
+        } else {
+          unitResults.push({ tier: "unit", name: "mix test", status: "fail", error: "no ExUnit summary (compile error?)" });
+        }
+      }
+
       execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
       // Clean DB per case (context-named schemas + schema_migrations), else the
       // 2nd case collides.  ecto.create ensured the DB exists first.
@@ -216,7 +250,7 @@ async function runCase(c) {
     writeFileSync(entry, entrySource(e2eFile, bearerToken));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
-    return await run();
+    return [...unitResults, ...(await run())];
   } finally {
     if (server?.pid && !server.killed) {
       // Kill the whole process group.
@@ -257,7 +291,7 @@ for (const c of corpus) {
   for (const r of results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
-    process.stdout.write(`  ${ok ? "✓" : "✗"} [api] ${r.name}\n`);
+    process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
 }

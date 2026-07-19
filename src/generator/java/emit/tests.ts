@@ -114,6 +114,69 @@ function renderTest(
   ];
 }
 
+/** Coerce a raw test literal (rendered) to a strongly-typed Java factory /
+ *  operation parameter.  The domain surface takes strong types
+ *  (`CustomerId` / `Instant` / …) where the test writes a bare string; enums
+ *  already render as `Enum.Value` refs.  Only the string-literal types need a
+ *  cast: ids (wrap in the Id record — a `guid` value type wraps the string in
+ *  `UUID.fromString` first, since `record CustomerId(UUID value)`) and
+ *  `datetime` (`Instant.parse`).  Mirrors wire.ts's `wireToDomain`, but from a
+ *  raw literal rather than a wire value. */
+function coerceLiteralToJavaType(
+  type: { kind: string; name?: string; targetName?: string; valueType?: string },
+  v: ExprIR,
+  rendered: string,
+  imports: Set<string>,
+): string {
+  // Only a raw STRING literal needs coercion — `now` renders as `Instant.now()`
+  // (already the target type), a ref is already typed, etc.  Wrapping those in
+  // `Instant.parse(...)` / an Id ctor would break them.
+  if (v.kind !== "literal" || v.lit !== "string") return rendered;
+  if (type.kind === "id" && type.targetName) {
+    if (type.valueType === "guid") {
+      imports.add("java.util.UUID");
+      return `new ${type.targetName}Id(UUID.fromString(${rendered}))`;
+    }
+    return `new ${type.targetName}Id(${rendered})`;
+  }
+  if (type.kind === "primitive" && type.name === "datetime") {
+    imports.add("java.time.Instant");
+    return `Instant.parse(${rendered})`;
+  }
+  return rendered;
+}
+
+/** `x.op(args)` on an aggregate receiver → the same call with each arg coerced
+ *  to the operation's declared param type (an id-typed param takes the strong
+ *  Id record, not the raw guid string).  Returns null when `e` isn't a
+ *  resolvable aggregate operation call (intrinsic matcher, unknown receiver,
+ *  unknown member) so the caller falls back to the plain renderer. */
+function renderOperationCall(
+  e: ExprIR,
+  ctx: BoundedContextIR,
+  imports: Set<string>,
+): string | null {
+  if (e.kind !== "method-call" || e.isIntrinsicMatcher) return null;
+  const rt = e.receiverType as { name?: string } | undefined;
+  const aggName = rt?.name;
+  if (!aggName) return null;
+  const agg = ctx.aggregates.find((a) => a.name === aggName);
+  if (!agg) return null;
+  const op = [...(agg.operations ?? []), ...(agg.creates ?? []), ...(agg.destroys ?? [])].find(
+    (o) => o.name === e.member,
+  );
+  if (!op || op.params.length === 0) return null;
+  collectJavaExprImports(e.receiver, imports);
+  const recv = renderJavaExpr(e.receiver);
+  const args = e.args.map((a, i) => {
+    collectJavaExprImports(a, imports);
+    const rendered = renderJavaExpr(a);
+    const p = op.params[i];
+    return p ? coerceLiteralToJavaType(p.type, a, rendered, imports) : rendered;
+  });
+  return `${recv}.${e.member}(${args.join(", ")})`;
+}
+
 /** `Agg.create({...})` → the positional `Agg.create(...)` factory call,
  *  omitted create-inputs filled with their omission value (the factory
  *  takes every canonical create-input positionally). */
@@ -129,10 +192,14 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR, imports: Set<string>
     const v = byName.get(f.name);
     if (v) {
       collectJavaExprImports(v, imports);
-      return renderJavaExpr(v);
+      // A provided string literal renders as a raw value; coerce it to the
+      // factory param's strong Java type (id record / Instant / …).
+      return coerceLiteralToJavaType(f.type, v, renderJavaExpr(v), imports);
     }
     const omission = createOmissionValue(f);
     if (omission.kind === "default") {
+      // A language-defined default (`newId()`, `now()`, …) already renders as
+      // the correct Java type — no coercion.
       collectJavaExprImports(omission.expr, imports);
       return renderJavaExpr(omission.expr);
     }
@@ -207,13 +274,21 @@ function renderTestStmt(
   if (s.kind === "expect-throws") {
     const expr =
       renderCreateCall(s.expr, ctx, imports) ??
-      withTestUser(s.expr, render(s.expr, imports), state);
+      withTestUser(
+        s.expr,
+        renderOperationCall(s.expr, ctx, imports) ?? render(s.expr, imports),
+        state,
+      );
     return [`        assertThrows(DomainException.class, () -> ${expr});`];
   }
   if (s.kind === "let") {
     const expr =
       renderCreateCall(s.expr, ctx, imports) ??
-      withTestUser(s.expr, render(s.expr, imports), state);
+      withTestUser(
+        s.expr,
+        renderOperationCall(s.expr, ctx, imports) ?? render(s.expr, imports),
+        state,
+      );
     return [`        var ${escapeJavaIdent(s.name)} = ${expr};`];
   }
   if (s.kind === "call") {
@@ -223,7 +298,11 @@ function renderTestStmt(
   if (s.kind === "expression") {
     const expr =
       renderCreateCall(s.expr, ctx, imports) ??
-      withTestUser(s.expr, render(s.expr, imports), state);
+      withTestUser(
+        s.expr,
+        renderOperationCall(s.expr, ctx, imports) ?? render(s.expr, imports),
+        state,
+      );
     return [`        ${expr};`];
   }
   throw new Error(
