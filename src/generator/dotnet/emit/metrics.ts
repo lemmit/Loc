@@ -20,6 +20,8 @@ import { Metrics } from "../../_obs/metrics.js";
 export function renderHttpMetrics(ns: string): string {
   const reqTotal = Metrics.httpRequestsTotal;
   const reqDur = Metrics.httpRequestDurationSeconds;
+  const domainOps = Metrics.domainOperationsTotal;
+  const domainFaults = Metrics.domainFaultsTotal;
   const labelArray = (labels: readonly string[]): string =>
     labels.map((l) => JSON.stringify(l)).join(", ");
   const buckets = (reqDur.buckets ?? []).join(", ");
@@ -62,6 +64,31 @@ public static class HttpMetrics
         var statusText = status.ToString(System.Globalization.CultureInfo.InvariantCulture);
         Requests.WithLabels(method, route, statusText).Inc();
         Duration.WithLabels(method, route, statusText).Observe(durationMs / 1000.0);
+    }
+
+    private static readonly Counter DomainOperations = Prometheus.Metrics.CreateCounter(
+        ${JSON.stringify(domainOps.name)},
+        ${JSON.stringify(domainOps.help)},
+        new CounterConfiguration { LabelNames = new[] { ${labelArray(domainOps.labels)} } });
+
+    private static readonly Counter DomainFaults = Prometheus.Metrics.CreateCounter(
+        ${JSON.stringify(domainFaults.name)},
+        ${JSON.stringify(domainFaults.help)},
+        new CounterConfiguration { LabelNames = new[] { ${labelArray(domainFaults.labels)} } });
+
+    /// <summary>Count one invoked domain operation (a named operation, or an
+    /// aggregate constructor as <c>op="create"</c>), at the operation_invoked /
+    /// aggregate_created seam.</summary>
+    public static void RecordDomainOperation(string aggregate, string op)
+    {
+        DomainOperations.WithLabels(aggregate, op).Inc();
+    }
+
+    /// <summary>Count one recoverable domain fault by kind, at the
+    /// DomainExceptionFilter seam alongside the matching fault log line.</summary>
+    public static void RecordDomainFault(string kind)
+    {
+        DomainFaults.WithLabels(kind).Inc();
     }
 }
 `;

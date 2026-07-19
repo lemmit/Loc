@@ -46,19 +46,34 @@ describe("vanilla — fault-tier catalog logging", () => {
     );
 
     // The generic problem_response/4 classifies by status — one event per
-    // fault, with the real HTTP status emitted (not normalised).
+    // fault, with the real HTTP status emitted (not normalised).  Each arm is a
+    // multi-statement block (the log line plus a domain_faults_total{kind}
+    // telemetry event, except the >=500 internal_error which is infra, not a
+    // domain fault), so the Logger call is asserted without the `NNN ->` prefix.
     expect(pd).toContain(
-      '403 -> Logger.warning("forbidden", event: "forbidden", message: detail, status: status)',
+      'Logger.warning("forbidden", event: "forbidden", message: detail, status: status)',
     );
     expect(pd).toContain(
-      '409 -> Logger.warning("disallowed", event: "disallowed", message: detail, status: status)',
+      'Logger.warning("disallowed", event: "disallowed", message: detail, status: status)',
     );
-    expect(pd).toContain('404 -> Logger.warning("not_found", event: "not_found", status: status)');
+    expect(pd).toContain('Logger.warning("not_found", event: "not_found", status: status)');
     expect(pd).toContain(
-      '_ when status >= 500 -> Logger.error("internal_error", event: "internal_error", error: detail, status: status)',
+      'Logger.error("internal_error", event: "internal_error", error: detail, status: status)',
     );
     expect(pd).toContain(
-      '_ -> Logger.warning("domain_error", event: "domain_error", message: detail, status: status)',
+      'Logger.warning("domain_error", event: "domain_error", message: detail, status: status)',
+    );
+
+    // Each recoverable fault also feeds domain_faults_total{kind}; the >=500
+    // internal_error does NOT (infrastructure, not a domain fault).
+    expect(pd).toContain(
+      ':telemetry.execute([:loom, :domain, :fault], %{count: 1}, %{kind: "forbidden"})',
+    );
+    expect(pd).toContain(
+      ':telemetry.execute([:loom, :domain, :fault], %{count: 1}, %{kind: "not_found"})',
+    );
+    expect(pd).not.toContain(
+      ':telemetry.execute([:loom, :domain, :fault], %{count: 1}, %{kind: "internal_error"})',
     );
   });
 });

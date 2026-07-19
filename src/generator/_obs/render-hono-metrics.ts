@@ -97,12 +97,12 @@ export function renderHonoMetricsFile(): string {
       "  domainOperationsTotal.inc({ aggregate, op });",
       "}",
       "",
-      "/** Count one recoverable domain fault, by aggregate + kind (the catalog",
-      " *  fault-event name).  Called from the router's onError, alongside the",
-      " *  matching `domain_error` / `forbidden` / `not_found` / `conflict` /",
-      " *  `disallowed` log line. */",
-      "export function recordDomainFault(aggregate: string, kind: string): void {",
-      "  domainFaultsTotal.inc({ aggregate, kind });",
+      "/** Count one recoverable domain fault, by kind (the catalog fault-event",
+      " *  name).  Called from the router's onError, alongside the matching",
+      " *  `domain_error` / `forbidden` / `not_found` / `conflict` / `disallowed`",
+      " *  log line. */",
+      "export function recordDomainFault(kind: string): void {",
+      "  domainFaultsTotal.inc({ kind });",
       "}",
     ) + "\n"
   );

@@ -118,6 +118,22 @@ defmodule ${appModule}.Telemetry do
         tags: [:method, :route, :status],
         tag_values: &__MODULE__.request_tags/1,
         description: "${Metrics.httpRequestDurationSeconds.help}"
+      ),
+      # Business-level counters, fed by [:loom, :domain, :*] events the
+      # controllers / ProblemDetails emit at the operation_invoked /
+      # aggregate_created / fault seams — the declarative sibling of the
+      # other backends' manual recordDomainOperation/recordDomainFault calls.
+      counter("domain.operations.total",
+        event_name: [:loom, :domain, :operation],
+        measurement: :count,
+        tags: [:aggregate, :op],
+        description: "${Metrics.domainOperationsTotal.help}"
+      ),
+      counter("domain.faults.total",
+        event_name: [:loom, :domain, :fault],
+        measurement: :count,
+        tags: [:kind],
+        description: "${Metrics.domainFaultsTotal.help}"
       )
     ]
   end

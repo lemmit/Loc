@@ -1,9 +1,12 @@
 // Per-operation / domain-fault Prometheus counters on the Hono backend
 // (M-T7.1).  Every domain operation increments domain_operations_total
 // {aggregate, op} at the same seam as the operation_invoked log line, and
-// every recoverable fault increments domain_faults_total{aggregate, kind}
-// in the router's onError alongside the matching fault log line.  Runtime
-// contract gated by observability-events.test.ts (LOOM_OBS_E2E=1).
+// every recoverable fault increments domain_faults_total{kind} in the
+// router's onError alongside the matching fault log line.  Only `kind` is
+// labelled on the fault counter — several backends handle faults in a
+// central seam where the aggregate isn't in scope, so an aggregate label
+// wouldn't be uniform cross-backend.  Runtime contract gated by
+// observability-events.test.ts (LOOM_OBS_E2E=1).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
@@ -38,13 +41,12 @@ describe("Hono domain metrics (M-T7.1)", () => {
     expect(metrics).toContain('"domain_operations_total"');
     expect(metrics).toContain('"domain_faults_total"');
     expect(metrics).toContain('labelNames: ["aggregate", "op"]');
-    expect(metrics).toContain('labelNames: ["aggregate", "kind"]');
+    // Fault counter is kind-only — no aggregate label (central-seam parity).
+    expect(metrics).toContain('labelNames: ["kind"]');
     expect(metrics).toContain(
       "export function recordDomainOperation(aggregate: string, op: string): void {",
     );
-    expect(metrics).toContain(
-      "export function recordDomainFault(aggregate: string, kind: string): void {",
-    );
+    expect(metrics).toContain("export function recordDomainFault(kind: string): void {");
   });
 
   it("records operations + faults at the domain seams in the routes file", async () => {
@@ -56,9 +58,9 @@ describe("Hono domain metrics (M-T7.1)", () => {
     // Operation invoked → operation counter (op name), create → op="create".
     expect(routes).toContain('recordDomainOperation("Order", "confirm")');
     expect(routes).toContain('recordDomainOperation("Order", "create")');
-    // Faults in onError → fault counter, keyed by the catalog kind.
-    expect(routes).toContain('recordDomainFault("Order", "forbidden")');
-    expect(routes).toContain('recordDomainFault("Order", "domain_error")');
-    expect(routes).toContain('recordDomainFault("Order", "not_found")');
+    // Faults in onError → fault counter, keyed by the catalog kind only.
+    expect(routes).toContain('recordDomainFault("forbidden")');
+    expect(routes).toContain('recordDomainFault("domain_error")');
+    expect(routes).toContain('recordDomainFault("not_found")');
   });
 });

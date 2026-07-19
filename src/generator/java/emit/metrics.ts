@@ -32,6 +32,8 @@ function sloDurations(): string {
 export function renderHttpMetrics(basePkg: string): string {
   const reqTotal = Metrics.httpRequestsTotal;
   const reqDur = Metrics.httpRequestDurationSeconds;
+  const domainOps = Metrics.domainOperationsTotal;
+  const domainFaults = Metrics.domainFaultsTotal;
   return lines(
     `package ${basePkg}.config;`,
     ``,
@@ -75,6 +77,29 @@ export function renderHttpMetrics(basePkg: string): string {
     `            .serviceLevelObjectives(${sloDurations()})`,
     `            .register(registry)`,
     `            .record(Duration.ofNanos((long) (durationMs * 1_000_000.0)));`,
+    `    }`,
+    ``,
+    `    /** Count one invoked domain operation (a named operation, or an aggregate`,
+    ` *  constructor as op="create"), at the operation_invoked / aggregate_created`,
+    ` *  seam.  Counter "domain.operations" -> "${domainOps.name}". */`,
+    `    public void recordDomainOperation(String aggregate, String op) {`,
+    `        Counter.builder("domain.operations")`,
+    `            .description(${JSON.stringify(domainOps.help)})`,
+    `            .tag("aggregate", aggregate)`,
+    `            .tag("op", op)`,
+    `            .register(registry)`,
+    `            .increment();`,
+    `    }`,
+    ``,
+    `    /** Count one recoverable domain fault by kind, at the ApiExceptionAdvice`,
+    ` *  seam alongside the matching fault log line.`,
+    ` *  Counter "domain.faults" -> "${domainFaults.name}". */`,
+    `    public void recordDomainFault(String kind) {`,
+    `        Counter.builder("domain.faults")`,
+    `            .description(${JSON.stringify(domainFaults.help)})`,
+    `            .tag("kind", kind)`,
+    `            .register(registry)`,
+    `            .increment();`,
     `    }`,
     `}`,
     ``,

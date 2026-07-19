@@ -939,26 +939,26 @@ export function buildRoutesFile(
   lines.push(
     `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
-  lines.push(`      recordDomainFault("${agg.name}", "forbidden");`);
+  lines.push(`      recordDomainFault("forbidden");`);
   lines.push(`      return problem(403, "Forbidden", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DisallowedError) {`);
   lines.push(
     `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: err.message, status: ${disallowedStatus}`)}`,
   );
-  lines.push(`      recordDomainFault("${agg.name}", "disallowed");`);
+  lines.push(`      recordDomainFault("disallowed");`);
   lines.push(`      return problem(${disallowedStatus}, "Disallowed", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
     `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
   );
-  lines.push(`      recordDomainFault("${agg.name}", "domain_error");`);
+  lines.push(`      recordDomainFault("domain_error");`);
   lines.push(`      return problem(400, "Bad Request", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
-  lines.push(`      recordDomainFault("${agg.name}", "not_found");`);
+  lines.push(`      recordDomainFault("not_found");`);
   lines.push(`      return problem(404, "Not Found", err.message);`);
   lines.push(`    }`);
   // PG unique_violation (SQLSTATE 23505) — a `unique (...)` domain invariant
@@ -979,7 +979,7 @@ export function buildRoutesFile(
     lines.push(
       `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: ${uniquenessStatus}`)}`,
     );
-    lines.push(`      recordDomainFault("${agg.name}", "disallowed");`);
+    lines.push(`      recordDomainFault("disallowed");`);
     lines.push(
       `      return problem(${uniquenessStatus}, "Conflict", \`A ${agg.name} with these values already exists.\`);`,
     );
@@ -1000,7 +1000,7 @@ export function buildRoutesFile(
     lines.push(
       `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: ${concurrencyStatus}`)}`,
     );
-    lines.push(`      recordDomainFault("${agg.name}", "conflict");`);
+    lines.push(`      recordDomainFault("conflict");`);
     lines.push(`      return problem(${concurrencyStatus}, "Conflict", err.message);`);
     lines.push(`    }`);
   }

@@ -1247,10 +1247,12 @@ function renderProblemPy(
         sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
         if sqlstate == "23505":
             log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
+            record_domain_fault("disallowed")
             return problem(
                 request, ${uniquenessStatus}, "Conflict", "A resource with these values already exists."
             )
         log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
+            record_domain_fault("disallowed")
         return problem(request, ${uniquenessStatus}, "Conflict", "The request conflicts with the current state.")
 
 `
@@ -1269,6 +1271,7 @@ function renderProblemPy(
         # competing write won the race.  Surface a friendly 409 so the client
         # reloads and retries instead of clobbering the newer state.
         log("warn", "conflict", message=str(err), status=${concurrencyStatus})
+        record_domain_fault("conflict")
         return problem(
             request, ${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry."
         )
@@ -1292,6 +1295,7 @@ ${versionedImport}    DisallowedError,
     ForbiddenError,
 )
 from app.obs.log import log
+from app.obs.metrics import record_domain_fault
 
 
 class ProblemDetails(BaseModel):
@@ -1397,21 +1401,25 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         log("warn", "forbidden", message=str(err), status=403)
+        record_domain_fault("forbidden")
         return problem(request, 403, "Forbidden", str(err))
 
     @app.exception_handler(DisallowedError)
     async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
         log("warn", "disallowed", message=str(err), status=${disallowedStatus})
+        record_domain_fault("disallowed")
         return problem(request, ${disallowedStatus}, "Conflict", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
         log("warn", "domain_error", message=str(err), status=400)
+        record_domain_fault("domain_error")
         return problem(request, 400, "Bad Request", str(err))
 
 ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
         log("warn", "not_found", message=str(err), status=404)
+        record_domain_fault("not_found")
         return problem(request, 404, "Not Found", str(err))
 
     @app.exception_handler(RequestValidationError)

@@ -21,6 +21,8 @@ import { Metrics } from "../../_obs/metrics.js";
 export function renderPythonMetricsFile(): string {
   const reqTotal = Metrics.httpRequestsTotal;
   const reqDur = Metrics.httpRequestDurationSeconds;
+  const domainOps = Metrics.domainOperationsTotal;
+  const domainFaults = Metrics.domainFaultsTotal;
   const labelTuple = (labels: readonly string[]): string =>
     labels.map((l) => JSON.stringify(l)).join(", ");
   const buckets = (reqDur.buckets ?? []).join(", ");
@@ -58,6 +60,32 @@ export function renderPythonMetricsFile(): string {
       "    labels = (method, route, str(status))",
       "    HTTP_REQUESTS_TOTAL.labels(*labels).inc()",
       "    HTTP_REQUEST_DURATION_SECONDS.labels(*labels).observe(duration_ms / 1000.0)",
+      "",
+      "",
+      `DOMAIN_OPERATIONS_TOTAL = Counter(`,
+      `    ${JSON.stringify(domainOps.name)},`,
+      `    ${JSON.stringify(domainOps.help)},`,
+      `    [${labelTuple(domainOps.labels)}],`,
+      `)`,
+      "",
+      `DOMAIN_FAULTS_TOTAL = Counter(`,
+      `    ${JSON.stringify(domainFaults.name)},`,
+      `    ${JSON.stringify(domainFaults.help)},`,
+      `    [${labelTuple(domainFaults.labels)}],`,
+      `)`,
+      "",
+      "",
+      "def record_domain_operation(aggregate: str, op: str) -> None:",
+      '    """Count one invoked domain operation (a named operation, or an',
+      '    aggregate constructor as op="create"), at the operation_invoked /',
+      '    aggregate_created seam."""',
+      "    DOMAIN_OPERATIONS_TOTAL.labels(aggregate, op).inc()",
+      "",
+      "",
+      "def record_domain_fault(kind: str) -> None:",
+      '    """Count one recoverable domain fault by kind, at the app-wide error',
+      '    handlers alongside the matching fault log line."""',
+      "    DOMAIN_FAULTS_TOTAL.labels(kind).inc()",
       "",
       "",
       "def render_metrics() -> tuple[bytes, str]:",

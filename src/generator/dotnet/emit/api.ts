@@ -305,6 +305,7 @@ export function renderController(
       `using ${ns}.Domain.Ids;`,
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Observability;`,
       "",
       `namespace ${ns}.Api;`,
       "",
@@ -340,6 +341,7 @@ export function renderController(
               { name: "aggregate", valueExpr: `"${agg.name}"` },
               { name: "id", valueExpr: "id.Value" },
             ])}`,
+            `        HttpMetrics.RecordDomainOperation("${agg.name}", "create");`,
             `        return CreatedAtAction(nameof(${actionName(opGetById(agg.name))}), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
             "    }",
             "",
@@ -527,6 +529,7 @@ export function renderOperationActionBlock(
       { name: "op", valueExpr: `"${op.name}"` },
       { name: "id", valueExpr: "id" },
     ])}`,
+    `        HttpMetrics.RecordDomainOperation("${agg.name}", "${op.name}");`,
     `        var cmd = new ${upperFirst(op.name)}Command(`,
     ...cmdBody,
     "        );",
@@ -603,6 +606,7 @@ export function renderExceptionFilter(
               { name: "message", valueExpr: `"A resource with these values already exists."` },
               { name: "status", valueExpr: `${uniquenessStatus}` },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("disallowed");
             context.Result = Problem(context, ${uniquenessStatus}, "Conflict", "A resource with these values already exists.", trace_id);
             context.ExceptionHandled = true;
             return;
@@ -637,6 +641,7 @@ export function renderExceptionFilter(
               },
               { name: "status", valueExpr: `${concurrencyStatus}` },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("conflict");
             context.Result = Problem(context, ${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
             context.ExceptionHandled = true;
             return;
@@ -716,6 +721,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "message", valueExpr: `"Validation failed"` },
               { name: "status", valueExpr: "422" },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("domain_error");
             context.HttpContext.Response.Headers["x-request-id"] = trace_id;
             context.Result = new ObjectResult(problem)
             {
@@ -733,6 +739,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "message", valueExpr: "fe.Message" },
               { name: "status", valueExpr: "403" },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("forbidden");
             context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -743,6 +750,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "message", valueExpr: "dx.Message" },
               { name: "status", valueExpr: `${disallowedStatus}` },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("disallowed");
             context.Result = Problem(context, ${disallowedStatus}, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -753,6 +761,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "message", valueExpr: "de.Message" },
               { name: "status", valueExpr: "400" },
             ])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("domain_error");
             context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -760,6 +769,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is AggregateNotFoundException nf)
         {
             ${renderDotnetLogCall("notFound", [{ name: "status", valueExpr: "404" }])}
+            ${ns}.Observability.HttpMetrics.RecordDomainFault("not_found");
             context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;

@@ -35,7 +35,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
-import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
@@ -362,6 +362,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         { name: "op", valueExpr: `"${op.name}"` },
         { name: "id", valueExpr: "id" },
       ])}
+    ${renderPhoenixDomainOperation(aggPascal, op.name)}
 
     with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}) do
@@ -436,6 +437,7 @@ ${auditRecordCall({
           { name: "aggregate", valueExpr: `"${aggPascal}"` },
           { name: "id", valueExpr: "record.id" },
         ])}
+        ${renderPhoenixDomainOperation(aggPascal, "create")}
 
         conn
         |> put_status(201)
@@ -452,6 +454,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
           { name: "aggregate", valueExpr: `"${aggPascal}"` },
           { name: "id", valueExpr: "record.id" },
         ])}
+        ${renderPhoenixDomainOperation(aggPascal, "create")}
 
         conn
         |> put_status(201)

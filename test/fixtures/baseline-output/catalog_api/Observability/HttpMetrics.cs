@@ -37,4 +37,29 @@ public static class HttpMetrics
         Requests.WithLabels(method, route, statusText).Inc();
         Duration.WithLabels(method, route, statusText).Observe(durationMs / 1000.0);
     }
+
+    private static readonly Counter DomainOperations = Prometheus.Metrics.CreateCounter(
+        "domain_operations_total",
+        "Total domain operations invoked, by aggregate and operation.",
+        new CounterConfiguration { LabelNames = new[] { "aggregate", "op" } });
+
+    private static readonly Counter DomainFaults = Prometheus.Metrics.CreateCounter(
+        "domain_faults_total",
+        "Total recoverable domain faults, by kind.",
+        new CounterConfiguration { LabelNames = new[] { "kind" } });
+
+    /// <summary>Count one invoked domain operation (a named operation, or an
+    /// aggregate constructor as <c>op="create"</c>), at the operation_invoked /
+    /// aggregate_created seam.</summary>
+    public static void RecordDomainOperation(string aggregate, string op)
+    {
+        DomainOperations.WithLabels(aggregate, op).Inc();
+    }
+
+    /// <summary>Count one recoverable domain fault by kind, at the
+    /// DomainExceptionFilter seam alongside the matching fault log line.</summary>
+    public static void RecordDomainFault(string kind)
+    {
+        DomainFaults.WithLabels(kind).Inc();
+    }
 }

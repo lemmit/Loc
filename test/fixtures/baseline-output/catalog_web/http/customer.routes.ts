@@ -195,27 +195,27 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
-      recordDomainFault("Customer", "forbidden");
+      recordDomainFault("forbidden");
       return problem(403, "Forbidden", err.message);
     }
     if (err instanceof DisallowedError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "disallowed", aggregate: "Customer", message: err.message, status: 409 });
-      recordDomainFault("Customer", "disallowed");
+      recordDomainFault("disallowed");
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 400 });
-      recordDomainFault("Customer", "domain_error");
+      recordDomainFault("domain_error");
       return problem(400, "Bad Request", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });
-      recordDomainFault("Customer", "not_found");
+      recordDomainFault("not_found");
       return problem(404, "Not Found", err.message);
     }
     if (err instanceof ConcurrencyError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Customer", message: err.message, status: 409 });
-      recordDomainFault("Customer", "conflict");
+      recordDomainFault("conflict");
       return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {

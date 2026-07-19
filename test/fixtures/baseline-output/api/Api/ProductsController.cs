@@ -13,6 +13,7 @@ using Api.Application.Products.Responses;
 using Api.Domain.Ids;
 using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
+using Api.Observability;
 
 namespace Api.Api;
 
@@ -36,6 +37,7 @@ public sealed class ProductsController : ControllerBase
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Product", id.Value);
+        HttpMetrics.RecordDomainOperation("Product", "create");
         return CreatedAtAction(nameof(GetProductById), new { id = id.Value }, new CreateProductResponse(id.Value));
     }
 
@@ -74,6 +76,7 @@ public sealed class ProductsController : ControllerBase
     public async Task<IActionResult> UpdateProduct([FromRoute] Guid id, [FromBody] UpdateProductRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Product", "update", id);
+        HttpMetrics.RecordDomainOperation("Product", "update");
         var cmd = new UpdateCommand(
             new ProductId(id),
             request.Sku,
