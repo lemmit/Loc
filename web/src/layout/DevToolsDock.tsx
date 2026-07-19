@@ -1,6 +1,7 @@
 import { Box, Group, Text, UnstyledButton } from "@mantine/core";
 import { AuthConfigPanel, authStubDot } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
+import { agentDot, ChatBody } from "./ChatPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
 import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
@@ -9,7 +10,8 @@ import { type DockTab, type LayoutCtx } from "./ctx";
 
 // `DockTab` (the consolidated bottom-dock tab ids) is defined in ctx.ts so
 // LayoutCtx can carry the active-tab state; re-exported here so existing
-// importers (`DesktopShell`) keep resolving it from DevToolsDock.
+// importers (`DesktopShell`) keep resolving it from DevToolsDock.  The
+// `"agent"` tab (the deterministic demo) is part of that shared type.
 export type { DockTab };
 
 interface Props {
@@ -27,6 +29,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
 
   const tabs: { id: DockTab; label: string; dot: DotColour }[] = [
     { id: "output", label: "Output", dot: outputAggregateDot(ctx) },
+    { id: "agent", label: "Agent", dot: agentDot(ctx) },
     { id: "backend", label: "Runtime", dot: backendDot },
     { id: "tests", label: "Tests", dot: null },
     { id: "migrations", label: "Migrations", dot: migrationsDot(ctx) },
@@ -90,6 +93,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         {tab === "output" && (
           <OutputPanel ctx={ctx} stream={ctx.outputStream} setStream={ctx.setOutputStream} />
         )}
+        {tab === "agent" && <ChatBody ctx={ctx} />}
         {tab === "backend" && <BackendBody ctx={ctx} />}
         {tab === "tests" && <TestsBody ctx={ctx} />}
         {tab === "migrations" && <MigrationsBody ctx={ctx} />}

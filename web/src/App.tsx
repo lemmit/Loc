@@ -5,6 +5,7 @@ import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
+import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type {
@@ -262,6 +263,10 @@ export default function App(): JSX.Element {
   const [pathParamValues, setPathParamValues] = useState<Record<string, string>>({});
   const [queryParamValues, setQueryParamValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  // Agent demo (the Agent dock tab) — the deterministic M-T8.3 wedge.
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const agentSignalRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   // Evolution-lifecycle surfaces (the Migrations dock tab): the derived
   // migration + wire-contract delta between the last-committed baseline
   // and the live edit, and the on-demand provenance snapshot capture.
@@ -1450,6 +1455,38 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Push an agent-authored `.ddd` into the editor + LSP + workspace — the same
+  // path a Builder "Apply" takes (`onSourceChange(..., "builder")`): Monaco's
+  // model is set (which re-runs the LSP) but its onChange is suppressed, so we
+  // mirror the workspace-write side-effects here.
+  function applyAgentSource(text: string): void {
+    sourceRef.current = text;
+    hasUserEditedRef.current = true;
+    const s = sourcesRef.current;
+    if (s.activePath === "/workspace/main.ddd") scheduleHashSync(text);
+    s.write(s.activePath, text);
+    editorHandleRef.current?.setSource(text);
+  }
+
+  // Play the deterministic prose → `.ddd` → generate → green demo (the Agent
+  // dock tab).  The scripted driver runs the real browser-safe `loom_*` tools;
+  // here we just wire it to the editor sink + the real generate.
+  async function runAgentDemo(): Promise<void> {
+    if (agentRunning) return;
+    agentSignalRef.current = { cancelled: false };
+    setAgentRunning(true);
+    try {
+      await playAgentDemo({
+        setMessages: setAgentMessages,
+        applySource: applyAgentSource,
+        triggerGenerate: () => void runGenerate(true),
+        signal: agentSignalRef.current,
+      });
+    } finally {
+      setAgentRunning(false);
+    }
+  }
+
   // Bundle every piece of state + every action into a single ctx
   // object that the shell + its panes consume.  Children destructure
   // what they need; no React context, no prop drilling.
@@ -1582,6 +1619,9 @@ export default function App(): JSX.Element {
     clearAppLog,
     copied,
     copyShareLink,
+    agentMessages,
+    agentRunning,
+    runAgentDemo: () => void runAgentDemo(),
     runGenerate: () => void runGenerate(true),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),
