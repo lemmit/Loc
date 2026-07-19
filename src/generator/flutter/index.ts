@@ -20,6 +20,7 @@ import type {
   PageIR,
   SystemIR,
   UiIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -27,7 +28,13 @@ import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { renderDartModels } from "./dart-model-emit.js";
 import { flutterTarget } from "./flutter-target.js";
-import { collectFlutterForms, collectPageForms, renderFormsFile } from "./forms-emit.js";
+import {
+  collectFlutterForms,
+  collectFlutterWorkflowForms,
+  collectPageForms,
+  collectPageWorkflowForms,
+  renderFormsFile,
+} from "./forms-emit.js";
 import { flutterPack } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -62,26 +69,31 @@ export function generateFlutterForContexts(
   // BC's enums / value objects) and the form projector.
   const aggregatesByName = new Map<string, EnrichedAggregateIR>();
   const bcByAggregate = new Map<string, EnrichedBoundedContextIR>();
+  const workflowsByName = new Map<string, WorkflowIR>();
+  const bcByWorkflow = new Map<string, EnrichedBoundedContextIR>();
   for (const c of contexts) {
     for (const a of c.aggregates) {
       aggregatesByName.set(a.name, a);
       bcByAggregate.set(a.name, c);
     }
+    for (const w of c.workflows) {
+      workflowsByName.set(w.name, w);
+      bcByWorkflow.set(w.name, c);
+    }
   }
 
   // Form widgets — one self-contained `StatefulWidget` per CreateForm /
-  // OperationForm / DestroyForm a page hosts (POST/DELETE over package:http).
-  const forms = collectFlutterForms(ui, aggregatesByName, bcByAggregate);
+  // OperationForm / DestroyForm a page hosts (POST/DELETE over package:http),
+  // plus one per WorkflowForm(runs:) (POST the workflow params to /workflows/<wf>).
+  const forms = [
+    ...collectFlutterForms(ui, aggregatesByName, bcByAggregate),
+    ...collectFlutterWorkflowForms(ui, workflowsByName, bcByWorkflow, aggregatesByName),
+  ];
 
   // Riverpod read providers — one `FutureProvider` per distinct QueryView read
   // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
   // only when the ui issues reads, alongside the `AppConfig` api-base helper.
   const reads = collectFlutterReads(ui, contexts);
-  // `AppConfig`/`apiUri` is shared by both the read providers AND the form
-  // widgets — emit it when either is present.
-  if (reads.length > 0 || forms.length > 0) {
-    out.set("lib/config.dart", renderAppConfig());
-  }
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }
@@ -96,8 +108,19 @@ export function generateFlutterForContexts(
   const pages = ui?.pages ?? [];
   const rendered = pages.map((page) => ({
     page,
-    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate),
+    ...renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate, {
+      workflowsByName,
+      bcByWorkflow,
+    }),
   }));
+
+  // `AppConfig`/`apiUri` is shared by the read providers, the form widgets, AND
+  // `Action(<instance>.<op>)` buttons (which POST inline via `apiUri(`).  Emit it
+  // when any of the three is present, so no page's import dangles.
+  const usesActionHttp = rendered.some((r) => r.source.includes("apiUri("));
+  if (reads.length > 0 || forms.length > 0 || usesActionHttp) {
+    out.set("lib/config.dart", renderAppConfig());
+  }
 
   if (rendered.length > 0) {
     for (const r of rendered) {
@@ -128,6 +151,13 @@ export function generateFlutterForContexts(
   // target, not a modelling mode — both are always available.
   out.set("Makefile", renderMakefile(pkg));
   out.set("README.md", renderReadme(title, pkg));
+  // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
+  // the real app and asserts it renders.  Unlike an `integration_test` (needs a
+  // device/emulator) this runs under plain `flutter test` on any host, so it
+  // gates "does the app actually RUN", not just compile.  Data reads fire on
+  // mount and settle to their loading/error branch with no backend — the tree
+  // still builds, which is exactly what the smoke proves.
+  out.set("test/widget_test.dart", renderWidgetSmokeTest(pkg));
 
   return out;
 }
@@ -148,7 +178,12 @@ function renderPage(
   contexts: EnrichedBoundedContextIR[],
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
   bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR>,
+  workflows: {
+    workflowsByName: ReadonlyMap<string, WorkflowIR>;
+    bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>;
+  },
 ): Omit<RenderedPage, "page"> {
+  const { workflowsByName, bcByWorkflow } = workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -157,9 +192,11 @@ function renderPage(
   const stateNames = new Set(page.state.map((s) => s.name));
 
   // Does this page host a form widget?  Its build references the generated
-  // widget class (`CreateAggForm()` / `DeleteAggForm(id: id)`), so the page
-  // imports `../forms.dart`.
-  const hostsForm = collectPageForms(page.body, aggregatesByName, bcByAggregate).length > 0;
+  // widget class (`CreateAggForm()` / `DeleteAggForm(id: id)` / `<Wf>WorkflowForm()`),
+  // so the page imports `../forms.dart`.
+  const hostsForm =
+    collectPageForms(page.body, aggregatesByName, bcByAggregate).length > 0 ||
+    collectPageWorkflowForms(page.body, workflowsByName, bcByWorkflow, aggregatesByName).length > 0;
 
   let bodyWidget = "const Center(child: Text('Empty page'))";
   let usesState = false;
@@ -177,6 +214,8 @@ function renderPage(
       ui.apiParams,
       aggregatesByName,
       bcByAggregate, // form seams resolve enum / value-object types here
+      workflowsByName, // WorkflowForm(runs:) resolves the workflow's params here
+      bcByWorkflow, // …and its owning BC for enum / value-object resolution
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
     usesState = result.usesState;
@@ -232,6 +271,11 @@ function renderStatelessPage(
 ): string {
   const imports = ["import 'package:flutter/material.dart';"];
   if (opts.hostsForm) imports.push("import '../forms.dart';");
+  // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
+  // page-body reference to it — so import http + the base-URL helper on demand.
+  if (bodyWidget.includes("apiUri(")) {
+    imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
+  }
   const idBinding = opts.usesRouteId
     ? ["    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';"]
     : [];
@@ -307,6 +351,11 @@ function renderConsumerPage(
   ];
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
+  // `Action(<instance>.<op>)` buttons POST inline via `apiUri(` — import http +
+  // the base-URL helper when the body references it.
+  if (bodyWidget.includes("apiUri(")) {
+    imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
+  }
   return `${lines(
     ...imports,
     "",
@@ -424,6 +473,26 @@ analyze:
 
 clean:
 	flutter clean
+`;
+}
+
+/** `test/widget_test.dart` — headless runtime smoke.  Pumps the real `App`
+ *  (which roots its own `ProviderScope`) once and asserts a `MaterialApp`
+ *  mounted.  A single `pump()` (not `pumpAndSettle`) is deliberate: reads fire
+ *  a `FutureProvider` on mount whose future never completes without a backend,
+ *  so settling would hang — the first frame already proves the app boots. */
+function renderWidgetSmokeTest(pkg: string): string {
+  return `import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:${pkg}/main.dart';
+
+void main() {
+  testWidgets('app boots and renders a MaterialApp', (WidgetTester tester) async {
+    await tester.pumpWidget(const App());
+    await tester.pump();
+    expect(find.byType(MaterialApp), findsOneWidget);
+  });
+}
 `;
 }
 
