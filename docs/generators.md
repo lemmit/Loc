@@ -862,7 +862,9 @@ seam because Dart list literals are comma-separated.
 
 A scalar array form field (`tags: string[]` / `scores: int[]`) renders as a repeatable add/remove row list (one `TextEditingController` per row, managed in state; numeric arrays parse each row on submit).
 
-Known frontier: array-of-value-object form inputs (repeatable sub-forms) and `UserComponent` invocation are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier.  See `docs/old/plans/flutter-mobile-implementation.md`.
+A user `component Foo(params) { body }` emits a Dart `StatelessWidget` into `lib/components.dart` (one final field per param, the walked body as `build`); an invocation `Foo(a: x)` renders as a widget constructor call and the page imports `../components.dart` (`component-emit.ts`).  Only USED stateless, value-param, no-read presentational components are emitted; a stateful component (its own Notifier), an `extern` component, or a read-bearing / slot / children component falls back to the diagnostic comment.
+
+Known frontier: array-of-value-object form inputs (repeatable sub-forms), and the deferred user-component variants above (stateful / extern / slot / children), are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier.  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
