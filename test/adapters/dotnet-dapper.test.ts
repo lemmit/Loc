@@ -481,9 +481,11 @@ system D {
       "CREATE TABLE IF NOT EXISTS o_events (",
     );
   });
-  it("still rejects a non-relational saving shape outside {document, embedded} (part-in-part on embedded)", async () => {
-    // Embedded is supported for FLAT-part containments; a part-in-part stays
-    // gated (the conservative v1 embedded surface).
+  it("accepts a part-in-part under shape(embedded) — the nested subtree folds via snapshots", async () => {
+    // Embedded folds each root containment into one JSONB column serialised
+    // through `part.ToSnapshot()`, and the `<Part>Snapshot` recurses into the
+    // part's own `contains` — so a part-in-part round-trips through the one
+    // column.  No child tables, no gate (M-T6.9 wave 6).
     const src = `
       system D {
         api A from S
@@ -491,14 +493,22 @@ system D {
           aggregate Cart shape: embedded with crudish {
             customer: string
             contains boxes: Box[]
-            entity Box { label: string  contains items: Item[]  entity Item { sku: string } }
+            entity Box { label: string  contains items: Item[] }
+            entity Item { sku: string }
           }
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
         deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
+    const { errors, files } = await emit(src);
+    expect(errors).toEqual([]);
+    // The containment column serialises each part's ToSnapshot; the nested
+    // Item folds inside BoxSnapshot (no child table for the embedded shape).
+    const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
+    expect(repo).toContain("aggregate.Boxes.Select(__x => __x.ToSnapshot()).ToList()");
+    const snaps = files.get("api/Domain/Carts/CartSnapshots.cs")!;
+    // Nested Item's snapshot ParentId brands to its DIRECT parent Box, not Cart.
+    expect(snaps).toMatch(/record ItemSnapshot\s*\{\s*public ItemId Id \{ get; init; \}\s*public BoxId ParentId/);
   });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {

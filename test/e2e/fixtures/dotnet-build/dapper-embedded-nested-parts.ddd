@@ -1,0 +1,64 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's EMBEDDED
+// SHAPE with PART-IN-PART (recursive containment) — M-T6.9 wave 6.  A
+// `shape(embedded)` `Cart` keeps its own scalar fields as FLAT columns and folds
+// each ROOT containment into ONE JSONB column serialised through the part's
+// `ToSnapshot()` / `FromSnapshot(...)`.  When a contained part itself declares
+// `contains` (`Box` -> `Slip` / `Item`s), the `<Part>Snapshot` records recurse
+// into the part's own containments, so the WHOLE subtree round-trips through the
+// one column — no child tables.  A nested part's snapshot `ParentId` brands to
+// its DIRECT parent's id class (`BoxId`), matching the entity `State.ParentId`.
+// Build under `dotnet build /warnaserror`.
+
+system DapperEmbeddedNestedParts {
+  api CartsApi from Sales
+
+  subdomain Sales {
+    context Carts {
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Cart shape: embedded with crudish {
+        customer: string
+        // single part-in-part chain: Cart -> Box -> Slip / Item
+        contains boxes: Box[]
+        // a flat sibling containment stays flat (byte-identical single-level)
+        contains coupon: Coupon?
+
+        entity Box {
+          label: string
+          // single part-in-part
+          contains slip: Slip
+          // collection part-in-part
+          contains items: Item[]
+        }
+        entity Slip { note: string }
+        entity Item {
+          sku:   string
+          price: Money
+        }
+        entity Coupon {
+          code:    string
+          percent: int
+        }
+      }
+
+      repository Carts for Cart {
+        find byCustomer(customer: string): Cart[] where this.customer == customer
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource cartsState { for: Carts, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Carts]
+    dataSources: [cartsState]
+    serves: CartsApi
+    port: 8080
+  }
+}

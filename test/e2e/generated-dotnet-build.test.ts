@@ -1108,6 +1108,54 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 6: shape(embedded) + PART-IN-PART on Dapper.  Each root
+    // containment folds into one JSONB column via `part.ToSnapshot()`; a nested
+    // part (Box → Slip/Item) recurses through its `<Part>Snapshot` records, so
+    // the whole subtree round-trips through the one column with NO child tables.
+    // The nested-ParentId snapshot fix (BoxId, not CartId) is what /warnaserror
+    // compiles here.
+    it("system `persistence: dapper` + shape(embedded) part-in-part — nested JSONB fold builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-emb-nested-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-embedded-nested-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // Root containment is a jsonb column; nested part has NO child table.
+        expect(schema).toContain("boxes jsonb not null");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS boxes");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS items");
+        // Nested snapshot ParentId brands to its DIRECT parent (BoxId).
+        const snaps = fs.readFileSync(
+          path.join(proj, "Domain", "Carts", "CartSnapshots.cs"),
+          "utf8",
+        );
+        expect(snaps).toMatch(/record ItemSnapshot[\s\S]*?BoxId ParentId/);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // M-T6.9 wave 3: the Dapper adapter's TPC (`ownTable`) INHERITANCE surface —
     // each concrete is a standalone table carrying the merged base + own fields
     // (a normal Dapper repository); the abstract base owns no table; the
