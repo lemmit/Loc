@@ -160,7 +160,7 @@ describe("scaffoldHandlers — contract records (M-T5.10 PR1)", () => {
     expect(fieldNames(getById!)).toEqual(["orderId"]);
     expect(getById!.fields[0]!.type.base.$type).toBe("IdType");
 
-    const find = byName(payloads, "ByStatusQuery");
+    const find = byName(payloads, "ByStatusOrderQuery");
     expect(find?.kind).toBe("query");
     expect(fieldNames(find!)).toEqual(["status"]);
   });
@@ -174,7 +174,7 @@ describe("scaffoldHandlers — contract records (M-T5.10 PR1)", () => {
     expect(printed).toContain("response OrderResponse {");
     expect(printed).toContain("response LineResponse {");
     expect(printed).toContain("command CreateOrderCommand {");
-    expect(printed).toContain("query ByStatusQuery {");
+    expect(printed).toContain("query ByStatusOrderQuery {");
     expect(printed).toContain("lines: LineResponse[]");
     // A single field is re-quoted / re-emitted as source (spot check).
     expect(printed).toContain("orderId: Order id");

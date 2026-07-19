@@ -251,16 +251,16 @@ describe("scaffoldHandlers + scaffoldApi — A3.2 create / find source kinds", (
     expect(cmd.returnType?.base.$type).toBe("IdType");
   });
 
-  it("emits a ByStatus queryHandler running the repository find, returning Order[]", async () => {
+  it("emits a ByStatusOrder queryHandler running the repository find, returning Order[]", async () => {
     const { model } = await parseString(A32, { validate: false });
     const q = [...AstUtils.streamAllContents(model)]
       .filter(isQueryHandler)
-      .find((h) => h.name === "ByStatus") as QueryHandler;
+      .find((h) => h.name === "ByStatusOrder") as QueryHandler;
     expect(q).toBeDefined();
-    // A single `query: ByStatusQuery` record param carrying the find's params.
+    // A single `query: ByStatusOrderQuery` record param carrying the find's params.
     expect(q.params.map((p) => p.name)).toEqual(["query"]);
     expect((q.params[0]!.type.base as { target: { $refText: string } }).target.$refText).toBe(
-      "ByStatusQuery",
+      "ByStatusOrderQuery",
     );
     expect(q.body.map((s) => s.$type)).toEqual(["LetStmt", "ReturnStmt"]);
     // A find over the aggregate declares `<Agg>Response[]` (the wire is already
@@ -276,11 +276,11 @@ describe("scaffoldHandlers + scaffoldApi — A3.2 create / find source kinds", (
     const api = [...AstUtils.streamAllContents(model)].find(isApi) as Api;
     const routes = api.routes.map((r) => `${r.method} ${r.path} -> ${r.target.handler}`);
     expect(routes).toContain("POST /orders -> CreateOrder");
-    expect(routes).toContain("GET /orders/by_status -> ByStatus");
+    expect(routes).toContain("GET /orders/by_status -> ByStatusOrder");
     // Full ordered surface: get-by-id, find, create, operation, destroy.
     expect(routes).toEqual([
       "GET /orders/{orderId} -> GetOrder",
-      "GET /orders/by_status -> ByStatus",
+      "GET /orders/by_status -> ByStatusOrder",
       "POST /orders -> CreateOrder",
       "POST /orders/{orderId}/cancel -> CancelOrder",
       "DELETE /orders/{orderId} -> DestroyOrder",

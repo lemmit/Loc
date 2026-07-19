@@ -253,11 +253,11 @@ describe("python — scaffolded handlers consume record params (M-T5.10)", () =>
 
   it("find handler projects the <Agg>Response collection via to_wire per element", async () => {
     const m = await generateSystemFiles(SCAFFOLD_SRC);
-    const h = fileEndingWith(m, "app/application/by_status.py");
+    const h = fileEndingWith(m, "app/application/by_status_order.py");
     // The declared `ByStatusQuery` record flattens to `status`; the `OrderResponse[]`
     // return normalises to the entity and projects each element via to_wire.
     expect(h).toContain(
-      "async def by_status(session: AsyncSession, status: str) -> list[dict[str, object]]:",
+      "async def by_status_order(session: AsyncSession, status: str) -> list[dict[str, object]]:",
     );
     expect(h).toContain("r = await orders.by_status(status)");
     expect(h).toContain("return [orders.to_wire(__e) for __e in r]");

@@ -246,7 +246,7 @@ describe("elixir — scaffolded record-param handlers flatten wire-preservingly"
   it("find read: query record flattens; the collection result is bound and returned", async () => {
     const h = fileEndingWith(
       await generateSystemFiles(SCAFFOLD_SRC),
-      "lib/api/ordering/handlers/by_status.ex",
+      "lib/api/ordering/handlers/by_status_order.ex",
     );
     expect(h).toContain('%{"status" => status} = params');
     expect(h).toContain("with {:ok, r} <- Context.by_status_order(status) do");

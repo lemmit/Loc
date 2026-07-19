@@ -79,7 +79,7 @@ export function contractRecords(ctx: BoundedContext): ContractRecord[] {
  *   - create   → `command <Create<Agg>>Command`  over the create-input fields
  *   - operation→ `command <Op><Agg>Command`       over the op's params
  *   - destroy  → `command <Destroy<Agg>>Command`  empty (id is a route param)
- *   - find     → `query   <Find>Query`            over the find's params
+ *   - find     → `query   <Find><Agg>Query`       over the find's params
  *   - getById  → `query   <Get<Agg>>Query`        over the single `<agg>Id` id
  * The `*Command` name matches the .NET Mediator record name a later PR wires up. */
 function contractForTarget(t: HandlerTarget): ContractRecord {

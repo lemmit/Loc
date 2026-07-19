@@ -157,9 +157,19 @@ export function handlerTargets(ctx: BoundedContext): HandlerTarget[] {
  *   - operation → `<Op><Agg>`            (`cancel` on `Order` → `CancelOrder`)
  *   - create    → `Create<Agg>`, or `<Name><Agg>` for a named factory
  *                 (`create place(...)` → `PlaceOrder`)
- *   - find      → `<Find>`                (`byStatus` → `ByStatus`)
+ *   - find      → `<Find><Agg>`           (`byStatus` on `Order` → `ByStatusOrder`)
  *   - getById   → `Get<Agg>`             (`Order` → `GetOrder`)
- *   - destroy   → `Destroy<Agg>`         (`Order` → `DestroyOrder`) */
+ *   - destroy   → `Destroy<Agg>`         (`Order` → `DestroyOrder`)
+ *
+ * Every kind is aggregate-QUALIFIED (the aggregate name is the suffix).  This
+ * matters for `find`: two aggregates in one context can declare a find of the
+ * same name (`Orders.byStatus` + `Customers.byStatus`), and their routes are
+ * already distinct (`/orders/by_status` vs `/customers/by_status`).  A bare
+ * `<Find>` name would collide — the scope-local override-by-name in the expander
+ * silently drops the second `queryHandler`/`<Find>Query` record BEFORE
+ * validation, so both routes bind to the surviving handler and one serves the
+ * wrong aggregate's data with no diagnostic.  Qualifying keeps handler, contract
+ * record, and route in lock-step per aggregate. */
 export function targetHandlerName(t: HandlerTarget): string {
   switch (t.kind) {
     case "operation":
@@ -169,7 +179,7 @@ export function targetHandlerName(t: HandlerTarget): string {
         ? `${upperFirst(t.create.name)}${upperFirst(t.agg.name)}`
         : `Create${upperFirst(t.agg.name)}`;
     case "find":
-      return upperFirst(t.find.name);
+      return `${upperFirst(t.find.name)}${upperFirst(t.agg.name)}`;
     case "getById":
       return `Get${upperFirst(t.agg.name)}`;
     case "destroy":

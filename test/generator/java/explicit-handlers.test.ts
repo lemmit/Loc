@@ -283,7 +283,7 @@ describe("java — scaffolded handlers consume command/query record params", () 
     expect(getH).toContain("return o;");
     expect(getH).not.toContain("OrderResponse");
     // find: a collection read types on List<Order>, returns the raw list.
-    const byStatusH = fileEndingWith(m, "ByStatusHandler.java");
+    const byStatusH = fileEndingWith(m, "ByStatusOrderHandler.java");
     expect(byStatusH).toContain("public List<Order> handle(String status) {");
     expect(byStatusH).toContain("var r = ordersRepository.byStatus(status);");
     expect(byStatusH).toContain("return r;");

@@ -40,7 +40,7 @@ import {
  *   ↓ Ordering gains
  *
  *   queryHandler   GetOrder(query: GetOrderQuery): OrderResponse  { let o = Orders.getById(query.orderId)  return o }
- *   queryHandler   ByStatus(query: ByStatusQuery): OrderResponse[] { let r = Orders.byStatus(query.status)  return r }
+ *   queryHandler   ByStatusOrder(query: ByStatusOrderQuery): OrderResponse[] { let r = Orders.byStatus(query.status)  return r }
  *   commandHandler CreateOrder(cmd: CreateOrderCommand): Order id {
  *     let o = Order.create({ code: cmd.code, status: cmd.status })
  *     return o.id
