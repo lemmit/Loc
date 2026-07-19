@@ -27,8 +27,10 @@
 //                                   `TextFormField` (matches the cross-frontend
 //                                   `display`-gated id-select/id-text split).
 //
-// DEFERRED (scoped down per the slice brief): scalar-array and array-of-value-
-// object inputs are dropped (no repeatable sub-form yet).
+// A SCALAR array (`tags: string[]` / `scores: int[]`) renders as a repeatable
+// add/remove row list (one `TextEditingController` per row, managed in state).
+// DEFERRED: array-of-value-object inputs (no repeatable sub-form yet) and
+// enum/bool/datetime element arrays are still dropped.
 
 import { createInputFields, isConstructible } from "../../ir/enrich/wire-projection.js";
 import type {
@@ -84,7 +86,8 @@ export type FlutterInputKind =
   | "bool"
   | "enum"
   | "datetime"
-  | "fk-select";
+  | "fk-select"
+  | "scalar-array";
 
 /** One prepared form field — a scalar input the widget renders + submits. */
 export interface FlutterFormField {
@@ -109,6 +112,10 @@ export interface FlutterFormField {
    *  its option list loads from (`GET /<collection>`); the option label is the
    *  target's derived `display` field (falling back to the row's `id`). */
   fkCollection?: string;
+  /** For a `scalar-array` field, the scalar kind of each element — drives the
+   *  per-row keyboard + parse (a `string[]` submits the raw list; a numeric array
+   *  parses each row). */
+  elementKind?: "text" | "number-int" | "number-double";
 }
 
 /** A fully prepared form → everything `renderFormWidget` needs. */
@@ -232,8 +239,25 @@ function prepareFields(
       }
       continue;
     }
+    // A scalar array (`tags: string[]` / `scores: int[]`) → a repeatable
+    // add/remove row list.  Only plain text / numeric elements render; enum /
+    // bool / datetime / value-object / id-collection arrays stay deferred.
+    if (base.kind === "array") {
+      const elemKind = scalarInputKind(base.element, enumsByName, aggregatesByName);
+      if (elemKind === "text" || elemKind === "number-int" || elemKind === "number-double") {
+        out.push({
+          wireName: f.name,
+          jsonKey: f.name,
+          label: humanize(f.name),
+          kind: "scalar-array",
+          required: !fieldOptional,
+          elementKind: elemKind,
+        });
+      }
+      continue;
+    }
     const kind = scalarInputKind(f.type, enumsByName, aggregatesByName);
-    if (!kind) continue; // array / nested — deferred
+    if (!kind) continue; // nested / unsupported — deferred
     out.push(buildField(f.name, f.name, f.type, fieldOptional, kind, enumsByName));
   }
   return out;
@@ -523,6 +547,12 @@ function ctrlId(wireName: string): string {
   return `${stateId(wireName)}Controller`;
 }
 
+/** The controller-list field name for a scalar-array field
+ *  (`tags` → `_tagsControllers`) — one `TextEditingController` per row. */
+function arrayCtrlsId(wireName: string): string {
+  return `${stateId(wireName)}Controllers`;
+}
+
 /** True when the field is backed by a `TextEditingController`. */
 function isTextBacked(f: FlutterFormField): boolean {
   return f.kind === "text" || f.kind === "number-int" || f.kind === "number-double";
@@ -550,6 +580,8 @@ function stateDecls(fields: readonly FlutterFormField[]): string[] {
     } else if (f.kind === "fk-select") {
       out.push(`  String? ${stateId(f.wireName)};`);
       out.push(`  List<Map<String, dynamic>> ${optionsId(f.wireName)} = const [];`);
+    } else if (f.kind === "scalar-array") {
+      out.push(`  final List<TextEditingController> ${arrayCtrlsId(f.wireName)} = [];`);
     }
   }
   return out;
@@ -602,9 +634,16 @@ function fkLoaders(fields: readonly FlutterFormField[]): string[] {
   return out;
 }
 
-/** The `dispose` overrides for text-backed controllers. */
+/** The `dispose` overrides for text-backed controllers + scalar-array
+ *  controller lists. */
 function disposeBody(fields: readonly FlutterFormField[]): string[] {
-  return fields.filter(isTextBacked).map((f) => `    ${ctrlId(f.wireName)}.dispose();`);
+  const out = fields.filter(isTextBacked).map((f) => `    ${ctrlId(f.wireName)}.dispose();`);
+  for (const f of fields) {
+    if (f.kind === "scalar-array") {
+      out.push(`    for (final c in ${arrayCtrlsId(f.wireName)}) c.dispose();`);
+    }
+  }
+  return out;
 }
 
 /** The Dart expression producing one field's submit value. */
@@ -629,6 +668,16 @@ function fieldValueExpr(f: FlutterFormField): string {
       return stateId(f.wireName);
     case "datetime":
       return `${stateId(f.wireName)}?.toIso8601String()`;
+    case "scalar-array": {
+      const ctrls = arrayCtrlsId(f.wireName);
+      if (f.elementKind === "number-int") {
+        return `${ctrls}.map((c) => int.tryParse(c.text)).whereType<int>().toList()`;
+      }
+      if (f.elementKind === "number-double") {
+        return `${ctrls}.map((c) => double.tryParse(c.text)).whereType<double>().toList()`;
+      }
+      return `${ctrls}.map((c) => c.text).toList()`;
+    }
   }
 }
 
@@ -707,6 +756,25 @@ function fieldWidget(f: FlutterFormField): string {
     }
     case "datetime":
       return `InkWell(onTap: () async { final picked = await showDatePicker(context: context, initialDate: ${stateId(f.wireName)} ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100)); if (picked != null) setState(() => ${stateId(f.wireName)} = picked); }, child: InputDecorator(decoration: ${decoration}, child: Text(${stateId(f.wireName)}?.toIso8601String() ?? 'Select date')))`;
+    case "scalar-array": {
+      const ctrls = arrayCtrlsId(f.wireName);
+      const kbd =
+        f.elementKind === "number-int" || f.elementKind === "number-double"
+          ? "keyboardType: TextInputType.number, "
+          : "";
+      // A labelled column of add/remove rows — one TextFormField per controller,
+      // a trailing "Add" button that appends a fresh controller.
+      return (
+        `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
+        `Padding(padding: const EdgeInsets.only(top: 8, bottom: 4), child: Text(${label}, style: Theme.of(context).textTheme.labelLarge)), ` +
+        `...${ctrls}.asMap().entries.map((entry) => Padding(padding: const EdgeInsets.only(bottom: 4), child: Row(children: <Widget>[` +
+        `Expanded(child: TextFormField(controller: entry.value, ${kbd}decoration: const InputDecoration(isDense: true))), ` +
+        `IconButton(icon: const Icon(Icons.remove_circle_outline), onPressed: () => setState(() => ${ctrls}.removeAt(entry.key).dispose())), ` +
+        `]))), ` +
+        `Align(alignment: Alignment.centerLeft, child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Add'), onPressed: () => setState(() => ${ctrls}.add(TextEditingController())))), ` +
+        `])`
+      );
+    }
   }
 }
 

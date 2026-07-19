@@ -72,7 +72,7 @@ jobs:
           #     ProductAdmin's OperationForm + Modal-wrapped op-form dialog +
           #     DestroyForm on a :id route) over every field kind (string/int/bool/
           #     enum/datetime/optional + a Money value object + a Category id
-          #     FK-loaded dropdown)
+          #     FK-loaded dropdown + a tags string[] add/remove row list)
           #   • display + multi-page named routing + navigation buttons
           # This is the load-bearing "does the emitted Dart compile" gate.
           cat > ci-flutter/showcase.ddd <<'DDD'
@@ -92,7 +92,7 @@ jobs:
                 error OutOfStock { detail: string }
                 aggregate Product {
                   name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
-                  category: Category id
+                  category: Category id  tags: string[]
                   operation rename(newName: string) { name := newName }
                   operation restock(): Product or OutOfStock { inStock := true }
                 }
