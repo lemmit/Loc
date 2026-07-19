@@ -13,7 +13,11 @@
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { buildRealtimeSwitchCases, toastImports } from "../_frontend/realtime.js";
+import {
+  buildRealtimeSwitchCases,
+  realtimeNeedsQueryClient,
+  toastImports,
+} from "../_frontend/realtime.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 /** Render `src/lib/components/RealtimeHandlers.svelte` for a ui with
@@ -22,17 +26,23 @@ import type { LoadedPack } from "../_packs/loader.js";
 export function buildSvelteRealtimeHandlers(ui: UiIR, pack: LoadedPack): string {
   const importLines = toastImports(pack);
   const cases = buildRealtimeSwitchCases(ui, pack, "        ");
+  // A `refetch(<Agg>)` handler needs the svelte-query client — invalidation
+  // mirrors the mutation `onSuccess` path.  Toast-only uis skip it.
+  const needsQc = realtimeNeedsQueryClient(ui);
 
   return lines(
     "<!-- Auto-generated.  Do not edit by hand. -->",
     '<script lang="ts">',
     "  // Live-event handlers (channels.md Part I): each `on <channel>.<Event>`",
-    "  // declared on the ui renders the arriving event as a toast.  Renderless;",
-    "  // mounted once in the root layout.  The authorized read stays the gate —",
-    "  // event payloads carry no privilege.",
+    "  // declared on the ui renders the arriving event as a toast and/or",
+    "  // refetches an aggregate's queries.  Renderless; mounted once in the root",
+    "  // layout.  The authorized read stays the gate — event payloads carry no",
+    "  // privilege.",
+    ...(needsQc ? ['  import { useQueryClient } from "@tanstack/svelte-query";'] : []),
     '  import { subscribeRealtime } from "$lib/api/realtime";',
     ...importLines.map((l) => `  ${l}`),
     "",
+    ...(needsQc ? ["  const qc = useQueryClient();", ""] : []),
     "  $effect(() => {",
     "    return subscribeRealtime((event) => {",
     "      switch (event.type) {",

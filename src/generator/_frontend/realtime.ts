@@ -65,10 +65,21 @@ export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () =
 `;
 }
 
+/** True when any handler declares a `refetch(<Agg>)` action, so the
+ *  RealtimeHandlers component needs a `useQueryClient()` handle (`qc`).
+ *  Every frontend gates the import + `const qc = …` on this — a
+ *  toast-only ui keeps its byte-identical, query-client-free output. */
+export function realtimeNeedsQueryClient(ui: UiIR): boolean {
+  return (ui.notifications ?? []).some((n) => (n.refetches?.length ?? 0) > 0);
+}
+
 /** The `switch (event.type)` arms of a RealtimeHandlers component —
  *  one `case` per event type, one pack-rendered `realtime-toast` line
- *  per handler toast.  `indent` is the case-keyword column (react's
- *  component nests two levels deeper than svelte's script). */
+ *  per handler toast, then one `qc.invalidateQueries` per refetch target
+ *  (the realtime twin of a mutation's `onSuccess` invalidation — same
+ *  `["<tag>"]` key, so both hit the same cache entries).  `indent` is
+ *  the case-keyword column (react's component nests two levels deeper
+ *  than svelte's script). */
 export function buildRealtimeSwitchCases(ui: UiIR, pack: LoadedPack, indent: string): string[] {
   const notifications = ui.notifications ?? [];
   const byEvent = new Map<string, UiNotificationIR[]>();
@@ -86,6 +97,17 @@ export function buildRealtimeSwitchCases(ui: UiIR, pack: LoadedPack, indent: str
       for (const msg of n.toasts) {
         const message = renderMessageExpr(msg, n.bind);
         cases.push(`${indent}  ${pack.render("realtime-toast", { message }).trim()}`);
+      }
+      // Cache invalidation — `qc.invalidateQueries({ queryKey: ["<tag>"] })`,
+      // dedup'd per event so two handlers refetching the same aggregate
+      // emit one line.  `queryTag` is the pre-resolved query key.
+      const seen = new Set<string>();
+      for (const r of n.refetches ?? []) {
+        if (seen.has(r.queryTag)) continue;
+        seen.add(r.queryTag);
+        cases.push(
+          `${indent}  qc.invalidateQueries({ queryKey: [${JSON.stringify(r.queryTag)}] });`,
+        );
       }
     }
     cases.push(`${indent}  break;`);
