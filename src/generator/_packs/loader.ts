@@ -131,6 +131,13 @@ export interface PackManifest {
    *  default falls back to the type-zero seed (the JSX-family op-form is a
    *  record-less module component by default). */
   seedsOpFormRecord?: boolean;
+  /** Opt-in: this pack's `form-of-decls` template renders the server-sourced
+   *  create-default overlay (fetch `usePrepare<Agg>`, then `reset` it over the
+   *  type-zero seed with `keepDirtyValues`).  The hooks are RHF/React-shaped,
+   *  so only the React packs set this — absent, a `now()` / `currentUser.*`
+   *  field default degrades to the type-zero seed with no `usePrepare` import
+   *  (the non-React frontends have no overlay yet). */
+  seedsServerDefaults?: boolean;
 }
 
 /** A single named-import declaration: `import { ...named } from "<from>"`. */

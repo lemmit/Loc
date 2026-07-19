@@ -287,7 +287,7 @@ An **ambient** default the client can't evaluate — `now()` or `currentUser.<cl
 aggregate has such a field default, the Hono backend emits `GET /<plural>/prepare`
 returning just those keys (evaluated exactly as the audit stamps are: `now()` →
 `new Date().toISOString()`, `currentUser.<claim>` off the ambient request
-principal), and the React **shadcn** create form fetches it (`usePrepare<Agg>`)
+principal), and every **React** pack's create form fetches it (`usePrepare<Agg>`)
 and `reset`s the form over its type-zero seed once it resolves —
 `keepDirtyValues` so a slow response never clobbers what the user typed.
 
@@ -302,10 +302,14 @@ useEffect(() => { if (__prep.data) form.reset({ ...{ customerId: "", createdAt: 
 ```
 
 The classification is one shared predicate (`serverSourcedDefaultFields`), so the
-endpoint's keys and the form's fetched keys can't drift. Fan-out in progress: the
-other backends (`.NET`/Java/Python/Elixir) and the other frontend packs render the
-unchanged form and keep the type-zero fallback until ported; a **sequence** or
-**cross-aggregate lookup** default is still deferred (not yet server-sourced).
+endpoint's keys and the form's fetched keys can't drift. The overlay is React-only
+for now, gated per pack by `manifest.seedsServerDefaults` — the `usePrepare<Agg>` +
+`reset` hooks are RHF-shaped, so a **Vue/Svelte/Angular** pack renders the plain
+create form and degrades to the type-zero seed (the Hono `/prepare` endpoint still
+emits; the non-React frontends just don't consume it yet — no dangling import).
+Fan-out in progress: the other backends (`.NET`/Java/Python/Elixir) and the
+non-React overlays; a **sequence** or **cross-aggregate lookup** default is still
+deferred (not yet server-sourced).
 Everything outside this tier falls back to the type-zero seed: a `this.<field>`
 on the by-name op form or a non-threading pack, and the still-deferred sources
 above. `ParamIR.default` is carried in the IR for a future backend that applies

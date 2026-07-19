@@ -479,10 +479,16 @@ function emitFormOfAggregate(
     `useCreate${agg.name}`,
   );
   // Server-sourced defaults (`now()` / `currentUser.*`): the create form fetches
-  // them from `usePrepare<Agg>` and overlays them on the type-zero seed (a pack
-  // whose `form-of-decls` renders the overlay — `hasServerDefaults`).  Register
-  // the hook + `useEffect` here; a pack that ignores the flag emits neither.
-  const hasServerDefaults = serverSourcedDefaultFields(createInputFields(agg)).length > 0;
+  // them from `usePrepare<Agg>` and overlays them on the type-zero seed.  Only
+  // packs whose `form-of-decls` renders the overlay opt in via
+  // `manifest.seedsServerDefaults` — the RHF `usePrepare<Agg>` + `useEffect`
+  // hooks are React-shaped, so registering them for a Svelte/Angular/Vue pack
+  // (whose template ignores the flag) would emit a dangling `react` import.
+  // Gate on the flag so non-overlay frontends degrade to the type-zero seed
+  // with a clean import set.
+  const hasServerDefaults =
+    ctx.pack.manifest.seedsServerDefaults === true &&
+    serverSourcedDefaultFields(createInputFields(agg)).length > 0;
   if (hasServerDefaults) {
     addImport(ctx, `../api/${lowerFirst(agg.name)}`, `usePrepare${agg.name}`);
     addImport(ctx, "react", "useEffect");

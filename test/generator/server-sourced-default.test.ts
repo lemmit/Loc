@@ -83,6 +83,46 @@ describe("server-sourced create defaults (Hono + React shadcn)", () => {
   });
 });
 
+// A non-React frontend has no create-form overlay yet (the RHF `usePrepare` +
+// `useEffect` hooks are React-shaped).  The Hono `/prepare` endpoint still
+// emits, but the Svelte create form must degrade to the type-zero seed with a
+// CLEAN import set — never a dangling `usePrepare<Agg>` / `react` import that
+// its own api module and template don't provide.  (`manifest.seedsServerDefaults`
+// gates the overlay so only the React packs opt in.)
+const SVELTE_SYS = (field: string) => `
+  system S {
+    subdomain Sales {
+      context Sales {
+        aggregate Order with crudish {
+          customerId: string
+          ${field}
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    storage db { type: postgres }
+    resource st { for: Sales, kind: state, use: db }
+    deployable api { platform: node contexts: [Sales] dataSources: [st] serves: SalesApi port: 3000 }
+    deployable web { platform: svelte targets: api ui: WebApp { Sales: api } design: "flowbite@v1" port: 3001 }
+    ui WebApp with scaffold(aggregates: [Order]) { api Sales: SalesApi }
+  }
+`;
+
+describe("server-sourced create defaults — non-React degradation (Svelte)", () => {
+  it("emits a clean Svelte create form (no dangling usePrepare / react import)", async () => {
+    const files = await generateSystemFiles(SVELTE_SYS("createdAt: datetime = now()"));
+    // The backend endpoint is unaffected — the server still computes the default.
+    const routes = findBySuffix(files, "order.routes.ts");
+    expect(routes).toMatch(/path: "\/prepare"/);
+    // The Svelte create page must not reference the React-only overlay hooks.
+    const newPage = findBySuffix(files, "orders/new/+page.svelte");
+    expect(newPage).not.toMatch(/usePrepare/);
+    expect(newPage).not.toMatch(/from "react"/);
+    expect(newPage).not.toMatch(/__prep/);
+  });
+});
+
 function findBySuffix(files: Map<string, string>, suffix: string): string {
   const hit = [...files.entries()].find(([k]) => k.endsWith(suffix));
   if (!hit) throw new Error(`no generated file ending in ${suffix}`);
