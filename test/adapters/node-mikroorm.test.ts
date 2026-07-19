@@ -375,6 +375,46 @@ describe("mikroorm — `filter` capability predicates", () => {
   });
 });
 
+describe("mikroorm — principal-referencing (tenancy) `filter` predicates", () => {
+  const PRINCIPAL_SRC = `system M {
+  user { id: guid  tenantId: string }
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Account with crudish {
+        tenantId: string
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required }
+}`;
+
+  it("applies (not drops) the tenant scope via the ambient requireCurrentUser()", async () => {
+    const { files, errors } = await emit(PRINCIPAL_SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/account-repository.ts")!;
+    // The principal accessor import is pulled in.
+    expect(repo).toContain('import { requireCurrentUser } from "../../auth/middleware";');
+    // findById ANDs the tenant scope onto the id lookup.
+    expect(repo).toContain(
+      "await em.findOne(AccountRow, { $and: [{ id: id as string }, { tenantId: requireCurrentUser().tenantId }] });",
+    );
+    // A declared find's own `where` is joined with the tenant scope.
+    expect(repo).toContain(
+      "await em.find(AccountRow, { $and: [{ balance: { $gte: min } }, { tenantId: requireCurrentUser().tenantId }] });",
+    );
+    // The scope is a real FilterQuery, not a dropped/stubbed predicate.
+    expect(repo).not.toContain("this find's predicate is not yet supported");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // `Id[]` reference-collection associations (wave 1) — persist as composite-PK
 // pivot Row entities (the MikroORM analogue of the drizzle join table): bulk-

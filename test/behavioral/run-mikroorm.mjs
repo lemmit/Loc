@@ -79,10 +79,6 @@ function walk(dir, pred, out = []) {
 // BEHAVIOURAL_SKIP (which is keyed by platform clause and would wrongly skip the
 // drizzle tier too). See the PR body's "MikroORM runtime gaps" register.
 const MIKRO_SKIP = {
-  // A capability `filter` predicate (tenancy scope) is not applied by the
-  // mikroorm find/query path — reads return every tenant's rows (expected 1,
-  // got 2) instead of the principal-scoped subset.
-  "tenancy-filter": "capability filter predicate not applied on the mikroorm read path",
   // Workflow (saga) code hard-codes drizzle-orm imports + query operators
   // (`import { eq, and, … } from "drizzle-orm"`), which the mikroorm project
   // doesn't depend on — the generated server crashes at boot (ERR_MODULE_NOT_FOUND).
