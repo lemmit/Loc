@@ -1,0 +1,47 @@
+// Dapper nested-entity-part COLLECTION-FIELD fixture (M-T6.9 wave 4): a state
+// aggregate whose contained part carries scalar / enum / value-object
+// collection fields (`tags: string[]`, `kinds: LineKind[]`, `charges:
+// Money[]`).  Each such field persists as one `jsonb` column on the part's
+// flat child table, holding the System.Text.Json-serialised list (the
+// raw-Npgsql mirror of EF's primitive-collection JSON mapping).  Build under
+// `dotnet build /warnaserror`.
+system DapperPartCollection {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      enum LineKind { Physical, Digital }
+
+      valueobject Money {
+        amount:   int
+        currency: string
+      }
+
+      aggregate Order with crudish {
+        customer: string
+        contains lineItems: LineItem[]
+
+        entity LineItem {
+          sku:      string
+          tags:     string[]
+          kinds:    LineKind[]
+          charges:  Money[]
+          notes:    string[]?
+        }
+      }
+
+      repository Orders for Order { }
+    }
+  }
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}

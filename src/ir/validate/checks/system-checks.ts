@@ -1863,6 +1863,17 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 // efcore (the default) supports the full surface, so this only fires for an
 // explicit `persistence: dapper`.
 // ---------------------------------------------------------------------------
+// Element kinds a Dapper part collection field can round-trip as one `jsonb`
+// column (System.Text.Json list serialisation) — kept in lockstep with
+// `arrayElemCs` in `src/generator/dotnet/emit/dapper.ts` (ir/validate may not
+// import generator/, so the two lists are mirrored, not shared).
+const DAPPER_ARRAY_ELEM_KINDS: ReadonlySet<string> = new Set([
+  "primitive",
+  "enum",
+  "valueobject",
+  "id",
+]);
+
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -1934,11 +1945,26 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // is a standalone table with the merged base fields (a normal Dapper
         // repository), and the polymorphic `find all <Base>` base reader is
         // persistence-agnostic (it delegates to each concrete's `All()`).  TPH
-        // (`sharedTable` — one shared table + `kind` discriminator hydration)
-        // stays gated: the discriminator-switch construction seam isn't wired on
-        // the Dapper repository yet.
-        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates))
-          reject(where, "participates in TPH (sharedTable) aggregate inheritance");
+        // (`sharedTable`) IS supported now for FLAT members — one shared table
+        // named for the base (id + `kind` discriminator + base columns + the
+        // nullable union of every concrete's own columns), each concrete repo
+        // targeting that table with a spliced `kind = '<Concrete>'` read filter +
+        // discriminator-literal INSERT, threading the shared `<Base>Id`.  Only a
+        // TPH member carrying `contains` (nested parts) or an `X id[]` reference
+        // collection stays gated — those child/join tables would need to FK the
+        // shared base row (a follow-up slice, matching EF's TPT-via-contains).
+        if (isTphBase(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates)) {
+          if ((a.contains ?? []).length > 0)
+            reject(
+              where,
+              "participates in TPH (sharedTable) inheritance with nested entity parts (`contains`)",
+            );
+          if ((a.associations ?? []).length > 0)
+            reject(
+              where,
+              "participates in TPH (sharedTable) inheritance with an `X id[]` reference collection",
+            );
+        }
         if (isDocShape) continue;
         // Reference-collection associations (`X id[]`) are supported: one
         // ordinal-ordered join table each (DbSchema), bulk-loaded on every
@@ -1949,29 +1975,40 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // containment (`id` PK + `<agg>_id` FK + the part's scalar/enum/vo/id
         // columns), bulk-loaded on every read and hydrated through the root's
         // `_Create(State)` seam, full-list-replaced on save, and cascade-deleted.
-        // Still gated (v1 scope): a part-in-part (a part with its OWN
-        // containments), a reference-collection field on a part, and any
-        // containment on an EVENT-SOURCED aggregate (its stream folds children
-        // in-memory — no child table).
+        //
+        // Event-sourced (`persistedAs: eventLog`) aggregates persist to the
+        // `<ctx>_events` stream, NOT a state table — their contained parts fold
+        // in-memory from the event stream (the `apply(...)` bodies), so the
+        // relational containment emitters (child tables, HydrateAsync, the
+        // array-throwing `fieldColumn`) never run for them.  The Dapper event
+        // store reuses the persistence-agnostic domain fold unchanged, so
+        // `contains` (in any shape) needs no gate on an event-sourced aggregate.
+        //
+        // Nested entity parts + reference-collection associations (`X id[]`)
+        // NOW COMPOSE (wave 4): every read hydrates the child tables through
+        // `_Create(State)` first, then `LoadRefsAsync` post-sets the writable
+        // ref-collection list on the reconstructed roots — the two hydrate
+        // paths run in sequence, not exclusively.
+        //
+        // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
+        // with its OWN containments).  A scalar / enum / value-object / id
+        // COLLECTION field on a part IS supported — it stores as one `jsonb`
+        // column holding the serialised list (System.Text.Json round-trip, the
+        // raw-Npgsql mirror of EF's primitive-collection JSON mapping); only an
+        // array whose element kind is outside that set stays gated (nothing in
+        // the corpus reaches it).
         const contains = a.contains ?? [];
-        if (contains.length > 0) {
-          if (a.persistedAs === "eventLog") {
-            reject(where, "has nested entity parts on an event-sourced aggregate");
-          } else if ((a.associations ?? []).length > 0) {
-            // The Dapper repository's containment hydration reconstructs each
-            // root through `_Create(State)`; the reference-collection load
-            // post-sets a writable list.  v1 keeps these two hydrate paths
-            // mutually exclusive (combining them is a follow-up slice).
-            reject(where, "combines nested entity parts with reference-collection associations");
-          } else {
-            for (const part of a.parts ?? []) {
-              if ((part.contains ?? []).length > 0)
-                reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
-              for (const pf of part.fields) {
-                const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
-                if (pt.kind === "array")
-                  reject(where, `contains a part ('${part.name}') with a collection field`);
-              }
+        if (contains.length > 0 && a.persistedAs !== "eventLog") {
+          for (const part of a.parts ?? []) {
+            if ((part.contains ?? []).length > 0)
+              reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
+            for (const pf of part.fields) {
+              const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
+              if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
+                reject(
+                  where,
+                  `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
+                );
             }
           }
         }

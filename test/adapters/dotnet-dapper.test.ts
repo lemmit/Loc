@@ -165,6 +165,43 @@ system D {
       "CREATE TABLE IF NOT EXISTS o_events",
     );
   });
+
+  // Wave 4: an event-sourced aggregate that ALSO declares `contains` parts is
+  // no longer rejected.  Its parts fold in-memory from the event stream (the
+  // `apply(...)` bodies), so the ES Dapper event store emits NO state / child
+  // tables for them — only the `<ctx>_events` log.  The relational containment
+  // emitters (child tables, HydrateAsync) never run.
+  it("accepts contains on an event-sourced aggregate (no state/child tables)", async () => {
+    const src = `
+system D {
+  subdomain S {
+    context O {
+      event Opened { account: Account id, owner: string }
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        contains lines: LedgerLine[]
+        entity LedgerLine { memo: string  amount: int }
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: eventLog, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the event-sourced-containment gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/AccountRepository.cs")!;
+    // Still the raw-Npgsql event store — folds the stream, no child-table load.
+    expect(repo).toContain("Account._FromEvents(id, __rows.Select(RowToEvent).ToList());");
+    expect(repo).not.toContain("HydrateAsync");
+    // No child table for the contained part; only the event log.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS ledger_lines");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS o_events");
+  });
 });
 
 // Reference collections (`X id[]`) on Dapper: one join table per association
@@ -435,7 +472,11 @@ system D {
     expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
   });
 
-  it("still rejects nested parts combined with a reference collection", async () => {
+  // Wave 4: nested parts + a reference collection on the same aggregate now
+  // COMPOSE — a read hydrates the child tables through `_Create(State)` first,
+  // then LoadRefsAsync post-sets the ref-collection list on the reconstructed
+  // roots (the two hydrate passes run in sequence).
+  it("composes nested parts with a reference collection (hydrate then load-refs)", async () => {
     const src = `
 system D {
   api A from S
@@ -448,7 +489,9 @@ system D {
         contains lineItems: LineItem[]
         entity LineItem { sku: string }
       }
-      repository Orders for Order { }
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
       repository Tags for Tag { }
     }
   }
@@ -456,12 +499,91 @@ system D {
   resource s { for: O, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(
-      errors.some(
-        (e) => /persistence: dapper/.test(e) && /reference-collection associations/.test(e),
-      ),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the contains+association gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Both the child-table hydrator and the ref-collection loader are emitted.
+    expect(repo).toContain("private static async Task<List<Order>> HydrateAsync(");
+    expect(repo).toContain("private static async Task LoadRefsAsync(");
+    // GetById: hydrate the single root, then load its ref collection.
+    expect(repo).toContain(
+      "var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);",
+    );
+    expect(repo).toMatch(
+      /var __one = await HydrateAsync[\s\S]*?await LoadRefsAsync\(conn, __one, cancellationToken\);/,
+    );
+    // FindManyByIds / findAll / the named list find all hydrate → load-refs.
+    expect(repo).toMatch(
+      /var __roots = await HydrateAsync\(conn, rows\.ToList\(\), cancellationToken\);\s*await LoadRefsAsync\(conn, __roots, cancellationToken\);/,
+    );
+    expect(repo).toMatch(
+      /var items = await HydrateAsync\(conn, rows\.ToList\(\), cancellationToken\);\s*await LoadRefsAsync\(conn, items, cancellationToken\);/,
+    );
+    // Save writes both the child table and the join table; the schema has both.
+    expect(repo).toContain("INSERT INTO line_items");
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS line_items");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS order_tags");
+  });
+
+  // Wave 4: a scalar / enum / value-object collection field ON a part is no
+  // longer rejected — each stores as one `jsonb` column on the child table
+  // holding the System.Text.Json-serialised list (the raw-Npgsql mirror of EF's
+  // primitive-collection JSON mapping).
+  it("accepts scalar/enum/VO collection fields on a part (jsonb list columns)", async () => {
+    const src = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      enum LineKind { Physical, Digital }
+      valueobject Money { amount: int  currency: string }
+      aggregate Order with crudish {
+        customer: string
+        contains lineItems: LineItem[]
+        entity LineItem {
+          sku: string
+          tags: string[]
+          kinds: LineKind[]
+          charges: Money[]
+          notes: string[]?
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the part-collection-field gate is lifted
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("tags jsonb not null");
+    expect(schema).toContain("kinds jsonb not null");
+    expect(schema).toContain("charges jsonb not null");
+    expect(schema).toContain("notes jsonb"); // optional → nullable (no "not null")
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Row DTO carries the list columns as jsonb-backed strings.
+    expect(repo).toContain("public string tags { get; set; } = default!;");
+    expect(repo).toContain("public string? notes { get; set; }");
+    // Save serialises the list; hydrate deserialises to the typed List<T>.
+    expect(repo).toContain(
+      "tags = System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Tags)",
+    );
+    expect(repo).toContain(
+      "Tags = System.Text.Json.JsonSerializer.Deserialize<List<string>>(r.tags)!,",
+    );
+    expect(repo).toContain(
+      "Kinds = System.Text.Json.JsonSerializer.Deserialize<List<LineKind>>(r.kinds)!,",
+    );
+    expect(repo).toContain(
+      "Charges = System.Text.Json.JsonSerializer.Deserialize<List<Money>>(r.charges)!,",
+    );
+    // Optional list handles null on both save + hydrate.
+    expect(repo).toContain(
+      "notes = __lineItemsChild.Notes is null ? null : System.Text.Json.JsonSerializer.Serialize(__lineItemsChild.Notes)",
+    );
   });
 });
 
@@ -592,7 +714,7 @@ system D {
 // concrete is a standalone table carrying the MERGED base fields (a normal
 // Dapper repository); the abstract base owns no table; the polymorphic
 // `find all <Base>` base reader is persistence-agnostic (it delegates to each
-// concrete's `All()`).  TPH (`sharedTable`) stays gated.
+// concrete's `All()`).  TPH (`sharedTable`) is drained in wave 4 (below).
 describe("dapper TPC (ownTable) aggregate inheritance", () => {
   const TPC = `
 system D {
@@ -639,12 +761,117 @@ system D {
     expect(base).toContain("result.AddRange(await _vendorRepo.All(cancellationToken));");
   });
 
-  it("still rejects TPH (sharedTable) inheritance", async () => {
-    const src = TPC.replace("inheritanceUsing: ownTable", "inheritanceUsing: sharedTable");
+  it("still rejects a TPH member carrying `contains` or a reference collection", async () => {
+    const src = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        contains notes: Note[]
+        entity Note { text: string }
+      }
+      repository Customers for Customer { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
     const { errors } = await emit(src);
     expect(errors.some((e) => /persistence: dapper/.test(e) && /TPH \(sharedTable\)/.test(e))).toBe(
       true,
     );
+  });
+});
+
+// TPH (`sharedTable`) aggregate inheritance on Dapper (M-T6.9 wave 4): the whole
+// hierarchy maps to ONE `kind`-discriminated table named for the abstract base
+// (id + `kind` + base columns + the nullable union of every concrete's own
+// columns).  Each concrete Dapper repo targets that table with a spliced
+// `kind = '<Concrete>'` read filter + discriminator-literal INSERT, threading
+// the shared `<Base>Id` (the concrete declares no id of its own).
+describe("dapper TPH (sharedTable) aggregate inheritance", () => {
+  const TPH = `
+system D {
+  api A from Registry
+  subdomain Registry {
+    context Parties {
+      abstract aggregate Party inheritanceUsing: sharedTable {
+        name: string
+        email: string
+      }
+      aggregate Customer extends Party with crudish {
+        creditLimit: int
+        operation raiseLimit(by: int) { creditLimit := creditLimit + by }
+      }
+      aggregate Vendor extends Party with crudish { rating: int  active: bool }
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Parties, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [Parties]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer rejects TPH; emits one shared kind-discriminated table", async () => {
+    const { files, errors } = await emit(TPH);
+    expect(errors).toEqual([]); // the dapper TPH inheritance gate is lifted for flat members
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    // ONE shared table named for the base; the concretes own no table.
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS parties");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS vendors");
+    // id + kind + base columns (not null) + the UNION of concrete columns
+    // (nullable — a row of one kind leaves the other kind's columns NULL).
+    expect(schema).toContain("kind text not null");
+    expect(schema).toContain("name text not null");
+    expect(schema).toContain("credit_limit integer,"); // nullable (no "not null")
+    expect(schema).toContain("rating integer,");
+    expect(schema).toContain("active boolean");
+    expect(schema).not.toMatch(/credit_limit integer not null/);
+  });
+
+  it("the concrete repo targets the shared table, filters + inserts the discriminator, threads the base id", async () => {
+    const { files } = await emit(TPH);
+    const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
+    // Shared base id class, not a per-concrete CustomerId.
+    expect(repo).toContain(
+      "public async Task<Customer?> GetByIdAsync(PartyId id, CancellationToken cancellationToken = default)",
+    );
+    expect(repo).toContain(
+      "public async Task<IReadOnlyList<Customer>> FindManyByIdsAsync(IReadOnlyList<PartyId> ids,",
+    );
+    expect(repo).toContain("Id = new PartyId(r.id),");
+    // Every SELECT splices `kind = 'Customer'` into its WHERE.
+    expect(repo).toContain("FROM parties WHERE id = @id AND kind = 'Customer'");
+    expect(repo).toContain("FROM parties WHERE id = ANY(@ids) AND kind = 'Customer'");
+    expect(repo).toContain("FROM parties WHERE kind = 'Customer'"); // findAll
+    expect(repo).toContain("(email = @email) AND kind = 'Customer'"); // named find
+    // INSERT writes the discriminator literal into the shared table.
+    expect(repo).toContain(
+      "INSERT INTO parties (id, kind, name, email, credit_limit, version) VALUES (@id, 'Customer', @name, @email, @credit_limit, 1)",
+    );
+  });
+
+  it("the abstract base emits the mapped entity but NO EF configuration on Dapper", async () => {
+    const { files } = await emit(TPH);
+    // The persistence-agnostic base entity (owns the shared PartyId) is emitted.
+    const base = files.get("api/Domain/Parties/Party.cs")!;
+    expect(base).toContain("public abstract class Party");
+    expect(base).toContain("public PartyId Id");
+    // No EF configuration (it would reference Microsoft.EntityFrameworkCore).
+    expect(files.has("api/Infrastructure/Persistence/Configurations/PartyConfiguration.cs")).toBe(
+      false,
+    );
+    // No polymorphic base repository (parity with the EF .NET path, which emits
+    // none for TPH — the concretes carry their own repos).
+    expect(files.has("api/Infrastructure/Repositories/PartyRepository.cs")).toBe(false);
   });
 });
 

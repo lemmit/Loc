@@ -641,6 +641,40 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 4: an event-sourced aggregate that ALSO declares `contains`
+    // parts.  The parts fold in-memory from the event stream (the `apply(...)`
+    // bodies), so the ES Dapper event store emits NO state / child tables for
+    // them — only the `<ctx>_events` log.  Pins that the combination builds.
+    it("system `persistence: dapper` + event sourcing + contains parts — builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-es-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-es-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // The contained part gets NO child table — it folds from the stream.
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS ledger_lines");
+        expect(schema).toContain("accounts_events");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // M-T6.9 wave 2: the Dapper adapter's NESTED ENTITY PARTS surface — a state
     // aggregate with a collection containment + a single optional containment.
     // Each persists as one flat child table (`id` PK + `<agg>_id` FK + the
@@ -669,6 +703,73 @@ describe.skipIf(!ENABLED)(
             "utf8",
           ),
         ).toContain("HydrateAsync");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // M-T6.9 wave 4: a contained part carrying scalar / enum / value-object
+    // COLLECTION fields (`tags: string[]`, `kinds: LineKind[]`, `charges:
+    // Money[]`).  Each persists as one `jsonb` column on the child table
+    // holding the System.Text.Json-serialised list — the List<T> deserialise
+    // arms are the type-sensitive parts this gate compiles.
+    it("system `persistence: dapper` + part collection fields — jsonb list columns build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-part-coll-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-part-collection.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        expect(schema).toContain("tags jsonb not null");
+        expect(schema).toContain("notes jsonb"); // optional list
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // M-T6.9 wave 4: nested entity parts + a reference collection on the SAME
+    // aggregate.  Every read hydrates the child tables through `_Create(State)`
+    // first, then LoadRefsAsync post-sets the ref-collection list — the two
+    // hydrate passes compose in sequence.  Build under /warnaserror.
+    it("system `persistence: dapper` + parts AND reference collection — composed hydrate builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-parts-refs-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-parts-refs.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "OrderRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("await HydrateAsync(conn, rows.ToList(), cancellationToken)");
+        expect(repo).toContain("await LoadRefsAsync(conn, __roots, cancellationToken)");
         execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
         execSync(`dotnet build --no-restore --nologo /warnaserror`, {
           cwd: proj,
@@ -926,6 +1027,54 @@ describe.skipIf(!ENABLED)(
             "utf8",
           ),
         ).toContain("_customerRepo.All(cancellationToken)");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // M-T6.9 wave 4: the Dapper adapter's TPH (`sharedTable`) inheritance
+    // surface — one `kind`-discriminated shared table named for the abstract
+    // base (id + kind + base columns + the nullable union of every concrete's
+    // own columns); each concrete repo targets that table with a spliced
+    // `kind = '<Concrete>'` filter + discriminator-literal INSERT, threading
+    // the shared `<Base>Id`.  Build under /warnaserror.
+    it("system `persistence: dapper` + TPH inheritance — shared kind-discriminated table builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-tph-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-tph.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // ONE shared table named for the base; concretes own none.
+        expect(schema).toContain("CREATE TABLE IF NOT EXISTS parties");
+        expect(schema).toContain("kind text not null");
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS customers");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "CustomerRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("FROM parties WHERE kind = 'Customer'");
+        expect(repo).toContain("INSERT INTO parties (id, kind,");
         execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
         execSync(`dotnet build --no-restore --nologo /warnaserror`, {
           cwd: proj,
