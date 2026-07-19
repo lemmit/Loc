@@ -311,17 +311,28 @@ export const svelteTarget: WalkerTarget = {
     return `{#if ${cond}}\n${inner}${thenS}\n${close}{:else}\n${inner}${elseS}\n${close}{/if}`;
   },
 
-  /** CSS-string style attribute.  String-literal values inline
-   *  verbatim; dynamic values interpolate with `{expr}` (valid
-   *  inside a quoted Svelte attribute). */
+  /** CSS-string style attribute.  An all-literal style stays a plain quoted
+   *  attribute (`style="a: b"`, byte-identical to before).  Once ANY value is
+   *  dynamic, bind a JS TEMPLATE LITERAL instead (`style={` + backtick + `…` +
+   *  backtick + `}`): a dynamic value is `JSON.stringify`-rendered, so it carries
+   *  double quotes (`active ? "green" : "gray"`), and interpolating that inside a
+   *  quoted `style="…"` (then entity-escaping the whole string) would turn the
+   *  `"` into `&quot;` INSIDE the `{…}` JS expression — Svelte parses that as JS
+   *  and dies.  A `${…}` inside a `{`backtick`}` binding has no delimiter to
+   *  collide with. */
   renderStyleAttr(
     entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
   ): string {
     if (entries.length === 0) return "";
+    const hasDynamic = entries.some((e) => e.literal === undefined);
+    if (!hasDynamic) {
+      const css = entries.map(({ key, literal }) => `${key}: ${literal}`).join("; ");
+      return ` style="${css.replace(/"/g, "&quot;")}"`;
+    }
     const css = entries
-      .map(({ key, rendered, literal }) => `${key}: ${literal ?? `{${rendered}}`}`)
+      .map(({ key, rendered, literal }) => `${key}: ${literal ?? `\${${rendered}}`}`)
       .join("; ");
-    return ` style="${css.replace(/"/g, "&quot;")}"`;
+    return ` style={\`${css}\`}`;
   },
 
   /** Svelte 5 children snippet — optional-render so components
