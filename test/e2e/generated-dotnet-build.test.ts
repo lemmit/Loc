@@ -641,6 +641,40 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 4: an event-sourced aggregate that ALSO declares `contains`
+    // parts.  The parts fold in-memory from the event stream (the `apply(...)`
+    // bodies), so the ES Dapper event store emits NO state / child tables for
+    // them — only the `<ctx>_events` log.  Pins that the combination builds.
+    it("system `persistence: dapper` + event sourcing + contains parts — builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-es-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-es-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const schema = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"),
+          "utf8",
+        );
+        // The contained part gets NO child table — it folds from the stream.
+        expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS ledger_lines");
+        expect(schema).toContain("accounts_events");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // M-T6.9 wave 2: the Dapper adapter's NESTED ENTITY PARTS surface — a state
     // aggregate with a collection containment + a single optional containment.
     // Each persists as one flat child table (`id` PK + `<agg>_id` FK + the

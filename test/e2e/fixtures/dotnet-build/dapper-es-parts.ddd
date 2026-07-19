@@ -1,0 +1,45 @@
+// Dapper event-sourcing + nested entity parts fixture (M-T6.9 wave 4): a
+// `persistence: dapper` dotnet deployable hosting a `persistedAs: eventLog`
+// aggregate that ALSO declares `contains` parts.  An event-sourced aggregate
+// has no state / child tables — its parts fold in-memory from the event stream
+// (the `apply(...)` bodies), so the Dapper event store reuses the
+// persistence-agnostic domain fold unchanged.  This fixture pins that the
+// combination builds under `dotnet build /warnaserror`.
+system LedgerParts {
+  subdomain Core {
+    context Accounts {
+      event Opened { account: Account id, owner: string }
+      event LineAdded { account: Account id, memo: string, amount: int }
+
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        balance: int
+        contains lines: LedgerLine[]
+
+        entity LedgerLine {
+          memo:   string
+          amount: int
+        }
+
+        create open(owner: string) {
+          emit Opened { account: id, owner: owner }
+        }
+        operation post(memo: string, amount: int) {
+          precondition amount != 0
+          emit LineAdded { account: id, memo: memo, amount: amount }
+        }
+
+        apply(e: Opened) { owner := e.owner  balance := 0 }
+        apply(e: LineAdded) { balance := balance + e.amount }
+      }
+
+      repository Accounts for Account {
+        find byOwner(owner: string): Account? where this.owner == owner
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource accountsLog { for: Accounts, kind: eventLog, use: pg }
+  api A from Core
+  deployable api { platform: dotnet { persistence: dapper }, contexts: [Accounts], dataSources: [accountsLog], serves: A, port: 4000 }
+}

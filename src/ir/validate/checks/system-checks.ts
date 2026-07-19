@@ -1949,15 +1949,21 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // containment (`id` PK + `<agg>_id` FK + the part's scalar/enum/vo/id
         // columns), bulk-loaded on every read and hydrated through the root's
         // `_Create(State)` seam, full-list-replaced on save, and cascade-deleted.
-        // Still gated (v1 scope): a part-in-part (a part with its OWN
-        // containments), a reference-collection field on a part, and any
-        // containment on an EVENT-SOURCED aggregate (its stream folds children
-        // in-memory — no child table).
+        //
+        // Event-sourced (`persistedAs: eventLog`) aggregates persist to the
+        // `<ctx>_events` stream, NOT a state table — their contained parts fold
+        // in-memory from the event stream (the `apply(...)` bodies), so the
+        // relational containment emitters (child tables, HydrateAsync, the
+        // array-throwing `fieldColumn`) never run for them.  The Dapper event
+        // store reuses the persistence-agnostic domain fold unchanged, so
+        // `contains` (in any shape) needs no gate on an event-sourced aggregate.
+        //
+        // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
+        // with its OWN containments), a reference-collection field on a part,
+        // and nested parts combined with reference-collection associations.
         const contains = a.contains ?? [];
-        if (contains.length > 0) {
-          if (a.persistedAs === "eventLog") {
-            reject(where, "has nested entity parts on an event-sourced aggregate");
-          } else if ((a.associations ?? []).length > 0) {
+        if (contains.length > 0 && a.persistedAs !== "eventLog") {
+          if ((a.associations ?? []).length > 0) {
             // The Dapper repository's containment hydration reconstructs each
             // root through `_Create(State)`; the reference-collection load
             // post-sets a writable list.  v1 keeps these two hydrate paths

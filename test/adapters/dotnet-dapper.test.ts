@@ -165,6 +165,43 @@ system D {
       "CREATE TABLE IF NOT EXISTS o_events",
     );
   });
+
+  // Wave 4: an event-sourced aggregate that ALSO declares `contains` parts is
+  // no longer rejected.  Its parts fold in-memory from the event stream (the
+  // `apply(...)` bodies), so the ES Dapper event store emits NO state / child
+  // tables for them — only the `<ctx>_events` log.  The relational containment
+  // emitters (child tables, HydrateAsync) never run.
+  it("accepts contains on an event-sourced aggregate (no state/child tables)", async () => {
+    const src = `
+system D {
+  subdomain S {
+    context O {
+      event Opened { account: Account id, owner: string }
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        contains lines: LedgerLine[]
+        entity LedgerLine { memo: string  amount: int }
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: eventLog, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  port: 8080 }
+}`;
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the event-sourced-containment gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/AccountRepository.cs")!;
+    // Still the raw-Npgsql event store — folds the stream, no child-table load.
+    expect(repo).toContain("Account._FromEvents(id, __rows.Select(RowToEvent).ToList());");
+    expect(repo).not.toContain("HydrateAsync");
+    // No child table for the contained part; only the event log.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS ledger_lines");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS o_events");
+  });
 });
 
 // Reference collections (`X id[]`) on Dapper: one join table per association
