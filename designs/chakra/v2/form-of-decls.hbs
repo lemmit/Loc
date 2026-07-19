@@ -5,7 +5,7 @@
 {{/if}}  const {{#if useController}}{ register, handleSubmit, setError, {{#if hasServerDefaults}}reset, {{/if}}control, formState: { errors } }{{else}}{ register, handleSubmit, setError, {{#if hasServerDefaults}}reset, {{/if}}formState: { errors } }{{/if}} = useForm<Create{{aggregateName}}Request>({
     resolver: zodResolver(Create{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
-  });
-{{#if hasServerDefaults}}  useEffect(() => { if (__prep.data) reset({ ...{{{defaultValuesTs}}}, ...__prep.data }, { keepDirtyValues: true }); }, [__prep.data]);
+  });{{#if hasServerDefaults}}
+  useEffect(() => { if (__prep.data) reset({ ...{{{defaultValuesTs}}}, ...__prep.data }, { keepDirtyValues: true }); }, [__prep.data]);
 {{/if}}{{#each fieldArrays}}
   const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control, name: "{{this.name}}" });{{/each}}
