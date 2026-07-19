@@ -48,6 +48,7 @@ import { errorsPy } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
+import { renderPythonMetricsFile } from "./emit/metrics.js";
 import {
   emitPythonAuditMigration,
   emitPythonMigrations,
@@ -55,7 +56,6 @@ import {
   MIGRATE_PY,
 } from "./emit/migrations.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
-import { renderPythonMetricsFile } from "./emit/metrics.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";

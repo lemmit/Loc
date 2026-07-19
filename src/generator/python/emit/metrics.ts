@@ -11,8 +11,8 @@
 // catalog so the exposition stays comparable with the other backends.
 // ---------------------------------------------------------------------------
 
-import { Metrics } from "../../_obs/metrics.js";
 import { lines } from "../../../util/code-builder.js";
+import { Metrics } from "../../_obs/metrics.js";
 
 /** Render `app/obs/metrics.py` — the prometheus_client Counter + Histogram
  *  (default process/GC collectors ride the default REGISTRY automatically),
