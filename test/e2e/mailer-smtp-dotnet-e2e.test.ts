@@ -77,7 +77,7 @@ describe.skipIf(!ENABLED)(
           env: {
             ...process.env,
             ConnectionStrings__Default: `Host=${pg.host};Port=${pg.port};Database=${pg.db};Username=${pg.user};Password=${pg.password}`,
-            MAIL_URL: `smtp://${mailpit.smtp}`,
+            MAIL_URL: mailpit.authUrl,
             ASPNETCORE_URLS: `http://127.0.0.1:${port}`,
           },
           stdio: ["ignore", "pipe", "pipe"],
