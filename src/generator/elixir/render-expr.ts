@@ -1,9 +1,4 @@
-import type {
-  BinOp,
-  EnrichedAggregateIR,
-  ExprIR,
-  TypeIR,
-} from "../../ir/types/loom-ir.js";
+import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
