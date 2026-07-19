@@ -36,3 +36,76 @@ export function renderJavaId(name: string, idValueType: string, basePkg: string)
     ``,
   );
 }
+
+/** Parse a jsonb-string id value back into the id record's `value` type.
+ *  The converter's relational element type is `String` (see below), so
+ *  every read element arrives as a String — re-typed here per id kind. */
+function parseIdValueExpr(idValueType: string, varName: string): string {
+  switch (idValueType) {
+    case "int":
+      return `Integer.parseInt(${varName})`;
+    case "long":
+      return `Long.parseLong(${varName})`;
+    case "string":
+      return varName;
+    default:
+      return `UUID.fromString(${varName})`;
+  }
+}
+
+/** `shape(embedded)` reference-collection converter (`X id[]` → jsonb
+ *  id-array).  A `List<XId>` can't ride Hibernate's `@JdbcTypeCode(JSON)`
+ *  path directly: the @Embeddable id routes through the STRUCTURED-JSON
+ *  aggregate mapping, which bypasses the Jackson FormatMapper and
+ *  mis-serialises the typed-id list.  This `AttributeConverter` unwraps
+ *  the list to a plain `List<String>` of the bare id `value`s — a
+ *  collection the FormatMapper serialises to `["v1","v2"]`, the SAME
+ *  physical jsonb shape the other backends produce (.NET serialises a
+ *  Guid via System.Text.Json to a JSON string too; Drizzle / Ecto store
+ *  id-array columns as string arrays).  `String` is the relational
+ *  element type on purpose: the JSON FormatMapper erases the element
+ *  type on READ (it hands back exactly what JSON holds — strings), so a
+ *  `List<UUID>` relational type would ClassCast; `parseIdValueExpr`
+ *  re-types each string on the way back in.  `@Convert` +
+ *  `@JdbcTypeCode(JSON)` compose: the converter defines domain↔relational
+ *  (`List<String>`), the jdbc-type-code binds it through jsonb. */
+export function renderJavaIdListConverter(
+  targetAgg: string,
+  idValueType: string,
+  basePkg: string,
+): string {
+  const idClass = `${targetAgg}Id`;
+  const needsUuid = idValueType !== "int" && idValueType !== "long" && idValueType !== "string";
+  return lines(
+    `package ${basePkg}.domain.ids;`,
+    ``,
+    `import java.util.ArrayList;`,
+    `import java.util.List;`,
+    needsUuid ? `import java.util.UUID;` : null,
+    ``,
+    `import jakarta.persistence.AttributeConverter;`,
+    `import jakarta.persistence.Converter;`,
+    ``,
+    `@Converter`,
+    `public class ${idClass}JsonListConverter implements AttributeConverter<List<${idClass}>, List<String>> {`,
+    `    @Override`,
+    `    public List<String> convertToDatabaseColumn(List<${idClass}> attribute) {`,
+    `        List<String> out = new ArrayList<>();`,
+    `        if (attribute != null) {`,
+    `            for (${idClass} __e : attribute) out.add(String.valueOf(__e.value()));`,
+    `        }`,
+    `        return out;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public List<${idClass}> convertToEntityAttribute(List<String> dbData) {`,
+    `        List<${idClass}> out = new ArrayList<>();`,
+    `        if (dbData != null) {`,
+    `            for (String __v : dbData) out.add(new ${idClass}(${parseIdValueExpr(idValueType, "__v")}));`,
+    `        }`,
+    `        return out;`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}

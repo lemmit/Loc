@@ -143,17 +143,23 @@ export function jpaFieldAnnotations(
   // Reference collection (`Target id[]`) → the association's join table
   // (relational), or a jsonb id-array column under `shape(embedded)`.
   if (t.kind === "array" && t.element.kind === "id") {
-    if (opts.embedded) {
-      return [
-        `    @JdbcTypeCode(SqlTypes.JSON)`,
-        `    @Column(name = "${col}"${f.optional ? "" : ", nullable = false"})`,
-      ];
-    }
     const assoc = associationFor(owner, f.name);
     if (!assoc) {
       throw new Error(
         `java jpa: no AssociationIR for reference collection '${owner.name}.${f.name}' — enrichment derives one per aggregate-level Id[] field.`,
       );
+    }
+    if (opts.embedded) {
+      // The `List<TargetId>` can't ride `@JdbcTypeCode(JSON)` alone — the
+      // @Embeddable id triggers Hibernate's structured-JSON aggregate path,
+      // which bypasses the FormatMapper.  A per-target `AttributeConverter`
+      // (emitted in domain.ids) unwraps the list to bare `value`s so the
+      // FormatMapper serialises `["v1","v2"]` — the cross-backend jsonb shape.
+      return [
+        `    @Convert(converter = ${assoc.targetAgg}IdJsonListConverter.class)`,
+        `    @JdbcTypeCode(SqlTypes.JSON)`,
+        `    @Column(name = "${col}"${f.optional ? "" : ", nullable = false"})`,
+      ];
     }
     // `Target id[]` is contractually a set (membership only, no order), so
     // the join table carries no `ordinal` column — the composite (owner,
