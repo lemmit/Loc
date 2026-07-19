@@ -57,7 +57,7 @@ import { renderRetrievalParamsWithCt } from "./repository.js";
 const tableOf = (aggName: string): string => plural(snake(aggName));
 
 /** SQL + C# row type for an id value type. */
-function idTypes(vt: IdValueType): { sql: string; cs: string } {
+export function idTypes(vt: IdValueType): { sql: string; cs: string } {
   switch (vt) {
     case "int":
       return { sql: "integer", cs: "int" };
@@ -95,7 +95,7 @@ function primTypes(name: string): { sql: string; cs: string } {
 
 /** A persisted column + the C# expressions that read it off the aggregate
  *  (save) and reconstruct it into the `State` (hydrate). */
-interface DapperColumn {
+export interface DapperColumn {
   col: string; // snake_case column name (== Dapper param + Row prop)
   sql: string; // Postgres column type
   nullable: boolean;
@@ -135,7 +135,7 @@ function idColumn(agg: EnrichedAggregateIR, idClass = `${agg.name}Id`): DapperCo
  *  the validator gates these out, so reaching the throw means a gating gap.
  *  `accBase` is the C# object the SAVE expression reads off (`aggregate` for a
  *  root field, the per-child loop variable for a contained part's field). */
-function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
+export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
   const { type, nullable } = unwrapOptional(f.type);
   const col = snake(f.name);
   const prop = upperFirst(f.name);
@@ -1586,6 +1586,11 @@ export function renderDapperSchema(
   /** Names of `shape(embedded)` aggregates — flat root columns PLUS one JSONB
    *  column per containment (the part sub-graph folds into it), no child tables. */
   embeddedAggNames: ReadonlySet<string> = new Set(),
+  /** Extra `CREATE TABLE` statements (M-T6.9): the workflow saga-state,
+   *  projection read-model, and __loom_outbox tables the Dapper workflow
+   *  surface needs (the raw-Npgsql siblings of the EF-migration-owned tables).
+   *  Appended after the aggregate / event-log / provenance tables. */
+  extraTables: readonly string[] = [],
 ): string {
   // Event-sourced aggregates own no per-aggregate table — their stream lives in
   // the shared per-context `<ctx>_events` log emitted after this map.  Document
@@ -1730,7 +1735,7 @@ export function renderDapperSchema(
         ].join("\n"),
       ]
     : [];
-  const ddl = [...stateTables, ...eventLogTables, ...provenanceTable].join("\n\n");
+  const ddl = [...stateTables, ...eventLogTables, ...provenanceTable, ...extraTables].join("\n\n");
   return (
     lines(
       "// Auto-generated.  Dapper schema bootstrap (persistence: dapper).",

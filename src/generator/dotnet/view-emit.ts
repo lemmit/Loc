@@ -13,11 +13,42 @@ import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
+import type { DapperColumn } from "./emit/dapper.js";
+import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
 import { wireFieldType } from "./projection-emit.js";
-import { projectionRowDbSet } from "./projection-state-emit.js";
+import {
+  projectionRowClass,
+  projectionRowDbSet,
+  projectionRowTable,
+} from "./projection-state-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
-import { esCorrIdClass, esEventDbSet, esStreamType } from "./workflow-eventsourced-emit.js";
-import { workflowStateClass, workflowStateDbSet } from "./workflow-state-emit.js";
+import {
+  esCorrIdClass,
+  esEventDbSet,
+  esEventRecordClass,
+  esStreamType,
+} from "./workflow-eventsourced-emit.js";
+import {
+  workflowStateClass,
+  workflowStateDbSet,
+  workflowStateTable,
+} from "./workflow-state-emit.js";
+
+/** A private nested `Row` DTO + a `Map` builder for a Dapper view handler
+ *  (mirrors the store's row/map).  `pocoFqn` is the fully-qualified POCO type,
+ *  `cols` the Dapper columns; both `Row` and `Map` are unqualified members. */
+function dapperViewRowMap(pocoFqn: string, cols: DapperColumn[]): string {
+  const rowProps = cols
+    .map(
+      (c) => `        public ${c.rowCs} ${c.col} { get; set; }${c.nullable ? "" : " = default!;"}`,
+    )
+    .join("\n");
+  const inits = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`).join("\n");
+  return (
+    `    private sealed class Row\n    {\n${rowProps}\n    }\n` +
+    `    private static ${pocoFqn} Map(Row r) => new()\n    {\n${inits}\n    };`
+  );
+}
 
 // ---------------------------------------------------------------------------
 // .NET view emission.
@@ -44,9 +75,10 @@ export function emitViews(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string; sourcemap?: SourceMapRecorder },
+  options?: { routePrefix?: string; sourcemap?: SourceMapRecorder; usingDapper?: boolean },
 ): void {
   if (ctx.views.length === 0) return;
+  const usingDapper = !!options?.usingDapper;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
   const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
@@ -64,7 +96,7 @@ export function emitViews(
       out.set(queryPath, queryContent);
       sourcemap?.file(queryPath, queryContent, view.origin, construct);
       const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
-      const handlerContent = renderWorkflowViewHandler(view, wf, ctx, ns);
+      const handlerContent = renderWorkflowViewHandler(view, wf, ctx, ns, usingDapper);
       out.set(handlerPath, handlerContent);
       sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
       continue;
@@ -88,7 +120,7 @@ export function emitViews(
       out.set(queryPath, queryContent);
       sourcemap?.file(queryPath, queryContent, view.origin, construct);
       const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
-      const handlerContent = renderProjectionViewHandler(view, proj, ctx, ns);
+      const handlerContent = renderProjectionViewHandler(view, proj, ctx, ns, usingDapper);
       out.set(handlerPath, handlerContent);
       sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
       continue;
@@ -325,6 +357,7 @@ function renderWorkflowViewHandler(
   wf: WorkflowIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper = false,
 ): string {
   const queryName = `${upperFirst(view.name)}Query`;
   const handlerName = `${upperFirst(view.name)}Handler`;
@@ -356,42 +389,68 @@ function renderWorkflowViewHandler(
       )});`,
     );
   }
+  // Dapper reads through NpgsqlDataSource; EF through the scoped AppDbContext.
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const ctorFields = gateUsesUser
-    ? `    private readonly AppDbContext _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(AppDbContext db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
-    : `    private readonly AppDbContext _db;\n    public ${handlerName}(AppDbContext db) => _db = db;`;
+    ? `    private readonly ${dbType} _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(${dbType} db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly ${dbType} _db;\n    public ${handlerName}(${dbType} db) => _db = db;`;
   const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
   const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
-  // The read body diverges on `wf.eventSourced`.  A state-based saga pushes the
-  // view filter into the EF query over the `<Wf>State` DbSet (SQL `WHERE`).  An
-  // event-sourced workflow has no state table — it group-folds the `<wf>_events`
-  // stream into the same instance read model the ES instance LIST produces
-  // (load all event rows, group by StreamId, fold each via `_FromEvents`), then
-  // applies the SAME predicate IN-MEMORY (`.Where(r => …)` over the folded
-  // state).  Both project `instanceWireShape` field-for-field, so operationIds,
-  // route paths, and the response component stay identical across the two paths.
+  // The read body diverges on `wf.eventSourced`.  A state-based saga reads the
+  // `<Wf>State` saga rows; an event-sourced workflow group-folds the
+  // `<ctx>_events` stream into the same instance read model the ES instance
+  // LIST produces (load all event rows, group by StreamId, fold each via
+  // `_FromEvents`).  The view predicate applies IN-MEMORY (`.Where(r => …)`
+  // over the folded/mapped state) on both persistence adapters, and both
+  // project `instanceWireShape` field-for-field, so operationIds / route paths
+  // / the response component stay identical across shape AND adapter.
   let queryBody: string;
+  let rowMapMembers = "";
   if (eventSourced) {
-    // A workflow-sourced view lives in the workflow's own context, so `ctx` is
-    // the owning context of `wf` — its per-context `<Ctx>Events` DbSet.
-    const eventSet = esEventDbSet(wf, () => ctx.name);
     const st = esStreamType(wf);
     const stateCls = workflowStateClass(wf);
     const corrId = esCorrIdClass(wf);
+    if (usingDapper) {
+      const rec = `global::${ns}.Infrastructure.Persistence.Events.${esEventRecordClass(wf, () => ctx.name)}`;
+      const table = `${snake(ctx.name)}_events`;
+      const cols =
+        "seq AS Seq, stream_type AS StreamType, stream_id AS StreamId, version AS Version, type AS Type, data AS Data, occurred_at AS OccurredAt";
+      queryBody =
+        `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+        `        var __rows = (await conn.QueryAsync<${rec}>(new CommandDefinition("SELECT ${cols} FROM ${table} WHERE stream_type = @st ORDER BY stream_id, version", new { st = "${st}" }, cancellationToken: cancellationToken))).ToList();\n` +
+        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(System.Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()))${where ? `.Where(r => ${where})` : ""};\n` +
+        `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
+    } else {
+      const eventSet = esEventDbSet(wf, () => ctx.name);
+      queryBody =
+        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);\n` +
+        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(System.Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()))${where ? `.Where(r => ${where})` : ""};\n` +
+        `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
+    }
+  } else if (usingDapper) {
+    const stateFqn = `global::${ns}.Infrastructure.Persistence.Workflows.${workflowStateClass(wf)}`;
+    const cols = dapperWorkflowStateColumns(wf, false);
+    rowMapMembers = `${dapperViewRowMap(stateFqn, cols)}\n\n`;
+    const selCols = cols.map((c) => c.col).join(", ");
     queryBody =
-      `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);\n` +
-      `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(System.Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()))${where ? `.Where(r => ${where})` : ""};\n` +
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var __all = (await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${selCols} FROM ${workflowStateTable(wf)}", cancellationToken: cancellationToken))).Select(Map);\n` +
+      `        var rows = __all${where ? `.Where(r => ${where})` : ""};\n` +
       `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
   } else {
     queryBody =
       `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
       `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
   }
+  const persistenceUsing = usingDapper
+    ? "using Dapper;\nusing Npgsql;"
+    : "using Microsoft.EntityFrameworkCore;";
   return `// Auto-generated.
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${persistenceUsing}
 using Mediator;
 using ${ns}.Application.Workflows;
 using ${ns}.Domain.Ids;
@@ -405,7 +464,7 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 {
 ${ctorFields}
 
-    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
+${rowMapMembers}    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
 ${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
     }
@@ -439,6 +498,7 @@ function renderProjectionViewHandler(
   proj: ProjectionIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper = false,
 ): string {
   const queryName = `${upperFirst(view.name)}Query`;
   const handlerName = `${upperFirst(view.name)}Handler`;
@@ -473,20 +533,38 @@ function renderProjectionViewHandler(
       )});`,
     );
   }
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const ctorFields = gateUsesUser
-    ? `    private readonly AppDbContext _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(AppDbContext db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
-    : `    private readonly AppDbContext _db;\n    public ${handlerName}(AppDbContext db) => _db = db;`;
+    ? `    private readonly ${dbType} _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(${dbType} db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly ${dbType} _db;\n    public ${handlerName}(${dbType} db) => _db = db;`;
   const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
   const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
-  const queryBody =
-    `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
-    `        return rows.Select(r => new ${responseRecord}(${projFields})).ToList();`;
+  let rowMapMembers = "";
+  let queryBody: string;
+  if (usingDapper) {
+    const rowFqn = `global::${ns}.Infrastructure.Persistence.Projections.${projectionRowClass(proj)}`;
+    const cols = dapperProjectionColumns(proj);
+    rowMapMembers = `${dapperViewRowMap(rowFqn, cols)}\n\n`;
+    const selCols = cols.map((c) => c.col).join(", ");
+    queryBody =
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var __all = (await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${selCols} FROM ${projectionRowTable(proj)}", cancellationToken: cancellationToken))).Select(Map);\n` +
+      `        var rows = __all${where ? `.Where(r => ${where})` : ""};\n` +
+      `        return rows.Select(r => new ${responseRecord}(${projFields})).ToList();`;
+  } else {
+    queryBody =
+      `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
+      `        return rows.Select(r => new ${responseRecord}(${projFields})).ToList();`;
+  }
+  const persistenceUsing = usingDapper
+    ? "using Dapper;\nusing Npgsql;"
+    : "using Microsoft.EntityFrameworkCore;";
   return `// Auto-generated.
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${persistenceUsing}
 using Mediator;
 using ${ns}.Application.Workflows;
 using ${ns}.Domain.Ids;
@@ -500,7 +578,7 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 {
 ${ctorFields}
 
-    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
+${rowMapMembers}    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
 ${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
     }

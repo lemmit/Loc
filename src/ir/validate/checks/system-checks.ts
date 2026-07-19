@@ -1902,16 +1902,13 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // `seed` data is now supported — the Dapper seeder (Seed.cs) frames the
       // marker table / raw inserts on Npgsql+Dapper while reusing the
       // persistence-agnostic domain-`Create` path (I<Agg>Repository.SaveAsync).
-      // Workflow event subscriptions (and therefore channels/outbox): the
-      // saga handlers + outbox dispatcher/relay inject the EF AppDbContext,
-      // which a Dapper deployable does not emit — the project would not
-      // compile.  Reject loudly instead (dispatch-delivery-semantics.md's
-      // Dapper outbox is a follow-up slice).
-      if (((ctx as EnrichedBoundedContextIR).eventSubscriptions ?? []).length > 0)
-        reject(
-          `context '${ctxName}'`,
-          "declares workflow event subscriptions (the Dapper dispatch/outbox path is not wired)",
-        );
+      // Workflow event subscriptions (and therefore channels/outbox) are now
+      // wired on the Dapper adapter (M-T6.9): the saga handlers depend on the
+      // persistence-neutral Domain.Common ports, whose raw-Npgsql adapters
+      // (DapperPersistencePorts.cs) replace the EF AppDbContext ones; the outbox
+      // dispatcher/relay + workflow-instances read controller + saga / outbox /
+      // event tables are all emitted through NpgsqlDataSource + DbSchema.  No
+      // gate.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
