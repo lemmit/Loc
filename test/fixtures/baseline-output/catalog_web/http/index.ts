@@ -3,6 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { sql } from "drizzle-orm";
 import { requestIdMiddleware } from "../obs/request-id";
+import { registry } from "../obs/metrics";
 import { productRoutes } from "./product.routes";
 import { ProductRepository } from "../db/repositories/product-repository";
 import { customerRoutes } from "./customer.routes";
@@ -74,6 +75,15 @@ export function createApp(
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_degraded", checks: ["db"] });
       return c.json({ status: "not_ready", error: message }, 503);
     }
+  });
+  // Prometheus scrape target — the text exposition of the registry in
+  // obs/metrics.ts (default process/runtime metrics + the HTTP
+  // counter/histogram recorded by the request-id middleware).  Sits
+  // beside the probes with the same access exposure; a Prometheus
+  // server or the OTel collector scrapes it on the deployable's port.
+  app.get("/metrics", async (c) => {
+    const body = await registry.metrics();
+    return c.text(body, 200, { "Content-Type": registry.contentType });
   });
   app.route("/api/products", productRoutes(new ProductRepository(db, events)));
   app.route("/api/customers", customerRoutes(new CustomerRepository(db, events)));
