@@ -37,9 +37,10 @@ describe("scaffolded Detail op-modal this-relative seeding", () => {
     expect(tsx!).toMatch(/record:\s*OrderResponse/);
     expect(tsx!).toMatch(/defaultValues:\s*\{[^}]*memo:\s*record\.customerId/);
     // The opener takes the record; the trigger — now inside the QueryView data
-    // lambda — passes the in-scope loaded record binding (`data`).
+    // lambda — passes the resolved loaded-record receiver (`<hook>.data`,
+    // non-null-asserted per #2060's data-lambda threading).
     expect(tsx!).toMatch(/function openRetagModal\(mut:[^)]*,\s*record:\s*OrderResponse\)/);
-    expect(tsx!).toMatch(/openRetagModal\(retag,\s*data\)/);
+    expect(tsx!).toMatch(/openRetagModal\(retag,\s*orderById\.data!\)/);
   });
 
   it("shadcn (self-contained OpModal) threads the record too", async () => {
