@@ -11,6 +11,7 @@ import { operationIsGuarded } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import {
   collectWireUsings,
@@ -20,6 +21,7 @@ import {
 } from "../dto-mapping.js";
 import type { ControllerShape } from "../emit/api.js";
 import { renderController } from "../emit.js";
+import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
 
 /** One arm of a return-typed operation's controller translation. */
 export interface ReturnUnionArm {
@@ -164,6 +166,20 @@ export function emitController(
     for (const p of find.params) collectWireUsings(p.type, ctx, usings);
   // A paged find's action returns `Paged<…Response>` from the shared runtime.
   if (exposedFinds.some((f) => pagedReturn(f.returnType))) usings.add(`${ns}.Domain.Common`);
+  // A server-sourced field default (`now()` / `currentUser.*`) is applied
+  // per-request in the create command construction (the field is a nullable
+  // optional request param): `request.X is null ? <default> : <parse>`.  A
+  // `currentUser.*` default binds the ambient principal via RequestContext
+  // (Domain.Common); a bare now() does not.
+  if (
+    requiredFields.some(
+      (f) =>
+        f.default !== undefined &&
+        isServerSourcedDefault(f.default) &&
+        !(f.default.kind === "literal" && f.default.lit === "now"),
+    )
+  )
+    usings.add(`${ns}.Domain.Common`);
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
@@ -171,9 +187,21 @@ export function emitController(
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? emitsRestCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
-      createCmdArgs: requiredFields.map((f) =>
-        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),
-      ),
+      createCmdArgs: requiredFields.map((f) => {
+        const wireArg = wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx);
+        if (f.default !== undefined && isServerSourcedDefault(f.default)) {
+          // The nullable request field coalesces to the per-request default.
+          // `renderCsExpr` yields the DOMAIN value (`DateTime.UtcNow`, the
+          // ambient claim) matching the command's param type; in the `: <parse>`
+          // arm C# flow-narrows `request.X` to non-null, so the parse is clean.
+          const dflt = renderCsExpr(f.default, {
+            thisName: "this",
+            currentUserExpr: AMBIENT_CURRENT_USER,
+          });
+          return `request.${upperFirst(f.name)} is null ? ${dflt} : ${wireArg}`;
+        }
+        return wireArg;
+      }),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
         .map((op) => buildOperationSpec(agg, op, ctx, ns)),
