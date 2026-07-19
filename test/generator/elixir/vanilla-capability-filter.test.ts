@@ -94,4 +94,39 @@ describe("vanilla capability filter — AND-ed into every read", () => {
     expect(repo).toContain("query = from(record in Api.Shop.Order)");
     expect(repo).toContain("case Repo.get(Api.Shop.Order, id) do");
   });
+
+  // Regression (docs/audits/repo-code-review-2026-07.md E3): a money/decimal
+  // capability filter must render with the NATIVE Ecto-query form
+  // (`record.total > 10.00`), not the in-memory `Decimal.compare(...) == :gt`
+  // struct API — the latter is not a valid Ecto query expression and fails
+  // `mix compile`.  Only bool/id/string/enum render identically in both modes,
+  // which is why the missing `filterArgs` went unnoticed until money.
+  it("renders a money capability filter as native Ecto, not Decimal.compare", async () => {
+    const src = `
+system Bill {
+  subdomain Core {
+    context Ledger {
+      aggregate Invoice {
+        code: string
+        total: money
+        filter this.total > money("10.00")
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  api BillApi from Core
+  storage pg { type: postgres }
+  resource st { for: Ledger, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Ledger]
+    dataSources: [st]
+    serves: BillApi
+    port: 4000
+  }
+}`;
+    const repo = file(await generateSystemFiles(src), "/ledger/invoice_repository.ex");
+    expect(repo).toContain("where: record.total > 10.00");
+    expect(repo).not.toContain("Decimal.compare");
+  });
 });
