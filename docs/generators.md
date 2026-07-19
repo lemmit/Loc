@@ -860,7 +860,9 @@ seam because Dart list literals are comma-separated.
 
 `match await <api>.<Agg>.<op>()` (async effect) projects an **async Riverpod Notifier method** (`Future<void> <action>(String id) async`): it POSTs the instance op to `/<coll>/$id/<op>`, reifies a non-2xx ProblemDetails back into the error variant (clobbering the wire `type` tag), then a Dart-3 `switch` over `result['type']` reifies each arm via `fromJson` and runs the arm body as a `state.copyWith` write.  The page-shell binds the action as an id-capturing closure (`final <a> = () => notifier.<a>(id);`) so the button's bare `<a>()` call is unchanged (`riverpod-emit.ts`).
 
-Known frontier: scalar/value-object array inputs, `UserComponent`, and inline `:=` view writes are deferred (fall back to a diagnostic comment — never broken Dart).  See `docs/old/plans/flutter-mobile-implementation.md`.
+A scalar array form field (`tags: string[]` / `scores: int[]`) renders as a repeatable add/remove row list (one `TextEditingController` per row, managed in state; numeric arrays parse each row on submit).
+
+Known frontier: array-of-value-object form inputs (repeatable sub-forms) and `UserComponent` invocation are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier.  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
