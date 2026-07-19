@@ -339,6 +339,11 @@ mission line + this plan's link in `docs/new-plan/T4-eventing-temporal.md`.
   (i18n-ready — the old §5.2 richer surface), HTML bodies, multi-recipient/cc/bcc.
   Introduce a `sendTemplated` capability + verb row; keep `send` as the plain-text
   primitive.
+- **Credential secret-wiring (own proposal)** — SMTP now authenticates from the
+  `MAIL_URL` connection URL on all five backends, but the credential is still
+  injected out-of-band; wiring `connection: secret(...)/env(...)` into the
+  generated compose/k8s manifests is tracked in
+  [connection-secret-wiring](connection-secret-wiring.md).
 
 ## 8. Open questions
 1. **`kind:` literal** — *resolved* to `mailer` (§1): a corpus grep found the
