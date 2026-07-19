@@ -92,10 +92,12 @@ ejected **body** instead of a blank page. Mechanically:
   overrides exactly one scaffold source). No new validator; the existing one
   must simply treat the ejected page as the override it structurally is.
 
-**Open question A1 (resolve before code):** granularity of the trigger — per
-individual page (`OrderDetail`), or per aggregate/archetype (all three `Order`
-pages)? Recommendation: per individual page (finest useful grain; the user can
-invoke it three times), with the code action offered on each classified page.
+**Decision A1 (resolved 2026-07-19): per individual page.** `classifyPage`
+already gives every produced page a stable identity, so the code action anchors
+on the `with scaffold(...)` clause and offers one *"Unfold page &lt;Name&gt;"*
+per produced page; the existing whole-`ui` unfold stays as *"Unfold all"*.
+"All `Order` pages" is three invocations — no separate per-aggregate action
+(consistent with scaffold's "list what you want, not what you don't" ethos).
 
 ### Slice B — Named override slots (the true cliff-softener)
 
@@ -104,19 +106,23 @@ slot with custom markup — no ejection, page keeps regenerating.
 
 Two sub-decisions, both reusing existing surface rather than inventing:
 
-1. **Where slots live.** The scaffold body-builders gain a small, *fixed* set
-   of named slots at stable positions (e.g. `Detail` page: `header`,
-   `beforeOperations`, `afterOperations`, `footer`). Closed set, like the
-   primitive library — not user-declarable slot names, so the contract stays
-   pinned and the walker can emit them unconditionally.
-2. **How an author fills one.** A page-level `override <slot> { … }` block whose
-   body is ordinary walker-stdlib markup, dispatched through the existing
-   `Slot`/`slot` element mechanism. Sketch:
+1. **Where slots live — and their scope.** The scaffold body-builders gain a
+   small, *fixed*, closed set of named slots at stable positions. The
+   load-bearing subtlety: a scaffold body is **not flat**. The Detail body is
+   `Stack[Breadcrumbs, Heading, QueryView{ data → Stack[card, related, ops] }]`
+   (`_body-builders.ts:scaffoldDetailsParts`), so a slot placed **inside** the
+   `data` lambda can reference the loaded record and one at page level cannot.
+   Every slot therefore declares a **scope**, and the validator rejects a
+   record reference (`data.…`) in a static slot.
+
+2. **How an author fills one.** A top-level `ui` member
+   `override <Page>.<slot> { … }` whose body is ordinary walker-stdlib markup,
+   dispatched through the existing `Slot`/`slot` element mechanism. Sketch:
 
 ```ddd
 ui SalesAdmin with scaffold(aggregates: [Order]) {
-  override OrderDetail.afterOperations {
-    Card { title: "Audit trail" QueryView { of: api.Order.history(id) } … }
+  override OrderDetail.afterOperations {          // record-scoped: `data` in scope
+    Card { title: "Audit trail" QueryView { of: api.Order.history(data.id) } … }
   }
 }
 ```
@@ -125,15 +131,37 @@ The scaffolded `OrderDetail` still regenerates from the model; only the named
 region carries user content. This is the invariant-preserving path — the model
 stays the single source of truth.
 
-**Open question B1:** grammar for the override handle — `override Page.slot { }`
-(new soft keyword `override`) vs. reusing `page Page { fill slot { } }`.
-Recommendation: `override <Page>.<slot> { }` as a top-level `ui` member; check
-`override` for corpus identifier collisions the way M-T2.1 checked `rename`
-(likely far rarer, but must verify before claiming the keyword).
+**Decision B1 (resolved 2026-07-19): `override <Page>.<slot> { … }`** as a
+top-level `ui` member, `override` admitted as a soft keyword. Verified: `override`
+has **zero** identifier occurrences across `examples/`, `web/src/examples/`, and
+`test/fixtures/corpus/`, and is not already a grammar keyword (the only current
+uses are prose comments) — clean to claim, à la M-T2.1's `rename` check.
+Rejected `page X { fill slot { } }`: declaring `page X` already triggers
+override-by-name = **full replacement** (§10). Overloading it with region-fill
+would give one syntax two opposite meanings ("replace the whole page" vs "keep
+generating, fill one region"). A distinct `override` member keeps them separate.
 
-**Open question B2:** the closed slot set per page archetype — enumerate it in
-this doc before code, gate additions behind a `heex-parity`-style freeze test so
-a slot added to the TSX body-builders can't silently skip HEEx.
+**Decision B2 (resolved 2026-07-19): the closed slot set per archetype, each
+with a scope.** Slot names are a closed set (like the primitive library);
+`static` slots see no record, `record` slots run inside the Detail `data`
+lambda with the loaded entity bound as `data`.
+
+| Archetype | `static` slots | `record` slots (`data` bound) |
+|---|---|---|
+| `<Agg>List` | `header`, `toolbarActions`, `footer` | — |
+| `<Agg>New` | `header`, `beforeForm`, `afterForm`, `footer` | — |
+| `<Agg>Detail` | `header`, `footer` | `beforeRecord`, `afterRecord`, `afterOperations` |
+| `<Wf>Workflow` | `header`, `beforeForm`, `afterForm`, `footer` | — |
+| `<View>View` | `header`, `footer` | — |
+
+The set is pinned by a `slot-set.test.ts` freeze test mirroring
+`test/generator/elixir/heex-parity.test.ts`: a slot added to the TSX
+body-builders without a renderer on every walker target (or a pinned reason)
+fails CI, so a slot can't silently skip HEEx/Feliz. Validator obligations:
+`loom.slot-unknown` (name not in the archetype's set), `loom.slot-scope` (a
+`data.…` reference in a `static` slot), `loom.slot-target-not-scaffolded` (an
+`override` for a page the model doesn't scaffold), `loom.slot-duplicate` (two
+`override`s for the same `Page.slot`).
 
 ## Decisions honored
 
@@ -168,5 +196,5 @@ a slot added to the TSX body-builders can't silently skip HEEx.
 ## Sequencing
 
 Slice A first (self-contained, no emitter fan-out, immediate DX win), Slice B
-second (design questions B1/B2 resolved in a follow-up revision of this doc
-before its code). Neither blocks the other.
+second. All three design questions (A1/B1/B2) are now resolved above, so both
+slices are implementation-ready; neither blocks the other.
