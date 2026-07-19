@@ -7,7 +7,8 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -103,6 +104,17 @@ export function renderJavaService(
     return `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), raw)};`;
   });
   const createArgs = createParams.map((f) => f.name).join(", ");
+  // A `currentUser.*` create-field default coalesces to the ambient principal
+  // (`... : currentUser.<claim>()`), so the create method needs `currentUser`
+  // bound off the accessor — the same binding the operations use.  (A bare
+  // `now()` default renders `Instant.now()` and needs nothing.)
+  const createDefaultUsesUser =
+    !!ctx.authed &&
+    !ctx.esCreateParams &&
+    createParams.some((f) => {
+      const dflt = (f as FieldIR).default;
+      return dflt !== undefined && isServerSourcedDefault(dflt) && exprUsesCurrentUser(dflt);
+    });
   // Lifecycle stamps (audit / softDelete) are persist-time on Java: the entity
   // carries Spring Data JPA auditing annotations (@CreatedDate / @CreatedBy /
   // @LastModifiedDate / @LastModifiedBy) filled by the AuditingEntityListener
@@ -143,6 +155,7 @@ export function renderJavaService(
   const createLines = emitsRestCreate(agg)
     ? [
         `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
+        createDefaultUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         ...createLets,
         hasCreateValidator && !ctx.esCreateParams
           ? `        ${agg.name}Validators.create(${createArgs});`
@@ -258,7 +271,7 @@ export function renderJavaService(
   // system even when no operation otherwise uses the current user, so the
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
-  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed);
+  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed) || createDefaultUsesUser;
   // Optimistic concurrency (`versioned`): every public mutation threads the
   // client's expected version from the `If-Match` request header (think-time
   // CAS).  When supplied and it disagrees with the freshly-loaded aggregate's

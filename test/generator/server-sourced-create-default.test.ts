@@ -178,3 +178,51 @@ describe("server-sourced create-path defaults — Python", () => {
     expect(routes).toMatch(/status:\s*str = "draft"/);
   });
 });
+
+const JAVA = (field: string, extra = "") => `
+  system S {
+    ${extra}
+    subdomain Sales {
+      context Sales {
+        aggregate Order with crudish {
+          customerId: string
+          ${field}
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    storage db { type: postgres }
+    resource st { for: Sales, kind: state, use: db }
+    deployable api { platform: java contexts: [Sales] dataSources: [st] serves: SalesApi port: 3000${extra ? " auth: required" : ""} }
+  }
+`;
+
+describe("server-sourced create-path defaults — Java", () => {
+  it("a now() default coalesces to Instant.now() in the create service", async () => {
+    const files = await generateSystemFiles(JAVA("createdAt: datetime = now()"));
+    const svc = fileEndingWith(files, "orders/OrderService.java");
+    expect(svc).toMatch(
+      /var createdAt = request\.createdAt\(\) != null \? Instant\.parse\(request\.createdAt\(\)\) : Instant\.now\(\)/,
+    );
+  });
+
+  it("a currentUser.* default binds the accessor and coalesces", async () => {
+    const files = await generateSystemFiles(
+      JAVA("ownerId: string = currentUser.tenantId", "user { tenantId: string }"),
+    );
+    const svc = fileEndingWith(files, "orders/OrderService.java");
+    // The accessor is injected and bound in the create method (was undefined before).
+    expect(svc).toMatch(/private final CurrentUserAccessor currentUserAccessor;/);
+    expect(svc).toMatch(/var currentUser = currentUserAccessor\.user\(\);/);
+    expect(svc).toMatch(
+      /var ownerId = request\.ownerId\(\) != null \? request\.ownerId\(\) : currentUser\.tenantId\(\)/,
+    );
+  });
+
+  it("a now()-only default does NOT inject the user accessor", async () => {
+    const files = await generateSystemFiles(JAVA("createdAt: datetime = now()"));
+    const svc = fileEndingWith(files, "orders/OrderService.java");
+    expect(svc).not.toMatch(/CurrentUserAccessor/);
+  });
+});
