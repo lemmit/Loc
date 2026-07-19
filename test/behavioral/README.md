@@ -49,6 +49,19 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   (`dotnet`) + a reachable `ConnectionStrings__Default`; run:
   `node run-dotnet.mjs`. `LOOM_BH_DOTNET_BASE` dispatches at an
   already-running server (skips the boot).
+- **dapper** — the SAME .NET runner and SAME emitted api suite, but forcing the
+  `persistence: dapper` adapter (raw Npgsql + hand-rolled SQL, no EF Core)
+  instead of the default EF Core (`run-dapper.mjs`). The ONLY delta is a source
+  transform: the corpus/systems sources declare `platform: __PLATFORM__`, and
+  this runner swaps `__PLATFORM__` for the realization clause
+  `dotnet { persistence: dapper }` — literally the same corpus/tests, so the
+  drained Dapper adapter gets the same RUNTIME coverage EF Core has (booted,
+  migrated, CRUD round-tripped) rather than only the compile gate
+  (`test/e2e/fixtures/dotnet-build/dapper*.ddd`). Its own
+  `behavioral-e2e-dapper.yml` workflow (a `services: postgres` sidecar); same
+  requirements as the EF runner; run: `node run-dapper.mjs`.
+  `LOOM_BH_DAPPER_BASE` dispatches at an already-running server (skips the
+  boot).
 - **java** — the SAME emitted api e2e, run against a booted **generated
   Java backend** (Spring Boot + JPA) over real HTTP (`run-java.mjs`, corpus
   `corpus-java.json` + `corpus-java/`). Like Python/.NET, Java has no

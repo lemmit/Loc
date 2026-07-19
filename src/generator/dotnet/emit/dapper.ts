@@ -1411,7 +1411,18 @@ export function renderDapperDocumentRepository(
   const versioned = aggregateIsVersioned(agg);
   const finds = (repo?.finds ?? []).map((raw) => unionFindAsOptionalTwin(raw, agg.name));
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
-  const deser = `${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.data, __json)!)`;
+  // Rehydrate from the JSONB snapshot, but the `version` COLUMN is the
+  // authoritative concurrency version (INSERT stamps it `1`, ON CONFLICT bumps
+  // it) — the snapshot's own `version` field is stale (serialized from the
+  // pre-persist aggregate, so `0` on first write).  Overriding it with
+  // `__d.version` on read mirrors the relational Dapper repo's `Version =
+  // r.version` hydration; without it a loaded aggregate carries version `0`,
+  // its next Save sends `ExpectedVersion = 0`, the CAS `WHERE version = 0`
+  // misses the row (column is `1`), and every second write 409s.
+  const deserSnap = versioned
+    ? `System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.data, __json)! with { Version = __d.version }`
+    : `System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.data, __json)!`;
+  const deser = `${agg.name}.FromSnapshot(${deserSnap})`;
 
   // SaveAsync upsert — CAS-guarded on `version` when the aggregate is
   // `versioned` (the same optimistic-concurrency shape the relational Dapper
@@ -1891,7 +1902,17 @@ export function renderDapperSchema(
       "    public static async Task EnsureAsync(NpgsqlDataSource db, CancellationToken cancellationToken = default)",
       "    {",
       "        await using var conn = await db.OpenConnectionAsync(cancellationToken);",
-      "        await conn.ExecuteAsync(new CommandDefinition(Sql, cancellationToken: cancellationToken));",
+      "        // One statement per round-trip.  Npgsql runs a multi-statement command",
+      "        // through the extended query protocol, which PARSES every statement",
+      "        // before executing any — so a `CREATE INDEX` (or FK) referencing a table",
+      "        // an earlier statement creates fails to parse (`column ... does not",
+      "        // exist`).  Splitting on `;` keeps each DDL statement its own command, so",
+      "        // the table exists before the next statement is parsed.  Every emitted",
+      "        // statement is `;`-terminated with no inner semicolons.",
+      "        foreach (var stmt in Sql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))",
+      "        {",
+      "            await conn.ExecuteAsync(new CommandDefinition(stmt, cancellationToken: cancellationToken));",
+      "        }",
       "    }",
       "}",
     ) + "\n"
