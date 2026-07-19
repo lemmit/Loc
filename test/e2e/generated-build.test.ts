@@ -837,5 +837,37 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 300_000);
+
+    // MikroORM aggregate-inheritance (TPH sharedTable) + nested contained parts:
+    // a concrete subtype whose contained part tree FKs the SHARED base row.  The
+    // repository composes the inheritance `kind` scope with the containment
+    // hydrate/diff-sync pass.  Type-checks under tsc.
+    it("system `persistence: mikroorm` + aggregate inheritance + nested parts — composes, type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-inh-parts-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/mikroorm-inheritance-parts.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const entities = fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8");
+        // The concrete's contained parts get child tables even though it owns no
+        // Row of its own under TPH (they FK the shared base row).
+        expect(entities).toContain("export class ChargeRow");
+        expect(entities).toContain("export class SplitRow");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
   },
 );

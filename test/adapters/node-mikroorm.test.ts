@@ -1301,3 +1301,104 @@ describe("mikroorm — shape(embedded) + Id[] reference collections (fold)", () 
     expect(repo).not.toContain("nativeDelete(TeamRoster");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Aggregate-inheritance participant + contained parts — a CONCRETE subtype
+// (`extends` a base) that also `contains` a nested part tree.  The repository
+// composes the inheritance `kind` scope with the containment hydrate pass: the
+// part child tables FK the row that owns the concrete (the shared TPH row / the
+// concrete's own TPC table).  Only an ABSTRACT base with its own parts stays
+// gated (no repository owns it; concretes don't inherit its `contains`).
+// ---------------------------------------------------------------------------
+describe("mikroorm — aggregate-inheritance participant + contained parts", () => {
+  const inhParts = (layout: "sharedTable" | "ownTable") => `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum CardNetwork { Visa, Mastercard, Amex }
+      valueobject Money { amount: int  currency: string }
+      abstract aggregate PaymentMethod inheritanceUsing: ${layout} {
+        holderName: string
+        last4: string
+      }
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        contains charges: Charge[]
+        entity Charge {
+          amount: Money
+          contains splits: Split[]
+        }
+        entity Split { label: string }
+      }
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+      }
+      repository CreditCards for CreditCard { }
+      repository BankAccounts for BankAccount { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("TPH concrete + nested parts no longer trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(inhParts("sharedTable"));
+    expect(errors).toEqual([]);
+  });
+
+  it("TPH emits child Row tables for the concrete's nested parts (FK the shared base row)", async () => {
+    const { files } = await emit(inhParts("sharedTable"));
+    const entities = files.get("api/db/entities.ts")!;
+    // The shared base table + a child table per contained part.
+    expect(entities).toContain('tableName: "payment_methods"');
+    expect(entities).toContain("export class ChargeRow");
+    expect(entities).toContain("export class SplitRow");
+    // No per-concrete Row under TPH (its columns live in the shared table).
+    expect(entities).not.toContain("class CreditCardRow");
+    const repo = files.get("api/db/repositories/creditCard-repository.ts")!;
+    // The repo composes the `kind` scope (reads/writes the shared PaymentMethodRow)…
+    expect(repo).toContain("PaymentMethodRow");
+    expect(repo).toContain('{ kind: "CreditCard" }');
+    // …with the containment child-table hydrate + diff-sync.
+    expect(repo).toContain("ChargeRow");
+    expect(repo).toContain("await em.upsert(ChargeRow,");
+    expect(repo).toContain("await em.nativeDelete(ChargeRow,");
+  });
+
+  it("TPC concrete + nested parts no longer trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(inhParts("ownTable"));
+    expect(errors).toEqual([]);
+  });
+
+  it("TPC emits the concrete's own table + child Row tables for its nested parts", async () => {
+    const { files } = await emit(inhParts("ownTable"));
+    const entities = files.get("api/db/entities.ts")!;
+    // Each concrete owns its table; the parts FK the concrete's own row.
+    expect(entities).toContain('tableName: "credit_cards"');
+    expect(entities).toContain("export class ChargeRow");
+    expect(entities).toContain("export class SplitRow");
+  });
+
+  it("still rejects an ABSTRACT inheritance base with its own contained parts (no repository owns it)", async () => {
+    const src = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      abstract aggregate Doc inheritanceUsing: sharedTable {
+        title: string
+        contains tags: Tag[]
+        entity Tag { label: string }
+      }
+      aggregate Article extends Doc with crudish { body: string }
+      repository Articles for Article { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+    const { errors } = await emit(src);
+    expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
+  });
+});

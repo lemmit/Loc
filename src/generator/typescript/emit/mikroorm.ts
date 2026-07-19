@@ -535,7 +535,18 @@ export function renderMikroEntities(
     if (agg.persistedAs === "eventLog") continue;
     // TPH concretes (aggregate-inheritance.md, sharedTable) own no Row — their
     // columns live in the base's shared table, emitted once for the base below.
-    if (isTphConcrete(agg, aggs)) continue;
+    // …but a TPH concrete's contained parts still need their own child tables:
+    // each part FKs the SHARED base row (the concrete has no table of its own),
+    // and the part row's `parentId` holds that shared-table row id — which is
+    // exactly the concrete's id (TPT-via-`contains`).  Mirrors emit/schema.ts.
+    if (isTphConcrete(agg, aggs)) {
+      for (const part of agg.parts ?? []) {
+        const { block, schemaName: partSchema } = renderPartRowEntity(part, ctx);
+        schemaNames.push(partSchema);
+        blocks.push(block);
+      }
+      continue;
+    }
     // Abstract bases own no table EXCEPT a TPH root, which owns the shared
     // table (a TPC / intermediate abstract base emits nothing).
     if (agg.isAbstract && !isTphBase(agg, aggs)) continue;

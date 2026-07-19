@@ -2133,11 +2133,22 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // containment tree through `_fromEvents`) — an ES aggregate has no state
         // table, so the relational child-table emitters never run for it; the
         // parts ride in the folded aggregate exactly as on the .NET Dapper ES
-        // path, so there is nothing to gate.  Aggregate-inheritance participants
-        // with parts stay gated (drained separately).
+        // path, so there is nothing to gate.  A CONCRETE aggregate-inheritance
+        // participant (`extends` a base) composes the inheritance repo with the
+        // containment hydrate pass: its part child tables FK the row that owns
+        // the concrete (the shared TPH row / the concrete's own TPC table), so
+        // the containment tree round-trips like any state aggregate's parts (the
+        // relational repo already emits both).  Only an ABSTRACT inheritance base
+        // with its OWN parts stays gated — an abstract base owns no repository
+        // (validator-forbidden) and concretes do not inherit its `contains`, so
+        // its part tables would have no reader/writer: genuinely unmappable.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          if (a.isAbstract || a.extendsAggregate)
-            reject(where, "contains nested entity parts on an aggregate-inheritance participant");
+          if (a.isAbstract)
+            reject(
+              where,
+              "contains nested entity parts on an abstract aggregate-inheritance base " +
+                "(the base owns no repository, and concretes do not inherit its parts)",
+            );
         }
         // `filter` capability predicates ARE supported: the repository ANDs each
         // non-principal predicate (a MikroORM FilterQuery) into every root read
