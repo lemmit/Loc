@@ -46,6 +46,9 @@ export interface AngularCreateFormSpec {
   /** Single-value-object (`price: Money`) fields — the page-shell declares a
    *  nested `FormGroup` control per entry. */
   fieldGroups: AngularFieldGroupSpec[];
+  /** True when the form has ≥1 `File` field — the page-shell emits the shared
+   *  `onFileUpload` method once per component. */
+  hasFile: boolean;
 }
 
 /** Resolve the `CreateForm(of: <Agg>)` aggregate ref. */
@@ -92,7 +95,7 @@ export function renderAngularCreateForm(
   const close = "  ".repeat(depth);
   // Split array-of-value-object inputs off — they render as a `FormArray` of
   // row groups; every other field stays a flat `FormControl`.
-  const parts = partitionAngularFields(fields, bc, ns, ctx);
+  const parts = partitionAngularFields(fields, bc, ns, ctx, formVar);
   const fieldMarkup = parts.flatMarkup;
   const submit = formButton(ctx, {
     type: "submit",
@@ -117,6 +120,7 @@ export function renderAngularCreateForm(
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
     fieldGroups: parts.fieldGroups,
+    hasFile: parts.hasFileField,
   };
   angularSink(ctx).forms.push(spec);
 

@@ -268,7 +268,19 @@ export function renderVuePage(input: VuePageShellInput): string {
   const stateLines: string[] = [];
   if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of page.state) {
-      stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
+      // A `File`-typed state field (FileUpload bind target) holds a nullable
+      // FileRef.  Its `ref()` init (undefined) would infer `Ref<undefined>` and
+      // reject the uploaded FileRef, so type it explicitly and import FileRef.
+      const base = f.type.kind === "optional" ? f.type.inner : f.type;
+      const isFile = base.kind === "primitive" && base.name === "File";
+      if (isFile) {
+        stateLines.push(`const ${f.name} = ref<FileRef | null>(null);`);
+        const set = apiImports.get("../api/client") ?? new Set<string>();
+        set.add("FileRef");
+        apiImports.set("../api/client", set);
+      } else {
+        stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
+      }
       // The shared input primitives' VM carries the React-style
       // `set<Pascal>` setter name (`@update:model-value` callbacks in
       // the vue packs call it) — provide it as a plain function.
@@ -501,6 +513,18 @@ export function renderVuePage(input: VuePageShellInput): string {
   for (const n of [...result.usedUserComponents].sort()) {
     const ext = input.externComponents?.has(n) ? "" : ".vue";
     script.push(`import ${n} from "${relPrefix(input)}components/${n}${ext}";`);
+  }
+  // The file-upload templates (`field-input-file` / `primitive-file-upload`)
+  // declare `import { api } from "../api/client"` via their pack.json `imports`
+  // table, which lands in `result.imports`.  The relative-import skip below
+  // drops it, so fold `../api/client` into `apiImports` here — this loop
+  // depth-adjusts the specifier and dedupes with any `ApiError` import from the
+  // same module into one line.
+  const clientNames = result.imports.get("../api/client");
+  if (clientNames && clientNames.size > 0) {
+    const set = apiImports.get("../api/client") ?? new Set<string>();
+    for (const n of clientNames) set.add(n);
+    apiImports.set("../api/client", set);
   }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);

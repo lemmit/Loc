@@ -18,6 +18,7 @@ import { flutterPack } from "../../src/generator/flutter/pack.js";
 const INLINE_OR_DEFERRED = new Set([
   "primitive-form-of",
   "primitive-modal",
+  "primitive-file-upload",
   "primitive-field",
   "primitive-multiline-field",
   "primitive-number-field",

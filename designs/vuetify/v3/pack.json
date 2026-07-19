@@ -73,7 +73,9 @@
     "form-op-module": "form-op-module.hbs",
     "form-runs-decls": "form-runs-decls.hbs",
     "realtime-toast": "realtime-toast.hbs",
-    "op-dialog": "op-dialog.hbs"
+    "op-dialog": "op-dialog.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
     "realtime-toast": [
@@ -81,6 +83,22 @@
         "from": "../lib/toast",
         "named": [
           "pushToast"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]

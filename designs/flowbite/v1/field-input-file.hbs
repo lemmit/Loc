@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <Label for="{{testId}}">{{label}}</Label>
+          <Fileupload id="{{testId}}" data-testid="{{testId}}" onchange={async (e) => { const file = (e.currentTarget as HTMLInputElement).files?.[0]; if (!file) { form.values.{{path}} = null; return; } const fd = new FormData(); fd.append("file", file); form.values.{{path}} = (await api.upload("/files", fd)) as typeof form.values.{{path}}; }} />
+          {#if form.errors["{{path}}"]}<Helper color="red">{form.errors["{{path}}"]}</Helper>{/if}
+        </div>

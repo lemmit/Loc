@@ -110,7 +110,9 @@
     "components-ui-textarea": "components-ui-textarea.hbs",
     "components-ui-tooltip": "components-ui-tooltip.hbs",
     "components-ui-tooltip-content": "components-ui-tooltip-content.hbs",
-    "op-dialog": "op-dialog.hbs"
+    "op-dialog": "op-dialog.hbs",
+    "field-input-file": "field-input-file.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -400,6 +402,34 @@
           "DialogContent",
           "DialogHeader",
           "DialogTitle"
+        ]
+      }
+    ],
+    "field-input-file": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Label"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
+        ]
+      }
+    ],
+    "primitive-file-upload": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Label"
+        ]
+      },
+      {
+        "from": "../api/client",
+        "named": [
+          "api"
         ]
       }
     ]

@@ -120,6 +120,12 @@ const SHARED_PRIMITIVES: readonly string[] = [
 //                                inline via `renderStickyHeex`.
 const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-code-block",
+  // The standalone `FileUpload { bind: … }` input.  Required on every
+  // JSX-family format (tsx / svelte / vue / angular — each spreads this list);
+  // HEEx is exempt (no HEEx renderer — `KNOWN_HEEX_GAPS.FileUpload` in
+  // heex-parity.test.ts pins the gap, and heex's required set is
+  // `SHARED_PRIMITIVES` only, so it never demands this template).
+  "primitive-file-upload",
   "primitive-icon",
   "primitive-modal",
   "primitive-section",
@@ -136,6 +142,9 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
 const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
   "primitive-form-of",
   "primitive-modal",
+  // FileUpload (M-T1.2 slice 4b) is a JSX/web primitive (multipart POST +
+  // bind); the Flutter mobile pack defers it alongside the other inputs.
+  "primitive-file-upload",
   "primitive-field",
   "primitive-multiline-field",
   "primitive-number-field",
@@ -162,6 +171,11 @@ const TSX_FIELD_INPUT: readonly string[] = [
   "field-input-datetime",
   "field-input-decimal",
   "field-input-enum-select",
+  // In-form `File` field → file input + `api.upload` → FileRef.  Required on the
+  // form-owning JSX formats (tsx / svelte / vue — each spreads this list).
+  // Angular has no `fieldInput` set (its File field renders inline via the
+  // `form-fields.ts` seam); HEEx has no field-input templates at all.
+  "field-input-file",
   "field-input-id-select",
   "field-input-id-text",
   "field-input-int",

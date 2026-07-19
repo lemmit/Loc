@@ -23,6 +23,11 @@ export interface AngularFormControlSpec {
   name: string;
   /** JS literal for the control's initial value (`""`, `0`, `false`, …). */
   init: string;
+  /** Explicit control generic — when set, the control emits as
+   *  `new FormControl<${tsType}>(${init})` (nullable, no `nonNullable`).  A
+   *  `File` field uses `FileRef | null` so the uploaded ref + the `null` seed
+   *  both assign (a `nonNullable` string control rejects the FileRef). */
+  tsType?: string;
 }
 
 /** A `useAll<X>()` query the page-shell hoists so an `X id` form field can
@@ -163,6 +168,37 @@ export function formButton(
   return `<button class="${cls}" type="${type}"${attrs}>${label}</button>`;
 }
 
+/** Register the imports a File field's file input + `onFileUpload` method need:
+ *  `AbstractControl` (the method's typed control param) and the `api` client
+ *  (the multipart `upload` call).  The client sits at `../../api/client` —
+ *  same depth as a form's `../../api/<agg>` mutation import. */
+export function registerFileUploadImports(ctx: WalkContext): void {
+  addNg(ctx, "@angular/forms", "AbstractControl");
+  addNg(ctx, "../../api/client", "api");
+  // The File FormControl is typed `FormControl<FileRef | null>`.
+  addNg(ctx, "../../api/client", "FileRef");
+}
+
+/** The shared `onFileUpload` component method a form with ≥1 `File` field emits
+ *  once: reads the chosen file off the change event, POSTs it multipart via
+ *  `api.upload("/files", …)`, and `setValue`s the returned `FileRef` into the
+ *  passed reactive-form control (clearing to `null` when the pick is cleared). */
+export function fileUploadMethodLines(): string[] {
+  return [
+    "  async onFileUpload(event: Event, control: AbstractControl | null): Promise<void> {",
+    "    if (!control) return;",
+    "    const file = (event.target as HTMLInputElement).files?.[0];",
+    "    if (!file) {",
+    "      control.setValue(null);",
+    "      return;",
+    "    }",
+    "    const fd = new FormData();",
+    '    fd.append("file", file);',
+    '    control.setValue(await api.upload("/files", fd));',
+    "  }",
+  ];
+}
+
 /** Register a `@angular/*` import on the walk's import map. */
 export function addNg(ctx: WalkContext, from: string, ...names: string[]): void {
   let set = ctx.imports.get(from);
@@ -207,11 +243,27 @@ export function fieldInput(
   ns: string,
   ctx: WalkContext,
   testidBase: string = `${ns}-input-${name}`,
+  formVar?: string,
 ): string {
   const label = humanize(name);
   const testid = ` data-testid="${testidBase}"`;
   const cn = JSON.stringify(name);
   const style = formStyle(ctx);
+  // A `File` field renders a native file input that multipart-POSTs the chosen
+  // file to `/files` (`api.upload`) and writes the returned `FileRef` back into
+  // the reactive-form control — file inputs can't use `formControlName` (the
+  // value accessor rejects a non-string value), so the change handler resolves
+  // the control off the form group and `setValue`s it via `onFileUpload`.  A
+  // plain input across all packs (no design-system file component exists in
+  // Material/PrimeNG/spartanNg); mirrors the JSX frontends' `field-input-file`.
+  if (t.kind === "primitive" && t.name === "File") {
+    registerFileUploadImports(ctx);
+    // The control name is single-quoted: it sits inside the double-quoted
+    // `(change)="…"` attribute, so `JSON.stringify`'s double quotes would close
+    // the attribute early.  Field names are safe identifiers (no escaping needed).
+    const change = formVar ? ` (change)="onFileUpload($event, ${formVar}.get('${name}'))"` : "";
+    return `<label class="loom-field"><span class="loom-label">${label}</span><input type="file" class="loom-input"${testid}${change} /></label>`;
+  }
   if (t.kind === "enum") {
     const en = bc.enums.find((e) => e.name === t.name);
     if (style === "material") {
@@ -495,6 +547,7 @@ export function partitionAngularFields(
   bc: BoundedContextIR,
   ns: string,
   ctx: WalkContext,
+  formVar?: string,
 ): {
   flatControls: AngularFormControlSpec[];
   flatMarkup: string[];
@@ -504,6 +557,9 @@ export function partitionAngularFields(
   arrayMarkup: string[];
   fieldGroups: AngularFieldGroupSpec[];
   groupMarkup: string[];
+  /** True when any flat field is a `File` — the page-shell emits the shared
+   *  `onFileUpload` method once for the component. */
+  hasFileField: boolean;
 } {
   const isArray = (f: { type: TypeIR }) => arrayVoFields(f.type, bc) !== null;
   const isGroup = (f: { type: TypeIR }) => !isArray(f) && voScalarFields(f.type, bc) !== null;
@@ -540,11 +596,18 @@ export function partitionAngularFields(
     // still edit it); non-evaluable defaults (money/now/this-relative/ref) and
     // no default fall back to the type-zero init.  A nonNullable control needs a
     // non-null literal, and `renderDefaultSeed` yields exactly that.
-    flatControls: flat.map((f) => ({
-      name: f.name,
-      init: (f.default ? renderDefaultSeed(f.default) : null) ?? controlInit(f.type),
-    })),
-    flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx)),
+    flatControls: flat.map((f) => {
+      const u = unwrapOpt(f.type);
+      if (u.kind === "primitive" && u.name === "File") {
+        // A File control holds a nullable FileRef, not a nonNullable string.
+        return { name: f.name, init: "null", tsType: "FileRef | null" };
+      }
+      return {
+        name: f.name,
+        init: (f.default ? renderDefaultSeed(f.default) : null) ?? controlInit(f.type),
+      };
+    }),
+    flatMarkup: flat.map((f) => fieldInput(f.name, f.type, bc, ns, ctx, undefined, formVar)),
     flatNames: flat.map((f) => f.name),
     // A value-object sub-field that is itself an `X id` needs the target's
     // `useAll<X>()` Select query hoisted too (rare, but kept uniform).
@@ -553,5 +616,9 @@ export function partitionAngularFields(
     arrayMarkup,
     fieldGroups,
     groupMarkup,
+    hasFileField: flat.some((f) => {
+      const u = unwrapOpt(f.type);
+      return u.kind === "primitive" && u.name === "File";
+    }),
   };
 }

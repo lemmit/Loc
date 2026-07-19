@@ -54,7 +54,8 @@
     "app-config": "app-config.hbs",
     "app-shell": "app-shell.hbs",
     "theme": "theme.hbs",
-    "format-helpers": "format-helpers.hbs"
+    "format-helpers": "format-helpers.hbs",
+    "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
     "primitive-button": [{ "from": "primeng/button", "named": ["ButtonModule"] }],

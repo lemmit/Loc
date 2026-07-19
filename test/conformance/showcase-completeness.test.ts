@@ -174,8 +174,9 @@ function invokedNames(model: Model): Set<string> {
  *  missing pack template. Excluded from the walker-primitive coverage gate
  *  until it's backfilled across the other frontends and can join the shared
  *  fixture.
- *    - FileUpload: M-T1.2 slice 4a (React only); LiveView/Vue/Svelte/Angular
- *      uploads land in slice 4b, then this entry drops and it joins showcase. */
+ *    - FileUpload: no HEEx renderer yet (renders on all 4 JSX frontends after
+ *      4b). Kept out of `showcase.ddd` because `frontend-showcase-render` drives
+ *      showcase through HEEx too, which can't render it (KNOWN_HEEX_GAPS). */
 const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set(["FileUpload"]);
 
 describe("conformance: showcase.ddd completeness", () => {

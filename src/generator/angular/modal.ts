@@ -47,6 +47,9 @@ export interface AngularModalSpec {
   /** Single-value-object (`price: Money`) params — page-shell adds a nested
    *  `FormGroup` control per entry. */
   fieldGroups?: AngularFieldGroupSpec[];
+  /** True when the form has ≥1 `File` param — page-shell emits the shared
+   *  `onFileUpload` method once per component. */
+  hasFile?: boolean;
 }
 
 /** Resolve the operation a Modal's `OperationForm` child targets, plus the
@@ -144,7 +147,7 @@ export function renderAngularModal(
   addNg(ctx, importFrom, mutationFn);
 
   const parts = bc
-    ? partitionAngularFields(op.params, bc, ns, ctx)
+    ? partitionAngularFields(op.params, bc, ns, ctx, formVar)
     : {
         flatControls: [],
         flatMarkup: [],
@@ -154,6 +157,7 @@ export function renderAngularModal(
         arrayMarkup: [],
         fieldGroups: [],
         groupMarkup: [],
+        hasFileField: false,
       };
   const fieldMarkup = parts.flatMarkup;
 
@@ -173,6 +177,7 @@ export function renderAngularModal(
     idTargets: parts.idTargets,
     fieldArrays: parts.fieldArrays,
     fieldGroups: parts.fieldGroups,
+    hasFile: parts.hasFileField,
   };
   angularSink(ctx).modals.push(spec);
 
