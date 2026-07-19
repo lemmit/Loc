@@ -54,6 +54,29 @@ import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.j
 // at-most-once in-process path.
 // ---------------------------------------------------------------------------
 
+/** The broker tee (M-T4.4, design §4): publish broker-routed events, pass
+ *  everything else to the wrapped dispatcher.  `innerType` is the annotation
+ *  of the wrapped chain (`DomainEventDispatcher` in the saga shape, the Noop
+ *  in the pure-producer shape). */
+function channelTeeClass(innerType: string): string {
+  return lines(
+    "class ChannelTeeDispatcher:",
+    `    """Delivery-uniformity tee (channels.md, design §4): an event carried`,
+    "    by a broker-bound channel is PUBLISHED and not fanned out locally —",
+    "    co-located consumers receive it through their subscription exactly",
+    "    like remote ones.  Everything else passes to the inner dispatcher.",
+    `    """`,
+    "",
+    `    def __init__(self, inner: ${innerType}) -> None:`,
+    "        self._inner = inner",
+    "",
+    "    async def dispatch(self, event: DomainEvent) -> None:",
+    "        if await publish_event(event):",
+    "            return",
+    "        await self._inner.dispatch(event)",
+  );
+}
+
 export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSubscriptionIR[] {
   // Re-derive over the (possibly merged) context so a reactor in one
   // hosted context can route off a channel declared in another —
@@ -75,9 +98,42 @@ export function buildPyDispatchFile(
    *  `<ctx>_events` row class matches the schema + repository in a merged
    *  multi-context deployable.  Absent → the merged `ctx.name`. */
   resolveStreamContext?: (name: string) => string | undefined,
+  /** M-T4.4 slice 2b: the deployable wires a redis-bound broadcast
+   *  channelSource — `make_dispatcher` wraps the chain in the channel tee
+   *  (design §4 delivery-uniformity: broker-routed events publish instead of
+   *  fanning out locally), and a subscription-less PURE PRODUCER still gets
+   *  a minimal dispatch.py so routes drain events into the tee. */
+  hasChannels = false,
 ): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
-  if (subs.length === 0) return null;
+  if (subs.length === 0) {
+    if (!hasChannels) return null;
+    // Pure producer: no reactor handlers — the dispatcher IS the tee over
+    // the Noop, so an aggregate's drained events reach the broker while
+    // everything un-routed stays a no-op (parity with Hono's
+    // `channelPublishTee(transports, NoopDomainEventDispatcher)`).
+    return lines(
+      `"""In-process event dispatch (channels.md).  Auto-generated.`,
+      "",
+      "Pure-producer shape: this deployable wires a broker channel but hosts",
+      "no reactors — the dispatcher publishes broker-routed events and",
+      "no-ops the rest.",
+      `"""`,
+      "",
+      "from sqlalchemy.ext.asyncio import AsyncSession",
+      "",
+      "from app.channels import publish_event",
+      "from app.domain.events import DomainEvent, NoopDomainEventDispatcher",
+      "",
+      channelTeeClass("NoopDomainEventDispatcher"),
+      "",
+      "",
+      "def make_dispatcher(_session: AsyncSession) -> ChannelTeeDispatcher:",
+      "    # The tee needs no db access; signature parity with the saga shape.",
+      "    return ChannelTeeDispatcher(NoopDomainEventDispatcher())",
+      "",
+    );
+  }
 
   // Durable tier: events on a `retention: log | work` channel route
   // through `__loom_outbox` + the relay; saga rows gain `last_event_id`.
@@ -150,6 +206,18 @@ export function buildPyDispatchFile(
     handlerByEvent.set(sub.event, list);
   }
 
+  // Innermost → outermost: InProcessDispatcher → OutboxDispatcher (durable
+  // tier) → ChannelTeeDispatcher (broker tier).  The tee is outermost so a
+  // broker-routed ephemeral event publishes without touching the outbox —
+  // the two routing sets are disjoint by the compat matrix.
+  const innerExpr = hasOutbox
+    ? "OutboxDispatcher(session, InProcessDispatcher(session))"
+    : "InProcessDispatcher(session)";
+  const returnType = hasChannels
+    ? '"ChannelTeeDispatcher"'
+    : hasOutbox
+      ? '"OutboxDispatcher"'
+      : "InProcessDispatcher";
   const dispatcher = lines(
     "class InProcessDispatcher:",
     '    """Routes each emitted event to its subscribed workflow handlers;',
@@ -166,12 +234,9 @@ export function buildPyDispatchFile(
     ]),
     "",
     "",
-    hasOutbox
-      ? 'def make_dispatcher(session: AsyncSession) -> "OutboxDispatcher":'
-      : "def make_dispatcher(session: AsyncSession) -> InProcessDispatcher:",
-    hasOutbox
-      ? "    return OutboxDispatcher(session, InProcessDispatcher(session))"
-      : "    return InProcessDispatcher(session)",
+    ...(hasChannels ? [channelTeeClass("DomainEventDispatcher"), "", ""] : []),
+    `def make_dispatcher(session: AsyncSession) -> ${returnType}:`,
+    hasChannels ? `    return ChannelTeeDispatcher(${innerExpr})` : `    return ${innerExpr}`,
   );
 
   const body = lines(
@@ -255,12 +320,14 @@ export function buildPyDispatchFile(
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    hasChannels ? "from app.channels import publish_event" : null,
     hasOutbox ? "from app.db.engine import engine" : null,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("DomainError") ? "from app.domain.errors import DomainError" : null,
     `from app.domain.events import ${[
       "DomainEvent",
+      ...(hasChannels ? ["DomainEventDispatcher"] : []),
       ...[...new Set([...eventNames, ...esEventNames])].sort(),
     ].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
@@ -774,7 +841,7 @@ function outboxBlock(durableEvents: EventIR[]): string {
 
 /** Domain-event field → its JSON-safe payload value (DSL-keyed, mirrors
  *  the event-sourcing store's `_event_to_data`). */
-function toPayload(expr: string, t: TypeIR): string {
+export function toPayload(expr: string, t: TypeIR): string {
   const inner = t.kind === "optional" ? t.inner : t;
   if (inner.kind === "primitive" && inner.name === "datetime") return `${expr}.isoformat()`;
   if (inner.kind === "primitive" && inner.name === "money") return `str(${expr})`;
@@ -782,7 +849,7 @@ function toPayload(expr: string, t: TypeIR): string {
 }
 
 /** Payload value → typed domain-event field (mirror of `toPayload`). */
-function fromPayload(name: string, t: TypeIR): string {
+export function fromPayload(name: string, t: TypeIR): string {
   const access = `payload["${name}"]`;
   const inner = t.kind === "optional" ? t.inner : t;
   switch (inner.kind) {
