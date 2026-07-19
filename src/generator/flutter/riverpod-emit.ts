@@ -25,10 +25,13 @@
 // (`order.shipping.zip := v`) and store/async-effect action bodies are marked
 // `TODO(flutter full-parity)` — a deep immutable rebuild is out of scope here.
 
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type { EnrichedBoundedContextIR, PageIR, StmtIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { errorTypeUri } from "../../util/error-defaults.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
-import { dartZeroValue } from "./dart-expr.js";
+import { dartString, dartZeroValue } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack } from "./pack.js";
@@ -44,6 +47,17 @@ export interface RiverpodProjection {
   /** Dart source: state class + notifier + provider (imports emitted by the
    *  page shell, not here). */
   source: string;
+  /** Names of actions whose body awaits a remote effect (`match await`).  Their
+   *  Notifier method is `Future<void> <name>(String id) async` (needs the route
+   *  id), so the page shell binds each as an id-capturing closure tear-off. */
+  asyncEffectActions: Set<string>;
+}
+
+/** True when an action body awaits a remote effect — a `match await` (lowered to
+ *  a `variant-match` statement).  Drives the async Notifier-method shape + the
+ *  page's route-id / http / models imports. */
+function actionHasAsyncEffect(action: PageIR["actions"][number]): boolean {
+  return action.body.some((s) => s.kind === "variant-match");
 }
 
 /** True when a page carries reactive state and/or named actions — the trigger
@@ -61,6 +75,7 @@ function notifierCtx(
   page: PageIR,
   contexts: readonly EnrichedBoundedContextIR[],
   locals: ReadonlyMap<string, string>,
+  apiParamNames: ReadonlyMap<string, string> = new Map(),
 ): WalkContext {
   const stateNames = new Set(page.state.map((s) => s.name));
   const derivedNames = new Set(page.derived.map((d) => d.name));
@@ -86,7 +101,7 @@ function notifierCtx(
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,
-    apiParamNames: new Map(),
+    apiParamNames: new Map(apiParamNames),
     usedApiHooks: new Map(),
     lambdaParams: locals,
     shellLocals: new Set(),
@@ -166,11 +181,116 @@ function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext): string {
   }
 }
 
+/** Render a `match await <api>.<Agg>.<op>(args) { … }` async effect into an async
+ *  Notifier-method body.  Mirrors the JS-family shape (`renderJsVariantMatch`)
+ *  but in Dart: POST the instance-op to `/<coll>/$id/<op>`, reify a non-2xx
+ *  ProblemDetails body back into the error variant (clobbering `type` to the
+ *  variant tag), then a Dart-3 `switch` over the wire `type` discriminator that
+ *  reifies each arm's variant via its `fromJson` and runs the arm body (state
+ *  writes through the same `renderNotifierStmt`, so `message := o.code` becomes
+ *  `state = state.copyWith(...)`).  Returns the method body lines (indented by
+ *  the caller). */
+function renderVariantMatchNotifier(
+  stmt: Extract<StmtIR, { kind: "variant-match" }>,
+  ctx: WalkContext,
+  contexts: readonly EnrichedBoundedContextIR[],
+): string[] {
+  const detected = tryDetectApiHook(stmt.subject, {
+    apiParamNames: ctx.apiParamNames,
+    aggregatesByName: ctx.aggregatesByName,
+    workflowsByName: ctx.workflowsByName,
+  });
+  const agg = detected ? ctx.aggregatesByName.get(detected.aggregateName) : undefined;
+  const op = agg?.operations.find((o) => o.name === detected?.operation);
+  if (!detected || !agg || !op) {
+    return ["// TODO(flutter full-parity): `match await` subject is not a resolvable remote op"];
+  }
+  const bc = contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+  const coll = snake(plural(agg.name));
+  const opPath = snake(op.routeSlug ?? op.name);
+  // Request payload — the op's params filled from the awaited call's positional
+  // args (matching the op signature; validated upstream by loom.match-await-*).
+  const bodyEntries = op.params.map(
+    (p, i) =>
+      `${dartString(p.name)}: ${detected.args[i] ? emitExpr(detected.args[i]!, ctx) : "null"}`,
+  );
+  const bodyMap = `<String, dynamic>{${bodyEntries.join(", ")}}`;
+
+  // Classify each arm: an error variant reaches the client as a non-2xx
+  // ProblemDetails; the payload classification is authoritative, the lowered
+  // `isError` hint is the OR-fallback (its UI-body lowering can't see the context).
+  const arms = stmt.arms.map((arm) => {
+    const tag = variantTag(arm.varType);
+    const isError =
+      arm.isError === true || !!bc?.payloads.some((p) => p.name === tag && p.kind === "error");
+    const armCtx: WalkContext = arm.binding
+      ? { ...ctx, lambdaParams: new Map([...ctx.lambdaParams, [arm.binding, arm.binding]]) }
+      : ctx;
+    const body = arm.body.map((s) => renderNotifierStmt(s, armCtx));
+    return { tag, binding: arm.binding, body, isError };
+  });
+  const errorVariants = arms
+    .filter((a) => a.isError)
+    .map((a) => ({ tag: a.tag, uri: errorTypeUri(a.tag) }));
+
+  const out: string[] = ["Map<String, dynamic> result;", "try {"];
+  out.push(
+    `  final res = await http.post(apiUri('/${coll}/\${id}/${opPath}'),`,
+    "      headers: const {'Content-Type': 'application/json'},",
+    `      body: jsonEncode(${bodyMap}));`,
+    "  final decoded = jsonDecode(res.body) as Map<String, dynamic>;",
+    "  if (res.statusCode >= 200 && res.statusCode < 300) {",
+    "    result = decoded;",
+  );
+  if (errorVariants.length === 1) {
+    // Single error variant — re-stamp its known tag (the wire `type` was
+    // clobbered to the ProblemDetails URI, but the fields survive).
+    out.push(
+      "  } else {",
+      `    result = {...decoded, 'type': ${dartString(errorVariants[0]!.tag)}};`,
+      "  }",
+    );
+  } else if (errorVariants.length > 1) {
+    // Multi-error — map the caught ProblemDetails `type` URI back to the tag.
+    const chain =
+      errorVariants
+        .slice(0, -1)
+        .map((v) => `decoded['type'] == ${dartString(v.uri)} ? ${dartString(v.tag)}`)
+        .join(" : ") + ` : ${dartString(errorVariants[errorVariants.length - 1]!.tag)}`;
+    out.push("  } else {", `    result = {...decoded, 'type': ${chain}};`, "  }");
+  } else {
+    // No error variant declared — a non-2xx has no arm to route to; keep the
+    // decoded body (its `type`, if any, falls through the switch).
+    out.push("  } else {", "    result = decoded;", "  }");
+  }
+  out.push(
+    "} catch (_) {",
+    "  return; // network / decode failure — abort the effect (no arm runs)",
+    "}",
+    "switch (result['type']) {",
+  );
+  for (const arm of arms) {
+    out.push(`  case ${dartString(arm.tag)}:`, "    {");
+    if (arm.binding) out.push(`      final ${arm.binding} = ${arm.tag}.fromJson(result);`);
+    for (const b of arm.body) out.push(`      ${b}`);
+    out.push("    }");
+  }
+  if (stmt.elseBody) {
+    const elseCtx = ctx;
+    out.push("  default:", "    {");
+    for (const s of stmt.elseBody) out.push(`      ${renderNotifierStmt(s, elseCtx)}`);
+    out.push("    }");
+  }
+  out.push("}");
+  return out;
+}
+
 /** Project a stateful page into its `<Page>State` / `<Page>Notifier` /
  *  `<page>Provider` Dart triad. */
 export function renderRiverpod(
   page: PageIR,
   contexts: readonly EnrichedBoundedContextIR[],
+  apiParamNames: ReadonlyMap<string, string> = new Map(),
 ): RiverpodProjection {
   const stateClass = `${upperFirst(page.name)}State`;
   const notifierClass = `${upperFirst(page.name)}Notifier`;
@@ -233,15 +353,29 @@ export function renderRiverpod(
     `    return ${buildReturn};`,
     "  }",
   ];
+  const asyncEffectActions = new Set<string>();
   for (const action of page.actions) {
     const param = action.params[0];
     const locals = new Map<string, string>();
     if (param) locals.set(param.name, param.name);
-    const ctx = notifierCtx(page, contexts, locals);
-    const body = action.body.map((s) => renderNotifierStmt(s, ctx));
-    const sig = param
-      ? `void ${action.name}(${dartType(param.type)} ${param.name})`
-      : `void ${action.name}()`;
+    const ctx = notifierCtx(page, contexts, locals, apiParamNames);
+    const isAsync = actionHasAsyncEffect(action);
+    // An async-effect action's op is instance-scoped, so its method takes the
+    // route `id` (a leading param the page-shell closure supplies) and is
+    // `Future<void> … async`.  Its `variant-match` body renders the await/reify/
+    // switch; any sibling statements render as normal Notifier lines.
+    const body = action.body.flatMap((s) =>
+      s.kind === "variant-match"
+        ? renderVariantMatchNotifier(s, ctx, contexts)
+        : [renderNotifierStmt(s, ctx)],
+    );
+    if (isAsync) asyncEffectActions.add(action.name);
+    const idParam = isAsync ? "String id" : "";
+    const actionParam = param ? `${dartType(param.type)} ${param.name}` : "";
+    const paramList = [idParam, actionParam].filter(Boolean).join(", ");
+    const sig = isAsync
+      ? `Future<void> ${action.name}(${paramList}) async`
+      : `void ${action.name}(${paramList})`;
     notifierLines.push("");
     notifierLines.push(`  ${sig} {`);
     for (const b of body) notifierLines.push(`    ${b}`);
@@ -252,5 +386,5 @@ export function renderRiverpod(
   const providerLine = `final ${providerName} = NotifierProvider<${notifierClass}, ${stateClass}>(${notifierClass}.new);`;
 
   const source = [...stateLines, "", ...notifierLines, "", providerLine].join("\n");
-  return { providerName, stateClass, notifierClass, source };
+  return { providerName, stateClass, notifierClass, source, asyncEffectActions };
 }

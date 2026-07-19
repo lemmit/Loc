@@ -65,6 +65,8 @@ jobs:
           mkdir -p ci-flutter
           # Full interactive showcase — exercises every shipped tier:
           #   • Riverpod state + actions (Home's counter: state{count} + inc())
+          #   • match await async effect (RestockProduct: await a Result-returning
+          #     op → reify error variant → Dart-3 switch → state write)
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
           #   • forms (NewProduct's CreateForm; NewCategory's WorkflowForm;
           #     ProductAdmin's OperationForm + Modal-wrapped op-form dialog +
@@ -87,10 +89,12 @@ jobs:
                 workflow addCategory transactional {
                   create(label: string) { let c = Category.create({ name: label }) }
                 }
+                error OutOfStock { detail: string }
                 aggregate Product {
                   name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
                   category: Category id
                   operation rename(newName: string) { name := newName }
+                  operation restock(): Product or OutOfStock { inStock := true }
                 }
                 repository Categories for Category { }
                 repository Products for Product { }
@@ -125,6 +129,17 @@ jobs:
                 }
               }
               page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              page RestockProduct {
+                route: "/products/:id/restock"
+                state { note: string = "" }
+                action restock() {
+                  match await Shop.Product.restock() {
+                    Product p    => { note := p.name }
+                    OutOfStock e => { note := e.detail }
+                  }
+                }
+                body: Stack { Heading { "Restock", level: 1 }, Text { note }, Button { "Restock", onClick: restock } }
+              }
               page NewCategory { route: "/categories/new"  body: Stack { Heading { "New category", level: 1 }, WorkflowForm { runs: addCategory } } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
                 Heading { "Admin", level: 1 },
