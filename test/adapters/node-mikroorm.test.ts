@@ -1560,3 +1560,86 @@ system M {
     expect(repo).not.toContain("this find's predicate is not yet supported");
   });
 });
+
+describe("mikroorm — workflow (saga) correlation store is persistence-neutral", () => {
+  const SAGA_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment {
+        find byOrder(order: Order id): Shipment? where this.orderRef == order
+      }
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+      workflow OrderFulfillment {
+        orderId: Order id
+        attempts: int
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource wfState { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [wfState]  serves: A  port: 8080 }
+}`;
+
+  it("emits a MikroORM Row entity for the workflow correlation table", async () => {
+    const { files, errors } = await emit(SAGA_SRC);
+    expect(errors).toEqual([]);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class OrderFulfillmentRow {");
+    expect(entities).toContain('tableName: "order_fulfillments"');
+    expect(entities).toContain('orderId: { type: "string", primary: true }');
+    expect(entities).toContain('attempts: { type: "integer" }');
+  });
+
+  it("workflows.ts uses the EntityManager, never drizzle-orm", async () => {
+    const { files } = await emit(SAGA_SRC);
+    const wf = files.get("api/http/workflows.ts")!;
+    // No drizzle imports/operators/schema handle leak (the boot-crash cause).
+    expect(wf).not.toContain("drizzle-orm");
+    expect(wf).not.toContain("NodePgDatabase");
+    expect(wf).not.toMatch(/\bschema\./);
+    // The correlation store runs on the EntityManager + Row entity.
+    expect(wf).toContain('import { EntityManager } from "@mikro-orm/postgresql";');
+    expect(wf).toContain('import { OrderFulfillmentRow } from "../db/entities";');
+    expect(wf).toContain("await db.findOne(OrderFulfillmentRow, { orderId: key });");
+    expect(wf).toContain("await db.upsert(OrderFulfillmentRow, state);");
+  });
+
+  it("createApp defaults events to the in-process dispatcher (saga cascade fires)", async () => {
+    const { files } = await emit(SAGA_SRC);
+    const httpIndex = files.get("api/http/index.ts")!;
+    expect(httpIndex).toContain(
+      'import { createInProcessDispatcher, workflowsRoutes } from "./workflows";',
+    );
+    expect(httpIndex).toContain("events: DomainEventDispatcher = createInProcessDispatcher(db),");
+  });
+});

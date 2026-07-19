@@ -78,12 +78,10 @@ function walk(dir, pred, out = []) {
 // are mikroorm-adapter-specific, so they live HERE, not in cases.mjs's shared
 // BEHAVIOURAL_SKIP (which is keyed by platform clause and would wrongly skip the
 // drizzle tier too). See the PR body's "MikroORM runtime gaps" register.
-const MIKRO_SKIP = {
-  // Workflow (saga) code hard-codes drizzle-orm imports + query operators
-  // (`import { eq, and, … } from "drizzle-orm"`), which the mikroorm project
-  // doesn't depend on — the generated server crashes at boot (ERR_MODULE_NOT_FOUND).
-  saga: "workflow emitter hard-codes drizzle-orm imports (not persistence-neutral)",
-};
+// Empty: the four M-T6.9 runtime gaps (value-collections, views, tenancy-filter,
+// saga) are all drained and boot-verified on this tier.  A new entry here is a
+// newly-found, tracked mikroorm-adapter runtime gap — never a silent drop.
+const MIKRO_SKIP = {};
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`
  *  deployable so the SAME corpus source generates the MikroORM db/ layer instead

@@ -46,6 +46,7 @@ import type {
   RepositoryIR,
   RetrievalIR,
   TypeIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
@@ -549,6 +550,23 @@ function provenanceRecordEntity(): { block: string; schemaName: string } {
   ]);
 }
 
+/** Row-entity class name for a workflow's persisted correlation state
+ *  (`OrderFulfillment` → `OrderFulfillmentRow`).  Exported so the workflow
+ *  builder's `usingMikro` store branch references the same symbol. */
+export const mikroWorkflowRowClass = (wf: WorkflowIR): string => `${upperFirst(wf.name)}Row`;
+
+/** Columns for a workflow's correlation-state Row: the correlation field is the
+ *  string PK (an id column), every other declared saga state field maps through
+ *  the shared `fieldColumns` — mirroring the drizzle `emitWorkflowStateTable`. */
+function workflowStateColumns(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
+  const corr = wf.correlationField;
+  return (wf.stateFields ?? []).flatMap((f) =>
+    f.name === corr
+      ? [{ prop: f.name, mikroType: "string", tsType: "string", nullable: false, primary: true }]
+      : fieldColumns(f, ctx),
+  );
+}
+
 export function renderMikroEntities(
   aggs: readonly EnrichedAggregateIR[],
   ctx: EnrichedBoundedContextIR,
@@ -692,6 +710,22 @@ export function renderMikroEntities(
       ),
     );
   }
+  // Persisted workflow-correlation state (workflow-and-applier.md A2-S2): one
+  // Row per non-event-sourced correlation-bearing workflow — the MikroORM twin
+  // of the drizzle `emitWorkflowStateTable`.  The in-process dispatcher's
+  // load/save helpers (http/workflows.ts, usingMikro branch) read/upsert these.
+  // An event-sourced workflow folds its `<ctx>_events` stream instead (no state
+  // table), and a plain command workflow has no correlation field → no Row.
+  for (const wf of ctx.workflows ?? []) {
+    if (wf.eventSourced || !wf.correlationField) continue;
+    const { block, schemaName } = renderRecordRowEntity(
+      mikroWorkflowRowClass(wf),
+      snake(plural(wf.name)),
+      workflowStateColumns(wf, ctx),
+    );
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
   // Audit / provenance history Row entities — emitted (like the drizzle
   // `audit_records` / `provenance_records` tables) only when the model has an
   // audited target / a provenanced field, so a plain project pays nothing.
@@ -806,8 +840,7 @@ function thisFieldColumn(e: ExprIR): string | null {
 function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>): string {
   // FilterQuery keys are entity PROPERTY names (== field names), not DB columns.
   const col = thisFieldColumn(e.left);
-  if (col === null)
-    throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
+  if (col === null) throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
   const rhs = filterValue(e.right);
   if (e.op === "==") return `${col}: ${rhs}`;
   const op = FILTER_OP[e.op];
@@ -1430,7 +1463,10 @@ function containCascade(
 // means the find-method builder (predicate lowering, capability-filter AND,
 // hydration) applies for free.
 // ---------------------------------------------------------------------------
-function synthViewFinds(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): RepositoryIR["finds"] {
+function synthViewFinds(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): RepositoryIR["finds"] {
   const viewFinds = (ctx.views ?? [])
     .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
     .map((view) => ({

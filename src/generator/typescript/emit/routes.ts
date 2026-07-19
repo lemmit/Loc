@@ -91,17 +91,19 @@ export function renderHttpIndex(
   const baseLoggerImport = needsBaseLogger ? `import { baseLogger } from "../obs/log";` : null;
   const hasWorkflows = ctx.workflows.length > 0;
   // In-process event dispatch (channels.md): when this deployable has any
-  // channel-routed subscription AND uses the default drizzle persistence, the
-  // generated `http/workflows.ts` exports `createInProcessDispatcher`, and
-  // `createApp` defaults `events` to it (routing emitted events to reactors /
-  // event-creates) instead of the no-op.  Mikro and channel-less projects keep
-  // the Noop default — byte-identical output.
+  // channel-routed subscription, the generated `http/workflows.ts` exports
+  // `createInProcessDispatcher`, and `createApp` defaults `events` to it
+  // (routing emitted events to reactors / event-creates) instead of the no-op.
+  // The MikroORM adapter is included: the workflow correlation store is now
+  // persistence-neutral (usingMikro branch → EntityManager), so the synchronous
+  // in-process saga cascade runs on mikro exactly as on drizzle.  Only the
+  // DURABLE outbox tier stays drizzle-only (see `wireOutbox`).
   // Workflow saga dispatch: driven by WORKFLOW subscriptions only (projection
   // subs carry a `projection` discriminant and are handled by the projectionTee
   // below).  Excluding them keeps a workflow-only project byte-identical and a
   // projection-only project from importing the never-emitted
   // `createInProcessDispatcher`.
-  const wireDispatcher = ctx.eventSubscriptions.some((s) => !s.projection) && !usingMikro;
+  const wireDispatcher = ctx.eventSubscriptions.some((s) => !s.projection);
   // Projection folds (projection.md): a dispatcher decorator that upserts read
   // models, composed over the workflow dispatcher (or the Noop).
   // FOLDED projections drive the event-fold tee + `http/projections.ts` mount.
@@ -114,8 +116,12 @@ export function renderHttpIndex(
   // default dispatcher wraps the in-process one — durable events are
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
+  // The durable outbox tier (loomOutbox table + createOutboxDispatcher) is still
+  // drizzle-only — mikroorm has no outbox emitter — so a durable channel on the
+  // mikro adapter keeps the plain in-process dispatcher (its channels are gated
+  // off in emit.ts anyway); the ephemeral saga cascade above is unaffected.
   const wireOutbox =
-    (wireDispatcher || (!!options?.forceOutbox && !usingMikro)) && durableEventTypes(ctx).size > 0;
+    !usingMikro && (wireDispatcher || !!options?.forceOutbox) && durableEventTypes(ctx).size > 0;
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.
