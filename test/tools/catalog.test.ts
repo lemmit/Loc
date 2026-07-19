@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { GenerateReport, Outline, PatchResult, ValidateReport } from "../../src/api/index.js";
+import type {
+  GenerateReport,
+  ModelView,
+  Outline,
+  PatchResult,
+  PrimitiveCatalog,
+  ValidateReport,
+} from "../../src/api/index.js";
 import { callTool, TOOLS, TOOLS_BY_NAME } from "../../src/tools/index.js";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +49,35 @@ describe("agent-tool catalog", () => {
   it("loom_outline returns the address book", async () => {
     const out = (await callTool("loom_outline", { source: CLEAN })) as Outline;
     expect(out.contexts.find((c) => c.name === "Sales")).toBeDefined();
+  });
+
+  it("loom_read_model projects the resolved wire shape a loose context omits from the outline", async () => {
+    const mv = (await callTool("loom_read_model", { source: CLEAN })) as ModelView;
+    // CLEAN is a loose context (no `system`), so it lands under `contexts`.
+    const sales = mv.contexts.find((c) => c.name === "Sales");
+    expect(sales).toBeDefined();
+    const order = sales?.aggregates.find((a) => a.name === "Order");
+    expect(order?.context).toBe("Sales");
+    // Wire shape leads with the id token, then the declared `total: int`.
+    expect(order?.wire.some((f) => f.source === "id")).toBe(true);
+    const total = order?.wire.find((f) => f.name === "total");
+    expect(total?.type).toBe("int");
+    expect(total?.source).toBe("property");
+  });
+
+  it("loom_read_model returns an empty view for a source that can't lower", async () => {
+    const mv = (await callTool("loom_read_model", { source: "not a model" })) as ModelView;
+    expect(mv).toEqual({ systems: [], contexts: [] });
+  });
+
+  it("loom_list_primitives lists the closed walker vocabulary (no args)", async () => {
+    const cat = (await callTool("loom_list_primitives", {})) as PrimitiveCatalog;
+    expect(cat.layout).toEqual([...cat.layout].sort()); // stable, sorted
+    for (const name of ["Stack", "Heading", "Button", "Card", "Field", "Table"]) {
+      expect(cat.layout).toContain(name);
+    }
+    expect(cat.sub).toContain("Tab");
+    expect(cat.sub).toContain("Column");
   });
 
   it("loom_generate reports validation (no system → empty manifest, still ok)", async () => {

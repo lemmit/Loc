@@ -21,8 +21,10 @@ import {
   findSymbol,
   generate,
   hover,
+  listPrimitives,
   outline,
   quickfix,
+  readModel,
   references,
   rename,
   unfoldMacro,
@@ -44,6 +46,13 @@ const SOURCE_SCHEMA = {
   type: "object",
   properties: { source: { type: "string", description: "The .ddd model source." } },
   required: ["source"],
+  additionalProperties: false,
+} as const;
+
+/** No-argument tool schema (loom_list_primitives is a static catalog). */
+const EMPTY_SCHEMA = {
+  type: "object",
+  properties: {},
   additionalProperties: false,
 } as const;
 
@@ -89,6 +98,20 @@ export const TOOLS: ToolDef[] = [
       "Return the model's outline — the address book of contexts, aggregates, and members. The addresses here are exactly the `target`s loom_apply_patch takes and the diagnostics point at.",
     inputSchema: SOURCE_SCHEMA,
     handler: (args) => outline(reqString(args, "source")),
+  },
+  {
+    name: "loom_read_model",
+    description:
+      "Return the RESOLVED model — each system's deployables (name/platform/port) plus every aggregate's canonical wire shape (the ordered DTO fields id → properties → containments → derived, each with rendered type, optionality, and provenance). This is the semantic wire contract loom_outline (a name-only address book) omits — use it to see what a field's type actually is and what the backend will emit. Runs lowering + enrichment; empty when the source can't lower.",
+    inputSchema: SOURCE_SCHEMA,
+    handler: (args) => readModel(reqString(args, "source")),
+  },
+  {
+    name: "loom_list_primitives",
+    description:
+      "List the closed page-body primitive vocabulary the UI walker admits (layout/display/input primitives — Stack, Group, Grid, Table, Field, Heading, Button, Card, CreateForm, … — plus the sub-primitives Tab/Column). These are the ONLY names valid as component types in a page/component body without declaring a domain type — consult this before authoring UI to avoid inventing primitives the validator rejects. Takes no arguments.",
+    inputSchema: EMPTY_SCHEMA,
+    handler: () => Promise.resolve(listPrimitives()),
   },
   {
     name: "loom_generate",

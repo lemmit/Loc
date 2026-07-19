@@ -131,6 +131,69 @@ export interface Outline {
   contexts: OutlineContext[];
 }
 
+// --- Model view (loom_read_model) ------------------------------------------
+// A resolved, semantic projection of the ENRICHED IR — the wire contract an
+// agent needs to reason about what it's building, which the AST-level
+// `Outline` (an address book of names) deliberately omits.  The canonical
+// `wireShape` (id → properties → containments → derived, the exact ordered
+// field list every backend's DTO emitter consumes) is surfaced per aggregate
+// with each field's resolved type / optionality / provenance.
+
+/** One field on an aggregate's wire DTO — a `WireField` flattened to
+ *  serialisable primitives (the IR `TypeIR` rendered via `typeLabel`). */
+export interface ModelWireField {
+  name: string;
+  /** `.ddd`-flavoured type label (`Order id`, `Money`, `string?`, `Line[]`). */
+  type: string;
+  optional: boolean;
+  /** Where the field came from: `id` | `property` | `containment` | `derived`. */
+  source: string;
+}
+
+/** An aggregate projected to its resolved wire shape. */
+export interface ModelAggregate {
+  name: string;
+  /** Owning bounded context. */
+  context: string;
+  wire: ModelWireField[];
+}
+
+/** A deployable's manifest triple (mirrors the `generate` report). */
+export interface ModelDeployable {
+  name: string;
+  platform: string;
+  port: number;
+}
+
+/** One system: its deployable manifest plus every aggregate's wire shape. */
+export interface ModelSystem {
+  name: string;
+  deployables: ModelDeployable[];
+  aggregates: ModelAggregate[];
+}
+
+/** The resolved model — systems (with deployables) plus any top-level loose
+ *  contexts' aggregates.  Empty `systems`/`contexts` when the source doesn't
+ *  parse or lower. */
+export interface ModelView {
+  systems: ModelSystem[];
+  /** Aggregates in contexts declared at model top level (no enclosing
+   *  `system`) — the single-deployable legacy shape. */
+  contexts: { name: string; aggregates: ModelAggregate[] }[];
+}
+
+// --- Primitive catalog (loom_list_primitives) ------------------------------
+
+/** The closed page-body primitive vocabulary the UI walker admits — the set
+ *  an agent may use in `page`/component bodies without declaring a type.
+ *  Sourced from the walker registry's admissibility sets. */
+export interface PrimitiveCatalog {
+  /** Layout / content primitives (`List`, `Detail`, `Form`, `Stack`, …). */
+  layout: string[];
+  /** Sub-primitives valid only inside a parent (`Tab`, `Column`). */
+  sub: string[];
+}
+
 // --- Envelopes (contract §2 / §4) ------------------------------------------
 
 export interface JsonReportSummary {
