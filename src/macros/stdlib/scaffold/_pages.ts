@@ -5,6 +5,7 @@
 // shapes.  Keeping them in one place means the per-archetype leaf
 // macros and the top-level composer share one source of truth.
 
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { Aggregate, Area, Page, Ui, View, Workflow } from "../../api/index.js";
 import { area, boolLit, callExpr, page, stringLit } from "../../api/index.js";
 import {
@@ -167,7 +168,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
   const wfName = wf.name;
   return [
     page({
-      name: `${pascal(wfName)}InstancesList`,
+      name: `${upperFirst(wfName)}InstancesList`,
       route: `/workflows/${slug}/instances`,
       body: scaffoldInstanceList(wf),
       menu: {
@@ -176,7 +177,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
       },
     }),
     page({
-      name: `${pascal(wfName)}InstanceDetail`,
+      name: `${upperFirst(wfName)}InstanceDetail`,
       route: `/workflows/${slug}/instances/:id`,
       body: scaffoldInstanceDetails(wf),
       menu: { hidden: boolLit(true) },
@@ -186,7 +187,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
 
 export function pageForWorkflow(wf: Workflow): Page {
   return page({
-    name: `${pascal(wf.name)}Workflow`,
+    name: `${upperFirst(wf.name)}Workflow`,
     route: `/workflows/${snake(wf.name)}`,
     body: scaffoldWorkflowForm(wf.name),
     menu: {
@@ -241,25 +242,10 @@ export function viewsIndexPage(views: readonly View[]): Page {
   });
 }
 
-// Naming utilities — kept module-local so the helpers don't pull in
-// the wider `util/naming` dep graph.
-
-function snake(s: string): string {
-  return s
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s-]+/g, "_")
-    .toLowerCase();
-}
-
-function plural(s: string): string {
-  if (s.endsWith("y")) return s.slice(0, -1) + "ies";
-  if (s.endsWith("s")) return s + "es";
-  return s + "s";
-}
-
-function pascal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
+// Naming utilities — `plural`/`snake`/`upperFirst` come from `util/naming` (the
+// single source of truth `classifyPage` also consumes, so scaffolded `area`
+// names match the classifier for irregular plurals).  `humanize` stays
+// module-local (display labels only).
 
 function humanize(s: string): string {
   const parts = s

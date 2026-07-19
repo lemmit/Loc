@@ -27,6 +27,7 @@ import type {
   View,
   Workflow,
 } from "../../../language/generated/ast.js";
+import { plural, snake } from "../../../util/naming.js";
 import {
   binaryExpr,
   boolLit,
@@ -1221,22 +1222,11 @@ function breadcrumbs(humanPlural: string, slug: string, leaf?: string): Expressi
   return callExpr("Breadcrumbs", crumbs);
 }
 
-// Naming helpers — copied verbatim from `_pages.ts` (kept module-local so the
-// scaffold macro family doesn't pull in the wider `util/naming` dep graph;
-// dedup is a follow-up once the builders consolidate).
-
-function snake(s: string): string {
-  return s
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s-]+/g, "_")
-    .toLowerCase();
-}
-
-function plural(s: string): string {
-  if (s.endsWith("y")) return s.slice(0, -1) + "ies";
-  if (s.endsWith("s")) return s + "es";
-  return s + "s";
-}
+// Naming helpers — `plural`/`snake` come from `util/naming` (the single source
+// of truth `classifyPage` also consumes, so a scaffolded page's `area` matches
+// the classifier's expectation for irregular plurals like `Box`→`boxes`,
+// `Day`→`days`, `APIKey`→`api_keys`).  `humanize` stays module-local (display
+// labels only, not classifier input).
 
 function humanize(s: string): string {
   const parts = s
