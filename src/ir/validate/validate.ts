@@ -71,6 +71,7 @@ import {
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
+  validateUiRealtimeSupport,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
 } from "./checks/system-checks.js";
@@ -161,6 +162,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
+    validateUiRealtimeSupport(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

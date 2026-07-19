@@ -39,6 +39,7 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
+import { backendServesRealtime } from "../../util/channels.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -154,6 +155,71 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
         severity: "error",
         code: "loom.auth-ui-unsupported-framework",
         message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        source: d.name,
+      });
+    }
+  }
+}
+
+// Frontends that CONSUME the realtime SSE wire (channels.md Part I) — each
+// subscribes to the backend's `GET /realtime/events` stream, so a live-event
+// handler is honored ONLY when the target backend serves that wire
+// (`backendServesRealtime`).  `static` hosts one of these framework bundles.
+const SSE_REALTIME_FRONTENDS = new Set<string>([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "static",
+]);
+// Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
+// own socket), so no separate SSE wire — a `on` handler is always honored.
+const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"]);
+
+/** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
+ *  Part I).  A handler on a ui whose serving frontend can't consume realtime
+ *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
+ *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
+ *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
+ *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *
+ *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
+ *  than hard-coding a frontend list, so a future frontend without the wire
+ *  warns until it grows realtime consumption. */
+export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const byName = new Map(sys.deployables.map((d) => [d.name, d]));
+  for (const d of sys.deployables) {
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui || (ui.notifications?.length ?? 0) === 0) continue;
+      // The serving framework: the ui's declared `framework:` wins (a `static`
+      // host or a Phoenix surface states it), else the deployable's platform.
+      const framework = ui.framework ?? d.uiFramework ?? d.platform;
+      if (NATIVE_REALTIME_FRONTENDS.has(framework)) continue;
+      if (SSE_REALTIME_FRONTENDS.has(framework)) {
+        // A self-hosting backend+ui mount (dotnet/phoenix) targets itself.
+        const target = d.targetName ? byName.get(d.targetName) : undefined;
+        const backendPlatform = target?.platform ?? d.platform;
+        if (backendServesRealtime(backendPlatform)) continue;
+        diags.push({
+          severity: "warning",
+          code: "loom.ui-realtime-unsupported",
+          message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
+            target
+              ? `target backend '${target.name}' (platform '${backendPlatform}')`
+              : `backend platform '${backendPlatform}'`
+          } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+          source: d.name,
+        });
+        continue;
+      }
+      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      diags.push({
+        severity: "warning",
+        code: "loom.ui-realtime-unsupported",
+        message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${framework}' has no realtime consumption, so the handlers are silently dropped.`,
         source: d.name,
       });
     }
