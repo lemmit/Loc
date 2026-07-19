@@ -94,6 +94,16 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
     case "list":
       for (const el of e.elements) expr?.(el);
       break;
+    case "authz-filter":
+      // Authorization/tenancy sentinel (M-T9.9).  A `scope` decision carries
+      // the two principal-claim member accessors as real child expressions
+      // (so `exprUsesCurrentUser` sees the `currentUser` reference and routes
+      // it to the principal filter path); `deny` is a childless leaf.
+      if (e.filter.kind === "scope") {
+        expr?.(e.filter.anchorClaim);
+        expr?.(e.filter.tenantClaim);
+      }
+      break;
     case "paren":
       expr?.(e.inner);
       break;

@@ -3321,6 +3321,47 @@ export type BinOp =
   | "&&"
   | "||";
 
+/**
+ * The discriminated policy decision carried by an `authz-filter` `ExprIR`
+ * node (M-T9.9).  Each backend's filter translator switches over `kind` with
+ * TypeScript exhaustiveness, so adding a variant is a `tsc` error at every
+ * render site — the compile-time replacement for the pre-M-T9.9 chain of
+ * `isDenyFilter` / `isDeepScopeFilter` runtime probes on a `method-call`
+ * marker (where a forgotten arm was a SILENT authorization bypass, not a
+ * build break).
+ *
+ *  - `deny` — the always-false carve-out (`deny [write] on <Agg>`,
+ *    authorization Phase 4, deny-wins).  Principal-FREE: it routes to each
+ *    backend's STATIC filter path (no ambient-principal parameter), which is
+ *    what keeps a denied aggregate's read/write seam free of the unused-param
+ *    trap.  Every backend renders it to its native always-false fragment
+ *    (Drizzle `and(isNull, isNotNull)` / EF `false` / JPQL `1 = 0` /
+ *    `cb.disjunction()` / SQLAlchemy contradiction / Ecto `fragment("false")`).
+ *  - `scope` — the descendant-or-self materialized-path subtree scope
+ *    (`deep`/`global` read levels, multi-tenancy Phase 2).  PRINCIPAL-referencing
+ *    (carries `currentUser.<anchor>` + `currentUser.tenantId` as resolved
+ *    member sub-expressions), so it routes to the ambient-principal filter
+ *    path and `exprUsesCurrentUser` classifies it by walking those children.
+ *    Renders to the compound scope predicate with the NULL-dataKey fallback
+ *    to the tenant floor (`DEEP_SCOPE_SEMANTICS`).  `anchorClaim` is
+ *    `currentUser.orgPath` for `deep` (caller's node + descendants) or
+ *    `currentUser.rootOrg` for `global` (caller's ROOT subtree).
+ */
+export type AuthzFilterKind =
+  | { kind: "deny" }
+  | {
+      kind: "scope";
+      /** `currentUser.<anchor>` as a resolved `member` sub-expression — the
+       *  descendant-prefix anchor (`orgPath` for `deep`, `rootOrg` for
+       *  `global`).  Kept as ExprIR so a backend that renders the claim through
+       *  its own expression path (Java's null-safe SpEL accessor) reuses it
+       *  verbatim, and `exprUsesCurrentUser` sees the principal reference. */
+      anchorClaim: ExprIR;
+      /** `currentUser.tenantId` as a resolved `member` sub-expression — the
+       *  floor the NULL-dataKey fallback compares against. */
+      tenantClaim: ExprIR;
+    };
+
 export type ExprIR =
   | { kind: "literal"; lit: LiteralKind; value: string; origin?: OriginRef }
   | { kind: "this"; origin?: OriginRef }
@@ -3530,6 +3571,41 @@ export type ExprIR =
        *  validators decide whether to flag them. */
       kind: "list";
       elements: ExprIR[];
+      origin?: OriginRef;
+    }
+  /**
+   * Authorization / tenancy filter sentinel (M-T9.9).  A synthesized,
+   * never-parsed predicate that carries a DISCRIMINATED policy decision
+   * (`filter.kind`) instead of riding the IR as an ordinary `method-call`
+   * marker (the pre-M-T9.9 `__loomDeny__` / `__loomDeepScope__` encoding).
+   *
+   * The decision is made ONCE in enrichment (deep/global/deny — see
+   * `src/ir/enrich/enrichments.ts`) and every backend's query-filter
+   * translator only RENDERS the pre-built node to its native fragment
+   * (Drizzle contradiction, EF `false`, JPQL `1 = 0`, Ecto `fragment("false")`,
+   * …).  Making it a first-class `ExprIR.kind` — rather than a `method-call`
+   * every backend already handles — is the safety payoff: a backend that
+   * omits a filter arm can no longer fall through to the generic expression
+   * dispatcher and emit a silent authorization bypass.  Instead the shared
+   * dispatcher THROWS on it (like `action-ref`), the queryable-subset gate
+   * and child-walker force an explicit arm, and each backend switches on
+   * `filter.kind` with TypeScript exhaustiveness so a future `AuthzFilterKind`
+   * becomes a `tsc` error at every render site.
+   *
+   * Never reaches a domain-logic expression position — it lives ONLY in an
+   * aggregate's `contextFilters` / `writeScopeFilter`, special-cased by the
+   * filter translators BEFORE the generic dispatch.  Build/inspect it through
+   * `src/ir/util/tenant-stance.ts` (`buildDenyFilter` / `buildDeepScopeFilter`
+   * / `buildGlobalScopeFilter`, `isDenyFilter` / `isDeepScopeFilter`).
+   */
+  | {
+      kind: "authz-filter";
+      /** The discriminated policy decision this sentinel encodes. */
+      filter: AuthzFilterKind;
+      /** Name of the aggregate the filter guards (formerly the marker's
+       *  `receiverType.name`).  Backends key the row's table/alias off their
+       *  render context, not this — it is carried for provenance / debugging. */
+      aggregate: string;
       origin?: OriginRef;
     }
   | { kind: "paren"; inner: ExprIR; origin?: OriginRef }

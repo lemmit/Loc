@@ -5,8 +5,6 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
-  isDeepScopeFilter,
-  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -325,7 +323,49 @@ const CS_TARGET_EF: ExprTarget<CsRenderContext> = {
 };
 
 export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
+  // Authorization/tenancy filter sentinels (M-T9.9) must be intercepted BEFORE
+  // the shared `renderExprWith` dispatch — which throws on the `authz-filter`
+  // kind (it is not a domain expression).  A discriminated node so a missing
+  // arm is a `tsc` error here, not a silent authorization bypass.
+  if (e.kind === "authz-filter") return renderCsAuthzFilter(e, ctx);
   return renderExprWith(e, ctx.efQuery ? CS_TARGET_EF : CS_TARGET, ctx);
+}
+
+/** The `authz-filter` sentinels as EF-query-filter-expressible C# (M-T9.9). */
+function renderCsAuthzFilter(
+  e: Extract<ExprIR, { kind: "authz-filter" }>,
+  ctx: CsRenderContext,
+): string {
+  switch (e.filter.kind) {
+    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
+    // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
+    case "deny":
+      return "false";
+    // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+    // descendant-or-self materialized-path scope with the NULL-dataKey fallback
+    // to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a
+    // static-expressible EF query-filter lambda: `.StartsWith(...)` translates
+    // to SQL LIKE, `== null` to IS NULL — no host call inside the filter (#1676
+    // pattern).
+    case "scope": {
+      const t = ctx.thisName;
+      const col = `${t}.${upperFirst(TENANT_OWNED_DATA_KEY_FIELD)}`;
+      const tenantCol = `${t}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+      const principal = ctx.currentUserExpr ?? "currentUser";
+      // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
+      const org = `${principal}.${upperFirst(deepScopeAnchorClaim(e))}`;
+      const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+      const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
+      return (
+        `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
+        `|| (${col} == null && ${tenantCol} == ${tenant}))`
+      );
+    }
+    default: {
+      const _exhaustive: never = e.filter;
+      throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+    }
+  }
 }
 
 function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boolean): string {
@@ -697,28 +737,10 @@ function renderMethodCall(
   e: MethodCallExpr,
   ctx: CsRenderContext,
 ): string {
-  // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
-  // materialized-path scope with the NULL-dataKey fallback to the tenant
-  // floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a static-expressible EF
-  // query-filter lambda: `.StartsWith(...)` translates to SQL LIKE, `== null`
-  // to IS NULL — no host call inside the filter (#1676 pattern).
-  // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
-  // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
-  if (isDenyFilter(e)) return "false";
-  if (isDeepScopeFilter(e)) {
-    const t = ctx.thisName;
-    const col = `${t}.${upperFirst(TENANT_OWNED_DATA_KEY_FIELD)}`;
-    const tenantCol = `${t}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
-    const principal = ctx.currentUserExpr ?? "currentUser";
-    // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
-    const org = `${principal}.${upperFirst(deepScopeAnchorClaim(e))}`;
-    const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
-    const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
-    return (
-      `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
-      `|| (${col} == null && ${tenantCol} == ${tenant}))`
-    );
-  }
+  // (The `deep` / DENY authorization filter sentinels moved to the
+  // discriminated `authz-filter` kind in M-T9.9 — handled by
+  // `renderCsAuthzFilter` before the shared dispatch, no longer a `method-call`
+  // marker here.)
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
   // `inArray(roots.id, ...)` shape.  Detection is structural: the

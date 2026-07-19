@@ -146,9 +146,12 @@ function renderRefineExpr(e: ExprIR): string {
     case "match":
     case "list":
     case "action-ref":
+    case "authz-filter":
       // `classifyForWire` excludes these; reaching the renderer
       // means a bug upstream — emit a placeholder so a failing
-      // build is louder than a silently-wrong refine.
+      // build is louder than a silently-wrong refine.  (An
+      // `authz-filter` sentinel is a query-filter node, never a
+      // wire-boundary invariant.)
       return `(/*UNRENDERABLE:${e.kind}*/ false)`;
   }
 }

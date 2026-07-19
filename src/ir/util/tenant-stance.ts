@@ -7,7 +7,14 @@
 // so it is derived on demand (the `classifyPage` pattern in
 // `page-kind.ts`), never stamped onto AggregateIR.
 
-import type { AggregateIR, ExprIR, IdValueType, SystemIR, TypeIR } from "../types/loom-ir.js";
+import type {
+  AggregateIR,
+  AuthzFilterKind,
+  ExprIR,
+  IdValueType,
+  SystemIR,
+  TypeIR,
+} from "../types/loom-ir.js";
 
 /** The prelude capability that marks an aggregate as tenant-scoped
  *  (`with tenantOwned` — see `src/macros/prelude.ts`). */
@@ -142,26 +149,9 @@ export const ROOT_ORG_CLAIM_FIELD = "rootOrg";
  *  itself is emitted here.) */
 export const DATA_KEY_PATH_DELIMITER = ".";
 
-/** The reserved `method-call.member` sentinel for the `deep` read-level
- *  reachability predicate (multi-tenancy Phase 2 P2.4).  A `deep` policy level
- *  rewrites a tenant-owned aggregate's `tenantOwned` capability filter to this
- *  single node; each backend's query-filter translator recognises the member
- *  and renders the whole compound natively (`{@link DEEP_SCOPE_SEMANTICS}`),
- *  so the generic comparison/null lowering stays untouched.  Double-underscore
- *  fenced so it can never collide with a user method name. */
-export const DEEP_SCOPE_MEMBER = "__loomDeepScope__";
-
-/** Marker member for the DENY carve-out sentinel (authorization Phase 4 —
- *  `deny [write] on X`, docs/old/plans/authorization-phase4-deny.md).  Like
- *  {@link DEEP_SCOPE_MEMBER} it is a recognizable `method-call` marker each
- *  backend's filter translator special-cases — here to its native *always-false*
- *  fragment.  Double-underscore fenced so it can never collide with a user
- *  method name. */
-export const DENY_SCOPE_MEMBER = "__loomDeny__";
-
 /**
- * Semantics every backend renders `DEEP_SCOPE_MEMBER` to (row R, principal P;
- * fail-closed — no principal ⇒ matches nothing):
+ * Semantics every backend renders the `scope` authorization filter (M-T9.9) to
+ * (row R, principal P; fail-closed — no principal ⇒ matches nothing):
  *
  *   (R.dataKey IS NOT NULL
  *      AND (R.dataKey = P.orgPath                       -- the caller's own node
@@ -178,18 +168,18 @@ export const DENY_SCOPE_MEMBER = "__loomDeny__";
  */
 export const DEEP_SCOPE_SEMANTICS = "descendant-or-self path prefix; NULL-dataKey ⇒ tenant floor";
 
-/** Build a subtree reachability predicate for a tenant-owned aggregate as the
- *  `DEEP_SCOPE_MEMBER` sentinel method-call, anchored at `anchorClaim`.  The
- *  args carry the two principal claims (`currentUser.<anchorClaim>`,
- *  `currentUser.tenantId`) as fully-resolved `member` nodes so
- *  `exprUsesCurrentUser` classifies the filter as principal-referencing
- *  (routing it to each backend's ambient-principal query path), and each
- *  backend reads the anchor claim field name off `args[0]` (see
- *  {@link deepScopeAnchorClaim}).  The row columns (`dataKey`, `tenantId`) are
- *  fixed by the `tenantOwned` capability.  `deep` anchors at
- *  {@link ORG_PATH_CLAIM_FIELD} (the caller's own node + descendants); `global`
- *  anchors at {@link ROOT_ORG_CLAIM_FIELD} (the caller's ROOT node +
- *  descendants — the whole root subtree). */
+/** Build a subtree reachability predicate for a tenant-owned aggregate as an
+ *  `authz-filter` sentinel node carrying a `scope` decision anchored at
+ *  `anchorClaim` (M-T9.9).  The `scope` decision carries the two principal
+ *  claims (`currentUser.<anchorClaim>`, `currentUser.tenantId`) as
+ *  fully-resolved `member` nodes so `exprUsesCurrentUser` classifies the filter
+ *  as principal-referencing (routing it to each backend's ambient-principal
+ *  query path), and each backend reads the anchor claim field name off
+ *  `anchorClaim` (see {@link deepScopeAnchorClaim}).  The row columns
+ *  (`dataKey`, `tenantId`) are fixed by the `tenantOwned` capability.  `deep`
+ *  anchors at {@link ORG_PATH_CLAIM_FIELD} (the caller's own node +
+ *  descendants); `global` anchors at {@link ROOT_ORG_CLAIM_FIELD} (the caller's
+ *  ROOT node + descendants — the whole root subtree). */
 function buildScopeFilter(agg: Pick<AggregateIR, "name">, anchorClaim: string): ExprIR {
   const userShape: TypeIR = { kind: "entity", name: "__User__" };
   const claim = (member: string): ExprIR => ({
@@ -200,13 +190,20 @@ function buildScopeFilter(agg: Pick<AggregateIR, "name">, anchorClaim: string): 
     memberType: { kind: "primitive", name: "string" },
   });
   return {
-    kind: "method-call",
-    receiver: { kind: "this" },
-    member: DEEP_SCOPE_MEMBER,
-    args: [claim(anchorClaim), claim(TENANT_OWNED_TENANT_ID_FIELD)],
-    receiverType: { kind: "entity", name: agg.name },
-    isCollectionOp: false,
+    kind: "authz-filter",
+    aggregate: agg.name,
+    filter: {
+      kind: "scope",
+      anchorClaim: claim(anchorClaim),
+      tenantClaim: claim(TENANT_OWNED_TENANT_ID_FIELD),
+    },
   };
+}
+
+/** The `scope` decision of an `authz-filter` sentinel, or `undefined` when `e`
+ *  is not one.  Thin narrower shared by the render/inspection helpers below. */
+function scopeOf(e: ExprIR): Extract<AuthzFilterKind, { kind: "scope" }> | undefined {
+  return e.kind === "authz-filter" && e.filter.kind === "scope" ? e.filter : undefined;
 }
 
 /** The `deep` read-level reachability predicate — the descendant-or-self
@@ -257,17 +254,18 @@ export function buildGlobalScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
   return buildScopeFilter(agg, ROOT_ORG_CLAIM_FIELD);
 }
 
-/** True when `e` is a subtree read-level sentinel (`DEEP_SCOPE_MEMBER`
- *  method-call — used by both `deep` and `global`).  Each backend's query-
- *  filter translator gates its native compound rendering on this. */
+/** True when `e` is a subtree read-level sentinel (an `authz-filter` node
+ *  carrying a `scope` decision — used by both `deep` and `global`).  Each
+ *  backend's query-filter translator gates its native compound rendering on
+ *  this. */
 export function isDeepScopeFilter(e: ExprIR): boolean {
-  return e.kind === "method-call" && e.member === DEEP_SCOPE_MEMBER;
+  return scopeOf(e) !== undefined;
 }
 
-/** The DENY carve-out predicate (authorization Phase 4 — deny-wins).  A
- *  recognizable always-false marker `method-call` on `this` (no `currentUser`,
- *  so `exprUsesCurrentUser` is false → each backend routes it to its STATIC
- *  filter path, adding no principal parameter — this is what keeps a denied
+/** The DENY carve-out predicate (authorization Phase 4 — deny-wins).  An
+ *  `authz-filter` sentinel carrying a `deny` decision (no `currentUser`, so
+ *  `exprUsesCurrentUser` is false → each backend routes it to its STATIC filter
+ *  path, adding no principal parameter — this is what keeps a denied
  *  aggregate's read/write seam free of the unused-param trap).  Appended to a
  *  denied aggregate's read `contextFilters` (deny read) or set as its
  *  `writeScopeFilter` (deny write) in enrichment; every backend's filter
@@ -276,34 +274,30 @@ export function isDeepScopeFilter(e: ExprIR): boolean {
  *  `cb.disjunction()` / SQLAlchemy contradiction / Ecto `fragment("false")`).
  *  A bare `literal: bool` node is deliberately NOT used — it is not a valid
  *  standalone predicate in Drizzle/Ecto/SQLAlchemy, which is why deny is a
- *  recognized sentinel, exactly like the deep-scope one. */
+ *  discriminated sentinel, exactly like the deep-scope one. */
 export function buildDenyFilter(agg: Pick<AggregateIR, "name">): ExprIR {
   return {
-    kind: "method-call",
-    receiver: { kind: "this" },
-    member: DENY_SCOPE_MEMBER,
-    args: [],
-    receiverType: { kind: "entity", name: agg.name },
-    isCollectionOp: false,
+    kind: "authz-filter",
+    aggregate: agg.name,
+    filter: { kind: "deny" },
   };
 }
 
 /** True when `e` is the DENY carve-out sentinel (authorization Phase 4).  Each
  *  backend's filter translator gates its always-false fragment on this. */
 export function isDenyFilter(e: ExprIR): boolean {
-  return e.kind === "method-call" && e.member === DENY_SCOPE_MEMBER;
+  return e.kind === "authz-filter" && e.filter.kind === "deny";
 }
 
 /** The anchor principal-claim field a subtree sentinel prefix-matches on —
- *  read off `args[0]`'s member name (`orgPath` for `deep`, `rootOrg` for
- *  `global`).  Each backend renders `currentUser.<anchorClaim>` as the LIKE
- *  prefix.  Falls back to {@link ORG_PATH_CLAIM_FIELD} for a hand-built sentinel
- *  whose first arg isn't a `member` (defensive; the builders always emit one). */
+ *  read off the `scope` decision's `anchorClaim` member name (`orgPath` for
+ *  `deep`, `rootOrg` for `global`).  Each backend renders
+ *  `currentUser.<anchorClaim>` as the LIKE prefix.  Falls back to
+ *  {@link ORG_PATH_CLAIM_FIELD} for a hand-built sentinel whose anchor isn't a
+ *  `member` (defensive; the builders always emit one). */
 export function deepScopeAnchorClaim(e: ExprIR): string {
-  if (e.kind === "method-call") {
-    const a0 = e.args[0];
-    if (a0?.kind === "member") return a0.member;
-  }
+  const anchor = scopeOf(e)?.anchorClaim;
+  if (anchor?.kind === "member") return anchor.member;
   return ORG_PATH_CLAIM_FIELD;
 }
 
