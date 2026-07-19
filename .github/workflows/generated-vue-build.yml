@@ -65,9 +65,9 @@ jobs:
         run: |
           PACKS='["vuetify@v3","shadcnVue@v1"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CASES='["showcase","store"]'
+            CASES='["showcase","store","file"]'
           else
-            CASES='["minimal","scaffold","showcase","store"]'
+            CASES='["minimal","scaffold","showcase","store","file"]'
           fi
           echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 
