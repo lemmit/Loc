@@ -7,8 +7,13 @@
 // `build-generated-dotnet` (examples/paged-dotnet.ddd); these unit tests pin
 // the emitted C# shape.
 
+import { NodeFileSystem } from "langium/node";
+import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../../src/generator/dotnet/index.js";
+import { createDddServices } from "../../../src/language/ddd-module.js";
+import type { Model } from "../../../src/language/generated/ast.js";
+import { generateSystems } from "../../../src/system/index.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
@@ -92,5 +97,64 @@ describe(".NET generator — paged finds (P3b)", () => {
     expect(ctrl).toContain(
       "var result = await _mediator.Send(new RecentQuery(page, pageSize, sort, dir));",
     );
+  });
+});
+
+// Regression (docs/audits/repo-code-review-2026-07.md T2): on the Dapper
+// persistence adapter, a PARAMETERIZED paged find (`… paged where this.f == x`)
+// must bind its predicate params in the ROWS (page) query, not only the COUNT
+// query — otherwise the page query's `@x` is unbound and Npgsql throws at
+// runtime.
+describe(".NET generator — Dapper paged find binds its where params", () => {
+  async function dapperRepo(): Promise<string> {
+    const SRC = `
+system Shop {
+  api OrdersApi from Sales
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish { code: string  region: string }
+      repository Orders for Order {
+        find recent(): Order paged
+        find inRegion(region: string): Order paged where this.region == region
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}`;
+    const services = createDddServices(NodeFileSystem);
+    const doc = await parseHelper(services.Ddd)(SRC, { validation: true });
+    const errs = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errs.length) throw new Error(errs.map((e) => e.message).join("\n"));
+    const files = generateSystems(doc.parseResult.value as Model).files;
+    return files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+  }
+
+  it("the parameterized paged rows query binds `region` (matches the COUNT query)", async () => {
+    const repo = await dapperRepo();
+    const inRegion = repo.slice(repo.indexOf("InRegion"));
+    const rowsLine = inRegion
+      .split("\n")
+      .find((l) => l.includes("QueryAsync<Row>") && l.includes("LIMIT @__take"))!;
+    expect(rowsLine).toBeDefined();
+    // The predicate `@region` is in the SQL AND bound in the param object.
+    expect(rowsLine).toContain("WHERE (region = @region)");
+    expect(rowsLine).toContain("new { __take = pageSize, __offset = offset, region }");
+  });
+
+  it("a non-parameterized paged find stays byte-identical (empty suffix)", async () => {
+    const repo = await dapperRepo();
+    const recent = repo.slice(repo.indexOf("Recent"));
+    const rowsLine = recent
+      .split("\n")
+      .find((l) => l.includes("QueryAsync<Row>") && l.includes("LIMIT @__take"))!;
+    expect(rowsLine).toContain("new { __take = pageSize, __offset = offset }");
   });
 });

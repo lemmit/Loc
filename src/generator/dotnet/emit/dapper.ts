@@ -1094,9 +1094,14 @@ export function renderDapperRepository(
       ...collectFilterPrincipalRefs(f.filter ? [f.filter] : []),
     ]);
     const findPrincFields = principalFields(findPrincipalRefs, principalBase);
-    const findPrincSuffix = findPrincFields.length > 0 ? `, ${findPrincFields.join(", ")}` : "";
     const allFindParams = [...paramFields, ...findPrincFields];
     const paramObj = allFindParams.length > 0 ? `, new { ${allFindParams.join(", ")} }` : "";
+    // Comma-prefixed binding suffix for the find's own `where` params PLUS its
+    // principal params — appended inside the paged rows query's `new { __take,
+    // __offset, … }`.  The page query's SQL carries the same predicate as the
+    // COUNT (via `fromClause`), so it MUST bind the same params, or a paged find
+    // with a `where this.f == x` throws on an unbound `@x` at runtime.
+    const allFindParamsSuffix = allFindParams.length > 0 ? `, ${allFindParams.join(", ")}` : "";
     let where = "";
     try {
       where = f.filter ? ` WHERE ${whereToSql(f.filter, sqlCtx)}` : "";
@@ -1128,7 +1133,7 @@ export function renderDapperRepository(
         `        var sortDir = dir == "desc" ? "DESC" : "ASC";`,
         `        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) ${fromClause}"${paramObj}, cancellationToken: cancellationToken));`,
         `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
-        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${findPrincSuffix} }, cancellationToken: cancellationToken));`,
+        `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${allFindParamsSuffix} }, cancellationToken: cancellationToken));`,
         ...(hasContains
           ? [
               `        var items = await HydrateAsync(conn, rows.ToList(), cancellationToken);`,
