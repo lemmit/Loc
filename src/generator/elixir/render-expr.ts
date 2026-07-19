@@ -1,11 +1,9 @@
 import type {
-  AggregateIR,
   BinOp,
   EnrichedAggregateIR,
   ExprIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
@@ -179,21 +177,6 @@ const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
  *  of truth shared by every renderer site so the two stay in lockstep. */
 const isDecimalStruct = (name: string | undefined): boolean =>
   name === "money" || name === "decimal";
-
-/** Ash relationship name for a reference-collection association —
- *  always `<fieldName>_through`.  We can't reuse the field name
- *  (`:party`) because that conflicts with the calculation that
- *  re-exposes the m2m as an `{:array, :uuid}` wire field of the same
- *  name (Ash treats both as queryable references on the resource).
- *  Suffixing keeps both registrable and signals intent ("this is the
- *  m2m through-relationship for `party`").  Shared by the four
- *  emitters that need to reference the relationship name in lockstep:
- *  domain-emit (declares the m2m), render-expr (contains → `exists`
- *  lowering), render-stmt (manage_relationship), and the calculation's
- *  `expr(<rel>.id)` body. */
-export function relationshipNameFor(_agg: AggregateIR, fieldName: string): string {
-  return `${snake(fieldName)}_through`;
-}
 
 const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   literal: renderLiteral,
@@ -642,40 +625,26 @@ export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: strin
 };
 
 function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {
-  // `this.<refColl>.contains(x)` — membership over a reference
-  // collection.  Inside an Ash `filter expr(...)` this lowers to a
-  // join-table subquery via the auto-emitted many_to_many relationship:
-  // `exists(<rel>, id == ^arg(:<param>))`.  Detection is structural:
-  // receiverType is array<id>, receiver chains through this.<field>,
-  // single arg, and ctx.agg is set (only the repository find emitter
-  // threads it).  Other emission contexts fall through to the in-memory
-  // `Enum.member?` shape below.
+  // `this.<refColl>.contains(x)` — membership over a REFERENCE collection
+  // (`X id[]` → `many_to_many`).  The receiver is a preloaded list of target
+  // STRUCTS (or `%Ecto.Association.NotLoaded{}`), while `x` is a bare id, so a
+  // plain `Enum.member?(record.<field>, x)` would compare an id against structs
+  // (always false).  Project the relationship to its id list via the context's
+  // `__ref_id_list/1` helper first — the same helper the `+=`/`-=` mutation path
+  // uses, and which handles the not-loaded case (`%NotLoaded{}` → `[]`).
+  //
+  // NB: this only ever runs in DOMAIN-LOGIC contexts (operation bodies).  The
+  // repository FIND path intercepts a `contains` where-clause BEFORE render-expr
+  // (`containsRefCollField` → a real join query in `repository-emit.ts`), so an
+  // Ecto-query-mode `Enum.member?` is never emitted here.  Detection is
+  // structural: `contains`, receiverType array<id>, a single arg.
   if (
     e.member === "contains" &&
     e.receiverType.kind === "array" &&
     e.receiverType.element.kind === "id" &&
-    e.args.length === 1 &&
-    ctx.agg
+    e.args.length === 1
   ) {
-    const fieldName = refCollectionFieldName(e.receiver);
-    if (fieldName) {
-      const assoc = ctx.agg.associations.find((a) => a.fieldName === fieldName);
-      if (assoc) {
-        const rel = relationshipNameFor(ctx.agg, fieldName);
-        // The arg is typically a `ref` to the find's named parameter;
-        // Ash filter syntax binds it via `^arg(:<param>)`.  When the
-        // arg renders to a bare identifier we map it through; for
-        // literals / refs we trust renderExpr to produce a valid
-        // Ash-expr token (Ash accepts `^var` for in-scope Elixir
-        // values too).
-        const argSrc = e.args[0];
-        const argRendered =
-          argSrc?.kind === "ref" && (argSrc.refKind === "param" || argSrc.refKind === "let")
-            ? `^arg(:${snake(argSrc.name)})`
-            : args[0]!;
-        return `exists(${rel}, id == ${argRendered})`;
-      }
-    }
+    return `Enum.member?(__ref_id_list(${recv}), ${args[0]})`;
   }
   if (e.isCollectionOp) {
     return renderCollectionOp(recv, e.member, args, e);
