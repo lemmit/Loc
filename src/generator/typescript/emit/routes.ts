@@ -1,4 +1,5 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
+import { isMaterializedProjection, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { API_BASE_PATH, AUTH_BASE_PATH } from "../../../util/api-base.js";
@@ -103,7 +104,11 @@ export function renderHttpIndex(
   const wireDispatcher = ctx.eventSubscriptions.some((s) => !s.projection) && !usingMikro;
   // Projection folds (projection.md): a dispatcher decorator that upserts read
   // models, composed over the workflow dispatcher (or the Noop).
-  const hasProjections = ctx.projections.length > 0 && !usingMikro;
+  // FOLDED projections drive the event-fold tee + `http/projections.ts` mount.
+  // Query-time projections (read-path-architecture.md rev.13) have no folds —
+  // they mount their own `/projections` router from `http/query-projections.ts`.
+  const hasProjections = ctx.projections.some(isMaterializedProjection) && !usingMikro;
+  const hasQueryProjections = ctx.projections.some(isQueryTimeProjection) && !usingMikro;
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's
   // default dispatcher wraps the in-process one — durable events are
@@ -158,6 +163,15 @@ export function renderHttpIndex(
     : null;
   const projectionMount = hasProjections
     ? `  app.route("${API_BASE_PATH}/projections", projectionsRoutes(db));`
+    : null;
+  // Query-time projection router — a second sub-app mounted at the same
+  // `/projections` prefix (Hono merges routers by prefix); reads through the
+  // aggregate repositories, so it takes `(db, events)` unlike the folded one.
+  const queryProjectionImport = hasQueryProjections
+    ? `import { queryProjectionsRoutes } from "./query-projections";`
+    : null;
+  const queryProjectionMount = hasQueryProjections
+    ? `  app.route("${API_BASE_PATH}/projections", queryProjectionsRoutes(db, events));`
     : null;
   // Explicit-route routers (unfoldable-api-derivation.md, A2) — one per served
   // api with resolvable `route` bindings.  Byte-identical when none.
@@ -237,6 +251,7 @@ export function renderHttpIndex(
       realtimeImport,
       viewImport,
       projectionImport,
+      queryProjectionImport,
       ...explicitRouterImports,
       fileImport,
       usingMikro
@@ -326,6 +341,7 @@ export function renderHttpIndex(
       realtimeMount,
       viewMount,
       projectionMount,
+      queryProjectionMount,
       ...explicitRouterMounts,
       fileRoutes,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",

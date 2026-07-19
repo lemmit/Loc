@@ -3814,6 +3814,17 @@ export function viewUsesCurrentUser(view: ViewIR): boolean {
   return false;
 }
 
+/** True when a query-time projection's `where` filter or `select` expressions
+ *  reference `currentUser` — the projection analogue of `viewUsesCurrentUser`.
+ *  Drives threading the request principal into the synthesised repo read. */
+export function queryProjectionUsesCurrentUser(proj: ProjectionIR): boolean {
+  if (exprUsesCurrentUser(proj.query?.filter)) return true;
+  for (const s of proj.query?.selects ?? []) {
+    if (exprUsesCurrentUser(s.expr)) return true;
+  }
+  return false;
+}
+
 /** True when the aggregate carries a *principal-referencing* capability
  *  `filter` — one whose predicate reads `currentUser` (e.g. a tenancy filter
  *  `filter this.tenantId == currentUser.tenantId`).  Such a filter is AND-ed

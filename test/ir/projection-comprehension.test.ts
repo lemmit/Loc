@@ -15,6 +15,7 @@ import {
   isSingletonProjection,
 } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
+import { generateSystemFiles } from "../_helpers/generate.js";
 import { parseString } from "../_helpers/parse.js";
 
 const wrap = (body: string) => `
@@ -132,10 +133,48 @@ describe("projection comprehension — lowering", () => {
   });
 });
 
+// A full system (with a deployable) so the backend-conditional gate + the Hono
+// emit are exercised — the query-time projection reads aggregate `Order`.
+const SYS = (platform = "node"): string => `
+system S {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed Closed }
+      aggregate Customer { name: string }
+      aggregate Order { status: OrderStatus  customerId: Customer id  lineCount: int
+        create place(customer: Customer id) {} }
+      repository Orders for Order { }
+      repository Customers for Customer { }
+      criterion IsConfirmed of Order = status == Confirmed
+      projection OrdersView keyed by orderId {
+        orderId: Order id  lineCount: int  customerName: string
+        from Order as o
+        where IsConfirmed
+        join Customer as c on o.customerId
+        select orderId = o.id, lineCount = o.lineCount, customerName = c.name
+      }
+    }
+  }
+  api A from Sales
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: ${platform}  contexts: [Orders]  dataSources: [s]  serves: A  port: 3000 }
+}`;
+
+async function sysErrorCodes(platform: string): Promise<string[]> {
+  const { model } = await parseString(SYS(platform), { validate: false });
+  return validateLoomModel(enrichLoomModel(lowerModel(model)))
+    .filter((d) => d.severity === "error")
+    .map((d) => d.code ?? "");
+}
+
 describe("projection comprehension — validation gates", () => {
-  it("HONESTLY rejects a query-time projection until a backend emits it", async () => {
-    const codes = await projectionErrorCodes(QUERY_TIME);
-    expect(codes).toContain("loom.projection-query-time-unsupported");
+  it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
+    // node emits it (PR-C); the other backends are honestly gated until they do.
+    expect(await sysErrorCodes("node")).not.toContain("loom.projection-query-time-unsupported");
+    for (const platform of ["python", "java", "dotnet", "elixir"]) {
+      expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
+    }
   });
 
   it("rejects a `from` source AND `on(e)` folds together (reserved combo)", async () => {
@@ -161,5 +200,27 @@ describe("projection comprehension — validation gates", () => {
     `);
     expect(codes).not.toContain("loom.projection-query-time-unsupported");
     expect(codes).not.toContain("loom.projection-query-and-fold-unsupported");
+  });
+});
+
+describe("projection comprehension — Hono emission", () => {
+  it("emits a `/projections/<name>` route reading through the synthesised repo find + join map", async () => {
+    const files = await generateSystemFiles(SYS("node"));
+    const qp = [...files.entries()].find(([p]) => p.endsWith("http/query-projections.ts"))?.[1];
+    expect(qp, "query-projections file emitted").toBeDefined();
+    // Route + response schema.
+    expect(qp).toContain(`path: "/orders_view"`);
+    expect(qp).toContain(`const OrdersViewResponse = z.array(OrdersViewRow)`);
+    // Sources rows via the synthesised repo find (repository-builder.ts).
+    expect(qp).toContain("const rows = await repo.ordersView();");
+    // `join Customer as c on o.customerId` → batched by-id load…
+    expect(qp).toContain(
+      "const customerById = new Map((await customerRepo.findManyByIds(rows.map((r) => r.customerId)))",
+    );
+    // …and the `select customerName = c.name` reads through the loaded map.
+    expect(qp).toContain("customerName: customerById.get(r.customerId as string)!.name");
+    // The synthesised find lands on the Order repository.
+    const repo = [...files.entries()].find(([p]) => p.endsWith("order-repository.ts"))?.[1];
+    expect(repo).toContain("async ordersView(): Promise<Order[]>");
   });
 });

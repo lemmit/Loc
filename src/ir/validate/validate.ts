@@ -67,6 +67,7 @@ import {
   validatePermissions,
   validateProvenancedStorage,
   validatePythonStampSupport,
+  validateQueryTimeProjectionBackend,
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
@@ -163,6 +164,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
+    validateQueryTimeProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);

@@ -588,7 +588,7 @@ function emitProjectionViewRoute(
  *  `<Agg>Id`), so a first-hop follow off a projection row drops NULLs and
  *  re-brands each value with `Ids.<Agg>Id(...)` before `findManyByIds`.  Later
  *  hops read hydrated aggregates and already hold proper id types. */
-function idsSourceForAux(
+export function idsSourceForAux(
   aux: { path: string[]; aggName: string; mapVar: string },
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
   fromRow = false,
@@ -611,7 +611,7 @@ function idsSourceForAux(
  *  the access becomes `<map>.get(<receiverRendered> as string)!.<member>`
  *  where `<receiverRendered>` is recursively the same walker.
  *  Falls back to standard `renderTsExpr` for non-follow shapes. */
-function renderBindWithFollows(
+export function renderBindWithFollows(
   expr: ExprIR,
   thisName: string,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
@@ -672,7 +672,7 @@ function idFollowPath(e: ExprIR): string[] | undefined {
 /** Zod schema for a view-output field's TS type.  Decimals stay as
  *  `z.number()`, ids emit as `z.string()`, enum values are emitted
  *  inline as a string-literal union pulled from `enumValues`. */
-function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
+export function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":

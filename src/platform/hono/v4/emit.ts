@@ -70,6 +70,8 @@ import {
   type EnrichedBoundedContextIR,
   type EventIR,
   type FieldIR,
+  isMaterializedProjection,
+  isQueryTimeProjection,
   type RepositoryIR,
   type SystemIR,
   type TimerSourceIR,
@@ -111,6 +113,7 @@ import { emitAuthFiles } from "./auth-emit.js";
 import { buildExplicitRoutesFile, emitExternHandlerImpls } from "./explicit-handlers-builder.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildProjectionsFile } from "./projection-builder.js";
+import { buildQueryProjectionsFile } from "./projection-query-routes-builder.js";
 import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { anyTimerUsesCron, renderTimerScheduler } from "./scheduler-builder.js";
@@ -580,8 +583,15 @@ export function generateTypeScriptForContexts(
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName, resolveStreamContext));
   }
-  if (merged.projections.length > 0 && !usingMikro) {
+  if (merged.projections.some(isMaterializedProjection) && !usingMikro) {
     out.set("http/projections.ts", buildProjectionsFile(merged));
+  }
+  // Query-time projections (read-path-architecture.md rev.13) — the always-
+  // current read model that was a `view`'s full form.  Emitted to a distinct
+  // file (`http/query-projections.ts`, mounted under `/projections`) since the
+  // folded read model owns `http/projections.ts` with a different signature.
+  if (merged.projections.some(isQueryTimeProjection) && !usingMikro) {
+    out.set("http/query-projections.ts", buildQueryProjectionsFile(merged));
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A2): one router
   // file per served api whose `route <M> <p> -> <Ctx>.<Handler>` list resolves

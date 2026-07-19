@@ -66,19 +66,13 @@ function validateQueryComprehension(
         `projection ('from … select …') OR a folded one ('on(e) { … }'), not both.`,
       source: `${ctx.name}/${proj.name}`,
     });
-    return;
   }
-  diags.push({
-    severity: "error",
-    code: "loom.projection-query-time-unsupported",
-    message:
-      `projection '${proj.name}' uses the query-time comprehension ` +
-      `('from'/'where'/'join'/'select'), which is parsed and lowered but not yet ` +
-      `emitted by any backend. The per-backend query-time projection emit lands ` +
-      `in a follow-up; for now express the read as a 'view' or a folded ` +
-      `'projection'.`,
-    source: `${ctx.name}/${proj.name}`,
-  });
+  // The HONEST "not yet emitted on this backend" gate
+  // (`loom.projection-query-time-unsupported`) is a SYSTEM-level check
+  // (`validateQueryTimeProjectionBackend`), keyed on the target deployable's
+  // platform — node emits it (PR-C), the other backends still error — mirroring
+  // `validatePagedQueryHandlerBackend`.  It can't live here because a
+  // context-level check has no deployable/platform in scope.
 }
 
 function validateKey(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagnostic[]): void {
