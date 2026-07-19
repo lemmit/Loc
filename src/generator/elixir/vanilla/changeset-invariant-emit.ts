@@ -81,15 +81,33 @@ function structEvaluable(e: ExprIR, scope: ReadonlySet<string> = new Set()): boo
   }
 }
 
-/** Aggregate invariants that need the cross-field `validate_invariants/1` seam:
- *  NOT already covered by a single-field `validate_*` line, and fully evaluable
- *  against the applied struct (predicate AND any `when`-guard). */
+/** A MESSAGED rule routes to the `validate_invariants/1` residual carrier — so
+ *  its wire `code` rides the `add_error` metadata (Ecto's native validators
+ *  can't carry a custom key) — when its predicate is renderable against the
+ *  applied struct: either a struct-evaluable cross-field comparison OR a
+ *  recognized single-field shape (`.length` / `.matches` / numeric bound, which
+ *  `renderExpr` renders as `String.length` / `Regex.match?` / `Decimal.compare`).
+ *  A message-LESS single-field rule is unaffected — it keeps its native
+ *  `validate_*` line (byte-identical). Consumed by BOTH `residualInvariants`
+ *  (to include it here) and `changeset-emit`'s native path (to exclude it
+ *  there), so the two never double-emit. */
+export function messagedRoutesToResidual(inv: InvariantIR): boolean {
+  if (inv.message == null) return false;
+  const renderable = structEvaluable(inv.expr) || singleFieldConstraints(inv) !== null;
+  return renderable && (inv.guard === undefined || structEvaluable(inv.guard));
+}
+
+/** Aggregate invariants that need the `validate_invariants/1` seam: message-less
+ *  cross-field comparisons (fully evaluable against the applied struct), plus
+ *  every MESSAGED rule that routes here to carry its wire `code`. */
 export function residualInvariants(agg: AggregateIR): InvariantIR[] {
   return (agg.invariants ?? []).filter(
     (inv) =>
-      singleFieldConstraints(inv) === null &&
-      structEvaluable(inv.expr) &&
-      (inv.guard === undefined || structEvaluable(inv.guard)),
+      (inv.message == null &&
+        singleFieldConstraints(inv) === null &&
+        structEvaluable(inv.expr) &&
+        (inv.guard === undefined || structEvaluable(inv.guard))) ||
+      messagedRoutesToResidual(inv),
   );
 }
 

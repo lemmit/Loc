@@ -23,6 +23,7 @@ import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   aggregateHasResidualInvariants,
+  messagedRoutesToResidual,
   renderInvariantValidatorFn,
 } from "./changeset-invariant-emit.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
@@ -169,9 +170,15 @@ function renderChangeset(
   // that are actually cast (`@all_fields`) get a validator.
   const castFields = new Set(allFields.map((f) => snake(f.name)));
   const validatorLines = (agg.invariants ?? []).flatMap((inv) =>
-    (singleFieldConstraints(inv) ?? [])
-      .filter((c) => castFields.has(snake(c.field)))
-      .map((c) => ectoValidator(snake(c.field), c.pattern, inv.message?.text)),
+    // A messaged rule that routes to the `validate_invariants/1` residual
+    // carrier (to carry its wire `code`) is emitted there, not as a native
+    // `validate_*` line — otherwise it would double-validate. A message-less
+    // rule (and a messaged rule that can't route) keeps its native line.
+    messagedRoutesToResidual(inv)
+      ? []
+      : (singleFieldConstraints(inv) ?? [])
+          .filter((c) => castFields.has(snake(c.field)))
+          .map((c) => ectoValidator(snake(c.field), c.pattern, inv.message?.text)),
   );
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 

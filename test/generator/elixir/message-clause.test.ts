@@ -3,11 +3,11 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // Custom validation messages on the vanilla Phoenix/Ecto backend — a messaged
-// single-field rule rides its author text on Ecto's own `message:` option of
-// the native `validate_*` line (keeping enforcement + surfacing the text); a
-// messaged cross-field rule surfaces it on the `validate_invariants/1`
-// `add_error`. A message-less rule keeps its native validator + the derived
-// `must satisfy:` default, byte-identical.
+// rule (single-field OR cross-field) routes through the `validate_invariants/1`
+// residual carrier, whose `add_error` carries the author text AND the stable
+// content-hash wire `code` as `loom_code:` metadata (Ecto's native validators
+// can't carry a custom key). A message-LESS single-field rule keeps its native
+// `validate_*` line, byte-identical.
 // ---------------------------------------------------------------------------
 
 const SRC = `
@@ -37,30 +37,32 @@ async function changeset() {
   return all.get(key)!;
 }
 
-describe("elixir/vanilla — messaged rule → Ecto message: option", () => {
-  it("carries the author text on the native validate_* line", async () => {
+describe("elixir/vanilla — messaged single-field rule → residual carrier + wire code", () => {
+  it("routes a messaged single-field rule through validate_invariants with loom_code", async () => {
     const cs = await changeset();
+    // `.length` predicates render against the applied struct via String.length,
+    // add_error carries the author text + the content-hash wire code.
     expect(cs).toContain(
-      '|> validate_length(:name, min: 2, message: "Name must be 2-120 characters")',
+      'if String.length(data.name) >= 2 and String.length(data.name) <= 120, do: changeset, else: add_error(changeset, :name, "Name must be 2-120 characters", loom_code: "msg.j985f2")',
     );
     expect(cs).toContain(
-      '|> validate_length(:name, max: 120, message: "Name must be 2-120 characters")',
+      'if String.length(data.sku) > 0, do: changeset, else: add_error(changeset, :sku, "SKU is required", loom_code: "msg.u3w71r")',
     );
-    expect(cs).toContain('|> validate_length(:sku, min: 1, message: "SKU is required")');
+    // A messaged rule no longer emits a native validate_* line with `message:`.
+    expect(cs).not.toContain('message: "Name must be 2-120 characters"');
+    expect(cs).not.toContain('message: "SKU is required"');
   });
 
-  it("keeps a message-LESS single-field rule byte-identical (no message: option)", async () => {
+  it("keeps a message-LESS single-field rule byte-identical on the native validator", async () => {
     const cs = await changeset();
     expect(cs).toContain("|> validate_length(:sku, min: 1)\n");
   });
 });
 
-// A messaged CROSS-FIELD rule routes through the `validate_invariants/1`
+// A messaged CROSS-FIELD rule likewise routes through the `validate_invariants/1`
 // residual carrier, whose `add_error` carries the stable content-hash wire
 // `code` as `loom_code:` metadata; the 422 handler surfaces it as
-// `errors[].code`. (Single-field messaged rules stay on native Ecto validators,
-// which can't carry a custom metadata key — so they get the message but no
-// code; that's a documented Elixir limitation.)
+// `errors[].code`.
 const CROSS = `
 system S {
   subdomain Sales {
