@@ -28,9 +28,12 @@
 //                                   `display`-gated id-select/id-text split).
 //
 // A SCALAR array (`tags: string[]` / `scores: int[]`) renders as a repeatable
-// add/remove row list (one `TextEditingController` per row, managed in state).
-// DEFERRED: array-of-value-object inputs (no repeatable sub-form yet) and
-// enum/bool/datetime element arrays are still dropped.
+// add/remove row list (one `TextEditingController` per row); an OBJECT array
+// (`items: LineItem[]`) renders each row as a group of `TextFormField`s over the
+// value object's scalar sub-fields (a `List<List<TextEditingController>>` in
+// state), submitting a `{sub: value, …}` map per row.
+// DEFERRED: a VO-array whose sub-fields aren't all text/numeric (bool / enum /
+// datetime / nested), and enum/bool/datetime scalar element arrays, are dropped.
 
 import { createInputFields, isConstructible } from "../../ir/enrich/wire-projection.js";
 import type {
@@ -87,7 +90,8 @@ export type FlutterInputKind =
   | "enum"
   | "datetime"
   | "fk-select"
-  | "scalar-array";
+  | "scalar-array"
+  | "object-array";
 
 /** One prepared form field — a scalar input the widget renders + submits. */
 export interface FlutterFormField {
@@ -116,6 +120,14 @@ export interface FlutterFormField {
    *  per-row keyboard + parse (a `string[]` submits the raw list; a numeric array
    *  parses each row). */
   elementKind?: "text" | "number-int" | "number-double";
+  /** For an `object-array` field (`items: LineItem[]`), the value object's
+   *  scalar sub-fields in order — each row is a group of `TextFormField`s, one
+   *  per sub-field, and submits a `{sub: value, …}` map per row. */
+  objectFields?: {
+    jsonKey: string;
+    label: string;
+    kind: "text" | "number-int" | "number-double";
+  }[];
 }
 
 /** A fully prepared form → everything `renderFormWidget` needs. */
@@ -239,10 +251,42 @@ function prepareFields(
       }
       continue;
     }
-    // A scalar array (`tags: string[]` / `scores: int[]`) → a repeatable
-    // add/remove row list.  Only plain text / numeric elements render; enum /
-    // bool / datetime / value-object / id-collection arrays stay deferred.
+    // An array field (`tags: string[]` / `items: LineItem[]`) → a repeatable
+    // add/remove row list.
     if (base.kind === "array") {
+      const elemBase = peel(base.element);
+      const voFieldsOfElem =
+        elemBase.kind === "valueobject" ? vosByName.get(elemBase.name) : undefined;
+      if (voFieldsOfElem) {
+        // Array of value objects → each row is a group of the VO's scalar
+        // sub-fields.  Only when EVERY sub-field is a plain text / numeric input
+        // (a mini-form of controllers); a bool/enum/datetime/nested sub-field
+        // defers the whole array (dropped, never broken Dart).
+        const objectFields: NonNullable<FlutterFormField["objectFields"]> = [];
+        let allScalar = true;
+        for (const sub of voFieldsOfElem) {
+          const k = scalarInputKind(sub.type, enumsByName, aggregatesByName);
+          if (k === "text" || k === "number-int" || k === "number-double") {
+            objectFields.push({ jsonKey: sub.name, label: humanize(sub.name), kind: k });
+          } else {
+            allScalar = false;
+            break;
+          }
+        }
+        if (allScalar && objectFields.length > 0) {
+          out.push({
+            wireName: f.name,
+            jsonKey: f.name,
+            label: humanize(f.name),
+            kind: "object-array",
+            required: !fieldOptional,
+            objectFields,
+          });
+        }
+        continue;
+      }
+      // Scalar array — plain text / numeric elements only; enum / bool / datetime
+      // / id-collection element arrays stay deferred.
       const elemKind = scalarInputKind(base.element, enumsByName, aggregatesByName);
       if (elemKind === "text" || elemKind === "number-int" || elemKind === "number-double") {
         out.push({
@@ -553,6 +597,12 @@ function arrayCtrlsId(wireName: string): string {
   return `${stateId(wireName)}Controllers`;
 }
 
+/** The row-list field name for an object-array field (`items` → `_itemsRows`) —
+ *  each row is a `List<TextEditingController>`, one per VO sub-field. */
+function rowsId(wireName: string): string {
+  return `${stateId(wireName)}Rows`;
+}
+
 /** True when the field is backed by a `TextEditingController`. */
 function isTextBacked(f: FlutterFormField): boolean {
   return f.kind === "text" || f.kind === "number-int" || f.kind === "number-double";
@@ -582,6 +632,8 @@ function stateDecls(fields: readonly FlutterFormField[]): string[] {
       out.push(`  List<Map<String, dynamic>> ${optionsId(f.wireName)} = const [];`);
     } else if (f.kind === "scalar-array") {
       out.push(`  final List<TextEditingController> ${arrayCtrlsId(f.wireName)} = [];`);
+    } else if (f.kind === "object-array") {
+      out.push(`  final List<List<TextEditingController>> ${rowsId(f.wireName)} = [];`);
     }
   }
   return out;
@@ -641,6 +693,10 @@ function disposeBody(fields: readonly FlutterFormField[]): string[] {
   for (const f of fields) {
     if (f.kind === "scalar-array") {
       out.push(`    for (final c in ${arrayCtrlsId(f.wireName)}) c.dispose();`);
+    } else if (f.kind === "object-array") {
+      out.push(
+        `    for (final row in ${rowsId(f.wireName)}) { for (final c in row) c.dispose(); }`,
+      );
     }
   }
   return out;
@@ -677,6 +733,22 @@ function fieldValueExpr(f: FlutterFormField): string {
         return `${ctrls}.map((c) => double.tryParse(c.text)).whereType<double>().toList()`;
       }
       return `${ctrls}.map((c) => c.text).toList()`;
+    }
+    case "object-array": {
+      const rows = rowsId(f.wireName);
+      const entries = (f.objectFields ?? [])
+        .map((sf, i) => {
+          const cell = `row[${i}].text`;
+          const val =
+            sf.kind === "number-int"
+              ? `int.tryParse(${cell})`
+              : sf.kind === "number-double"
+                ? `double.tryParse(${cell})`
+                : cell;
+          return `'${dartStr(sf.jsonKey)}': ${val}`;
+        })
+        .join(", ");
+      return `${rows}.map((row) => <String, dynamic>{${entries}}).toList()`;
     }
   }
 }
@@ -772,6 +844,31 @@ function fieldWidget(f: FlutterFormField): string {
         `IconButton(icon: const Icon(Icons.remove_circle_outline), onPressed: () => setState(() => ${ctrls}.removeAt(entry.key).dispose())), ` +
         `]))), ` +
         `Align(alignment: Alignment.centerLeft, child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Add'), onPressed: () => setState(() => ${ctrls}.add(TextEditingController())))), ` +
+        `])`
+      );
+    }
+    case "object-array": {
+      const rows = rowsId(f.wireName);
+      const subs = f.objectFields ?? [];
+      // One cell (TextFormField over `row[i]`) per VO sub-field.
+      const cells = subs
+        .map((sf, i) => {
+          const kbd =
+            sf.kind === "number-int" || sf.kind === "number-double"
+              ? "keyboardType: TextInputType.number, "
+              : "";
+          return `Expanded(child: Padding(padding: const EdgeInsets.only(right: 4), child: TextFormField(controller: row[${i}], ${kbd}decoration: InputDecoration(isDense: true, labelText: '${dartStr(sf.label)}'))))`;
+        })
+        .join(", ");
+      const newRow = subs.map(() => "TextEditingController()").join(", ");
+      return (
+        `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
+        `Padding(padding: const EdgeInsets.only(top: 8, bottom: 4), child: Text(${label}, style: Theme.of(context).textTheme.labelLarge)), ` +
+        `...${rows}.asMap().entries.map((entry) { final row = entry.value; return Padding(padding: const EdgeInsets.only(bottom: 4), child: Row(children: <Widget>[` +
+        `${cells}, ` +
+        `IconButton(icon: const Icon(Icons.remove_circle_outline), onPressed: () => setState(() { final removed = ${rows}.removeAt(entry.key); for (final c in removed) c.dispose(); })), ` +
+        `])); }), ` +
+        `Align(alignment: Alignment.centerLeft, child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Add'), onPressed: () => setState(() => ${rows}.add([${newRow}])))), ` +
         `])`
       );
     }
