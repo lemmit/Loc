@@ -351,6 +351,16 @@ special-cases it (`angular-target.ts:461`), but Vue
 — users failing a `requires` gate see the word **null** where the hidden
 button should be nothing. Fix: mirror the Angular guard in both targets.
 
+> **Update (2026-07-19, follow-up PR): F4/F5 fixed.** Both `renderConditionalChild`
+> targets now drop the else arm entirely when `elseS === "null"` (the
+> render-nothing sentinel), mirroring the Angular guard — Vue emits only the
+> `<template v-if>`, Svelte only the `{#if}…{/if}`. (Feliz emits an F#
+> `if/then/else` and its build matrix includes an authgate scenario that is
+> green, so its `null` arm already renders nothing; Flutter is a phase-0 stub.)
+> Verified: generated Vue/Svelte `OrderActions` carry no literal `null` text;
+> regression assertions added to the existing `operation-button-gate` tests
+> (which previously passed *with* the bug present).
+
 ---
 
 ## G. IR / validation holes

@@ -308,6 +308,13 @@ export const svelteTarget: WalkerTarget = {
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const inner = "  ".repeat(depth + 1);
     const close = "  ".repeat(depth);
+    // `"null"` is the walker's render-nothing sentinel (e.g. an auth-gated
+    // action button's else arm).  Svelte renders a bare `null` token between
+    // `{:else}` and `{/if}` as literal TEXT, so drop the `{:else}` entirely —
+    // matching the Angular target's guard.
+    if (elseS === "null") {
+      return `{#if ${cond}}\n${inner}${thenS}\n${close}{/if}`;
+    }
     return `{#if ${cond}}\n${inner}${thenS}\n${close}{:else}\n${inner}${elseS}\n${close}{/if}`;
   },
 
