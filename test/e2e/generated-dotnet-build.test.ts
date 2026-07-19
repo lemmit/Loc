@@ -232,6 +232,63 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 (the last drained Dapper gate): workflow event subscriptions /
+    // outbox on `persistence: dapper`.  The saga handlers depend on the
+    // persistence-neutral Domain.Common ports, whose raw-Npgsql adapters
+    // (DapperPersistencePorts.cs) replace the EF ones; the outbox
+    // dispatcher/relay + workflow-instances read controller + the saga /
+    // event-store / view handlers all read/write through NpgsqlDataSource +
+    // DbSchema.  This cell exercises a state saga over a DURABLE channel (outbox
+    // + relay + `last_event_id` marker), an event-sourced workflow (per-context
+    // Dapper event store over `<ctx>_events`), and a workflow-sourced view, and
+    // proves the whole path compiles with no EF AppDbContext under /warnaserror.
+    it("system `persistence: dapper` (dotnet) — workflow outbox / event-subscriptions build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-outbox-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-outbox.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // The Dapper port adapters replace the EF PersistencePorts + AppDbContext.
+        expect(
+          fs.existsSync(
+            path.join(proj, "Infrastructure", "Persistence", "DapperPersistencePorts.cs"),
+          ),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "PersistencePorts.cs")),
+        ).toBe(false);
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "AppDbContext.cs")),
+        ).toBe(false);
+        // The Dapper outbox relay is emitted; the EF OutboxMessage POCO is not.
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Events", "OutboxRelayService.cs")),
+        ).toBe(true);
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "OutboxMessage.cs")),
+        ).toBe(false);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits the
     // generated OidcUserVerifier (JWKS validation + claims→User) + its NuGet
     // refs + the Program.cs registration.  This cell compiles the verifier
