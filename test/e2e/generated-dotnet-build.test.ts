@@ -77,6 +77,12 @@ describe.skipIf(!ENABLED)(
       // the shadow FK column named for the direct parent (labels.shipment_id)
       // and the domain ParentId branded ShipmentId (nested-parts Phase 4 — .NET).
       "test/e2e/fixtures/dotnet-build/nested-parts.ddd",
+      // shape(document) + part-in-part (Cart → Box → Slip/Item): the snapshot
+      // fold recurses the part tree into the JSONB blob, and each nested part's
+      // snapshot ParentId brands to its DIRECT parent's id class (Slip/Item →
+      // BoxId), matching the entity State.ParentId so the ToSnapshot/FromSnapshot
+      // field copies compile (regresses the nested-ParentId mistyping).
+      "test/e2e/fixtures/dotnet-build/document-nested-parts.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
