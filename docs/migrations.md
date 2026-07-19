@@ -35,7 +35,8 @@ A `SchemaSnapshot` is an alphabetically-sorted list of `TableShape`s
 (`{ name, schema?, columns, primaryKey, foreignKeys, indexes }`). `MigrationStep`
 is a closed union of `createTable` / `dropTable` / `renameTable` / `addColumn` /
 `dropColumn` / `renameColumn` / `alterColumnNullable` / `alterColumnType` /
-`addIndex` / `dropIndex` / `sqlComment`. Backends only translate steps to native syntax — they
+`addIndex` / `dropIndex` / `renameIndex` / `sqlComment` / `backfillColumn` /
+`sqlExec`. Backends only translate steps to native syntax — they
 never re-derive the schema from the IR.
 
 **Every delta step carries a `schema?`** — the owning bounded context's Postgres
@@ -112,9 +113,17 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
   column on every child + contained-part table (each a `renameColumn`). The whole
   set is non-destructive; Postgres/Ecto keep FK constraints valid across a table
   rename, so no FK is re-emitted. Guarded on baseline existence, so it is a no-op
-  once baked in. (Derived FK-index names embed the renamed table/column, so they
-  drop+recreate under the new name — a non-destructive rebuild, not a
-  `renameIndex`.)
+  once baked in. Derived FK-index names embed the renamed table/column, so the
+  diff renames them **in place** via a `renameIndex` step (`ALTER INDEX … RENAME
+  TO`; Ecto `execute/1`) — the same index (columns/uniqueness/predicate/opclasses
+  match after mapping through the generation's column renames), just a new name,
+  zero drop/create (M-T2.1 a). Renaming an aggregate that is the **target** of a
+  *sibling* aggregate's reference collection (`Other.xs: Old id[]`) also renames
+  that sibling join table's `targetFk` column (`old_id → new_id`), even when the
+  sibling lives in another module (M-T2.1 b). A `persistedAs(eventLog)` aggregate
+  has no own table — its rename emits a ledgered `sqlExec` fix-up rewriting the
+  stranded `stream_type` rows in `<ctx>_events` (M-T2.1 c), mirroring the TPH
+  `kind` fix-up. The whole rename stays non-destructive across the system.
 
   ```ddd
   migration "rename-order" {
@@ -231,6 +240,35 @@ UPDATE "parties" SET "kind" = 'Sponsor' WHERE "kind" = 'Vendor';
 **Down migrations are no-op by decision** (D-MIG-NO-DOWN): operators roll
 forward; recovery is backup + roll-forward. And data steps live in the DSL,
 not in per-backend stub files (D-MIG-DSL-STEPS) — one source, five backends.
+
+## Reshape detection — the `loom.migration-shape-change` gate (M-T2.4)
+
+Flipping an aggregate's `shape(relational|embedded|document)` or its TPH/TPC
+inheritance strategy **reshapes the physical table** — a full-table data move the
+column diff can't express (a relational row becomes `(id, data, version)`; one
+shared TPH table becomes one table per concrete). To detect it, the snapshot
+`TableShape` carries two optional stamps: `savingShape` (aggregate root) and
+`inheritance` (`{strategy, base}` on TPH-shared / TPC-concrete tables). Both are
+optional — `schemaVersion` stays `1`, and an **unstamped pre-M-T2.4 baseline is
+simply not compared** (the flip falls to the generic destructive gate, exactly as
+before — backward-compatible grace).
+
+`detectReshapes` finds a **saving-shape flip** (matched table, `savingShape`
+changed) and an **inheritance-strategy flip** (TPH↔TPC, whose table *names*
+change, grouped by root base across the drop/create sets). A flip raises the
+dedicated **`MigrationShapeChangeError`** (`loom.migration-shape-change`) instead
+of the generic destructive listing. Under `--allow-destructive` there is **no
+drop**: the old table is renamed to `<table>__pre_reshape` (kept for the data
+move), the new shape is created empty, and a `-- TODO reshape …` recipe marks the
+`INSERT … SELECT` the operator runs. The backup is recorded in the written
+snapshot, so its cleanup drop is destructive-gated the *next* generation.
+
+```sql
+-- relational Cart → shape(document) Cart, under --allow-destructive
+ALTER TABLE "carts" RENAME TO "carts__pre_reshape";
+CREATE TABLE "carts" ("id" UUID NOT NULL, "data" JSONB NOT NULL, "version" INTEGER NOT NULL, PRIMARY KEY ("id"));
+-- TODO reshape (…): copy data from "carts__pre_reshape" into the new shape (e.g. INSERT … SELECT), then drop the backup under --allow-destructive
+```
 
 ## Baseline safety — the `--allow-rebaseline` gate (M-T2.2)
 

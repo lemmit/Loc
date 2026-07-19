@@ -103,6 +103,38 @@ export interface TableShape {
    *  backends (Drizzle / EF) create it; Phoenix **skips** it — it stores
    *  the array inline as a `{:array, :map}` column on the parent instead. */
   valueCollection?: boolean;
+  /** Reshape-detection stamp (M-T2.4): the effective saving shape of the
+   *  aggregate whose ROOT table this is (`relational` / `embedded` /
+   *  `document`).  Stamped on the aggregate root only (not parts / joins /
+   *  saga / event-log / outbox).  The diff compares a matched pair's
+   *  `savingShape`; a flip (relational → document) is a *reshape* — a
+   *  full-table data move the column-churn diff can't express — so it raises
+   *  `loom.migration-shape-change` instead of the generic destructive listing.
+   *  Optional ⇒ `schemaVersion` stays 1; an UNstamped baseline (pre-M-T2.4
+   *  snapshot) simply isn't compared, so the flip falls to the generic
+   *  destructive gate as before (backward-compatible grace). */
+  savingShape?: SavingShape;
+  /** Reshape-detection stamp (M-T2.4): the inheritance strategy + root base
+   *  of an inheritance table — `sharedTable` on a TPH shared base table,
+   *  `ownTable` on each TPC concrete's own table.  Keyed by the root base
+   *  name so a TPH↔TPC flip (whose table NAMES change, so no matched pair
+   *  exists) is detected by grouping this generation's created + dropped
+   *  inheritance tables per base and comparing strategies.  Same optional /
+   *  grace semantics as {@link savingShape}. */
+  inheritance?: InheritanceStamp;
+}
+
+/** Persistence saving shape — mirrors the IR's `SavingShape`, redeclared here
+ *  so `migrations-ir.ts` stays free of an `ir/types/loom-ir.ts` import (the
+ *  MigrationsIR layer is consumed by the backends, which must not pull the full
+ *  IR vocabulary). */
+export type SavingShape = "relational" | "embedded" | "document";
+
+export interface InheritanceStamp {
+  strategy: "sharedTable" | "ownTable";
+  /** Root-base aggregate name — the grouping key that pairs a TPH shared table
+   *  with the TPC concrete tables of the SAME hierarchy across a flip. */
+  base: string;
 }
 
 export interface SchemaSnapshot {

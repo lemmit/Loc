@@ -50,7 +50,7 @@ function chainOf(agg: AggregateIR, pool: AggPool): AggregateIR[] {
  *  a root (declares no `extends`).  In a multi-level chain (`Dog extends Pet
  *  extends Animal`) every intermediate base is abstract and owns no table —
  *  the single shared TPH table lives at the root. */
-function rootBaseOf(agg: AggregateIR, pool: AggPool): AggregateIR {
+export function rootBaseOf(agg: AggregateIR, pool: AggPool): AggregateIR {
   const chain = chainOf(agg, pool);
   return chain.length > 0 ? chain[chain.length - 1] : agg;
 }

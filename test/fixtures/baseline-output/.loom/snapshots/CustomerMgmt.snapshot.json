@@ -47,7 +47,8 @@
       ],
       "foreignKeys": [],
       "indexes": [],
-      "schema": "customers"
+      "schema": "customers",
+      "savingShape": "relational"
     }
   ],
   "lastVersion": "20260101000000",
