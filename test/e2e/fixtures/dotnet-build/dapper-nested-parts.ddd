@@ -1,0 +1,63 @@
+// Compile-gate fixture for the .NET `persistence: dapper` adapter's PART-IN-PART
+// (recursive containment) surface (M-T6.9 wave 5).  `Order` contains a single
+// `Shipment`, which ITSELF contains a single `Label` and a collection of
+// `Sticker`s — each nested part persists as its own child table FK'd to its
+// DIRECT parent part (`labels.shipment_id`, `stickers.shipment_id`), not the
+// aggregate root.  Reads recurse the containment tree bottom-up (grandchildren
+// grouped by parent-part id, slotted into the parent's `Map`), saves recurse the
+// object graph, deletes rely on the FK cascade.  Build under
+// `dotnet build /warnaserror` — the nested `_Create(State)` seam + the
+// dictionary-threaded `Map` signatures are the type-sensitive parts.
+
+system DapperNestedParts {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      enum StickerKind { Fragile, Priority }
+
+      valueobject Weight {
+        grams: int
+      }
+
+      aggregate Order with crudish {
+        customer: string
+        // single part-in-part chain: Order -> Shipment -> Label
+        contains shipment: Shipment
+        // sibling root-level collection containment (flat)
+        contains coupons: Coupon[]
+
+        entity Shipment {
+          carrier: string
+          weight:  Weight
+          // single part-in-part
+          contains label: Label
+          // collection part-in-part
+          contains stickers: Sticker[]
+        }
+        entity Label { zpl: string }
+        entity Sticker {
+          text: string
+          kind: StickerKind
+        }
+        entity Coupon { code: string }
+      }
+
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}

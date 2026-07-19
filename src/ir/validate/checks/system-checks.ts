@@ -1987,18 +1987,28 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // ref-collection list on the reconstructed roots — the two hydrate
         // paths run in sequence, not exclusively.
         //
-        // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
-        // with its OWN containments).  A scalar / enum / value-object / id
-        // COLLECTION field on a part IS supported — it stores as one `jsonb`
-        // column holding the serialised list (System.Text.Json round-trip, the
-        // raw-Npgsql mirror of EF's primitive-collection JSON mapping); only an
-        // array whose element kind is outside that set stays gated (nothing in
-        // the corpus reaches it).
+        // Part-in-part (a contained part with its OWN `contains`) is now drained
+        // for the RELATIONAL child-table shape: `partChildrenOf` builds the
+        // containment TREE, each grandchild a table FK'd to its DIRECT parent
+        // part; hydration recurses bottom-up (children grouped by parent-part id,
+        // slotted into the parent's `Map`), save recurses the object graph, and
+        // delete relies on the FK cascade.  The `shape(embedded)` fold (one JSONB
+        // column per root containment) still gates a part-in-part — the nested
+        // snapshot fold is an untested follow-up, kept conservative.
+        //
+        // A scalar / enum / value-object / id COLLECTION field on a part IS
+        // supported — it stores as one `jsonb` column holding the serialised
+        // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
+        // primitive-collection JSON mapping); only an array whose element kind
+        // is outside that set stays gated (nothing in the corpus reaches it).
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
           for (const part of a.parts ?? []) {
-            if ((part.contains ?? []).length > 0)
-              reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
+            if (shape === "embedded" && (part.contains ?? []).length > 0)
+              reject(
+                where,
+                `contains a nested part-in-part ('${part.name}' has its own parts) under shape(embedded)`,
+              );
             for (const pf of part.fields) {
               const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
               if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))

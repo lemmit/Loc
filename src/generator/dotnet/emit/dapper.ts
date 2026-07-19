@@ -37,6 +37,7 @@ import {
   isTphBase,
   isTphConcrete,
   ownFieldsOf,
+  tableOwnerName,
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
@@ -346,9 +347,19 @@ function columnsOf(
 interface PartChild {
   cont: ContainmentIR;
   part: EntityPartIR;
-  /** Child table (`line_items`) and owner FK column (`order_id`). */
+  /** Child table (`line_items`). */
   table: string;
+  /** The entity whose table this part's row FKs to — the aggregate root (or, for
+   *  a TPH concrete, the shared base) for a root-level part, a sibling part for
+   *  a nested (part-in-part) one.  Drives the `<fkOwner>_id` column + the schema
+   *  `references plural(fkOwner)`. */
+  fkOwner: string;
   parentFk: string;
+  /** The entity type the part's `State.ParentId` is typed to — the entity's
+   *  `parentName` (`directParentName`): the CONCRETE aggregate for a TPH
+   *  concrete's root-level part (whose FK still targets the base table), the
+   *  sibling part for a nested one.  Off the TPH path this equals `fkOwner`. */
+  parentEntityId: string;
   /** C# / SQL types for the owner FK and the part's own `id`. */
   parentIdCs: string;
   partIdCs: string;
@@ -361,74 +372,160 @@ interface PartChild {
   /** The part's field columns (save expressions read off `childVar`; hydrate
    *  expressions read off the child `r` row). */
   fieldCols: DapperColumn[];
+  /** Nested part-in-part containments — this part's own `contains`, each a
+   *  grandchild table FK'd to THIS part's row (recursion). */
+  children: PartChild[];
 }
 
-function partChildrenOf(agg: EnrichedAggregateIR): PartChild[] {
-  return (agg.contains ?? []).map((cont): PartChild => {
-    const part = (agg.parts ?? []).find((p) => p.name === cont.partName)!;
-    const childVar = `__${cont.name}Child`;
-    return {
-      cont,
-      part,
-      table: plural(snake(part.name)),
-      parentFk: `${snake(agg.name)}_id`,
-      parentIdCs: idTypes(agg.idValueType).cs,
-      partIdCs: idTypes(part.parentIdValueType).cs,
-      parentIdSql: idTypes(agg.idValueType).sql,
-      partIdSql: idTypes(part.parentIdValueType).sql,
-      childVar,
-      fieldCols: part.fields.map((f) => fieldColumn(f, childVar)),
-    };
-  });
+/** Build the containment tree for `agg`.  `ownerName` is the entity that owns
+ *  the physical root table the top-level parts FK to — `agg.name` for a plain
+ *  aggregate, the shared TPH base for a TPH concrete (so a concrete's contained
+ *  parts hang off the base row, EF's TPT-via-contains).  Recurses into each
+ *  part's own `contains`, FK'ing a grandchild to its DIRECT parent part. */
+function partChildrenOf(agg: EnrichedAggregateIR, ownerName: string = agg.name): PartChild[] {
+  const buildLevel = (
+    containments: readonly ContainmentIR[],
+    fkOwner: string,
+    fkOwnerIdVt: IdValueType,
+    parentEntityId: string,
+  ): PartChild[] =>
+    containments.map((cont): PartChild => {
+      const part = (agg.parts ?? []).find((p) => p.name === cont.partName)!;
+      const childVar = `__${cont.name}Child`;
+      return {
+        cont,
+        part,
+        table: plural(snake(part.name)),
+        fkOwner,
+        parentFk: `${snake(fkOwner)}_id`,
+        parentEntityId,
+        parentIdCs: idTypes(fkOwnerIdVt).cs,
+        partIdCs: idTypes(part.parentIdValueType).cs,
+        parentIdSql: idTypes(fkOwnerIdVt).sql,
+        partIdSql: idTypes(part.parentIdValueType).sql,
+        childVar,
+        fieldCols: part.fields.map((f) => fieldColumn(f, childVar)),
+        // A nested part FKs its DIRECT parent (this part), for both the storage
+        // FK and the `State.ParentId` type — so `fkOwner === parentEntityId`
+        // below (the TPH split only ever applies at the root level).
+        children: buildLevel(part.contains ?? [], part.name, part.parentIdValueType, part.name),
+      };
+    });
+  return buildLevel(agg.contains ?? [], ownerName, agg.idValueType, agg.name);
 }
 
-/** Per-child Row DTO class + its `Map<Part>` static hydrator, plus the private
- *  `HydrateAsync` that bulk-loads every containment for a page of root rows and
- *  reconstructs each root through `_Create(State)` with its children in place. */
+/** Flatten the containment tree to every part table (pre-order) — the schema,
+ *  save, and delete passes that need one row per table walk this. */
+function flattenParts(children: readonly PartChild[]): PartChild[] {
+  return children.flatMap((pc) => [pc, ...flattenParts(pc.children)]);
+}
+
+/** A `{ upperFirst(cont) } = <dict>.TryGetValue(<key>, out var …) ? … : <empty>`
+ *  containment slot, shared by the root `_Create` and each part `Map`.  `indent`
+ *  and `keyExpr` differ per site (12 spaces + `r.id` in a part Map; 16 spaces +
+ *  `r.id` in the root reconstruction). */
+function containmentSlot(pc: PartChild, indent: string, keyExpr: string): string {
+  const byOwner = `__${pc.cont.name}ByOwner`;
+  const local = `__${pc.cont.name}`;
+  const head = `${indent}${upperFirst(pc.cont.name)} = ${byOwner}.TryGetValue(${keyExpr}, out var ${local}) ? ${local}`;
+  return pc.cont.collection ? `${head} : new List<${pc.part.name}>(),` : `${head} : null,`;
+}
+
+/** The C# dictionary value type a containment groups its children into —
+ *  `IReadOnlyList<Part>` for a collection, `Part` for a single. */
+function containmentValueType(pc: PartChild): string {
+  return pc.cont.collection ? `IReadOnlyList<${pc.part.name}>` : pc.part.name;
+}
+
+/** Row DTO + `Map<Part>` static for one part.  A part that itself contains
+ *  nested parts takes each grandchild's grouped dictionary as an extra
+ *  parameter and slots them into its `State`, so a whole part-in-part subtree
+ *  reconstructs bottom-up.  A leaf part keeps the parameterless `Map<Part>(Row)`
+ *  shape (byte-identical to the pre-recursion single-level output). */
+function partRowAndMap(pc: PartChild): string {
+  const rowCols = [
+    `        public ${pc.partIdCs} id { get; set; }`,
+    `        public ${pc.parentIdCs} ${pc.parentFk} { get; set; }`,
+    ...pc.fieldCols.map(
+      (c) =>
+        `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+    ),
+  ];
+  // The grandchild dictionaries are the concrete `Dictionary<…>` that
+  // `ToDictionary` returns — declared as such (not `IReadOnlyDictionary`) so the
+  // `/warnaserror` CA1859 "use the concrete type" analyzer stays quiet.
+  const dictParams = pc.children.map(
+    (gc) => `, Dictionary<${gc.parentIdCs}, ${containmentValueType(gc)}> __${gc.cont.name}ByOwner`,
+  );
+  const childSlots = pc.children.map((gc) => containmentSlot(gc, "            ", "r.id"));
+  return lines(
+    `    private sealed class ${pc.part.name}Row`,
+    "    {",
+    ...rowCols,
+    "    }",
+    "",
+    `    private static ${pc.part.name} Map${pc.part.name}(${pc.part.name}Row r${dictParams.join("")}) =>`,
+    `        ${pc.part.name}._Create(new ${pc.part.name}.State`,
+    "        {",
+    `            Id = new ${pc.part.name}Id(r.id),`,
+    `            ParentId = new ${pc.parentEntityId}Id(r.${pc.parentFk}),`,
+    ...pc.fieldCols.map((c) => `            ${c.stateProp} = ${c.hydrate},`),
+    ...childSlots,
+    "        });",
+  );
+}
+
+/** Load + group a containment subtree.  Returns the top-down `loads` (each
+ *  level's rows filtered by its parent's ids) and the bottom-up `dicts` (each
+ *  level's `GroupBy → ToDictionary`, children first so a parent's `Map` call can
+ *  reference the grandchild dictionaries).  A leaf subtree yields
+ *  `[rowsQuery]` / `[dict]`, whose concatenation reproduces the pre-recursion
+ *  single-level output exactly. */
+function hydrateSubtree(pc: PartChild, parentIdsVar: string): { loads: string[]; dicts: string[] } {
+  const cols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
+  const rowsVar = `__${pc.cont.name}Rows`;
+  const byOwner = `__${pc.cont.name}ByOwner`;
+  const idsVar = `__${pc.cont.name}Ids`;
+  const loads: string[] = [
+    `        var ${rowsVar} = (await conn.QueryAsync<${pc.part.name}Row>(new CommandDefinition("SELECT ${cols} FROM ${pc.table} WHERE ${pc.parentFk} = ANY(@ids) ORDER BY ${pc.parentFk}, id", new { ids = ${parentIdsVar} }, cancellationToken: cancellationToken))).ToList();`,
+  ];
+  const childDicts: string[] = [];
+  if (pc.children.length > 0) {
+    loads.push(`        var ${idsVar} = ${rowsVar}.Select(x => x.id).ToArray();`);
+    for (const gc of pc.children) {
+      const sub = hydrateSubtree(gc, idsVar);
+      loads.push(...sub.loads);
+      childDicts.push(...sub.dicts);
+    }
+  }
+  // A leaf part maps via the method group (`g.Select(MapPart)`); a part with
+  // children passes the grandchild dictionaries into each `Map` call.
+  const mapArgs = pc.children.map((gc) => `, __${gc.cont.name}ByOwner`).join("");
+  const collectSelect =
+    pc.children.length === 0
+      ? `g.Select(Map${pc.part.name})`
+      : `g.Select(x => Map${pc.part.name}(x${mapArgs}))`;
+  const dictLine = pc.cont.collection
+    ? `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => (IReadOnlyList<${pc.part.name}>)${collectSelect}.ToList());`
+    : `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => Map${pc.part.name}(g.First()${mapArgs}));`;
+  return { loads, dicts: [...childDicts, dictLine] };
+}
+
+/** Per-part Row DTOs + `Map<Part>` statics (every part in the tree), plus the
+ *  private `HydrateAsync` that bulk-loads every containment level for a page of
+ *  root rows and reconstructs each root through `_Create(State)` with its
+ *  (recursively nested) children in place. */
 function containmentMembers(agg: EnrichedAggregateIR, children: PartChild[]): string[] {
   const rootStateBody = columnsOf(agg).map((c) => `                ${c.stateProp} = ${c.hydrate},`);
-  const rowClasses = children.map((pc) => {
-    const rowCols = [
-      `        public ${pc.partIdCs} id { get; set; }`,
-      `        public ${pc.parentIdCs} ${pc.parentFk} { get; set; }`,
-      ...pc.fieldCols.map(
-        (c) =>
-          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
-      ),
-    ];
-    return lines(
-      `    private sealed class ${pc.part.name}Row`,
-      "    {",
-      ...rowCols,
-      "    }",
-      "",
-      `    private static ${pc.part.name} Map${pc.part.name}(${pc.part.name}Row r) =>`,
-      `        ${pc.part.name}._Create(new ${pc.part.name}.State`,
-      "        {",
-      `            Id = new ${pc.part.name}Id(r.id),`,
-      `            ParentId = new ${agg.name}Id(r.${pc.parentFk}),`,
-      ...pc.fieldCols.map((c) => `            ${c.stateProp} = ${c.hydrate},`),
-      "        });",
-    );
-  });
+  const rowClasses = flattenParts(children).map(partRowAndMap);
+  // Per root-level child: its full subtree loads (top-down) then dicts
+  // (bottom-up).  For a flat child this is `[rowsQuery, dict]` — the exact
+  // interleaving the pre-recursion emitter produced.
   const loadBlocks = children.flatMap((pc) => {
-    const cols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
-    const rowsVar = `__${pc.cont.name}Rows`;
-    const byOwner = `__${pc.cont.name}ByOwner`;
-    return [
-      `        var ${rowsVar} = (await conn.QueryAsync<${pc.part.name}Row>(new CommandDefinition("SELECT ${cols} FROM ${pc.table} WHERE ${pc.parentFk} = ANY(@ids) ORDER BY ${pc.parentFk}, id", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
-      pc.cont.collection
-        ? `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => (IReadOnlyList<${pc.part.name}>)g.Select(Map${pc.part.name}).ToList());`
-        : `        var ${byOwner} = ${rowsVar}.GroupBy(x => x.${pc.parentFk}).ToDictionary(g => g.Key, g => Map${pc.part.name}(g.First()));`,
-    ];
+    const sub = hydrateSubtree(pc, "__ids");
+    return [...sub.loads, ...sub.dicts];
   });
-  const slotLines = children.map((pc) => {
-    const byOwner = `__${pc.cont.name}ByOwner`;
-    const local = `__${pc.cont.name}`;
-    return pc.cont.collection
-      ? `                ${upperFirst(pc.cont.name)} = ${byOwner}.TryGetValue(r.id, out var ${local}) ? ${local} : new List<${pc.part.name}>(),`
-      : `                ${upperFirst(pc.cont.name)} = ${byOwner}.TryGetValue(r.id, out var ${local}) ? ${local} : null,`;
-  });
+  const slotLines = children.map((pc) => containmentSlot(pc, "                ", "r.id"));
   return [
     ...rowClasses.flatMap((m) => [m, ""]),
     `    private static async Task<List<${agg.name}>> HydrateAsync(NpgsqlConnection conn, List<Row> rows, CancellationToken cancellationToken)`,
@@ -884,9 +981,17 @@ export function renderDapperRepository(
   // Relational: containments are child tables (partChildrenOf).  Embedded folds
   // each into a JSONB column instead (added to `cols` above), so no child
   // tables / HydrateAsync — the flat `Map` hydrates from the containment columns.
-  const partChildren = embedded ? [] : partChildrenOf(agg);
+  // A TPH concrete's contained parts hang off the SHARED base row, so the
+  // top-level FK targets the base table (`tph.baseName`) rather than the
+  // concrete (which owns no table) — EF's TPT-via-contains.  Off the TPH path
+  // this is `agg.name` (byte-identical).
+  const partChildren = embedded ? [] : partChildrenOf(agg, tph ? tph.baseName : agg.name);
   const hasContains = partChildren.length > 0;
-  const containSaveLines = partChildren.flatMap((pc) => {
+  // Insert one part row + recurse into its own contained parts, FK'ing each
+  // grandchild to THIS part's row (`ownerIdExpr` / `ownerAccessor` walk the
+  // in-memory object graph).  A leaf part emits just the loop + INSERT — the
+  // exact single-level shape the pre-recursion emitter produced.
+  const saveInsert = (pc: PartChild, ownerIdExpr: string, ownerAccessor: string): string[] => {
     const insertCols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
     const insertVals = [
       "@id",
@@ -895,20 +1000,30 @@ export function renderDapperRepository(
     ].join(", ");
     const insertParams = [
       `id = ${pc.childVar}.Id.Value`,
-      `${pc.parentFk} = aggregate.Id.Value`,
+      `${pc.parentFk} = ${ownerIdExpr}`,
       ...pc.fieldCols.map((c) => `${c.col} = ${c.save}`),
     ].join(", ");
     const iter = pc.cont.collection
-      ? `        foreach (var ${pc.childVar} in aggregate.${upperFirst(pc.cont.name)})`
-      : `        if (aggregate.${upperFirst(pc.cont.name)} is { } ${pc.childVar})`;
+      ? `        foreach (var ${pc.childVar} in ${ownerAccessor})`
+      : `        if (${ownerAccessor} is { } ${pc.childVar})`;
     return [
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
       iter,
       "        {",
       `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${pc.table} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, cancellationToken: cancellationToken));`,
+      ...pc.children.flatMap((gc) =>
+        saveInsert(gc, `${pc.childVar}.Id.Value`, `${pc.childVar}.${upperFirst(gc.cont.name)}`),
+      ),
       "        }",
     ];
-  });
+  };
+  // Full-list replace per root containment: delete the owner's rows (ON DELETE
+  // CASCADE clears any grandchildren) then re-insert the whole subtree.
+  const containSaveLines = partChildren.flatMap((pc) => [
+    `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+    ...saveInsert(pc, "aggregate.Id.Value", `aggregate.${upperFirst(pc.cont.name)}`),
+  ]);
+  // Delete only the root-level child tables by owner id; their FK ON DELETE
+  // CASCADE removes every nested grandchild row.
   const containDeleteLines = partChildren.map(
     (pc) =>
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
@@ -1600,95 +1715,108 @@ export function renderDapperSchema(
   // TPH (`sharedTable`) ABSTRACT base DOES own the single shared table (`id` +
   // `kind` discriminator + base columns + the nullable UNION of every concrete's
   // own columns), and each TPH CONCRETE owns no table of its own.
-  const stateTables = aggs
-    .filter((agg) => {
-      if (agg.persistedAs === "eventLog") return false;
-      // TPH concrete: its rows live in the shared base table — no own DDL.
-      if (isTphConcrete(agg, aggs)) return false;
-      // Abstract base: emits DDL only when it's a TPH base (owns the shared
-      // table); a TPC base owns nothing.
-      if (agg.isAbstract) return isTphBase(agg, aggs);
-      return true;
-    })
-    .map((agg) => {
-      // TPH shared table: `id` + `kind` + base columns + the nullable union of
-      // every concrete's own columns.  A concrete row leaves the sibling
-      // concretes' columns NULL (hence nullable); the `kind` discriminator picks
-      // the concrete on read (the repo splices `kind = '<Concrete>'`).
-      if (isTphBase(agg, aggs)) {
-        const baseCols = columnsOf(agg); // id + base own fields (+version)
-        const seen = new Set(baseCols.map((c) => c.col));
-        const unionCols: DapperColumn[] = [];
-        for (const concrete of tphConcretesOf(agg, aggs)) {
-          for (const f of ownFieldsOf(concrete, agg)) {
-            const c = fieldColumn(f);
-            if (seen.has(c.col)) continue;
-            seen.add(c.col);
-            // A sibling concrete's column is absent on other kinds → nullable.
-            unionCols.push({ ...c, nullable: true });
-          }
+  // One join table per reference collection (`X id[]`).  `X id[]` is a set
+  // (membership only, no order): the composite (owner, target) PK is the whole
+  // row — no payload column.  No FK constraint (the ownerFk stores the shared
+  // base row id for a TPH concrete, whose table is the base's), so reads ORDER
+  // BY the target FK id.
+  const joinTablesFor = (agg: EnrichedAggregateIR): string[] =>
+    (agg.associations ?? []).map((a) =>
+      [
+        `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
+        `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
+        `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
+        `    primary key (${a.ownerFk}, ${a.targetFk})`,
+        ");",
+      ].join("\n"),
+    );
+  // One child table per nested containment (`contains lineItems: LineItem[]`):
+  // `id` PK + `<owner>_id` FK (indexed) + the part's own scalar/enum/vo/id
+  // columns.  `flattenParts` walks the WHOLE containment tree, so a part-in-part
+  // grandchild gets its own table FK'd to its DIRECT parent part (`pc.fkOwner`);
+  // a TPH concrete's root parts FK the shared base table (`ownerName`).
+  // Cascade-delete keeps the raw-SQL delete path trivial.
+  const childTablesFor = (agg: EnrichedAggregateIR, ownerName: string): string[] =>
+    flattenParts(partChildrenOf(agg, ownerName)).map((pc) => {
+      const fieldCols = pc.fieldCols.map(
+        (c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`,
+      );
+      return [
+        `CREATE TABLE IF NOT EXISTS ${pc.table} (`,
+        [
+          `    id ${pc.partIdSql} primary key`,
+          `    ${pc.parentFk} ${pc.parentIdSql} not null references ${plural(snake(pc.fkOwner))} (id) on delete cascade`,
+          ...fieldCols,
+        ].join(",\n"),
+        ");",
+        `CREATE INDEX IF NOT EXISTS ${pc.table}_${pc.parentFk}_idx ON ${pc.table} (${pc.parentFk});`,
+      ].join("\n");
+    });
+
+  const stateTables = aggs.flatMap((agg): string[] => {
+    if (agg.persistedAs === "eventLog") return [];
+    // TPH concrete: no state table of its own (its rows live in the shared base
+    // table), but its contained parts + `X id[]` reference collections DO need
+    // their tables — child tables FK the shared base row (EF's TPT-via-contains),
+    // join tables carry the base row id.
+    if (isTphConcrete(agg, aggs)) {
+      const base = tableOwnerName(agg, aggs);
+      return [...childTablesFor(agg, base), ...joinTablesFor(agg)];
+    }
+    // TPH shared table: `id` + `kind` + base columns + the nullable union of
+    // every concrete's own columns.  A concrete row leaves the sibling
+    // concretes' columns NULL (hence nullable); the `kind` discriminator picks
+    // the concrete on read (the repo splices `kind = '<Concrete>'`).  A TPC
+    // (`ownTable`) abstract base owns nothing.
+    if (agg.isAbstract) {
+      if (!isTphBase(agg, aggs)) return [];
+      const baseCols = columnsOf(agg); // id + base own fields (+version)
+      const seen = new Set(baseCols.map((c) => c.col));
+      const unionCols: DapperColumn[] = [];
+      for (const concrete of tphConcretesOf(agg, aggs)) {
+        for (const f of ownFieldsOf(concrete, agg)) {
+          const c = fieldColumn(f);
+          if (seen.has(c.col)) continue;
+          seen.add(c.col);
+          // A sibling concrete's column is absent on other kinds → nullable.
+          unionCols.push({ ...c, nullable: true });
         }
-        const ddlCols = [
-          `    ${baseCols[0]!.col} ${baseCols[0]!.sql} primary key`,
-          "    kind text not null",
-          ...baseCols.slice(1).map((c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`),
-          ...unionCols.map((c) => `    ${c.col} ${c.sql}`),
-        ];
-        return `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${ddlCols.join(",\n")}\n);`;
       }
-      // Document shape: the whole aggregate is one JSONB `data` column.  No
-      // per-field columns, no child/join tables — the graph folds into the blob.
-      if (documentAggNames.has(agg.name)) {
-        return [
+      const ddlCols = [
+        `    ${baseCols[0]!.col} ${baseCols[0]!.sql} primary key`,
+        "    kind text not null",
+        ...baseCols.slice(1).map((c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`),
+        ...unionCols.map((c) => `    ${c.col} ${c.sql}`),
+      ];
+      const shared = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${ddlCols.join(",\n")}\n);`;
+      // A TPH base may itself declare `contains` / `X id[]` — its own child /
+      // join tables FK the shared table (owner = the base).
+      return [shared, ...childTablesFor(agg, agg.name), ...joinTablesFor(agg)];
+    }
+    // Document shape: the whole aggregate is one JSONB `data` column.  No
+    // per-field columns, no child/join tables — the graph folds into the blob.
+    if (documentAggNames.has(agg.name)) {
+      return [
+        [
           `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (`,
           `    id ${idTypes(agg.idValueType).sql} primary key,`,
           "    data jsonb not null,",
           "    version int not null",
           ");",
-        ].join("\n");
-      }
-      // Embedded shape: flat root columns + one JSONB containment column each
-      // (folded into `columnsOf(agg, true)`), and NO child tables.
-      const embedded = embeddedAggNames.has(agg.name);
-      const cols = columnsOf(agg, embedded).map((c, i) => {
-        const pk = i === 0 ? " primary key" : "";
-        const nn = c.nullable || i === 0 ? "" : " not null";
-        return `    ${c.col} ${c.sql}${pk}${nn}`;
-      });
-      const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
-      // One join table per reference collection (`X id[]`).  `X id[]` is a set
-      // (membership only, no order): the composite (owner, target) PK is the
-      // whole row — no payload column.  Reads ORDER BY the target FK id.
-      const joins = (agg.associations ?? []).map((a) =>
-        [
-          `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
-          `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
-          `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
-          `    primary key (${a.ownerFk}, ${a.targetFk})`,
-          ");",
         ].join("\n"),
-      );
-      // One child table per nested containment (`contains lineItems:
-      // LineItem[]`): `id` PK + `<agg>_id` owner FK (indexed) + the part's own
-      // scalar/enum/vo/id columns.  Cascade-delete keeps the raw-SQL delete
-      // path trivial (the repository also deletes children first defensively).
-      const childTables = (embedded ? [] : partChildrenOf(agg)).map((pc) => {
-        const fieldCols = pc.fieldCols.map(
-          (c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`,
-        );
-        return [
-          `CREATE TABLE IF NOT EXISTS ${pc.table} (`,
-          [
-            `    id ${pc.partIdSql} primary key`,
-            `    ${pc.parentFk} ${pc.parentIdSql} not null references ${tableOf(agg.name)} (id) on delete cascade`,
-            ...fieldCols,
-          ].join(",\n"),
-          ");",
-          `CREATE INDEX IF NOT EXISTS ${pc.table}_${pc.parentFk}_idx ON ${pc.table} (${pc.parentFk});`,
-        ].join("\n");
-      });
-      return [root, ...joins, ...childTables].join("\n\n");
+      ];
+    }
+    // Embedded shape: flat root columns + one JSONB containment column each
+    // (folded into `columnsOf(agg, true)`), and NO child tables.
+    const embedded = embeddedAggNames.has(agg.name);
+    const cols = columnsOf(agg, embedded).map((c, i) => {
+      const pk = i === 0 ? " primary key" : "";
+      const nn = c.nullable || i === 0 ? "" : " not null";
+      return `    ${c.col} ${c.sql}${pk}${nn}`;
     });
+    const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
+    return [root, ...joinTablesFor(agg), ...(embedded ? [] : childTablesFor(agg, agg.name))];
+  });
   // The single per-context event log `<ctx>_events` (event-log-architecture.md):
   // seq cursor + stream_type discriminator + PK (stream_type, stream_id,
   // version) + unique seq index — mirrors the canonical migration.
