@@ -129,10 +129,18 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           `or (${col} is null and ${tenantCol} = ${tenant})`
         );
       }
-      // Reference-collection membership: `this.<refColl>.contains(x)` →
-      // `:x member of e.<refColl>`.
+      // Reference-collection membership: `this.<refColl>.contains(x)`.  The
+      // collection is an `@ElementCollection` of an embeddable id
+      // (`PokemonId(UUID value)`), so `:x member of e.<refColl>` throws at
+      // runtime on Hibernate 6 ("Unsupported tuple comparison" — the element is
+      // a tuple, the bind param is not).  Use a correlated existence subquery
+      // with an embeddable-equality predicate instead, which Hibernate
+      // decomposes per attribute (`p.value = :x.value`).
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
-        return `${render(e.args[0]!, ctx)} member of ${render(e.receiver, ctx)}`;
+        const coll = render(e.receiver, ctx);
+        const val = render(e.args[0]!, ctx);
+        const alias = `${coll.split(".").pop() ?? "elem"}_m`;
+        return `exists (select 1 from ${coll} ${alias} where ${alias} = ${val})`;
       }
       // Queryable scalar intrinsic (src/util/intrinsics.ts) — render the
       // receiver recursively and apply the JPQL snippet.  Serves both the
