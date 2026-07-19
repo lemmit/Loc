@@ -126,7 +126,16 @@ import {
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
 import { renderExecutionContextFilter, renderRequestContext } from "./emit/request-context.js";
-import { javaTimerSchedulerPath, renderJavaTimerScheduler } from "./emit/scheduler.js";
+import {
+  anyTimerUsesCron,
+  cronTimers,
+  javaTimerJobPath,
+  javaTimerSchedulerPath,
+  jobRunrConfigPath,
+  renderJavaTimerJob,
+  renderJavaTimerScheduler,
+  renderJobRunrConfig,
+} from "./emit/scheduler.js";
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
@@ -955,14 +964,22 @@ function emitProjectFromContexts(
         return sub?.migrationsOwner === system.deployable.name;
       })
     : [];
+  const ownsCronTimer = anyTimerUsesCron(ownedTimers);
   if (ownedTimers.length > 0) {
     const eventByName = new Map<string, EventIR>(
       contexts.flatMap((c) => c.events).map((e) => [e.name, e]),
     );
-    out.set(
-      javaTimerSchedulerPath(basePkg),
-      renderJavaTimerScheduler(ownedTimers, eventByName, basePkg),
-    );
+    // `every:` timers → in-process @Scheduled in TimerScheduler.java (emitted
+    // only when there is at least one; the renderer returns "" otherwise).
+    const scheduler = renderJavaTimerScheduler(ownedTimers, eventByName, basePkg);
+    if (scheduler) out.set(javaTimerSchedulerPath(basePkg), scheduler);
+    // `cron:` timers → a durable JobRunr recurring job each, wired by JobRunrConfig.
+    for (const ts of cronTimers(ownedTimers)) {
+      out.set(javaTimerJobPath(basePkg, ts), renderJavaTimerJob(ts, eventByName, basePkg));
+    }
+    if (ownsCronTimer) {
+      out.set(jobRunrConfigPath(basePkg), renderJobRunrConfig(ownedTimers, basePkg));
+    }
   }
 
   // Project shell — stable from S1 on.
@@ -971,6 +988,8 @@ function emitProjectFromContexts(
     renderGradleBuild({
       flyway: hasMigrations,
       oidc,
+      // Durable cron timerSources (scheduling.md Phase 2) add the JobRunr core dep.
+      jobrunr: ownsCronTimer,
       extraDeps: resourceEmission.deps,
       // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the

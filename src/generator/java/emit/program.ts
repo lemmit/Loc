@@ -60,6 +60,13 @@ export const NIMBUS_JOSE_JWT_VERSION = "10.9.1";
  *  through 25.  Used by the aggregate/part id factories (`XId.newId()`). */
 export const JAVA_UUID_GENERATOR_VERSION = "5.2.0";
 
+/** JobRunr — durable `timerSource … cron:` scheduling (scheduling.md Phase 2).
+ *  We pull the CORE (`org.jobrunr:jobrunr`), not the Spring-Boot starter: the
+ *  starter has no Spring-Boot-4 support yet (its autoconfig only partially
+ *  activates), so `JobRunrConfig` wires the core directly.  Shipped only when a
+ *  deployable owns a cron timer. */
+export const JOBRUNR_VERSION = "7.5.1";
+
 /** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
  *  uses to attach a `.smap` sidecar as a compiled class's
  *  `SourceDebugExtension` attribute (JSR-45, M10 phase 6b).  Only pulled
@@ -164,6 +171,9 @@ export function renderGradleBuild(
   options: {
     flyway?: boolean;
     oidc?: boolean;
+    /** Durable cron timerSources (scheduling.md Phase 2) pull the JobRunr core
+     *  dependency.  Off ⇒ byte-identical (no dep). */
+    jobrunr?: boolean;
     extraDeps?: Record<string, string>;
     /** `--sourcemap` — gated on the SourceMapRecorder's PRESENCE alone (the
      *  java generator never threads `sourceTexts` — see
@@ -221,6 +231,10 @@ export function renderGradleBuild(
     options.oidc
       ? `    implementation("com.nimbusds:nimbus-jose-jwt:${NIMBUS_JOSE_JWT_VERSION}")`
       : null,
+    // JobRunr core — durable cron timerSource scheduling (scheduling.md Phase 2).
+    // Core (not the Spring-Boot starter, which lacks Spring-Boot-4 support);
+    // JobRunrConfig wires it manually.  Shipped only when an owned timer is cron.
+    options.jobrunr ? `    implementation("org.jobrunr:jobrunr:${JOBRUNR_VERSION}")` : null,
     // Resource-client deps (objectStore / queue adapters) — empty for
     // deployables wiring no consumable resources.
     ...Object.entries(options.extraDeps ?? {})
