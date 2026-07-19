@@ -261,16 +261,18 @@ operation forms (param defaults). A mistyped default is rejected at the source,
 exactly like a field default (`operation cancel(reason: int = "x")` → validation
 error).
 
-A **`this.<field>`** default additionally seeds from the loaded record on a
-**hand-written instance-qualified** op form (`OperationForm { order.<op> }`, where
-the instance is in scope) rendered by a pack that threads the record into its
-op-form (`seedsOpFormRecord`) — the **React** packs (**mantine, shadcn, mui,
-chakra**), which pass a `record` prop into the op-form component, and the **Vue**
-packs (**vuetify, shadcnVue**), which read the in-scope component prop directly
+A **`this.<field>`** default additionally seeds from the loaded record on an
+**instance-qualified** op form (`OperationForm { order.<op> }`, where the instance
+is in scope) rendered by a pack that threads the record into its op-form
+(`seedsOpFormRecord`) — the **React** packs (**mantine, shadcn, mui, chakra**),
+which pass a `record` prop into the op-form component, and the **Vue** packs
+(**vuetify, shadcnVue**), which read the in-scope component prop directly
 (`props.<instance>.<field>`) since Vue inlines the op-form in `<script setup>`.
-The **scaffolded** Detail page uses the by-name form (`OperationForm { of:, op: }`
-— id from the route, no record in scope), so its op modals seed constants but
-fall back to type-zero for a `this.<field>` default.
+The **scaffolded** Detail page's op modals render *inside* the record view (the
+QueryView `data` lambda), so they are instance-qualified against the loaded
+record too — a `this.<field>` op default seeds from it on those packs, the same
+as the hand-written case. A pack that doesn't thread the record still falls back
+to type-zero.
 
 ```tsx
 // operation note(memo: string = this.customerId) → mantine op-form component
@@ -278,11 +280,10 @@ function NoteForm({ mut, record, onClose }: { …; record: OrderResponse; … })
   const { … } = useForm<NoteOrderRequest>({ defaultValues: { memo: record.customerId } });
 ```
 
-Everything else falls back to the type-zero seed: a `this.<field>` on the
-by-name op form (`OperationForm { of:, op: }` — no record in scope) or on a
-non-threading pack (Svelte / Angular / Feliz), and any ambient / lookup
-source (`now()`, `currentUser.*`, a sequence, a cross-aggregate read) — the
-server-`prepare`-endpoint tier. `ParamIR.default` is still carried in the IR for
+Everything else falls back to the type-zero seed: a `this.<field>` op default on
+a pack that doesn't thread the record (Svelte / Angular / Feliz), and any
+ambient / lookup source (`now()`, `currentUser.*`, a sequence, a cross-aggregate
+read) — the server-`prepare`-endpoint tier. `ParamIR.default` is still carried in the IR for
 a future backend that applies it server-side (today none do — op params are
 required on the wire and the form always seeds + sends them).
 

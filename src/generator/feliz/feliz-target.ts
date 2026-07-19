@@ -466,16 +466,32 @@ export const felizTarget: WalkerTarget = {
     const names = call.argNames ?? [];
     const ofArg = names.indexOf("of") >= 0 ? call.args[names.indexOf("of")] : undefined;
     const opArg = names.indexOf("op") >= 0 ? call.args[names.indexOf("op")] : undefined;
-    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") return null;
-    const agg = ctx.aggregatesByName.get(ofArg.name);
-    const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
+    // Resolve the op through either shape: the by-name `OperationForm(of:, op:)`,
+    // or the instance-qualified `OperationForm(<binding>.<op>)` used inside a
+    // single-record QueryView data lambda (the scaffold Detail's op modals),
+    // whose receiver resolves via `ctx.paramTypes` (the collector's twin).
+    let aggName: string | undefined;
+    let opName: string | undefined;
+    if (ofArg?.kind === "ref" && opArg?.kind === "ref") {
+      aggName = ofArg.name;
+      opName = opArg.name;
+    } else {
+      const inst = call.args.find((_, i) => !names[i]);
+      if (inst?.kind === "member" && inst.receiver.kind === "ref") {
+        aggName = ctx.paramTypes?.get(inst.receiver.name);
+        opName = inst.member;
+      }
+    }
+    if (!aggName || !opName) return null;
+    const agg = ctx.aggregatesByName.get(aggName);
+    const op = agg?.operations.find((o) => o.name === opName && o.visibility === "public");
     if (!agg || !op) return null;
     const form = felizOperationForm(
       agg,
       op,
-      enumsFromBc(ctx.bcByAggregate.get(ofArg.name)),
+      enumsFromBc(ctx.bcByAggregate.get(aggName)),
       idLabelsFrom(ctx.aggregatesByName.values()),
-      vosFromBc(ctx.bcByAggregate.get(ofArg.name)),
+      vosFromBc(ctx.bcByAggregate.get(aggName)),
     );
     // A PARAM-LESS op (`confirm()`) renders too — an empty form with just the
     // submit (no inputs, no validity guard); the page object still drives it as

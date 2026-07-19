@@ -985,18 +985,46 @@ function operationFormSpecs(
   aggregatesByName: ReadonlySet<string>,
 ): { agg: string; op: string }[] {
   const out: { agg: string; op: string }[] = [];
-  const walk = (e: ExprIR): void => {
+  // `binding` maps a single-record QueryView data-lambda param → its aggregate
+  // (the render-time `ctx.paramTypes` twin), so an instance-qualified
+  // `OperationForm { data.<op> }` nested in that lambda resolves — the scaffold's
+  // Detail op modals live there.
+  const walk = (e: ExprIR, binding: ReadonlyMap<string, string>): void => {
+    if (e.kind === "call" && e.name === "QueryView") {
+      const names = e.argNames ?? [];
+      const ofArg = names.indexOf("of") >= 0 ? e.args[names.indexOf("of")] : undefined;
+      const dataArg = names.indexOf("data") >= 0 ? e.args[names.indexOf("data")] : undefined;
+      const agg =
+        isSingleQueryView(e) && ofArg ? singleQueryAggregate(ofArg, aggregatesByName) : undefined;
+      for (const arg of e.args) {
+        if (arg === dataArg && arg.kind === "lambda" && arg.body && agg) {
+          walk(arg.body, new Map([...binding, [arg.param, agg]]));
+        } else {
+          walk(arg, binding);
+        }
+      }
+      return;
+    }
     if (e.kind === "call" && e.name === "OperationForm") {
       const names = e.argNames ?? [];
       const ofArg = names.indexOf("of") >= 0 ? e.args[names.indexOf("of")] : undefined;
       const opArg = names.indexOf("op") >= 0 ? e.args[names.indexOf("op")] : undefined;
       if (ofArg?.kind === "ref" && opArg?.kind === "ref" && aggregatesByName.has(ofArg.name)) {
+        // by-name shape: OperationForm(of: X, op: Y)
         out.push({ agg: ofArg.name, op: opArg.name });
+      } else {
+        // instance-member shape: OperationForm(<binding>.<op>) where <binding>
+        // is a QueryView data-lambda param bound to an aggregate.
+        const inst = e.args.find((_, i) => !names[i]);
+        if (inst?.kind === "member" && inst.receiver.kind === "ref") {
+          const aggName = binding.get(inst.receiver.name);
+          if (aggName) out.push({ agg: aggName, op: inst.member });
+        }
       }
     }
-    for (const c of exprChildren(e)) walk(c);
+    for (const c of exprChildren(e)) walk(c, binding);
   };
-  walk(body);
+  walk(body, new Map());
   return out;
 }
 

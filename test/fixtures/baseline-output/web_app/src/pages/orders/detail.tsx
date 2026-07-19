@@ -217,17 +217,17 @@ export default function OrderDetail() {
                 </Table>
               </Stack>
             </Card>
+            <Group>
+              <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
+    
+              <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+    
+              <Button variant="light" onClick={() => openUpdateModal(update)} data-testid="orders-op-update">Update</Button>
+    
+            </Group>
           </Stack>
         ) }
       </>
-      <Group>
-        <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
-    
-        <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
-    
-        <Button variant="light" onClick={() => openUpdateModal(update)} data-testid="orders-op-update">Update</Button>
-    
-      </Group>
     </Stack>
   );
 }

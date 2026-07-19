@@ -32,14 +32,18 @@ async function main() {
   await page.goto(`${URL}products/new`, { waitUntil: "networkidle" });
   await page.getByPlaceholder("name").waitFor({ timeout: 10000 });
 
-  // Detail page — the per-operation `Modal` renders as a `<details>` disclosure
-  // (the operations area is a sibling of the QueryView, so it renders without a
-  // backend).  Expanding the "Rename" summary reveals the wrapped operation form.
+  // Detail page — the per-operation `Modal`s now render INSIDE the QueryView's
+  // data view (below the loaded record), so they only appear once the record
+  // loads (an instance op needs its record — this also seeds a `this.<field>`
+  // op-param default from it).  With no backend the QueryView settles on the
+  // error/empty branch, so the ops are intentionally not reachable here; the
+  // op-form emission + disclosure is covered by the unit suites instead.  Assert
+  // the reachable state: the Detail page renders and its QueryView resolves.
   await page.goto(`${URL}products/smoke-id`, { waitUntil: "networkidle" });
-  const summary = page.getByText("Rename", { exact: true });
-  await summary.waitFor({ timeout: 10000 });
-  await summary.click();
-  await page.getByPlaceholder("newName").waitFor({ timeout: 10000 });
+  await page
+    .getByText(/Couldn't load product|No product matches that id\./)
+    .first()
+    .waitFor({ timeout: 10000 });
 
   if (errors.length > 0) throw new Error(`page errors:\n${errors.join("\n")}`);
   console.log(

@@ -88,20 +88,22 @@ export default function CustomerDetail() {
           <Alert color="yellow" variant="light">No customer matches that id.</Alert>
         ) }
         { customerById.data && (
-          <Card withBorder padding="md">
-            <Stack>
-              <KeyValueRow label="Username" data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
-              <KeyValueRow label="Email" data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
-              <KeyValueRow label="Age" data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
-              <KeyValueRow label="Version" data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
-            </Stack>
-          </Card>
+          <Stack>
+            <Card withBorder padding="md">
+              <Stack>
+                <KeyValueRow label="Username" data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
+                <KeyValueRow label="Email" data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
+                <KeyValueRow label="Age" data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
+                <KeyValueRow label="Version" data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
+              </Stack>
+            </Card>
+            <Group>
+              <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="customers-op-update">Update</Button>
+    
+            </Group>
+          </Stack>
         ) }
       </>
-      <Group>
-        <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="customers-op-update">Update</Button>
-    
-      </Group>
     </Stack>
   );
 }
