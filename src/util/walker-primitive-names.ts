@@ -74,6 +74,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "DateDisplay",
   "EnumBadge",
   "IdLink",
+  "FileLink",
   "Skeleton",
   "Alert",
   "QueryView",

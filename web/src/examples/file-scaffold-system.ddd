@@ -1,14 +1,16 @@
-// File display in SCAFFOLDED pages (M-T1.2 slice 4a.1).  A `with crudish`
-// aggregate carrying a `File` field, scaffolded into list + detail pages, so
-// the generated React proves a `File` cell renders its download path (`.url`)
-// as text rather than the raw FileRef object (which is not a ReactNode and
-// tsc-errors).  Pointed at by the `generated-react-build` matrix.
+// File display in SCAFFOLDED pages (M-T1.2 slice 4b).  A `with crudish`
+// aggregate carrying BOTH a required `File` and an optional `File?`, scaffolded
+// into list + detail pages, so the generated React proves each `File` cell
+// renders a clickable `FileLink` download anchor (`<a href={ref.url} download>`)
+// — null-guarded for the optional field — rather than the raw FileRef object
+// (which is not a ReactNode and tsc-errors).  In the `generated-react-build` matrix.
 system FileScaffold {
   subdomain Media {
     context Docs {
       aggregate Attachment with crudish {
         title: string
         blob: File
+        thumbnail: File?
       }
       repository Attachments for Attachment { }
     }

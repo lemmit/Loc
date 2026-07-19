@@ -614,6 +614,16 @@ export interface WalkerTarget {
    *  .add(call.name)` so the shell wires the class import + directive. */
   renderUserComponent?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for `FileLink(<file-ref>)`.  The
+   *  shared `emitFileLink` delegates here first; a non-null return is used
+   *  verbatim and the inline JSX/markup anchor path is skipped.  The JSX/markup
+   *  family (React/Vue/Svelte/Angular) omits it — a file download is a native
+   *  `<a href download>`, built inline via the markup seams (no pack template).
+   *  Feliz overrides here because its "markup" is F# (`Html.a [ … ]`, not an
+   *  HTML string), matching a `FileRef option` wire field with a `Some`/`None`
+   *  guard.  Phoenix/HEEx renders through its own parallel walker, not this. */
+  renderFileLink?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
    *  shared `emitDestroyForm` delegates here first; a non-null return is used
    *  verbatim and the shared path (which records an `actionMutations` sink +

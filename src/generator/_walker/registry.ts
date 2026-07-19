@@ -69,6 +69,7 @@ import {
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
   renderField as renderFieldHeex,
+  renderFileLink as renderFileLinkHeex,
   renderFileUpload as renderFileUploadHeex,
   renderFor as renderForHeex,
   renderForm as renderFormHeex,
@@ -118,6 +119,7 @@ import {
   emitSlot,
   emitStat,
 } from "./primitives/display.js";
+import { emitFileLink } from "./primitives/file-link.js";
 import { emitFor } from "./primitives/for.js";
 import {
   emitCreateForm,
@@ -528,6 +530,17 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitIdLink,
     heex: renderIdLinkHeex,
+    a11y: { needsName: true },
+  },
+  // A download link for a `File` field — a plain `<a href download>` labelled
+  // by the FileRef `key`.  Built inline via the target markup seams (no pack
+  // template); Feliz forks to `Html.a`, HEEx to its parallel-walker renderer.
+  // A link needs discernible text (the file's `key`).
+  FileLink: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitFileLink,
+    heex: renderFileLinkHeex,
     a11y: { needsName: true },
   },
   // Loading placeholder — content hidden from AT (aria-busy) while pending.

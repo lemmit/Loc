@@ -579,7 +579,7 @@ system DevPlatform {
 
         // Project detail — covers the remaining layout primitives:
         // Group / Grid / Container / Tabs / Field / NumberField /
-        // PasswordField / Toggle / FileUpload / Loader / Image / Avatar / Slot /
+        // PasswordField / Toggle / FileUpload / FileLink / Loader / Image / Avatar / Slot /
         // Card / Stat / Badge / Divider / Money / KeyValueRow / Modal.
         page ProjectDetail(id: Project id) {
             route: "/projects/:id"
@@ -625,6 +625,7 @@ system DevPlatform {
                                 PasswordField { "Token" },
                                 Toggle { "Editing", bind: editing },
                                 FileUpload { "Attachment", bind: attachment },
+                                FileLink { attachment },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" },
                                 Button { "Reserve", onClick: reserveNow }

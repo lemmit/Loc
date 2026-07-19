@@ -841,6 +841,34 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   return `<span${testidAttr}>${valueHeex}</span>`;
 }
 
+/** `FileLink(<file-ref>)` → a plain download anchor for a `File` field.  The
+ *  `File` wire value is a JSON map (`%{"url" => …, "key" => …}`, string keys —
+ *  Ecto `:map`), so `url`/`key` read via bracket access.  Null-guarded: an
+ *  optional `File?` that is `nil` renders an em-dash (a required `File` is
+ *  always truthy). */
+export function renderFileLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
+  const valueArg = namedArg(expr, "value") ?? positionals[0];
+  if (!valueArg) return `<span${testidAttr}>—</span>`;
+  const recv = renderExpr(valueArg, { ...ctx, position: "template" });
+  return `<%= if ${recv} do %><a href={${recv}["url"]} download${testidAttr}><%= ${recv}["key"] %></a><% else %><span>—</span><% end %>`;
+}
+
+/** The value of a named arg on a call, or undefined. */
+function namedArg(expr: Extract<ExprIR, { kind: "call" }>, name: string): ExprIR | undefined {
+  for (let i = 0; i < expr.args.length; i++) {
+    if (expr.argNames?.[i] === name) return expr.args[i];
+  }
+  return undefined;
+}
+
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
 export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
