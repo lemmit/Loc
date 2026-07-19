@@ -220,6 +220,11 @@ export interface WalkResult {
    *  the highlight.js CDN + auto-init script.  Pages without
    *  CodeBlock skip the CDN payload entirely. */
   usesCodeBlock: boolean;
+  /** True when any walked node emitted a standalone `FileUpload`
+   *  primitive.  Only the Angular page-shell reads it — to emit the
+   *  `onFileUploadTo` component method + its `WritableSignal`/`api`/
+   *  `FileRef` imports; harmless (unread) on the other frontends. */
+  usesFileUpload: boolean;
 }
 
 /** `Action(<instance>.<op>, then?)` — a button bound to an aggregate
@@ -434,6 +439,7 @@ export function walkBody(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFileUpload: false,
     usesFragment: false,
     externFunctions,
     usedExternFunctions: new Set(),
@@ -462,6 +468,7 @@ export function walkBody(
     hoistedHandlers: ctx.hoistedHandlers,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
+    usesFileUpload: ctx.usesFileUpload,
     usesFragment: ctx.usesFragment,
     usedExternFunctions: ctx.usedExternFunctions ?? new Set(),
     usedActions: ctx.usedActions ?? new Set(),
@@ -634,6 +641,10 @@ export interface Sink {
    *  to drive conditional injection of the highlight.js CDN payload
    *  into the shell's `index.html`. */
   usesCodeBlock: boolean;
+  /** True when a standalone `FileUpload(bind:)` primitive emitted from
+   *  this body.  Read by the Angular page-shell to wire the
+   *  `onFileUploadTo` method; unread on the other frontends. */
+  usesFileUpload: boolean;
   /** True when a `For { … }` comprehension emitted a keyed React
    *  `<Fragment>` wrapper (TSX target only — Vue/Svelte iterate with
    *  native `v-for` / `{#each}` and never set it).  The React page /
@@ -1010,6 +1021,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesCurrentUser) parent.usesCurrentUser = true;
   if (child.usesChildren) parent.usesChildren = true;
   if (child.usesCodeBlock) parent.usesCodeBlock = true;
+  if (child.usesFileUpload) parent.usesFileUpload = true;
   if (child.usesFragment) parent.usesFragment = true;
   for (const f of child.formOfs) {
     if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
@@ -1613,6 +1625,7 @@ function propagateSinkFlags(from: WalkContext, to: WalkContext): void {
   to.usesRouterLink ||= from.usesRouterLink;
   to.usesChildren ||= from.usesChildren;
   to.usesCodeBlock ||= from.usesCodeBlock;
+  to.usesFileUpload ||= from.usesFileUpload;
   if (from.usesFragment) to.usesFragment = true;
 }
 
