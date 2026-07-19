@@ -17,7 +17,7 @@ need        what the context requires (kind + capabilities) — derived, never a
 sourceType  built-in technology descriptor (postgres, s3, rabbitmq, …) — platform-internal
             per kind it declares: capabilities + interfaces
 kind        semantic role:  state | eventLog | snapshot | cache | replica
-                            | objectStore | queue | api
+                            | objectStore | queue | api | mailer
 capability  refines a kind (crud, blob, signedUrl, enqueue, …) — registry data
 interface   access mode (sql / rest / amqp / sdk) — selected per kind, derived
 ```
@@ -35,6 +35,7 @@ storage hotCache   { type: redis }
 storage files      { type: s3,       config: { region: "eu-central-1", bucket: "app-files" } }
 storage jobBus     { type: rabbitmq, config: { vhost: "/" } }
 storage payments   { type: restApi,  config: { baseUrl: "https://pay.example.com" } }
+storage mailer     { type: smtp,     config: { from: "no-reply@app.example.com" } }
 ```
 
 `type:` names the built-in **sourceType**. The `config { k: v }` map carries
@@ -55,6 +56,7 @@ resource ordersDb    { for: Orders, kind: state,       use: primarySql, schema: 
 resource ordersFiles { for: Orders, kind: objectStore, use: files }
 resource orderJobs   { for: Orders, kind: queue,       use: jobBus }
 resource payApi      { for: Orders, kind: api,         use: payments }
+resource orderMail   { for: Orders, kind: mailer,      use: mailer }
 ```
 
 `resource` was previously named `dataSource`; the declaration keyword is now
@@ -86,6 +88,13 @@ infrastructure roles:
 | `objectStore` | blob storage | s3 |
 | `queue` | message queue | rabbitmq |
 | `api` | external HTTP API | restApi |
+| `mailer` | outbound email | smtp, ses, sendgrid |
+
+The surface keyword is `mailer` (not `email` — a value-position `email` literal
+would collide with the global keyword tokeniser); it maps to the internal infra
+kind `email`. Every mailer sourceType requires a `from:` config key (`ses` also
+accepts a `region:`), and `smtp` gains a **Mailpit** dev sidecar in the emitted
+`docker-compose.yml` (a catch-all SMTP server with a web inbox on `:8025`).
 
 The validator rejects a `kind` on an incompatible sourceType
 (`loom.kind-incompatible`). The persistence kinds (`state`/`snapshot`/`replica`)
@@ -122,12 +131,14 @@ like `currentUser` / `permissions`) and a **closed per-kind verb vocabulary**:
 resource files { for: Sales, kind: objectStore, use: s3Bucket }
 resource jobs  { for: Sales, kind: queue,       use: rabbit }
 resource rates { for: Sales, kind: api,         use: fxApi }
+resource mail  { for: Sales, kind: mailer,      use: mailServer }
 
 workflow ArchiveOrder(order: Order id) {
   let prev = files.get("orders/" + order.id)        // objectStore
   files.put("orders/" + order.id, { id: order.id }) // json payload
   jobs.enqueue({ event: "archived", id: order.id }) // queue
   let fx = rates.get("/rate/usd")                    // api
+  mail.send(order.email, "Archived", "Order " + order.id) // mailer
 }
 ```
 
@@ -138,6 +149,7 @@ workflow ArchiveOrder(order: Order id) {
 | `objectStore` | `put(key, json)`→blob · `get(key): json?`→blob · `list(prefix): string[]`→list · `signedUrl(key): string`→signedUrl · `delete(key)`→blob |
 | `queue` | `enqueue(message)`→enqueue · `publish(topic, message)`→publish |
 | `api` | `get(path): json`→request · `post(path, body): json`→request |
+| `mailer` | `send(to, subject, body)`→send |
 
 The vocabulary is registry-defined (`src/ir/resource-verbs.ts`). Rules:
 
@@ -174,9 +186,15 @@ verb call sites dispatch to it:
 | objectStore | `@aws-sdk/client-s3` (+ presigner) | `AWSSDK.S3` | `ExAws.S3` | `boto3` (+ presigner) | `software.amazon.awssdk:s3` (+ `S3Presigner`) |
 | queue | `amqplib` | `RabbitMQ.Client` v7 | `AMQP` | `aio_pika` | `com.rabbitmq:amqp-client` |
 | api | `fetch` | `HttpClient` | `Req` | `httpx` | `java.net.http HttpClient` |
+| mailer (`smtp`) | `nodemailer` | `MailKit` | `Swoosh` (+ `gen_smtp`) | `aiosmtplib` | Jakarta Mail (`angus-mail`) |
 
-Dev `docker-compose` gains a sidecar per object-store / queue storage (MinIO for
-`s3`, `rabbitmq`); deployables with no such resources are byte-identical.
+The `mailer` client also has `ses` (AWS SES SDK / `AmazonSES` / SendGrid-style)
+and `sendgrid` (`@sendgrid/mail` etc.) sourceType variants; `smtp` is the one
+with a dev sidecar.
+
+Dev `docker-compose` gains a sidecar per object-store / queue / smtp-mailer
+storage (MinIO for `s3`, `rabbitmq`, **Mailpit** for `smtp`); deployables with
+no such resources are byte-identical.
 
 ## Custom source types (out-of-tree)
 

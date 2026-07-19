@@ -1086,8 +1086,11 @@ and the e2e OpenAPI cross-check compares it pairwise against Hono /
 `conformance-parity.yml`).
 
 Resource verb clients (`objectStore` → boto3, `queue` → aio-pika,
-`api` → httpx) are emitted under `app/resources/<sourceType>.py`;
-workflow / saga `<resource>.<verb>(...)` calls import + await them.
+`api` → httpx, `mailer` → aiosmtplib) are emitted under
+`app/resources/<sourceType>.py`; workflow / saga `<resource>.<verb>(...)`
+calls import + await them. (Cross-backend the mailer client is
+`nodemailer` / `MailKit` / `Swoosh` / Jakarta Mail — see
+[`resources.md`](resources.md) for the full kind × backend matrix.)
 
 **Not yet implemented** (fails fast / follow-ups): durable-channel
 outbox tier, `--trace` domain instrumentation, and provenance/audited
