@@ -51,6 +51,7 @@ import {
   aggregateUsesMoney,
   exprUsesCurrentUser,
   findUsesCurrentUser,
+  isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
 import {
   discriminatorValue,
@@ -787,13 +788,26 @@ const FILTER_OP: Record<string, string> = {
   "!=": "$ne",
 };
 
+/** The FilterQuery property name for a `this`-rooted field access, or null.
+ *  Accepts `this.<field>` (a `member` over `this` — the shape a repository
+ *  `find ... where this.field` lowers to), a bare `this-prop` ref (`total` — the
+ *  shape a `view ... where total` / criterion candidate field lowers to), and a
+ *  VO subfield `this.<field>.<sub>` (→ the flattened `<field>_<sub>` column, the
+ *  MikroORM twin of the drizzle `<field>_<sub>` column). */
+function thisFieldColumn(e: ExprIR): string | null {
+  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
+  if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
+    return `${e.receiver.member}_${e.member}`;
+  return null;
+}
+
 /** Render a `this.<col> <op> <param>` comparison as a `{ col: ... }` entry. */
 function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>): string {
-  const left = e.left;
-  if (left.kind !== "member" || left.receiver.kind !== "this")
-    throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
   // FilterQuery keys are entity PROPERTY names (== field names), not DB columns.
-  const col = left.member;
+  const col = thisFieldColumn(e.left);
+  if (col === null)
+    throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
   const rhs = filterValue(e.right);
   if (e.op === "==") return `${col}: ${rhs}`;
   const op = FILTER_OP[e.op];
@@ -1385,6 +1399,39 @@ function containCascade(
 }
 
 // ---------------------------------------------------------------------------
+// Context-level `view`s + query-time `projection`s sourced from an aggregate
+// synthesise a parameterless-find repository read (`repo.<viewName>()` →
+// `<Agg>[]`), exactly as the drizzle `repository-builder` does — the shared
+// http/views + projection routes call these by name, so the MikroORM repo must
+// emit them or the boot crashes on a missing method.  Reusing the FindIR shape
+// means the find-method builder (predicate lowering, capability-filter AND,
+// hydration) applies for free.
+// ---------------------------------------------------------------------------
+function synthViewFinds(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): RepositoryIR["finds"] {
+  const viewFinds = (ctx.views ?? [])
+    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
+    .map((view) => ({
+      name: lowerFirst(view.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
+      filter: view.filter,
+      // Carry the view's `ignoring` bypass so its capability-filter conjunction
+      // drops the bypassed origins (the view read honours the bypass as a find).
+      bypassAll: view.bypassAll,
+      bypassCaps: view.bypassCaps,
+    }));
+  const projectionFinds = (ctx.projections ?? [])
+    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
+    .map((p) => ({
+      name: lowerFirst(p.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
+      filter: p.query?.filter,
+    }));
+  return [...viewFinds, ...projectionFinds];
+}
+
+// ---------------------------------------------------------------------------
 // Per-aggregate repository — a drop-in for the drizzle `<Agg>Repository`.
 // ---------------------------------------------------------------------------
 
@@ -1513,7 +1560,7 @@ export function renderMikroRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -1908,7 +1955,7 @@ export function renderMikroEmbeddedRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -2126,7 +2173,7 @@ export function renderMikroDocumentRepository(
   // deserialises every row), narrowed first by the capability filter then by
   // the find's own predicate — same selector shape as the drizzle document
   // builder's `documentFindMethod`.
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
     const pred = findPredicate(agg, f, ctx);
     const isArray = f.returnType.kind === "array";
@@ -2355,7 +2402,7 @@ export function renderMikroEventSourcedRepository(
     ];
   });
 
-  const findMethods = (repo?.finds ?? []).map((find) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((find) => {
     const usesUser = findUsesCurrentUser(find);
     const baseParams = find.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
     const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");

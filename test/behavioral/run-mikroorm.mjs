@@ -79,10 +79,6 @@ function walk(dir, pred, out = []) {
 // BEHAVIOURAL_SKIP (which is keyed by platform clause and would wrongly skip the
 // drizzle tier too). See the PR body's "MikroORM runtime gaps" register.
 const MIKRO_SKIP = {
-  // A where-filtered `view` lowers to a repository query method (`bigOrders()`);
-  // the mikroorm repository builder emits findById/getById/all/save/delete but
-  // NOT the view-derived query methods, so `http/views.ts` calls a missing fn.
-  views: "view-derived query methods (e.g. bigOrders) not emitted on the mikroorm repository",
   // A capability `filter` predicate (tenancy scope) is not applied by the
   // mikroorm find/query path — reads return every tenant's rows (expected 1,
   // got 2) instead of the principal-scoped subset.
