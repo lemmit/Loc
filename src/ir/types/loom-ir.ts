@@ -2570,10 +2570,28 @@ export interface UiChannelParamIR {
   channelName: string;
 }
 
-/** `on <param>.<Event>(e) { toast(…) }` — render a carried event as it
- *  arrives on the realtime wire.  v1's only action is `toast`; each
- *  handler statement lowers to one message expression with `bind` in
- *  scope as the event payload. */
+/** A `refetch(<Aggregate>)` action inside an `on` handler body — the
+ *  realtime analogue of a mutation's `onSuccess` cache invalidation.
+ *  Fully resolved: `queryTag` is the exact `["<tag>"]` query key the
+ *  frontend api modules register (`snake(plural(aggregate))`), so a
+ *  realtime invalidation and a mutation-success invalidation hit the
+ *  same cache entries.  Backends never re-derive the tag. */
+export interface RefetchTargetIR {
+  /** The aggregate whose queries are invalidated (resolved to a real
+   *  aggregate in the enclosing system by the validator). */
+  aggregate: string;
+  /** The query-key tag — `snake(plural(aggregate))`.  Frontends emit
+   *  `qc.invalidateQueries({ queryKey: ["<queryTag>"] })`, prefix-matching
+   *  the aggregate's list / detail / find queries. */
+  queryTag: string;
+}
+
+/** `on <param>.<Event>(e) { toast(…)  refetch(Agg) }` — render a carried
+ *  event as it arrives on the realtime wire.  A handler body admits two
+ *  actions: `toast(<expr>)` (a message notification) and
+ *  `refetch(<Aggregate>[, …])` (invalidate that aggregate's query cache);
+ *  the validator (`loom.ui-handler-unsupported`) rejects anything else.
+ *  Each lowers with `bind` in scope as the event payload. */
 export interface UiNotificationIR {
   /** The channel-param handle the handler subscribes through. */
   paramName: string;
@@ -2581,8 +2599,11 @@ export interface UiNotificationIR {
   eventType: string;
   /** Handler binding name (`e` in `on Orders.OrderShipped(e)`). */
   bind: string;
-  /** One toast message expression per handler statement. */
+  /** One toast message expression per `toast(<expr>)` handler statement. */
   toasts: ExprIR[];
+  /** One entry per aggregate named across the handler's `refetch(…)`
+   *  statements.  Omitted when the handler declares no refetch. */
+  refetches?: RefetchTargetIR[];
 }
 
 /** API declaration — first-class contract derived from a module's
