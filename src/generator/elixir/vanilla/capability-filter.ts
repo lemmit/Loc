@@ -72,7 +72,18 @@ export function vanillaCapabilityFilter(
   contextModule: string,
   opts?: { actor?: boolean; bypass?: FilterBypass },
 ): string | null {
-  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  // `filterArgs: true` — these predicates are spliced into `from(... where: ...)`
+  // Ecto queries, where money/decimal/datetime are data-layer-native (Postgres
+  // columns), NOT `Decimal`/`DateTime` structs.  Without it a money/datetime
+  // comparison renders the in-memory `Decimal.compare(...)` struct API, which is
+  // not a valid Ecto query expression → `mix compile` fails.  (bool/id/string/enum
+  // render identically in both modes, so previously-working filters are unchanged.)
+  const ctx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    foundation: "vanilla",
+    filterArgs: true,
+  };
   const preds = (agg.contextFilters ?? [])
     .filter((_, i) => !isFilterBypassed(agg.contextFilterOrigins?.[i], opts?.bypass))
     .filter((p) => opts?.actor || !exprUsesCurrentUser(p))
@@ -99,7 +110,14 @@ export function vanillaCapabilityFilter(
  *  `pinPrincipal(...)`), so the write guard needs no new render path. */
 export function vanillaWriteScopeFilter(agg: AggregateIR, contextModule: string): string | null {
   if (!agg.writeScopeFilter) return null;
-  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  // See `vanillaCapabilityFilter`: rendered into an Ecto `where:`, so money/
+  // decimal/datetime must use the native-query form (`filterArgs: true`).
+  const ctx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    foundation: "vanilla",
+    filterArgs: true,
+  };
   const p = agg.writeScopeFilter;
   return isDeepScopeFilter(p)
     ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
@@ -128,7 +146,14 @@ export function vanillaCapabilityFilterParts(
   contextModule: string,
   opts?: { actor?: boolean },
 ): { origin: string | undefined; pred: string }[] {
-  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  // See `vanillaCapabilityFilter`: rendered into an Ecto `where:` pipe, so
+  // money/decimal/datetime must use the native-query form (`filterArgs: true`).
+  const ctx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    foundation: "vanilla",
+    filterArgs: true,
+  };
   const parts: { origin: string | undefined; pred: string }[] = [];
   (agg.contextFilters ?? []).forEach((p, i) => {
     if (!opts?.actor && exprUsesCurrentUser(p)) return;
