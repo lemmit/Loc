@@ -868,16 +868,25 @@ export function renderDapperRepository(
   const versionedSetClause = upsertSetNoVersion
     ? `${upsertSetNoVersion}, ${versionCol} = ${table}.${versionCol} + 1`
     : `${versionCol} = ${table}.${versionCol} + 1`;
+  // SaveAsync writes the root upsert, join-table replaces, containment-tree
+  // replaces, and the provenance flush as ONE unit of work: a crash between the
+  // full-list-replace DELETE and its re-INSERT would otherwise permanently lose
+  // an aggregate's children/associations (autocommit).  The EF path is atomic
+  // via SaveChanges and the Hono path via `db.transaction`; this matches them.
+  // `transaction: __tx` is threaded into every save-path CommandDefinition, and
+  // the body commits before dispatching events (see renderRelationalRepository).
   const saveUpsertLines = versioned
     ? [
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+        "        await using var __tx = await conn.BeginTransactionAsync(cancellationToken);",
         "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
-        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${versionedInsertValsTph}) ON CONFLICT (id) DO UPDATE SET ${versionedSetClause} WHERE ${table}.${versionCol} = @ExpectedVersion", new { ${saveParams}, ExpectedVersion = __expected }, cancellationToken: cancellationToken));`,
+        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${versionedInsertValsTph}) ON CONFLICT (id) DO UPDATE SET ${versionedSetClause} WHERE ${table}.${versionCol} = @ExpectedVersion", new { ${saveParams}, ExpectedVersion = __expected }, transaction: __tx, cancellationToken: cancellationToken));`,
         `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
       ]
     : [
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${insertValsTph}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
+        "        await using var __tx = await conn.BeginTransactionAsync(cancellationToken);",
+        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${insertColList}) VALUES (${insertValsTph}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, transaction: __tx, cancellationToken: cancellationToken));`,
       ];
 
   // Capability filters (`filter !this.isDeleted`, `filter this.tenantId ==
@@ -965,10 +974,10 @@ export function renderDapperRepository(
   const assocSaveLines = associations.flatMap((a) => {
     const prop = upperFirst(a.fieldName);
     return [
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
       `        foreach (var __t in aggregate.${prop})`,
       "        {",
-      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}) VALUES (@o, @t)", new { o = aggregate.Id.Value, t = __t.Value }, cancellationToken: cancellationToken));`,
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}) VALUES (@o, @t)", new { o = aggregate.Id.Value, t = __t.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
       "        }",
     ];
   });
@@ -1017,7 +1026,7 @@ export function renderDapperRepository(
     return [
       iter,
       "        {",
-      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${pc.table} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, cancellationToken: cancellationToken));`,
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${pc.table} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, transaction: __tx, cancellationToken: cancellationToken));`,
       ...pc.children.flatMap((gc) =>
         saveInsert(gc, `${pc.childVar}.Id.Value`, `${pc.childVar}.${upperFirst(gc.cont.name)}`),
       ),
@@ -1027,7 +1036,7 @@ export function renderDapperRepository(
   // Full-list replace per root containment: delete the owner's rows (ON DELETE
   // CASCADE clears any grandchildren) then re-insert the whole subtree.
   const containSaveLines = partChildren.flatMap((pc) => [
-    `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+    `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
     ...saveInsert(pc, "aggregate.Id.Value", `aggregate.${upperFirst(pc.cont.name)}`),
   ]);
   // Delete only the root-level child tables by owner id; their FK ON DELETE
@@ -1047,7 +1056,7 @@ export function renderDapperRepository(
     ? [
         "        foreach (var __lin in aggregate.DrainProv())",
         "        {",
-        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO provenance_records (trace_id, snapshot_id, target_type, field, inputs, computed_value, at, correlation_id, scope_id, actor_id, parent_id) VALUES (@trace_id, @snapshot_id, @target_type, @field, CAST(@inputs AS jsonb), CAST(@computed_value AS jsonb), @at, @correlation_id, @scope_id, @actor_id, @parent_id)", new { trace_id = Guid.NewGuid().ToString(), snapshot_id = __lin.SnapshotId, target_type = __lin.Target.Type, field = __lin.Target.Field, inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options), computed_value = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options), at = DateTime.UtcNow, correlation_id = RequestContext.Current?.CorrelationId, scope_id = RequestContext.Current?.ScopeId, actor_id = RequestContext.Current?.ActorId, parent_id = RequestContext.Current?.ParentId }, cancellationToken: cancellationToken));`,
+        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO provenance_records (trace_id, snapshot_id, target_type, field, inputs, computed_value, at, correlation_id, scope_id, actor_id, parent_id) VALUES (@trace_id, @snapshot_id, @target_type, @field, CAST(@inputs AS jsonb), CAST(@computed_value AS jsonb), @at, @correlation_id, @scope_id, @actor_id, @parent_id)", new { trace_id = Guid.NewGuid().ToString(), snapshot_id = __lin.SnapshotId, target_type = __lin.Target.Type, field = __lin.Target.Field, inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options), computed_value = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options), at = DateTime.UtcNow, correlation_id = RequestContext.Current?.CorrelationId, scope_id = RequestContext.Current?.ScopeId, actor_id = RequestContext.Current?.ActorId, parent_id = RequestContext.Current?.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
         "        }",
       ]
     : [];
@@ -1369,6 +1378,9 @@ export function renderDapperRepository(
       ...assocSaveLines,
       ...containSaveLines,
       ...provFlushLines,
+      // Commit the write set atomically before events fire — a rolled-back save
+      // (concurrency conflict throw, mid-replace crash) must not dispatch events.
+      "        await __tx.CommitAsync(cancellationToken);",
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
       "            await _events.DispatchAsync(ev, cancellationToken);",
