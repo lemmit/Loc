@@ -1969,34 +1969,31 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // store reuses the persistence-agnostic domain fold unchanged, so
         // `contains` (in any shape) needs no gate on an event-sourced aggregate.
         //
+        // Nested entity parts + reference-collection associations (`X id[]`)
+        // NOW COMPOSE (wave 4): every read hydrates the child tables through
+        // `_Create(State)` first, then `LoadRefsAsync` post-sets the writable
+        // ref-collection list on the reconstructed roots — the two hydrate
+        // paths run in sequence, not exclusively.
+        //
         // Still gated (v1 scope, STATE aggregates only): a part-in-part (a part
-        // with its OWN containments) and nested parts combined with
-        // reference-collection associations.  A scalar / enum / value-object /
-        // id COLLECTION field on a part IS supported now — it stores as one
-        // `jsonb` column holding the serialised list (System.Text.Json
-        // round-trip, the raw-Npgsql mirror of EF's primitive-collection JSON
-        // mapping); only an array whose element kind is outside that set stays
-        // gated (nothing in the corpus reaches it).
+        // with its OWN containments).  A scalar / enum / value-object / id
+        // COLLECTION field on a part IS supported — it stores as one `jsonb`
+        // column holding the serialised list (System.Text.Json round-trip, the
+        // raw-Npgsql mirror of EF's primitive-collection JSON mapping); only an
+        // array whose element kind is outside that set stays gated (nothing in
+        // the corpus reaches it).
         const contains = a.contains ?? [];
         if (contains.length > 0 && a.persistedAs !== "eventLog") {
-          if ((a.associations ?? []).length > 0) {
-            // The Dapper repository's containment hydration reconstructs each
-            // root through `_Create(State)`; the reference-collection load
-            // post-sets a writable list.  v1 keeps these two hydrate paths
-            // mutually exclusive (combining them is a follow-up slice).
-            reject(where, "combines nested entity parts with reference-collection associations");
-          } else {
-            for (const part of a.parts ?? []) {
-              if ((part.contains ?? []).length > 0)
-                reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
-              for (const pf of part.fields) {
-                const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
-                if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
-                  reject(
-                    where,
-                    `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
-                  );
-              }
+          for (const part of a.parts ?? []) {
+            if ((part.contains ?? []).length > 0)
+              reject(where, `contains a nested part-in-part ('${part.name}' has its own parts)`);
+            for (const pf of part.fields) {
+              const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
+              if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
+                reject(
+                  where,
+                  `contains a part ('${part.name}') with a collection field whose element kind '${pt.element.kind}' is unsupported`,
+                );
             }
           }
         }

@@ -752,6 +752,39 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // M-T6.9 wave 4: nested entity parts + a reference collection on the SAME
+    // aggregate.  Every read hydrates the child tables through `_Create(State)`
+    // first, then LoadRefsAsync post-sets the ref-collection list — the two
+    // hydrate passes compose in sequence.  Build under /warnaserror.
+    it("system `persistence: dapper` + parts AND reference collection — composed hydrate builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-parts-refs-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper-parts-refs.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const repo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "OrderRepository.cs"),
+          "utf8",
+        );
+        expect(repo).toContain("await HydrateAsync(conn, rows.ToList(), cancellationToken)");
+        expect(repo).toContain("await LoadRefsAsync(conn, __roots, cancellationToken)");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // Event sourcing (appliers A2.2b): a `persistedAs: eventLog` aggregate on a
     // dotnet deployable emits the EF `<Agg>EventRecord` entity + config, the
     // `_Apply`/`_FromEvents` fold on the aggregate, the record-and-apply `emit`,

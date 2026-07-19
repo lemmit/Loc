@@ -1,0 +1,49 @@
+// Dapper nested-entity-parts + reference-collection fixture (M-T6.9 wave 4): a
+// state aggregate that BOTH `contains` parts (a flat child table each) AND
+// carries an `X id[]` reference collection (a join table).  Every read
+// hydrates the child tables through `_Create(State)` first, then LoadRefsAsync
+// post-sets the ref-collection list on the reconstructed roots — the two
+// hydrate passes compose in sequence.  Build under `dotnet build /warnaserror`.
+system DapperPartsRefs {
+  api OrdersApi from Sales
+
+  subdomain Sales {
+    context Orders {
+      aggregate Tag with crudish {
+        label: string
+      }
+
+      aggregate Order with crudish {
+        customer: string
+        tags:     Tag id[]
+        contains lineItems: LineItem[]
+        contains shipping:  ShipInfo?
+
+        entity LineItem {
+          sku: string
+          qty: int
+        }
+
+        entity ShipInfo {
+          address: string
+        }
+      }
+
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
+      repository Tags for Tag { }
+    }
+  }
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8080
+  }
+}

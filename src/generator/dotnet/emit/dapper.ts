@@ -824,8 +824,11 @@ export function renderDapperRepository(
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
   // deletes cascade the children first.  `hasContains` and reference-collection
-  // associations are mutually exclusive on the same aggregate (validator-gated),
-  // so the two hydrate paths never overlap.
+  // associations COMPOSE (wave 4): when both are present a read hydrates the
+  // child tables first, then `LoadRefsAsync` post-sets the writable
+  // ref-collection list on the reconstructed roots (the two hydrate passes run
+  // in sequence — columnsOf excludes the assoc field, so HydrateAsync's
+  // `_Create(State)` leaves it defaulted for LoadRefsAsync to fill).
   // Relational: containments are child tables (partChildrenOf).  Embedded folds
   // each into a JSONB column instead (added to `cols` above), so no child
   // tables / HydrateAsync — the flat `Map` hydrates from the containment columns.
@@ -943,7 +946,10 @@ export function renderDapperRepository(
         `        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition($"SELECT ${colList} ${fromClause} ORDER BY {sortColumn} {sortDir} LIMIT @__take OFFSET @__offset", new { __take = pageSize, __offset = offset${findPrincSuffix} }, cancellationToken: cancellationToken));`,
         ...(hasContains
-          ? [`        var items = await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
+          ? [
+              `        var items = await HydrateAsync(conn, rows.ToList(), cancellationToken);`,
+              ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
+            ]
           : [
               `        var items = rows.Select(Map).ToList();`,
               ...(hasAssoc ? [`        await LoadRefsAsync(conn, items, cancellationToken);`] : []),
@@ -959,7 +965,13 @@ export function renderDapperRepository(
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
         ...(hasContains
-          ? [`        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
+          ? hasAssoc
+            ? [
+                `        var __roots = await HydrateAsync(conn, rows.ToList(), cancellationToken);`,
+                `        await LoadRefsAsync(conn, __roots, cancellationToken);`,
+                `        return __roots;`,
+              ]
+            : [`        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
           : hasAssoc
             ? [
                 `        var __roots = rows.Select(Map).ToList();`,
@@ -979,6 +991,7 @@ export function renderDapperRepository(
         ? [
             `        if (r is null) return null;`,
             `        var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);`,
+            ...(hasAssoc ? [`        await LoadRefsAsync(conn, __one, cancellationToken);`] : []),
             `        return __one[0];`,
           ]
         : hasAssoc
@@ -1041,9 +1054,15 @@ export function renderDapperRepository(
       `            if (pg.offset is { } off) { sql += " OFFSET @__off"; p.Add("__off", off); }`,
       `        }`,
       `        var rows = await conn.QueryAsync<Row>(new CommandDefinition(sql, p, cancellationToken: cancellationToken));`,
-      hasContains
-        ? `        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`
-        : `        return rows.Select(Map).ToList();`,
+      ...(hasContains
+        ? hasAssoc
+          ? [
+              `        var __roots = await HydrateAsync(conn, rows.ToList(), cancellationToken);`,
+              `        await LoadRefsAsync(conn, __roots, cancellationToken);`,
+              `        return __roots;`,
+            ]
+          : [`        return await HydrateAsync(conn, rows.ToList(), cancellationToken);`]
+        : [`        return rows.Select(Map).ToList();`]),
       `    }`,
     );
   });
@@ -1131,6 +1150,9 @@ export function renderDapperRepository(
         ? [
             "        if (r is null) return null;",
             `        var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);`,
+            // contains + reference collections: hydrate the child tables first,
+            // then post-set the ref-collection list on the reconstructed root.
+            ...(hasAssoc ? ["        await LoadRefsAsync(conn, __one, cancellationToken);"] : []),
             "        return __one[0];",
           ]
         : hasAssoc
@@ -1149,7 +1171,13 @@ export function renderDapperRepository(
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray()${princSuffix} }, cancellationToken: cancellationToken));`,
       ...(hasContains
-        ? ["        return await HydrateAsync(conn, rows.ToList(), cancellationToken);"]
+        ? hasAssoc
+          ? [
+              "        var __roots = await HydrateAsync(conn, rows.ToList(), cancellationToken);",
+              "        await LoadRefsAsync(conn, __roots, cancellationToken);",
+              "        return __roots;",
+            ]
+          : ["        return await HydrateAsync(conn, rows.ToList(), cancellationToken);"]
         : hasAssoc
           ? [
               "        var __roots = rows.Select(Map).ToList();",

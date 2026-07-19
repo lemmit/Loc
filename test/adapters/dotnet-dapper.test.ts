@@ -472,7 +472,11 @@ system D {
     expect(errors.some((e) => /persistence: dapper/.test(e) && /part-in-part/.test(e))).toBe(true);
   });
 
-  it("still rejects nested parts combined with a reference collection", async () => {
+  // Wave 4: nested parts + a reference collection on the same aggregate now
+  // COMPOSE — a read hydrates the child tables through `_Create(State)` first,
+  // then LoadRefsAsync post-sets the ref-collection list on the reconstructed
+  // roots (the two hydrate passes run in sequence).
+  it("composes nested parts with a reference collection (hydrate then load-refs)", async () => {
     const src = `
 system D {
   api A from S
@@ -485,7 +489,9 @@ system D {
         contains lineItems: LineItem[]
         entity LineItem { sku: string }
       }
-      repository Orders for Order { }
+      repository Orders for Order {
+        find byCustomer(customer: string): Order[] where this.customer == customer
+      }
       repository Tags for Tag { }
     }
   }
@@ -493,12 +499,31 @@ system D {
   resource s { for: O, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(
-      errors.some(
-        (e) => /persistence: dapper/.test(e) && /reference-collection associations/.test(e),
-      ),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // the contains+association gate is lifted
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // Both the child-table hydrator and the ref-collection loader are emitted.
+    expect(repo).toContain("private static async Task<List<Order>> HydrateAsync(");
+    expect(repo).toContain("private static async Task LoadRefsAsync(");
+    // GetById: hydrate the single root, then load its ref collection.
+    expect(repo).toContain(
+      "var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);",
+    );
+    expect(repo).toMatch(
+      /var __one = await HydrateAsync[\s\S]*?await LoadRefsAsync\(conn, __one, cancellationToken\);/,
+    );
+    // FindManyByIds / findAll / the named list find all hydrate → load-refs.
+    expect(repo).toMatch(
+      /var __roots = await HydrateAsync\(conn, rows\.ToList\(\), cancellationToken\);\s*await LoadRefsAsync\(conn, __roots, cancellationToken\);/,
+    );
+    expect(repo).toMatch(
+      /var items = await HydrateAsync\(conn, rows\.ToList\(\), cancellationToken\);\s*await LoadRefsAsync\(conn, items, cancellationToken\);/,
+    );
+    // Save writes both the child table and the join table; the schema has both.
+    expect(repo).toContain("INSERT INTO line_items");
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS line_items");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS order_tags");
   });
 
   // Wave 4: a scalar / enum / value-object collection field ON a part is no
