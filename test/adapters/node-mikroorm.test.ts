@@ -482,18 +482,24 @@ describe("mikroorm — `seed` data", () => {
 });
 
 describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
-  const rejects = async (body: string, needle: RegExp) => {
-    const { errors } = await emit(sys("mikroorm", body));
-    expect(errors.some((e) => /persistence: mikroorm/.test(e) && needle.test(e))).toBe(true);
-  };
+  // Nested parts (part-in-part) are now supported (recursive child tables).
+  it("no longer rejects a nested entity part (part-in-part)", async () => {
+    const { errors } = await emit(
+      sys(
+        "mikroorm",
+        "contains lines: Line[]  entity Line { contains sub: Sub[] }  entity Sub { x: int }",
+      ),
+    );
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
 
-  // A genuinely-impossible shape still fails fast (the reject surface survives
-  // as a guard, not a subset boundary) — a nested/collection-bearing part.
-  it("still rejects a nested entity part (deeper nesting)", () =>
-    rejects(
-      "contains lines: Line[]  entity Line { contains sub: Sub[]  entity Sub { x: int } }",
-      /nested/,
-    ));
+  // A collection field INSIDE a part is now supported (jsonb column).
+  it("no longer rejects a collection-bearing entity part (array-typed part field)", async () => {
+    const { errors } = await emit(
+      sys("mikroorm", "contains lines: Line[]  entity Line { tags: string[] }"),
+    );
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
 
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("mikroorm"));
@@ -743,8 +749,7 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
     expect(repo).toContain("await em.nativeDelete(OrderLineRow, { parentId: id as string });");
   });
 
-  it("still rejects a part that itself contains a part (deeper nesting)", async () => {
-    const src = `system M {
+  const NESTED_SRC = `system M {
   api A from S
   subdomain S {
     context O {
@@ -754,8 +759,8 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
         entity Box {
           label: string
           contains items: Item[]
-          entity Item { sku: string }
         }
+        entity Item { sku: string }
       }
       repository Orders for Order { }
     }
@@ -764,8 +769,116 @@ describe("mikroorm — contained entity parts (wave 2)", () => {
   resource s { for: O, kind: state, use: pg }
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
-    const { errors } = await emit(src);
-    expect(errors.some((e) => /persistence: mikroorm/.test(e) && /entity part/.test(e))).toBe(true);
+
+  it("no longer trips loom.mikroorm-unsupported for a part-in-part (nested)", async () => {
+    const { errors } = await emit(NESTED_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+
+  it("emits a child Row per nested part, keyed by its DIRECT parent", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain("export class BoxRow");
+    expect(entities).toContain("export class ItemRow");
+    expect(entities).toContain('tableName: "boxes"');
+    expect(entities).toContain('tableName: "items"');
+  });
+
+  it("recursively bulk-loads + hydrates the nested level keyed by the direct parent", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Deepest-first bulk-load: Box rows, then Item rows scoped to the box ids.
+    expect(repo).toContain("const itemsByParent = new Map<string, Item[]>();");
+    expect(repo).toContain(
+      "await em.find(ItemRow, { parentId: { $in: boxesRows.map((r) => r.id) } }",
+    );
+    // Nested Item brands its parentId to BoxId (its direct parent), not OrderId.
+    expect(repo).toContain("parentId: Ids.BoxId(r.parentId)");
+  });
+
+  it("recursively diff-syncs + cascade-deletes the nested level on save/delete", async () => {
+    const { files } = await emit(NESTED_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Save recurses into box.items, stamping the nested FK from tree position.
+    expect(repo).toContain("for (const child of aggregate.boxes)");
+    expect(repo).toContain("for (const child1 of child.items)");
+    expect(repo).toContain("parentId: child.id as string");
+    // Delete cascades deepest-first (no DB FK): collect box ids, clear items.
+    expect(repo).toContain("const boxesDelIds = (await em.find(BoxRow,");
+    expect(repo).toContain("await em.nativeDelete(ItemRow, { parentId: { $in: boxesDelIds } });");
+    expect(repo).toContain("await em.nativeDelete(BoxRow, { parentId: id as string });");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collection-bearing contained parts on mikroorm — a part field of array type
+// (scalar / enum / VO / id) folds into ONE jsonb column on the part's child Row,
+// (de)serialised through the shared serialise/deserialise helpers (the mirror
+// of the Dapper part-collection path).  Closes the last containment gate.
+// ---------------------------------------------------------------------------
+describe("mikroorm — collection-bearing contained parts", () => {
+  const COLL_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      valueobject Money { amount: int  currency: string }
+      enum Tag { Red, Blue }
+      aggregate Product with crudish { name: string }
+      aggregate Order with crudish {
+        customer: string
+        contains lines: OrderLine[]
+        entity OrderLine {
+          sku: string
+          labels: string[]
+          amounts: Money[]
+          flags: Tag[]
+          related: Product id[]
+          notes: string[]?
+        }
+      }
+      repository Orders for Order { }
+      repository Products for Product { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a collection-bearing part", async () => {
+    const { errors } = await emit(COLL_SRC);
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+  });
+
+  it("emits one jsonb column per collection field (optional → nullable)", async () => {
+    const { files } = await emit(COLL_SRC);
+    const entities = files.get("api/db/entities.ts")!;
+    expect(entities).toContain('labels: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('amounts: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('flags: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('related: { type: "json", columnType: "jsonb" }');
+    expect(entities).toContain('notes: { type: "json", columnType: "jsonb", nullable: true }');
+    // Row TS types carry the DOC shape of each array.
+    expect(entities).toContain("amounts!: { amount: number; currency: string }[];");
+    expect(entities).toContain("related!: string[];");
+    expect(entities).toContain("notes!: string[] | null;");
+  });
+
+  it("serialises on save and (de)serialises the element type on read", async () => {
+    const { files } = await emit(COLL_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    // Save: VO array parenthesised as an object-literal arrow return; id → string.
+    expect(repo).toContain(
+      "amounts: child.amounts.map((x) => ({ amount: x.amount, currency: x.currency }))",
+    );
+    expect(repo).toContain("related: child.related.map((x) => x as string)");
+    // Read: VO reconstructed, enum cast, id re-branded, optional guarded.
+    expect(repo).toContain(
+      "amounts: (r.amounts ?? []).map((x) => new Money(x.amount, x.currency))",
+    );
+    expect(repo).toContain("flags: (r.flags ?? []).map((x) => x as Tag)");
+    expect(repo).toContain("related: (r.related ?? []).map((s: string) => Ids.ProductId(s))");
+    expect(repo).toContain("notes: (r.notes == null ? null : (r.notes ?? []).map((x) => x))");
   });
 });
 

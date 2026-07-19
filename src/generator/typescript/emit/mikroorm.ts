@@ -293,10 +293,33 @@ function renderJoinRowEntity(assoc: AssociationIR): { block: string; schemaName:
  *  `OrderLineRow`), its own child table keyed by a `parentId` FK. */
 const partRowClassOf = (partName: string): string => `${partName}Row`;
 
+/** True when a field type is a COLLECTION (array of scalar / enum / VO / id),
+ *  optionally optional-wrapped — the shape a part stores as one jsonb column. */
+function isCollectionFieldType(t: TypeIR): boolean {
+  return (t.kind === "optional" ? t.inner : t).kind === "array";
+}
+
+/** One jsonb column carrying a part's collection field's serialised list.  The
+ *  Row TS type is the DOC shape of the array (`string[]`, `{ amount: number;
+ *  currency: string }[]`, …); the `nullable` flag adds `| null` for an optional
+ *  collection. */
+function collectionFieldColumn(f: FieldIR, ctx: EnrichedBoundedContextIR): MikroColumn {
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return {
+    prop: f.name,
+    mikroType: "json",
+    tsType: docFieldType(inner, ctx),
+    nullable: f.type.kind === "optional",
+    primary: false,
+    columnType: "jsonb",
+  };
+}
+
 /** Render one child Row entity + EntitySchema for a contained entity part.
  *  Columns: `id` (PK), `parentId` (FK to the owner), then the part's own
- *  fields (scalar / enum / VO-flattened / id).  MikroORM owns the schema, so
- *  no explicit FK/index — the parent-scoped reads carry the relationship. */
+ *  fields (scalar / enum / VO-flattened / id; a collection field folds into one
+ *  jsonb column).  MikroORM owns the schema, so no explicit FK/index — the
+ *  parent-scoped reads carry the relationship. */
 function renderPartRowEntity(
   part: EntityPartIR,
   ctx: EnrichedBoundedContextIR,
@@ -306,7 +329,9 @@ function renderPartRowEntity(
   const cols: MikroColumn[] = [
     { prop: "id", mikroType: "string", tsType: "string", nullable: false, primary: true },
     { prop: "parentId", mikroType: "string", tsType: "string", nullable: false, primary: false },
-    ...part.fields.filter((f) => !isRefCollection(f.type)).flatMap((f) => fieldColumns(f, ctx)),
+    ...part.fields.flatMap((f) =>
+      isCollectionFieldType(f.type) ? [collectionFieldColumn(f, ctx)] : fieldColumns(f, ctx),
+    ),
   ];
   const classFields = cols.map((c) => `  ${c.prop}!: ${c.tsType}${c.nullable ? " | null" : ""};`);
   const propLines = cols.map((c) => {
@@ -971,8 +996,11 @@ function assocHydrateBind(
 // `Id[]` association machinery — bulk-load into a `<name>ByParent` map on the
 // array reads, inline-load on findById, diff-sync on save.  The domain root
 // hydrates each containment from a bare `<name>` local (hydrateRootExpr), so
-// these helpers just supply those locals.  v1 is bounded to single-level flat
-// parts (validator-gated), so a part row never nests further.
+// these helpers just supply those locals.  NESTED parts (part-in-part) recurse
+// (deepest-first loads / tree-position-stamped saves / cascade deletes), and a
+// COLLECTION field on a part folds into one jsonb column — so the full
+// containment tree round-trips (validator only gates event-sourced /
+// aggregate-inheritance participants, which have no relational child-table home).
 // ---------------------------------------------------------------------------
 
 /** The entity part a containment names (undefined if malformed — validator-
@@ -981,20 +1009,96 @@ function partForContainment(agg: EnrichedAggregateIR, c: ContainmentIR): EntityP
   return (agg.parts ?? []).find((p) => p.name === c.partName);
 }
 
+/** The MikroORM part hydrate — `hydrateEntityExpr` with the collection-field
+ *  override wired in: a part's array field is stored as one serialised jsonb
+ *  column, so it (de)serialises through the shared `deserializeField` (VO/id/
+ *  money elements reconstructed) rather than the drizzle native-array
+ *  passthrough.  For a part with no collection field this is byte-identical to a
+ *  bare `hydrateEntityExpr` (the override never fires). */
+function mikroHydrateEntity(
+  part: EntityPartIR,
+  rowVar: string,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  return hydrateEntityExpr(part, rowVar, agg, ctx, {
+    collectionField: (f, rv) => deserializeField(f.type, `${rv}.${f.name}`, ctx),
+  });
+}
+
 /** Save projection for a child part row — `{ id, parentId, <fields> }`,
- *  reusing the shared field projector so the columns match the Row entity. */
+ *  reusing the shared field projector so the columns match the Row entity.
+ *
+ *  A NESTED part (part-in-part) is stamped from TREE POSITION instead of the
+ *  object's own `parentId`: a freshly-built nested part has no reliable
+ *  construction-time parentId (a `new Label` inside a `new Shipment` has no
+ *  shipment id yet), so the recursive save passes the enclosing loop variable's
+ *  id as `parentIdExpr` — mirroring the drizzle `entityProjection` FK-stamp
+ *  rule.  A COLLECTION field folds into one jsonb column, serialised through the
+ *  shared `serializeField` (the MikroORM json column stores the plain value
+ *  directly — VOs flattened to plain objects, ids/money to strings). */
 function partProjection(
   part: EntityPartIR,
   varExpr: string,
   ctx: EnrichedBoundedContextIR,
+  parentIdExpr?: string,
 ): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
-    { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
-    ...part.fields
-      .filter((f) => !isRefCollection(f.type))
-      .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    { fieldName: "parentId", expr: parentIdExpr ?? `${varExpr}.parentId as string` },
+    ...part.fields.flatMap((f) =>
+      isCollectionFieldType(f.type)
+        ? [{ fieldName: f.name, expr: serializeField(f.type, `${varExpr}.${f.name}`, ctx) }]
+        : projectFieldEntries(f, varExpr, ctx),
+    ),
   ]);
+}
+
+/** Recursively bulk-load a part's OWN nested containments (part-in-part) into
+ *  per-direct-parent `<name>ByParent` maps keyed by the child row's id, emitted
+ *  BEFORE the `hydrateEntityExpr` that references them.  `rowsVar` is the parent
+ *  level's already-loaded rows array local.  Deepest-first: each level loads its
+ *  rows (`parentId $in <parent ids>`), recurses to build grandchild maps, then
+ *  groups its own rows (whose hydrate now finds the grandchild maps in scope).
+ *  Empty for a leaf part, so single-level output is byte-identical.  The
+ *  MikroORM analogue of the drizzle `nestedContainLoads`. */
+function nestedContainMikroLoads(
+  part: EntityPartIR,
+  rowsVar: string,
+  emVar: string,
+  indent: string,
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): string[] {
+  return part.contains.flatMap((nc) => {
+    const ncPart = partForContainment(agg, nc);
+    if (!ncPart) return [];
+    const ncRow = partRowClassOf(ncPart.name);
+    const rowsLocal = `${nc.name}Rows`;
+    const out = [
+      `${indent}const ${rowsLocal} = ${rowsVar}.length === 0 ? [] : await ${emVar}.find(${ncRow}, { parentId: { $in: ${rowsVar}.map((r) => r.id) } }, { orderBy: { parentId: "asc", id: "asc" } });`,
+      ...nestedContainMikroLoads(ncPart, rowsLocal, emVar, indent, agg, ctx),
+    ];
+    if (nc.collection) {
+      out.push(
+        `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}[]>();`,
+        `${indent}for (const r of ${rowsLocal}) {`,
+        `${indent}  const list = ${nc.name}ByParent.get(r.parentId) ?? [];`,
+        `${indent}  list.push(${mikroHydrateEntity(ncPart, "r", agg, ctx)});`,
+        `${indent}  ${nc.name}ByParent.set(r.parentId, list);`,
+        `${indent}}`,
+      );
+    } else {
+      out.push(
+        `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}>();`,
+        `${indent}for (const r of ${rowsLocal}) {`,
+        `${indent}  if (${nc.name}ByParent.has(r.parentId)) continue;`,
+        `${indent}  ${nc.name}ByParent.set(r.parentId, ${mikroHydrateEntity(ncPart, "r", agg, ctx)});`,
+        `${indent}}`,
+      );
+    }
+    return out;
+  });
 }
 
 /** Inline single-owner containment loads (findById / single find) — each
@@ -1010,14 +1114,33 @@ function containInlineLoadLines(
     const part = partForContainment(agg, c);
     if (!part) return [];
     const prow = partRowClassOf(part.name);
+    // A part with its OWN nested containments must materialise its child rows
+    // into a local so `nestedContainMikroLoads` can build the `<nc>ByParent`
+    // maps the hydrate references; a leaf part keeps the byte-identical inline
+    // form.
+    const hasNested = part.contains.length > 0;
     if (c.collection) {
+      if (!hasNested)
+        return [
+          `${indent}const ${c.name} = (await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } })).map((r) => ${mikroHydrateEntity(part, "r", agg, ctx)});`,
+        ];
+      const rows = `${c.name}Rows`;
       return [
-        `${indent}const ${c.name} = (await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } })).map((r) => ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `${indent}const ${rows} = await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } });`,
+        ...nestedContainMikroLoads(part, rows, emVar, indent, agg, ctx),
+        `${indent}const ${c.name} = ${rows}.map((r) => ${mikroHydrateEntity(part, "r", agg, ctx)});`,
       ];
     }
+    if (!hasNested)
+      return [
+        `${indent}const ${c.name}Row = await ${emVar}.findOne(${prow}, { parentId: ${ownerIdExpr} });`,
+        `${indent}const ${c.name} = ${c.name}Row === null ? null : ${mikroHydrateEntity(part, `${c.name}Row`, agg, ctx)};`,
+      ];
+    const rows = `${c.name}Rows`;
     return [
-      `${indent}const ${c.name}Row = await ${emVar}.findOne(${prow}, { parentId: ${ownerIdExpr} });`,
-      `${indent}const ${c.name} = ${c.name}Row === null ? null : ${hydrateEntityExpr(part, `${c.name}Row`, agg, ctx)};`,
+      `${indent}const ${rows} = await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} }, { orderBy: { id: "asc" } });`,
+      ...nestedContainMikroLoads(part, rows, emVar, indent, agg, ctx),
+      `${indent}const ${c.name} = ${rows}.length === 0 ? null : ${mikroHydrateEntity(part, `${rows}[0]!`, agg, ctx)};`,
     ];
   });
 }
@@ -1037,23 +1160,30 @@ function containMapLoadLines(
     const rows = `${c.name}Rows`;
     const map = `${c.name}ByParent`;
     const elemT = c.collection ? `${part.name}[]` : part.name;
-    const head = [
-      `${indent}const ${rows} = rootIds.length === 0 ? [] : await ${emVar}.find(${prow}, { parentId: { $in: rootIds } }, { orderBy: { parentId: "asc", id: "asc" } });`,
-      `${indent}const ${map} = new Map<string, ${elemT}>();`,
-    ];
+    // Load this containment's rows, then (for a part with its OWN nested
+    // containments) recursively build the child `<nc>ByParent` maps BEFORE the
+    // grouping hydrate references them.  Empty for a leaf part → byte-identical
+    // single-level output.
+    const rowsDecl = `${indent}const ${rows} = rootIds.length === 0 ? [] : await ${emVar}.find(${prow}, { parentId: { $in: rootIds } }, { orderBy: { parentId: "asc", id: "asc" } });`;
+    const nested = nestedContainMikroLoads(part, rows, emVar, indent, agg, ctx);
+    const mapDecl = `${indent}const ${map} = new Map<string, ${elemT}>();`;
     if (c.collection) {
       return [
-        ...head,
+        rowsDecl,
+        ...nested,
+        mapDecl,
         `${indent}for (const r of ${rows}) {`,
         `${indent}  const list = ${map}.get(r.parentId) ?? [];`,
-        `${indent}  list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        `${indent}  list.push(${mikroHydrateEntity(part, "r", agg, ctx)});`,
         `${indent}  ${map}.set(r.parentId, list);`,
         `${indent}}`,
       ];
     }
     return [
-      ...head,
-      `${indent}for (const r of ${rows}) ${map}.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+      rowsDecl,
+      ...nested,
+      mapDecl,
+      `${indent}for (const r of ${rows}) ${map}.set(r.parentId, ${mikroHydrateEntity(part, "r", agg, ctx)});`,
     ];
   });
 }
@@ -1067,32 +1197,94 @@ function containRowDeclLines(agg: EnrichedAggregateIR, rowVar: string, indent: s
   );
 }
 
-/** Diff-sync each containment's child rows on save: delete the rows the
- *  aggregate no longer holds, upsert the current set (id is the PK). */
+/** Diff-sync each containment's child rows on save: delete the rows the owner no
+ *  longer holds, upsert the current set (id is the PK), then RECURSE into each
+ *  part's own nested containments keyed by that part instance's id.  The
+ *  MikroORM analogue of the drizzle `syncContain`: `depth` uniquifies the loop /
+ *  `existing` / `currentIds` locals across levels, and a NESTED part's `parentId`
+ *  is stamped from tree position (the enclosing loop variable's id) rather than
+ *  the object's own — a freshly-built nested part has no reliable parentId. */
 function containSaveLines(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
   emVar: string,
   indent: string,
 ): string[] {
-  return (agg.contains ?? []).flatMap((c) => {
+  const sync = (
+    containments: readonly ContainmentIR[],
+    ownerExpr: string,
+    ownerIdExpr: string,
+    ind: string,
+    depth: number,
+  ): string[] =>
+    containments.flatMap((c) => {
+      const part = partForContainment(agg, c);
+      if (!part) return [];
+      const prow = partRowClassOf(part.name);
+      const suffix = depth === 0 ? "" : String(depth);
+      const cap = `${upperFirst(c.name)}${suffix}`;
+      const loopVar = `child${suffix}`;
+      const itemsRef = c.collection
+        ? `${ownerExpr}.${c.name}`
+        : `(${ownerExpr}.${c.name} ? [${ownerExpr}.${c.name}] : [])`;
+      // Root-level part keeps its own `parentId`; a nested part FKs to the
+      // enclosing loop variable's id (tree position).
+      const parentIdExpr = depth === 0 ? undefined : `${ownerExpr}.id as string`;
+      return [
+        `${ind}// Full child sync of the '${c.name}' containment.`,
+        `${ind}const existing${cap} = await ${emVar}.find(${prow}, { parentId: ${ownerIdExpr} });`,
+        `${ind}const currentIds${cap} = new Set(${itemsRef}.map((e) => e.id as string));`,
+        `${ind}for (const r of existing${cap}) {`,
+        `${ind}  if (!currentIds${cap}.has(r.id)) await ${emVar}.nativeDelete(${prow}, { id: r.id });`,
+        `${ind}}`,
+        `${ind}for (const ${loopVar} of ${itemsRef}) {`,
+        `${ind}  await ${emVar}.upsert(${prow}, ${partProjection(part, loopVar, ctx, parentIdExpr)});`,
+        ...sync(part.contains, loopVar, `${loopVar}.id as string`, `${ind}  `, depth + 1),
+        `${ind}}`,
+      ];
+    });
+  return sync(agg.contains ?? [], "aggregate", "aggregate.id as string", indent, 0);
+}
+
+/** Recursive cascade-delete of a subtree of contained child rows.  MikroORM
+ *  owns the schema and the generated EntitySchemas carry no relation/FK, so
+ *  there's no DB cascade — the repository clears descendants explicitly,
+ *  DEEPEST-first.  A leaf part deletes straight by `parentId`; a part with its
+ *  own nested containments first loads its row ids, recurses to clear
+ *  grandchildren (`parentId $in <ids>`), then deletes its own rows.  For a
+ *  single-level aggregate this reduces to the original one-liner per part
+ *  (byte-identical).  `parentIdValue` is the `parentId` FilterQuery VALUE (an
+ *  `id as string` at the root, a `{ $in: <ids> }` object below). */
+function containCascadeDeleteLines(
+  agg: EnrichedAggregateIR,
+  emVar: string,
+  parentIdValue: string,
+  indent: string,
+  depth: number,
+): string[] {
+  return containCascade(agg, agg.contains ?? [], emVar, parentIdValue, indent, depth);
+}
+
+function containCascade(
+  agg: EnrichedAggregateIR,
+  containments: readonly ContainmentIR[],
+  emVar: string,
+  parentIdValue: string,
+  indent: string,
+  depth: number,
+): string[] {
+  return containments.flatMap((c, i) => {
     const part = partForContainment(agg, c);
     if (!part) return [];
     const prow = partRowClassOf(part.name);
-    const cap = upperFirst(c.name);
-    const itemsRef = c.collection
-      ? `aggregate.${c.name}`
-      : `(aggregate.${c.name} ? [aggregate.${c.name}] : [])`;
+    if (part.contains.length === 0) {
+      return [`${indent}await ${emVar}.nativeDelete(${prow}, { parentId: ${parentIdValue} });`];
+    }
+    const idsVar = `${c.name}DelIds${depth === 0 ? "" : depth}${i === 0 ? "" : `_${i}`}`;
     return [
-      `${indent}// Full child sync of the '${c.name}' containment.`,
-      `${indent}const existing${cap} = await ${emVar}.find(${prow}, { parentId: aggregate.id as string });`,
-      `${indent}const currentIds${cap} = new Set(${itemsRef}.map((e) => e.id as string));`,
-      `${indent}for (const r of existing${cap}) {`,
-      `${indent}  if (!currentIds${cap}.has(r.id)) await ${emVar}.nativeDelete(${prow}, { id: r.id });`,
-      `${indent}}`,
-      `${indent}for (const child of ${itemsRef}) {`,
-      `${indent}  await ${emVar}.upsert(${prow}, ${partProjection(part, "child", ctx)});`,
-      `${indent}}`,
+      `${indent}const ${idsVar} = (await ${emVar}.find(${prow}, { parentId: ${parentIdValue} })).map((r) => r.id);`,
+      ...containCascade(agg, part.contains, emVar, `{ $in: ${idsVar} }`, indent, depth + 1),
+      `${indent}await ${emVar}.nativeDelete(${prow}, { parentId: ${parentIdValue} });`,
     ];
   });
 }
@@ -1354,14 +1546,7 @@ export function renderMikroRepository(
             (a) =>
               `    await em.nativeDelete(${joinRowClassOf(a)}, { ${joinColumnName(a.ownerFk)}: id as string });`,
           ),
-          ...(agg.contains ?? []).flatMap((c) => {
-            const part = partForContainment(agg, c);
-            return part
-              ? [
-                  `    await em.nativeDelete(${partRowClassOf(part.name)}, { parentId: id as string });`,
-                ]
-              : [];
-          }),
+          ...containCascadeDeleteLines(agg, "em", "id as string", "    ", 0),
           `    await em.nativeDelete(${row}, ${withContextFilters("{ id: id as string }", kindClause)});`,
           `  }`,
         )

@@ -28,7 +28,6 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
-  EntityPartIR,
   ExprIR,
   FunctionIR,
   OperationIR,
@@ -2121,30 +2120,25 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // gated until that path is wired.
         if ((a.associations ?? []).length > 0 && a.persistedAs === "eventLog")
           reject(where, "has reference-collection associations on an event-sourced aggregate");
-        // Contained entity parts ARE supported (relational child tables, wave 2):
-        // each part persists as a parent-scoped `<Part>Row` child table, bulk-
-        // loaded on read and diff-synced on save (the MikroORM analogue of the
-        // drizzle containment path).  Bounded to single-level FLAT parts (no
-        // part-of-a-part, no collection field inside a part) on a plain state
-        // aggregate — deeper nesting / inheritance / event-sourcing stay gated.
-        // Contained parts (relational child tables OR embedded jsonb) are v1-
-        // bounded to single-level FLAT parts (no part-of-a-part, no collection
-        // field inside a part), on a non-inheritance / non-event-sourced state
-        // aggregate.  Both shapes share the bound.
+        // Contained entity parts ARE supported (relational child tables): each
+        // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
+        // on read and diff-synced on save (the MikroORM analogue of the drizzle
+        // containment path).  NESTED parts (part-in-part) are supported — a
+        // nested part FKs to its DIRECT parent part's row (`directParentName`,
+        // shared with migrations-builder), recursively loaded (deepest-first
+        // `<nc>ByParent` maps) / saved (tree-position-stamped FK) / cascade-
+        // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
+        // field on a part (array of scalar / enum / VO / id) folds into one jsonb
+        // column (shared serialise/deserialise), the mirror of the Dapper
+        // part-collection path.  Only event-sourced / aggregate-inheritance
+        // participants with parts stay gated — their storage shape (event stream
+        // / shared-or-per-concrete inheritance table) has no relational
+        // child-table home, so the containment tree is genuinely unmappable.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          const flatType = (t: TypeIR): boolean =>
-            (t.kind === "optional" ? t.inner : t).kind !== "array";
-          const partFlat = (p: EntityPartIR): boolean =>
-            (p.contains ?? []).length === 0 && p.fields.every((f) => flatType(f.type));
           if (a.persistedAs === "eventLog")
             reject(where, "contains nested entity parts on an event-sourced aggregate");
           else if (a.isAbstract || a.extendsAggregate)
             reject(where, "contains nested entity parts on an aggregate-inheritance participant");
-          else if (!(a.parts ?? []).every(partFlat))
-            reject(
-              where,
-              "contains a nested or collection-bearing entity part (v1 supports single-level flat parts)",
-            );
         }
         // `filter` capability predicates ARE supported: the repository ANDs each
         // non-principal predicate (a MikroORM FilterQuery) into every root read
