@@ -41,6 +41,7 @@ import {
   classifyFelizAsyncEffect,
   type FelizAsyncEffectShape,
 } from "../../ir/util/feliz-async-effect.js";
+import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
@@ -1149,6 +1150,108 @@ export function collectPageBoundState(page: PageIR): FelizBoundState[] {
   return out;
 }
 
+/** A page `state` field bound by a standalone `FileUpload(bind: <File state>)`.
+ *  The MVU projection needs a `Select<Field>File` Msg (the picked browser file),
+ *  a `<Field>Uploaded` result Msg (the returned `FileRef`), and the two update
+ *  arms that run the upload `Cmd` (multipart POST `/files`) + set the model field
+ *  — the Elmish twin of the JSX frontends' `api.upload` + `field.onChange(ref)`. */
+export interface FelizFileUpload {
+  /** The bound `File`-typed page `state` field name (`avatar`). */
+  name: string;
+}
+
+/** Collect the page `state` fields a standalone `FileUpload(bind:)` primitive
+ *  binds — deduped by name, in tree order.  Only a `bind:` ref to a declared
+ *  `File`-typed `state` field is collected; anything else is ignored (the pack
+ *  renders an uncontrolled stub for it, so the page still compiles). */
+export function collectPageFileUploads(page: PageIR): FelizFileUpload[] {
+  if (!page.body) return [];
+  const fileState = new Set(page.state.filter((s) => typeIsFile(s.type)).map((s) => s.name));
+  const seen = new Set<string>();
+  const out: FelizFileUpload[] = [];
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call" && e.name === "FileUpload") {
+      const names = e.argNames ?? [];
+      const idx = names.indexOf("bind");
+      const a = idx >= 0 ? e.args[idx] : undefined;
+      if (a?.kind === "ref" && fileState.has(a.name) && !seen.has(a.name)) {
+        seen.add(a.name);
+        out.push({ name: a.name });
+      }
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(page.body);
+  return out;
+}
+
+/** Msg case name for a File upload field's file-picked trigger (`avatar` →
+ *  `SelectAvatarFile`), carrying the picked `Browser.Types.File`. */
+export function fileSelectMsg(name: string): string {
+  return `Select${upperFirst(name)}File`;
+}
+
+/** Msg case name for a File upload field's upload-completed result (`avatar` →
+ *  `AvatarUploaded`), carrying `Result<FileRef, string>`. */
+export function fileUploadedMsg(name: string): string {
+  return `${upperFirst(name)}Uploaded`;
+}
+
+/** The fixed `FileRef` wire record (`{ url, key, contentType, size }`) + its
+ *  Thoth decoder — emitted once when a ui has any `File`-typed page state, so
+ *  the `File` Model field (`FileRef option`) + `Api.uploadFile` typecheck.  The
+ *  shape is fixed (mirrors the backend `POST /files` 201 body). */
+export function renderFileRefType(): string {
+  return lines(
+    "// File upload — the fixed FileRef wire shape returned by POST /files.",
+    "type FileRef =",
+    "  {",
+    "    url: string",
+    "    key: string",
+    "    contentType: string",
+    "    size: int",
+    "  }",
+    "",
+    "let fileRefDecoder : Decoder<FileRef> =",
+    "  Decode.object (fun get ->",
+    "    {",
+    '      url = get.Required.Field "url" Decode.string',
+    '      key = get.Required.Field "key" Decode.string',
+    '      contentType = get.Required.Field "contentType" Decode.string',
+    '      size = get.Required.Field "size" Decode.int',
+    "    })",
+  );
+}
+
+/** The `Api.uploadFile` function — a multipart `POST /files` (a browser
+ *  `FormData` with the `file` field, exactly the form field the backend
+ *  `parseBody` reads) that decodes the returned `FileRef`.  One per app,
+ *  emitted when the ui has any bound `FileUpload`. */
+function renderUploadFn(): (string | undefined)[] {
+  return [
+    "  let uploadFile (file: Browser.Types.File) : Async<Result<FileRef, string>> =",
+    "    async {",
+    // Fable.Browser.Dom's `FormData` type ships no `.Create()` constructor in the
+    // pinned version, so mint the browser FormData via the JS-interop escape hatch
+    // (`emitJsExpr`) — Fable-verified.  It's a `Browser.Types.FormData`, so
+    // `append` + `BodyContent.Form` typecheck.
+    '      let formData : Browser.Types.FormData = emitJsExpr () "new FormData()"',
+    '      formData.append ("file", file)',
+    "      let! response =",
+    '        Http.request "/files"',
+    "        |> Http.method POST",
+    "        |> Http.content (BodyContent.Form formData)",
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 201 then",
+    "        match Decode.fromString fileRefDecoder response.responseText with",
+    "        | Ok fileRef -> return Ok fileRef",
+    "        | Error e -> return Error e",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
 /** True when a `QueryView` call is `single: true` (byId — one record, not a list). */
 function isSingleQueryView(e: Extract<ExprIR, { kind: "call" }>): boolean {
   const names = e.argNames ?? [];
@@ -1914,6 +2017,9 @@ export function renderApiModule(
   workflowForms: FelizWorkflowForm[] = [],
   asyncEffects: FelizAsyncEffect[] = [],
   opActions: FelizAction[] = [],
+  /** True when the ui has any bound `FileUpload` — appends one shared
+   *  `uploadFile` (multipart POST `/files` → `FileRef`) to the module. */
+  hasFileUploads = false,
 ): string {
   if (
     reads.length === 0 &&
@@ -1922,7 +2028,8 @@ export function renderApiModule(
     operationForms.length === 0 &&
     workflowForms.length === 0 &&
     asyncEffects.length === 0 &&
-    opActions.length === 0
+    opActions.length === 0 &&
+    !hasFileUploads
   ) {
     return "";
   }
@@ -1934,6 +2041,7 @@ export function renderApiModule(
     ...workflowForms.map((f) => renderWorkflowFn(f)),
     ...asyncEffects.map((e) => renderAsyncEffectFn(e)),
     ...opActions.map((a) => renderActionFn(a)),
+    ...(hasFileUploads ? [renderUploadFn()] : []),
   ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",

@@ -4,6 +4,7 @@
 // action, one `update` arm per action body.  No gensym.
 
 import type { ActionIR, StateFieldIR, StoreIR } from "../../ir/types/loom-ir.js";
+import { typeIsFile } from "../../ir/util/file-field.js";
 import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
@@ -12,6 +13,7 @@ import type {
   FelizAsyncEffect,
   FelizBoundState,
   FelizFieldArray,
+  FelizFileUpload,
   FelizForm,
   FelizMutation,
   FelizOperationForm,
@@ -19,7 +21,28 @@ import type {
   FelizWorkflowForm,
   FormRecord,
 } from "./wire.js";
-import { formHasFieldErrors, formTouchedField, formTouchMsg, opHasForm } from "./wire.js";
+import {
+  fileSelectMsg,
+  fileUploadedMsg,
+  formHasFieldErrors,
+  formTouchedField,
+  formTouchMsg,
+  opHasForm,
+} from "./wire.js";
+
+/** The F# Model type for a `state {}` field.  A `File`-typed field holds the
+ *  uploaded reference (`FileRef option`, `None` before/when cleared) — the
+ *  standalone `FileUpload(bind:)` writes it via the upload result Msg — not the
+ *  `string` that `typeToFs` would spell for the passive `File` leaf. */
+function stateFieldFsType(f: StateFieldIR): string {
+  return typeIsFile(f.type) ? "FileRef option" : typeToFs(f.type);
+}
+
+/** The F# init value for a `state {}` field with no `= <init>` — `None` for a
+ *  `File` field (its `FileRef option` starts empty), else the type's zero. */
+function stateFieldZero(f: StateFieldIR): string {
+  return typeIsFile(f.type) ? "None" : fsZeroValue(f.type);
+}
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -114,7 +137,7 @@ export function renderModel(
     ...(authUi ? ["    Session: SessionState"] : []),
     ...(pageGate ? ["    CurrentUser: CurrentUser option"] : []),
     ...(routed ? ["    CurrentPage: Page"] : []),
-    ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
+    ...state.map((f) => `    ${upperFirst(f.name)}: ${stateFieldFsType(f)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
     ...forms.flatMap((f) => [
       `    ${f.formField}: ${f.formType}`,
@@ -171,7 +194,7 @@ export function renderInit(
       : []),
     ...state.map((f) => {
       const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
-      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : fsZeroValue(f.type);
+      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f);
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
@@ -217,6 +240,7 @@ export function renderMsg(
   pageGate = false,
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
+  fileUploads: readonly FelizFileUpload[] = [],
 ): string {
   const cases = [
     // Under a page gate the probe carries the decoded claims (None on 401);
@@ -225,6 +249,12 @@ export function renderMsg(
     ...(routed ? ["  | UrlChanged of string list"] : []),
     // One `Set<Field>` per two-way-bound controlled input (Field/Toggle/…).
     ...boundState.map(boundSetMsg),
+    // Per standalone `FileUpload(bind:)`: a file-picked trigger (the browser
+    // File) + an upload-completed result (the returned FileRef).
+    ...fileUploads.flatMap((u) => [
+      `  | ${fileSelectMsg(u.name)} of Browser.Types.File`,
+      `  | ${fileUploadedMsg(u.name)} of Result<FileRef, string>`,
+    ]),
     ...actions.map((a) => {
       const p = a.params[0];
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
@@ -413,10 +443,22 @@ export function renderUpdate(
   pageGate = false,
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
+  fileUploads: readonly FelizFileUpload[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   // One `| Set<Field> v -> …` arm per two-way-bound controlled input.
   const boundArms = boundState.map(boundSetArm);
+  // Per standalone `FileUpload(bind:)`: the file-picked trigger fires the upload
+  // `Cmd` (multipart POST /files), and the result sets the `File` Model field to
+  // `Some ref` on success (an error is dropped — the field stays as it was).
+  const fileUploadArms = fileUploads.map((u) => {
+    const field = upperFirst(u.name);
+    return (
+      `  | ${fileSelectMsg(u.name)} file -> model, Cmd.OfAsync.perform Api.uploadFile file ${fileUploadedMsg(u.name)}\n` +
+      `  | ${fileUploadedMsg(u.name)} (Ok fileRef) -> { model with ${field} = Some fileRef }, Cmd.none\n` +
+      `  | ${fileUploadedMsg(u.name)} (Error _) -> model, Cmd.none`
+    );
+  });
   const byIdReads = reads.filter((r) => r.single);
   // The auth gate: the session probe resolves to Authed / Anon.  Under a page
   // gate it also stashes the decoded claims (`Some user`) so a gated view can
@@ -638,6 +680,7 @@ export function renderUpdate(
     ...authArms,
     ...routeArms,
     ...boundArms,
+    ...fileUploadArms,
     ...actionArms,
     ...storeArms,
     ...asyncEffectArms,
