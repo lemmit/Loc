@@ -98,7 +98,7 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // query-time projection hosted on such a deployable with an honest diagnostic
 // until its port lands — the same reviewed-gap discipline as the paged gate.
 // Node is the first (PR-C).
-const PROJECTION_QT_SUPPORTED = new Set(["node"]);
+const PROJECTION_QT_SUPPORTED = new Set(["node", "python"]);
 
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));

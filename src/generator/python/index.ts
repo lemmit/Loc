@@ -10,6 +10,7 @@ import type {
   TimerSourceIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import {
   aggregatesHaveUniqueKeys,
@@ -64,6 +65,7 @@ import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-ha
 import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
+import { buildPyQueryProjectionsFile } from "./query-projections-builder.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
@@ -254,7 +256,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // observable, parity with Hono / .NET).
   const hasWorkflows =
     commandWorkflowsOf(merged).length > 0 || observableWorkflowsOf(merged).length > 0;
-  const hasProjections = merged.projections.length > 0;
+  // FOLDED projections drive projections_routes.py; query-time projections
+  // (read-path-architecture.md rev.13) get their own query_projections_routes.py.
+  const hasProjections = merged.projections.some(isMaterializedProjection);
+  const hasQueryProjections = merged.projections.some(isQueryTimeProjection);
   const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
     const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
     return owning
@@ -348,6 +353,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasViews,
       hasWorkflows,
       hasProjections,
+      hasQueryProjections,
       authRequired ? args.sys.user : undefined,
       hasSeeds,
       hasEmbeddedSpa,
@@ -502,6 +508,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
   const projectionsFile = buildPyProjectionsFile(merged);
   if (projectionsFile != null) out.set("app/http/projections_routes.py", projectionsFile);
+  const queryProjectionsFile = buildPyQueryProjectionsFile(merged, hasDispatch);
+  if (queryProjectionsFile != null)
+    out.set("app/http/query_projections_routes.py", queryProjectionsFile);
   // Only collected when a recorder is actually threaded in — a
   // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
   // `app/http/workflows_routes.py` pools every command workflow, so it
@@ -796,6 +805,7 @@ function renderMain(
   hasViews = false,
   hasWorkflows = false,
   hasProjections = false,
+  hasQueryProjections = false,
   authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
   hasEmbeddedSpa = false,
@@ -877,6 +887,9 @@ function renderMain(
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
+    hasQueryProjections
+      ? "from app.http.query_projections_routes import router as query_projections_router"
+      : null,
     ...explicitRouteApis.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
@@ -1015,6 +1028,7 @@ function renderMain(
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
+    hasQueryProjections ? `app.include_router(query_projections_router${routerArgs})` : null,
     ...explicitRouteApis.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`

@@ -170,9 +170,11 @@ async function sysErrorCodes(platform: string): Promise<string[]> {
 
 describe("projection comprehension — validation gates", () => {
   it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
-    // node emits it (PR-C); the other backends are honestly gated until they do.
-    expect(await sysErrorCodes("node")).not.toContain("loom.projection-query-time-unsupported");
-    for (const platform of ["python", "java", "dotnet", "elixir"]) {
+    // node (PR-C) + python (PR-D) emit it; java/dotnet/elixir stay gated until they do.
+    for (const platform of ["node", "python"]) {
+      expect(await sysErrorCodes(platform)).not.toContain("loom.projection-query-time-unsupported");
+    }
+    for (const platform of ["java", "dotnet", "elixir"]) {
       expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
     }
   });
@@ -222,5 +224,21 @@ describe("projection comprehension — Hono emission", () => {
     // The synthesised find lands on the Order repository.
     const repo = [...files.entries()].find(([p]) => p.endsWith("order-repository.ts"))?.[1];
     expect(repo).toContain("async ordersView(): Promise<Order[]>");
+  });
+
+  it("emits the Python twin — synthesised find + join map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("python"));
+    const qp = [...files.entries()].find(([p]) =>
+      p.endsWith("http/query_projections_routes.py"),
+    )?.[1];
+    expect(qp, "python query-projections file emitted").toBeDefined();
+    expect(qp).toContain('@router.get("/orders_view"');
+    expect(qp).toContain("rows = await repo.orders_view()");
+    expect(qp).toContain(
+      "customer_by_id = {str(a.id): a for a in await customer_repo.find_many_by_ids([r.customer_id for r in rows])}",
+    );
+    expect(qp).toContain('"customerName": customer_by_id[str(r.customer_id)].name');
+    const repo = [...files.entries()].find(([p]) => p.endsWith("order_repository.py"))?.[1];
+    expect(repo).toContain("async def orders_view(self) -> list[Order]:");
   });
 });

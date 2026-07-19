@@ -10,6 +10,7 @@ import {
   type FieldIR,
   type FindIR,
   findUsesCurrentUser,
+  isQueryTimeProjection,
   type RepositoryIR,
   type RetrievalIR,
   type TypeIR,
@@ -247,6 +248,7 @@ export function buildPyRepositoryFile(
     )})).scalars().all()`,
     `        return ${hydrateListExpr(agg)}`,
     ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
+    ...queryProjectionViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
     ...aggregateRetrievals(agg, ctx).flatMap((r) => [
       "",
       runMethod(agg, r, ctx, filterPred, inlineRunBypasses.get(r.name)),
@@ -527,6 +529,23 @@ export function rootWhere(
 /** Aggregate-sourced views over this aggregate (workflow views: S15). */
 export function aggregateViews(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): ViewIR[] {
   return ctx.views.filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name);
+}
+
+/** Query-time projections (read-path-architecture.md rev.13) sourced from this
+ *  aggregate, adapted to the `ViewIR` shape `viewFindMethod` consumes so the
+ *  synthesised `repo.<projName>()` read is byte-identical to a full-form view's
+ *  find — the projection route then follows (`join`) + projects (`select`). */
+export function queryProjectionViews(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): ViewIR[] {
+  return (ctx.projections ?? [])
+    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
+    .map((p) => ({
+      name: p.name,
+      source: { kind: "aggregate" as const, name: agg.name },
+      ...(p.query?.filter ? { filter: p.query.filter } : {}),
+    }));
 }
 
 function aggregateRetrievals(
