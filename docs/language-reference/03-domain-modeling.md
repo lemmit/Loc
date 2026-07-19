@@ -329,10 +329,19 @@ public sealed record CreateOrderRequest(
 ```
 == elixir
 ```elixir
-# orders/order.ex — default on the attribute
-attribute :note, :string, allow_nil?: false, default: "pending"
+# orders/order.ex — default on the Ecto field
+field :note, :string, default: "pending"
 ```
 ::: end
+
+The example above is a **constant** default, so it lands on the wire as a
+serializer default (zod `.default(...)`, a C# record `= …`, an Ecto `default:`).
+An **ambient** default the client can't precompute — `now()` or
+`currentUser.<claim>` — is instead applied **per-request in the create path**:
+the field is wire-**optional** and the create handler coalesces the value
+(`body.createdAt ?? now()`), because a serializer default is evaluated once at
+module load and would freeze every row to the server's boot time. See
+[Server-sourced defaults](../actions.md#server-sourced-defaults--applied-per-request-in-the-create-path).
 
 A `check` on a field is exactly the inline form of a member `invariant` — both lower to the constructor guard shown under `contains` above (`qty: int check qty > 0` → `if (!(this._qty > 0)) throw …`). See [Invariants, derived & functions](07-invariants-derived-functions.md) for the full invariant surface.
 
