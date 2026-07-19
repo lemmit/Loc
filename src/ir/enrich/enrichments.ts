@@ -70,7 +70,7 @@ import {
   TENANT_OWNED_CAPABILITY,
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
-import { walkStmtExprsDeep } from "../util/walk.js";
+import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
 import { buildCreateInput, wireFieldsForAggregate } from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
@@ -288,28 +288,41 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
           needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
         }
       }
-      // Usage-derived needs (Phase 4): a resource-op `files.put(...)` in
-      // a workflow body means the context requires the verb's capability
-      // of its `(context, kind)` resource.  Union per kind so a context
-      // using several verbs of one resource needs all their capabilities.
-      // Walks EVERY workflow body (creates / handlers / reactors) AND descends
-      // into `for-each` / `if-let` bodies via `allWorkflowStmts` — a nested
-      // `files.put` must still derive its capability need, else
-      // `validateNeedCapabilities` never sees it (audit finding: `deriveNeeds`
-      // walked only the primary top-level statement list).
+      // Usage-derived needs (Phase 4): a resource-op `files.put(...)` means the
+      // context requires the verb's capability of its `(context, kind)` resource.
+      // Union per kind so a context using several verbs of one resource needs all
+      // their capabilities.  Scan every place a resource-op can appear, walking
+      // DEEP through each expression (a resource-op nested inside an `assign`
+      // value / `emit` field / call arg — not just a bare `resource-call` /
+      // `expr-let` — must still derive its need) so `validateNeedCapabilities`
+      // never misses one (audit finding: this walked only two statement shapes,
+      // and only workflow bodies — not command/query handlers or domain services).
       const byKind = new Map<DataSourceKind, Set<string>>();
-      for (const wf of ctx.workflows) {
-        for (const st of allWorkflowStmts(wf)) {
-          const call =
-            st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
-          if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
-            const { resourceKind, capability } = call.resourceOp;
-            if (!capability) continue;
-            const set = byKind.get(resourceKind) ?? new Set<string>();
-            set.add(capability);
-            byKind.set(resourceKind, set);
-          }
+      const noteResourceOp = (e: ExprIR): void => {
+        if (e.kind === "call" && e.callKind === "resource-op" && e.resourceOp) {
+          const { resourceKind, capability } = e.resourceOp;
+          if (!capability) return;
+          const set = byKind.get(resourceKind) ?? new Set<string>();
+          set.add(capability);
+          byKind.set(resourceKind, set);
         }
+      };
+      // Workflow bodies (creates / handlers / reactors, descending into nested
+      // for-each / if-let via `allWorkflowStmts`; the deep walk over each is
+      // idempotent for the re-visited nested statements).
+      for (const wf of ctx.workflows) {
+        for (const st of allWorkflowStmts(wf)) walkWorkflowStmtExprsDeep(st, noteResourceOp);
+      }
+      // Command / query handler bodies — separate context fields, same
+      // `WorkflowStmtIR` shape (+ a `return <expr>` value).
+      for (const h of [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])]) {
+        for (const st of h.statements) walkWorkflowStmtExprsDeep(st, noteResourceOp);
+        if (h.returnValue) walkExprDeep(h.returnValue, noteResourceOp);
+      }
+      // Domain-service operation bodies (`StmtIR`).
+      for (const ds of ctx.domainServices ?? []) {
+        for (const op of ds.operations)
+          for (const st of op.body) walkStmtExprsDeep(st, noteResourceOp);
       }
       for (const [kind, caps] of byKind) {
         needs.push({ contextName: ctx.name, kind, capabilities: [...caps].sort() });

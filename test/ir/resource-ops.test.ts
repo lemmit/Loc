@@ -73,6 +73,32 @@ describe("usage-derived needs", () => {
     expect(need).toBeDefined();
     expect(need!.capabilities).toContain("blob");
   });
+
+  // Regression (docs/audits/repo-code-review-2026-07.md I1): `deriveNeeds`
+  // walked only WORKFLOW bodies (and only two statement shapes).  A resource-op
+  // in a command/query HANDLER — a separate context field — derived no need, so
+  // `validateNeedCapabilities` never checked the resource offers the verb.  The
+  // deep walk now covers handlers too.
+  const HANDLER_SRC = `
+system Sys {
+  subdomain Sales { context Sales {
+    aggregate Order { name: string }
+    commandHandler Stash(name: string) { salesFiles.put("k/" + name, name) }
+  } }
+  storage pg { type: postgres }
+  storage files { type: s3, config: { bucket: "b" } }
+  resource salesState { for: Sales, kind: state, use: pg }
+  resource salesFiles { for: Sales, kind: objectStore, use: files }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState, salesFiles], port: 3000 }
+}`;
+
+  it("derives a need for a resource-op used in a command handler (not just workflows)", async () => {
+    const { model } = await parseString(HANDLER_SRC, { validate: false });
+    const sys = enrichLoomModel(lowerModel(model)).systems[0]!;
+    const need = sys.needs.find((n) => n.contextName === "Sales" && n.kind === "objectStore");
+    expect(need, "handler resource-op must derive an objectStore need").toBeDefined();
+    expect(need!.capabilities).toContain("blob");
+  });
 });
 
 describe("resource-op validation", () => {
