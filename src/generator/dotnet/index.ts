@@ -13,6 +13,7 @@ import type {
   TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
 import {
@@ -162,6 +163,7 @@ import {
 import { rewriteNamespacesForLayout } from "./layout-namespaces.js";
 import { emitProjectionDispatch, emitProjectionReads } from "./projection-emit.js";
 import { emitProjectionRowPersistence } from "./projection-state-emit.js";
+import { emitQueryProjections } from "./query-projection-emit.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
@@ -439,6 +441,9 @@ function emitProjectFromContexts(
       sourcemap,
       usingDapper: system?.deployable.persistence === "dapper",
     });
+    // Query-time projections (read-path-architecture.md rev.13) — a live read
+    // (source find + join bulk-loads + select) with no folded read-model table.
+    emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A1): one
   // ControllerBase per served api whose `route` list is non-empty, dispatching
@@ -803,7 +808,12 @@ function emitProjectFromContexts(
           return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
         }
       : undefined;
-    emitProjectionRowPersistence(merged.projections, ns, out, resolveProjectionSchema);
+    emitProjectionRowPersistence(
+      merged.projections.filter(isMaterializedProjection),
+      ns,
+      out,
+      resolveProjectionSchema,
+    );
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
     // fold class.  Its stream shares the per-context `<ctx>_events` log (shared
     // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
@@ -1084,6 +1094,7 @@ function emitContext(
     emitProjectionDispatch(ctx, ns, out);
   }
   emitViews(ctx, ns, out);
+  emitQueryProjections(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
   emitCriteria(ctx, ns, out);
@@ -1608,7 +1619,7 @@ function emitInfrastructure(
     );
   }
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
-  emitProjectionRowPersistence(ctx.projections, ns, out);
+  emitProjectionRowPersistence(ctx.projections.filter(isMaterializedProjection), ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));
   // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
   // single-context (`generate dotnet`) sibling of the system path's emission.
@@ -1947,22 +1958,36 @@ function mergeViewsAsFinds(
   const matching = ctx.views.filter(
     (v) => v.source.kind === "aggregate" && v.source.name === agg.name,
   );
-  if (matching.length === 0) return repo;
+  // Query-time projections (read-path-architecture.md rev.13) sourced from this
+  // aggregate ride the SAME synthesized find as an aggregate full-form view —
+  // the source read is a parameterless find over the projection's `where`.
+  const matchingQp = (ctx.projections ?? []).filter(
+    (p) => isQueryTimeProjection(p) && p.query?.source === agg.name,
+  );
+  if (matching.length === 0 && matchingQp.length === 0) return repo;
   const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",
     element: { kind: "entity", name: agg.name },
   };
-  const synthesised = matching.map((v) => ({
-    name: v.name,
-    params: [],
-    returnType: arrayReturn,
-    filter: v.filter,
-    // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
-    // §11) onto the synthesized find so the shared find emitter renders the
-    // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
-    ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
-    ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
-  }));
+  const synthesised = [
+    ...matching.map((v) => ({
+      name: v.name,
+      params: [],
+      returnType: arrayReturn,
+      filter: v.filter,
+      // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
+      // §11) onto the synthesized find so the shared find emitter renders the
+      // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
+      ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
+      ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
+    })),
+    ...matchingQp.map((p) => ({
+      name: p.name,
+      params: [],
+      returnType: arrayReturn,
+      ...(p.query?.filter ? { filter: p.query.filter } : {}),
+    })),
+  ];
   if (!repo) {
     return {
       name: `${agg.name}Repository`,

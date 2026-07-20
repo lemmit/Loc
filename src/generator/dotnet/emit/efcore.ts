@@ -8,6 +8,7 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
 import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
@@ -191,7 +192,9 @@ export function renderDbContext(
   // projection, keyed by its correlation column, non-key columns nullable.
   // Empty (byte-identical) when the context declares no projection.  The
   // `<Proj>Row` POCO lives in the Persistence.Projections namespace.
-  const projRows = ctx.projections ?? [];
+  // FOLDED (materialized) projections only — query-time projections
+  // (read-path-architecture.md rev.13) have no read-model table / EF entity.
+  const projRows = (ctx.projections ?? []).filter(isMaterializedProjection);
   const projRowUsings =
     projRows.length > 0 ? [`using ${ns}.Infrastructure.Persistence.Projections;`] : [];
   const projRowDbSets = projRows.map(

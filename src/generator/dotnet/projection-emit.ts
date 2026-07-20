@@ -6,6 +6,7 @@ import type {
   TypeIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import {
   collectWireUsings,
@@ -165,8 +166,12 @@ export function emitProjectionReads(
   out: Map<string, string>,
   options?: { routePrefix?: string },
 ): void {
-  if (ctx.projections.length === 0) return;
-  for (const proj of ctx.projections) {
+  // FOLDED (materialized) projections only — the event-folded read model with a
+  // physical `<Proj>Row` table.  Query-time projections (read-path-architecture.md
+  // rev.13) have no read-model row; they are served by `emitQueryProjections`.
+  const folded = ctx.projections.filter(isMaterializedProjection);
+  if (folded.length === 0) return;
+  for (const proj of folded) {
     out.set(
       `Application/Workflows/${upperFirst(proj.name)}Response.cs`,
       renderProjectionResponseDto(proj, ctx, ns),
@@ -214,7 +219,7 @@ function renderProjectionsController(
   const route = `${routePrefix ?? ""}projections`;
   const usings = new Set<string>();
   const blocks: string[] = [];
-  for (const proj of ctx.projections) {
+  for (const proj of ctx.projections.filter(isMaterializedProjection)) {
     const slug = snake(proj.name);
     const T = upperFirst(proj.name);
     const dbSet = projectionRowDbSet(proj);
