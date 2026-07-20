@@ -2,11 +2,13 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type DomainServiceIR,
   type ExprIR,
   operationUsesCurrentUser,
   type TestIR,
   type TestStmtIR,
   type TypeIR,
+  type ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../../util/naming.js";
 import { renderPyExpr } from "../render-expr.js";
@@ -43,18 +45,55 @@ const TEST_ACTOR_PY =
 // ---------------------------------------------------------------------------
 
 export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string | null {
-  if (agg.tests.length === 0) return null;
+  return renderPySubjectTests(agg.name, agg.tests, ctx, {
+    module: `app.domain.${snake(agg.name)}`,
+    symbols: [agg.name, ...agg.parts.map((p) => p.name)],
+  });
+}
+
+/** Value-object unit-test module (test-placement.md, Phase 2).  The VO is
+ *  imported through the shared `app.domain.value_objects` narrowing — no
+ *  dedicated subject import. */
+export function renderPyVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
+  return renderPySubjectTests(vo.name, vo.tests, ctx, null);
+}
+
+/** Domain-service unit-test module (test-placement.md, Phase 2).  A service op
+ *  renders as a bare module-level function (`snake(op)(…)`), so the test imports
+ *  the referenced op functions from `app.domain.services.<snake(svc)>`. */
+export function renderPyServiceTestsFile(
+  svc: DomainServiceIR,
+  ctx: BoundedContextIR,
+): string | null {
+  return renderPySubjectTests(svc.name, svc.tests, ctx, {
+    module: `app.domain.services.${snake(svc.name)}`,
+    symbols: svc.operations.map((o) => snake(o.name)),
+  });
+}
+
+/** Shared pytest-module renderer for any subject.  `subjectImport` names the
+ *  module + symbols carrying the subject's own code (an aggregate's per-agg
+ *  module, a service's ops module); `null` for a value object, imported through
+ *  the `app.domain.value_objects` narrowing.  Symbols are narrowed to names the
+ *  body actually references. */
+function renderPySubjectTests(
+  describeName: string,
+  tests: readonly TestIR[],
+  ctx: BoundedContextIR,
+  subjectImport: { module: string; symbols: string[] } | null,
+): string | null {
+  if (tests.length === 0) return null;
 
   const body: string[] = [];
   const usedNames = new Set<string>();
-  for (const t of agg.tests) {
+  for (const t of tests) {
     body.push("", "");
     body.push(...renderTest(t, ctx, usedNames));
   }
   const bodyStr = body.join("\n");
 
   const refs = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(bodyStr);
-  const domainNames = [agg.name, ...agg.parts.map((p) => p.name)].filter(refs);
+  const subjectNames = subjectImport ? subjectImport.symbols.filter(refs) : [];
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refs)
     .sort();
@@ -80,7 +119,7 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const usesActor = bodyStr.includes("SimpleNamespace(");
 
   const out: string[] = [];
-  out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
+  out.push(`"""Domain tests for ${describeName}.  Auto-generated."""`);
   if (usesDatetime || usesTimedelta || usesDecimal || usesMath || usesPytest || usesActor) {
     out.push("");
   }
@@ -98,8 +137,8 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   if (usesPytest) out.push("import pytest");
   out.push("");
   if (usesActor) out.push("from app.auth.user import User");
-  if (domainNames.length > 0) {
-    out.push(`from app.domain.${snake(agg.name)} import ${domainNames.join(", ")}`);
+  if (subjectImport && subjectNames.length > 0) {
+    out.push(`from ${subjectImport.module} import ${subjectNames.join(", ")}`);
   }
   if (idNames.length > 0) {
     out.push(`from app.domain.ids import ${idNames.join(", ")}`);

@@ -4,7 +4,6 @@ using Xunit;
 using AwesomeAssertions;
 using Api.Domain.Orders;
 using Api.Domain.Common;
-using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
 using Api.Domain.Ids;
 

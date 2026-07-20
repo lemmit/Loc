@@ -60,7 +60,7 @@ import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
-import { renderPyTestsFile } from "./emit/tests.js";
+import { renderPyServiceTestsFile, renderPyTestsFile, renderPyVoTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-handlers-emit.js";
 import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.js";
@@ -592,6 +592,18 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (serviceFiles.length > 0) {
     out.set("app/domain/services/__init__.py", "");
     for (const f of serviceFiles) out.set(f.path, f.content);
+  }
+
+  // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+  // colocated pytest modules under tests/, emitted off the merged context like
+  // the service modules above; only when the subject declares a `test`.
+  for (const vo of merged.valueObjects) {
+    const voTests = renderPyVoTestsFile(vo, merged);
+    if (voTests) out.set(`tests/test_${snake(vo.name)}.py`, voTests);
+  }
+  for (const svc of merged.domainServices) {
+    const svcTests = renderPyServiceTestsFile(svc, merged);
+    if (svcTests) out.set(`tests/test_${snake(svc.name)}.py`, svcTests);
   }
 
   // Domain-side repository PORTS (audit S7) — the `<Agg>RepositoryPort`

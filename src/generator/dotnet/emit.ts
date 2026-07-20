@@ -56,4 +56,4 @@ export {
   renderRepositoryImpl,
   renderRepositoryInterface,
 } from "./emit/repository.js";
-export { renderTestsFile } from "./emit/tests.js";
+export { renderServiceTestsFile, renderTestsFile, renderVoTestsFile } from "./emit/tests.js";

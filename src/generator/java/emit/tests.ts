@@ -2,10 +2,12 @@ import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-
 import type {
   AggregateIR,
   BoundedContextIR,
+  DomainServiceIR,
   ExprIR,
   FieldIR,
   TestIR,
   TestStmtIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
@@ -32,10 +34,46 @@ export function renderJavaTestsFile(
    *  dev-stub claim values and threaded as the trailing argument. */
   userFields?: readonly FieldIR[],
 ): string | null {
-  if (agg.tests.length === 0) return null;
+  return renderJavaSubjectTests(agg.name, agg.tests, ctx, basePkg, pkg, userFields, false);
+}
+
+/** Value-object unit-test class (test-placement.md, Phase 2).  The VO is
+ *  reachable through the shared `${basePkg}.domain.valueobjects.*` wildcard. */
+export function renderJavaVoTestsFile(
+  vo: ValueObjectIR,
+  ctx: BoundedContextIR,
+  basePkg: string,
+  pkg: string,
+  userFields?: readonly FieldIR[],
+): string | null {
+  return renderJavaSubjectTests(vo.name, vo.tests, ctx, basePkg, pkg, userFields, false);
+}
+
+/** Domain-service unit-test class (test-placement.md, Phase 2).  Adds the
+ *  `${basePkg}.domain.services.*` wildcard so `<Service>.<op>(…)` resolves. */
+export function renderJavaServiceTestsFile(
+  svc: DomainServiceIR,
+  ctx: BoundedContextIR,
+  basePkg: string,
+  pkg: string,
+  userFields?: readonly FieldIR[],
+): string | null {
+  return renderJavaSubjectTests(svc.name, svc.tests, ctx, basePkg, pkg, userFields, true);
+}
+
+function renderJavaSubjectTests(
+  name: string,
+  tests: readonly TestIR[],
+  ctx: BoundedContextIR,
+  basePkg: string,
+  pkg: string,
+  userFields: readonly FieldIR[] | undefined,
+  includeServices: boolean,
+): string | null {
+  if (tests.length === 0) return null;
   const imports = new Set<string>();
   const state = { usesTestUser: false, userFields, ctx };
-  const methods = agg.tests.flatMap((t) => renderTest(t, ctx, imports, state));
+  const methods = tests.flatMap((t) => renderTest(t, ctx, imports, state));
   while (methods[methods.length - 1] === "") methods.pop();
   if (state.usesTestUser) {
     for (const f of userFields ?? []) collectJavaTypeImports(f.type, imports);
@@ -56,8 +94,9 @@ export function renderJavaTestsFile(
     `import ${basePkg}.domain.events.*;`,
     `import ${basePkg}.domain.ids.*;`,
     `import ${basePkg}.domain.valueobjects.*;`,
+    includeServices ? `import ${basePkg}.domain.services.*;` : null,
     ``,
-    `public class ${agg.name}Tests {`,
+    `public class ${name}Tests {`,
     ...(state.usesTestUser
       ? [
           `    private static final User __testUser = new User(${(userFields ?? [])

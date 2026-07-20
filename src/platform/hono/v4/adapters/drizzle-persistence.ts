@@ -138,6 +138,7 @@ export function emitDrizzleSchema(
     projections: ctx.contexts.flatMap((c) => c.projections ?? []),
     retrievals: ctx.contexts.flatMap((c) => c.retrievals),
     seeds: ctx.contexts.flatMap((c) => c.seeds),
+    tests: ctx.contexts.flatMap((c) => c.tests ?? []),
     // Schema emission only — dispatch wiring reads the value computed in
     // `emit.ts`; flatMap the per-context derivations to satisfy the type.
     eventSubscriptions: ctx.contexts.flatMap((c) => c.eventSubscriptions),

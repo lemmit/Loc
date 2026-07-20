@@ -772,6 +772,10 @@ export interface ValueObjectIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Unit tests anchored to this value object (nested `test` member, or a
+   *  hoisted `test … for <VO>`).  Same `TestIR` shape as `AggregateIR.tests`;
+   *  emitted as a colocated unit file (test-placement.md, Phase 2). */
+  tests: TestIR[];
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -929,6 +933,11 @@ export interface CriterionIR {
 export interface DomainServiceIR {
   name: string;
   operations: DomainServiceOperationIR[];
+  /** Unit tests anchored to this domain service (nested `test` member, or a
+   *  hoisted `test … for <Service>`).  Same `TestIR` shape as
+   *  `AggregateIR.tests`; emitted as a colocated unit file
+   *  (test-placement.md, Phase 2). */
+  tests: TestIR[];
 }
 
 /** One operation of a `domainService` (domain-services.md).  Mirrors the
@@ -1035,6 +1044,13 @@ export interface BoundedContextIR {
    *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
+  /** Context-scoped INTEGRATION tests (test-placement.md, Phase 3) — a `test`
+   *  nested in the `context` (no `for`) or hoisted with `for <Ctx>`.  Same
+   *  `TestIR` shape as the per-subject unit tests, but lowered under the context
+   *  env (every aggregate/service in scope) so it exercises cross-aggregate
+   *  behaviour.  Not yet emitted by any backend (gated `loom.context-test-unsupported`
+   *  until the Phase 3a integration renderer lands). */
+  tests: TestIR[];
   /** Per-error HTTP status overrides reaching this context, merged from the
    *  `httpStatus <Error> -> <Code>` clauses of every api over its subdomain
    *  (exception-less.md A1).  Populated by `enrichLoomModel`; the route

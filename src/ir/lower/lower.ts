@@ -34,7 +34,6 @@ import type {
   Subdomain,
   System,
   SystemMember,
-  TestBlock,
   TestE2E,
   ThemeBlock,
   TimerSource,
@@ -97,6 +96,7 @@ import {
   isValueObject,
   isView,
   isWorkflow,
+  type TestBlock,
 } from "../../language/generated/ast.js";
 import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
@@ -154,7 +154,6 @@ import type {
   TenancyIR,
   TestCaseIR,
   TestE2EIR,
-  TestIR,
   TestStmtIR,
   ThemeIR,
   TimerSourceIR,
@@ -201,6 +200,7 @@ import {
 import { lowerProjection } from "./lower-projection.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
+import { collectSubjectTests, expectStmtIR, indexHoistedTests } from "./lower-test.js";
 import {
   cstText,
   type Env,
@@ -257,6 +257,10 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   // file.  Installed before any body is lowered; first declaration wins on
   // a cross-enum value-name collision (the validator owns the ambiguity).
   // See `setAmbientEnumIndex` in lower-expr.ts.
+  // Index hoisted `test … for <Agg>` blocks (context/root) by home aggregate,
+  // before any aggregate is lowered.  Reset per project so a re-run doesn't
+  // leak the previous project's tests.
+  indexHoistedTests(models);
   const ambientEnumIndex = new Map<string, string>();
   for (const m of allMembers) {
     if (!isEnumDecl(m)) continue;
@@ -1163,6 +1167,15 @@ function lowerContext(
       }
     }
   }
+  // Context-scoped integration tests (test-placement.md, Phase 3): a `test`
+  // nested directly in the `context` (no `for` — subject inferred as this
+  // context) plus any hoisted `test … for <this context>` routed here.  Lowered
+  // under the context env (no `this`; every aggregate/service resolvable).
+  const contextTests = collectSubjectTests(
+    ctx.members.filter((m): m is TestBlock => isTestBlock(m) && !m.target),
+    ctx,
+    env,
+  );
   return {
     name: ctx.name,
     enums,
@@ -1186,6 +1199,7 @@ function lowerContext(
     projections,
     retrievals,
     seeds,
+    tests: contextTests,
     origin: originFor(ctx),
     ...(policyReadLevels.length > 0 ? { policyReadLevels } : {}),
     ...(policyWriteLevels.length > 0 ? { policyWriteLevels } : {}),
@@ -1361,6 +1375,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
       ...lowerPropertyChecks(props, inner),
     ],
     functions: vo.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
+    tests: collectSubjectTests(vo.members.filter(isTestBlock), vo, inner),
     origin: originFor(vo),
   };
 }
@@ -1441,10 +1456,7 @@ function lowerAggregate(
   const canonicalCreate = creates.find((c) => c.canonical) ?? null;
   const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
   const appliers = (agg.members.filter(isApply) as Apply[]).map((a) => lowerApply(a, inner));
-  const tests: TestIR[] = [];
-  for (const m of agg.members) {
-    if (isTestBlock(m)) tests.push(lowerTest(m, inner));
-  }
+  const tests = collectSubjectTests(agg.members.filter(isTestBlock), agg, inner);
   // Capability source nodes — read structurally from agg.members,
   // concatenated with anything propagated from the enclosing context.
   // Context-level capabilities lower in the context's env (which
@@ -1488,41 +1500,6 @@ function lowerAggregate(
       undefined,
     origin: originFor(agg),
   };
-}
-
-function lowerTest(block: TestBlock, env: Env): TestIR {
-  let inner = env;
-  const statements: TestStmtIR[] = [];
-  for (const s of block.body) {
-    if (isExpectStmt(s)) {
-      statements.push(expectStmtIR(lowerExpr(s.expr, inner), cstText(s.expr)));
-    } else {
-      const r = lowerStatement(s as Statement, inner);
-      statements.push(r.stmt);
-      inner = r.envAfter;
-    }
-  }
-  return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
-}
-
-/** Build the `TestStmtIR` for an `expect(...)` test statement.  The
- *  method-based throw assertion `expect(call).toThrow(N?)` is recognised here
- *  and rewritten into the platform-neutral `expect-throws` IR node — so every
- *  backend renders it as a throw exactly as before — with the optional integer
- *  pinning the rejected HTTP status in an e2e api body.  Every other
- *  `expect(...)` carries a value/locator matcher (`toBe`, `toHaveText`, …); a
- *  bare-boolean `expect` is rejected by the validator (`checkExpectMatcher`). */
-function expectStmtIR(e: ExprIR, source: string): TestStmtIR {
-  if (e.kind === "method-call" && e.isIntrinsicMatcher && e.member === "toThrow") {
-    const inner = e.receiver.kind === "paren" ? e.receiver.inner : e.receiver;
-    const arg = e.args[0];
-    const status =
-      arg && arg.kind === "literal" && arg.lit === "int" ? Number(arg.value) : undefined;
-    return status != null
-      ? { kind: "expect-throws", expr: inner, source, status }
-      : { kind: "expect-throws", expr: inner, source };
-  }
-  return { kind: "expect", expr: e, source };
 }
 
 function lowerRepository(

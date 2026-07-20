@@ -78,7 +78,10 @@ import {
   validateVanillaDocumentScope,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
-import { validateAggregateTestBodies } from "./checks/test-checks.js";
+import {
+  validateAggregateTestBodies,
+  validateContextIntegrationTests,
+} from "./checks/test-checks.js";
 import { validateTimerSources } from "./checks/timer-checks.js";
 import { validateUiBodies } from "./checks/ui-checks.js";
 import {
@@ -210,6 +213,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
+    validateContextIntegrationTests(c, diags);
     validateDomainServices(c, diags);
     validateFunctionBlockBodies(c, diags);
     validateExternOperations(c, diags);

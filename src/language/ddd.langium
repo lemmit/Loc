@@ -25,6 +25,9 @@ ModelMember:
     // compose into the project's single `system`, so deployment can live in
     // its own file.
     | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E
+    // A unit `test` hoisted all the way to the file root (or a dedicated
+    // `tests/*.ddd`).  Requires a `for <Aggregate>` head naming its home.
+    | TestBlock
     // A `capability` pure-mixin is top-level declarable (and a `SystemMember`
     // inside `system { }`).
     | Capability
@@ -912,7 +915,10 @@ BoundedContext:
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
     | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService
-    | Projection | PolicyDecl | CommandHandler | QueryHandler;
+    | Projection | PolicyDecl | CommandHandler | QueryHandler
+    // A unit `test` hoisted out of its aggregate, sitting beside it in the
+    // context.  Requires a `for <Aggregate>` head naming its home.
+    | TestBlock;
 
 // Application-layer handlers — top-level context members, effectively a
 // workflow `handle` lifted out when the orchestration is single-aggregate.
@@ -957,7 +963,10 @@ ValueObject:
     '}';
 
 ValueObjectMember:
-    Property | DerivedProp | Invariant | FunctionDecl;
+    Property | DerivedProp | Invariant | FunctionDecl
+    // A unit `test` nested in the value object, exercising its invariants /
+    // normalizers / functions (test-placement.md, Phase 2).
+    | TestBlock;
 
 // `abstract` base + `extends` subtype + `inheritanceUsing(…)` layout are
 // the aggregate-inheritance surface.  An `abstract` base can never be
@@ -1207,8 +1216,28 @@ Capability:
 CapabilityMember:
     Property | FilterDecl | StampDecl;
 
+// A per-subject unit test.  Historically an aggregate member only, with its
+// subject INFERRED from containment.  It now also carries an optional `for
+// <Aggregate>` head that NAMES its subject explicitly — the in-process twin of
+// `test e2e … against <deployable>` — so the block can be HOISTED out of the
+// aggregate to a `context` sibling (ContextMember) or the file root
+// (ModelMember) and still resolve to its home aggregate.  `target` is a bare
+// `[Aggregate:ID]` cross-reference; aggregates export workspace-wide (see
+// `ddd-scope.ts`), so `for Order` resolves across contexts/files.  Placement
+// rules (`for` required when hoisted, forbidden when nested) are enforced by
+// the validator (`loom.test-needs-target` / `loom.test-redundant-for`), not the
+// grammar, so a misplaced test surfaces a themed diagnostic rather than a parse
+// error.  See `docs/old/proposals/test-placement.md`.
+// The subjects a unit `test` may anchor to via `for` (test-placement.md).  A
+// declared union so one `[TestSubject:ID]` cross-reference resolves an aggregate
+// (Phase 1), a value object / domain service (Phase 2), or a bounded context
+// (Phase 3 — the in-process integration rung) — all export their names
+// workspace-wide (`ddd-scope.ts`), so a bare `for <Name>` resolves across
+// contexts and files.
+type TestSubject = Aggregate | ValueObject | DomainService | BoundedContext;
+
 TestBlock:
-    'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
+    'test' name=STRING ('for' target=[TestSubject:ID])? ('verifies' verifies=[TestCase:TraceId])? '{'
         body+=TestStatement*
     '}';
 
@@ -1629,7 +1658,9 @@ LoadSegment:
 //   }
 DomainService:
     'domainService' name=ID '{'
-        operations+=DomainServiceOperation*
+        // Operations and unit `test`s interleave freely (test-placement.md,
+        // Phase 2); each keeps its own typed list.
+        (operations+=DomainServiceOperation | tests+=TestBlock)*
     '}';
 
 // Statement body ONLY (no `= Expression` shorthand — deferred).

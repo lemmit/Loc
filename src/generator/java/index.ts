@@ -152,7 +152,11 @@ import {
 } from "./emit/scheduler.js";
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
-import { renderJavaTestsFile } from "./emit/tests.js";
+import {
+  renderJavaServiceTestsFile,
+  renderJavaTestsFile,
+  renderJavaVoTestsFile,
+} from "./emit/tests.js";
 import {
   aggregateReturnUnions,
   renderJavaDomainUnionFiles,
@@ -561,6 +565,45 @@ function emitProjectFromContexts(
         routePrefix,
         sourcemap,
       );
+    }
+    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // JUnit classes colocated in each subject's test package; emitted only when
+    // the subject declares a `test`.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderJavaVoTestsFile(
+        vo,
+        ctx,
+        basePkg,
+        pkgFor("test-class", vo.name),
+        system?.sys?.user?.fields,
+      );
+      if (voTests)
+        place(
+          `${vo.name}Tests.java`,
+          "test-class",
+          voTests,
+          vo.name,
+          vo.origin,
+          `${ctx.name}.${vo.name}`,
+        );
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderJavaServiceTestsFile(
+        svc,
+        ctx,
+        basePkg,
+        pkgFor("test-class", svc.name),
+        system?.sys?.user?.fields,
+      );
+      if (svcTests)
+        place(
+          `${svc.name}Tests.java`,
+          "test-class",
+          svcTests,
+          svc.name,
+          undefined,
+          `${ctx.name}.${svc.name}`,
+        );
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.

@@ -41,12 +41,15 @@ import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescri
 import {
   type OpFragment,
   renderAggregate,
+  renderContextIntegrationTest,
   renderEnumsAndValueObjects,
   renderEvents,
   renderHttpIndex,
   renderIds,
   renderSchema,
+  renderServiceTestsFile,
   renderTestsFile,
+  renderVoTestsFile,
 } from "../../../generator/typescript/emit.js";
 import { buildExternSubclassFile } from "../../../generator/typescript/extern-builder.js";
 import { rewriteRelativeImports } from "../../../generator/typescript/layout-imports.js";
@@ -822,6 +825,24 @@ export function generateTypeScriptForContexts(
       if (testsFile) {
         place("domain-test", agg.name, testsFile, agg.origin, construct);
       }
+    }
+    // Value-object and domain-service unit tests (test-placement.md, Phase 2) —
+    // colocated `domain/<subject>.test.ts` files, picked up by the same
+    // behavioral-unit glob as aggregate tests.  Emitted only when the subject
+    // declares a `test`, so a test-free project stays byte-identical.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderVoTestsFile(vo, ctx);
+      if (voTests) place("domain-test", vo.name, voTests, vo.origin, `${ctx.name}.${vo.name}`);
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderServiceTestsFile(svc, ctx);
+      if (svcTests) place("domain-test", svc.name, svcTests, undefined, `${ctx.name}.${svc.name}`);
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3a) — an in-process,
+    // repository-backed cross-aggregate test file reading a PG_URL, no HTTP.
+    const integrationTests = renderContextIntegrationTest(ctx);
+    if (integrationTests) {
+      out.set(`test/${lowerFirst(ctx.name)}.integration.test.ts`, integrationTests);
     }
     // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
     // table but has no per-concrete repo/routes.  Emit its polymorphic read
