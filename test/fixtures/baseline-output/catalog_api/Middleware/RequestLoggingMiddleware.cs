@@ -31,6 +31,15 @@ public sealed class RequestLoggingMiddleware
         {
             sw.Stop();
             _log.LogInformation("{Event} method={Method} path={Path} status={Status} duration_ms={DurationMs}", "request_end", ctx.Request.Method, ctx.Request.Path.Value ?? "/", ctx.Response.StatusCode, sw.ElapsedMilliseconds);
+            // Record the same finished request against the Prometheus HTTP
+            // metrics — same seam as request_end.  The route TEMPLATE (from the
+            // matched endpoint), not the raw path, keeps label cardinality
+            // bounded (raw paths carry per-request ids).
+            var metricRoute =
+                (ctx.GetEndpoint() as Microsoft.AspNetCore.Routing.RouteEndpoint)
+                    ?.RoutePattern.RawText ?? ctx.Request.Path.Value ?? "/";
+            CatalogApi.Observability.HttpMetrics.Record(
+                ctx.Request.Method, metricRoute, ctx.Response.StatusCode, sw.Elapsed.TotalMilliseconds);
         }
     }
 }

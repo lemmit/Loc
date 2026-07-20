@@ -393,6 +393,7 @@ ${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${u
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${options?.hasChannels ? `\nusing ${ns}.Infrastructure.Channels;` : ""}${authUsing}
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -761,6 +762,11 @@ ${
     }
 });`
 }
+// Prometheus scrape target — prometheus-net's MapMetrics serves the default
+// registry (the .NET runtime + process metrics it auto-collects, plus the
+// http_requests_total / http_request_duration_seconds recorded by
+// RequestLoggingMiddleware) as the text exposition at /metrics.
+app.MapMetrics();
 // Ambient execution context — births the RequestContext (correlation id,
 // locale, start time, scope id) and opens the root frame.  Mounted FIRST so
 // the frame covers the entire pipeline: the request log below rides its
@@ -975,7 +981,9 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <!-- Prometheus metrics at /metrics (prometheus-net) -->
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;

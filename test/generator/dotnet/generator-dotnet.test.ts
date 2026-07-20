@@ -61,6 +61,29 @@ describe(".NET generator", () => {
     expect([...files.keys()]).not.toContain("GlobalUsings.cs");
   });
 
+  it("emits catalog-driven Prometheus metrics + /metrics wiring (M-T7.1)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const metrics = files.get("Observability/HttpMetrics.cs")!;
+    expect(metrics).toBeDefined();
+    // Catalog names/labels from the neutral src/generator/_obs/metrics.ts.
+    expect(metrics).toContain('"http_requests_total"');
+    expect(metrics).toContain('"http_request_duration_seconds"');
+    expect(metrics).toContain('LabelNames = new[] { "method", "route", "status" }');
+    expect(metrics).toContain(
+      "public static void Record(string method, string route, int status, double durationMs)",
+    );
+    // Program.cs exposes /metrics via prometheus-net and references the pkg.
+    const program = files.get("Program.cs")!;
+    expect(program).toContain("app.MapMetrics();");
+    expect(program).toMatch(/^using Prometheus;/m);
+    expect(files.get("Sales.csproj")!).toContain('Include="prometheus-net.AspNetCore"');
+    // Recorded at the request_end seam in the request-logging middleware.
+    const mw = files.get("Middleware/RequestLoggingMiddleware.cs")!;
+    expect(mw).toContain("Observability.HttpMetrics.Record(");
+    expect(mw).toContain("RoutePattern.RawText");
+  });
+
   it("renders Order with idiomatic C#", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

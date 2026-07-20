@@ -90,6 +90,7 @@ import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
 import { renderExternHookImpl } from "./emit/extern.js";
 import { renderId } from "./emit/ids.js";
+import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -1679,6 +1680,9 @@ function emitProject(
   // Catalog-identity request log — always-on.  Cross-backend parity
   // with Phoenix's <App>.Telemetry and Hono's pino access log.
   out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
+  // Prometheus HTTP metrics — catalog-driven, served at /metrics (Program.cs
+  // MapMetrics), recorded from RequestLoggingMiddleware's request_end seam.
+  out.set("Observability/HttpMetrics.cs", renderHttpMetrics(ns));
   // Ambient execution context (docs/architecture/request-context.md) — the one
   // AsyncLocal carrier the principal slice (auth), the request-logger slice
   // (--trace), and the audit/provenance correlation stamps all ride.  ALWAYS

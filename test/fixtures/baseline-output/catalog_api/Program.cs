@@ -6,6 +6,7 @@ using CatalogApi.Api;
 using CatalogApi.Domain.Common;
 using CatalogApi.Infrastructure.Persistence;
 using CatalogApi.Infrastructure.Events;
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -287,6 +288,11 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken cancellationToken
             statusCode: 503);
     }
 });
+// Prometheus scrape target — prometheus-net's MapMetrics serves the default
+// registry (the .NET runtime + process metrics it auto-collects, plus the
+// http_requests_total / http_request_duration_seconds recorded by
+// RequestLoggingMiddleware) as the text exposition at /metrics.
+app.MapMetrics();
 // Ambient execution context — births the RequestContext (correlation id,
 // locale, start time, scope id) and opens the root frame.  Mounted FIRST so
 // the frame covers the entire pipeline: the request log below rides its
