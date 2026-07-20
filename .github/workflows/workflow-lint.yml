@@ -55,14 +55,19 @@ jobs:
           print("all workflow files parse")
           PY
 
-      # actionlint's OWN checks over the whole workflows dir — invalid
-      # triggers/expressions, bad `uses:` refs, matrix errors, deprecated
-      # syntax (the workflow-correctness class). The bundled shellcheck and
-      # pyflakes integrations are disabled: they flag pre-existing `run:`
-      # style debt across the repo (SC2086 &c.) that isn't this gate's job,
-      # and enforcing it repo-wide would block every PR. Official image — no
-      # third-party action version to rot.
+      # actionlint's own checks (invalid triggers/expressions, bad `uses:`
+      # refs, matrix errors, deprecated syntax) PLUS shellcheck on `run:`
+      # steps at WARNING severity. Warning-level, not the default info: it
+      # catches real shell bugs (unquoted-that-word-splits, unused vars, ls
+      # pitfalls) while not enforcing the repo's cosmetic info/style debt
+      # (harmless unquoted $GITHUB_STEP_SUMMARY, `{ }`-grouping style,
+      # false-positive SC2016 on literal-markdown backticks / `node -e`
+      # programs) — enforcing those repo-wide would block every PR for no
+      # correctness gain. pyflakes stays off (separate concern). Official
+      # image — no third-party action version to rot.
       - name: actionlint
         uses: docker://rhysd/actionlint:latest
+        env:
+          SHELLCHECK_OPTS: --severity=warning
         with:
-          args: "-shellcheck= -pyflakes= -color"
+          args: "-pyflakes= -color"

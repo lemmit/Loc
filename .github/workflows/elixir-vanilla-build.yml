@@ -82,8 +82,9 @@ jobs:
       - uses: actions/checkout@v6
       - id: set
         run: |
-          fixtures=$(ls test/e2e/fixtures/elixir-vanilla-build/*.ddd \
-            | xargs -n1 basename | sed 's/\.ddd$//' | jq -R . | jq -cs .)
+          fixtures=$(for f in test/e2e/fixtures/elixir-vanilla-build/*.ddd; do
+            basename "$f" .ddd
+          done | jq -R . | jq -cs .)
           echo "matrix={\"fixture\":$fixtures}" >> "$GITHUB_OUTPUT"
 
   # One job PER fixture (sharded, #1367).  A
