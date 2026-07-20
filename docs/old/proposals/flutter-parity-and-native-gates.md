@@ -110,15 +110,39 @@ with no invalidation story — the emitter that forgets it is the bug.
 
 ### Phase 4 — Verification gates (P2, prerequisite to trusting the above)
 
-- **M-H · Native build gate (G6).** `M`. Extend `generated-flutter-build.yml` (or
-  a sibling) with a `flutter build apk` job over the showcase (`make prepare` +
-  `make apk`). iOS needs a macOS runner — gate Android first, pin iOS as a
-  documented follow-up. Catches native-only regressions the web gate is blind to.
-- **M-I · Flutter runtime/e2e gate (G7).** `L`. The genuinely deferred item from
-  `flutter-mobile-implementation.md` Phase-2 step 3. Emit a `flutter_test`
-  `WidgetTester` smoke (boot the app, assert it renders — no device needed) as a
-  per-PR gate, and/or add flutter to `frontend-fullstack-e2e.yml`. This is the
-  only path to "does the Flutter app actually RUN," not just compile.
+> **DECISION (pinned 2026-07-20, maintainer-signed): per-PR CI covers only what
+> runs on a plain Linux runner. "Full mobile CI" is explicitly out of scope.**
+> The verification surface is a ladder, not a single gate — two rungs are cheap
+> and land per-PR, two are expensive and stay deferred:
+>
+> | Gate | Runner | Cadence | Why |
+> |---|---|---|---|
+> | `flutter analyze` + `flutter build web` | Linux | per-PR (shipped) | baseline "is the Dart real" |
+> | `flutter build apk` (compile only) | Linux | **per-PR (M-H)** | native-compile regressions; SDK installs on Linux, no device |
+> | `flutter_test` `WidgetTester` smoke (headless runtime) | Linux | **per-PR (M-I)** | genuine "does it boot &amp; render" **without an emulator** |
+> | `flutter build ios --no-codesign` | macOS | 🌙 nightly at most | needs a macOS runner (~10× cost); no real IPA without signing |
+> | on-device `integration_test` | emulator / macOS | ❌ deferred | slow, flaky, device-farm cost — the classic infra-noise red build |
+>
+> Rationale: Android build + the headless widget-test harness together close
+> most of the G6/G7 hole entirely on Linux. iOS build (macOS cost) and real
+> on-device e2e (emulator flakiness) buy little per-PR signal for a lot of cost
+> and infra risk, so they are a documented "not now," not an oversight.
+
+- **M-H · Android native build gate (G6).** `M`. Add a `flutter build apk` job to
+  `generated-flutter-build.yml` (or a sibling) over the showcase — `flutter-action`
+  installs the Android SDK on the existing **Linux** runner, then `make prepare`
+  (`flutter create --platforms=android`) + `make apk`. Compile-only, no device.
+  **Android only** per the decision above; iOS is the pinned macOS/nightly
+  follow-up. Catches native-only regressions the web gate is blind to.
+- **M-I · Flutter headless runtime gate (G7).** `M` (reduced from `L` by the
+  decision — the on-device `integration_test` half is deferred, leaving only the
+  headless smoke). Emit a `flutter_test` `WidgetTester` smoke (boot the app,
+  assert it renders) run under plain `flutter test` on the **Linux** runner — no
+  emulator. This is the genuinely-deferred item from
+  `flutter-mobile-implementation.md` Phase-2 step 3, scoped down to what runs
+  device-free. It is the only path to "does the Flutter app actually RUN," not
+  just compile. Full on-device / `frontend-fullstack-e2e.yml` inclusion stays out
+  of scope per the decision.
 
 ## Sequencing &amp; dependencies
 
@@ -129,20 +153,24 @@ Phase 2 (M-D, M-E)         ── makes gaps MEASURED  (needs Phase 1 markers)
         │
 Phase 3 (M-F, M-G)         ── new consumption paths (independent)
         │
-Phase 4 (M-H, M-I)         ── VERIFIES the above    (M-I highest cost, highest value)
+Phase 4 (M-H, M-I)         ── VERIFIES the above    (Linux-only per the pinned decision)
 ```
 
 M-A is the cheapest and unblocks the measurement story; do it first. M-B and M-C
 are the visible user payoff. M-D/M-E lock the ceiling so it can't silently
-regress. Phase 4 is the standing safety net.
+regress. Phase 4 is the standing safety net — both gates run device-free on the
+existing Linux runner (iOS + on-device e2e are pinned out of scope, see the
+Phase 4 decision block).
 
 ## Open questions (maintainer decisions)
 
 1. **`FileUpload` on Flutter** — fold into M-T1.2 slice 4 (the cross-frontend
    upload primitive), or a Flutter-specific slice? (Recommend: fold in — the wire
    `FileRef` is already frozen and shared.)
-2. **iOS CI** — is a macOS runner in budget for M-H, or is Android-only + a pinned
-   iOS follow-up acceptable? (Recommend: Android-only first.)
+2. ~~**iOS CI** — macOS runner or Android-only?~~ **RESOLVED (2026-07-20):**
+   per-PR CI is Linux-only (Android `build apk` + headless `flutter_test`); iOS
+   build is nightly-macOS at most and on-device e2e is deferred. See the Phase 4
+   decision block.
 3. **M-G scope** — worth a seam, or is the reachable frontend method set small
    enough to pin-and-close? Needs the verify-first audit before committing code.
 4. **Realtime transport on Flutter (M-F)** — `dart:html EventSource` (web-only) vs
