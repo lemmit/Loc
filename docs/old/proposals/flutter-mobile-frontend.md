@@ -6,7 +6,13 @@
 > seams. The sections below are the originating design rationale; the plan
 > supersedes the phasing where they differ.
 >
-> Status: **NOTE (exploratory).** Nothing here is implemented. This scopes
+> Status: **LARGELY SHIPPED (updated 2026-07-20).** The originating "nothing is
+> implemented" note is stale: the target, forms, Riverpod projector, pack,
+> `composeService`, and the web CI gate all ship (see
+> [`docs/generators.md`](../../generators.md) → "Flutter mobile"). The remaining
+> gaps + plan are [`flutter-parity-and-native-gates.md`](./flutter-parity-and-native-gates.md)
+> (silent-drop closure, realtime, native/runtime CI). The sections below are the
+> originating design rationale, kept as the design record. This scopes
 > **Flutter** as Loom's first *mobile* target and argues it is a **new axis
 > of development**, deliberately **outside the T10 web-target-matrix freeze**
 > ([`../../new-plan/T10-new-targets.md`](../../new-plan/T10-new-targets.md)) —
