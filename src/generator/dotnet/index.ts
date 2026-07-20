@@ -145,9 +145,11 @@ import {
   renderRepositoryImpl,
   renderRepositoryInterface,
   renderRequiredFromCtorParamFilter,
+  renderServiceTestsFile,
   renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
+  renderVoTestsFile,
 } from "./emit.js";
 import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
 import {
@@ -402,6 +404,16 @@ function emitProjectFromContexts(
     // Domain services (domain-services.md) — stateless pure calculators, one
     // `public static class` per `domainService` + its `or`-union return records.
     emitDomainServices(ctx, ns, out);
+    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // colocated xUnit classes, emitted only when the subject declares a `test`.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderVoTestsFile(vo, ctx, ns);
+      if (voTests) out.set(`Tests/${ns}.Tests/ValueObjects/${vo.name}Tests.cs`, voTests);
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderServiceTestsFile(svc, ctx, ns);
+      if (svcTests) out.set(`Tests/${ns}.Tests/Services/${svc.name}Tests.cs`, svcTests);
+    }
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
     // Explicit application layer (unfoldable-api-derivation.md, A1): emit the
     // `commandHandler` / `queryHandler` Mediator records + handlers.  A no-op
@@ -1799,9 +1811,13 @@ function emitProject(
 }
 
 function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
-  // Only emit a test csproj when at least one aggregate declares a `test`
-  // block — otherwise the project would have nothing to compile.
-  const anyTests = ctx.aggregates.some((a) => a.tests.length > 0);
+  // Only emit a test csproj when at least one subject (aggregate / value object
+  // / domain service) declares a `test` block — otherwise the project would
+  // have nothing to compile.
+  const anyTests =
+    ctx.aggregates.some((a) => a.tests.length > 0) ||
+    ctx.valueObjects.some((v) => v.tests.length > 0) ||
+    ctx.domainServices.some((s) => s.tests.length > 0);
   if (!anyTests) return;
   out.set(`Tests/${ns}.Tests/${ns}.Tests.csproj`, renderTestCsproj(ns));
 }

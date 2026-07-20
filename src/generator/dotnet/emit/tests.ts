@@ -2,9 +2,11 @@ import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-
 import type {
   AggregateIR,
   BoundedContextIR,
+  DomainServiceIR,
   ExprIR,
   TestIR,
   TestStmtIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
@@ -39,13 +41,57 @@ export function renderTestsFile(
   ctx: BoundedContextIR,
   ns: string,
 ): string | null {
-  if (agg.tests.length === 0) return null;
+  return renderSubjectTestsFile(
+    agg.name,
+    agg.tests,
+    ctx,
+    ns,
+    upperFirst(plural(agg.name)),
+    `${ns}.Domain.${upperFirst(plural(agg.name))}`,
+  );
+}
+
+/** Value-object unit-test class (test-placement.md, Phase 2).  The VO lives in
+ *  `${ns}.Domain.ValueObjects`, already among the shared usings — no dedicated
+ *  subject using needed. */
+export function renderVoTestsFile(
+  vo: ValueObjectIR,
+  ctx: BoundedContextIR,
+  ns: string,
+): string | null {
+  return renderSubjectTestsFile(vo.name, vo.tests, ctx, ns, "ValueObjects", null);
+}
+
+/** Domain-service unit-test class (test-placement.md, Phase 2).  The service
+ *  lives in `${ns}.Domain.Services`. */
+export function renderServiceTestsFile(
+  svc: DomainServiceIR,
+  ctx: BoundedContextIR,
+  ns: string,
+): string | null {
+  return renderSubjectTestsFile(svc.name, svc.tests, ctx, ns, "Services", `${ns}.Domain.Services`);
+}
+
+/** Shared xUnit test-class renderer for any subject.  `nsSuffix` is the test
+ *  sub-namespace/folder (`Orders` for an aggregate, `ValueObjects` / `Services`
+ *  for the Phase-2 subjects); `ownUsing` is the subject's own domain namespace
+ *  (an aggregate's per-agg namespace, a service's `Domain.Services`), or `null`
+ *  for a value object whose `Domain.ValueObjects` is already imported. */
+function renderSubjectTestsFile(
+  name: string,
+  tests: TestIR[],
+  ctx: BoundedContextIR,
+  ns: string,
+  nsSuffix: string,
+  ownUsing: string | null,
+): string | null {
+  if (tests.length === 0) return null;
   // Render the test bodies first so we know whether the synthetic actor
   // (TEST_ACTOR) was threaded into any currentUser-gated op call — only then do
   // we import its `List<string>` + Auth-layer `User` dependencies (a system
   // with no `user` block emits no `${ns}.Auth` namespace, so an unconditional
   // import would not compile).
-  const methodBlocks = agg.tests.map((t) => renderTest(t, ctx).map((l) => `    ${l}`));
+  const methodBlocks = tests.map((t) => renderTest(t, ctx).map((l) => `    ${l}`));
   const usesActor = methodBlocks.some((b) => b.some((l) => l.includes(TEST_ACTOR)));
 
   const lines: string[] = [];
@@ -54,16 +100,21 @@ export function renderTestsFile(
   if (usesActor) lines.push("using System.Collections.Generic;");
   lines.push("using Xunit;");
   lines.push("using AwesomeAssertions;");
-  lines.push(`using ${ns}.Domain.${upperFirst(plural(agg.name))};`);
+  if (ownUsing) lines.push(`using ${ownUsing};`);
   lines.push(`using ${ns}.Domain.Common;`);
-  lines.push(`using ${ns}.Domain.ValueObjects;`);
-  lines.push(`using ${ns}.Domain.Enums;`);
-  lines.push(`using ${ns}.Domain.Ids;`);
+  // The ValueObjects / Enums / Ids namespaces only exist when the context
+  // actually declares that kind — an unconditional `using` on an absent
+  // namespace is a CS0234 compile error.  (Latent on the aggregate path too;
+  // surfaced by the Phase-2 VO/service tests, which a project may have without
+  // any enum.)
+  if (ctx.valueObjects.length > 0) lines.push(`using ${ns}.Domain.ValueObjects;`);
+  if (ctx.enums.length > 0) lines.push(`using ${ns}.Domain.Enums;`);
+  if (ctx.aggregates.length > 0) lines.push(`using ${ns}.Domain.Ids;`);
   if (usesActor) lines.push(`using ${ns}.Auth;`);
   lines.push("");
-  lines.push(`namespace ${ns}.Tests.${upperFirst(plural(agg.name))};`);
+  lines.push(`namespace ${ns}.Tests.${nsSuffix};`);
   lines.push("");
-  lines.push(`public sealed class ${agg.name}Tests`);
+  lines.push(`public sealed class ${name}Tests`);
   lines.push("{");
   for (const block of methodBlocks) {
     lines.push(...block);
