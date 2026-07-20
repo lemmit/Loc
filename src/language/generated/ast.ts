@@ -1231,12 +1231,14 @@ export interface DomainService extends langium.AstNode {
     readonly $type: 'DomainService';
     name: string;
     operations: Array<DomainServiceOperation>;
+    tests: Array<TestBlock>;
 }
 
 export const DomainService = {
     $type: 'DomainService',
     name: 'name',
-    operations: 'operations'
+    operations: 'operations',
+    tests: 'tests'
 } as const;
 
 export function isDomainService(item: unknown): item is DomainService {
@@ -3662,11 +3664,11 @@ export function isTernaryExpr(item: unknown): item is TernaryExpr {
 }
 
 export interface TestBlock extends langium.AstNode {
-    readonly $container: Aggregate | BoundedContext | Model;
+    readonly $container: Aggregate | BoundedContext | DomainService | Model | ValueObject;
     readonly $type: 'TestBlock';
     body: Array<TestStatement>;
     name: string;
-    target?: langium.Reference<Aggregate>;
+    target?: langium.Reference<TestSubject>;
     verifies?: langium.Reference<TestCase>;
 }
 
@@ -3732,6 +3734,16 @@ export const TestStatement = {
 
 export function isTestStatement(item: unknown): item is TestStatement {
     return reflection.isInstance(item, TestStatement.$type);
+}
+
+export type TestSubject = Aggregate | DomainService | ValueObject;
+
+export const TestSubject = {
+    $type: 'TestSubject'
+} as const;
+
+export function isTestSubject(item: unknown): item is TestSubject {
+    return reflection.isInstance(item, TestSubject.$type);
 }
 
 export interface ThemeBlock extends langium.AstNode {
@@ -4120,7 +4132,7 @@ export function isValueObject(item: unknown): item is ValueObject {
     return reflection.isInstance(item, ValueObject.$type);
 }
 
-export type ValueObjectMember = DerivedProp | FunctionDecl | Invariant | Property;
+export type ValueObjectMember = DerivedProp | FunctionDecl | Invariant | Property | TestBlock;
 
 export const ValueObjectMember = {
     $type: 'ValueObjectMember'
@@ -4465,6 +4477,7 @@ export type DddAstType = {
     TestCase: TestCase
     TestE2E: TestE2E
     TestStatement: TestStatement
+    TestSubject: TestSubject
     ThemeBlock: ThemeBlock
     ThemeProp: ThemeProp
     ThisRef: ThisRef
@@ -4574,7 +4587,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type, NamedDecl.$type, Targetable.$type, ViewSource.$type]
+            superTypes: [ContextMember.$type, NamedDecl.$type, Targetable.$type, TestSubject.$type, ViewSource.$type]
         },
         AggregateMember: {
             name: AggregateMember.$type,
@@ -5284,9 +5297,14 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: DomainService.operations,
                     defaultValue: [],
                     optional: true
+                },
+                tests: {
+                    name: DomainService.tests,
+                    defaultValue: [],
+                    optional: true
                 }
             },
-            superTypes: [ContextMember.$type]
+            superTypes: [ContextMember.$type, TestSubject.$type]
         },
         DomainServiceOperation: {
             name: DomainServiceOperation.$type,
@@ -7218,7 +7236,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 target: {
                     name: TestBlock.target,
-                    referenceType: Aggregate.$type,
+                    referenceType: TestSubject.$type,
                     optional: true
                 },
                 verifies: {
@@ -7227,7 +7245,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [AggregateMember.$type, ContextMember.$type, ModelMember.$type]
+            superTypes: [AggregateMember.$type, ContextMember.$type, ModelMember.$type, ValueObjectMember.$type]
         },
         TestCase: {
             name: TestCase.$type,
@@ -7277,6 +7295,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         },
         TestStatement: {
             name: TestStatement.$type,
+            properties: {
+            },
+            superTypes: []
+        },
+        TestSubject: {
+            name: TestSubject.$type,
             properties: {
             },
             superTypes: []
@@ -7597,7 +7621,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: ValueObject.name
                 }
             },
-            superTypes: [ContextMember.$type, ModelMember.$type, NamedDecl.$type, Targetable.$type]
+            superTypes: [ContextMember.$type, ModelMember.$type, NamedDecl.$type, Targetable.$type, TestSubject.$type]
         },
         ValueObjectMember: {
             name: ValueObjectMember.$type,

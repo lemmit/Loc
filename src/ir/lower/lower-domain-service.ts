@@ -21,6 +21,7 @@ import type {
   StmtIR,
 } from "../types/loom-ir.js";
 import { lowerStatement } from "./lower-stmt.js";
+import { collectSubjectTests } from "./lower-test.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
 
 export function lowerDomainService(decl: DomainService, env: Env): DomainServiceIR {
@@ -37,6 +38,10 @@ export function lowerDomainService(decl: DomainService, env: Env): DomainService
   return {
     name: decl.name,
     operations: decl.operations.map((op) => lowerDomainServiceOperation(op, svcEnv)),
+    // Unit tests (nested `test` members + hoisted `test … for <Service>`) lower
+    // against the same service env operation bodies resolve against, so a
+    // `Pricing.quote(...)` call in a test resolves identically.
+    tests: collectSubjectTests(decl.tests, decl, svcEnv),
   };
 }
 

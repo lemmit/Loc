@@ -1,12 +1,17 @@
 # Test placement — subject anchoring and the `for` target
 
-> Status: **PROPOSED / on paper** (2026-07-20). No grammar surface yet. This is
-> the **placement** complement to
+> Status: **PARTIAL** (2026-07-20). **Phase 1 shipped** — the `for` head +
+> aggregate hoisting (grammar/IR/lowering/validation/print). **Phase 2 shipped
+> (node emission)** — `valueobject` / `domainService` unit-test anchors + hoisted
+> `for <VO|Service>`; the Hono backend emits colocated `domain/<subject>.test.ts`.
+> **Remaining:** the other four backends' VO/service test emitters (.NET/Java/
+> Python/Elixir — the aggregate-test twin exists on each; the IR/grammar are
+> backend-agnostic and already landed), and **Phase 3** (the `for <Context>`
+> integration rung). Workflow anchors were folded into Phase 3 (a workflow test
+> wants context wiring — OQ#3). This is the **placement** complement to
 > [`test-authoring-language.md`](./test-authoring-language.md): that proposal is
 > about a test's *body* (principals, fixtures, retry); this one is about *where a
-> `test` may be declared* and *what it may target*. The two compose cleanly and
-> touch disjoint grammar (this adds a `for` head + new anchor positions; that adds
-> `suite`/`as`/`make` body vocabulary).
+> `test` may be declared* and *what it may target*.
 
 ## Problem
 

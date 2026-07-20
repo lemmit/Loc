@@ -772,6 +772,10 @@ export interface ValueObjectIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Unit tests anchored to this value object (nested `test` member, or a
+   *  hoisted `test … for <VO>`).  Same `TestIR` shape as `AggregateIR.tests`;
+   *  emitted as a colocated unit file (test-placement.md, Phase 2). */
+  tests: TestIR[];
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -929,6 +933,11 @@ export interface CriterionIR {
 export interface DomainServiceIR {
   name: string;
   operations: DomainServiceOperationIR[];
+  /** Unit tests anchored to this domain service (nested `test` member, or a
+   *  hoisted `test … for <Service>`).  Same `TestIR` shape as
+   *  `AggregateIR.tests`; emitted as a colocated unit file
+   *  (test-placement.md, Phase 2). */
+  tests: TestIR[];
 }
 
 /** One operation of a `domainService` (domain-services.md).  Mirrors the

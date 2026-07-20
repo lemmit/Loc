@@ -883,7 +883,14 @@ function printCriterion(node: import("../generated/ast.js").Criterion): string {
 /** `domainService <Name> { operation … }` — a stateless container of
  *  non-mutating operations (domain-services.md). */
 function printDomainService(node: import("../generated/ast.js").DomainService): string {
-  return block(`domainService ${node.name}`, node.operations.map(printDomainServiceOperation));
+  // Operations and unit `test`s live in separate typed lists (grammar
+  // `(operations | tests)*`); print operations first, then tests.  Source-order
+  // interleaving isn't preserved (the AST doesn't retain it), but reparse is
+  // stable — both spellings lower to the same two lists.
+  return block(`domainService ${node.name}`, [
+    ...node.operations.map(printDomainServiceOperation),
+    ...node.tests.map(printTestBlock),
+  ]);
 }
 
 /** One `operation <name>(<params>)[: <ret>] { <stmts> }` of a domain

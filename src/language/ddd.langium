@@ -963,7 +963,10 @@ ValueObject:
     '}';
 
 ValueObjectMember:
-    Property | DerivedProp | Invariant | FunctionDecl;
+    Property | DerivedProp | Invariant | FunctionDecl
+    // A unit `test` nested in the value object, exercising its invariants /
+    // normalizers / functions (test-placement.md, Phase 2).
+    | TestBlock;
 
 // `abstract` base + `extends` subtype + `inheritanceUsing(…)` layout are
 // the aggregate-inheritance surface.  An `abstract` base can never be
@@ -1225,8 +1228,15 @@ CapabilityMember:
 // the validator (`loom.test-needs-target` / `loom.test-redundant-for`), not the
 // grammar, so a misplaced test surfaces a themed diagnostic rather than a parse
 // error.  See `docs/old/proposals/test-placement.md`.
+// The subjects a unit `test` may anchor to via `for` (test-placement.md).  A
+// declared union so one `[TestSubject:ID]` cross-reference resolves an aggregate
+// (Phase 1) or a value object / domain service (Phase 2) — all three export
+// their names workspace-wide (`ddd-scope.ts`), so a bare `for <Name>` resolves
+// across contexts and files.
+type TestSubject = Aggregate | ValueObject | DomainService;
+
 TestBlock:
-    'test' name=STRING ('for' target=[Aggregate:ID])? ('verifies' verifies=[TestCase:TraceId])? '{'
+    'test' name=STRING ('for' target=[TestSubject:ID])? ('verifies' verifies=[TestCase:TraceId])? '{'
         body+=TestStatement*
     '}';
 
@@ -1647,7 +1657,9 @@ LoadSegment:
 //   }
 DomainService:
     'domainService' name=ID '{'
-        operations+=DomainServiceOperation*
+        // Operations and unit `test`s interleave freely (test-placement.md,
+        // Phase 2); each keeps its own typed list.
+        (operations+=DomainServiceOperation | tests+=TestBlock)*
     '}';
 
 // Statement body ONLY (no `= Expression` shorthand — deferred).

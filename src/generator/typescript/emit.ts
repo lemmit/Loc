@@ -12,5 +12,5 @@ export {
   renderSchema,
   valueObjectColumnNames,
 } from "./emit/schema.js";
-export { renderTestsFile } from "./emit/tests.js";
+export { renderServiceTestsFile, renderTestsFile, renderVoTestsFile } from "./emit/tests.js";
 export { renderEnumsAndValueObjects } from "./emit/value-objects.js";

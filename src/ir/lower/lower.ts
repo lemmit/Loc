@@ -34,7 +34,6 @@ import type {
   Subdomain,
   System,
   SystemMember,
-  TestBlock,
   TestE2E,
   ThemeBlock,
   TimerSource,
@@ -154,7 +153,6 @@ import type {
   TenancyIR,
   TestCaseIR,
   TestE2EIR,
-  TestIR,
   TestStmtIR,
   ThemeIR,
   TimerSourceIR,
@@ -201,6 +199,7 @@ import {
 import { lowerProjection } from "./lower-projection.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
+import { collectSubjectTests, expectStmtIR, indexHoistedTests } from "./lower-test.js";
 import {
   cstText,
   type Env,
@@ -229,35 +228,6 @@ import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive
 // lives in `lower-expr.ts`; this file only deals with the
 // hierarchical IR built around those expressions.
 // ---------------------------------------------------------------------------
-
-// Hoisted unit tests (`test "…" for <Agg> { … }` written at context or file
-// root, outside the aggregate) grouped by their resolved home aggregate AST
-// node.  Populated once per project in `lowerProject`, consumed in
-// `lowerAggregate`, where each hoisted block is lowered under the SAME
-// per-aggregate `inner` env a colocated test uses — so a hoisted test
-// re-lowers byte-identically to the nested form (test-placement.md, Phase 1).
-let hoistedTestsByAgg: Map<Aggregate, TestBlock[]> = new Map();
-
-/** Scan every document for hoisted `TestBlock`s — those whose container is a
- *  `context` or the file root, i.e. NOT an aggregate — and index them by the
- *  aggregate their `for` head resolves to.  A nested (aggregate-member) test
- *  keeps its existing containment path and is skipped here; an unresolved
- *  `for` target (a linker error) drops out via the `?.ref` guard. */
-function indexHoistedTests(models: ReadonlyArray<Model>): void {
-  const index = new Map<Aggregate, TestBlock[]>();
-  for (const model of models) {
-    for (const node of AstUtils.streamAllContents(model)) {
-      if (!isTestBlock(node)) continue;
-      if (isAggregate(node.$container)) continue; // nested — handled in lowerAggregate
-      const home = node.target?.ref;
-      if (!home) continue; // missing/unresolved `for` — validator/linker owns it
-      const list = index.get(home);
-      if (list) list.push(node);
-      else index.set(home, [node]);
-    }
-  }
-  hoistedTestsByAgg = index;
-}
 
 export function lowerModel(model: Model): RawLoomModel {
   // Single-document lowering = a one-element project (composes the file's
@@ -1394,6 +1364,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
       ...lowerPropertyChecks(props, inner),
     ],
     functions: vo.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
+    tests: collectSubjectTests(vo.members.filter(isTestBlock), vo, inner),
     origin: originFor(vo),
   };
 }
@@ -1474,18 +1445,7 @@ function lowerAggregate(
   const canonicalCreate = creates.find((c) => c.canonical) ?? null;
   const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
   const appliers = (agg.members.filter(isApply) as Apply[]).map((a) => lowerApply(a, inner));
-  const tests: TestIR[] = [];
-  for (const m of agg.members) {
-    if (isTestBlock(m)) tests.push(lowerTest(m, inner));
-  }
-  // Hoisted `test … for <this aggregate>` blocks (declared at context/root
-  // scope) lower under the SAME `inner` env as colocated tests and append to
-  // this aggregate's suite — so placement is a source-location choice with no
-  // effect on the emitted unit file.  Nested tests come first (source order
-  // within the aggregate), then hoisted ones in document-scan order.
-  for (const block of hoistedTestsByAgg.get(agg) ?? []) {
-    tests.push(lowerTest(block, inner));
-  }
+  const tests = collectSubjectTests(agg.members.filter(isTestBlock), agg, inner);
   // Capability source nodes — read structurally from agg.members,
   // concatenated with anything propagated from the enclosing context.
   // Context-level capabilities lower in the context's env (which
@@ -1529,41 +1489,6 @@ function lowerAggregate(
       undefined,
     origin: originFor(agg),
   };
-}
-
-function lowerTest(block: TestBlock, env: Env): TestIR {
-  let inner = env;
-  const statements: TestStmtIR[] = [];
-  for (const s of block.body) {
-    if (isExpectStmt(s)) {
-      statements.push(expectStmtIR(lowerExpr(s.expr, inner), cstText(s.expr)));
-    } else {
-      const r = lowerStatement(s as Statement, inner);
-      statements.push(r.stmt);
-      inner = r.envAfter;
-    }
-  }
-  return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
-}
-
-/** Build the `TestStmtIR` for an `expect(...)` test statement.  The
- *  method-based throw assertion `expect(call).toThrow(N?)` is recognised here
- *  and rewritten into the platform-neutral `expect-throws` IR node — so every
- *  backend renders it as a throw exactly as before — with the optional integer
- *  pinning the rejected HTTP status in an e2e api body.  Every other
- *  `expect(...)` carries a value/locator matcher (`toBe`, `toHaveText`, …); a
- *  bare-boolean `expect` is rejected by the validator (`checkExpectMatcher`). */
-function expectStmtIR(e: ExprIR, source: string): TestStmtIR {
-  if (e.kind === "method-call" && e.isIntrinsicMatcher && e.member === "toThrow") {
-    const inner = e.receiver.kind === "paren" ? e.receiver.inner : e.receiver;
-    const arg = e.args[0];
-    const status =
-      arg && arg.kind === "literal" && arg.lit === "int" ? Number(arg.value) : undefined;
-    return status != null
-      ? { kind: "expect-throws", expr: inner, source, status }
-      : { kind: "expect-throws", expr: inner, source };
-  }
-  return { kind: "expect", expr: e, source };
 }
 
 function lowerRepository(

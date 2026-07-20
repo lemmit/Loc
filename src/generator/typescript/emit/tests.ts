@@ -2,11 +2,13 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type DomainServiceIR,
   type ExprIR,
   operationUsesCurrentUser,
   type TestIR,
   type TestStmtIR,
   type TypeIR,
+  type ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapeTsIdent, lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
@@ -34,20 +36,56 @@ const TEST_ACTOR =
 // it imports the aggregate / parts / value objects directly.
 // ---------------------------------------------------------------------------
 
+/** Aggregate unit-test file — colocated next to the aggregate's domain class,
+ *  importing `<Agg>`/parts from the per-aggregate module. */
 export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string | null {
-  if (agg.tests.length === 0) return null;
+  return renderTestsCore(agg.name, agg.tests, ctx, {
+    symbols: [agg.name, ...agg.parts.map((p) => p.name)],
+    modulePath: `./${lowerFirst(agg.name)}`,
+  });
+}
+
+/** Value-object unit-test file (test-placement.md, Phase 2).  The VO is a
+ *  member of `ctx.valueObjects`, so it's imported from `./value-objects` by the
+ *  shared narrowing — no dedicated subject import needed. */
+export function renderVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
+  return renderTestsCore(vo.name, vo.tests, ctx, null);
+}
+
+/** Domain-service unit-test file (test-placement.md, Phase 2).  The service is
+ *  emitted as a namespace in `./services`. */
+export function renderServiceTestsFile(svc: DomainServiceIR, ctx: BoundedContextIR): string | null {
+  return renderTestsCore(svc.name, svc.tests, ctx, {
+    symbols: [svc.name],
+    modulePath: "./services",
+  });
+}
+
+/** Shared unit-test-file renderer for any test subject.  `subjectImport` names
+ *  the module + symbols that carry the subject's own code (an aggregate's
+ *  per-agg module, a service's `./services`); it's `null` for a value object,
+ *  which the `./value-objects` narrowing already imports.  Value-object / enum
+ *  / `Ids` imports are narrowed to names the rendered body actually references,
+ *  per the generated-code Biome gate. */
+function renderTestsCore(
+  describeName: string,
+  tests: TestIR[],
+  ctx: BoundedContextIR,
+  subjectImport: { symbols: string[]; modulePath: string } | null,
+): string | null {
+  if (tests.length === 0) return null;
   // Render the describe body first so the import set can be narrowed to
   // names actually referenced (per the generated-code Biome gate).
   const body: string[] = [];
-  body.push(`describe("${agg.name}", () => {`);
-  for (const t of agg.tests) {
+  body.push(`describe("${describeName}", () => {`);
+  for (const t of tests) {
     body.push(...renderTest(t, ctx).map((l) => `  ${l}`));
     body.push("");
   }
   body.push(`});`);
   const bodyStr = body.join("\n");
   const refs = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(bodyStr);
-  const domainNames = [agg.name, ...agg.parts.map((p) => p.name)].filter(refs);
+  const subjectNames = subjectImport ? subjectImport.symbols.filter(refs) : [];
   const voNames = ctx.valueObjects.map((v) => v.name).filter(refs);
   const enumNames = ctx.enums.map((e) => e.name).filter(refs);
   const usesIds = /\bIds\.\w/.test(bodyStr);
@@ -55,8 +93,8 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
-  if (domainNames.length > 0) {
-    lines.push(`import { ${domainNames.join(", ")} } from "./${lowerFirst(agg.name)}";`);
+  if (subjectImport && subjectNames.length > 0) {
+    lines.push(`import { ${subjectNames.join(", ")} } from "${subjectImport.modulePath}";`);
   }
   if (voNames.length > 0) {
     lines.push(`import { ${voNames.join(", ")} } from "./value-objects";`);
