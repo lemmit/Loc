@@ -38,7 +38,7 @@ import {
 // — a context hosted by any of these emits a runnable integration test, so the
 // `loom.context-test-unsupported` warning is suppressed.  Grows as each backend
 // lands; a context hosted ONLY on a not-yet-shipped backend still warns.
-const INTEGRATION_BACKENDS = new Set(["node", "python", "dotnet"]);
+const INTEGRATION_BACKENDS = new Set(["node", "python", "dotnet", "java"]);
 
 /** True when a deployable running an integration-capable backend hosts this
  *  context. */
@@ -98,9 +98,10 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
     if (ctxNode && !integrationBackendHostsContext(model, ctxNode)) {
       accept(
         "warning",
-        `Context integration tests currently emit on the node, python, and dotnet ` +
-          `backends (test-placement.md Phase 3a/3b). Context '${ctxNode.name}' is not hosted ` +
-          `by an integration-capable deployable, so this 'test' produces no runnable test yet.`,
+        `Context integration tests currently emit on the node, python, dotnet, and ` +
+          `java backends (test-placement.md Phase 3a/3b). Context '${ctxNode.name}' is not ` +
+          `hosted by an integration-capable deployable, so this 'test' produces no runnable ` +
+          `test yet.`,
         { node, property: "name", code: "loom.context-test-unsupported" },
       );
     }

@@ -551,6 +551,17 @@ describe("Ordering (integration)", () => {
   constraint:** the dispatcher is the no-op — synchronous workflow cascade for
   the non-node backends is the tracked follow-up (the app's in-process cascade is
   DI-resolved).
-- **3b (remaining)** — the Java and Elixir integration renderers (against the
-  same real PG), outbox-async cascade draining if reactors are async, and the
-  cross-backend CI matrix.
+- **3b (java)** ✅ **SHIPPED (emit + run-verified)** — the **Java/Spring Boot**
+  integration renderer (`java/emit/integration-tests.ts`): emits a
+  `@SpringBootTest` at the base package (`src/test/java/<basePkg>/<Ctx>IntegrationTests.java`)
+  that **autowires** the Spring Data JPA repositories (they can't be
+  hand-constructed — they're DI beans over an EntityManager) and binds
+  `spring.datasource.*` from `LOOM_PG_URL` via `@DynamicPropertySource`; Flyway
+  applies the migrations on context boot. create→`repo.save` / op→mutate+save /
+  find→`repo.findById(…).orElseThrow()` (getById → plain; findAll → `List`). The
+  re-gate is now `{node, python, dotnet, java}`. **Verified end-to-end:** the
+  emitted class compiles + runs green under `gradle test` (JDK 25 / Gradle 9.6,
+  the CI toolchain) against a real Postgres.
+- **3b (remaining)** — the Elixir integration renderer (against the same real
+  PG), synchronous workflow cascade for the non-node backends, outbox-async
+  cascade draining if reactors are async, and the cross-backend CI matrix.

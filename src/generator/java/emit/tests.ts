@@ -190,7 +190,7 @@ function coerceLiteralToJavaType(
  *  Id record, not the raw guid string).  Returns null when `e` isn't a
  *  resolvable aggregate operation call (intrinsic matcher, unknown receiver,
  *  unknown member) so the caller falls back to the plain renderer. */
-function renderOperationCall(
+export function renderOperationCall(
   e: ExprIR,
   ctx: BoundedContextIR,
   imports: Set<string>,
@@ -219,7 +219,11 @@ function renderOperationCall(
 /** `Agg.create({...})` → the positional `Agg.create(...)` factory call,
  *  omitted create-inputs filled with their omission value (the factory
  *  takes every canonical create-input positionally). */
-function renderCreateCall(e: ExprIR, ctx: BoundedContextIR, imports: Set<string>): string | null {
+export function renderCreateCall(
+  e: ExprIR,
+  ctx: BoundedContextIR,
+  imports: Set<string>,
+): string | null {
   if (e.kind !== "method-call" || e.member !== "create" || e.args.length !== 1) return null;
   const objArg = e.args[0];
   const receiver = e.receiver;
@@ -250,7 +254,7 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR, imports: Set<string>
 /** Explicit intrinsic matcher → a JUnit assertion.  Comparisons over
  *  BigDecimal receivers route through compareTo (BigDecimal's equals is
  *  scale-sensitive and `<`/`>` don't exist). */
-function renderExplicitMatcher(expr: ExprIR, imports: Set<string>): string | null {
+export function renderExplicitMatcher(expr: ExprIR, imports: Set<string>): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
   if (sig?.on !== "value") return null;
