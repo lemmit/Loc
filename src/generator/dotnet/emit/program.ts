@@ -209,7 +209,11 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
   // realtime tee via factory), and the ChannelPublishTeeDispatcher — whose
   // typed inner is the realtime tee — is the sole IDomainEventDispatcher.
   const realtimeConcreteRegistration = options?.hasOutbox
-    ? `// Domain event dispatch — durable events relay via the outbox; the realtime\n// tee wraps the outbox dispatcher; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    ? `// Domain event dispatch — durable events relay via the outbox; the realtime\n// tee wraps the outbox dispatcher; the broker tee (below) is outermost.\n${
+        options?.outboxNoopInner
+          ? "builder.Services.AddSingleton<NoopDomainEventDispatcher>();"
+          : "builder.Services.AddScoped<InProcessDomainEventDispatcher>();"
+      }\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
       : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
