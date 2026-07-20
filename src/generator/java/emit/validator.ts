@@ -16,6 +16,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { annotationEligible } from "./bean-validation.js";
 
 // ---------------------------------------------------------------------------
 // Wire-boundary validators — the FluentValidation / zod-refine analog.
@@ -140,6 +141,12 @@ function methodBody(
 
   for (const inv of spec.invariants) {
     if (!classifyForWire(inv, ctx)) continue;
+    // Message-less single-field shapes are enforced by Bean Validation
+    // annotations on the request DTO (`@Size`/`@Pattern`/`@Min`/…) at the
+    // `@Valid` seam — skip them here so they aren't validated twice.  Messaged
+    // and cross-field rules stay: they carry an authored message + content-hash
+    // `code`, or need PARSED values that only exist at this service floor.
+    if (annotationEligible(inv, spec.available)) continue;
     const single = singleFieldShape(inv);
     if (single && spec.available.has(single.field)) {
       checks.push(
@@ -242,8 +249,13 @@ function patternCheck(
  *  precondition translates, which leaves the create method omitted → a call
  *  to a symbol that doesn't exist (the crudish-without-invariants footgun). */
 export function aggHasCreateWireValidator(agg: EnrichedAggregateIR): boolean {
-  const createCtx: ClassifyContext = {
-    available: new Set(forCreateInput(agg.fields).map((f) => f.name)),
-  };
-  return agg.invariants.some((i) => classifyForWire(i, createCtx));
+  const available = new Set(forCreateInput(agg.fields).map((f) => f.name));
+  const createCtx: ClassifyContext = { available };
+  // A residual (programmatic) validator method is emitted only for rules NOT
+  // covered by DTO annotations — messaged or cross-field.  Message-less
+  // single-field rules moved to `@Valid` annotations, so an aggregate whose
+  // only create rule is (e.g.) `name.length > 0` no longer needs `create(...)`.
+  return agg.invariants.some(
+    (i) => classifyForWire(i, createCtx) && !annotationEligible(i, available),
+  );
 }

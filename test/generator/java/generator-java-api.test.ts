@@ -140,9 +140,13 @@ system S {
   it("create request takes wire types; the service parses them to domain values", async () => {
     const files_ = await files();
     const req = files_.get(`${ROOT}/features/orders/CreateOrderRequest.java`)!;
+    // The single-field `code.length > 0` invariant rides a Bean Validation
+    // `@Size` on the wire field (enforced at the `@Valid` seam); the rest keep
+    // their wire types (money/datetime as String).
     expect(req).toContain(
-      "public record CreateOrderRequest(String code, Status status, AddressRequest shipTo, String notes, String total, String placedAt) {",
+      'public record CreateOrderRequest(@Size(min = 1, message = "Invariant violated: code.length > 0") String code, Status status, AddressRequest shipTo, String notes, String total, String placedAt) {',
     );
+    expect(req).toContain("import jakarta.validation.constraints.Size;");
     const svc = files_.get(`${ROOT}/features/orders/OrderService.java`)!;
     expect(svc).toContain("var total = new BigDecimal(request.total());");
     expect(svc).toContain("var placedAt = Instant.parse(request.placedAt());");
@@ -151,9 +155,12 @@ system S {
 });
 
 describe("java generator — layered service (S5)", () => {
-  it("create: parse → validate → domain factory → save → publish → id", async () => {
+  it("create: parse → domain factory → save → publish → id", async () => {
     const svc = (await files()).get(`${ROOT}/features/orders/OrderService.java`)!;
-    expect(svc).toContain("OrderValidators.create(code, status, shipTo, notes, total, placedAt);");
+    // Order's only field invariant (`code.length > 0`) is a single-field rule
+    // now enforced by `@Size` at the `@Valid` boundary, so no residual
+    // programmatic validator is emitted or called at the service floor.
+    expect(svc).not.toContain("OrderValidators");
     expect(svc).toContain(
       "var aggregate = Order.create(code, status, shipTo, notes, total, placedAt);",
     );
@@ -200,19 +207,32 @@ describe("java generator — paged finds", () => {
 });
 
 describe("java generator — wire validators + advice (S5)", () => {
-  it("translates classified invariants into 422 checks via the shared classifier", async () => {
-    const v = (await files()).get(`${ROOT}/features/orders/OrderValidators.java`)!;
-    expect(v).toContain("public final class OrderValidators {");
-    expect(v).toContain(
-      'if (!(code.length() >= 1)) errors.add(WireValidationException.error("/code", "Invariant violated: code.length > 0"));',
+  it("maps a single-field invariant to a Bean Validation annotation at the @Valid seam", async () => {
+    // A message-less single-field invariant (`code.length > 0`) is enforced by
+    // Jakarta Bean Validation on the request DTO, triggered by `@Valid` on the
+    // controller — the idiomatic-Spring analog of .NET's FluentValidation native
+    // chain.  MethodArgumentNotValidException maps to the SAME 422 envelope as
+    // the residual WireValidationException path.
+    const files_ = await files();
+    const req = files_.get(`${ROOT}/features/orders/CreateOrderRequest.java`)!;
+    expect(req).toContain('@Size(min = 1, message = "Invariant violated: code.length > 0")');
+    const ctrl = files_.get(`${ROOT}/features/orders/OrdersController.java`)!;
+    expect(ctrl).toContain("@Valid @RequestBody CreateOrderRequest request");
+    expect(ctrl).toContain("import jakarta.validation.Valid;");
+    const advice = files_.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
+    expect(advice).toContain("@ExceptionHandler(MethodArgumentNotValidException.class)");
+    expect(advice).toContain('entry.put("pointer", "/" + err.getField());');
+    expect(advice).toContain(
+      "import org.springframework.web.bind.MethodArgumentNotValidException;",
     );
-    expect(v).toContain("if (!errors.isEmpty()) throw new WireValidationException(errors);");
+    // No residual programmatic validator for a single-field-only aggregate.
+    expect(files_.get(`${ROOT}/features/orders/OrderValidators.java`)).toBeUndefined();
   });
 
-  it("mirrors create wire constraints onto the crudish update validator (SYS-1)", async () => {
-    // M-T6.8/SYS-1: the crudish `update` op's validator carries the SAME
-    // field-invariant checks as `create`, so an invalid update throws
-    // WireValidationException (422) instead of reaching the domain floor.
+  it("mirrors create wire constraints onto the crudish update DTO (SYS-1)", async () => {
+    // M-T6.8/SYS-1: the crudish `update` request carries the SAME field
+    // constraints as create, so an invalid update is rejected at the `@Valid`
+    // boundary (422) instead of reaching the domain floor.
     const src = `
 system Demo {
   subdomain S {
@@ -230,13 +250,13 @@ system Demo {
 }
 `;
     const out = await generateSystemFiles(src);
-    const v = [...out.entries()].find(([k]) => /AccountValidators\.java$/.test(k))?.[1];
-    expect(v).toBeDefined();
-    const updateMethod = v!.slice(v!.indexOf("public static void update("));
-    expect(v).toContain("public static void update(String handle)");
-    expect(updateMethod).toContain(
-      'if (!(handle.length() >= 1)) errors.add(WireValidationException.error("/handle", "Invariant violated: handle.length > 0"));',
-    );
+    const constraint = '@Size(min = 1, message = "Invariant violated: handle.length > 0")';
+    const create = [...out.entries()].find(([k]) => /CreateAccountRequest\.java$/.test(k))?.[1];
+    const update = [...out.entries()].find(([k]) => /UpdateAccountRequest\.java$/.test(k))?.[1];
+    expect(create).toContain(constraint);
+    expect(update).toContain(constraint);
+    // Single-field-only → no residual programmatic validator.
+    expect([...out.keys()].some((k) => /AccountValidators\.java$/.test(k))).toBe(false);
   });
 
   it("advice maps the exception taxonomy to the cross-backend problem envelope", async () => {

@@ -36,6 +36,7 @@ async function gen() {
   return {
     domain: all.get(key("features/products/Product.java"))!,
     validators: all.get(key("features/products/ProductValidators.java"))!,
+    createRequest: all.get(key("features/products/CreateProductRequest.java"))!,
   };
 }
 
@@ -51,11 +52,14 @@ describe("java — messaged rule → wire validator + domain floor text", () => 
     );
   });
 
-  it("keeps a message-LESS invariant on the derived default with no wire code", async () => {
-    const { validators } = await gen();
-    // 2-arg error() → no code (byte-identical)
-    expect(validators).toContain(
-      'errors.add(WireValidationException.error("/sku", "Invariant violated: sku.length > 0"))',
+  it("moves a message-LESS single-field invariant to a Bean Validation annotation (no wire code)", async () => {
+    const { createRequest } = await gen();
+    // The message-less `invariant sku.length > 0` becomes a built-in `@Size` on
+    // the wire DTO (enforced at `@Valid`), carrying the derived-default message
+    // and no content-hash code — the messaged rules stay in the residual
+    // validator (see the test above).
+    expect(createRequest).toContain(
+      '@Size(min = 1, message = "Invariant violated: sku.length > 0")',
     );
   });
 

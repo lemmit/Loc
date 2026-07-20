@@ -177,7 +177,7 @@ export function renderJavaController(
         return [
           `    @PostMapping("/{id}/${snake(op.name)}")`,
           hasParams
-            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
           `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
@@ -196,7 +196,7 @@ export function renderJavaController(
         `    @PostMapping("/{id}/${snake(op.name)}")`,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
         hasParams
-          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
         `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
@@ -319,7 +319,7 @@ export function renderJavaController(
   const createRoute = emitsRestCreate(agg)
     ? [
         `    @PostMapping`,
-        `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
+        `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@Valid @RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
         `        CatalogLog.event("aggregate_created", "info", "aggregate", "${agg.name}", "id", id.value());`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "create");`,
@@ -385,6 +385,11 @@ export function renderJavaController(
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.config.CatalogLog;`,
     `import ${ctx.basePkg}.config.HttpMetrics;`,
+    // `@Valid` triggers Bean Validation on the request DTOs (`@Size`/`@Pattern`/…)
+    // at the controller boundary; emitted only when the controller takes a body.
+    emitsRestCreate(agg) || agg.operations.some((o) => o.params.length > 0)
+      ? `import jakarta.validation.Valid;`
+      : null,
     ``,
     `@RestController`,
     `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
@@ -441,6 +446,7 @@ export function renderApiExceptionAdvice(
     `import org.springframework.http.ProblemDetail;`,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.http.converter.HttpMessageNotReadableException;`,
+    `import org.springframework.web.bind.MethodArgumentNotValidException;`,
     `import org.springframework.web.bind.annotation.ExceptionHandler;`,
     `import org.springframework.web.bind.annotation.RestControllerAdvice;`,
     `import org.springframework.web.context.request.WebRequest;`,
@@ -474,6 +480,28 @@ export function renderApiExceptionAdvice(
     `                // A messaged rule carries the stable content-hash wire code; a`,
     `                // message-less rule's null code is omitted (byte-identical body).`,
     `                if (err.code() != null) entry.put("code", err.code());`,
+    `                return entry;`,
+    `            })`,
+    `            .collect(Collectors.toList()));`,
+    `        return respond(problem, 422);`,
+    `    }`,
+    ``,
+    // Bean Validation failures (`@Valid @RequestBody`, the single-field
+    // `@Size`/`@Pattern`/… constraints) surface as MethodArgumentNotValidException.
+    // Map them to the SAME 422 envelope as the residual WireValidationException
+    // path so a client sees one error shape regardless of which layer rejected.
+    // These are message-less rules (the messaged ones stay in WireValidation-
+    // Exception with their content-hash `code`), so no `code` is attached.
+    `    @ExceptionHandler(MethodArgumentNotValidException.class)`,
+    `    public ResponseEntity<ProblemDetail> onBeanValidation(MethodArgumentNotValidException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(422, "Validation failed", "One or more fields are invalid.", request);`,
+    `        problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()`,
+    `            .map(err -> {`,
+    `                var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `                entry.put("pointer", "/" + err.getField());`,
+    `                entry.put("message", err.getDefaultMessage());`,
     `                return entry;`,
     `            })`,
     `            .collect(Collectors.toList()));`,
