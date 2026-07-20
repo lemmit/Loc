@@ -39,14 +39,18 @@ versioning works.
   `elixir` always mounts (fullstack LiveView); `node` never does.
 
 > **`flutter` is the mobile axis, not a sixth web SPA.**  Like Feliz it is a
-> self-hosting frontend (own SDK build — `flutter build web`, not a vite static
-> bundle), so it hosts only its own `framework: flutter` UI and dispatches
-> through `src/generator/flutter/`.  It emits a Dart/Flutter (Material 3) app on
+> self-hosting frontend (own SDK build, not a vite static bundle), so it hosts
+> only its own `framework: flutter` UI and dispatches through
+> `src/generator/flutter/`.  It emits a Dart/Flutter (Material 3) app on
 > Riverpod: wire models (`sealed class` for payload unions), `ConsumerWidget`
 > pages, `Notifier` state + actions, `FutureProvider` reads for `QueryView`, and
-> `StatefulWidget` forms (`CreateForm` / `OperationForm` / `DestroyForm`).  The
-> emitted Dart is compiled per-PR by `generated-flutter-build.yml`
-> (`flutter analyze` + `flutter build web`).
+> `StatefulWidget` forms (`CreateForm` / `OperationForm` / `DestroyForm`).  From
+> the one Dart source the emitted `Makefile` builds **three surfaces** — web
+> (`make web`, the compose-served surface), Android (`make apk`), and iOS
+> (`make ipa`); the native folders are materialised on demand (`make prepare`).
+> The web build is compiled per-PR by `generated-flutter-build.yml`
+> (`flutter analyze` + `flutter build web`); the native surface has no CI gate
+> yet.
 
 ## Resolving a `platform:` value
 
