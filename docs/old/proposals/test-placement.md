@@ -562,6 +562,20 @@ describe("Ordering (integration)", () => {
   re-gate is now `{node, python, dotnet, java}`. **Verified end-to-end:** the
   emitted class compiles + runs green under `gradle test` (JDK 25 / Gradle 9.6,
   the CI toolchain) against a real Postgres.
-- **3b (remaining)** — the Elixir integration renderer (against the same real
-  PG), synchronous workflow cascade for the non-node backends, outbox-async
-  cascade draining if reactors are async, and the cross-backend CI matrix.
+- **3b (elixir)** ✅ **SHIPPED (emit + run-verified)** — the
+  **Elixir/vanilla-Phoenix (Ecto)** integration renderer
+  (`elixir/vanilla/integration-tests-emit.ts`): emits
+  `test/<ctx>_integration_test.exs` — an `ExUnit` module that persists→reads
+  through the plain **context module** (not a hand-built repo) against the live
+  Ecto repo. create→`{:ok, o} = <Ctx>.create_<agg>(%{…})`, op→`{:ok, o} =
+  <Ctx>.<op>_<agg>(o, %{})`, find→`{:ok, f} = <Ctx>.get_<agg>(id)` / `list_<plural>()`.
+  DB isolation via `Ecto.Adapters.SQL.Sandbox` (per-test `checkout` +
+  `{:shared, self()}`); the harness applies the schema once with
+  `MIX_ENV=test mix ecto.create && mix ecto.migrate`. The re-gate is now the full
+  five: `{node, python, dotnet, java, elixir}`. **Verified end-to-end:** both the
+  persist→read and the op-transition legs run green under `mix test` (Elixir
+  1.18 / OTP 27) against a real Postgres.
+- **3b — ALL FIVE BACKENDS SHIPPED.** Remaining follow-ups: synchronous workflow
+  cascade for the non-node backends (node ships it via `createInProcessDispatcher`;
+  python ships it via `InProcessDispatcher`), outbox-async cascade draining if
+  reactors are async, and the cross-backend CI matrix that runs the tier per-PR.

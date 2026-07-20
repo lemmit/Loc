@@ -37,7 +37,7 @@ import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 // an unexpected shape) is emitted as a documented `@tag :skip`, never broken Elixir.
 // ---------------------------------------------------------------------------
 
-interface Env {
+export interface Env {
   /** The aggregate under test, or `null` for a value-object / domain-service
    *  subject (test-placement.md, Phase 2) — those have no aggregate identity, so
    *  the agg-op / create paths are inert. */
@@ -233,7 +233,7 @@ function renderStmt(s: TestStmtIR, env: Env, used: Set<string>): string[] {
   }
 }
 
-function renderExpect(expr: ExprIR, env: Env): string {
+export function renderExpect(expr: ExprIR, env: Env): string {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) {
     throw new UnsupportedTestShapeError("expect requires a matcher");
   }
@@ -291,7 +291,7 @@ function renderThrows(expr: ExprIR, env: Env): string {
 /** Render a test-position expression to Elixir, with money/decimal literals
  *  coerced to `Decimal` and aggregate `create`/op calls routed to the pure
  *  domain core. */
-function vtExpr(e: ExprIR, env: Env): string {
+export function vtExpr(e: ExprIR, env: Env): string {
   switch (e.kind) {
     case "literal":
       return renderLiteral(e.lit, e.value);
