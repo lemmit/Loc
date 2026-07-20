@@ -38,7 +38,7 @@ public sealed class RequestLoggingMiddleware
             var metricRoute =
                 (ctx.GetEndpoint() as Microsoft.AspNetCore.Routing.RouteEndpoint)
                     ?.RoutePattern.RawText ?? ctx.Request.Path.Value ?? "/";
-            Api.Observability.HttpMetrics.Record(
+            global::Api.Observability.HttpMetrics.Record(
                 ctx.Request.Method, metricRoute, ctx.Response.StatusCode, sw.Elapsed.TotalMilliseconds);
         }
     }
