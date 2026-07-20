@@ -14,6 +14,7 @@
 import { AstUtils } from "langium";
 import {
   type Aggregate,
+  type BoundedContext,
   type DomainService,
   isAggregate,
   isDomainService,
@@ -31,8 +32,8 @@ import { lowerStatement } from "./lower-stmt.js";
 import { cstText, type Env } from "./lower-types.js";
 
 /** The declaration kinds a `test` may anchor to (Phase 1 aggregate + Phase 2
- *  value object / domain service). */
-export type TestSubjectNode = Aggregate | ValueObject | DomainService;
+ *  value object / domain service + Phase 3 bounded context). */
+export type TestSubjectNode = Aggregate | ValueObject | DomainService | BoundedContext;
 
 // Hoisted unit tests (`test "…" for <Subject> { … }` written at context or file
 // root, outside the subject) grouped by their resolved home AST node.

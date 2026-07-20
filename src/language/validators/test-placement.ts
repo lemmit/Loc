@@ -1,27 +1,31 @@
-// Placement rules for the unit `test` block (test-placement.md).
+// Placement rules for the unit / integration `test` block (test-placement.md).
 //
-// A `test` resolves its home subject — an aggregate (Phase 1) or a value object
-// / domain service (Phase 2) — from the `for <Subject>` head if present, else
-// from its enclosing declaration.  That yields exactly two structural rules,
-// enforced here rather than in the grammar so a misplaced test surfaces a
-// themed, actionable diagnostic instead of a parse error:
+// A `test` resolves its home subject — an aggregate (Phase 1), a value object /
+// domain service (Phase 2), or a bounded context (Phase 3, the integration rung)
+// — from the `for <Subject>` head if present, else from its enclosing
+// declaration.  The structural rules, enforced here so a misplaced test surfaces
+// a themed diagnostic instead of a parse error:
 //
-//   - HOISTED (declared at `context` or file-root scope — `$container` is not a
-//     subject declaration) → `for` is REQUIRED: there is no enclosing subject to
-//     infer from (`loom.test-needs-target`).
-//   - NESTED (a member of an aggregate / value object / domain service) → `for`
-//     is FORBIDDEN: containment already names the subject, and a restated `for`
-//     is a second, redundant way to say the same thing (`loom.test-redundant-for`).
+//   - Nested in a SUBJECT decl (aggregate / value object / domain service):
+//     containment fixes the subject, so any `for` is redundant
+//     (`loom.test-redundant-for`).
+//   - Nested in a `context`: no `for` → a context integration test (subject = the
+//     enclosing context); `for <Agg|VO|Service>` → a legit hoisted subject test;
+//     `for <that same context>` → redundant (`loom.test-redundant-for`).
+//   - At file root (no enclosing subject): `for` is REQUIRED
+//     (`loom.test-needs-target`).
 //
-// The third proposed code, `loom.test-bad-target` (a `for` naming something that
-// isn't a testable subject), needs no themed check: `target` is a typed
-// `[TestSubject:ID]` cross-reference, so an unknown name or a non-subject target
-// is already a linker error — the same stance `TenancyDecl`/`Repository` take on
-// their aggregate refs.
+// A `for` naming a non-testable / unknown target is already a linker error (the
+// typed `[TestSubject:ID]` cross-reference), so there is no themed `bad-target`.
+//
+// Context integration tests are not yet emitted by any backend, so a
+// `loom.context-test-unsupported` WARNING is raised until the Phase-3a
+// integration renderer lands (removed / made backend-conditional then).
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import {
   isAggregate,
+  isBoundedContext,
   isDomainService,
   isTestBlock,
   isValueObject,
@@ -32,10 +36,11 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isTestBlock(node)) continue;
     const c = node.$container;
-    // NESTED = a member of its subject declaration (aggregate / value object /
-    // domain service); anything else (context / file root) is HOISTED.
-    const nested = isAggregate(c) || isValueObject(c) || isDomainService(c);
-    if (nested && node.target) {
+    const inSubjectDecl = isAggregate(c) || isValueObject(c) || isDomainService(c);
+    const inContext = isBoundedContext(c);
+    const target = node.target?.ref;
+
+    if (inSubjectDecl && node.target) {
       accept(
         "error",
         `A nested 'test' already belongs to its enclosing subject — drop the ` +
@@ -43,12 +48,33 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
           `the test is hoisted out of it).`,
         { node, property: "target", code: "loom.test-redundant-for" },
       );
-    } else if (!nested && !node.target) {
+    } else if (inContext && target === c) {
+      accept(
+        "error",
+        `A 'test' nested in context '${c.name}' already targets it — drop the ` +
+          `'for ${node.target?.$refText}' head.`,
+        { node, property: "target", code: "loom.test-redundant-for" },
+      );
+    } else if (!inSubjectDecl && !inContext && !node.target) {
       accept(
         "error",
         `A 'test' declared outside its subject must name it: ` +
           `\`test ${JSON.stringify(node.name)} for <Subject> { … }\`.`,
         { node, property: "name", code: "loom.test-needs-target" },
+      );
+    }
+
+    // Honest gate: a context integration test (nested in a context with no `for`,
+    // or `for <Context>`) has no backend emitter yet.
+    const isContextTest =
+      (inContext && (!target || target === c)) || (target != null && isBoundedContext(target));
+    if (isContextTest) {
+      accept(
+        "warning",
+        `Context integration tests (test-placement.md Phase 3) are not yet emitted ` +
+          `by any backend — this 'test' parses and validates but produces no runnable ` +
+          `test until the integration renderer lands.`,
+        { node, property: "name", code: "loom.context-test-unsupported" },
       );
     }
   }

@@ -3736,7 +3736,7 @@ export function isTestStatement(item: unknown): item is TestStatement {
     return reflection.isInstance(item, TestStatement.$type);
 }
 
-export type TestSubject = Aggregate | DomainService | ValueObject;
+export type TestSubject = Aggregate | BoundedContext | DomainService | ValueObject;
 
 export const TestSubject = {
     $type: 'TestSubject'
@@ -4813,7 +4813,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ModelMember.$type, SystemMember.$type, Targetable.$type]
+            superTypes: [ModelMember.$type, SystemMember.$type, Targetable.$type, TestSubject.$type]
         },
         BuilderCall: {
             name: BuilderCall.$type,

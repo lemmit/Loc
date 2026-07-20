@@ -1230,10 +1230,11 @@ CapabilityMember:
 // error.  See `docs/old/proposals/test-placement.md`.
 // The subjects a unit `test` may anchor to via `for` (test-placement.md).  A
 // declared union so one `[TestSubject:ID]` cross-reference resolves an aggregate
-// (Phase 1) or a value object / domain service (Phase 2) — all three export
-// their names workspace-wide (`ddd-scope.ts`), so a bare `for <Name>` resolves
-// across contexts and files.
-type TestSubject = Aggregate | ValueObject | DomainService;
+// (Phase 1), a value object / domain service (Phase 2), or a bounded context
+// (Phase 3 — the in-process integration rung) — all export their names
+// workspace-wide (`ddd-scope.ts`), so a bare `for <Name>` resolves across
+// contexts and files.
+type TestSubject = Aggregate | ValueObject | DomainService | BoundedContext;
 
 TestBlock:
     'test' name=STRING ('for' target=[TestSubject:ID])? ('verifies' verifies=[TestCase:TraceId])? '{'

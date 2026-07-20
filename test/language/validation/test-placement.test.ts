@@ -45,9 +45,12 @@ describe("validator: test placement", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  it("loom.test-needs-target — hoisted at context with no `for`", async () => {
+  it("a context-member test with no `for` is a context integration test, not needs-target (Phase 3)", async () => {
     const { diagnostics } = await parseString(build({ ctx: `test "t" { expect(1).toBe(1) }` }));
-    expect(codes(diagnostics)).toContain("loom.test-needs-target");
+    // No `loom.test-needs-target` — it's a context integration test now (honest
+    // `loom.context-test-unsupported` warning until the renderer lands).
+    expect(codes(diagnostics)).not.toContain("loom.test-needs-target");
+    expect(codes(diagnostics)).toContain("loom.context-test-unsupported");
   });
 
   it("loom.test-needs-target — hoisted at root with no `for`", async () => {

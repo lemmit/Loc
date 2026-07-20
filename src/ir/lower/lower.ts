@@ -96,6 +96,7 @@ import {
   isValueObject,
   isView,
   isWorkflow,
+  type TestBlock,
 } from "../../language/generated/ast.js";
 import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
@@ -1166,6 +1167,15 @@ function lowerContext(
       }
     }
   }
+  // Context-scoped integration tests (test-placement.md, Phase 3): a `test`
+  // nested directly in the `context` (no `for` — subject inferred as this
+  // context) plus any hoisted `test … for <this context>` routed here.  Lowered
+  // under the context env (no `this`; every aggregate/service resolvable).
+  const contextTests = collectSubjectTests(
+    ctx.members.filter((m): m is TestBlock => isTestBlock(m) && !m.target),
+    ctx,
+    env,
+  );
   return {
     name: ctx.name,
     enums,
@@ -1189,6 +1199,7 @@ function lowerContext(
     projections,
     retrievals,
     seeds,
+    tests: contextTests,
     origin: originFor(ctx),
     ...(policyReadLevels.length > 0 ? { policyReadLevels } : {}),
     ...(policyWriteLevels.length > 0 ? { policyWriteLevels } : {}),

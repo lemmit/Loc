@@ -9,7 +9,11 @@
 > subject can host tests; a shape it can't lower degrades to `@tag :skip`, as the
 > aggregate path already did.) **Remaining:** **Phase 3** (the `for <Context>`
 > integration rung). Workflow anchors were folded into Phase 3 (a workflow test
-> wants context wiring — OQ#3). This is the **placement** complement to
+> wants context wiring — OQ#3). **Phase 3-core shipped** — the `for <Context>`
+> surface + `BoundedContextIR.tests` + lowering + placement validation, honestly
+> gated (`loom.context-test-unsupported`) until the per-backend integration
+> renderer (3a node / 3b the rest) lands against real Postgres. This is the
+> **placement** complement to
 > [`test-authoring-language.md`](./test-authoring-language.md): that proposal is
 > about a test's *body* (principals, fixtures, retry); this one is about *where a
 > `test` may be declared* and *what it may target*.
@@ -420,33 +424,81 @@ describe("Ordering (integration)", () => {
    drains the outbox inline or defers workflow-cascade assertions to 3b. To
    confirm before building.
 
-3. **Node-first for the runnable tier.** The per-PR behavioural tiers
-   (unit/api/ui) are all node-only; cross-backend behaviour rides docker
-   `conformance-full`. The integration tier follows suit: node runs it, other
-   backends' repository seams exist but their in-process harness is a later slice.
+3. **Substrate: REAL Postgres, not PGlite — and therefore cross-backend-uniform.**
+   PGlite is real-Postgres-in-WASM (not a mock) but is **node-only** (WASM in the
+   JS process) and **single-connection** (no true concurrency/isolation fidelity)
+   — and the other four backends cannot run it at all. Every existing
+   cross-backend behavioural leg already boots a **real Postgres** via a docker
+   sidecar + a `LOOM_*_PG_URL` connection string (`tenancy-e2e`, `obs-e2e`,
+   `behavioral-e2e-{python,java,dotnet,elixir}`, `conformance-full`). The
+   integration tier adopts that same substrate. The consequence is that the
+   integration test is emitted as a **native-runner test file per backend**
+   (vitest / xUnit / JUnit / pytest / ExUnit — reusing Phase 2's per-backend
+   native-test emission) that connects to a real Postgres, applies the schema,
+   constructs the context's repositories, and runs the persisting body. This is
+   **cross-backend-uniform** rather than node-first: real PG removes node's
+   special-snowflake status.
+
+   **Provisioning: Testcontainers (default), not a bespoke sidecar.** The
+   six existing jobs hand-roll the container lifecycle (`waitForReady` /
+   `resetDatabase` / `docker run` + a `services: postgres` YAML), which is exactly
+   the "start postgres → wait ready → hand back a URL → reap" slice Testcontainers
+   owns. The integration tier uses Testcontainers instead, for one decisive
+   reason: these tests are emitted **into the generated app** and a *user* runs
+   them (`dotnet test` / `mix test` / `pytest`). With Testcontainers the generated
+   app's integration tests **self-provision** — clone, run, done (Docker present) —
+   with no `PG_URL`/README ceremony. The cost is a **test-scoped** per-language dep
+   (`testcontainers`-node / Testcontainers.NET / testcontainers-python /
+   testcontainers-java / the `testcontainers` hex lib), added to a generated
+   project **only when it has a context integration test**. Loom still owns
+   migration/DDL application + repository construction + the test body;
+   Testcontainers only replaces the DB-lifecycle slice. **Caveats:** (a) the Elixir
+   `testcontainers` lib is less mature — Elixir may fall back to a provided
+   `PG_URL` (its e2e already assumes a docker postgres); (b) use Testcontainers'
+   reuse/singleton so the context tier shares one postgres per run rather than one
+   container per test file.
 
 ### Pipeline touchpoints
 
-- **grammar** — `TestSubject |= BoundedContext`; export context names in
-  `ddd-scope.ts` so `for <Ctx>` resolves; `checkTestPlacement` already covers the
-  placement rules (a context test is always hoisted → `for` required).
-- **IR** — `BoundedContextIR.tests: TestIR[]` (mirrors the Phase 1/2 subjects);
-  lower a context-level `test` under the **context env** (every aggregate / service
-  in scope), routed like the hoisted subject tests but keyed on the context.
-- **third renderer** (node) — `src/generator/typescript/emit/` (new
-  `integration-tests.ts`): create/create-action → `repo.save(<Agg>.create({…}))`;
-  operation → mutate + `repo.save`; a repository find → `await repo.<find>(…)`;
-  reuse `renderCreateInput` / `renderTsExpr` for the domain expressions.
-- **wire-repos factory** (node) — one emitted `createContextRepos(db, events)`
-  returning `{ <agg>: new <Agg>Repository(db, events), … }`.
-- **behavioural harness** — `test/behavioral/run.mjs`: a new `walk(...)` for the
-  integration file + an `entrySource` branch reusing lines 127-129 (PGlite + DDL +
-  drizzle) and injecting `repos` instead of `app.fetch`.
+- **grammar** (backend-agnostic core) — `TestSubject |= BoundedContext`; export
+  context names in `ddd-scope.ts` so `for <Ctx>` resolves; extend
+  `checkTestPlacement` so a `context`-nested `test` (no `for`) is a context
+  integration test (subject = the enclosing context) and `for` is redundant only
+  when it restates the *enclosing* declaration (a `context`-nested `test for <Agg>`
+  stays a legit hoisted aggregate test).
+- **IR** (backend-agnostic core) — `BoundedContextIR.tests: TestIR[]` (mirrors the
+  Phase 1/2 subjects); lower a context-level `test` under the **context env**
+  (every aggregate / service in scope), routed like the hoisted subject tests but
+  keyed on the context node.
+- **third renderer — per backend** (native test framework, against real PG):
+  create/create-action → `repo.save(<Agg>.create({…}))`; operation → mutate +
+  `repo.save`; a repository find → `await repo.<find>(…)`. Node reuses
+  `renderCreateInput` / `renderTsExpr`; each other backend reuses its own expr
+  renderer + repository API (the Phase 2 native-test emitters are the template).
+- **wire-repos factory — per backend** — one emitted `createContextRepos(db|conn)`
+  returning the context's repositories, so the test doesn't hand-construct each.
+- **real-PG harness + gate** — the generated native integration tests
+  self-provision a real Postgres via Testcontainers (per-language, test-scoped
+  dep); the node behavioural harness (`test/behavioral/run.mjs`) uses
+  `testcontainers`-node for the integration run-path (replacing the bespoke docker
+  scripting). CI needs Docker present (inherent to real PG); a provided
+  `LOOM_*_PG_URL` overrides Testcontainers where set (Elixir fallback / a shared
+  CI service).
 
 ### Phasing 3
 
-- **3a** — multi-aggregate persist + query + **synchronous** workflow cascades on
-  **node**. The renderer, the wire-repos factory, the harness run-path, the IR +
-  grammar. Delivers the motivating example.
-- **3b** — outbox-async cascade draining (if 3a finds reactors are async), and the
-  cross-backend integration harness (.NET/Java/Python/Elixir repository seams).
+- **3-core** ✅ **SHIPPED** (backend-agnostic, no emission change) — grammar
+  (`TestSubject |= BoundedContext`; context names already export via `ddd-scope.ts`),
+  `BoundedContextIR.tests`, lowering under the context env (a `context`-nested
+  `test` with no `for`, or a hoisted `test … for <Ctx>`), and the
+  `checkTestPlacement` extension (context is a nested container; `for` redundant
+  only when it restates the enclosing context; a context-nested `test for <Agg>`
+  stays a legit hoisted aggregate test). A context test is honestly gated with the
+  `loom.context-test-unsupported` **warning** until a backend's integration
+  renderer lands — no silent no-emit. Parse / lower / validate tested.
+- **3a** — the **node** integration renderer + wire-repos factory + real-PG harness
+  run-path, delivering multi-aggregate persist + query + **synchronous** workflow
+  cascades. Lifts the gate for `platform: node`.
+- **3b** — the other four backends' integration renderers (against the same real
+  PG), outbox-async cascade draining if 3a finds reactors are async, and the
+  cross-backend CI matrix.

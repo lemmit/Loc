@@ -1044,6 +1044,13 @@ export interface BoundedContextIR {
    *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
+  /** Context-scoped INTEGRATION tests (test-placement.md, Phase 3) — a `test`
+   *  nested in the `context` (no `for`) or hoisted with `for <Ctx>`.  Same
+   *  `TestIR` shape as the per-subject unit tests, but lowered under the context
+   *  env (every aggregate/service in scope) so it exercises cross-aggregate
+   *  behaviour.  Not yet emitted by any backend (gated `loom.context-test-unsupported`
+   *  until the Phase 3a integration renderer lands). */
+  tests: TestIR[];
   /** Per-error HTTP status overrides reaching this context, merged from the
    *  `httpStatus <Error> -> <Code>` clauses of every api over its subdomain
    *  (exception-less.md A1).  Populated by `enrichLoomModel`; the route
