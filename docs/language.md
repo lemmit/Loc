@@ -283,9 +283,10 @@ Membership is queryable from a repository `find ... where` (see
 [Repositories](#repositories) below).
 
 Reference collections are **not** the same as containment.
-`contains lines: OrderLine[]` declares entity parts that live and die
-with the parent — a child table joined on `parent_id`.  `X id[]` is a
-list of references to a *different* aggregate that outlives any one
+`contains lines: OrderLine[]` (or, equivalently, the `contains`-less
+`lines: OrderLine[]` — see below) declares entity parts that live and
+die with the parent — a child table joined on `parent_id`.  `X id[]` is
+a list of references to a *different* aggregate that outlives any one
 owner — persisted as a separate join table when the backend supports
 it (see [`docs/generators.md`](generators.md)).
 
@@ -316,6 +317,7 @@ Inside an aggregate or an `entity` part:
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single (required). |
 | `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
+| `name: PartName[]` / `name: PartName` / `name: PartName?` | **`contains` is optional.** A field whose type is a locally-declared `entity` part *is* a containment — `lines: OrderLine[]` means exactly what `contains lines: OrderLine[]` means (an entity part is owned by its root, never held by value). The keyword stays valid for readers who want the composition boundary spelled out; both spellings lower identically. Only what `contains` carries applies — a name, `[]`, and `?`; the value-property modifiers (`provenanced` / access / `= default` / `sensitive(...)` / `check`) are rejected on an entity-typed field (`loom.entity-field-modifier`). `X id` remains required for cross-aggregate references — `id` is a type constructor (the field is a key, not the entity), which is why *it* is never inferred. |
 | `derived name: TypeRef = Expression` | Computed read-only property. |
 | `derived display: string = Expression` | **Reserved** — declares the aggregate's user-facing label.  When present, `string(aggregate)` and implicit `"x " + aggregate` compile to a member access on this derived; React Select pickers use it for option text.  Without it, those expressions are compile errors. |
 | `derived inspect: string = Expression` | **Reserved** — declares the aggregate's developer-facing debug form.  Auto-generated when omitted (structural form, sensitive fields shown as `<redacted>`).  Backends emit it as `ToString()` / `[util.inspect.custom]` / `Inspect` so debugger watches, exceptions, and logger output get a useful representation. |

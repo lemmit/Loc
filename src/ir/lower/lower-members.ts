@@ -6,6 +6,8 @@
 // by ./lower.ts (structural walk) and the workflow lowerer.
 // -------------------------------------------------------------------------
 
+import type { AstNode } from "langium";
+import { isInferredContainment } from "../../language/containment.js";
 import type {
   Aggregate,
   Apply,
@@ -27,6 +29,7 @@ import {
   isDerivedProp,
   isFunctionDecl,
   isInvariant,
+  isNamedType,
   isProperty,
 } from "../../language/generated/ast.js";
 // Re-exported so this leaf and its `lower-workflow` sibling share the one
@@ -83,13 +86,13 @@ export function lowerApply(a: Apply, env: Env): ApplyIR {
 
 export function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPartIR {
   const inner = inPart(outer, agg, part);
-  const props = part.members.filter(isProperty) as Property[];
+  const props = valueProperties(part.members);
   return {
     name: part.name,
     parentName: agg.name,
     parentIdValueType: "guid" as IdValueType,
     fields: props.map((p) => lowerField(p, inner)),
-    contains: part.members.filter(isContainment).map(lowerContainment),
+    contains: lowerContainments(part.members),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
       ...part.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
@@ -153,6 +156,41 @@ export function lowerContainment(c: Containment): ContainmentIR {
   };
   if (c.optional) ir.optional = true;
   return ir;
+}
+
+// A `contains`-less entity-typed field (`line: OrderLine[]`) lowers to the same
+// `ContainmentIR` as its explicit `contains line: OrderLine[]` twin — the
+// `[]`/`?` markers live on the field's `TypeRef`, not a `Containment` node.
+export function containmentFromProperty(p: Property): ContainmentIR {
+  const base = isNamedType(p.type?.base) ? p.type.base : undefined;
+  const ir: ContainmentIR = {
+    name: p.name,
+    partName: base?.target?.ref?.name ?? "Unknown",
+    collection: !!p.type?.array,
+  };
+  if (p.type?.optional) ir.optional = true;
+  return ir;
+}
+
+// The declaration-ordered containments of an aggregate / entity part — explicit
+// `contains` members and inferred (entity-typed) properties, interleaved in
+// source order so `wireShape`'s containment slice stays stable regardless of
+// which spelling the author used.
+export function lowerContainments(members: readonly AstNode[]): ContainmentIR[] {
+  const out: ContainmentIR[] = [];
+  for (const m of members) {
+    if (isContainment(m)) out.push(lowerContainment(m));
+    else if (isProperty(m) && isInferredContainment(m)) out.push(containmentFromProperty(m));
+  }
+  return out;
+}
+
+// The genuine value properties — declared `Property` members minus the ones that
+// are really inferred containments.  The twin of `lowerContainments`: together
+// they partition an aggregate / entity part's members exactly as the explicit
+// `Property`/`Containment` split did before `contains` became optional.
+export function valueProperties(members: readonly AstNode[]): Property[] {
+  return members.filter((m): m is Property => isProperty(m) && !isInferredContainment(m));
 }
 
 export function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
