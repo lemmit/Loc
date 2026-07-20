@@ -212,6 +212,14 @@ export function renderGradleBuild(
     `    implementation("org.jmolecules:jmolecules-ddd:${JMOLECULES_VERSION}")`,
     `    implementation("org.jmolecules:jmolecules-events:${JMOLECULES_VERSION}")`,
     `    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${SPRINGDOC_VERSION}")`,
+    // Prometheus metrics at /metrics.  Actuator auto-binds the JVM/process
+    // meters + a PrometheusMeterRegistry; micrometer-registry-prometheus is
+    // the Prometheus exposition backend (both versions BOM-managed).  Only
+    // the `prometheus` endpoint is exposed, remapped to /metrics in
+    // application.yml — Actuator's own /health is NOT exposed, so it never
+    // collides with the hand-emitted HealthController.
+    `    implementation("org.springframework.boot:spring-boot-starter-actuator")`,
+    `    implementation("io.micrometer:micrometer-registry-prometheus")`,
     // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
     `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
@@ -291,6 +299,19 @@ export function renderApplicationYml(slug: string): string {
     `    hibernate:`,
     `      ddl-auto: none`,
     `    open-in-view: false`,
+    // Prometheus scrape target at /metrics (M-T7.1).  Actuator's base-path is
+    // moved to "/" and only the `prometheus` endpoint is exposed, remapped
+    // from its default id to `metrics` — so the exposition lands at exactly
+    // /metrics (parity with the other backends) and no other actuator
+    // endpoint (health/info/env) is web-reachable.
+    `management:`,
+    `  endpoints:`,
+    `    web:`,
+    `      base-path: /`,
+    `      exposure:`,
+    `        include: prometheus`,
+    `      path-mapping:`,
+    `        prometheus: metrics`,
     `springdoc:`,
     `  api-docs:`,
     `    path: /openapi.json`,

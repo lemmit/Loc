@@ -157,11 +157,11 @@ The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
 ## Metrics (Prometheus)
 
-Alongside the log stream, the **Hono**, **Python**, and **.NET**
+Alongside the log stream, the **Hono**, **Python**, **.NET**, and **Java**
 deployables expose a Prometheus scrape target at **`GET /metrics`** — the
-standard "monitoring" surface a dashboard or alert rule consumes.
-(Renderers for Java/Phoenix follow in sibling slices; the catalog below is
-already platform-neutral so they emit the same series.)
+standard "monitoring" surface a dashboard or alert rule consumes. (The
+Phoenix renderer follows in a sibling slice; the catalog below is already
+platform-neutral so they emit the same series.)
 
 Same design as the log catalog: one platform-neutral source of truth,
 `src/generator/_obs/metrics.ts`, pins every metric's stable name, type,
@@ -226,10 +226,10 @@ Each suite:
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
 
-The Hono, Python, and .NET suites additionally scrape `GET /metrics` and
-assert the Prometheus exposition carries the default runtime metrics plus
-the `http_requests_total` / `http_request_duration_seconds` series for the
-`/health` request (route-template + status labels).
+The Hono, Python, .NET, and Java suites additionally scrape `GET /metrics`
+and assert the Prometheus exposition carries the default runtime metrics
+plus the `http_requests_total` / `http_request_duration_seconds` series for
+the `/health` request (route-template + status labels).
 
 `.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,

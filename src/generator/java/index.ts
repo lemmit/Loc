@@ -87,6 +87,7 @@ import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaExternHook } from "./emit/extern.js";
 import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
+import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
@@ -378,6 +379,9 @@ function emitProjectFromContexts(
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));
   place("LifecycleCatalog.java", "config", renderLifecycleCatalog(basePkg));
   place("RequestCatalogFilter.java", "config", renderRequestCatalogFilter(basePkg));
+  // Prometheus HTTP metrics — catalog-driven Micrometer meters, served at
+  // /metrics (Actuator), recorded from RequestCatalogFilter's request_end seam.
+  place("HttpMetrics.java", "config", renderHttpMetrics(basePkg));
   // Ambient execution-context carrier (correlation_id / scope_id / actor_id in
   // MDC) — always-on, the cross-backend RequestContext (docs/architecture/
   // request-context.md).  The principal's actor_id is stamped by UserFilter.
