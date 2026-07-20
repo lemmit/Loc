@@ -2,15 +2,14 @@
 
 > Status: **PARTIAL** (2026-07-20). **Phase 1 shipped** — the `for` head +
 > aggregate hoisting (grammar/IR/lowering/validation/print). **Phase 2 shipped on
-> 4 of 5 backends** — `valueobject` / `domainService` unit-test anchors + hoisted
-> `for <VO|Service>`; **node (Hono), .NET, Java, and Python** emit colocated
-> VO/service unit-test files. **Remaining:** the **Elixir** VO/service test
-> emitter (its vanilla test emitter's `Env` is hard-coupled to a required
-> `AggregateIR` — `isAggOp`/`renderCreate`/`derivedAccessors` — so hosting a
-> non-aggregate subject needs an Env-decoupling refactor, its own slice), and
-> **Phase 3** (the `for <Context>` integration rung). Workflow anchors were folded
-> into Phase 3 (a workflow test wants context wiring — OQ#3). This is the
-> **placement** complement to
+> ALL FIVE backends** — `valueobject` / `domainService` unit-test anchors + hoisted
+> `for <VO|Service>`; node (Hono), .NET, Java, Python, and Elixir (vanilla
+> Phoenix) each emit colocated VO/service unit-test files. (Elixir's vanilla test
+> `Env` was decoupled from its former required `AggregateIR` so a VO/service
+> subject can host tests; a shape it can't lower degrades to `@tag :skip`, as the
+> aggregate path already did.) **Remaining:** **Phase 3** (the `for <Context>`
+> integration rung). Workflow anchors were folded into Phase 3 (a workflow test
+> wants context wiring — OQ#3). This is the **placement** complement to
 > [`test-authoring-language.md`](./test-authoring-language.md): that proposal is
 > about a test's *body* (principals, fixtures, retry); this one is about *where a
 > `test` may be declared* and *what it may target*.
