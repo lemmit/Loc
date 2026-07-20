@@ -54,7 +54,6 @@ import {
   isColumnStep,
   isCommandHandler,
   isComponent,
-  isContainment,
   isCreate,
   isCriterion,
   isDeployable,
@@ -186,7 +185,7 @@ import {
 } from "./lower-expr.js";
 import {
   lowerApply,
-  lowerContainment,
+  lowerContainments,
   lowerCreate,
   lowerDerived,
   lowerDestroy,
@@ -197,6 +196,7 @@ import {
   lowerOperation,
   lowerPropertyChecks,
   lowerUnique,
+  valueProperties,
 } from "./lower-members.js";
 import { lowerProjection } from "./lower-projection.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
@@ -1417,8 +1417,8 @@ function lowerAggregate(
 ): AggregateIR {
   const idValueType = "guid" as IdValueType;
   const inner = inAggregate(env, agg);
-  const props = agg.members.filter(isProperty) as Property[];
-  const containments = agg.members.filter(isContainment).map(lowerContainment);
+  const props = valueProperties(agg.members);
+  const containments = lowerContainments(agg.members);
   const parts: EntityPartIR[] = [];
   for (const m of agg.members) {
     if (isEntityPart(m)) parts.push(lowerEntityPart(m, agg, inner));
