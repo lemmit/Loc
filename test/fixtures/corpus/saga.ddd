@@ -10,6 +10,19 @@ system FulfillmentSaga {
           status := "Placed"
           emit OrderPlaced { order: id, at: now() }
         }
+
+        // Pure-domain (unit) test — a scalar-status transition GATED by a
+        // precondition: a Draft order places (status flips), a non-Draft order
+        // is rejected (`toThrow`).  Adds precondition-rejection coverage that
+        // core-domain lacks; the `emit` effect is stripped in the pure core.
+        test "place transitions a draft order and rejects a non-draft one" {
+          let o = Order.create({ customerId: "C1", status: "Draft" })
+          expect(o.status).toBe("Draft")
+          o.place()
+          expect(o.status).toBe("Placed")
+          let bad = Order.create({ customerId: "C2", status: "Shipped" })
+          expect(bad.place()).toThrow()
+        }
       }
       repository Orders for Order { }
       aggregate Shipment {
