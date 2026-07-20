@@ -63,6 +63,9 @@ describe("seed datetime string literals coerce to real datetime values", () => {
   it("python: datetime.fromisoformat(...) for an asyncpg timestamptz bind", async () => {
     const seed = find(await build("python", 8000), "app/db/seed.py");
     expect(seed).toContain('started_at=datetime.fromisoformat("2024-01-01T00:00:00Z")');
-    expect(seed).toContain("from datetime import UTC, datetime");
+    // The seed coerces via `datetime.fromisoformat(...)` and never constructs
+    // `datetime.now(UTC)`, so the emitter imports only `datetime` — importing
+    // `UTC` here would be an unused import that trips ruff (see seed.ts).
+    expect(seed).toContain("from datetime import datetime");
   });
 });
