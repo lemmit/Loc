@@ -214,21 +214,16 @@ describe("Order", () => {
 ```
 
 **Context integration test** emits a new per-context file that boots the context's
-domain layer in-process (the behavioral-unit runtime, reusing the same PGlite /
-repository wiring the api tier already stands up — minus the HTTP surface):
+domain layer in-process (reusing the PGlite / repository wiring the api tier
+stands up — minus the HTTP surface). The runnable shape is **async over live
+repositories** — see `Phase 3 — design` below for the runtime-accurate emission
+(this early sketch predated the runtime audit and is superseded there):
 
-```ts
-// ordering.integration.test.ts
-import { describe, it, expect } from "vitest";
-import { Order } from "./order";
-import { Inventory } from "./inventory";
-
-describe("Ordering (integration)", () => {
-  it("placing an order reserves stock", () => {
-    const o = Order.place({ sku: "abc", qty: 1 });
-    expect(Inventory.forSku(o.sku).reserved).toBe(1);
-  });
-});
+```ddd
+test "placing an order reserves stock" for Ordering {
+  let o = Order.place({ sku: "abc", qty: 1 })
+  expect(Inventory.forSku(o.sku).reserved).toBe(1)
+}
 ```
 
 ## Grammar additions (sketch)
@@ -306,16 +301,16 @@ nested `test "…" { … }` (no `for`) stays valid unchanged.
 1. **Own-file discovery** — is a `tests/*.ddd` file discovered purely via `import`
    (today's model, zero new machinery), or should the CLI auto-glob a `tests/`
    convention? Leaning: import-only for the first slice; a glob is sugar on top.
-2. **Context-integration runtime seam** — the api tier boots over HTTP; the
-   integration rung wants the *same* wired context minus the router. Confirm the
-   behavioral harness can expose a "domain-layer-only boot" (it already constructs
-   the repositories/PGlite before mounting Hono) so the integration file is a
-   thinner entry, not a second runtime.
-3. **`for` a workflow vs the enclosing context** — a workflow orchestration test
-   arguably wants context scope (it touches multiple aggregates). Do we allow
-   `for <Workflow>` at all, or fold workflow orchestration tests into the
-   `for <Context>` integration rung? Leaning: allow `for <Workflow>` as sugar that
-   lowers into the context integration file with the workflow's aggregates in scope.
+2. **Context-integration runtime seam** — ✅ **RESOLVED** (see `Phase 3 — design`).
+   The PGlite+DDL boot is separable from the router, and the repository is an
+   exported, HTTP-free persist seam; no domain-layer-only boot function exists
+   today but it's reconstructable. Phase 3 reuses the boot + repo classes and adds
+   a third renderer + harness run-path, not a new backend layer.
+3. **`for` a workflow vs the enclosing context** — ✅ **DECIDED**: workflow
+   orchestration folds into the `for <Context>` integration rung (a workflow test
+   touches multiple aggregates and needs the wired context + in-process dispatcher).
+   `for <Workflow>` is **not** a separate anchor in this design — dropped from the
+   Phase-2 unit anchors for that reason.
 4. **Cross-context targets** — should `for` ever name two contexts (a genuinely
    cross-context in-process test)? Leaning: no — that is the `test e2e against`
    rung's job. Keep `for` single-context to preserve an unambiguous boot.
@@ -336,4 +331,122 @@ nested `test "…" { … }` (no `for`) stays valid unchanged.
 - **Phase 3 — the context-integration rung.** `for <Context>`, the
   `BoundedContextIR.tests` list, and the per-backend in-process integration
   emitter. This is the one with a genuinely new runtime entry; it lands last so the
-  cheap wins ship first.
+  cheap wins ship first. Full design below (`Phase 3 — design`).
+
+---
+
+## Phase 3 — design (runtime-grounded, 2026-07-20)
+
+Phases 1–2 shipped by *reusing* existing per-subject unit runtimes. Phase 3 is
+different: a `test "…" for <Context>` runs cross-aggregate behaviour **in-process
+against live repositories, no HTTP** — a genuinely new execution path. This
+section resolves OQ#2 against the real behavioural runtime.
+
+### The core finding — the persist seam already exists, HTTP-free
+
+A context integration test's statements need **persistence** semantics that
+neither existing renderer provides:
+
+- the **unit** renderer (`renderTestExpr`, `typescript/emit/tests.ts`) makes
+  `Order.create({…})` a *pure in-memory* factory call — no `db`, no repo, and the
+  validator (`validateAggregateTestBodies`) even *rejects* mutating statements;
+- the **api/e2e** renderer (`src/system/e2e-render.ts`) makes `api.orders.create({…})`
+  an HTTP `fetch` — the wire boundary the whole rung exists to avoid.
+
+But the persist boundary is a **standalone, exported seam** — there is no need for
+a per-backend application-service layer:
+
+```ts
+// what the Hono route handler does internally (routes-builder.ts:594,631) —
+// and what the integration renderer emits directly, minus the router:
+const o = Order.create({ … });                 // pure domain factory (reused from the unit renderer)
+await new OrderRepository(db, events).save(o);  // the persist seam — repository-save-builder.ts:218
+const inv = await inventoryRepo.forSku(sku);    // a repo read — routes-builder.ts:736 pattern
+```
+
+`<Agg>Repository` is emitted per aggregate with `save` / `findById` / custom
+finds (`repository-builder.ts:220`), constructed today only *inside* `createApp`
+(`routes.ts:79`) but trivially reconstructable. And the PGlite + `synthDDL` +
+drizzle boot (`test/behavioral/run.mjs:127-131`, `web/src/runtime/ddl.ts`) is a
+self-contained block — only the `createApp(db)` router mount is HTTP-specific.
+
+**So Phase 3 reuses:** the boot block + the repository classes. **And adds:** a
+third renderer, a new emitted file category + run-path branch, `BoundedContextIR.tests`,
+`TestSubject |= BoundedContext`, and one small "wire the context's repositories"
+factory (so the harness doesn't hand-construct each repo).
+
+### Two examples (source → generated) — corrected for the real runtime
+
+The earlier sketch under "Two examples" showed a synchronous, DB-less body; the
+real emission is async over live repositories:
+
+```ddd
+context Ordering {
+  aggregate Order { … create place(sku: string, qty: int) { … emit OrderPlaced { … } } }
+  aggregate Inventory { … }
+  workflow ReserveOnPlace { on(OrderPlaced) { … reserve … } }
+
+  test "placing an order reserves stock" for Ordering {
+    let o = Order.place({ sku: "abc", qty: 1 })
+    expect(Inventory.forSku(o.sku).reserved).toBe(1)
+  }
+}
+```
+
+```ts
+// context/ordering.integration.test.ts — body only; the behavioural harness
+// injects `repos` after booting PGlite + DDL (mirrors how the api tier injects `api`).
+describe("Ordering (integration)", () => {
+  it("placing an order reserves stock", async () => {
+    const o = Order.place({ sku: "abc", qty: 1 });
+    await repos.orders.save(o);                       // persist → dispatch OrderPlaced
+    const inv = await repos.inventory.forSku(o.sku);  // repo read (post-cascade)
+    expect(inv.reserved).toBe(1);
+  });
+});
+```
+
+### The three decisions
+
+1. **Reuse, don't build a new backend layer.** The repository *is* the callable
+   persist boundary — no application-service seam. New code is confined to the
+   renderer + harness + IR/grammar, not the backend architecture.
+
+2. **Workflow cascades ride the in-process dispatcher.** `repos` is wired with
+   `createInProcessDispatcher(db)` (not `Noop`), so a `save` that emits
+   `OrderPlaced` runs the `ReserveOnPlace` reactor **synchronously in-process** —
+   delivering the motivating example without HTTP or an outbox drain. **Open
+   sub-question:** if a reactor is outbox-async rather than synchronous, v1 either
+   drains the outbox inline or defers workflow-cascade assertions to 3b. To
+   confirm before building.
+
+3. **Node-first for the runnable tier.** The per-PR behavioural tiers
+   (unit/api/ui) are all node-only; cross-backend behaviour rides docker
+   `conformance-full`. The integration tier follows suit: node runs it, other
+   backends' repository seams exist but their in-process harness is a later slice.
+
+### Pipeline touchpoints
+
+- **grammar** — `TestSubject |= BoundedContext`; export context names in
+  `ddd-scope.ts` so `for <Ctx>` resolves; `checkTestPlacement` already covers the
+  placement rules (a context test is always hoisted → `for` required).
+- **IR** — `BoundedContextIR.tests: TestIR[]` (mirrors the Phase 1/2 subjects);
+  lower a context-level `test` under the **context env** (every aggregate / service
+  in scope), routed like the hoisted subject tests but keyed on the context.
+- **third renderer** (node) — `src/generator/typescript/emit/` (new
+  `integration-tests.ts`): create/create-action → `repo.save(<Agg>.create({…}))`;
+  operation → mutate + `repo.save`; a repository find → `await repo.<find>(…)`;
+  reuse `renderCreateInput` / `renderTsExpr` for the domain expressions.
+- **wire-repos factory** (node) — one emitted `createContextRepos(db, events)`
+  returning `{ <agg>: new <Agg>Repository(db, events), … }`.
+- **behavioural harness** — `test/behavioral/run.mjs`: a new `walk(...)` for the
+  integration file + an `entrySource` branch reusing lines 127-129 (PGlite + DDL +
+  drizzle) and injecting `repos` instead of `app.fetch`.
+
+### Phasing 3
+
+- **3a** — multi-aggregate persist + query + **synchronous** workflow cascades on
+  **node**. The renderer, the wire-repos factory, the harness run-path, the IR +
+  grammar. Delivers the motivating example.
+- **3b** — outbox-async cascade draining (if 3a finds reactors are async), and the
+  cross-backend integration harness (.NET/Java/Python/Elixir repository seams).
