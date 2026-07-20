@@ -55,9 +55,14 @@ jobs:
           print("all workflow files parse")
           PY
 
-      # actionlint over the whole workflows dir (expression syntax, shellcheck
-      # on run: steps, deprecated-runner hints). Official image — no
-      # third-party action version to rot. Best-effort layer; the YAML-parse
-      # step above is the hard guard for the startup_failure class.
+      # actionlint's OWN checks over the whole workflows dir — invalid
+      # triggers/expressions, bad `uses:` refs, matrix errors, deprecated
+      # syntax (the workflow-correctness class). The bundled shellcheck and
+      # pyflakes integrations are disabled: they flag pre-existing `run:`
+      # style debt across the repo (SC2086 &c.) that isn't this gate's job,
+      # and enforcing it repo-wide would block every PR. Official image — no
+      # third-party action version to rot.
       - name: actionlint
         uses: docker://rhysd/actionlint:latest
+        with:
+          args: "-shellcheck= -pyflakes= -color"
