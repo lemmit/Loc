@@ -21,6 +21,7 @@ import type {
   TypeIR,
   WorkflowIR,
 } from "../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../ir/types/loom-ir.js";
 import type {
   ColumnShape,
   ColumnType,
@@ -260,8 +261,12 @@ export function schemaFromModule(
     }
     // Projection read models (projection.md): each folds foreign events into a
     // context-owned state table, keyed by its correlation column — the same
-    // shape a plain correlation-bearing workflow persists.
+    // shape a plain correlation-bearing workflow persists.  Query-time
+    // projections (read-path-architecture.md rev.13) are a LIVE read (source
+    // find + join bulk-loads) with no folded read-model table, so they own no
+    // physical table on any backend.
     for (const proj of ctx.projections) {
+      if (!isMaterializedProjection(proj)) continue;
       const t = projectionTableShape(proj, module.name, voLookup);
       if (ctxSchema !== undefined) t.schema = ctxSchema;
       tables.push(t);

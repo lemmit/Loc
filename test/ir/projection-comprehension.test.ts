@@ -170,11 +170,11 @@ async function sysErrorCodes(platform: string): Promise<string[]> {
 
 describe("projection comprehension — validation gates", () => {
   it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
-    // node (PR-C) + python (PR-D) emit it; java/dotnet/elixir stay gated until they do.
-    for (const platform of ["node", "python"]) {
+    // node (PR-C) + python (PR-D) + elixir (PR-E) emit it; java/dotnet stay gated.
+    for (const platform of ["node", "python", "elixir"]) {
       expect(await sysErrorCodes(platform)).not.toContain("loom.projection-query-time-unsupported");
     }
-    for (const platform of ["java", "dotnet", "elixir"]) {
+    for (const platform of ["java", "dotnet"]) {
       expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
     }
   });
@@ -240,5 +240,34 @@ describe("projection comprehension — Hono emission", () => {
     expect(qp).toContain('"customerName": customer_by_id[str(r.customer_id)].name');
     const repo = [...files.entries()].find(([p]) => p.endsWith("order_repository.py"))?.[1];
     expect(repo).toContain("async def orders_view(self) -> list[Order]:");
+  });
+
+  it("emits the Elixir twin — live source find + join bulk-load map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("elixir"));
+    const mod = [...files.entries()].find(([p]) =>
+      p.endsWith("query_projections/orders_view.ex"),
+    )?.[1];
+    expect(mod, "elixir query-projection module emitted").toBeDefined();
+    // Source find over the aggregate, with the `where IsConfirmed` predicate
+    // inlined (enum → dumped declared string under the Ecto query context).
+    expect(mod).toContain("from(record in D.Orders.Order,");
+    expect(mod).toContain("|> Repo.all()");
+    // `join Customer as c on o.customerId` → a batched id→struct map…
+    expect(mod).toContain("customer_by_id =");
+    expect(mod).toContain(
+      "from(row in D.Orders.Customer, where: row.id in ^Enum.map(rows, fn record -> record.customer_id end))",
+    );
+    expect(mod).toContain("|> Map.new(&{&1.id, &1})");
+    // …and the `select customerName = c.name` reads through the loaded map.
+    expect(mod).toContain("customerName: Map.get(customer_by_id, record.customer_id).name");
+    // `select orderId = o.id` / `lineCount = o.lineCount` render off `record`.
+    expect(mod).toContain("orderId: record.id");
+    expect(mod).toContain("lineCount: record.line_count");
+    // A project-wide controller exposes `GET /api/projections/orders_view`.
+    const ctrl = [...files.entries()].find(([p]) =>
+      p.endsWith("controllers/query_projections_controller.ex"),
+    )?.[1];
+    expect(ctrl).toContain("def orders_view(conn, _params) do");
+    expect(ctrl).toContain("D.Orders.QueryProjections.OrdersView.run(current_user)");
   });
 });
