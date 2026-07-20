@@ -7,12 +7,14 @@
 // generated drizzle migrations, wires the context's repositories, and runs the
 // body.
 //
+// A context with workflows wires the SYNCHRONOUS `createInProcessDispatcher(db)`
+// so a `save`'s emitted event fires its reactors inline (a placed order reserves
+// stock before the next read); a workflow-free context uses the no-op dispatcher.
+//
 // v1 constraint (`loom.integration-find-must-bind`): a repository find must be
 // LET-BOUND (`let inv = Inventory.forSku(x)`), not written inline inside an
 // `expect(...)`, so the `await` stays a statement-level concern and the assertion
-// expressions render synchronously.  v1 also uses the no-fan-out
-// `NoopDomainEventDispatcher`; the synchronous workflow-cascade edition
-// (`createInProcessDispatcher`) is the 3a-cascade follow-up.
+// expressions render synchronously.
 
 import type {
   AggregateIR,
@@ -163,6 +165,11 @@ export function renderContextIntegrationTest(ctx: BoundedContextIR): string | nu
     (a) => ctx.repositories.some((r) => r.aggregateName === a.name) && refs(a.name),
   );
   const usesIds = /\bIds\./.test(bodyStr);
+  // When the context runs workflows, wire the SYNCHRONOUS in-process dispatcher
+  // so a `save`'s emitted event fires its reactors inline (a placed order
+  // reserves stock before the next read).  A workflow-free context has nothing
+  // to fan out → the no-op dispatcher (and `../http/workflows` may not exist).
+  const cascade = ctx.workflows.length > 0;
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
@@ -171,7 +178,11 @@ export function renderContextIntegrationTest(ctx: BoundedContextIR): string | nu
   lines.push(`import { drizzle } from "drizzle-orm/node-postgres";`);
   lines.push(`import { migrate } from "drizzle-orm/node-postgres/migrator";`);
   lines.push(`import * as schema from "../db/schema";`);
-  lines.push(`import { NoopDomainEventDispatcher } from "../domain/events";`);
+  if (cascade) {
+    lines.push(`import { createInProcessDispatcher } from "../http/workflows";`);
+  } else {
+    lines.push(`import { NoopDomainEventDispatcher } from "../domain/events";`);
+  }
   if (usesIds) lines.push(`import * as Ids from "../domain/ids";`);
   for (const a of usedAggs) {
     lines.push(`import { ${a.name} } from "../domain/${lowerFirst(a.name)}";`);
@@ -190,7 +201,11 @@ export function renderContextIntegrationTest(ctx: BoundedContextIR): string | nu
   );
   lines.push(`  const db = drizzle(pool, { schema });`);
   lines.push(`  await migrate(db, { migrationsFolder: "./db/migrations" });`);
-  lines.push(`  const events = NoopDomainEventDispatcher;`);
+  lines.push(
+    cascade
+      ? `  const events = createInProcessDispatcher(db);`
+      : `  const events = NoopDomainEventDispatcher;`,
+  );
   lines.push(
     `  repos = { ${usedAggs
       .map((a) => `${lowerFirst(a.name)}: new ${a.name}Repository(db, events)`)

@@ -54,4 +54,43 @@ describe("Hono: context integration test emission (Phase 3a)", () => {
     const files = await generateSystemFiles(SRC.replace(/test "persists[\s\S]*?\}\n/, ""));
     expect(get(files, "integration.test.ts")).toBeUndefined();
   });
+
+  it("wires the SYNCHRONOUS in-process dispatcher when the context runs workflows", async () => {
+    const withWorkflow = `
+system Ship {
+  subdomain F { context Fulfillment {
+    aggregate Order {
+      customerId: string  status: string
+      operation place() { precondition status == "Draft"  status := "Placed"  emit OrderPlaced { order: id, at: now() } }
+    }
+    repository Orders for Order { }
+    aggregate Shipment { orderRef: Order id  status: string }
+    repository Shipments for Shipment { }
+    event OrderPlaced { order: Order id, at: datetime }
+    channel Lifecycle { carries: OrderPlaced  delivery: queue  retention: log }
+    workflow OrderFulfillment {
+      orderId: Order id
+      create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "Pending" }) }
+    }
+    test "placing transitions to Placed" {
+      let o = Order.create({ customerId: "c1", status: "Draft" })
+      o.place()
+      let found = Order.findById(o.id)
+      expect(found.status).toBe("Placed")
+    }
+  } }
+  api FApi from F
+  storage pg { type: postgres }
+  resource st { for: Fulfillment, kind: state, use: pg }
+  deployable d { platform: node contexts: [Fulfillment] serves: FApi dataSources: [st] port: 4000 }
+}`;
+    const files = await generateSystemFiles(withWorkflow);
+    const f = get(files, "test/fulfillment.integration.test.ts");
+    expect(f, "fulfillment.integration.test.ts").toBeDefined();
+    expect(f).toContain('import { createInProcessDispatcher } from "../http/workflows";');
+    expect(f).toContain("const events = createInProcessDispatcher(db);");
+    // op → mutate-in-place + save (the emit fans out through the dispatcher).
+    expect(f).toContain("o.place();");
+    expect(f).toContain("await repos.order.save(o);");
+  });
 });

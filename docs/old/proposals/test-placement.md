@@ -515,10 +515,15 @@ describe("Ordering (integration)", () => {
   `createInProcessDispatcher` cascade edition is **3a-cascade**). **Not yet wired**
   into Loom's behavioural CI run-path (testcontainers-node harness) — the emitted
   file is generator-tested + tsc-verified and runs against any PG URL.
-- **3a-cascade** — swap in `createInProcessDispatcher(db)` so a `save`'s emitted
-  event fires reactors synchronously (the "reserves stock" example); plus the
-  `loom.integration-find-must-bind` validator for the let-bound constraint, and
-  the testcontainers-node behavioural run-path.
+- **3a-cascade** ✅ **SHIPPED (emit + validation)** — a context that runs
+  workflows now wires `createInProcessDispatcher(db)` (imported from
+  `../http/workflows`) instead of the no-op, so a `save`'s emitted event fires its
+  reactors **synchronously in-process** (the "reserves stock" example). The
+  `loom.integration-find-must-bind` IR validator enforces the let-bound-find
+  constraint (an inline find in `expect(...)` is a themed error with a fix hint).
+  Compile-verified: a workflow + integration-test project (create → op → save →
+  cascade) `tsc --noEmit`s clean. **Still deferred:** the testcontainers-node
+  behavioural run-path that actually *runs* the tier in Loom's CI.
 - **3b** — the other four backends' integration renderers (against the same real
   PG), outbox-async cascade draining if reactors are async, and the cross-backend
   CI matrix.

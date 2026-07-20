@@ -57,6 +57,52 @@ export function validateAggregateTestBodies(ctx: BoundedContextIR, diags: LoomDi
   }
 }
 
+// ---------------------------------------------------------------------------
+// Context-scoped INTEGRATION test bodies (test-placement.md, Phase 3a).
+//
+// The node integration renderer awaits a repository read at STATEMENT level
+// (`const x = await repos.<agg>.<find>(...)`), so a find must be let-bound before
+// its result is asserted.  A find written INLINE inside `expect(...)` has no
+// statement to await it — reject it with a fix hint (the async-in-expression
+// edition is a deferred follow-up).
+// ---------------------------------------------------------------------------
+
+export function validateContextIntegrationTests(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const BUILTIN_READS = new Set(["findById", "getById", "findAll"]);
+  const isRepoFind = (e: ExprIR): boolean => {
+    if (e.kind !== "method-call" || e.receiver.kind !== "ref") return false;
+    const aggName = (e.receiver as { name: string }).name;
+    const repos = ctx.repositories.filter((r) => r.aggregateName === aggName);
+    if (repos.length === 0) return false;
+    return (
+      BUILTIN_READS.has(e.member) || repos.some((r) => r.finds.some((f) => f.name === e.member))
+    );
+  };
+  for (const test of ctx.tests) {
+    for (const stmt of test.statements) {
+      if (stmt.kind !== "expect" && stmt.kind !== "expect-throws") continue;
+      let inlineFind = false;
+      walkExpr(stmt.expr, (e) => {
+        if (isRepoFind(e)) inlineFind = true;
+      });
+      if (inlineFind) {
+        diags.push({
+          severity: "error",
+          code: "loom.integration-find-must-bind",
+          message:
+            `context '${ctx.name}' integration test '${test.name}': a repository read inside ` +
+            `'expect(...)' must be let-bound first — write \`let x = <Agg>.findById(...)\` then ` +
+            `assert over \`x\` (the integration renderer awaits the read at statement level).`,
+          source: `${ctx.name}.test:${test.name}`,
+        });
+      }
+    }
+  }
+}
+
 function invalidTestStmt(s: TestStmtIR): string | null {
   switch (s.kind) {
     case "assign":
