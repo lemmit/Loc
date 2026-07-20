@@ -27,6 +27,7 @@ import {
   renderRootLayout,
 } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
+import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
   appName: string,
@@ -50,10 +51,13 @@ export function emitVanillaShellFiles(
   // the byte-identical shell (no SPA static plug, no fallback).  Mutually
   // exclusive with LiveView (an embedded-SPA deployable emits no HEEx pages).
   hasEmbeddedSpa = false,
-  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer GenServer
-  // module names, appended to the supervision tree in `renderApplication`.
-  // Empty ⇒ byte-identical.
+  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer supervision
+  // children (Oban first when present, then the timer GenServer module names),
+  // appended to the supervision tree in `renderApplication`.  Empty ⇒
+  // byte-identical.
   schedulerChildren: string[] = [],
+  // Durable-timer (cron:) support: adds the Oban config block to config.exs.
+  usesOban = false,
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
@@ -130,7 +134,7 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
-  out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly));
+  out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban));
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
   out.set("config/runtime.exs", renderVanillaRuntime(appName, appModule));
@@ -644,13 +648,21 @@ end
 `;
 }
 
-function renderVanillaConfig(appName: string, appModule: string, swooshSmtpOnly = false): string {
+function renderVanillaConfig(
+  appName: string,
+  appModule: string,
+  swooshSmtpOnly = false,
+  usesOban = false,
+): string {
   // gen_smtp-backed Swoosh (the smtp mailer) needs no HTTP API client; disable
   // the default so `:swoosh` boots without hackney.  Omitted entirely when no
   // smtp-only mailer is present, so a mailer-free app's config is unchanged.
   const swooshConfig = swooshSmtpOnly
     ? `\n# smtp mailer (Swoosh.Adapters.SMTP via gen_smtp) uses no HTTP API client.\nconfig :swoosh, :api_client, false\n`
     : "";
+  // Durable timerSource (cron:) support — the Oban instance the scheduler
+  // GenServers enqueue onto.  Omitted when no cron timer is owned.
+  const obanConfig = usesOban ? renderObanConfig(appName, appModule) : "";
   return `import Config
 
 config :${appName},
@@ -669,7 +681,7 @@ config :${appName}, ${appModule}Web.Endpoint,
   live_view: [signing_salt: "loom_dev"]
 
 config :phoenix, :json_library, Jason
-
+${obanConfig}
 # JSON Logger formatter — emits one structured JSON object per line so
 # the cross-backend observability catalog envelope (event, request_id,
 # method, path, status, duration_ms, …) is parseable upstream the same

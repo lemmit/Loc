@@ -396,7 +396,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // timer under `lib/<app>/scheduler/<timer>.ex`, added to the supervision tree.
   // A `cron:` timer rides a `crontab` hex dep; an `every:`-only (or timer-free)
   // deployable stays byte-identical (no module, no dep, no supervision child).
-  const { schedulerChildren, usesCron } = emitVanillaScheduler(
+  const { schedulerChildren, usesCron, usesOban } = emitVanillaScheduler(
     appName,
     appModule,
     contexts,
@@ -404,8 +404,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     sys,
     out,
   );
+  // A `cron:` timer rides `crontab` (next-boundary computation) + `oban` (the
+  // durable single-fire/retry job store); an `every:`-only timer needs neither.
   const hexDeps = usesCron
-    ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"' }
+    ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"', oban: '"~> 2.19"' }
     : resourceEmission.hexDeps;
 
   // Shell files — emitted AFTER per-context emit so the router has the
@@ -426,6 +428,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
     schedulerChildren,
+    usesOban,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
