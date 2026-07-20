@@ -41,7 +41,7 @@ import {
   collectPageWorkflowForms,
   renderFormsFile,
 } from "./forms-emit.js";
-import { flutterPack } from "./pack.js";
+import { flutterPack, usesIntl } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 
@@ -318,6 +318,7 @@ function renderStatelessPage(
   if (bodyWidget.includes("apiUri(")) {
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
+  if (usesIntl(bodyWidget)) imports.push("import 'package:intl/intl.dart';");
   const idBinding = opts.usesRouteId
     ? ["    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';"]
     : [];
@@ -426,6 +427,9 @@ function renderConsumerPage(
   if (bodyWidget.includes("apiUri(") || projSource.includes("apiUri(")) {
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
+  if (usesIntl(bodyWidget) || usesIntl(projSource)) {
+    imports.push("import 'package:intl/intl.dart';");
+  }
   return `${lines(
     ...imports,
     "",
@@ -496,6 +500,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
