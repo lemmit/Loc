@@ -1,4 +1,5 @@
 import type { EnrichedBoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
@@ -21,10 +22,14 @@ import { instanceFieldValue } from "./workflows-builder.js";
 // ---------------------------------------------------------------------------
 
 export function buildPyProjectionsFile(ctx: EnrichedBoundedContextIR): string | null {
-  if (ctx.projections.length === 0) return null;
+  // FOLDED (materialized) projections only — the event-folded read model with a
+  // physical `<Proj>Row` table.  Query-time projections (read-path-architecture.md
+  // rev.13) are emitted by `buildPyQueryProjectionsFile` instead.
+  const folded = ctx.projections.filter(isMaterializedProjection);
+  if (folded.length === 0) return null;
 
-  const models = ctx.projections.map((p) => projectionResponseModels(p, ctx)).join("");
-  const routeBlocks = ctx.projections.map(projectionRoutes);
+  const models = folded.map((p) => projectionResponseModels(p, ctx)).join("");
+  const routeBlocks = folded.map(projectionRoutes);
   const routes = routeBlocks.join("\n\n\n");
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routes}`;
 
