@@ -28,7 +28,7 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
-import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { leafPath } from "../../_stmt/leaves.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
@@ -1124,6 +1124,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
     { name: "op", valueExpr: `"${op.name}"` },
     { name: "id", valueExpr: "id" },
   ])}
+    ${renderPhoenixDomainOperation(aggPascal, op.name)}
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
       ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}))

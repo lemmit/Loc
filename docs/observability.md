@@ -180,6 +180,8 @@ fed by the Phoenix endpoint `:telemetry` event (Phoenix).
 |---|---|---|---|
 | `http_requests_total` | counter | `method`, `route`, `status` | RED rate + errors |
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status` | RED duration (quantiles via `histogram_quantile`) |
+| `domain_operations_total` | counter | `aggregate`, `op` | Business throughput — every domain operation invoked (constructor is `op="create"`) |
+| `domain_faults_total` | counter | `kind` | Recoverable domain faults (`domain_error`/`forbidden`/`not_found`/`conflict`/`disallowed`) — the business error rate |
 | `process_*`, `nodejs_*` | (default) | — | CPU, resident memory, event-loop lag, GC, open handles — from `collectDefaultMetrics()` |
 
 The two HTTP metrics are recorded at the **same request seam** as the
@@ -187,6 +189,18 @@ The two HTTP metrics are recorded at the **same request seam** as the
 `finally` block). The `route` label is the matched route **template**
 (`/api/carts/:id`), never the raw path — labelling by raw path would
 explode cardinality on every id.
+
+The two **domain** counters are recorded at the domain seams: an operation
+increment at `operation_invoked` / `aggregate_created` (the constructor
+counts as `op="create"`), and a fault increment at the app-wide error
+handler alongside the matching fault log line. `domain_faults_total` is
+labelled by `kind` only (not `aggregate`) — several backends handle faults
+in a central seam where the aggregate isn't in scope, so an aggregate label
+wouldn't be uniform cross-backend; per-aggregate throughput lives on
+`domain_operations_total{aggregate,op}` instead. On the four manual-increment
+backends (Hono / .NET / Java / Python) a `record*` helper does the bump; on
+Phoenix the counters are declared in the Telemetry supervisor and fed by
+`[:loom, :domain, :*]` `:telemetry` events at the seams.
 
 ```bash
 # Scrape once.
@@ -200,6 +214,12 @@ sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total
 
 # p95 latency.
 histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+# Domain error rate — faults over operations (business RED).
+sum(rate(domain_faults_total[5m])) / sum(rate(domain_operations_total[5m]))
+
+# Busiest operations.
+topk(5, sum(rate(domain_operations_total[5m])) by (aggregate, op))
 ```
 
 **Stability:** the metric catalog is a wire contract, same governance as

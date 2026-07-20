@@ -273,6 +273,11 @@ export function buildPyRoutesFile(
     // The catalog `log(...)` facade — `aggregate_created` (create route) and
     // `operation_invoked` (operation routes) narrative lines.
     refersTo("log") ? "from app.obs.log import log" : null,
+    // Domain metrics (M-T7.1) — the per-operation counter, recorded next to
+    // the operation_invoked / aggregate_created log lines.
+    refersTo("record_domain_operation")
+      ? "from app.obs.metrics import record_domain_operation"
+      : null,
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",
@@ -798,6 +803,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
       ...(auditCreate ? createAuditCall(agg) : []),
       `    log("info", "aggregate_created", aggregate=${JSON.stringify(agg.name)}, id=created.id)`,
+      `    record_domain_operation(${JSON.stringify(agg.name)}, "create")`,
       `    return {"id": created.id}`,
     );
   }
@@ -842,6 +848,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
     ...(auditCreate ? createAuditCall(agg) : []),
     `    log("info", "aggregate_created", aggregate=${JSON.stringify(agg.name)}, id=created.id)`,
+    `    record_domain_operation(${JSON.stringify(agg.name)}, "create")`,
     `    return {"id": created.id}`,
   );
 }
@@ -1058,6 +1065,7 @@ function operationRoute(
       "    repo = _repo(session)",
       `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
       `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+      `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -1095,6 +1103,7 @@ function operationRoute(
     "    repo = _repo(session)",
     `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+    `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
     ...whenGate(agg, op),
     op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,

@@ -68,6 +68,28 @@ export const Metrics = {
     labels: ["method", "route", "status"],
     buckets: HTTP_DURATION_BUCKETS,
   },
+  /** Business-level throughput: every domain operation invoked (a named
+   *  `operation`, or the aggregate constructor as `op="create"`), by
+   *  aggregate + operation.  The denominator for a domain error rate. */
+  domainOperationsTotal: {
+    name: "domain_operations_total",
+    type: "counter",
+    help: "Total domain operations invoked, by aggregate and operation.",
+    labels: ["aggregate", "op"],
+  },
+  /** Business-level errors: recoverable domain faults by kind (`domain_error`
+   *  / `forbidden` / `not_found` / `conflict` / `disallowed`) — the numerator
+   *  for a domain error rate, at the same seams the log catalog's fault events
+   *  fire.  Only `kind` is labelled: several backends handle faults in a
+   *  central (app-wide) error seam where the aggregate isn't in scope, so an
+   *  aggregate label wouldn't be uniform across backends; per-aggregate
+   *  throughput lives on `domain_operations_total` instead. */
+  domainFaultsTotal: {
+    name: "domain_faults_total",
+    type: "counter",
+    help: "Total recoverable domain faults, by kind.",
+    labels: ["kind"],
+  },
 } as const satisfies Record<string, MetricDef>;
 
 /** Lookup key for any catalog entry — used by per-backend renderers so a

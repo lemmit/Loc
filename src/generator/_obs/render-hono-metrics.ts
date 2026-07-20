@@ -22,6 +22,8 @@ import { Metrics } from "./metrics.js";
 export function renderHonoMetricsFile(): string {
   const reqTotal = Metrics.httpRequestsTotal;
   const reqDur = Metrics.httpRequestDurationSeconds;
+  const domainOps = Metrics.domainOperationsTotal;
+  const domainFaults = Metrics.domainFaultsTotal;
   const labelList = (labels: readonly string[]): string =>
     labels.map((l) => JSON.stringify(l)).join(", ");
 
@@ -69,6 +71,38 @@ export function renderHonoMetricsFile(): string {
       "  const labels = { method, route, status: String(status) };",
       "  httpRequestsTotal.inc(labels);",
       "  httpRequestDurationSeconds.observe(labels, durationMs / 1000);",
+      "}",
+      "",
+      `/** ${domainOps.help} */`,
+      "export const domainOperationsTotal = new Counter({",
+      `  name: ${JSON.stringify(domainOps.name)},`,
+      `  help: ${JSON.stringify(domainOps.help)},`,
+      `  labelNames: [${labelList(domainOps.labels)}],`,
+      "  registers: [registry],",
+      "});",
+      "",
+      `/** ${domainFaults.help} */`,
+      "export const domainFaultsTotal = new Counter({",
+      `  name: ${JSON.stringify(domainFaults.name)},`,
+      `  help: ${JSON.stringify(domainFaults.help)},`,
+      `  labelNames: [${labelList(domainFaults.labels)}],`,
+      "  registers: [registry],",
+      "});",
+      "",
+      "/** Count one invoked domain operation (a named operation, or an",
+      ' *  aggregate constructor as `op="create"`), by aggregate + op.  Called',
+      " *  at the same seam as the `operation_invoked` / `aggregate_created`",
+      " *  log lines. */",
+      "export function recordDomainOperation(aggregate: string, op: string): void {",
+      "  domainOperationsTotal.inc({ aggregate, op });",
+      "}",
+      "",
+      "/** Count one recoverable domain fault, by kind (the catalog fault-event",
+      " *  name).  Called from the router's onError, alongside the matching",
+      " *  `domain_error` / `forbidden` / `not_found` / `conflict` / `disallowed`",
+      " *  log line. */",
+      "export function recordDomainFault(kind: string): void {",
+      "  domainFaultsTotal.inc({ kind });",
       "}",
     ) + "\n"
   );

@@ -41,3 +41,35 @@ export function recordHttpRequest(
   httpRequestsTotal.inc(labels);
   httpRequestDurationSeconds.observe(labels, durationMs / 1000);
 }
+
+/** Total domain operations invoked, by aggregate and operation. */
+export const domainOperationsTotal = new Counter({
+  name: "domain_operations_total",
+  help: "Total domain operations invoked, by aggregate and operation.",
+  labelNames: ["aggregate", "op"],
+  registers: [registry],
+});
+
+/** Total recoverable domain faults, by kind. */
+export const domainFaultsTotal = new Counter({
+  name: "domain_faults_total",
+  help: "Total recoverable domain faults, by kind.",
+  labelNames: ["kind"],
+  registers: [registry],
+});
+
+/** Count one invoked domain operation (a named operation, or an
+ *  aggregate constructor as `op="create"`), by aggregate + op.  Called
+ *  at the same seam as the `operation_invoked` / `aggregate_created`
+ *  log lines. */
+export function recordDomainOperation(aggregate: string, op: string): void {
+  domainOperationsTotal.inc({ aggregate, op });
+}
+
+/** Count one recoverable domain fault, by kind (the catalog fault-event
+ *  name).  Called from the router's onError, alongside the matching
+ *  `domain_error` / `forbidden` / `not_found` / `conflict` / `disallowed`
+ *  log line. */
+export function recordDomainFault(kind: string): void {
+  domainFaultsTotal.inc({ kind });
+}

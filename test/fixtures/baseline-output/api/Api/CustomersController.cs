@@ -13,6 +13,7 @@ using Api.Application.Customers.Responses;
 using Api.Domain.Ids;
 using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
+using Api.Observability;
 
 namespace Api.Api;
 
@@ -37,6 +38,7 @@ public sealed class CustomersController : ControllerBase
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Customer", id.Value);
+        HttpMetrics.RecordDomainOperation("Customer", "create");
         return CreatedAtAction(nameof(GetCustomerById), new { id = id.Value }, new CreateCustomerResponse(id.Value));
     }
 
@@ -75,6 +77,7 @@ public sealed class CustomersController : ControllerBase
     public async Task<IActionResult> UpdateCustomer([FromRoute] Guid id, [FromBody] UpdateCustomerRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Customer", "update", id);
+        HttpMetrics.RecordDomainOperation("Customer", "update");
         var cmd = new UpdateCommand(
             new CustomerId(id),
             request.Username,

@@ -16,6 +16,7 @@ system S {
       aggregate Order with crudish {
         customerId: string
         status: string
+        operation confirm() { status := "confirmed" }
       }
       repository Orders for Order { }
     }
@@ -65,5 +66,29 @@ describe("Java Prometheus metrics", () => {
     const yml = get(files, "/application.yml");
     expect(yml).toContain("include: prometheus");
     expect(yml).toContain("prometheus: metrics");
+  });
+
+  it("emits the domain counters + records them at the operation / fault seams", async () => {
+    const files = await generateSystemFiles(SYSTEM);
+
+    // Business counters on the same catalog-driven HttpMetrics component.
+    const metrics = get(files, "/config/HttpMetrics.java");
+    expect(metrics).toContain('Counter.builder("domain.operations")');
+    expect(metrics).toContain('Counter.builder("domain.faults")');
+    expect(metrics).toContain("public void recordDomainOperation(String aggregate, String op) {");
+    expect(metrics).toContain("public void recordDomainFault(String kind) {");
+
+    // Controllers inject HttpMetrics and record every operation / create.
+    const controller = get(files, "/OrdersController.java");
+    expect(controller).toContain(", HttpMetrics httpMetrics");
+    expect(controller).toContain('httpMetrics.recordDomainOperation("Order", "create")');
+    expect(controller).toContain('httpMetrics.recordDomainOperation("Order", "confirm")');
+
+    // The exception advice injects HttpMetrics and records faults by kind.
+    const advice = get(files, "/ApiExceptionAdvice.java");
+    expect(advice).toContain("public ApiExceptionAdvice(HttpMetrics httpMetrics) {");
+    expect(advice).toContain('httpMetrics.recordDomainFault("domain_error")');
+    expect(advice).toContain('httpMetrics.recordDomainFault("forbidden")');
+    expect(advice).toContain('httpMetrics.recordDomainFault("not_found")');
   });
 });

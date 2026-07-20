@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
-import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { renderPhoenixDomainFault, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 export function renderVanillaProblemDetailsModule(
   appModule: string,
@@ -50,6 +50,7 @@ export function renderVanillaProblemDetailsModule(
       },
       { name: "status", valueExpr: `${concurrencyStatus}` },
     ])}
+    ${renderPhoenixDomainFault("conflict")}
 
     body =
       Jason.encode!(%{
@@ -74,6 +75,7 @@ export function renderVanillaProblemDetailsModule(
   ]);
   // The 422 body — shared by the plain (no-`unique`) and the unique-aware forms.
   const body422 = `    ${log422}
+    ${renderPhoenixDomainFault("domain_error")}
 
     pointer_errors =
       changeset.errors
@@ -191,24 +193,39 @@ ${responseFns}
     # every fault response (incl. not_found_response/3, which delegates here)
     # surfaces a structured log line matching Hono/.NET/Python. Emitted with
     # each fault's real HTTP status (not normalised).
+    # Each fault also feeds domain_faults_total{kind} (via [:loom, :domain, :fault]),
+    # except a >=500 internal_error — that's infrastructure, not a domain fault.
     case status do
-      403 -> ${renderPhoenixLogCall("forbidden", [
-        { name: "message", valueExpr: "detail" },
-        { name: "status", valueExpr: "status" },
-      ])}
-      409 -> ${renderPhoenixLogCall("disallowed", [
-        { name: "message", valueExpr: "detail" },
-        { name: "status", valueExpr: "status" },
-      ])}
-      404 -> ${renderPhoenixLogCall("notFound", [{ name: "status", valueExpr: "status" }])}
-      _ when status >= 500 -> ${renderPhoenixLogCall("internalError", [
-        { name: "error", valueExpr: "detail" },
-        { name: "status", valueExpr: "status" },
-      ])}
-      _ -> ${renderPhoenixLogCall("domainError", [
-        { name: "message", valueExpr: "detail" },
-        { name: "status", valueExpr: "status" },
-      ])}
+      403 ->
+        ${renderPhoenixLogCall("forbidden", [
+          { name: "message", valueExpr: "detail" },
+          { name: "status", valueExpr: "status" },
+        ])}
+        ${renderPhoenixDomainFault("forbidden")}
+
+      409 ->
+        ${renderPhoenixLogCall("disallowed", [
+          { name: "message", valueExpr: "detail" },
+          { name: "status", valueExpr: "status" },
+        ])}
+        ${renderPhoenixDomainFault("disallowed")}
+
+      404 ->
+        ${renderPhoenixLogCall("notFound", [{ name: "status", valueExpr: "status" }])}
+        ${renderPhoenixDomainFault("not_found")}
+
+      _ when status >= 500 ->
+        ${renderPhoenixLogCall("internalError", [
+          { name: "error", valueExpr: "detail" },
+          { name: "status", valueExpr: "status" },
+        ])}
+
+      _ ->
+        ${renderPhoenixLogCall("domainError", [
+          { name: "message", valueExpr: "detail" },
+          { name: "status", valueExpr: "status" },
+        ])}
+        ${renderPhoenixDomainFault("domain_error")}
     end
 
     body =
