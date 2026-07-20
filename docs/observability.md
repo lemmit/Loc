@@ -157,16 +157,22 @@ The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
 ## Metrics (Prometheus)
 
-Alongside the log stream, the **Hono**, **Python**, **.NET**, and **Java**
-deployables expose a Prometheus scrape target at **`GET /metrics`** — the
-standard "monitoring" surface a dashboard or alert rule consumes. (The
-Phoenix renderer follows in a sibling slice; the catalog below is already
-platform-neutral so they emit the same series.)
+Alongside the log stream, **every** backend deployable — Hono, Python,
+.NET, Java, and Phoenix — exposes a Prometheus scrape target at **`GET
+/metrics`**, the standard "monitoring" surface a dashboard or alert rule
+consumes.
 
 Same design as the log catalog: one platform-neutral source of truth,
 `src/generator/_obs/metrics.ts`, pins every metric's stable name, type,
 help, label set, and (for histograms) bucket bounds. A per-backend
 renderer consumes it, so a PromQL query written once works everywhere.
+The client library differs per platform but the exposition matches: pino's
+backend uses [prom-client](https://github.com/siimon/prom-client) (Hono),
+[prometheus_client](https://github.com/prometheus/client_python) (Python),
+[prometheus-net](https://github.com/prometheus-net/prometheus-net) (.NET),
+Actuator + [Micrometer](https://micrometer.io/) (Java), and
+[telemetry_metrics_prometheus_core](https://hex.pm/packages/telemetry_metrics_prometheus_core)
+fed by the Phoenix endpoint `:telemetry` event (Phoenix).
 
 **What's exposed:**
 
@@ -226,10 +232,11 @@ Each suite:
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
 
-The Hono, Python, .NET, and Java suites additionally scrape `GET /metrics`
-and assert the Prometheus exposition carries the default runtime metrics
-plus the `http_requests_total` / `http_request_duration_seconds` series for
-the `/health` request (route-template + status labels).
+All five obs-e2e suites additionally scrape `GET /metrics` and assert the
+Prometheus exposition carries the `http_requests_total` /
+`http_request_duration_seconds` series for the `/health` request
+(route-template + status labels), plus the default runtime metrics on the
+backends whose client library ships them (Hono/Python/.NET/Java).
 
 `.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,

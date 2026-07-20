@@ -134,6 +134,10 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
+  out.set(
+    `lib/${appName}_web/controllers/metrics_controller.ex`,
+    renderVanillaMetricsController(appModule),
+  );
   out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban));
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
@@ -200,7 +204,9 @@ defmodule ${appModule}.MixProject do
       {:jason, "~> 1.4"},
       {:uuidv7, "~> 1.0"},
       {:plug_cowboy, "~> 2.6"},
-      {:open_api_spex, "~> 3.0"}${liveViewDep}${extraBlock}${oidcDep}
+      {:open_api_spex, "~> 3.0"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_metrics_prometheus_core, "~> 1.1"}${liveViewDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -561,6 +567,10 @@ ${browserPipeline}${spaPipeline}
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
+
+  scope "/metrics" do
+    get "/", ${appModule}Web.MetricsController, :index
+  end
 ${rootApiScope}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
@@ -599,6 +609,28 @@ defmodule ${appModule}Web.HealthController do
         |> put_status(:service_unavailable)
         |> json(%{status: "not_ready"})
     end
+  end
+end
+`;
+}
+
+function renderVanillaMetricsController(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.MetricsController do
+  use ${appModule}Web, :controller
+
+  @moduledoc """
+  Prometheus scrape target — the text exposition of the
+  \`TelemetryMetricsPrometheus.Core\` aggregator started in
+  \`${appModule}.Telemetry\` (the HTTP counter/histogram fed by the Phoenix
+  endpoint telemetry event).  Parity with the other backends' GET /metrics.
+  """
+
+  @doc "GET /metrics — Prometheus text exposition."
+  def index(conn, _params) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, TelemetryMetricsPrometheus.Core.scrape())
   end
 end
 `;

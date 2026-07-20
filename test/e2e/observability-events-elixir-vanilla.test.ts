@@ -250,6 +250,20 @@ describe.skipIf(!ENABLED)(
         // 7. /health round-trip.
         const r = await fetch(`http://127.0.0.1:${appPort}/health`);
         expect(r.status).toBe(200);
+
+        // 7b. Prometheus scrape (M-T7.1): /metrics (TelemetryMetricsPrometheus
+        // .Core, fed by the [:phoenix, :endpoint, :stop] event) exposes the
+        // HTTP counter/histogram recorded for the /health request, labelled by
+        // the matched route TEMPLATE.
+        const m = await fetch(`http://127.0.0.1:${appPort}/metrics`);
+        expect(m.status).toBe(200);
+        const metricsBody = await m.text();
+        expect(metricsBody).toMatch(
+          /http_requests_total\{method="GET",route="\/health",status="200"\}/,
+        );
+        expect(metricsBody).toMatch(/http_request_duration_seconds_bucket\{/);
+        expect(metricsBody).toMatch(/http_request_duration_seconds_count\{/);
+
         await new Promise<void>((resolve) => setTimeout(resolve, 300));
 
         // 8. SIGTERM the whole process group.

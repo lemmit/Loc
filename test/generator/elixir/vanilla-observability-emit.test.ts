@@ -96,6 +96,27 @@ describe("vanilla — telemetry.ex translates Phoenix endpoint events into the c
     expect(tel).toContain("duration_ms");
   });
 
+  it("defines the catalog-driven Prometheus metrics + serves /metrics (M-T7.1)", async () => {
+    const files = await load();
+    const tel = files.get("api/lib/api/telemetry.ex")!;
+    // Catalog-named Telemetry.Metrics defs fed by the endpoint stop event.
+    expect(tel).toContain("import Telemetry.Metrics");
+    expect(tel).toContain('counter("http.requests.total"');
+    expect(tel).toContain('distribution("http.request.duration.seconds"');
+    expect(tel).toContain("{TelemetryMetricsPrometheus.Core, metrics: metrics()}");
+    expect(tel).toContain("def request_tags(%{conn: conn}) do");
+    // Route label = matched template via route_info.
+    expect(tel).toContain("Phoenix.Router.route_info(");
+    // The scrape controller + route + deps.
+    const ctrl = files.get("api/lib/api_web/controllers/metrics_controller.ex")!;
+    expect(ctrl).toContain("TelemetryMetricsPrometheus.Core.scrape()");
+    const router = files.get("api/lib/api_web/router.ex")!;
+    expect(router).toContain('scope "/metrics" do');
+    expect(router).toContain("ApiWeb.MetricsController, :index");
+    const mix = files.get("api/mix.exs")!;
+    expect(mix).toContain(":telemetry_metrics_prometheus_core");
+  });
+
   it("does NOT subscribe to Ash domain events (foundation-agnostic — emitTrace stays off on vanilla)", async () => {
     const files = await load();
     const tel = files.get("api/lib/api/telemetry.ex")!;
@@ -121,10 +142,16 @@ describe("vanilla — observability surface is foundation-agnostic", () => {
     }
   });
 
-  it("mix.exs drops the legacy telemetry_metrics / telemetry_poller deps (catalog translator uses :telemetry directly)", async () => {
+  it("mix.exs carries telemetry_metrics only for the Prometheus /metrics surface (no telemetry_poller / LiveDashboard)", async () => {
     const files = await load();
     const mix = files.get("api/mix.exs")!;
-    expect(mix).not.toContain(":telemetry_metrics");
+    // The log catalog uses :telemetry directly, but the Prometheus /metrics
+    // surface (M-T7.1) legitimately re-introduces telemetry_metrics +
+    // telemetry_metrics_prometheus_core for the Telemetry.Metrics defs.
+    expect(mix).toContain(":telemetry_metrics_prometheus_core");
+    // telemetry_poller (periodic VM polling / the legacy LiveDashboard path)
+    // stays out — the HTTP metrics come from the endpoint telemetry event.
     expect(mix).not.toContain(":telemetry_poller");
+    expect(mix).not.toContain(":phoenix_live_dashboard");
   });
 });
