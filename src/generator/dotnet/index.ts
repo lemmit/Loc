@@ -457,9 +457,18 @@ function emitProjectFromContexts(
   const mergedBase = mergeContexts(contexts);
   // Foreign events a hosted workflow consumes through a wired channel join
   // the deployable's event vocabulary (record class + DomainEvent routing).
+  // EVERY broker-carried event joins too, subscribed or not — the consumer's
+  // codec must decode a carried type it has no reactor for (the dispatch
+  // no-ops), or the broker driver would wrongly dead-letter it as unknown
+  // (the 8a python fix, applied here for parity).
   const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
   const foreignConsumedEvents = system
-    ? [...new Set(mergedSubscriptions.map((sub) => sub.event))]
+    ? [
+        ...new Set([
+          ...mergedSubscriptions.map((sub) => sub.event),
+          ...channelBindings.flatMap((b) => b.events),
+        ]),
+      ]
         .filter((name) => !knownEventNames.has(name))
         .flatMap((name) => {
           for (const sub of system.sys.subdomains) {
@@ -923,6 +932,7 @@ function emitProjectFromContexts(
     channelTransports: {
       redis: channelBindings.some((b) => b.transport === "redis"),
       rabbit: channelBindings.some((b) => b.transport === "rabbitmq"),
+      kafka: channelBindings.some((b) => b.transport === "kafka"),
     },
     authRequired,
     actorIdProp,
@@ -1651,7 +1661,7 @@ function emitProject(
     /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
      *  the per-transport csproj package refs (StackExchange.Redis /
      *  RabbitMQ.Client). */
-    channelTransports?: { redis: boolean; rabbit: boolean };
+    channelTransports?: { redis: boolean; rabbit: boolean; kafka?: boolean };
     /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
      *  instead of the InProcess scoped line. */

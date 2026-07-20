@@ -53,6 +53,7 @@
     "test:channels-rabbit": "LOOM_CHANNELS_E2E_RABBIT=1 vitest run test/e2e/channels-e2e-rabbit.test.ts",
     "test:channels-kafka": "LOOM_CHANNELS_E2E_KAFKA=1 vitest run test/e2e/channels-e2e-kafka.test.ts",
     "test:channels-kafka-python": "LOOM_CHANNELS_E2E_KAFKA_PYTHON=1 vitest run test/e2e/channels-e2e-kafka-python.test.ts",
+    "test:channels-kafka-dotnet": "LOOM_CHANNELS_E2E_KAFKA_DOTNET=1 vitest run test/e2e/channels-e2e-kafka-dotnet.test.ts",
     "test:channels-rabbit-python": "LOOM_CHANNELS_E2E_RABBIT_PYTHON=1 vitest run test/e2e/channels-e2e-rabbit-python.test.ts",
     "test:channels-rabbit-dotnet": "LOOM_CHANNELS_E2E_RABBIT_DOTNET=1 vitest run test/e2e/channels-e2e-rabbit-dotnet.test.ts",
     "test:channels-rabbit-java": "LOOM_CHANNELS_E2E_RABBIT_JAVA=1 vitest run test/e2e/channels-e2e-rabbit-java.test.ts",
