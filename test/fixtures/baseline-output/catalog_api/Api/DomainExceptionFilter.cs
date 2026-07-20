@@ -70,7 +70,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
                 })
                 .ToArray();
             _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
             context.HttpContext.Response.Headers["x-request-id"] = trace_id;
             context.Result = new ObjectResult(problem)
             {
@@ -83,7 +83,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is ForbiddenException fe)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("forbidden");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("forbidden");
             context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -91,7 +91,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is DisallowedException dx)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "disallowed", dx.Message, 409);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("disallowed");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("disallowed");
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -99,7 +99,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "conflict", "The resource was modified by another request; reload and retry.", 409);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("conflict");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("conflict");
             context.Result = Problem(context, 409, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
             context.ExceptionHandled = true;
             return;
@@ -107,7 +107,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is DomainException de)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
             context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
@@ -115,7 +115,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is AggregateNotFoundException nf)
         {
             _log.LogWarning("{Event} status={Status}", "not_found", 404);
-            CatalogApi.Observability.HttpMetrics.RecordDomainFault("not_found");
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("not_found");
             context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
