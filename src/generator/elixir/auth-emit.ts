@@ -473,8 +473,23 @@ function renderOidcVerifier(auth: AuthIR, webModule: string): string {
   // `aud` must CARRY it — the other four backends validate it, and a verifier
   // that skips the check accepts tokens the rest of the system rejects.  The
   // value check rides Auth.Token's `aud` validator; here we only enforce that
-  // the claim is present (joken skips validators for absent claims).
-  const audiencePresence = auth.oidc.audience ? ` and Map.has_key?(claims, "aud")` : "";
+  // the claim is PRESENT (joken skips validators for absent claims).  Both are
+  // gated on a non-empty runtime `audience()`, preserving the original
+  // escape hatch (OIDC_AUDIENCE="" disables the aud check).
+  const audiencePresence = auth.oidc.audience ? ` and aud_present?(claims)` : "";
+  const audPresentDef = auth.oidc.audience
+    ? `
+  # Enforce aud PRESENCE only when an audience is actually configured — an
+  # empty runtime \`audience()\` disables the aud check (the escape hatch the
+  # hand-rolled verifier had; Auth.Token's aud validator honours the same "").
+  defp aud_present?(claims) do
+    case audience() do
+      "" -> true
+      _ -> Map.has_key?(claims, "aud")
+    end
+  end
+`
+    : "";
   const audienceFn = auth.oidc.audience
     ? `
   @doc false
@@ -516,7 +531,7 @@ ${audienceFn}
       do: :ok,
       else: :error
   end
-
+${audPresentDef}
   # Reads a dotted claim path off the (string-keyed) claims map; nil when any
   # segment is missing.  Only the OIDC build_user maps via paths, so this lives
   # in the OIDC section (the dev stub reads flat claim keys directly).
@@ -544,7 +559,10 @@ function renderOidcToken(webModule: string, auth: AuthIR): string {
   const audClaim = auth.oidc.audience
     ? `
     |> add_claim("aud", nil, fn aud, _claims, _ctx ->
-      aud |> List.wrap() |> Enum.member?(${webModule}.Auth.audience())
+      case ${webModule}.Auth.audience() do
+        "" -> true
+        expected -> aud |> List.wrap() |> Enum.member?(expected)
+      end
     end)`
     : "";
   return `# Auto-generated.
