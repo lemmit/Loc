@@ -17,13 +17,13 @@ on:
       - '.github/workflows/java-obs-e2e.yml'
       - 'test/e2e/observability-events-java.test.ts'
   workflow_dispatch:
-
+  merge_group:
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   java-obs-e2e:

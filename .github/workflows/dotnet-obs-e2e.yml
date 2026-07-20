@@ -28,13 +28,13 @@ on:
       - 'package.json'
       - '.github/workflows/dotnet-obs-e2e.yml'
   workflow_dispatch:
-
+  merge_group:
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   dotnet-obs-e2e:

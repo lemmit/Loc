@@ -52,8 +52,10 @@ jobs:
         include:
           - frontend: vue
             case: sales-system-vue
+            experimental: false
           - frontend: svelte
             case: sales-system-svelte
+            experimental: false
           # Angular: BLOCKING. The Angular-codegen cascade this gate first
           # surfaced is fixed and the full round-trip (create product w/ a
           # value-object price → add a line → confirm → read back) is 10/10
@@ -67,6 +69,7 @@ jobs:
           # matching the Hono route — was camelCase → 404).
           - frontend: angular
             case: sales-system-angular
+            experimental: false
           # Feliz (F#/Fable/Elmish): BLOCKING.  The frontend emits the full
           # `data-testid` surface, so the SHARED testid-driven page objects + smoke
           # spec + e2e config are wired in (feliz/index.ts); run-ui.mjs builds it
@@ -80,6 +83,7 @@ jobs:
           # testid on the value cell.
           - frontend: feliz
             case: sales-system-feliz
+            experimental: false
     # Non-blocking for cells not yet locally verified; flip by dropping the flag.
     continue-on-error: ${{ matrix.experimental || false }}
     name: ${{ matrix.frontend }} → real Hono backend

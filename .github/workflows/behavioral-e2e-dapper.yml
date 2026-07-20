@@ -1,4 +1,4 @@
-name: Behavioral e2e — .NET (persistence: dapper)
+name: "Behavioral e2e — .NET (persistence: dapper)"
 
 # The behavioral sibling of behavioral-e2e-dotnet.yml, forcing the .NET
 # backend's `persistence: dapper` adapter (raw Npgsql + hand-rolled SQL, no EF
