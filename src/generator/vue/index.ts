@@ -428,7 +428,7 @@ export function generateVueForContexts(
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
-  // The reactive()+zod form runtime (vue/ shared source) — the
+  // The vee-validate form runtime (vue/ shared source) — the
   // generated pages' field inputs and v-form handlers bind to it.
   out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));
 

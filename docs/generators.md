@@ -746,7 +746,7 @@ web_app/
 │   ├── App.vue             # app chrome + <router-view/> + onErrorCaptured boundary
 │   ├── router.ts           # createRouter(createWebHistory) route table + NotFound catch-all
 │   ├── theme.ts            # createVuetify tokens (vuetify) / `export {}` stub (shadcnVue — CSS vars)
-│   ├── lib/form.ts         # useLoomForm — reactive() values + zod parse + per-field error map
+│   ├── lib/form.ts         # useLoomForm — vee-validate useForm over the shared zod schema (local toTypedSchema) + per-field error map
 │   ├── lib/format.ts       # formatting FUNCTIONS (the React packs' format components, fn-style)
 │   ├── lib/toast.ts        # channels only: reactive pushToast() queue the app-shell host renders
 │   ├── api/realtime.ts     # channels only: EventSource client (broadcast wire → subscribeRealtime)
@@ -763,7 +763,9 @@ web_app/
 
 - vue-query handles hoist as `reactive(useX(...))` so nested refs
   (`.data`, `.isPending`) read uniformly in template + script.
-- Forms: `useLoomForm(schema, drafts)` — no third-party form dep;
+- Forms: `useLoomForm(schema, drafts)` — vee-validate's `useForm` over
+  the shared zod schema (adapted by a locally-emitted `toTypedSchema`,
+  since `@vee-validate/zod`'s peer pins zod 3 while the stack is zod 4);
   create forms, operation `v-dialog`s (the pack-owned `op-dialog`
   template), and workflow run-forms are wired.
 - Operation/find hook args, navigate, match-in-child-position, and
