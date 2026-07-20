@@ -60,32 +60,86 @@ function sortFolder(folder: TreeFolder): void {
   }
 }
 
+// Map a generated file's path onto a Monaco/VS Code language id.  The ids must
+// match a grammar registered in `loom-services.ts` (the codingame editor-api
+// build has no built-in language modes), otherwise the file falls back to
+// untokenized plaintext.  Some names are matched whole (`Dockerfile`,
+// `.gitignore`) since they have no meaningful extension.
 export function languageFromPath(path: string): string {
-  const dot = path.lastIndexOf(".");
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  const lower = base.toLowerCase();
+  // Extension-less / whole-name files.
+  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) return "dockerfile";
+  if (lower === ".env" || lower.startsWith(".env.")) return "ini";
+  const dot = lower.lastIndexOf(".");
   if (dot < 0) return "plaintext";
-  const ext = path.slice(dot + 1).toLowerCase();
+  const ext = lower.slice(dot + 1);
   switch (ext) {
     case "ts":
     case "tsx":
+    case "mts":
+    case "cts":
       return "typescript";
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return "javascript";
     case "json":
+    case "jsonc":
       return "json";
     case "yml":
     case "yaml":
       return "yaml";
     case "md":
+    case "markdown":
       return "markdown";
     case "sql":
       return "sql";
     case "cs":
       return "csharp";
+    case "ex":
+    case "exs":
+      return "elixir";
     case "html":
+    case "htm":
+    // HEEx / EEx are HTML-with-embedded-Elixir; no dedicated grammar is
+    // vendored, so fall back to HTML for the markup highlighting.
+    case "heex":
+    case "eex":
       return "html";
     case "css":
       return "css";
+    case "scss":
+      return "scss";
+    case "less":
+      return "less";
+    case "py":
+      return "python";
+    case "java":
+      return "java";
+    case "fs":
+    case "fsx":
+      return "fsharp";
+    case "dart":
+      return "dart";
+    case "xml":
+    case "csproj":
+    case "fsproj":
+    case "props":
+    case "targets":
+      return "xml";
+    case "gradle":
+      return "groovy";
+    case "sh":
+    case "bash":
+      return "shellscript";
+    case "ini":
+    case "toml":
+    case "env":
+    case "properties":
+    case "conf":
+      return "ini";
     default:
       return "plaintext";
   }
