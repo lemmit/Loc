@@ -215,10 +215,14 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
   const body = await list1.text();
   if (list1.status !== 200) fail(`GET /products (after create) expected 200, got ${list1.status}: ${body}`);
   const parsed = JSON.parse(body);
-  if (!Array.isArray(parsed) || parsed.length !== 1 || parsed[0].sku !== "WIDGET-1") {
+  // A `crudish` aggregate's findAll returns the paged envelope
+  // ({ items, page, pageSize, total, totalPages }); a plain findAll returns a
+  // bare array. Accept either so the smoke matches the current contract.
+  const rows = Array.isArray(parsed) ? parsed : parsed.items;
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0].sku !== "WIDGET-1") {
     fail(`expected 1 product 'WIDGET-1', got ${JSON.stringify(parsed)}`);
   }
-  console.log(`# OK — round-tripped 1 product (${parsed[0].sku}) through PGlite + drizzle + Hono`);
+  console.log(`# OK — round-tripped 1 product (${rows[0].sku}) through PGlite + drizzle + Hono`);
 
   await pglite.close();
 }
