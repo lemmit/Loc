@@ -20,10 +20,11 @@
 // expressions still route through the shared `emitExpr` so a `count` read on the
 // RHS resolves through `flutterTarget.renderStateRead` to `state.count`.
 //
-// SCOPE (this slice): scalar/collection `:=`/`+=`/`-=` writes, `let`, bare
-// expression statements, and sibling-action calls.  Nested-target writes
-// (`order.shipping.zip := v`) and store/async-effect action bodies are marked
-// `TODO(flutter full-parity)` — a deep immutable rebuild is out of scope here.
+// SCOPE: scalar/collection `:=`/`+=`/`-=` writes (including NESTED targets —
+// `order.shipping.zip := v` folds into a `copyWith` chain, see `nestedCopyWith`),
+// `let`, bare expression statements, sibling-action calls, and `match await`
+// async effects.  Store-action / private-operation calls are the remaining
+// `TODO(flutter full-parity)` items.
 
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
@@ -136,32 +137,41 @@ export function stateCtx(opts: {
   };
 }
 
+/** Fold a (possibly nested) state-write target into the immutable `copyWith`
+ *  rebuild.  Level `i` sets `seg[i]` on receiver `state.<seg[0..i)>`, built
+ *  inside-out: `order.shipping.zip := v` →
+ *  `state.copyWith(order: state.order.copyWith(shipping: state.order.shipping.copyWith(zip: v)))`.
+ *  A single-segment target collapses to `state.copyWith(<field>: v)` (the flat
+ *  case).  Every intermediate level is a wire model that carries its own
+ *  `copyWith` (emitted by `dart-model-emit.ts`). */
+function nestedCopyWith(seg: readonly string[], value: string): string {
+  let expr = value;
+  for (let i = seg.length - 1; i >= 0; i--) {
+    const receiver = i === 0 ? "state" : `state.${seg.slice(0, i).join(".")}`;
+    expr = `${receiver}.copyWith(${seg[i]}: ${expr})`;
+  }
+  return expr;
+}
+
 /** Render one action-body statement into a Notifier-method line.  A state write
- *  becomes `state = state.copyWith(field: <value>)`; a sibling-action call is a
- *  bare in-class method invocation.  The RHS routes through `emitExpr`, so a
- *  `count` read resolves through the state seam to `state.count`. */
+ *  becomes `state = state.copyWith(field: <value>)` (a nested target folds into a
+ *  `copyWith` chain — see `nestedCopyWith`); a sibling-action call is a bare
+ *  in-class method invocation.  The RHS routes through `emitExpr`, so a `count`
+ *  read resolves through the state seam to `state.count`. */
 export function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {
       const seg = stmt.target.segments;
-      const root = seg[0]!;
       const value = emitExpr(stmt.value, ctx);
-      if (seg.length === 1) {
-        return `state = state.copyWith(${root}: ${value});`;
-      }
-      // Nested immutable rebuild (`order.shipping.zip := v`) needs a per-level
-      // copyWith down the wire-model chain — deferred.
-      return `// TODO(flutter full-parity): nested state write ${seg.join(".")} := ${value}`;
+      return `state = ${nestedCopyWith(seg, value)};`;
     }
     case "add":
     case "remove": {
       const seg = stmt.target.segments;
-      const root = seg[0]!;
-      if (seg.length !== 1) {
-        return `// TODO(flutter full-parity): nested compound write on ${seg.join(".")}`;
-      }
       const rhs = emitExpr(stmt.value, ctx);
-      const cur = `state.${root}`;
+      // The current value at the (possibly nested) target — the read the compound
+      // is relative to (`state.order.items`).
+      const cur = `state.${seg.join(".")}`;
       // A collection target appends / removes-by-value on the Dart list; a scalar
       // target is an arithmetic compound (`+`/`-`).  `stmt.collection` (set at
       // lowering) is the discriminator — the same flag the JS/F# frontends read.
@@ -170,7 +180,8 @@ export function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext): string {
           ? `[...${cur}, ${rhs}]`
           : `${cur}.where((__v) => __v != ${rhs}).toList()`
         : `${cur} ${stmt.kind === "add" ? "+" : "-"} ${rhs}`;
-      return `state = state.copyWith(${root}: ${value});`;
+      // Fold the new value back in through the same nested `copyWith` chain.
+      return `state = ${nestedCopyWith(seg, value)};`;
     }
     case "let":
       return `final ${stmt.name} = ${emitExpr(stmt.expr, ctx)};`;

@@ -91,6 +91,38 @@ function toJsonEntry(f: DartField): string {
   return `        '${f.name}': ${dartToJson(f.type, f.name)},`;
 }
 
+/** The `copyWith` parameter type for a field — always the nullable form so an
+ *  omitted arg keeps `this` (`field ?? this.field`).  A field that is already
+ *  optional keeps its single `?`. */
+function copyWithParam(f: DartField): string {
+  const b = base(f.type);
+  const t = dartType(b);
+  return `    ${t}? ${f.name},`;
+}
+
+/** The `copyWith` body entry — `field: field ?? this.field`. */
+function copyWithEntry(f: DartField): string {
+  return `        ${f.name}: ${f.name} ?? this.${f.name},`;
+}
+
+/** The `copyWith({...}) => X(...)` method lines for a wire model — the immutable
+ *  rebuild a nested page-state write (`order.shipping.zip := v`) folds into
+ *  (`state.order.copyWith(shipping: …)`).  Mirrors the `<Page>State` copyWith
+ *  shape (`renderStateDataClass`); an omitted arg keeps the current value, so a
+ *  write can't clear a field to null — the nested-write use never needs to. */
+function copyWithMethod(className: string, fields: readonly DartField[]): string[] {
+  if (fields.length === 0) return [];
+  return [
+    "",
+    `  ${className} copyWith({`,
+    ...fields.map(copyWithParam),
+    "  }) =>",
+    `      ${className}(`,
+    ...fields.map(copyWithEntry),
+    "      );",
+  ];
+}
+
 /** Emit one Dart wire-model `class` — `final` fields, a `const` constructor,
  *  and hand-written `fromJson` / `toJson`. */
 export function renderDartModel(record: DartRecord): string {
@@ -110,6 +142,7 @@ export function renderDartModel(record: DartRecord): string {
     "  Map<String, dynamic> toJson() => {",
     ...fields.map(toJsonEntry),
     "      };",
+    ...copyWithMethod(className, fields),
     "}",
   );
 }

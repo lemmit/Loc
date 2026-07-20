@@ -342,17 +342,44 @@ function targetModelField(name: string, ctx: FsExprCtx): string {
   return upperFirst(name);
 }
 
+/** Fold a (possibly nested) write target into the immutable F# record `with`
+ *  update.  The ROOT segment is the Model field (PascalCase / store-namespaced,
+ *  via `targetModelField`); NESTED segments are wire-record fields, which keep
+ *  their exact (lowercase) source names (see `wire.ts`).  Built inside-out:
+ *  `order.shipping.zip := v` →
+ *  `{ model with Order = { model.Order with shipping = { model.Order.shipping with zip = v } } }`.
+ *  A single-segment target collapses to `{ model with <Field> = v }` (the flat
+ *  case), byte-identical to the previous root-only emission. */
+function nestedFsWith(segments: readonly string[], value: string, ctx: FsExprCtx): string {
+  const rootField = targetModelField(segments[0]!, ctx);
+  let expr = value;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (i === 0) {
+      expr = `{ model with ${rootField} = ${expr} }`;
+    } else {
+      // Receiver at level i: `model.<Root>.<seg1>…<seg_{i-1}>`.
+      const receiver = [`model.${rootField}`, ...segments.slice(1, i)].join(".");
+      expr = `{ ${receiver} with ${segments[i]} = ${expr} }`;
+    }
+  }
+  return expr;
+}
+
 function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): UpdateArmPart {
   switch (stmt.kind) {
     case "assign": {
-      const field = targetModelField(stmt.target.segments[0]!, ctx);
       return {
-        line: `      let model = { model with ${field} = ${renderFsExpr(stmt.value, ctx)} }`,
+        line: `      let model = ${nestedFsWith(stmt.target.segments, renderFsExpr(stmt.value, ctx), ctx)}`,
       };
     }
     case "add":
     case "remove": {
-      const field = targetModelField(stmt.target.segments[0]!, ctx);
+      const seg = stmt.target.segments;
+      const rootField = targetModelField(seg[0]!, ctx);
+      // The current value at the (possibly nested) target — the read the compound
+      // is relative to.  The root is the Model field; nested segments are
+      // wire-record fields (exact lowercase source names).
+      const readPath = [`model.${rootField}`, ...seg.slice(1)].join(".");
       const v = renderFsExpr(stmt.value, ctx);
       // A collection target appends / removes-by-value on the F# list (`@` cons,
       // `List.filter` drop); a scalar target is an arithmetic compound
@@ -360,10 +387,11 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
       // the JS frontends read the same flag to choose `[...xs, v]` vs `x + v`.
       const value = stmt.collection
         ? stmt.kind === "add"
-          ? `(model.${field} @ [ ${v} ])`
-          : `(model.${field} |> List.filter (fun x -> x <> ${v}))`
-        : `(model.${field} ${stmt.kind === "add" ? "+" : "-"} ${v})`;
-      return { line: `      let model = { model with ${field} = ${value} }` };
+          ? `(${readPath} @ [ ${v} ])`
+          : `(${readPath} |> List.filter (fun x -> x <> ${v}))`
+        : `(${readPath} ${stmt.kind === "add" ? "+" : "-"} ${v})`;
+      // Fold the new value back in through the same nested `with` chain.
+      return { line: `      let model = ${nestedFsWith(seg, value, ctx)}` };
     }
     case "let":
       return { line: `      let ${stmt.name} = ${renderFsExpr(stmt.expr, ctx)}` };
