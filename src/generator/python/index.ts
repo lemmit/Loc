@@ -1109,7 +1109,10 @@ function renderMain(
     `    return {"status": "ready"}`,
     "",
     "",
-    `@app.get("/metrics")`,
+    // include_in_schema=False: /metrics is an infra scrape target, not part of
+    // the API surface — keeping it out of the OpenAPI doc preserves the
+    // cross-backend parity contract (no other backend lists it).
+    `@app.get("/metrics", include_in_schema=False)`,
     "async def metrics() -> Response:",
     `    """Prometheus scrape target — the text exposition of the default`,
     "    registry (process/GC collectors + the HTTP counter/histogram recorded",
