@@ -1,6 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import { ActionIcon, Box, Group, SegmentedControl, Text } from "@mantine/core";
+import { ActionIcon, Box, Group, SegmentedControl, Text, TypographyStylesProvider } from "@mantine/core";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { installMonacoEnvironment } from "../editor/monaco-env";
 import { languageFromPath } from "./file-tree";
 import type { VirtualFile } from "../build/protocol";
@@ -21,16 +23,65 @@ interface FileViewerProps {
 
 // Dispatcher: Mermaid sources (`.mmd`) get a rendered SVG preview; LikeC4
 // (`.c4`) gets an interactive diagram rebuilt from its sibling `.c4.json`;
+// Markdown (`.md`) gets a rendered HTML preview with a source toggle;
 // everything else uses the read-only Monaco viewer.  Branching here (rather
 // than with a conditional hook inside one component) keeps each viewer's
 // hooks unconditional.
 export function FileViewer({ path, content, files }: FileViewerProps): JSX.Element {
   if (path.endsWith(".mmd")) return <MermaidViewer content={content} />;
+  if (path.endsWith(".md") || path.endsWith(".markdown")) {
+    return <MarkdownViewer path={path} content={content} />;
+  }
   if (path.endsWith(".c4")) {
     const spec = files?.find((f) => f.path === `${path}.json`);
     if (spec) return <LikeC4Viewer specJson={spec.content} source={content} />;
   }
   return <MonacoViewer path={path} content={content} />;
+}
+
+// Markdown preview with a Preview / Source toggle.  Preview renders the
+// document to sanitized HTML (marked → DOMPurify) inside Mantine's
+// TypographyStylesProvider so headings, lists, tables and code blocks pick up
+// theme-consistent typography.  Source drops to the Monaco viewer, which now
+// has a real markdown grammar (registered in `loom-services.ts`).
+function MarkdownViewer({ path, content }: { path: string; content: string }): JSX.Element {
+  const [view, setView] = useState<"preview" | "source">("preview");
+  const html = useMemo(() => {
+    // `marked.parse` is synchronous with the default (non-async) options.
+    const raw = marked.parse(content, { async: false, gfm: true }) as string;
+    return DOMPurify.sanitize(raw);
+  }, [content]);
+
+  return (
+    <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+      <Group px="xs" py={4} bg="dark.6" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <SegmentedControl
+          size="xs"
+          value={view}
+          onChange={(v) => setView(v as "preview" | "source")}
+          data={[
+            { label: "Preview", value: "preview" },
+            { label: "Source", value: "source" },
+          ]}
+          data-testid="md-view"
+        />
+      </Group>
+      {view === "source" ? (
+        <Box style={{ flex: 1, minHeight: 0 }}>
+          <MonacoViewer path={path} content={content} />
+        </Box>
+      ) : (
+        <TypographyStylesProvider
+          p="md"
+          style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+          data-testid="md-preview"
+        >
+          {/* marked output sanitised by DOMPurify above. */}
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        </TypographyStylesProvider>
+      )}
+    </Box>
+  );
 }
 
 // The LikeC4 React canvas (provider + view) is large and pulls its own

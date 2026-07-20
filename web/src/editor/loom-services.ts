@@ -10,6 +10,32 @@ import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-serv
 import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-service-override";
 import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
+// Standard-language grammars for the generated-file viewer.  The
+// `@codingame/monaco-vscode-editor-api` build ships a bare editor with NO
+// built-in language modes (unlike stock `monaco-editor`), so a generated
+// `.ts` / `.cs` / `.yml` file would render as flat grey text.  Each of these
+// default-extension packages registers a language id + TextMate grammar +
+// language-configuration as a virtual VS Code extension (side-effect import),
+// which the textmate service tokenizes on the main thread.  The set mirrors
+// the file types every backend/frontend emits (`generate system` can produce
+// all of them); `languageFromPath` maps extensions onto these ids.
+import "@codingame/monaco-vscode-typescript-basics-default-extension";
+import "@codingame/monaco-vscode-json-default-extension";
+import "@codingame/monaco-vscode-yaml-default-extension";
+import "@codingame/monaco-vscode-markdown-basics-default-extension";
+import "@codingame/monaco-vscode-csharp-default-extension";
+import "@codingame/monaco-vscode-sql-default-extension";
+import "@codingame/monaco-vscode-html-default-extension";
+import "@codingame/monaco-vscode-css-default-extension";
+import "@codingame/monaco-vscode-python-default-extension";
+import "@codingame/monaco-vscode-java-default-extension";
+import "@codingame/monaco-vscode-xml-default-extension";
+import "@codingame/monaco-vscode-docker-default-extension";
+import "@codingame/monaco-vscode-shellscript-default-extension";
+import "@codingame/monaco-vscode-fsharp-default-extension";
+import "@codingame/monaco-vscode-dart-default-extension";
+import "@codingame/monaco-vscode-groovy-default-extension";
+import "@codingame/monaco-vscode-ini-default-extension";
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
 import tmGrammar from "../../../vscode/grammars/ddd.tmLanguage.json?raw";
 import langConfig from "../../../vscode/language-configuration.json?raw";
