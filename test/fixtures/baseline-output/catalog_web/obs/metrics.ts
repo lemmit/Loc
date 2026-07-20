@@ -7,7 +7,15 @@ import { collectDefaultMetrics, Counter, Histogram, Registry } from "prom-client
  *  are collected automatically — the baseline every dashboard wants
  *  before any app-specific metric. */
 export const registry = new Registry();
-collectDefaultMetrics({ register: registry });
+// The default collectors read Node's v8/process internals; in a
+// browser-bundled runtime (the playground) those are stubbed, so guard
+// the call and degrade to just the app metrics below rather than crash
+// at module load.
+try {
+  collectDefaultMetrics({ register: registry });
+} catch {
+  // Non-Node runtime: default process/runtime metrics are unavailable.
+}
 
 /** Total HTTP requests handled, by method, route template, and status code. */
 export const httpRequestsTotal = new Counter({
