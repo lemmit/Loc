@@ -68,7 +68,12 @@ describe("rabbitmq queue transport — dotnet leg (M-T4.4 slice 7b)", () => {
     for (const dep of ["sales_api", "ship_api"] as const) {
       const mod = files.get(`${dep}/Infrastructure/Channels/ChannelTransport.cs`) ?? "";
       expect(mod, `${dep} ChannelTransport.cs`).toContain("using RabbitMQ.Client;");
-      expect(mod).toContain("public sealed class RabbitChannelTransport : IChannelTransport");
+      // IDisposable: the transport owns a SemaphoreSlim connect gate —
+      // without it CA1001 fails `dotnet build /warnaserror`.
+      expect(mod).toContain(
+        "public sealed class RabbitChannelTransport : IChannelTransport, IDisposable",
+      );
+      expect(mod).toContain("public void Dispose()");
       // Dead-letter topology: DLX exchange + per-address parking queue,
       // wired as the consumer queue's dead-letter target.
       expect(mod).toContain(

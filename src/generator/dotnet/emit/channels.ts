@@ -239,7 +239,7 @@ public sealed class RedisChannelTransport : IChannelTransport
 /// manual ack; a failed handler republishes with an attempt header up to
 /// MaxAttempts, then parks via DLX <c>loom.dlx</c> into
 /// <c>loom.dlq.&lt;address&gt;</c>.</summary>
-public sealed class RabbitChannelTransport : IChannelTransport
+public sealed class RabbitChannelTransport : IChannelTransport, IDisposable
 {
     /// <summary>Bounded per-message retries before a poisoned message parks
     /// in the DLQ (mirrors the outbox relay's MaxAttempts).</summary>
@@ -255,6 +255,16 @@ public sealed class RabbitChannelTransport : IChannelTransport
     {
         _url = url;
         _log = log;
+    }
+
+    /// <summary>Process-lifetime transport (held by the ChannelTransports
+    /// singleton); Dispose runs at host shutdown — release the connect gate
+    /// and drop the channel/connection (CA1001).</summary>
+    public void Dispose()
+    {
+        _connect.Dispose();
+        _channel?.Dispose();
+        _connection?.Dispose();
     }
 
     private async Task<IChannel> ChannelAsync()
@@ -653,6 +663,7 @@ public sealed class ChannelTransports : IAsyncDisposable
         foreach (var transport in _byCsName.Values)
         {
             await transport.CloseAsync();
+            if (transport is IDisposable disposable) disposable.Dispose();
         }
     }
 }
