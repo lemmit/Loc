@@ -439,24 +439,30 @@ describe("Ordering (integration)", () => {
    **cross-backend-uniform** rather than node-first: real PG removes node's
    special-snowflake status.
 
-   **Provisioning: Testcontainers (default), not a bespoke sidecar.** The
-   six existing jobs hand-roll the container lifecycle (`waitForReady` /
-   `resetDatabase` / `docker run` + a `services: postgres` YAML), which is exactly
-   the "start postgres → wait ready → hand back a URL → reap" slice Testcontainers
-   owns. The integration tier uses Testcontainers instead, for one decisive
-   reason: these tests are emitted **into the generated app** and a *user* runs
-   them (`dotnet test` / `mix test` / `pytest`). With Testcontainers the generated
-   app's integration tests **self-provision** — clone, run, done (Docker present) —
-   with no `PG_URL`/README ceremony. The cost is a **test-scoped** per-language dep
-   (`testcontainers`-node / Testcontainers.NET / testcontainers-python /
-   testcontainers-java / the `testcontainers` hex lib), added to a generated
-   project **only when it has a context integration test**. Loom still owns
-   migration/DDL application + repository construction + the test body;
-   Testcontainers only replaces the DB-lifecycle slice. **Caveats:** (a) the Elixir
-   `testcontainers` lib is less mature — Elixir may fall back to a provided
-   `PG_URL` (its e2e already assumes a docker postgres); (b) use Testcontainers'
-   reuse/singleton so the context tier shares one postgres per run rather than one
-   container per test file.
+   **Provisioning: the emitted test is provisioning-AGNOSTIC — it reads a
+   `PG_URL`; Testcontainers is an opt-in layer, not a baked-in mandate.** The
+   emitted test connects to a connection string, applies migrations, constructs
+   repos, and runs the body — it does not know or care how Postgres got there.
+   That URL is the portable universal seam. On top of it:
+   - **Loom's own node behavioural harness uses `testcontainers`-node** — this is
+     where "stop hand-rolling container lifecycle" is cheap and high-value: *one*
+     dep in Loom's *own* harness, replacing the bespoke `waitForReady` / `docker
+     run` scripting.
+   - **Loom's CI provisions via the existing docker-postgres sidecar** (the
+     `tenancy-e2e` pattern) — no new deps, consistent with the six existing jobs.
+   - **Generated projects do NOT carry a mandatory Testcontainers dep.** A Loom app
+     already ships a `docker compose` stack *with* Postgres, so its tests point at
+     a URL (compose DB or a throwaway) with no extra setup. Self-provisioning via
+     Testcontainers is offered behind an **emit flag** for users who want it —
+     default off.
+
+   Why not Testcontainers-everywhere: (a) the generated app already brings
+   compose-provisioned Postgres, so "self-contained" is largely already solved by a
+   URL; (b) Testcontainers needs a **Docker socket in the test process** — not
+   universally available for a shipped artifact, whereas a `services: postgres` +
+   URL is; (c) the Elixir `testcontainers` lib is immature, forcing a URL fallback
+   anyway — so the URL is the one contract that works uniformly, and two divergent
+   provisioning paths × 5 backends is more code, not less.
 
 ### Pipeline touchpoints
 
@@ -477,13 +483,13 @@ describe("Ordering (integration)", () => {
   renderer + repository API (the Phase 2 native-test emitters are the template).
 - **wire-repos factory — per backend** — one emitted `createContextRepos(db|conn)`
   returning the context's repositories, so the test doesn't hand-construct each.
-- **real-PG harness + gate** — the generated native integration tests
-  self-provision a real Postgres via Testcontainers (per-language, test-scoped
-  dep); the node behavioural harness (`test/behavioral/run.mjs`) uses
-  `testcontainers`-node for the integration run-path (replacing the bespoke docker
-  scripting). CI needs Docker present (inherent to real PG); a provided
-  `LOOM_*_PG_URL` overrides Testcontainers where set (Elixir fallback / a shared
-  CI service).
+- **real-PG harness + gate** — the emitted native integration test reads a
+  `PG_URL` (provisioning-agnostic). Loom's node behavioural harness
+  (`test/behavioral/run.mjs`) uses `testcontainers`-node for the integration
+  run-path (replacing the bespoke docker scripting); Loom's CI provisions via the
+  existing docker-postgres sidecar. Generated projects read the URL (compose DB /
+  throwaway); a `--testcontainers` emit flag additionally emits a self-provisioning
+  bootstrap for users who want zero-setup runs (default off).
 
 ### Phasing 3
 
