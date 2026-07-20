@@ -2,6 +2,7 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type ContainmentIR,
   type DomainServiceIR,
   type ExprIR,
   operationUsesCurrentUser,
@@ -11,7 +12,7 @@ import {
   type ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../../util/naming.js";
-import { renderPyExpr } from "../render-expr.js";
+import { renderPyExpr, renderPyType } from "../render-expr.js";
 
 // A currentUser-gated operation's method signature picks up a trailing
 // `current_user: User` parameter; a domain `test` block has no auth
@@ -117,6 +118,9 @@ function renderPySubjectTests(
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
   const usesMath = /\bmath\./.test(bodyStr);
   const usesActor = bodyStr.includes("SimpleNamespace(");
+  // `cast(...)` appears both from the synthetic actor and from null-safe
+  // nullable-field reads (`cast(Shipment, o.shipment).carrier`).
+  const usesCast = usesActor || /\bcast\(/.test(bodyStr);
 
   const out: string[] = [];
   out.push(`"""Domain tests for ${describeName}.  Auto-generated."""`);
@@ -133,7 +137,7 @@ function renderPySubjectTests(
   }
   if (usesDecimal) out.push("from decimal import Decimal");
   if (usesActor) out.push("from types import SimpleNamespace");
-  if (usesActor) out.push("from typing import cast");
+  if (usesCast) out.push("from typing import cast");
   if (usesPytest) out.push("import pytest");
   out.push("");
   if (usesActor) out.push("from app.auth.user import User");
@@ -178,11 +182,47 @@ function renderTest(t: TestIR, ctx: BoundedContextIR, used: Set<string>): string
 /** Render a test-body expression: `<Agg>.create({ … })` object literals
  *  become coerced keyword arguments; everything else defers to
  *  `renderPyExpr`. */
+/** True when a member read yields `T | None` on the generated domain object —
+ *  an OPTIONAL field, or a SINGLE (non-collection) containment (which is
+ *  `T | None` even when required, since it's unset at create and set later by an
+ *  op).  A further access on it fails `mypy --strict` (`Item "None" … has no
+ *  attribute`), so it's wrapped in `cast(T, …)`.  Mirror of the TS emitter's
+ *  `isNullableMemberRead`. */
+function isNullableMemberReadPy(e: ExprIR, ctx: BoundedContextIR): boolean {
+  if (e.kind !== "member") return false;
+  if (e.memberType.kind === "optional") return true;
+  if (e.receiverType.kind === "entity") {
+    const typeName = e.receiverType.name;
+    const member = e.member;
+    const owner: { contains?: readonly ContainmentIR[] } | undefined =
+      ctx.aggregates.find((a) => a.name === typeName) ??
+      ctx.aggregates.flatMap((a) => a.parts ?? []).find((p) => p.name === typeName);
+    const c = owner?.contains?.find((x) => x.name === member);
+    if (c && !c.collection) return true;
+  }
+  return false;
+}
+
 export function renderTestExpr(
   e: ExprIR,
   ctx: BoundedContextIR,
   lets?: Map<string, string>,
 ): string {
+  // A member read whose RECEIVER is a nullable field (single containment or
+  // optional field, both `T | None` on the domain object) fails `mypy --strict`
+  // on the follow-on access.  Wrap the receiver in `cast(T, …)` so the read
+  // type-checks: `o.shipment.carrier` → `cast(Shipment, o.shipment).carrier`.
+  // The op that sets it ran earlier in the test, so the cast is sound.
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "member" &&
+    isNullableMemberReadPy(e.receiver, ctx)
+  ) {
+    const recv = renderTestExpr(e.receiver, ctx, lets);
+    const rt = e.receiver.memberType;
+    const inner = rt.kind === "optional" ? rt.inner : rt;
+    return `cast(${renderPyType(inner)}, ${recv}).${snake(e.member)}`;
+  }
   // Calls of currentUser-gated ops thread the synthetic actor as the
   // trailing argument (mirrors the TS test emitter).  The aggregate
   // resolves through the receiver's type when lowered, else through the

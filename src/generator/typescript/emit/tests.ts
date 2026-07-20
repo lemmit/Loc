@@ -2,6 +2,7 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type ContainmentIR,
   type DomainServiceIR,
   type ExprIR,
   operationUsesCurrentUser,
@@ -122,7 +123,37 @@ function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
 /** Render a test-body expression, threading a synthetic actor into calls of
  *  currentUser-gated operations (whose method signature gained a trailing
  *  `currentUser` parameter).  Everything else defers to `renderTsExpr`. */
+/** True when a member read yields a nullable type on the generated domain
+ *  object — so a further access on it needs a non-null assertion under strict
+ *  `tsc`.  Two cases: an OPTIONAL field (`X?` → getter returns `T | null`), and
+ *  a SINGLE (non-collection) containment (`contains x: X` → `T | null` on the
+ *  domain object even when required, since it's unset at create and set later by
+ *  an op).  A collection containment is a (non-null) array, so it's excluded. */
+function isNullableMemberRead(e: ExprIR, ctx: BoundedContextIR): boolean {
+  if (e.kind !== "member") return false;
+  if (e.memberType.kind === "optional") return true;
+  if (e.receiverType.kind === "entity") {
+    const typeName = e.receiverType.name;
+    const member = e.member;
+    const owner: { contains?: readonly ContainmentIR[] } | undefined =
+      ctx.aggregates.find((a) => a.name === typeName) ??
+      ctx.aggregates.flatMap((a) => a.parts ?? []).find((p) => p.name === typeName);
+    const c = owner?.contains?.find((x) => x.name === member);
+    if (c && !c.collection) return true;
+  }
+  return false;
+}
+
 function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
+  // A member read whose RECEIVER is a nullable field (single containment or
+  // optional field, both `T | null` on the domain object) needs a non-null
+  // assertion under strict `tsc`: `o.shipment.carrier` → `o.shipment!.carrier`.
+  // The op that sets the containment ran earlier in the test, so the read is
+  // sound — the assertion just tells the compiler what the author knows.  Only
+  // the `!` is injected; everything else defers to the shared renderer.
+  if (e.kind === "member" && isNullableMemberRead(e.receiver, ctx)) {
+    return `${renderTestExpr(e.receiver, ctx)}!.${e.member}`;
+  }
   if (e.kind === "method-call" && e.receiverType.kind === "entity" && !e.isCollectionOp) {
     const entityName = e.receiverType.name;
     const agg = ctx.aggregates.find((a) => a.name === entityName);
