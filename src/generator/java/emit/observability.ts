@@ -7,25 +7,35 @@ import { lines } from "../../../util/code-builder.js";
 //   server_starting → server_listening → request_start {method,path} →
 //   request_end {status, durationMs} → server_shutdown → server_drained
 //
-// Emitted as flat JSON objects via a tiny writer (no logging-framework
-// configuration to drift).  Mirrors dotnet's AddJsonConsole catalog and
-// Hono's pino lines in event vocabulary.
+// Events are logged through SLF4J on a dedicated `loomCatalog` logger;
+// `config/logback.xml` (renderLogbackConfig) serialises them to the flat JSON
+// envelope via logstash-logback-encoder — so JSON writing, string escaping,
+// and MDC enrichment are the logging stack's job, not a hand-rolled writer.
+// Mirrors dotnet's AddJsonConsole catalog and Hono's pino lines in event
+// vocabulary.
 // ---------------------------------------------------------------------------
 
 export function renderCatalogLogger(basePkg: string): string {
   return lines(
     `package ${basePkg}.config;`,
     ``,
-    `import java.time.Instant;`,
     `import java.util.Map;`,
     ``,
-    `import org.slf4j.MDC;`,
+    `import org.slf4j.Logger;`,
+    `import org.slf4j.LoggerFactory;`,
+    `import org.slf4j.spi.LoggingEventBuilder;`,
     ``,
-    `/** Catalog event writer — one flat JSON object per line on stdout.  Every`,
+    `/** Catalog event emitter — one flat JSON object per line on stdout.  Every`,
     ` *  line leads with the cross-backend envelope (\`ts\`, \`level\`, \`event\`),`,
-    ` *  then the ambient carrier ids (request_id / scope_id / actor_id) read`,
-    ` *  from MDC so a log line joins to the audit / provenance rows of the same`,
-    ` *  request frame (omitted on boot-time lines, where no frame is active).`,
+    ` *  then the ambient carrier ids (request_id / scope_id / actor_id) so a log`,
+    ` *  line joins to the audit / provenance rows of the same request frame`,
+    ` *  (omitted on boot-time lines, where no frame is active).`,
+    ` *`,
+    ` *  Events log through SLF4J on the \`loomCatalog\` logger; \`logback.xml\` wires`,
+    ` *  logstash-logback-encoder to render the JSON — the encoder maps the`,
+    ` *  timestamp to \`ts\`, the whitelisted MDC keys to the carrier ids`,
+    ` *  (\`correlation_id\` renamed to \`request_id\`), and the SLF4J key/value pairs`,
+    ` *  to \`level\` / \`event\` / the per-event fields.  Numbers stay JSON numbers.`,
     ` *`,
     ` *  Emission is gated by the \`LOG_LEVEL\` env var (default \`info\`); a line`,
     ` *  whose level is below the threshold is dropped.  Java has no \`trace\``,
@@ -33,6 +43,8 @@ export function renderCatalogLogger(basePkg: string): string {
     ` *  emitted \`level\` value and for threshold comparison) — matching the`,
     ` *  Hono \`level: process.env.LOG_LEVEL ?? "info"\` channel. */`,
     `public final class CatalogLog {`,
+    `    private static final Logger LOG = LoggerFactory.getLogger("loomCatalog");`,
+    ``,
     `    private CatalogLog() {`,
     `    }`,
     ``,
@@ -56,43 +68,97 @@ export function renderCatalogLogger(basePkg: string): string {
     `        return RANK.containsKey(l) ? l : "info";`,
     `    }`,
     ``,
-    `    /** kvs alternate key/value; values are JSON-escaped strings or raw numbers. */`,
+    `    /** kvs alternate key/value; numbers serialise as raw JSON numbers,`,
+    `     *  everything else as JSON strings (escaping handled by the encoder). */`,
     `    public static void event(String name, String level, Object... kvs) {`,
     `        var lvl = normalize(level);`,
     `        if (RANK.get(lvl) < THRESHOLD) {`,
     `            return;`,
     `        }`,
-    `        var sb = new StringBuilder("{\\"ts\\":\\"").append(Instant.now().toString()).append('"');`,
-    `        sb.append(",\\"level\\":\\"").append(lvl).append('"');`,
-    `        sb.append(",\\"event\\":\\"").append(name).append('"');`,
-    `        appendId(sb, "request_id", MDC.get(RequestContext.CORRELATION_ID));`,
-    `        appendId(sb, "scope_id", MDC.get(RequestContext.SCOPE_ID));`,
-    `        appendId(sb, "actor_id", MDC.get(RequestContext.ACTOR_ID));`,
+    `        var builder = builderFor(lvl).addKeyValue("level", lvl).addKeyValue("event", name);`,
     `        for (int i = 0; i + 1 < kvs.length; i += 2) {`,
-    `            sb.append(",\\"").append(kvs[i]).append("\\":");`,
-    `            var value = kvs[i + 1];`,
-    `            if (value instanceof Number) {`,
-    `                sb.append(value);`,
-    `            } else {`,
-    `                sb.append('"').append(escape(String.valueOf(value))).append('"');`,
-    `            }`,
+    `            builder = builder.addKeyValue(String.valueOf(kvs[i]), kvs[i + 1]);`,
     `        }`,
-    `        sb.append('}');`,
-    `        System.out.println(sb);`,
+    `        builder.log();`,
     `    }`,
     ``,
-    `    /** Append a carrier id when present (skipped on boot-time lines, where`,
-    `     *  no request frame is active so MDC has no value). */`,
-    `    private static void appendId(StringBuilder sb, String key, String value) {`,
-    `        if (value != null) {`,
-    `            sb.append(",\\"").append(key).append("\\":\\"").append(escape(value)).append('"');`,
-    `        }`,
-    `    }`,
-    ``,
-    `    private static String escape(String s) {`,
-    `        return s.replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"");`,
+    `    /** Map the folded catalog level onto the SLF4J level the event logs at.`,
+    `     *  The \`loomCatalog\` logger stays open (TRACE) in logback so filtering`,
+    `     *  happens once, here, against \`LOG_LEVEL\` — not a second time downstream. */`,
+    `    private static LoggingEventBuilder builderFor(String lvl) {`,
+    `        return switch (lvl) {`,
+    `            case "debug" -> LOG.atDebug();`,
+    `            case "warn" -> LOG.atWarn();`,
+    `            case "error" -> LOG.atError();`,
+    `            default -> LOG.atInfo();`,
+    `        };`,
     `    }`,
     `}`,
+    ``,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// logback.xml — the logging configuration behind the observability catalog.
+//
+// Two console channels, both on stdout:
+//   • CONSOLE  — human-readable text for the framework/app's own logs (root).
+//   • CATALOG  — the structured JSON envelope for catalog events, encoded by
+//     logstash-logback-encoder.  Its providers map timestamp → `ts`, the
+//     whitelisted MDC keys → the carrier ids (correlation_id renamed to
+//     request_id), and the SLF4J key/value pairs → level / event / fields.
+//
+// A plain `logback.xml` (not `logback-spring.xml`) on purpose: logback loads
+// it on first logger use, which happens for `server_starting` in
+// Application.main BEFORE SpringApplication.run — a `-spring` variant would not
+// be configured yet, so that first catalog line would miss the JSON channel.
+// ---------------------------------------------------------------------------
+
+export function renderLogbackConfig(): string {
+  return lines(
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!-- Generated by Loom - do not edit by hand. -->`,
+    `<configuration>`,
+    `    <!-- Human-readable console for the framework/app's own logs. -->`,
+    `    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">`,
+    `        <encoder>`,
+    `            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level %logger{36} - %msg%n</pattern>`,
+    `        </encoder>`,
+    `    </appender>`,
+    ``,
+    `    <!-- Structured catalog channel: the cross-backend JSON envelope on`,
+    `         stdout.  logstash-logback-encoder does the JSON writing/escaping the`,
+    `         app used to hand-roll. -->`,
+    `    <appender name="CATALOG" class="ch.qos.logback.core.ConsoleAppender">`,
+    `        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">`,
+    `            <providers>`,
+    `                <timestamp>`,
+    `                    <fieldName>ts</fieldName>`,
+    `                    <timeZone>UTC</timeZone>`,
+    `                    <pattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</pattern>`,
+    `                </timestamp>`,
+    `                <mdc>`,
+    `                    <includeMdcKeyName>correlation_id</includeMdcKeyName>`,
+    `                    <includeMdcKeyName>scope_id</includeMdcKeyName>`,
+    `                    <includeMdcKeyName>actor_id</includeMdcKeyName>`,
+    `                    <mdcKeyFieldName>correlation_id=request_id</mdcKeyFieldName>`,
+    `                </mdc>`,
+    `                <keyValuePairs/>`,
+    `            </providers>`,
+    `        </encoder>`,
+    `    </appender>`,
+    ``,
+    `    <!-- Catalog events are gated in CatalogLog by LOG_LEVEL; keep the logger`,
+    `         open (TRACE) so logback doesn't filter a second time.`,
+    `         additivity=false keeps the JSON lines off the CONSOLE appender. -->`,
+    `    <logger name="loomCatalog" level="TRACE" additivity="false">`,
+    `        <appender-ref ref="CATALOG"/>`,
+    `    </logger>`,
+    ``,
+    `    <root level="\${LOG_LEVEL:-INFO}">`,
+    `        <appender-ref ref="CONSOLE"/>`,
+    `    </root>`,
+    `</configuration>`,
     ``,
   );
 }

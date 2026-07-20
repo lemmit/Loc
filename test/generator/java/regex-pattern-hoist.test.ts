@@ -18,7 +18,7 @@ system Shop {
       aggregate Engineer with crudish {
         handle: string
         email: string
-          check email.matches("^[^@]+@[^@]+\\\\.[^@]+$")
+          check email.matches("^[^@]+@[^@]+\\\\.[^@]+$") message "Invalid email address"
         private invariant handle.matches("^[a-z][a-z0-9_]*$")
       }
       repository Engineers for Engineer { }
@@ -65,10 +65,37 @@ describe("java — regex Pattern hoisting", () => {
     expect(src).not.toMatch(/Pattern\.compile\([^)]*\)\.matcher/);
   });
 
-  it("hoists the wire-validator regex (compound check) to a static final Pattern", async () => {
-    const src = await fileEndingWith("/EngineerValidators.java");
+  it("hoists a wire-validator regex to a static final Pattern in the Spring Validator", async () => {
+    // A regex check in the command's Spring Validator hoists to a reused
+    // `private static final Pattern` (the `email.matches(...)` check lands here).
+    const src = await fileEndingWith("/CreateEngineerValidator.java");
     expect(src).toMatch(/private static final Pattern MATCHES_PATTERN_0 = Pattern\.compile\(/);
     expect(src).toContain("MATCHES_PATTERN_0.matcher(email).find()");
     expect(src).not.toMatch(/Pattern\.compile\([^)]*\)\.matcher/);
+  });
+
+  it("hoists a message-less single-field regex too (rejectValue with the sentinel code)", async () => {
+    const src = `
+system Reg {
+  subdomain S {
+    context C {
+      aggregate Account with crudish {
+        slug: string
+          check slug.matches("^[a-z0-9-]+$")
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api RegApi from S
+  storage primary { type: postgres }
+  deployable api { platform: java contexts: [C] serves: RegApi port: 8080 }
+}
+`;
+    const files = await generateSystemFiles(src);
+    const v = [...files.entries()].find(([k]) => /CreateAccountValidator\.java$/.test(k))![1];
+    expect(v).toMatch(/private static final Pattern MATCHES_PATTERN_0 = Pattern\.compile\(/);
+    expect(v).toContain(
+      'if (!(MATCHES_PATTERN_0.matcher(slug).find())) errors.rejectValue("slug", "loom.invariant"',
+    );
   });
 });

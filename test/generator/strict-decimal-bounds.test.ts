@@ -87,7 +87,8 @@ describe("strict numeric bound on a decimal field emits an exclusive validator",
 
   it("Java (Spring): strict `> 0.5` / `< 2` via BigDecimal.compareTo, integer bound stays `>= 5`", async () => {
     const files = await filesFor("java", 8080);
-    const validator = findFile(files, /ParcelValidators\.java$/i);
+    // Rules ride the per-command Spring Validator (the create shape here).
+    const validator = findFile(files, /CreateParcelValidator\.java$/i);
     expect(validator).toContain('new java.math.BigDecimal("0.5")) > 0');
     expect(validator).toContain('new java.math.BigDecimal("2")) < 0');
     expect(validator).not.toContain('new java.math.BigDecimal("1.5")) >= 0');

@@ -140,6 +140,8 @@ system S {
   it("create request takes wire types; the service parses them to domain values", async () => {
     const files_ = await files();
     const req = files_.get(`${ROOT}/features/orders/CreateOrderRequest.java`)!;
+    // The request record is plain wire types (money/datetime as String);
+    // validation lives in a Spring Validator, not on the DTO.
     expect(req).toContain(
       "public record CreateOrderRequest(String code, Status status, AddressRequest shipTo, String notes, String total, String placedAt) {",
     );
@@ -151,9 +153,11 @@ system S {
 });
 
 describe("java generator — layered service (S5)", () => {
-  it("create: parse → validate → domain factory → save → publish → id", async () => {
+  it("create: parse → domain factory → save → publish → id", async () => {
     const svc = (await files()).get(`${ROOT}/features/orders/OrderService.java`)!;
-    expect(svc).toContain("OrderValidators.create(code, status, shipTo, notes, total, placedAt);");
+    // Validation lives in the CreateOrderValidator (run at `@Valid`), so the
+    // service no longer calls a validator at the floor — parse → factory → save.
+    expect(svc).not.toContain("Validator");
     expect(svc).toContain(
       "var aggregate = Order.create(code, status, shipTo, notes, total, placedAt);",
     );
@@ -200,19 +204,38 @@ describe("java generator — paged finds", () => {
 });
 
 describe("java generator — wire validators + advice (S5)", () => {
-  it("translates classified invariants into 422 checks via the shared classifier", async () => {
-    const v = (await files()).get(`${ROOT}/features/orders/OrderValidators.java`)!;
-    expect(v).toContain("public final class OrderValidators {");
+  it("emits a unified Spring Validator per command, run at the @Valid seam", async () => {
+    // A classified invariant (`code.length > 0`) becomes an
+    // `errors.rejectValue(...)` in a per-command Spring `Validator` — the .NET
+    // FluentValidation analog (one validator, all rules, one seam).  The
+    // controller registers it via `@InitBinder`; `@Valid @RequestBody` triggers
+    // it; MethodArgumentNotValidException maps to the 422 envelope.
+    const files_ = await files();
+    const v = files_.get(`${ROOT}/features/orders/CreateOrderValidator.java`)!;
+    expect(v).toContain("public final class CreateOrderValidator implements Validator {");
+    expect(v).toContain("return CreateOrderRequest.class.equals(clazz);");
     expect(v).toContain(
-      'if (!(code.length() >= 1)) errors.add(WireValidationException.error("/code", "Invariant violated: code.length > 0"));',
+      'if (!(code.length() >= 1)) errors.rejectValue("code", "loom.invariant", "Invariant violated: code.length > 0");',
     );
-    expect(v).toContain("if (!errors.isEmpty()) throw new WireValidationException(errors);");
+    const ctrl = files_.get(`${ROOT}/features/orders/OrdersController.java`)!;
+    expect(ctrl).toContain("@Valid @RequestBody CreateOrderRequest request");
+    expect(ctrl).toContain("import jakarta.validation.Valid;");
+    expect(ctrl).toContain("@InitBinder");
+    expect(ctrl).toContain(
+      "if (target instanceof CreateOrderRequest) binder.addValidators(new CreateOrderValidator());",
+    );
+    const advice = files_.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
+    expect(advice).toContain("@ExceptionHandler(MethodArgumentNotValidException.class)");
+    expect(advice).toContain('entry.put("pointer", "/" + err.getField());');
+    expect(advice).toContain(
+      'if (code != null && code.startsWith("msg.")) entry.put("code", code);',
+    );
   });
 
   it("mirrors create wire constraints onto the crudish update validator (SYS-1)", async () => {
-    // M-T6.8/SYS-1: the crudish `update` op's validator carries the SAME
-    // field-invariant checks as `create`, so an invalid update throws
-    // WireValidationException (422) instead of reaching the domain floor.
+    // M-T6.8/SYS-1: the crudish `update` command's validator carries the SAME
+    // field constraints as create, so an invalid update is rejected at the
+    // `@Valid` boundary (422) instead of reaching the domain floor.
     const src = `
 system Demo {
   subdomain S {
@@ -230,13 +253,12 @@ system Demo {
 }
 `;
     const out = await generateSystemFiles(src);
-    const v = [...out.entries()].find(([k]) => /AccountValidators\.java$/.test(k))?.[1];
-    expect(v).toBeDefined();
-    const updateMethod = v!.slice(v!.indexOf("public static void update("));
-    expect(v).toContain("public static void update(String handle)");
-    expect(updateMethod).toContain(
-      'if (!(handle.length() >= 1)) errors.add(WireValidationException.error("/handle", "Invariant violated: handle.length > 0"));',
-    );
+    const check =
+      'if (!(handle.length() >= 1)) errors.rejectValue("handle", "loom.invariant", "Invariant violated: handle.length > 0");';
+    const create = [...out.entries()].find(([k]) => /CreateAccountValidator\.java$/.test(k))?.[1];
+    const update = [...out.entries()].find(([k]) => /UpdateAccountValidator\.java$/.test(k))?.[1];
+    expect(create).toContain(check);
+    expect(update).toContain(check);
   });
 
   it("advice maps the exception taxonomy to the cross-backend problem envelope", async () => {
@@ -245,7 +267,9 @@ system Demo {
     expect(advice).toContain(
       'problem(422, "Validation failed", "One or more fields are invalid.", request)',
     );
-    expect(advice).toContain('problem.setProperty("errors", e.errors().stream()');
+    expect(advice).toContain(
+      'problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()',
+    );
     expect(advice).toContain('problem(403, "Forbidden", e.getMessage(), request), 403');
     expect(advice).toContain('problem(400, "Bad Request", e.getMessage(), request), 400');
     expect(advice).toContain('problem(404, "Not Found", e.getMessage(), request), 404');
