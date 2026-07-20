@@ -114,6 +114,7 @@ export function renderDotnetChannels(
   const unique = uniqueBindings(bindings);
   const hasRedis = unique.some((b) => b.transport === "redis");
   const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  const hasKafka = unique.some((b) => b.transport === "kafka");
   // event type -> address, split by durability (design §5): ephemeral events
   // publish inline in the tee; durable (`work`) events ride the outbox relay.
   // First-by-declaration within each tier, mirroring the in-process
@@ -158,7 +159,7 @@ export function renderDotnetChannels(
   const bindingLines = unique
     .map(
       (b) =>
-        `        new(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)}, ${JSON.stringify(b.transport)}, ${JSON.stringify(b.group)}, ${b.delivery === "queue"}),`,
+        `        new(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)}, ${JSON.stringify(b.transport)}, ${JSON.stringify(b.group)}, ${b.delivery === "queue"}${hasKafka ? `, ${b.key === undefined ? "null" : JSON.stringify(b.key)}` : ""}),`,
     )
     .join("\n");
   const routingLines = [...ephemeralRouting.entries()]
@@ -168,14 +169,24 @@ export function renderDotnetChannels(
     .map(([ev, addr]) => `        [${JSON.stringify(ev)}] = ${JSON.stringify(addr)},`)
     .join("\n");
 
+  // Fixed kafka -> rabbitmq -> redis order; the last wired driver is the
+  // fallback arm, so pre-kafka outputs stay byte-identical.
+  const transportCtors: [string, string][] = [];
+  if (hasKafka) transportCtors.push(["kafka", "new KafkaChannelTransport(url, log)"]);
+  if (hasRabbit) transportCtors.push(["rabbitmq", "new RabbitChannelTransport(url, log)"]);
+  if (hasRedis) transportCtors.push(["redis", "new RedisChannelTransport(url, log)"]);
+  const lastCtor = transportCtors[transportCtors.length - 1];
+  if (!lastCtor) throw new Error("renderDotnetChannels called with no wired broker transport");
   const newTransportExpr =
-    hasRedis && hasRabbit
-      ? `binding.Transport == "rabbitmq"
-                    ? new RabbitChannelTransport(url, log)
-                    : new RedisChannelTransport(url, log)`
-      : hasRabbit
-        ? "new RabbitChannelTransport(url, log)"
-        : "new RedisChannelTransport(url, log)";
+    transportCtors.length === 1
+      ? lastCtor[1]
+      : transportCtors
+          .slice(0, -1)
+          .map(
+            ([t, ctor]) =>
+              `binding.Transport == ${JSON.stringify(t)}\n                    ? ${ctor}\n                    : `,
+          )
+          .join("") + lastCtor[1];
 
   const redisDriver = hasRedis
     ? `
@@ -398,6 +409,142 @@ public static class ChannelRelayPublisher
 `
     : "";
 
+  const kafkaDriver = hasKafka
+    ? `
+/// <summary>Kafka driver — Confluent.Kafka over the log (design §4
+/// topology): one topic per channel address (idempotently admin-created
+/// before the group join); per-partition ordering with partition key =
+/// loomkey ?? envelope id; consumption always rides the deployable's
+/// consumer GROUP (broadcast across deployables, competing within).
+/// Offsets commit after the handler resolves.  Dead-letter v1: a failed or
+/// malformed record parks onto &lt;address&gt;.dlq and the offset advances —
+/// logged and kept, never a hot-loop.</summary>
+public sealed class KafkaChannelTransport : IChannelTransport
+{
+    private readonly string _bootstrap;
+    private readonly ILogger _log;
+    private readonly Lazy<IProducer<string, string>> _producer;
+    private readonly List<Task> _loops = new();
+    private readonly CancellationTokenSource _stopping = new();
+
+    public KafkaChannelTransport(string url, ILogger log)
+    {
+        _log = log;
+        _bootstrap = url.StartsWith("kafka://", StringComparison.Ordinal) ? url["kafka://".Length..] : url;
+        _producer = new(() =>
+            new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = _bootstrap }).Build());
+    }
+
+    private async Task EnsureTopicAsync(string topic)
+    {
+        // Subscribing to a not-yet-produced topic stalls the group join;
+        // idempotently create it (3 partitions / rf 1 — the compose
+        // sidecar's defaults; an existing topic keeps its own shape).
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = _bootstrap }).Build();
+        try
+        {
+            await admin.CreateTopicsAsync(new[]
+            {
+                new TopicSpecification { Name = topic, NumPartitions = 3, ReplicationFactor = 1 },
+            });
+        }
+        catch (CreateTopicsException ex) when (ex.Results.TrueForAll(
+            r => r.Error.Code == ErrorCode.TopicAlreadyExists))
+        {
+            // Already there — the idempotent path.
+        }
+    }
+
+    public async Task PublishAsync(string address, LoomEventEnvelope envelope)
+    {
+        var key = envelope.LoomKey ?? envelope.Id;
+        await _producer.Value.ProduceAsync(address, new Message<string, string>
+        {
+            Key = key,
+            Value = JsonSerializer.Serialize(envelope),
+        });
+    }
+
+    public async Task SubscribeAsync(string address, string? group, Func<LoomEventEnvelope, Task> handler)
+    {
+        await EnsureTopicAsync(address);
+        var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        {
+            BootstrapServers = _bootstrap,
+            GroupId = group ?? address,
+            EnableAutoCommit = false,
+            AutoOffsetReset = AutoOffsetReset.Latest,
+        }).Build();
+        consumer.Subscribe(address);
+        _loops.Add(Task.Run(async () =>
+        {
+            while (!_stopping.IsCancellationRequested)
+            {
+                ConsumeResult<string, string> result;
+                try
+                {
+                    result = consumer.Consume(_stopping.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                LoomEventEnvelope? envelope = null;
+                try
+                {
+                    envelope = JsonSerializer.Deserialize<LoomEventEnvelope>(result.Message.Value);
+                }
+                catch (JsonException)
+                {
+                    // Malformed record: park + advance (v1 log + park).
+                }
+                if (envelope is null)
+                {
+                    await ParkAsync(address, result.Message);
+                    _log.LogWarning("{Event} {Address} {Error}", "channel_dead_lettered", address, "malformed envelope");
+                }
+                else
+                {
+                    try
+                    {
+                        await handler(envelope);
+                    }
+                    catch (Exception ex)
+                    {
+                        // v1 log + park: keep the partition moving (a raw retry
+                        // would stall every record behind the poisoned one).
+                        await ParkAsync(address, result.Message);
+                        _log.LogWarning("{Event} {Address} {Type} {Id} {Error}", "channel_dead_lettered", address, envelope.Type, envelope.Id, ex.Message);
+                    }
+                }
+                // Offset commits after the handler resolved (or the record
+                // parked) — at-least-once with the envelope id as the
+                // consumer-side dedup key.
+                consumer.Commit(result);
+            }
+            consumer.Close();
+        }));
+    }
+
+    private async Task ParkAsync(string address, Message<string, string> message)
+    {
+        await _producer.Value.ProduceAsync($"{address}.dlq", new Message<string, string>
+        {
+            Key = message.Key,
+            Value = message.Value,
+        });
+    }
+
+    public async Task CloseAsync()
+    {
+        _stopping.Cancel();
+        await Task.WhenAll(_loops);
+        if (_producer.IsValueCreated) _producer.Value.Dispose();
+    }
+}
+`
+    : "";
+
   const consumerMarkedDispatch = opts.hasOutbox
     ? `        // The envelope id rides in as the idempotency marker: saga rows
         // stamped with it no-op on broker redelivery (design §5).
@@ -428,8 +575,16 @@ public static class ChannelRelayPublisher
                         _log.LogWarning("{Event} {Address} {Type} {Error}", "channel_consume_failed", binding.Address, envelope.Type, ex.Message);
                     }
                 });`;
-  const subscribeBody =
-    hasRedis && hasRabbit
+  const subscribeBody = hasKafka
+    ? `if (binding.Queue || binding.Transport == "kafka")
+            {
+                ${strictSubscribe}
+            }
+            else
+            {
+                ${loggedSubscribe}
+            }`
+    : hasRedis && hasRabbit
       ? `if (binding.Queue)
             {
                 ${strictSubscribe}
@@ -484,7 +639,11 @@ public sealed class ChannelConsumerService : BackgroundService
         using var scope = _scopes.CreateScope();
         var dispatcher = scope.ServiceProvider.GetRequiredService<InProcessDomainEventDispatcher>();
 ${consumerMarkedDispatch}
-        _log.LogInformation("{Event} {Address} {Type} {Id}", "channel_consumed", binding.Address, envelope.Type, envelope.Id);
+        ${
+          hasKafka
+            ? `_log.LogInformation("{Event} {Address} {Type} {Id} {Key}", "channel_consumed", binding.Address, envelope.Type, envelope.Id, envelope.LoomKey);`
+            : `_log.LogInformation("{Event} {Address} {Type} {Id}", "channel_consumed", binding.Address, envelope.Type, envelope.Id);`
+        }
     }
 }
 `
@@ -506,7 +665,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-${hasRabbit ? "using RabbitMQ.Client;\nusing RabbitMQ.Client.Events;\n" : ""}${hasRedis ? "using StackExchange.Redis;\n" : ""}using ${ns}.Domain.Common;
+${hasKafka ? "using Confluent.Kafka;\nusing Confluent.Kafka.Admin;\n" : ""}${hasRabbit ? "using RabbitMQ.Client;\nusing RabbitMQ.Client.Events;\n" : ""}${hasRedis ? "using StackExchange.Redis;\n" : ""}using ${ns}.Domain.Common;
 using ${ns}.Domain.Enums;
 using ${ns}.Domain.Events;
 using ${ns}.Domain.Ids;
@@ -523,7 +682,12 @@ public sealed record LoomEventEnvelope(
     [property: JsonPropertyName("source")] string Source,
     [property: JsonPropertyName("time")] string Time,
     [property: JsonPropertyName("datacontenttype")] string DataContentType,
-    [property: JsonPropertyName("loomchannel")] string LoomChannel,
+    [property: JsonPropertyName("loomchannel")] string LoomChannel,${
+      hasKafka
+        ? `
+    [property: JsonPropertyName("loomkey"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LoomKey,`
+        : ""
+    }
     [property: JsonPropertyName("data")] JsonElement Data);
 
 /// <summary>The publish/subscribe seam every transport implements — the
@@ -536,9 +700,9 @@ public interface IChannelTransport
     Task SubscribeAsync(string address, string? group, Func<LoomEventEnvelope, Task> handler);
     Task CloseAsync();
 }
-${redisDriver}${rabbitDriver}
+${redisDriver}${rabbitDriver}${kafkaDriver}
 public sealed record ChannelBinding(
-    string CsName, string Address, string EnvVar, string Context, string Transport, string Group, bool Queue);
+    string CsName, string Address, string EnvVar, string Context, string Transport, string Group, bool Queue${hasKafka ? ", string? Key" : ""});
 
 public static class ChannelBindings
 {
@@ -606,10 +770,25 @@ public static class ChannelEnvelopes
         }
         var id = eventId
             ?? $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds():x}-{Environment.ProcessId:x}-{Interlocked.Increment(ref _counter):x}";
-        var data = JsonSerializer.SerializeToElement(ChannelCodec.ToData(ev));
+        var raw = ChannelCodec.ToData(ev);
+        var data = JsonSerializer.SerializeToElement(raw);${
+          hasKafka
+            ? `
+        // The channel's key: field value rides as loomkey — kafka's
+        // partition key (design §4), so one aggregate's events keep order.
+        string? loomKey = null;
+        if (bound.Key is not null && raw.TryGetValue(bound.Key, out var keyValue) && keyValue is not null)
+        {
+            loomKey = keyValue.ToString();
+        }
         return new LoomEventEnvelope(
             "1.0", id, $"{bound.Context}.{type}", $"/loom/{bound.Context}",
-            DateTime.UtcNow.ToString("o"), "application/json", address, data);
+            DateTime.UtcNow.ToString("o"), "application/json", address, loomKey, data);`
+            : `
+        return new LoomEventEnvelope(
+            "1.0", id, $"{bound.Context}.{type}", $"/loom/{bound.Context}",
+            DateTime.UtcNow.ToString("o"), "application/json", address, data);`
+        }
     }
 }
 

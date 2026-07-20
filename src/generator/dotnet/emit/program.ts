@@ -928,7 +928,10 @@ export function renderCsproj(
   usesSpecifications: boolean = false,
   oidc: boolean = false,
   withCronTimers: boolean = false,
-  channelTransports: { redis: boolean; rabbit: boolean } = { redis: false, rabbit: false },
+  channelTransports: { redis: boolean; rabbit: boolean; kafka?: boolean } = {
+    redis: false,
+    rabbit: false,
+  },
 ): string {
   // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
@@ -939,6 +942,9 @@ export function renderCsproj(
   // sidecar.  Per-transport wiring-gated.
   const redisChannelRef = channelTransports.redis
     ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    : "";
+  const kafkaChannelRef = channelTransports.kafka
+    ? `\n    <!-- Kafka channel transport (channels.md, M-T4.4; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
     : "";
   const rabbitChannelRef = channelTransports.rabbit
     ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
@@ -1070,7 +1076,7 @@ ${persistenceRefs}
     <!-- OpenAPI spec emitted at /openapi.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
-    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${kafkaChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;

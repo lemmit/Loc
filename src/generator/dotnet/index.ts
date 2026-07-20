@@ -915,6 +915,7 @@ function emitProjectFromContexts(
     channelTransports: {
       redis: channelBindings.some((b) => b.transport === "redis"),
       rabbit: channelBindings.some((b) => b.transport === "rabbitmq"),
+      kafka: channelBindings.some((b) => b.transport === "kafka"),
     },
     authRequired,
     actorIdProp,
@@ -1643,7 +1644,7 @@ function emitProject(
     /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
      *  the per-transport csproj package refs (StackExchange.Redis /
      *  RabbitMQ.Client). */
-    channelTransports?: { redis: boolean; rabbit: boolean };
+    channelTransports?: { redis: boolean; rabbit: boolean; kafka?: boolean };
     /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
      *  instead of the InProcess scoped line. */
