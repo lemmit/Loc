@@ -55,9 +55,12 @@
     "app-shell": "app-shell.hbs",
     "theme": "theme.hbs",
     "format-helpers": "format-helpers.hbs",
-    "primitive-file-upload": "primitive-file-upload.hbs"
+    "primitive-file-upload": "primitive-file-upload.hbs",
+    "realtime-toast": "realtime-toast.hbs",
+    "realtime-toast-setup": "realtime-toast-setup.hbs"
   },
   "imports": {
+    "realtime-toast": [{ "from": "./loom-toast.service", "named": ["LoomToastService"] }],
     "primitive-button": [{ "from": "@angular/material/button", "named": ["MatButtonModule"] }],
     "primitive-card": [{ "from": "@angular/material/card", "named": ["MatCardModule"] }],
     "primitive-divider": [{ "from": "@angular/material/divider", "named": ["MatDividerModule"] }],

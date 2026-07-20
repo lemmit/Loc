@@ -16,7 +16,7 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
-import { durableEventTypes } from "../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
@@ -67,6 +67,7 @@ import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
 import { buildPyQueryProjectionsFile } from "./query-projections-builder.js";
+import { buildPyRealtimeFile } from "./realtime-builder.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
@@ -196,6 +197,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       .flatMap((b) => b.events)
       .filter((ev) => hostedDurable.has(ev)),
   );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /realtime/events.  Gates the
+  // `app/realtime.py` module, the dispatcher's `RealtimeDispatcher` tee, and
+  // the main.py router mount; a broadcast-free deployable stays byte-identical.
+  const hasRealtime = realtimeEventTypes(merged).size > 0;
 
   // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
   // owner is DERIVED (no stamp): the deployable whose subdomain
@@ -393,6 +399,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasTimers,
       hasChannels,
       hasChannelConsumers,
+      hasRealtime,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -490,6 +497,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     resolveStreamContext,
     hasChannels,
     durableBrokerEvents,
+    hasRealtime,
   );
   const hasDispatch = dispatchFile != null;
   // Broker transport module (M-T4.4 slices 2b + 7a): the redis.asyncio /
@@ -506,6 +514,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
         durableBrokerEvents.size > 0,
       ),
     );
+  }
+  if (hasRealtime) {
+    const realtimeFile = buildPyRealtimeFile(merged);
+    if (realtimeFile) out.set("app/realtime.py", realtimeFile);
   }
   if (dispatchFile != null) {
     out.set("app/dispatch.py", dispatchFile);
@@ -851,6 +863,7 @@ function renderMain(
   hasTimers = false,
   hasChannels = false,
   hasChannelConsumers = false,
+  hasRealtime = false,
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -930,6 +943,7 @@ function renderMain(
     ...explicitRouteApis.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
+    hasRealtime ? "from app.realtime import realtime_router" : null,
     "from app.obs.log import log",
     "from app.obs.metrics import render_metrics",
     "from app.obs.middleware import ObservabilityMiddleware",
@@ -1068,6 +1082,10 @@ function renderMain(
     hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
     hasQueryProjections ? `app.include_router(query_projections_router${routerArgs})` : null,
     ...explicitRouteApis.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
+    // Realtime SSE wire (channels.md Part I): GET /api/realtime/events streams
+    // broadcast-channel events to connected browsers (mounted under the shared
+    // API base so `${API_BASE_URL}/realtime/events` lines up).
+    hasRealtime ? `app.include_router(realtime_router${routerArgs})` : null,
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
     // and the handshake redirect lands at `/api/auth/callback`.
@@ -1091,7 +1109,10 @@ function renderMain(
     `    return {"status": "ready"}`,
     "",
     "",
-    `@app.get("/metrics")`,
+    // include_in_schema=False: /metrics is an infra scrape target, not part of
+    // the API surface — keeping it out of the OpenAPI doc preserves the
+    // cross-backend parity contract (no other backend lists it).
+    `@app.get("/metrics", include_in_schema=False)`,
     "async def metrics() -> Response:",
     `    """Prometheus scrape target — the text exposition of the default`,
     "    registry (process/GC collectors + the HTTP counter/histogram recorded",
@@ -1297,7 +1318,7 @@ function renderProblemPy(
                 request, ${uniquenessStatus}, "Conflict", "A resource with these values already exists."
             )
         log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
-            record_domain_fault("disallowed")
+        record_domain_fault("disallowed")
         return problem(request, ${uniquenessStatus}, "Conflict", "The request conflicts with the current state.")
 
 `

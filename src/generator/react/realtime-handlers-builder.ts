@@ -19,7 +19,11 @@
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { buildRealtimeSwitchCases, toastImports } from "../_frontend/realtime.js";
+import {
+  buildRealtimeSwitchCases,
+  realtimeNeedsQueryClient,
+  toastImports,
+} from "../_frontend/realtime.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 /** Render `src/components/RealtimeHandlers.tsx` for a ui with at least
@@ -30,18 +34,24 @@ export function buildRealtimeHandlers(ui: UiIR, pack: LoadedPack): string {
     ? pack.render("realtime-toast-setup", {}).trim()
     : null;
   const cases = buildRealtimeSwitchCases(ui, pack, "        ");
+  // A `refetch(<Agg>)` handler needs the react-query client — invalidation
+  // mirrors the mutation `onSuccess` path.  Toast-only uis skip it.
+  const needsQc = realtimeNeedsQueryClient(ui);
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     "// Live-event handlers (channels.md Part I): each `on <channel>.<Event>`",
-    "// declared on the ui renders the arriving event as a toast.  Renderless;",
-    "// mounted once at the App root.  The authorized read stays the gate —",
-    "// event payloads carry no privilege.",
+    "// declared on the ui renders the arriving event as a toast and/or",
+    "// refetches an aggregate's queries.  Renderless; mounted once at the App",
+    "// root.  The authorized read stays the gate — event payloads carry no",
+    "// privilege.",
     'import { useEffect } from "react";',
+    ...(needsQc ? ['import { useQueryClient } from "@tanstack/react-query";'] : []),
     'import { subscribeRealtime } from "../api/realtime";',
     ...importLines,
     "",
     "export function RealtimeHandlers(): null {",
+    ...(needsQc ? ["  const qc = useQueryClient();"] : []),
     ...(setup ? [`  ${setup}`] : []),
     // The toast closure (chakra v2's hook-returned `toast`) is reference-
     // stable per provider; subscribing once on mount is the contract.

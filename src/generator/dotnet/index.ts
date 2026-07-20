@@ -20,7 +20,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
-import { durableEventTypes } from "../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
@@ -105,6 +105,7 @@ import {
   renderProvenanceRecordConfiguration,
   renderProvLineage,
 } from "./emit/provenance.js";
+import { realtimeTypesOf, renderRealtimeDispatcher, renderRealtimeHub } from "./emit/realtime.js";
 import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
@@ -491,6 +492,11 @@ function emitProjectFromContexts(
   }
   // Broker transport module (M-T4.4 slice 6a) — channel-less projects stay
   // byte-identical.
+  // Realtime SSE wire (channels.md Part I): computed before the broker
+  // channels emit because the channel tee's typed inner becomes the realtime
+  // dispatcher when both are wired (chain: ChannelTee → Realtime → core).
+  const realtimeTypes = realtimeTypesOf(merged);
+  const hasRealtime = realtimeTypes.length > 0;
   if (hasChannels && system) {
     out.set(
       "Infrastructure/Channels/ChannelTransport.cs",
@@ -500,11 +506,13 @@ function emitProjectFromContexts(
         merged.events,
         hasChannelConsumers,
         system.sys,
-        hasOutboxTier
-          ? "OutboxDomainEventDispatcher"
-          : hasSubscriptions
-            ? "InProcessDomainEventDispatcher"
-            : "NoopDomainEventDispatcher",
+        hasRealtime
+          ? "RealtimeDomainEventDispatcher"
+          : hasOutboxTier
+            ? "OutboxDomainEventDispatcher"
+            : hasSubscriptions
+              ? "InProcessDomainEventDispatcher"
+              : "NoopDomainEventDispatcher",
         { hasOutbox: hasOutboxTier, durableBroker: durableBrokerEvents.size > 0 },
       ),
     );
@@ -559,6 +567,15 @@ function emitProjectFromContexts(
         renderOutboxRelay(ns, durableTypes, relayOpts),
       );
     }
+  }
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /api/realtime/events.  The
+  // hub + dispatcher decorator emit here; Program.cs registers the hub, wraps
+  // the dispatcher in the tee, and maps the SSE endpoint.  A broadcast-free
+  // deployable emits nothing (byte-identical).
+  if (hasRealtime) {
+    out.set("Infrastructure/Realtime/RealtimeHub.cs", renderRealtimeHub(ns, realtimeTypes));
+    out.set("Infrastructure/Events/RealtimeDomainEventDispatcher.cs", renderRealtimeDispatcher(ns));
   }
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
@@ -899,6 +916,7 @@ function emitProjectFromContexts(
     usingDapper,
     hasSubscriptions,
     hasOutbox,
+    hasRealtime,
     hasAudit,
     hasProvenance,
     // Dapper persistence-port DI (M-T6.9): closed bindings keyed off the
@@ -1621,6 +1639,10 @@ function emitProject(
     /** Transactional outbox (dispatch-delivery-semantics.md): registers the
      *  outbox-wrapping dispatcher + the relay BackgroundService. */
     hasOutbox?: boolean;
+    /** Realtime SSE wire (channels.md Part I): registers the RealtimeHub
+     *  singleton, wraps the dispatcher in the tee, and maps GET
+     *  /api/realtime/events. */
+    hasRealtime?: boolean;
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
@@ -1684,6 +1706,7 @@ function emitProject(
       hasChannelConsumers: !!options?.hasChannelConsumers,
       hasOutbox: !!options?.hasOutbox,
       outboxNoopInner: !!options?.outboxNoopInner,
+      hasRealtime: !!options?.hasRealtime,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,

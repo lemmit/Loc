@@ -26,6 +26,7 @@ import {
 } from "../../ir/util/aggregate-flags.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
+import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
   resolveContextSchema,
@@ -126,6 +127,7 @@ import {
   renderProvLineage,
   renderProvLineageRecord,
 } from "./emit/provenance.js";
+import { renderJavaRealtimeController } from "./emit/realtime.js";
 import {
   isPagedAutoAll,
   type JavaRepoCtx,
@@ -1117,6 +1119,15 @@ function emitProjectFromContexts(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /api/realtime/events.  The
+  // controller tees off the always-present ApplicationEventPublisher bus; a
+  // broadcast-free deployable emits nothing (byte-identical).  Derived over the
+  // union of hosted contexts so a channel declared in one is served here.
+  const realtimeController = renderJavaRealtimeController(mergeContexts(contexts), basePkg);
+  if (realtimeController) {
+    out.set(mainSourcePath(`${basePkg}.api`, "RealtimeController.java"), realtimeController);
+  }
   // springdoc OpenApiCustomizer — align the emitted /openapi.json with the
   // other backends' contract (success bodies under application/json + named
   // <Agg>ListResponse array wrappers; RFC 7807 ProblemDetails error responses

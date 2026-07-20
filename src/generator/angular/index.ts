@@ -10,6 +10,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
 import { type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
@@ -26,6 +27,7 @@ import {
 } from "../_frontend/extern-functions.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
@@ -40,6 +42,10 @@ import {
   renderAngularExternComponentProps,
   renderAngularExternComponentShim,
 } from "./extern-components.js";
+import {
+  buildAngularRealtimeHandlers,
+  buildAngularToastService,
+} from "./realtime-handlers-builder.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
 import { buildAngularViewsModule } from "./views-module.js";
@@ -318,6 +324,29 @@ export function generateAngularForContexts(
   // gated — an unused injected member would be an `ng build` strict error.
   const navUsesSession = navSections.some((s) => s.entries.some((e) => !!e.requiresJs));
 
+  // --- Realtime SSE wire (channels.md Part I) -------------------------
+  // When the targeted backend exposes the realtime wire (any
+  // `delivery: broadcast` channel; a backend where `backendServesRealtime`
+  // holds), emit the EventSource client (`src/api/realtime.ts`).  When the
+  // ui additionally declares `on <channel>.<Event>` handlers, emit the
+  // renderless RealtimeHandlersComponent + the minimal toast service, and
+  // the app shell mounts the component (`hasRealtimeHandlers`).
+  const realtimeTypes = backendServesRealtime(target?.platform)
+    ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+    : [];
+  if (realtimeTypes.length > 0) {
+    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+  }
+  const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui?.notifications?.length ?? 0) > 0;
+  if (hasRealtimeHandlers && ui) {
+    out.set("src/app/realtime-handlers.component.ts", buildAngularRealtimeHandlers(ui, pack));
+    // The toast service is referenced only by a toast-bearing handler; a
+    // refetch-only ui skips it (matches the component's own gating).
+    if ((ui.notifications ?? []).some((n) => n.toasts.length > 0)) {
+      out.set("src/app/loom-toast.service.ts", buildAngularToastService());
+    }
+  }
+
   // The app shell (Material toolbar + sidenav).
   out.set(
     "src/app/app.component.ts",
@@ -327,6 +356,7 @@ export function generateAngularForContexts(
       hasNav: navSections.some((s) => s.entries.length > 0),
       authUi,
       navUsesSession,
+      hasRealtimeHandlers,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));

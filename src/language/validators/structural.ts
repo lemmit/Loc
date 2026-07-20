@@ -39,7 +39,9 @@ import {
   isUnique,
   isValueObject,
   isWorkflow,
+  isWorkflowCreateDecl,
 } from "../generated/ast.js";
+import { envForNode, typeOf, typeToString } from "../type-system.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
 import {
@@ -261,6 +263,23 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
     }
   }
   checkWorkflowEventSourcedDiscipline(wf, accept);
+
+  // `requires Expr` authorization gate (authorization.md §11.3) on a workflow
+  // `create` / `handle` trigger: a bool pre-check (403) over `currentUser` +
+  // the trigger's command params (a saga starter/handler has no aggregate
+  // `this`).  Types to bool exactly like the in-body `requires` it lowers to;
+  // `envForNode` resolves the enclosing create/handle params.
+  for (const m of wf.members) {
+    if (!isWorkflowCreateDecl(m) && !isHandleDecl(m)) continue;
+    if (!m.gate) continue;
+    const gt = typeOf(m.gate, envForNode(m.gate));
+    if (gt.kind !== "primitive" || gt.name !== "bool") {
+      accept("error", `'requires' must be of type 'bool', got '${typeToString(gt)}'.`, {
+        node: m,
+        property: "gate",
+      });
+    }
+  }
 
   // Workflow `function` members are the aggregate-parity pure helper — both the
   // expression form (`function f(...): T = expr`) and the pure block form

@@ -820,7 +820,9 @@ system D {
     expect(schema).toContain("data jsonb not null");
     expect(schema).toContain("version int not null");
     expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines"); // parts fold into the blob
-    // The repository (de)serialises the whole aggregate through the snapshot.
+    // The repository (de)serialises the whole aggregate through the snapshot,
+    // stamping the row's version onto it so the optimistic-concurrency CAS
+    // compares against the persisted value (PR #2095).
     const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
     expect(repo).toContain(
       "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)! with { Version = __d.version })",

@@ -1363,6 +1363,7 @@ WorkflowCreateDecl:
     'create' (name=ID)?
         '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         ('by' correlation=CorrelationExpr)?
+        ('requires' gate=Expression)?
     '{'
         body+=Statement*
     '}';
@@ -1374,7 +1375,7 @@ WorkflowCreateDecl:
 // `handle` is a fresh keyword so it can never start a Statement.  Multiple
 // handles make a workflow a multi-command saga.
 HandleDecl:
-    'handle' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+    'handle' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ('requires' gate=Expression)? '{'
         body+=Statement*
     '}';
 
@@ -1749,7 +1750,7 @@ FunctionDecl:
 // `{ allowed }`.  Distinct from `requires` (auth, 403) and `precondition`
 // (argument validation inside the body, 400).
 Operation:
-    (private?='private')? 'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
+    (private?='private')? 'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('requires' gate=Expression)? ('when' when=Expression)? '{'
         body+=Statement*
     '}';
 

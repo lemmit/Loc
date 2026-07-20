@@ -90,6 +90,19 @@ describe("realtime SSE wire — Vue (`on <channel>.<Event>`)", () => {
     expect(app).toContain("{{ t.message }}");
   });
 
+  it("a `refetch(Order)` handler invalidates the aggregate's query cache", async () => {
+    const src = BASE.replace(
+      'on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") }',
+      'on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }',
+    );
+    const out = await vueFiles(src);
+    const handlers = out.get("src/components/RealtimeHandlers.vue") ?? "";
+    expect(handlers).toContain('import { useQueryClient } from "@tanstack/vue-query";');
+    expect(handlers).toContain("const qc = useQueryClient();");
+    expect(handlers).toContain('case "OrderPlaced":');
+    expect(handlers).toContain('qc.invalidateQueries({ queryKey: ["orders"] });');
+  });
+
   it("emits the client but no handlers/toast when the ui declares no `on` members", async () => {
     const src = BASE.replace(/ {4}channel Live:.*\n {4}on Live\..*\n/, "");
     const out = await vueFiles(src);

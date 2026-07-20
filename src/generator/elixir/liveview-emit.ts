@@ -26,6 +26,7 @@ import type {
   SystemIR,
   TypeIR,
   UiIR,
+  UiNotificationIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
@@ -47,6 +48,7 @@ import {
   walkBodyToHeex,
 } from "./heex-walker.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
+import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
 import { renderStoreModule } from "./store-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
@@ -472,6 +474,11 @@ function renderLiveView(a: RenderArgs): string {
     .map((s) => `  alias ${webModule}.Stores.${upperFirst(s)}`)
     .join("\n");
 
+  // Realtime (channels.md Part I, Phoenix path): when the ui declares any
+  // `on <channel>.<Event>` handler, every routed LiveView subscribes to the
+  // domain `emit` topic on mount and handles each carried event natively via
+  // `handle_info`.  A ui with no handlers keeps byte-identical output.
+  const subscribeRealtime = (ui.notifications?.length ?? 0) > 0;
   const mount = renderMount(
     page,
     walked.formBindings,
@@ -480,6 +487,7 @@ function renderLiveView(a: RenderArgs): string {
     aggregatesByName,
     usedStores,
     walked.uploadBindings,
+    subscribeRealtime ? appModule : null,
   );
   const handleParams = renderHandleParams(
     page,
@@ -509,6 +517,16 @@ function renderLiveView(a: RenderArgs): string {
     renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
     renderCreateEventClauses(walked.formBindings, contextModuleByAggName, createSuccessRoute) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName);
+  // Realtime `handle_info` clauses — one per subscribed event type, each
+  // rendering the handler's `toast(…)` as `put_flash(:info, …)` and re-loading
+  // any `refetch(<Agg>)` target the page displays.  Empty when the ui declares
+  // no `on` handlers (byte-identical).
+  const realtimeClauses = renderRealtimeHandleInfo(
+    ui,
+    walked.queryBindings,
+    appModule,
+    contextModuleByAggName,
+  );
 
   // `FileUpload` progress consumers — one `handle_<field>_progress/3` per
   // upload binding, referenced by the `allow_upload(..., progress: &…/3)` mount
@@ -522,7 +540,7 @@ ${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
-${handleEventClauses}${uploadHandlers}
+${handleEventClauses}${uploadHandlers}${realtimeClauses}
   @impl true
   def render(assigns) do
     ~H"""
@@ -549,6 +567,85 @@ ${h.body.join("\n")}
   );
 }
 
+/** Realtime `handle_info` clauses (channels.md Part I, Phoenix path).  One
+ *  clause per subscribed event type (grouped across handlers), each matching
+ *  the broadcast struct `%<App>.<Ctx>.Events.<Event>{}` and:
+ *   - rendering every `toast(<expr>)` as a `put_flash(:info, …)`, and
+ *   - re-loading each `refetch(<Agg>)` target the page actually displays
+ *     (a page that doesn't load the aggregate no-ops that reload).
+ *  A trailing catch-all discards every other broadcast so an unmatched event
+ *  can't crash the subscribed LiveView.  Empty string when the ui declares no
+ *  `on` handlers (byte-identical to the pre-realtime output). */
+function renderRealtimeHandleInfo(
+  ui: UiIR,
+  queryBindings: import("./heex-walker.js").QueryBinding[],
+  appModule: string,
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): string {
+  const notifications = ui.notifications ?? [];
+  if (notifications.length === 0) return "";
+
+  // Channel-param handle → owning context, so the handle_info head can name
+  // the broadcast struct's module (`%<App>.<Ctx>.Events.<Event>{}`).
+  const contextByParam = new Map<string, string>();
+  for (const cp of ui.channelParams ?? []) contextByParam.set(cp.name, cp.contextName);
+
+  // One clause per event type — group the ui's handlers by their carried event.
+  const byEvent = new Map<string, UiNotificationIR[]>();
+  for (const n of notifications) {
+    const list = byEvent.get(n.eventType) ?? [];
+    list.push(n);
+    byEvent.set(n.eventType, list);
+  }
+
+  // First QueryBinding per aggregate — a `refetch(<Agg>)` reloads it.
+  const qbByAgg = new Map<string, import("./heex-walker.js").QueryBinding>();
+  for (const qb of queryBindings) if (!qbByAgg.has(qb.aggregate)) qbByAgg.set(qb.aggregate, qb);
+
+  const clauses: string[] = [];
+  for (const [eventType, handlers] of [...byEvent.entries()].sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    const contextName = contextByParam.get(handlers[0]!.paramName);
+    if (!contextName) continue; // unresolved channel param — validator catches
+    const eventModule = `${appModule}.${upperFirst(contextName)}.Events.${upperFirst(eventType)}`;
+    const bind = handlers[0]!.bind;
+    const toastExprs = handlers.flatMap((h) => h.toasts);
+    // Only capture the struct when a toast reads it — otherwise `%…{}` (no
+    // binding) keeps `--warnings-as-errors` happy on a refetch-only handler.
+    const usesBind = toastExprs.some((e) => exprUsesBind(e, bind));
+    const head = usesBind ? `%${eventModule}{} = ${snake(bind)}` : `%${eventModule}{}`;
+
+    const body: string[] = [];
+    // Refetch reloads — dedup'd aggregates the page displays.
+    const reloadAggs = [
+      ...new Set(handlers.flatMap((h) => (h.refetches ?? []).map((r) => r.aggregate))),
+    ].sort();
+    for (const agg of reloadAggs) {
+      const qb = qbByAgg.get(agg);
+      const ctxModule = contextModuleByAggName.get(agg);
+      if (!qb || !ctxModule) continue; // page doesn't load it → no-op reload
+      body.push(renderQueryLoadBlock(qb, ctxModule, []));
+    }
+    // Toasts → chained put_flash(:info, …).
+    const flashes = toastExprs.map((e) => `put_flash(:info, ${renderMessageExprElixir(e, bind)})`);
+    if (flashes.length > 0) {
+      body.push(`    socket =\n      socket\n      |> ${flashes.join("\n      |> ")}`);
+    }
+    body.push("    {:noreply, socket}");
+    clauses.push(`  @impl true
+  def handle_info(${head}, socket) do
+${body.join("\n")}
+  end`);
+  }
+  if (clauses.length === 0) return "";
+  // Catch-all — the subscription receives every "events" broadcast; an
+  // unmatched struct must not raise in the LiveView process.
+  clauses.push(`  @impl true
+  def handle_info(_msg, socket), do: {:noreply, socket}`);
+  return `\n${clauses.join("\n\n")}\n`;
+}
+
 function renderMount(
   page: PageIR,
   formBindings: import("./heex-walker.js").FormBinding[],
@@ -571,7 +668,17 @@ function renderMount(
    *  matching `<.live_file_input upload={@uploads.<field>}>` resolves and
    *  uploads stream in. */
   uploadBindings: readonly UploadBinding[] = [],
+  /** App module prefix when this page must subscribe to the realtime PubSub
+   *  topic on connect (the ui declares `on` handlers), else `null` — a
+   *  `null` keeps mount byte-identical to the pre-realtime output. */
+  realtimeAppModule: string | null = null,
 ): string {
+  // `if connected?(socket), do: subscribe` — only the live (websocket-
+  // connected) mount subscribes; the initial static render skips it.  Prepended
+  // to the mount body so the subscription is set up before the assigns load.
+  const subscribeLine = realtimeAppModule
+    ? `    if connected?(socket), do: Phoenix.PubSub.subscribe(${realtimeAppModule}.PubSub, ${JSON.stringify(REALTIME_TOPIC)})\n`
+    : "";
   const assigns: string[] = [];
   for (const f of page.state) {
     // Type-aware default from the walker — single source of truth so
@@ -634,16 +741,62 @@ function renderMount(
   if (assigns.length === 0) {
     return `  @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket}
+${subscribeLine}    {:ok, socket}
   end`;
   }
   return `  @impl true
   def mount(_params, _session, socket) do
-    socket =
+${subscribeLine}    socket =
       socket
 ${assigns.join("\n")}
     {:ok, socket}
   end`;
+}
+
+/** Build the `socket = case <load> do … end` block for one QueryBinding —
+ *  the detail (`get_<agg>`) / list (`list_<agg>s`) read that populates the
+ *  page's `@data` / `@items` assign.  Shared by `handle_params` (initial load)
+ *  and the realtime `handle_info` refetch reload; `opFbs` re-seeds operation
+ *  forms in the `{:ok, record}` arm (single loads only) — `handle_params`
+ *  passes the page's operation form bindings, the realtime reload passes `[]`
+ *  (data reload only, forms untouched). */
+function renderQueryLoadBlock(
+  qb: import("./heex-walker.js").QueryBinding,
+  ctxModule: string,
+  opFbs: import("./heex-walker.js").FormBinding[],
+): string {
+  const aggSnake = snake(qb.aggregate);
+  if (qb.kind === "single") {
+    const opAssigns = opFbs.map(
+      (fb) =>
+        `        |> assign(:${fb.op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())`,
+    );
+    // `get_<agg>(id)` is a plain-Ecto fetch returning
+    // `{:ok, record} | {:error, :not_found}`.  The `:not_found` / `:error`
+    // sentinels feed the 4-way `cond`.  Operation forms (seeded from the
+    // loaded `record`) are bound in the `{:ok, record}` arm.
+    const okArm =
+      opAssigns.length > 0
+        ? `        {:ok, record} ->
+          socket
+          |> assign(:${qb.assign}, record)
+${opAssigns.map((a) => `  ${a}`).join("\n")}`
+        : `        {:ok, record} -> assign(socket, :${qb.assign}, record)`;
+    return `    socket =
+      case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do
+${okArm}
+        {:error, :not_found} -> assign(socket, :${qb.assign}, :not_found)
+        _ -> assign(socket, :${qb.assign}, :error)
+      end`;
+  }
+  // List read: `list_<agg>s()` returns `{:ok, list}` (the repo wraps
+  // `Repo.all/1`).  The `{:error, _}` arm maps to the `:error` sentinel
+  // the list `cond` renders as the error slot.
+  return `    socket =
+      case ${ctxModule}.list_${aggSnake}s() do
+        {:ok, items} -> assign(socket, :${qb.assign}, items)
+        _ -> assign(socket, :${qb.assign}, :error)
+      end`;
 }
 
 function renderHandleParams(
@@ -669,49 +822,10 @@ function renderHandleParams(
   for (const qb of queryBindings) {
     const ctxModule = contextModuleByAggName.get(qb.aggregate);
     if (!ctxModule) continue; // unresolved — validator catches upstream
-    const aggSnake = snake(qb.aggregate);
-    if (qb.kind === "single") {
-      // Operation forms for this aggregate bind to the loaded record —
-      // assigned here, where `record` is in scope: a plain Ecto changeset
-      // seeded from the loaded record via the `change_<agg>` facade.
-      const opFbs = formBindings.filter(
-        (fb) => fb.kind === "operation" && fb.name === qb.aggregate,
-      );
-      const opAssigns = opFbs.map(
-        (fb) =>
-          `        |> assign(:${fb.op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())`,
-      );
-      // `get_<agg>(id)` is a plain-Ecto fetch returning
-      // `{:ok, record} | {:error, :not_found}`.  The `:not_found` / `:error`
-      // sentinels feed the 4-way `cond`.  Operation forms (seeded from the
-      // loaded `record`) are bound in the `{:ok, record}` arm.
-      const okArm =
-        opAssigns.length > 0
-          ? `        {:ok, record} ->
-          socket
-          |> assign(:${qb.assign}, record)
-${opAssigns.map((a) => `  ${a}`).join("\n")}`
-          : `        {:ok, record} -> assign(socket, :${qb.assign}, record)`;
-      loadBlocks.push(
-        `    socket =
-      case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do
-${okArm}
-        {:error, :not_found} -> assign(socket, :${qb.assign}, :not_found)
-        _ -> assign(socket, :${qb.assign}, :error)
-      end`,
-      );
-    } else {
-      // List read: `list_<agg>s()` returns `{:ok, list}` (the repo wraps
-      // `Repo.all/1`).  The `{:error, _}` arm maps to the `:error` sentinel
-      // the list `cond` renders as the error slot.
-      loadBlocks.push(
-        `    socket =
-      case ${ctxModule}.list_${aggSnake}s() do
-        {:ok, items} -> assign(socket, :${qb.assign}, items)
-        _ -> assign(socket, :${qb.assign}, :error)
-      end`,
-      );
-    }
+    // Operation forms for this aggregate bind to the loaded record —
+    // re-seeded (single loads only) in the `{:ok, record}` arm.
+    const opFbs = formBindings.filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate);
+    loadBlocks.push(renderQueryLoadBlock(qb, ctxModule, opFbs));
   }
 
   const hasParams = paramAssigns.length > 0;

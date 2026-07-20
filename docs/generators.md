@@ -981,6 +981,7 @@ PageIR maps onto LiveView:
 | `match { p => v; else => fallback }` | `cond do p -> v; true -> fallback end` (or `<%= cond do … end %>` in HEEx) |
 | `requires <pred>` (page) | full `handle_params/3` guard — when the predicate fails it `put_flash(:error, "forbidden")` + `push_navigate`s to `/` (the read-side UI analogue of an operation's `requires`; `liveview-emit.ts`) |
 | `navigate(<P>, {…})` | `push_navigate(socket, to: ~p"/route?…")` |
+| `on <channel>.<Event>(e) { toast(…) refetch(Agg) }` (ui-level realtime, channels.md Part I) | **native** — no SSE client. `mount/3` `if connected?(socket), do: Phoenix.PubSub.subscribe(<App>.PubSub, "events")` (the same topic every domain `emit` broadcasts on); one `handle_info(%<App>.<Ctx>.Events.<Event>{} = e, socket)` clause per subscribed event type → `toast(<expr>)` becomes `put_flash(:info, …)`, `refetch(Agg)` re-runs the page's `list_<agg>s` / `get_<agg>` load (no-op when the page doesn't display it), plus a `handle_info(_msg, socket)` catch-all. The reactor/saga path uses direct `Dispatcher.dispatch/1` calls (never this PubSub topic), so it is untouched. A ui with no `on` handlers emits byte-identical output (`liveview-emit.ts` + `realtime-liveview.ts`). |
 | Scaffolded body | `pack.render("page-list" \| "page-new" \| "page-detail", vm)` → HEEx inline in `render/1` |
 | Pack-emitted Playwright page object | `e2e/pages/<x>.ts` — same testid-keyed shape as React; HEEx HTML is selector-compatible |
 

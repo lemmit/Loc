@@ -954,13 +954,16 @@ function printWorkflowCreateDecl(node: import("../generated/ast.js").WorkflowCre
   const name = node.name ? ` ${node.name}` : "";
   const params = node.params.map(printParameter).join(", ");
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
-  return block(`create${name}(${params})${by}`, node.body.map(printStmt));
+  // Authorization gate (authorization.md §11.3) — after `by`, before the body.
+  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
+  return block(`create${name}(${params})${by}${gate}`, node.body.map(printStmt));
 }
 
 // `handle name(params) { … }` command-handler member (workflow-and-applier.md A2).
 function printHandleDecl(node: import("../generated/ast.js").HandleDecl): string {
   const params = node.params.map(printParameter).join(", ");
-  return block(`handle ${node.name}(${params})`, node.body.map(printStmt));
+  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
+  return block(`handle ${node.name}(${params})${gate}`, node.body.map(printStmt));
 }
 
 // `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).
@@ -1091,11 +1094,14 @@ function printOperation(node: Operation): string {
   // Exception-less `or`-union return (exception-less.md): `: X or NotFound`,
   // grammar-positioned after extern/audited.
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  // Authorization gate (authorization.md §11.3) — after the return type, before
+  // `when`, matching the grammar.
+  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
   // canCommand state gate (criterion.md use site 2) — after the return type,
   // before the body, matching the grammar.
   const when = node.when ? ` when ${printExpr(node.when)}` : "";
   return block(
-    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${when}`,
+    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${gate}${when}`,
     node.body.map(printStmt),
   );
 }

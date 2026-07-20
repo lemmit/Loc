@@ -89,6 +89,93 @@ describe("realtime SSE wire — Hono (delivery: broadcast)", () => {
   });
 });
 
+// ─── Rooms + policy-derived routing v1 (tenant-scoped delivery) ─────────────
+
+const TENANT_REALTIME_SYSTEM = `
+system TenantRealtime {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Organization
+  subdomain Core {
+  context Fulfillment {
+    aggregate Order with tenantOwned, crudish { status: string }
+    repository Orders for Order { }
+    crossTenant aggregate Plan with crudish { code: string }
+    repository Plans for Plan { }
+    aggregate Organization with crudish { name: string }
+
+    event OrderPlaced { order: Order id, at: datetime }
+    event PlanPublished { plan: Plan id, at: datetime }
+
+    channel Lifecycle {
+      carries: OrderPlaced, PlanPublished
+      delivery: broadcast
+      retention: ephemeral
+    }
+  }
+  }
+  api FulfillmentApi from Core
+  storage primary { type: postgres }
+  resource coreState { for: Fulfillment, kind: state, use: primary }
+  deployable backend {
+    platform: node
+    contexts: [Fulfillment]
+    dataSources: [coreState]
+    serves: FulfillmentApi
+    port: 3000
+    auth: required
+  }
+}
+`;
+
+describe("realtime rooms — Hono (tenant-scoped delivery)", () => {
+  async function backendRealtime(source: string): Promise<string> {
+    const model = await parseValid(source);
+    const { files } = generateSystems(model);
+    const key = [...files.keys()].find((k) => k.endsWith("backend/http/realtime.ts"));
+    expect(key, "backend realtime.ts emitted").toBeTruthy();
+    return files.get(key ?? "") ?? "";
+  }
+
+  it("keys the registry by tenant and scopes only tenantOwned-referencing events", async () => {
+    const rt = await backendRealtime(TENANT_REALTIME_SYSTEM);
+    // Both carried events are UI-observable...
+    expect(rt).toContain(
+      'export const REALTIME_EVENT_TYPES: ReadonlySet<string> = new Set(["OrderPlaced", "PlanPublished"]);',
+    );
+    // ...but only OrderPlaced references the tenant-owned Order — PlanPublished
+    // references the crossTenant Plan, so it stays a global broadcast.
+    expect(rt).toContain(
+      'const TENANT_SCOPED_EVENT_TYPES: ReadonlySet<string> = new Set(["OrderPlaced"]);',
+    );
+    expect(rt).toContain('OrderPlaced: ["order"],');
+    // The tenant DataKey comes from the ambient principal at publish and the
+    // verified principal at connect.
+    expect(rt).toContain('import { requestContext } from "../obs/als";');
+    expect(rt).toContain("const rooms = new Map<string, Set<Subscriber>>();");
+    expect(rt).toContain("function ambientTenant(): string | undefined {");
+    expect(rt).toContain(
+      "const user = requestContext()?.currentUser as { tenantId?: unknown } | undefined;",
+    );
+    // Publish routes tenant-scoped events to the emitter's room, never all.
+    expect(rt).toContain("if (!TENANT_SCOPED_EVENT_TYPES.has(event.type)) {");
+    expect(rt).toContain("const room = rooms.get(tenant);");
+    // Connect derives the room from the verified principal (never client-supplied).
+    expect(rt).toContain('.get("currentUser");');
+    expect(rt).toContain("const room = tenant !== undefined ? roomFor(tenant) : undefined;");
+  });
+
+  it("an untenanted broadcast context keeps the v1 wire byte-identical (no rooms)", async () => {
+    const rt = await backendRealtime(REALTIME_SYSTEM);
+    expect(rt).not.toContain("TENANT_SCOPED_EVENT_TYPES");
+    expect(rt).not.toContain("const rooms = new Map");
+    expect(rt).not.toContain("requestContext");
+    // The v1 broadcast body is preserved verbatim.
+    expect(rt).toContain("const subscribers = new Set<Subscriber>();");
+    expect(rt).toContain("for (const s of subscribers) s(event);");
+    expect(rt).toContain("v1 is broadcast-to-all (no rooms); the");
+  });
+});
+
 // ─── React client ────────────────────────────────────────────────────────────
 
 const REALTIME_SYSTEM = `
@@ -224,5 +311,28 @@ describe("realtime live-event handlers — React (`on <channel>.<Event>`)", () =
     expect([...files.keys()].some((k) => k.endsWith("/RealtimeHandlers.tsx"))).toBe(false);
     const appKey = [...files.keys()].find((k) => k.endsWith("web_app/src/App.tsx"));
     expect(files.get(appKey ?? "") ?? "").not.toContain("RealtimeHandlers");
+  });
+
+  it("a `refetch(Order)` handler invalidates the aggregate's query cache", async () => {
+    // Same `["orders"]` key `useCreateOrder`/`useDeleteOrder` invalidate on
+    // success — a realtime event refetches through the identical cache entry.
+    const refetchUi = HANDLERS_UI.replace(
+      'on Orders.OrderPlaced(e) { toast("Order " + e.order + " placed") }',
+      'on Orders.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }',
+    );
+    const system = REALTIME_SYSTEM.replace(
+      / {2}ui WebApp \{[\s\S]*?\n {2}\}/,
+      refetchUi.trimStart().replace(/^/, "  "),
+    );
+    const model = await parseValid(system);
+    const { files } = generateSystems(model);
+    const key = [...files.keys()].find((k) =>
+      k.endsWith("web_app/src/components/RealtimeHandlers.tsx"),
+    );
+    const rh = files.get(key ?? "") ?? "";
+    expect(rh).toContain('import { useQueryClient } from "@tanstack/react-query";');
+    expect(rh).toContain("const qc = useQueryClient();");
+    expect(rh).toContain('case "OrderPlaced":');
+    expect(rh).toContain('qc.invalidateQueries({ queryKey: ["orders"] });');
   });
 });

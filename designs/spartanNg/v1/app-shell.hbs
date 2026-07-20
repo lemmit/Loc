@@ -7,6 +7,7 @@ import { Component{{#if navUsesSession}}, inject{{/if}} } from "@angular/core";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
+{{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
 {{/if}}
 @Component({
   selector: "app-root",
@@ -15,10 +16,12 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     RouterLink,
 {{#if hasNav}}    RouterLinkActive,
 {{/if}}{{#if authUi}}    AuthGateComponent,
+{{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
     <a href="#main-content" class="loom-skip-link">Skip to content</a>
-    <div class="loom-shell">
+{{#if hasRealtimeHandlers}}    <app-realtime-handlers />
+{{/if}}    <div class="loom-shell">
       <aside class="loom-sidebar" data-testid="nav-sidebar">
         <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
         <nav class="loom-nav" aria-label="Primary navigation">

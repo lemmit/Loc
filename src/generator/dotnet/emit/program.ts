@@ -70,6 +70,10 @@ export function renderProgram(
      *  outbox-wrapping dispatcher + the relay BackgroundService.  Implies
      *  hasSubscriptions. */
     hasOutbox?: boolean;
+    /** Realtime SSE wire (channels.md Part I): registers the RealtimeHub
+     *  singleton, wraps the registered dispatcher in the RealtimeDomainEvent
+     *  Dispatcher tee, and maps GET /api/realtime/events. */
+    hasRealtime?: boolean;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -137,6 +141,53 @@ export function renderProgram(
   // subscriptions, register the Mediator-notification dispatcher (Scoped — it
   // depends on the scoped IMediator) so emitted events reach their reactor /
   // starter handlers.  Otherwise the default no-op stands (byte-identical).
+  // Realtime SSE wire (channels.md Part I): the RealtimeDomainEventDispatcher
+  // tee wraps whichever core dispatcher is outermost, so every dispatched
+  // event also reaches GET /api/realtime/events.  The hub singleton is shared
+  // with the SSE endpoint.  With broker channels wired the chain is
+  // ChannelPublishTee → Realtime → [Outbox →] InProcess/Noop — the broker tee
+  // stays outermost, the realtime tee sees each event exactly once (an
+  // outbox-durable broadcast event streams at dispatch time; the relay
+  // redelivers only to handlers).
+  const hasRealtime = !!options?.hasRealtime;
+  const realtimeHubRegistration = hasRealtime
+    ? `\nbuilder.Services.AddSingleton<${ns}.Infrastructure.Realtime.RealtimeHub>();`
+    : "";
+  // The SSE endpoint — one long-lived text/event-stream per browser connection,
+  // with a 15s keep-alive ping.  Reads frames off the hub's per-client channel;
+  // `WhenAny` a 15s timer so an idle stream still pings.  v1 broadcast-to-all.
+  const realtimeEndpoint = hasRealtime
+    ? `// Realtime SSE wire (channels.md Part I): GET /api/realtime/events streams
+// broadcast-channel events to connected browsers (\${API_BASE_URL}/realtime/events).
+app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure.Realtime.RealtimeHub hub, CancellationToken cancellationToken) =>
+{
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    var (id, reader) = hub.Subscribe();
+    try
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var readTask = reader.ReadAsync(cancellationToken).AsTask();
+            var completed = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(15), cancellationToken));
+            if (completed == readTask)
+            {
+                await http.Response.WriteAsync(await readTask, cancellationToken);
+            }
+            else
+            {
+                await http.Response.WriteAsync("event: ping\\ndata: \\n\\n", cancellationToken);
+            }
+            await http.Response.Body.FlushAsync(cancellationToken);
+        }
+    }
+    catch (OperationCanceledException) { }
+    finally { hub.Unsubscribe(id); }
+}).ExcludeFromDescription();
+`
+    : "";
+  // Non-channel, non-realtime core registration (byte-identical to the
+  // pre-realtime output for systems using neither feature).
   const innerRegistration = options?.hasOutbox
     ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\n${
         options?.outboxNoopInner
@@ -146,30 +197,53 @@ export function renderProgram(
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
       : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
+  // Realtime-teed core registration: the realtime tee is registered as the
+  // IDomainEventDispatcher over the concrete core (byte-identical to the
+  // realtime slice's output for channel-less systems).
+  const realtimeRegistration = options?.hasOutbox
+    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    : options?.hasSubscriptions
+      ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed to the realtime wire.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
+      : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
+  // Channels + realtime: every dispatcher registers as its CONCRETE type (the
+  // realtime tee via factory), and the ChannelPublishTeeDispatcher — whose
+  // typed inner is the realtime tee — is the sole IDomainEventDispatcher.
+  const realtimeConcreteRegistration = options?.hasOutbox
+    ? `// Domain event dispatch — durable events relay via the outbox; the realtime\n// tee wraps the outbox dispatcher; the broker tee (below) is outermost.\n${
+        options?.outboxNoopInner
+          ? "builder.Services.AddSingleton<NoopDomainEventDispatcher>();"
+          : "builder.Services.AddScoped<InProcessDomainEventDispatcher>();"
+      }\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    : options?.hasSubscriptions
+      ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
+      : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
+  const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+    options?.hasChannelConsumers
+      ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
+      : ""
+  }`;
   // Broker channels (M-T4.4): the publish tee becomes the outermost
   // IDomainEventDispatcher (its ctor takes the concrete inner), the shared
   // transports register once, and — where reactors live — the consumer loop
   // runs as a hosted service feeding the in-process dispatch.
   const dispatcherRegistration = options?.hasChannels
-    ? `${innerRegistration
-        .split("\n")
-        .map((l) =>
-          l.startsWith("builder.Services.AddScoped<IDomainEventDispatcher") ||
-          l.startsWith("builder.Services.AddSingleton<IDomainEventDispatcher")
-            ? l
-                .replace("AddScoped<IDomainEventDispatcher, ", "AddScoped<")
-                .replace("AddSingleton<IDomainEventDispatcher, ", "AddSingleton<")
-                .replace(">();", ">();")
-            : l,
-        )
-        .join(
-          "\n",
-        )}\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
-        options?.hasChannelConsumers
-          ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
-          : ""
-      }`
-    : innerRegistration;
+    ? hasRealtime
+      ? `${realtimeConcreteRegistration}${channelTeeSuffix}`
+      : `${innerRegistration
+          .split("\n")
+          .map((l) =>
+            l.startsWith("builder.Services.AddScoped<IDomainEventDispatcher") ||
+            l.startsWith("builder.Services.AddSingleton<IDomainEventDispatcher")
+              ? l
+                  .replace("AddScoped<IDomainEventDispatcher, ", "AddScoped<")
+                  .replace("AddSingleton<IDomainEventDispatcher, ", "AddSingleton<")
+                  .replace(">();", ">();")
+              : l,
+          )
+          .join("\n")}${channelTeeSuffix}`
+    : hasRealtime
+      ? realtimeRegistration
+      : innerRegistration;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
   // TimerSource scheduling (scheduling.md, M-T4.1): one hosted
@@ -505,7 +579,7 @@ builder.Services.AddScoped(
 `
     : ""
 }
-${dispatcherRegistration}${timerRegistrations}${hangfireDiBlock}
+${dispatcherRegistration}${realtimeHubRegistration}${timerRegistrations}${hangfireDiBlock}
 
 ${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
 ${authDi}
@@ -798,7 +872,7 @@ app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
 ${authMount}app.MapControllers();
-${authMe}${authHandshake}${
+${realtimeEndpoint}${authMe}${authHandshake}${
   hasEmbeddedSpa
     ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.
