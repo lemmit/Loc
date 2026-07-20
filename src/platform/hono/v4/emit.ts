@@ -1156,9 +1156,8 @@ function projectPackageJson(
     : { ...pins.dependencies };
   const devDependencies = {
     ...(mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies }),
-    // Types for the node-cron scheduler dep (scheduling.md) — devDep so the
-    // generated project's `tsc --noEmit` resolves `import cron from "node-cron"`.
-    ...(opts.withCronTimers ? { "@types/node-cron": "^3.0.11" } : {}),
+    // pg-boss (the durable cron-timer store, scheduling.md Phase 2) ships its
+    // own types, so no @types devDep is needed for the timer path.
     // Types for the amqplib broker dep (M-T4.4 slice 3) — devDep so the
     // generated project's `tsc --noEmit` resolves `import amqp from "amqplib"`.
     ...(opts.withRabbitChannels ? { "@types/amqplib": "^0.10.5" } : {}),
@@ -1206,9 +1205,11 @@ function projectPackageJson(
           // OIDC token verification (D-AUTH-OIDC) — jose owns JWKS fetch +
           // signature/claims validation in the generated verifier.
           ...(opts.withOidc ? { jose: "^5.9.0" } : {}),
-          // Timer scheduler (scheduling.md) — node-cron parses real cron
-          // expressions; an `every:`-only deployable stays on setInterval.
-          ...(opts.withCronTimers ? { "node-cron": "^3.0.3" } : {}),
+          // Durable timer scheduler (scheduling.md Phase 2) — pg-boss runs
+          // cron: timers as Postgres-backed durable jobs (single-fire + retry);
+          // cron-parser computes the previous boundary for the coalesce-once
+          // catch-up.  An `every:`-only deployable needs neither (in-process).
+          ...(opts.withCronTimers ? { "pg-boss": "^12.26.1", "cron-parser": "^5.4.0" } : {}),
           // Broker transport (M-T4.4 slice 2) — ioredis (MIT, design §6a)
           // speaks RESP to the compose-provisioned Valkey sidecar.
           ...(opts.withRedisChannels ? { ioredis: "^5.4.0" } : {}),
@@ -1506,8 +1507,9 @@ const stopOutboxRelay = startOutboxRelay(db, channelPublishTee(channelTransports
 }${
   hasTimers
     ? `// Timer sources (scheduling.md): infrastructure fires tick events on a
-// wall-clock cadence, single-fire across replicas via a pg advisory lock.
-const stopTimers = startTimerScheduler(db, inProcessEvents);
+// wall-clock cadence.  cron: timers run on pg-boss (durable, retried,
+// single-fire across replicas); every: timers run in-process.
+const stopTimers = await startTimerScheduler(db, inProcessEvents);
 `
     : ""
 }`
@@ -1529,7 +1531,7 @@ async function shutdown(signal: string): Promise<void> {
   }${
     hasTimers
       ? `
-  stopTimers();`
+  await stopTimers();`
       : ""
   }${
     hasChannelConsumers
