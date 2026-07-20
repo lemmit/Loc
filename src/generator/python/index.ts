@@ -27,7 +27,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
-import { redisChannelBindings } from "../_channels/bindings.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -129,17 +129,22 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const mergedBase = mergeContexts(args.contexts);
   const sourcemap = args.sourcemap;
 
-  // Broker bindings (channels.md; M-T4.4 slice 2b): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4 slices 2b + 7a): the broker-bound
   // channelSources this deployable wires via `channels:`.  Computed up front
   // because they widen the merged vocabulary — a consumer deployable need not
   // HOST the channel's owning context to react to its events; the wired
   // binding carries the routing knowledge across deployables (mirrors the
   // Hono orchestrator).
-  const channelBindings = redisChannelBindings(args.deployable, args.sys);
+  const channelBindings = brokerChannelBindings(args.deployable, args.sys);
   const hostedChannelNames = new Set(args.contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   // Wired-but-foreign channels join the carrier set as minimal ChannelIR
-  // stubs (slice-2 scope pins their knobs), so the dispatch derivation routes
-  // a hosted reactor off a channel declared in a non-hosted context.
+  // stubs, so the dispatch derivation routes a hosted reactor off a channel
+  // declared in a non-hosted context.  The stub knobs stay PINNED to
+  // broadcast/ephemeral on purpose: `durableEventTypes(merged)` must only see
+  // HOSTED durable channels — the module-level migrations are what back the
+  // outbox table and the saga `last_event_id` column, and they can't see a
+  // foreign wiring.  A foreign `queue`/`work` consumer relies on broker ack
+  // semantics + idempotent reactors instead (the slice-3 stance).
   const wiredForeignChannels = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
     .map((b) => ({
@@ -177,6 +182,18 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Consumer side only when a hosted WORKFLOW reactor subscribes (slice-2
   // scope: projection folds stay on the in-process path).
   const hasChannelConsumers = hasChannels && mergedSubscriptions.some((s) => !s.projection);
+  // Durable broker-bound events (M-T4.4 slice 7a): carried by a wired
+  // `queue`/`work` (or future `log`) channel — the producer path for these
+  // rides the outbox relay (design §5), never the inline tee.  Intersected
+  // with the HOSTED durable set: only a producer that hosts the channel's
+  // context owns the outbox tier (see the stub-knob pin above).
+  const hostedDurable = durableEventTypes(merged);
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
 
   // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
   // owner is DERIVED (no stamp): the deployable whose subdomain
@@ -213,10 +230,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // added ONLY when this deployable owns a cron timer; an every-only (or
   // timer-free) project stays byte-identical.
   const timerDeps = hasDurableTimers ? ["procrastinate>=3,<4", "psycopg[binary]>=3.2,<4"] : [];
-  // Broker transport (M-T4.4 slice 2b) — redis-py (MIT, design §6a) speaks
-  // RESP to the compose-provisioned Valkey sidecar; wiring-gated so a
-  // channel-less pyproject stays byte-identical.
-  const channelDeps = hasChannels ? ["redis>=5.2,<7"] : [];
+  // Broker transports (M-T4.4 slices 2b + 7a) — redis-py (MIT, design §6a)
+  // speaks RESP to the compose-provisioned Valkey sidecar; aio-pika
+  // (Apache-2.0) speaks AMQP 0-9-1 to the rabbitmq sidecar.  Per-transport
+  // wiring-gated so a channel-less (or single-transport) pyproject stays
+  // byte-identical.
+  const channelDeps = [
+    ...(channelBindings.some((b) => b.transport === "redis") ? ["redis>=5.2,<7"] : []),
+    ...(channelBindings.some((b) => b.transport === "rabbitmq") ? ["aio-pika>=9.5,<10"] : []),
+  ];
   out.set(
     "pyproject.toml",
     renderPyproject(
@@ -326,12 +348,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return agg ? resolveDs(agg)?.schema : undefined;
   });
   const hasSeeds = seedFile != null;
-  // Durable-channel outbox relay (dispatch-delivery-semantics.md): only
-  // when a durable channel carries a *subscribed* event does `app/dispatch.py`
-  // ship `start_outbox_relay`, which the lifespan kicks off as a background
-  // task.  No durable channel / no subscription → byte-identical boot.
+  // Durable-channel outbox relay (dispatch-delivery-semantics.md): when a
+  // durable channel carries a *subscribed* event, `app/dispatch.py` ships
+  // `start_outbox_relay`, which the lifespan kicks off as a background
+  // task.  M-T4.4 slice 7a adds the workflow-less durable-broker PRODUCER
+  // (design §5): no subscription, but the relay must still drain the outbox
+  // to publish.  No durable channel → byte-identical boot.
   const startsRelay =
-    durableEventTypes(merged).size > 0 && dispatchSubscriptionsOf(merged).length > 0;
+    durableEventTypes(merged).size > 0 &&
+    (dispatchSubscriptionsOf(merged).length > 0 || durableBrokerEvents.size > 0);
   // Explicit transport layer (unfoldable-api-derivation.md, A2): one APIRouter
   // per served api whose `route` list resolves to a hosted handler, dispatching
   // each route to its `app/application/<handler>.py` function.  Emitted before
@@ -458,16 +483,22 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     dispatchOpFragments,
     resolveStreamContext,
     hasChannels,
+    durableBrokerEvents,
   );
   const hasDispatch = dispatchFile != null;
-  // Broker transport module (M-T4.4 slice 2b): the redis.asyncio driver,
-  // CloudEvents envelope codec, publish half of the tee, and — where a
-  // hosted reactor subscribes — the consumer loop.  Channel-less projects
-  // stay byte-identical.
+  // Broker transport module (M-T4.4 slices 2b + 7a): the redis.asyncio /
+  // aio-pika drivers, CloudEvents envelope codec, publish half of the tee,
+  // and — where a hosted reactor subscribes — the consumer side.
+  // Channel-less projects stay byte-identical.
   if (hasChannels) {
     out.set(
       "app/channels.py",
-      buildPyChannelsFile(channelBindings, merged.events, hasChannelConsumers),
+      buildPyChannelsFile(
+        channelBindings,
+        merged.events,
+        hasChannelConsumers,
+        durableBrokerEvents.size > 0,
+      ),
     );
   }
   if (dispatchFile != null) {
