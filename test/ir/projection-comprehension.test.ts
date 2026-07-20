@@ -170,11 +170,11 @@ async function sysErrorCodes(platform: string): Promise<string[]> {
 
 describe("projection comprehension — validation gates", () => {
   it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
-    // node (PR-C) + python (PR-D) + elixir (PR-E) emit it; java/dotnet stay gated.
-    for (const platform of ["node", "python", "elixir"]) {
+    // node (PR-C) + python (PR-D) + elixir (PR-E) + java (PR-F) emit it; dotnet stays gated.
+    for (const platform of ["node", "python", "elixir", "java"]) {
       expect(await sysErrorCodes(platform)).not.toContain("loom.projection-query-time-unsupported");
     }
-    for (const platform of ["java", "dotnet"]) {
+    for (const platform of ["dotnet"]) {
       expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
     }
   });
@@ -269,5 +269,27 @@ describe("projection comprehension — Hono emission", () => {
     )?.[1];
     expect(ctrl).toContain("def orders_view(conn, _params) do");
     expect(ctrl).toContain("D.Orders.QueryProjections.OrdersView.run(current_user)");
+  });
+
+  it("emits the Java twin — synthesised repo find + join bulk-load map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("java"));
+    const svc = [...files.entries()].find(([p]) => p.endsWith("OrdersQueryProjections.java"))?.[1];
+    expect(svc, "java query-projection service emitted").toBeDefined();
+    // Source rows via the synthesised repo find (queryProjectionFindsFor).
+    expect(svc).toContain("ordersRepository.ordersView().stream()");
+    // `join Customer as c on o.customerId` → a bulk-load-by-id Map…
+    expect(svc).toContain("var customerById = customersRepository.findAll().stream()");
+    expect(svc).toContain(".collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));");
+    // …and `select customerName = c.name` reads through the loaded map.
+    expect(svc).toContain("customerById.get(a.customerId().value()).name()");
+    // The synthesised find lands on the Order repository with the inlined `where`.
+    const repo = [...files.entries()].find(([p]) => p.endsWith("OrderJpaRepository.java"))?.[1];
+    expect(repo).toContain("List<Order> ordersView();");
+    // Route under /projections; a query-time <Proj>Row record is emitted.
+    const ctrl = [...files.entries()].find(([p]) =>
+      p.endsWith("OrdersQueryProjectionsController.java"),
+    )?.[1];
+    expect(ctrl).toContain('@GetMapping("/orders_view")');
+    expect([...files.keys()].some((p) => p.endsWith("OrdersViewRow.java"))).toBe(true);
   });
 });

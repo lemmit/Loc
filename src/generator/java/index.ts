@@ -17,7 +17,12 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  isMaterializedProjection,
+  isQueryTimeProjection,
+  workflowEmitsCommandRoute,
+} from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
 import {
@@ -131,6 +136,10 @@ import {
   renderProvLineage,
   renderProvLineageRecord,
 } from "./emit/provenance.js";
+import {
+  queryProjectionFindsFor,
+  renderJavaQueryProjections,
+} from "./emit/query-projection-reads.js";
 import { renderJavaRealtimeController } from "./emit/realtime.js";
 import {
   isPagedAutoAll,
@@ -753,7 +762,7 @@ function emitProjectFromContexts(
     // Spring Data repository over it — the foundation the dispatcher fold and
     // the read routes build on (the saga-state analogue with the command side
     // removed).  Placed in the same packages as the saga state.
-    for (const proj of ctx.projections) {
+    for (const proj of ctx.projections.filter(isMaterializedProjection)) {
       const projConstruct = `${ctx.name}.${proj.name}`;
       place(
         `${projectionRowClass(proj)}.java`,
@@ -923,6 +932,35 @@ function emitProjectFromContexts(
           undefined,
           v?.origin,
           v ? `${ctx.name}.${v.name}` : undefined,
+        );
+      }
+    }
+    // Query-time projections (read-path-architecture.md rev.13): a live read
+    // (source find + join bulk-loads + select) with no folded read-model table —
+    // its own `<Ctx>QueryProjections` service + `GET /projections/<slug>`
+    // controller, sibling of the folded ProjectionsController above.
+    const queryProjectionFiles = renderJavaQueryProjections(ctx, {
+      basePkg,
+      pkg: pkgFor("view-service"),
+      routePrefix,
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+    });
+    if (queryProjectionFiles) {
+      const qpRowOrigin = new Map<string, ProjectionIR>(
+        ctx.projections
+          .filter(isQueryTimeProjection)
+          .map((p) => [`${upperFirst(p.name)}Row.java`, p]),
+      );
+      for (const [name, f] of queryProjectionFiles) {
+        const p = qpRowOrigin.get(name);
+        place(
+          name,
+          f.category,
+          f.content,
+          undefined,
+          p?.origin,
+          p ? `${ctx.name}.${p.name}` : undefined,
         );
       }
     }
@@ -1459,7 +1497,12 @@ function emitAggregate(
     const crit = ctx.criteria.find((c) => c.name === r.criterionRef?.name);
     return !!crit && criterionEligible(crit, ctx)?.name === agg.name;
   };
-  const viewFinds = viewFindsFor(agg.name, ctx) as unknown as RepositoryIR["finds"];
+  // Views + query-time projections sourced from this aggregate both ride
+  // synthesized parameterless finds (the mergeViewsAsFinds analog).
+  const viewFinds = [
+    ...viewFindsFor(agg.name, ctx),
+    ...queryProjectionFindsFor(agg.name, ctx),
+  ] as unknown as RepositoryIR["finds"];
   const repoWithViews: RepositoryIR =
     viewFinds.length > 0
       ? repo
