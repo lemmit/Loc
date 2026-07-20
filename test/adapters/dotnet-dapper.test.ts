@@ -747,13 +747,14 @@ system D {
     );
   });
 
-  // The one part-collection element kind that stays gated: a by-value array of a
-  // sibling ENTITY (a plain field, not a `contains`).  This is an impossible
-  // storage shape, not a Dapper gap — an un-owned entity collection has no
-  // relational identity/ownership model, and efcore only appears to accept it
-  // (it maps `List<Entity>` as a scalar Property that EF rejects at model-build).
-  // The precise message points at the two supported alternatives.
-  it("rejects a by-value ENTITY-array part field (impossible storage shape)", async () => {
+  // An entity-array part field is now an INFERRED CONTAINMENT (#2161: a field
+  // whose type resolves to a locally-declared entity is a containment, so
+  // `tags: Tag[]` means `contains tags: Tag[]`).  That is part-in-part ownership,
+  // which the Dapper adapter drains to a child table FK'd to the parent part —
+  // not an "un-owned by-value entity array" to reject.  The old dapper gate that
+  // rejected this shape is now unreachable (an entity-typed array can never be a
+  // plain field), so the model validates cleanly and generates the nested table.
+  it("infers a part-in-part containment from an entity-array part field (#2161)", async () => {
     const src = `
 system D {
   api A from S
@@ -768,18 +769,12 @@ system D {
   } }
   storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
-    const { errors } = await emit(src);
-    // The gate fires with the sharpened message (element kind 'entity', with the
-    // `contains` / `id[]` guidance).
-    expect(
-      errors.some(
-        (e) =>
-          /persistence: dapper/.test(e) &&
-          /entity element kind 'entity'/i.test(e) &&
-          /contains tags/.test(e) &&
-          /tags: … id\[\]/.test(e),
-      ),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]); // inferred containment — the by-value gate no longer applies
+    // The nested Tag entity persists as its own child table, FK'd to LineItem.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS tags (");
+    expect(schema).toContain("tags_line_item_id_idx ON tags (line_item_id)");
   });
 });
 
