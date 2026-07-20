@@ -24,13 +24,28 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import {
+  type BoundedContext,
   isAggregate,
   isBoundedContext,
+  isDeployable,
   isDomainService,
   isTestBlock,
   isValueObject,
   type Model,
 } from "../generated/ast.js";
+
+/** True when a `platform: node` deployable in the model hosts this context — the
+ *  node backend emits a runnable integration test for it (Phase 3a), so the
+ *  `loom.context-test-unsupported` warning is suppressed.  Other backends don't
+ *  emit yet, so a context hosted only on them still warns. */
+function nodeHostsContext(model: Model, ctx: BoundedContext): boolean {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (isDeployable(node) && node.platform === "node") {
+      if (node.contextRefs.some((r) => r.ref === ctx)) return true;
+    }
+  }
+  return false;
+}
 
 export function checkTestPlacement(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
@@ -64,16 +79,24 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
       );
     }
 
-    // Honest gate: a context integration test (nested in a context with no `for`,
-    // or `for <Context>`) has no backend emitter yet.
-    const isContextTest =
-      (inContext && (!target || target === c)) || (target != null && isBoundedContext(target));
-    if (isContextTest) {
+    // Honest gate: a context integration test emits ONLY on the node backend so
+    // far (Phase 3a). Warn when the target context is not hosted by a node
+    // deployable — the other backends' integration renderers are still pending.
+    // A context test targets a context: `for <Ctx>`, or nested in a context with
+    // no `for` (or `for` restating that context).  A context-nested `for <Agg>`
+    // is a hoisted AGGREGATE test, not a context test.
+    const ctxNode: BoundedContext | undefined =
+      target != null && isBoundedContext(target)
+        ? target // `for <Ctx>` (a `for <that ctx>` restatement lands here too)
+        : inContext && !target
+          ? (c as BoundedContext) // nested in a context with no `for`
+          : undefined;
+    if (ctxNode && !nodeHostsContext(model, ctxNode)) {
       accept(
         "warning",
-        `Context integration tests (test-placement.md Phase 3) are not yet emitted ` +
-          `by any backend — this 'test' parses and validates but produces no runnable ` +
-          `test until the integration renderer lands.`,
+        `Context integration tests currently emit on the node backend only ` +
+          `(test-placement.md Phase 3a). Context '${ctxNode.name}' is not hosted by a ` +
+          `'platform: node' deployable, so this 'test' produces no runnable test yet.`,
         { node, property: "name", code: "loom.context-test-unsupported" },
       );
     }

@@ -502,9 +502,23 @@ describe("Ordering (integration)", () => {
   stays a legit hoisted aggregate test). A context test is honestly gated with the
   `loom.context-test-unsupported` **warning** until a backend's integration
   renderer lands — no silent no-emit. Parse / lower / validate tested.
-- **3a** — the **node** integration renderer + wire-repos factory + real-PG harness
-  run-path, delivering multi-aggregate persist + query + **synchronous** workflow
-  cascades. Lifts the gate for `platform: node`.
+- **3a** ✅ **SHIPPED (emit)** — the **node** integration renderer + inline
+  wire-repos + URL-based (provisioning-agnostic) setup + orchestrator wiring +
+  the node-aware re-gate (`loom.context-test-unsupported` no longer fires for a
+  node-hosted context). Emits `test/<ctx>.integration.test.ts`: reads `LOOM_PG_URL`,
+  applies the drizzle migrations, wires repos, and runs create→`repo.save` /
+  op→mutate+save / find→`await repo.<read>` (findById nullable → non-null
+  asserted). Compile-verified: a generated project `tsc --noEmit`s clean with the
+  emitted file. **v1 constraints:** a repository find must be **let-bound** (no
+  inline find inside `expect(...)`; the async-in-expression edition is a
+  follow-up), and it uses `NoopDomainEventDispatcher` (no workflow cascade — the
+  `createInProcessDispatcher` cascade edition is **3a-cascade**). **Not yet wired**
+  into Loom's behavioural CI run-path (testcontainers-node harness) — the emitted
+  file is generator-tested + tsc-verified and runs against any PG URL.
+- **3a-cascade** — swap in `createInProcessDispatcher(db)` so a `save`'s emitted
+  event fires reactors synchronously (the "reserves stock" example); plus the
+  `loom.integration-find-must-bind` validator for the let-bound constraint, and
+  the testcontainers-node behavioural run-path.
 - **3b** — the other four backends' integration renderers (against the same real
-  PG), outbox-async cascade draining if 3a finds reactors are async, and the
-  cross-backend CI matrix.
+  PG), outbox-async cascade draining if reactors are async, and the cross-backend
+  CI matrix.

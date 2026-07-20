@@ -41,6 +41,7 @@ import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescri
 import {
   type OpFragment,
   renderAggregate,
+  renderContextIntegrationTest,
   renderEnumsAndValueObjects,
   renderEvents,
   renderHttpIndex,
@@ -836,6 +837,12 @@ export function generateTypeScriptForContexts(
     for (const svc of ctx.domainServices) {
       const svcTests = renderServiceTestsFile(svc, ctx);
       if (svcTests) place("domain-test", svc.name, svcTests, undefined, `${ctx.name}.${svc.name}`);
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3a) — an in-process,
+    // repository-backed cross-aggregate test file reading a PG_URL, no HTTP.
+    const integrationTests = renderContextIntegrationTest(ctx);
+    if (integrationTests) {
+      out.set(`test/${lowerFirst(ctx.name)}.integration.test.ts`, integrationTests);
     }
     // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
     // table but has no per-concrete repo/routes.  Emit its polymorphic read

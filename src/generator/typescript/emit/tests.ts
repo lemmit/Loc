@@ -158,8 +158,10 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
 }
 
 /** Render a `create({ … })` input object with each field coerced to the
- *  aggregate's declared create-input type (see `renderTestExpr`). */
-function renderCreateInput(
+ *  aggregate's declared create-input type (see `renderTestExpr`).  Exported for
+ *  the context-integration renderer (`integration-tests.ts`), which shares the
+ *  same branded-create-input coercion. */
+export function renderCreateInput(
   obj: Extract<ExprIR, { kind: "object" }>,
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -200,8 +202,10 @@ function coerceCreateValue(value: ExprIR, type: TypeIR | undefined, ctx: Bounded
  *  explicit intrinsic matcher call wrapped around an `expect` statement.
  *  Returns the vitest line directly (matcher names line up 1:1) so the
  *  inner expression isn't double-wrapped in `.toBe(true)`. Returns null
- *  for bare boolean assertions, which the caller still wraps. */
-function renderExplicitMatcher(expr: ExprIR, ctx: BoundedContextIR): string | null {
+ *  for bare boolean assertions, which the caller still wraps.  Exported for the
+ *  context-integration renderer, which shares the matcher mapping (its
+ *  let-bound-find constraint keeps the actual expression await-free). */
+export function renderExplicitMatcher(expr: ExprIR, ctx: BoundedContextIR): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   let receiver = expr.receiver;
   let negate = false;

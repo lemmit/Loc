@@ -5,6 +5,7 @@
 export { type OpFragment, renderAggregate } from "./emit/aggregate.js";
 export { renderEvents } from "./emit/events.js";
 export { renderIds } from "./emit/ids.js";
+export { renderContextIntegrationTest } from "./emit/integration-tests.js";
 export { renderHttpIndex } from "./emit/routes.js";
 export {
   joinColumnName,
