@@ -552,7 +552,7 @@ export function renderDapperOutboxRelay(
   },
 ): string {
   const arms = durableTypes
-    .map((t) => `            "${t}" => JsonSerializer.Deserialize<${t}>(payload),`)
+    .map((t) => `            "${t}" => (IDomainEvent?)JsonSerializer.Deserialize<${t}>(payload),`)
     .join("\n");
   const channelsUsing = opts.durableBroker ? `using ${ns}.Infrastructure.Channels;\n` : "";
   const transportsField = opts.durableBroker

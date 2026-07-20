@@ -105,7 +105,9 @@ describe("transactional outbox emission — .NET (retention: log)", () => {
     expect(disp).toContain("_db.LoomOutbox.Add(new OutboxMessage");
     const relay = files.get("Infrastructure/Events/OutboxRelayService.cs") ?? "";
     expect(relay).toContain("public sealed class OutboxRelayService : BackgroundService");
-    expect(relay).toContain('"OrderPlaced" => JsonSerializer.Deserialize<OrderPlaced>(payload),');
+    expect(relay).toContain(
+      '"OrderPlaced" => (IDomainEvent?)JsonSerializer.Deserialize<OrderPlaced>(payload),',
+    );
     expect(relay).toContain('"event_dead_lettered"');
     expect(files.get("Infrastructure/Persistence/AppDbContext.cs")).toContain(
       "DbSet<OutboxMessage> LoomOutbox",
