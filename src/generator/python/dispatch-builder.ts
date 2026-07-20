@@ -1082,6 +1082,8 @@ function pureProducerOutboxBlock(durableEvents: EventIR[]): string {
     "",
     `def start_outbox_relay() -> "asyncio.Task[None]":`,
     "    return asyncio.create_task(_run_outbox_relay())",
+  );
+}
 
 /** The minimal `app/dispatch.py` for a deployable whose ONLY event routing is
  *  the realtime SSE wire — a `delivery: broadcast` channel with no workflow /
