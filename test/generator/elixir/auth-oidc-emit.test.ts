@@ -10,12 +10,14 @@ import { generateSystems } from "../../../src/system/index.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix OIDC verifier emission (D-AUTH-OIDC).  An `auth { oidc }` block
-// makes the generated ApiWeb.Auth plug a REAL OIDC verifier (JOSE + the
-// issuer's JWKS), adds the /auth/me probe, and pulls {:jose, ...} + :inets/
-// :ssl into mix.exs.  Without an oidc block (auth: required only) the plug
-// stays the permissive dev stub — same out-of-the-box behaviour as the Hono /
-// .NET dev-stub verifiers.  Compilation of the emitted Elixir is covered by
-// the elixir-vanilla-build gate (the vanilla-auth-oidc.ddd fixture); this
+// makes the generated ApiWeb.Auth plug a REAL OIDC verifier delegating to
+// `ApiWeb.Auth.Token` (the idiomatic joken + joken_jwks libraries — the Elixir
+// analogue of jose createRemoteJWKSet / Nimbus / PyJWKClient / Configuration-
+// Manager); it adds the /auth/me probe and pulls {:joken, ...} + {:joken_jwks,
+// ...} + :inets/:ssl into mix.exs.  Without an oidc block (auth: required only)
+// the plug stays the permissive dev stub — same out-of-the-box behaviour as the
+// Hono / .NET dev-stub verifiers.  Compilation of the emitted Elixir is covered
+// by the elixir-vanilla-build gate (the vanilla-auth-oidc.ddd fixture); this
 // suite pins the generator-level wiring.
 // ---------------------------------------------------------------------------
 
@@ -139,43 +141,57 @@ describe("Phoenix LiveView auth: ui guard (D-AUTH-OIDC, M-T3.5)", () => {
 });
 
 describe("Phoenix OIDC verifier emission", () => {
-  it("emits a real JOSE/JWKS verifier when an auth { oidc } block is present", async () => {
+  it("emits a joken + joken_jwks verifier when an auth { oidc } block is present", async () => {
     const files = await build(source({ oidc: true }));
     const auth = files.get("api/lib/api_web/auth.ex");
     expect(auth, "auth.ex should be emitted").toBeDefined();
-    // Real verifier — signature check against the issuer's JWKS.
-    expect(auth!).toContain("JOSE.JWT.verify_strict");
+    // The plug delegates signature + claim validation to the joken token config
+    // (no hand-rolled JOSE.JWT.verify_strict / kid extraction).
+    expect(auth!).toContain("ApiWeb.Auth.Token.verify_and_validate(token)");
+    expect(auth!).not.toContain("JOSE.JWT.verify_strict");
+    expect(auth!).not.toContain("token_kid");
     // Issuer read at RUNTIME (a module attribute would freeze the empty
-    // compile-time env into the release); the OIDC_ISSUER env override wins
-    // over the declared value (12-factor).
-    expect(auth!).toContain('defp issuer, do: (System.get_env("OIDC_ISSUER"');
+    // compile-time env into the release), and PUBLIC so Auth.Token /
+    // Auth.JwksStrategy read the same value; OIDC_ISSUER env override wins.
+    expect(auth!).toContain('def issuer, do: (System.get_env("OIDC_ISSUER"');
     expect(auth!).not.toContain("DEV STUB");
-    // JWKS discovered + cached in :persistent_term.
-    expect(auth!).toContain(":persistent_term");
-    expect(auth!).toContain("/.well-known/openid-configuration");
+
+    // The token config: signature via the JokenJwks hook + iss/exp/nbf(/aud)
+    // validators (with a clock-skew leeway).
+    const token = files.get("api/lib/api_web/auth/token.ex");
+    expect(token, "auth/token.ex should be emitted").toBeDefined();
+    expect(token!).toContain("use Joken.Config");
+    expect(token!).toContain("add_hook(JokenJwks, strategy: ApiWeb.Auth.JwksStrategy)");
+    expect(token!).toContain(
+      'add_claim("iss", nil, fn iss, _claims, _ctx -> iss == ApiWeb.Auth.issuer()',
+    );
+    expect(token!).toContain('add_claim("exp"');
+    expect(token!).toContain('add_claim("nbf"');
+    expect(token!).toContain("@leeway 30");
   });
 
-  it("never caches a failed JWKS fetch (IdP-not-up-yet must not brick auth)", async () => {
+  it("owns the JWKS via a joken_jwks strategy (cached + periodically refreshed, no persistent_term)", async () => {
     const files = await build(source({ oidc: true }));
     const auth = files.get("api/lib/api_web/auth.ex")!;
-    // A failed discovery yields [] — reject THIS request, but do not
-    // persist the empty list: a request racing the dev Keycloak's boot
-    // would otherwise pin every later verify to 401 until restart.
-    expect(auth).toContain("case fetch_jwks() do");
-    expect(auth).toMatch(/\[\] ->\n\s+\[\]/);
+    // No hand-rolled JWKS cache / rotation in the plug — the library owns it.
+    expect(auth).not.toContain(":persistent_term");
+    expect(auth).not.toContain("refreshed_jwks");
+    expect(auth).not.toContain("fetch_jwks");
+
+    // The joken_jwks strategy: fetch + cache + periodic refresh keyed by kid.
+    const strat = files.get("api/lib/api_web/auth/jwks_strategy.ex");
+    expect(strat, "auth/jwks_strategy.ex should be emitted").toBeDefined();
+    expect(strat!).toContain("use JokenJwks.DefaultStrategyTemplate");
+    // JWKS URL resolved from the issuer's OIDC discovery document at start,
+    // with a certs-path fallback so a boot race against the IdP self-heals.
+    expect(strat!).toContain("/.well-known/openid-configuration");
+    expect(strat!).toContain('issuer <> "/protocol/openid-connect/certs"');
   });
 
-  it("refetches the JWKS on a kid miss (rate-limited) so IdP key rotation heals without a restart", async () => {
+  it("supervises the JWKS strategy so its cache is populated + rotation-healed", async () => {
     const files = await build(source({ oidc: true }));
-    const auth = files.get("api/lib/api_web/auth.ex")!;
-    // A kid the cached set doesn't know retries against a fresh fetch…
-    expect(auth).toContain("find_key(jwks(), kid) || find_key(refreshed_jwks(), kid)");
-    // …rate-limited (one refetch per 30s) so unknown-kid bursts can't
-    // hammer the IdP…
-    expect(auth).toContain(":jwks_refreshed_at");
-    expect(auth).toContain("if now - last < 30 do");
-    // …and a successful refetch replaces the cached set for later requests.
-    expect(auth).toContain(":persistent_term.put({__MODULE__, :jwks}, keys)");
+    // The strategy GenServer is added to the app supervision tree.
+    expect(files.get("api/lib/api/application.ex")!).toContain("ApiWeb.Auth.JwksStrategy");
   });
 
   it("maps claims onto the user shape via dotted paths (id ← sub)", async () => {
@@ -253,24 +269,29 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(router).not.toContain(":login");
   });
 
-  it("pulls {:jose} + :inets/:ssl into mix.exs only under OIDC", async () => {
+  it("pulls {:joken} + {:joken_jwks} + :inets/:ssl into mix.exs only under OIDC", async () => {
     const oidcMix = (await build(source({ oidc: true }))).get("api/mix.exs")!;
-    expect(oidcMix).toContain("{:jose,");
+    expect(oidcMix).toContain("{:joken,");
+    expect(oidcMix).toContain("{:joken_jwks,");
+    expect(oidcMix).not.toContain("{:jose,");
     expect(oidcMix).toContain("extra_applications: [:logger, :runtime_tools, :inets, :ssl]");
 
     const stubMix = (await build(source({ oidc: false }))).get("api/mix.exs")!;
-    expect(stubMix).not.toContain("{:jose,");
+    expect(stubMix).not.toContain("{:joken,");
+    expect(stubMix).not.toContain("{:joken_jwks,");
     expect(stubMix).toContain("extra_applications: [:logger, :runtime_tools]");
   });
 
   it("keeps the permissive dev stub when auth is required but no oidc block", async () => {
-    const auth = (await build(source({ oidc: false }))).get("api/lib/api_web/auth.ex")!;
+    const files = await build(source({ oidc: false }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
     expect(auth).toContain("DEV STUB");
-    expect(auth).not.toContain("JOSE.JWT.verify_strict");
+    expect(auth).not.toContain("verify_and_validate");
+    // No joken token config / strategy on the dev-stub path.
+    expect(files.has("api/lib/api_web/auth/token.ex")).toBe(false);
+    expect(files.has("api/lib/api_web/auth/jwks_strategy.ex")).toBe(false);
     // The /auth/me probe is still emitted (works for both verifier + stub).
-    expect(
-      (await build(source({ oidc: false }))).get("api/lib/api_web/controllers/auth_controller.ex"),
-    ).toBeDefined();
+    expect(files.get("api/lib/api_web/controllers/auth_controller.ex")).toBeDefined();
   });
 });
 

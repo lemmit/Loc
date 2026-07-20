@@ -588,6 +588,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     (hexDeps as Record<string, string>).amqp = '"~> 4.0"';
   }
 
+  // JWKS strategy (OIDC only): the joken_jwks GenServer that fetches, caches,
+  // and periodically refreshes the issuer's signing keys.  Supervised so the
+  // signer cache is populated (and rotation-healed) for the Auth.Token verifier
+  // — the library analogue of the other backends' out-of-the-box JWKS clients.
+  const authChildren = authEnabled && sys.auth?.oidc ? [`${appModule}Web.Auth.JwksStrategy`] : [];
+
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
   // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
@@ -605,7 +611,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // via Plug.Static and the router adds the `/app/*` deep-link fallback
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
-    [...schedulerChildren, ...channelChildren],
+    [...authChildren, ...schedulerChildren, ...channelChildren],
     usesOban,
   );
 
