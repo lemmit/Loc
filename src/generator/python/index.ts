@@ -1315,7 +1315,7 @@ function renderProblemPy(
                 request, ${uniquenessStatus}, "Conflict", "A resource with these values already exists."
             )
         log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
-            record_domain_fault("disallowed")
+        record_domain_fault("disallowed")
         return problem(request, ${uniquenessStatus}, "Conflict", "The request conflicts with the current state.")
 
 `
