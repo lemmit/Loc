@@ -1091,7 +1091,11 @@ function renderMain(
     `    return {"status": "ready"}`,
     "",
     "",
-    `@app.get("/metrics")`,
+    // `include_in_schema=False` keeps the Prometheus scrape target out of the
+    // OpenAPI contract — it's an operational endpoint, not part of the domain
+    // API, so it must not appear in `/openapi.json` (the other four backends
+    // omit it; including it breaks the cross-backend parity contract).
+    `@app.get("/metrics", include_in_schema=False)`,
     "async def metrics() -> Response:",
     `    """Prometheus scrape target — the text exposition of the default`,
     "    registry (process/GC collectors + the HTTP counter/histogram recorded",

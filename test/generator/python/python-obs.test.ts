@@ -86,7 +86,11 @@ describe("python observability", () => {
     // The route is mounted in main.py, serving the exposition.
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.obs.metrics import render_metrics");
-    expect(main).toContain('@app.get("/metrics")');
+    // Excluded from the OpenAPI contract — `/metrics` is an operational scrape
+    // target, not a domain route.  The other four backends omit it too (their
+    // frameworks separate operational endpoints from the API surface); FastAPI
+    // would auto-include it without this flag, breaking cross-backend parity.
+    expect(main).toContain('@app.get("/metrics", include_in_schema=False)');
     expect(main).toContain("return Response(content=body, media_type=content_type)");
   });
 
