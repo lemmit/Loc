@@ -28,7 +28,7 @@ on:
       - 'biome.generated.json'
       - 'designs/**'
       - '.github/workflows/test.yml'
-
+  merge_group:
 permissions:
   contents: read
 

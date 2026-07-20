@@ -55,5 +55,9 @@ jobs:
           print("all workflow files parse")
           PY
 
+      # actionlint over the whole workflows dir (expression syntax, shellcheck
+      # on run: steps, deprecated-runner hints). Official image — no
+      # third-party action version to rot. Best-effort layer; the YAML-parse
+      # step above is the hard guard for the startup_failure class.
       - name: actionlint
-        uses: raven-actions/actionlint@v2
+        uses: docker://rhysd/actionlint:latest
