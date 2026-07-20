@@ -169,13 +169,12 @@ async function sysErrorCodes(platform: string): Promise<string[]> {
 }
 
 describe("projection comprehension — validation gates", () => {
-  it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
-    // node (PR-C) + python (PR-D) + elixir (PR-E) + java (PR-F) emit it; dotnet stays gated.
-    for (const platform of ["node", "python", "elixir", "java"]) {
+  it("emits a query-time projection on every backend (all five have ported it)", async () => {
+    // node (PR-C), python (PR-D), elixir (PR-E), java (PR-F), dotnet (PR-G) —
+    // the honest gate `loom.projection-query-time-unsupported` now fires for no
+    // backend (every backend-owning platform is in PROJECTION_QT_SUPPORTED).
+    for (const platform of ["node", "python", "elixir", "java", "dotnet"]) {
       expect(await sysErrorCodes(platform)).not.toContain("loom.projection-query-time-unsupported");
-    }
-    for (const platform of ["dotnet"]) {
-      expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
     }
   });
 
@@ -291,5 +290,34 @@ describe("projection comprehension — Hono emission", () => {
     )?.[1];
     expect(ctrl).toContain('@GetMapping("/orders_view")');
     expect([...files.keys()].some((p) => p.endsWith("OrdersViewRow.java"))).toBe(true);
+  });
+
+  it("emits the .NET twin — synthesised repo find + join dictionary + alias select", async () => {
+    const files = await generateSystemFiles(SYS("dotnet"));
+    const handler = [...files.entries()].find(([p]) =>
+      p.endsWith("Application/Projections/OrdersViewQpHandler.cs"),
+    )?.[1];
+    expect(handler, "dotnet query-projection handler emitted").toBeDefined();
+    // Source rows via the synthesised repo find (mergeViewsAsFinds).
+    expect(handler).toContain("var domain = await _repo.OrdersView(cancellationToken);");
+    // `join Customer as c on o.customerId` → a bulk-load-by-id Dictionary…
+    expect(handler).toContain(
+      "var customerById = (await _customerRepo.FindManyByIdsAsync(domain.Select(d => d.CustomerId).ToList(), cancellationToken)).ToDictionary(__a => __a.Id);",
+    );
+    // …and `select customerName = c.name` reads through the loaded dictionary.
+    expect(handler).toContain("customerById[d.CustomerId].Name");
+    // The synthesised find lands on the Order repository impl with the inlined `where`.
+    const repo = [...files.entries()].find(([p]) =>
+      p.endsWith("Repositories/OrderRepository.cs"),
+    )?.[1];
+    expect(repo).toContain("public async Task<List<Order>> OrdersView(");
+    expect(repo).toContain("x.Status == OrderStatus.Confirmed");
+    // Route under /projections; no phantom folded <Proj>Row EF DbSet.
+    const ctrlCs = [...files.entries()].find(([p]) =>
+      p.endsWith("Api/OrdersQueryProjectionsController.cs"),
+    )?.[1];
+    expect(ctrlCs).toContain('[HttpGet("orders_view")]');
+    const db = [...files.entries()].find(([p]) => p.endsWith("AppDbContext.cs"))?.[1];
+    expect(db).not.toContain("OrdersViewRow");
   });
 });
