@@ -589,7 +589,18 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
     const order = ["int", "long", "decimal"] as const;
     const ai = (order as readonly string[]).indexOf(a.name);
     const bi = (order as readonly string[]).indexOf(b.name);
-    if (ai >= 0 && bi >= 0) return withTags(T.prim(order[Math.max(ai, bi)]!), tags);
+    if (ai >= 0 && bi >= 0) {
+      const widened = order[Math.max(ai, bi)]!;
+      // Division always yields a fractional result: `int / int` (and
+      // `long / long`, `int / long`) widens to `decimal`, so `5 / 2` is `2.5`
+      // on every backend rather than truncating differently per host.  An
+      // author who wants truncating integer division writes `a.divTrunc(b)`.
+      // `+ - * %` stay int-preserving; money/decimal handled above.
+      if (op === "/" && (widened === "int" || widened === "long")) {
+        return withTags(T.prim("decimal"), tags);
+      }
+      return withTags(T.prim(widened), tags);
+    }
   }
   return withTags(T.unknown, tags);
 }

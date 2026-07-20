@@ -21,6 +21,7 @@ import {
   type BinaryExpr,
   type CallExpr,
   type ExprTarget,
+  isIntDivWidenedToDecimal,
   type MemberExpr,
   type MethodCallExpr,
   type NewExpr,
@@ -567,6 +568,9 @@ export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: str
     "long.abs": (recv) => `abs(${recv})`,
     "decimal.abs": (recv) => `Decimal.abs(${recv})`,
     "money.abs": (recv) => `Decimal.abs(${recv})`,
+    // Truncating integer division (toward zero) — Kernel.div/2.
+    "int.divTrunc": (recv, args) => `div(${recv}, ${args[0]})`,
+    "long.divTrunc": (recv, args) => `div(${recv}, ${args[0]})`,
     "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
     "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
     "decimal.min": (recv, args) => `Decimal.min(${recv}, ${args[0]})`,
@@ -1102,6 +1106,14 @@ function renderBinary(
   // only the native op-body path dispatches through `Decimal.*`.
   if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
     return renderDecimalBinary(e.op, l, r);
+  }
+  // Integer division widened to decimal (`int / int` → decimal): native Elixir
+  // `/` on integers yields a FLOAT, not the `Decimal` struct a decimal field
+  // maps to (Ecto `:decimal`).  `Decimal.div/2` coerces the integer operands
+  // and returns a `Decimal`.  In-memory op bodies only — inside an Ecto query
+  // the native path lowers to SQL division.
+  if (!inFilter && isIntDivWidenedToDecimal(e)) {
+    return `Decimal.div(${l}, ${r})`;
   }
   // A5 temporal — datetime ORDER comparisons dispatch through
   // `DateTime.compare/2` (mirroring the Decimal path above): native `<`/`>`

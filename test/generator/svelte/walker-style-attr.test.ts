@@ -16,7 +16,6 @@ describe("svelte renderStyleAttr — dynamic values", () => {
     ]);
     // A JS template-literal binding — the `${…}` has no attribute delimiter to
     // collide with, so the inner double quotes survive intact.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting emitted literal text
     expect(out).toBe(' style={`color: ${(active ? "green" : "gray")}`}');
     expect(out).not.toContain("&quot;");
   });
@@ -26,7 +25,6 @@ describe("svelte renderStyleAttr — dynamic values", () => {
       { key: "padding", literal: "8px", rendered: '"8px"' },
       { key: "color", rendered: "c" },
     ]);
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting emitted literal text
     expect(out).toBe(" style={`padding: 8px; color: ${c}`}");
   });
 

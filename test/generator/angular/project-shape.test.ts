@@ -164,7 +164,6 @@ describe("angular generator — project shape", () => {
     expect(api).toContain("name: string;");
     // Service POST + rxjs->promise mutation.
     expect(api).toContain("create(input: CreateCustomerRequest) {");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(api).toContain("this.http.post<{ id: string }>(`${API_BASE_URL}/customers`, input)");
     expect(api).toContain('import { firstValueFrom } from "rxjs";');
     // TanStack injectMutation — on success invalidates the collection query.

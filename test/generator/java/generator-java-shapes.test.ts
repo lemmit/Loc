@@ -41,7 +41,9 @@ describe("java generator — shape: document", () => {
     expect(entity).not.toContain("@EmbeddedId");
     expect(files.has(`${root}/features/articles/ArticleJpaRepository.java`)).toBe(false);
     const impl = files.get(`${root}/features/articles/ArticleRepositoryImpl.java`)!;
-    expect(impl).toContain(".visibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)");
+    expect(impl).toContain(
+      ".withVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)",
+    );
     expect(impl).toContain(
       '"insert into cms.articles (id, data, version) values (?, ?::jsonb, 1) "',
     );

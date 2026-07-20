@@ -52,6 +52,22 @@ export type BinaryExpr = Extract<ExprIR, { kind: "binary" }>;
 export type ConvertExpr = Extract<ExprIR, { kind: "convert" }>;
 export type DurationExpr = Extract<ExprIR, { kind: "duration" }>;
 
+/** True when a binary node is an integer division that widened to `decimal`
+ *  (`int / int`, `int / long`, `long / long`) — BOTH operands integral, result
+ *  `decimal`.  The type system widens `/` on integers to `decimal` (5 / 2 =
+ *  2.5), so backends whose integer `/` truncates (.NET, Java) or whose native
+ *  `/` yields a bare float rather than the decimal representation (Elixir) must
+ *  emit real decimal division here, casting/boxing the integral operands.
+ *  A mixed `int / decimal` is NOT matched (its decimal operand is already
+ *  fractional and must not be re-wrapped). */
+export function isIntDivWidenedToDecimal(e: BinaryExpr): boolean {
+  if (e.op !== "/") return false;
+  if (e.resultType?.kind !== "primitive" || e.resultType.name !== "decimal") return false;
+  const integral = (t: BinaryExpr["leftType"]): boolean =>
+    t?.kind === "primitive" && (t.name === "int" || t.name === "long");
+  return integral(e.leftType) && integral(e.rightType);
+}
+
 /** A `name: value` pair with `value` already rendered (object / new fields). */
 export interface RenderedField {
   name: string;

@@ -52,6 +52,11 @@ describe("svelte operation action-button gate", () => {
     // cancel() has no `requires` → its button is NOT inside an {#if}.
     expect(c).toContain(">Cancel</button>");
     expect(c.match(/\{#if /g)?.length ?? 0).toBe(1);
+    // The gate's else arm is the render-nothing sentinel — it must NOT emit a
+    // `{:else}` (Svelte would render the bare `null` token between `{:else}`
+    // and `{/if}` as literal text to users who fail the gate).
+    expect(c).not.toContain("{:else}");
+    expect(c).not.toMatch(/\{:else\}\s*null/);
   });
 
   it("emits no gate / binding without auth: ui (byte-identical)", async () => {

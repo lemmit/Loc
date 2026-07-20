@@ -404,6 +404,16 @@ export const vueTarget: WalkerTarget = {
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
+    // `"null"` is the walker's render-nothing sentinel (e.g. an auth-gated
+    // action button's else arm).  Vue renders a bare `null` token as literal
+    // TEXT, so drop the `v-else` entirely — matching the Angular target's guard.
+    if (elseS === "null") {
+      return [
+        `<template v-if=${quoteAttrExpr(cond, "'")}>`,
+        `${inner}${thenS}`,
+        `${pad}</template>`,
+      ].join("\n");
+    }
     return [
       `<template v-if=${quoteAttrExpr(cond, "'")}>`,
       `${inner}${thenS}`,

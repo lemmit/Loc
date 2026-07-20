@@ -163,7 +163,6 @@ describe("realtime SSE client — React", () => {
     // `src/util/api-base.ts` emitter), so the realtime client imports + uses
     // that symbol — matching svelte/vue, not the historical `API_BASE`.
     expect(client).toContain('import { API_BASE_URL } from "./config";');
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates `${API_BASE_URL}` in the generated client, not here
     expect(client).toContain("new EventSource(`${API_BASE_URL}/realtime/events`)");
     expect(client).toContain(
       "for (const t of REALTIME_EVENT_TYPES) source.addEventListener(t, handler);",

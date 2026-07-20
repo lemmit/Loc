@@ -811,7 +811,8 @@ export type ColumnKind =
   | { tag: "id"; targetName: string }
   | { tag: "datetime" }
   | { tag: "bool" }
-  | { tag: "numeric" } // decimal / money / int / long — bare text
+  | { tag: "numeric" } // decimal / int / long — bare text (plain numbers client-side)
+  | { tag: "money" } // money — a decimal.js Decimal client-side, needs the Money formatter
   | { tag: "enum" }
   | { tag: "file" } // File (required or optional) — a `FileLink` download anchor
   //                   (`<a href={ref.url} download>{ref.key}</a>`).  A raw `File`
@@ -843,6 +844,11 @@ function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
       ]);
     case "enum":
       return callExpr("EnumBadge", [{ value: receiver() }]);
+    case "money":
+      // `money` is a decimal.js Decimal client-side — the `Money` primitive's
+      // `MoneyValue` helper formats it (accepts the Decimal structurally);
+      // rendering it as a bare React child would be a tsc error + runtime crash.
+      return callExpr("Money", [{ value: receiver() }]);
     case "file":
       // A `File` field is the FileRef object `{ url, key, contentType, size }` —
       // rendering it directly is a non-ReactNode tsc error.  `FileLink` renders a
@@ -916,8 +922,14 @@ function kindForType(type: TypeRef, voAsText: boolean): ColumnKind | null {
         return { tag: "datetime" };
       case "bool":
         return { tag: "bool" };
-      case "decimal":
       case "money":
+        // `money` deserialises to a decimal.js `Decimal` INSTANCE client-side
+        // (moneySchema z.output), NOT a plain number — rendering it as a bare
+        // React child is a non-ReactNode tsc error + runtime crash.  The `Money`
+        // formatter primitive renders it (its `MoneyValue` accepts the Decimal
+        // structurally).  decimal / int / long stay plain numbers → `numeric`.
+        return { tag: "money" };
+      case "decimal":
       case "int":
       case "long":
         return { tag: "numeric" };

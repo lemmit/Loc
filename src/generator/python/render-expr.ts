@@ -405,6 +405,10 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "long.abs": (recv) => `abs(${recv})`,
   "decimal.abs": (recv) => `abs(${recv})`,
   "money.abs": (recv) => `abs(${recv})`,
+  // Truncating integer division (toward zero) — `int(a / b)`, NOT `//` (which
+  // floors negatives); `int()` on the float quotient truncates toward zero.
+  "int.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
+  "long.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
   "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "decimal.min": (recv, args) => `min(${recv}, ${args[0]})`,

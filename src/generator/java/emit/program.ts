@@ -298,7 +298,6 @@ export function renderApplicationYml(slug: string): string {
     // Interactive Swagger UI (/swagger-ui.html) is gated OFF in production via
     // LOOM_OPENAPI_UI=false (the k8s chart sets it); the /openapi.json spec
     // (api-docs) stays available.  Default on for dev / compose / conformance.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Spring property placeholder emitted into application.yml, not a JS template literal
     "    enabled: ${LOOM_OPENAPI_UI:true}",
     ``,
   );

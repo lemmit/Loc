@@ -310,6 +310,9 @@ export const TS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "long.abs": (recv) => `Math.abs(${recv})`,
   "decimal.abs": (recv) => `Math.abs(${recv})`,
   "money.abs": (recv) => `${recv}.abs()`,
+  // Truncating integer division (toward zero) — `Math.trunc` on the float quotient.
+  "int.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
+  "long.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
   "int.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
   "decimal.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
@@ -399,15 +402,30 @@ export const TS_COLLECTION_RENDERERS: Record<
         : `${recv}.reduce((acc, x) => acc + x, 0)`,
   all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
   any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
-  // Array membership — maps to JS's `.includes(value)`.
-  contains: (recv, args) => `${recv}.includes(${args[0] ?? "undefined"})`,
+  // Array membership.  For value types this is JS's `.includes(value)` (===).
+  // For money the elements are decimal.js `Decimal` instances, whose `===` is
+  // reference identity — two value-equal Decimals never match — so a money
+  // membership test dispatches to a value-equality scan (`.some(x => x.eq(v))`),
+  // the same reason min/max/sum special-case money.
+  contains: (recv, args, e) =>
+    receiverElementIsMoney(e)
+      ? `${recv}.some((__x) => __x.eq(${args[0] ?? "undefined"}))`
+      : `${recv}.includes(${args[0] ?? "undefined"})`,
   where: (recv, args) => `${recv}.filter(${args[0] ?? "() => true"})`,
   first: (recv) => `${recv}[0]`,
   firstOrNull: (recv) => `(${recv}[0] ?? null)`,
   map: (recv, args) => `${recv}.map(${args[0]})`,
   sortBy: (recv, args, e) => {
-    const cmp =
-      e && isDescendingSort(e)
+    // Money keys are decimal.js `Decimal`s, whose `<`/`>` coerce via `valueOf()`
+    // (a string) → LEXICOGRAPHIC order (Decimal(10) < Decimal(9)).  Compare them
+    // with `.lt`/`.gt` instead, the same money special-case as min/max.
+    const desc = e ? isDescendingSort(e) : false;
+    const money = projectionBodyIsMoney(e);
+    const cmp = money
+      ? desc
+        ? "kb.lt(ka) ? -1 : kb.gt(ka) ? 1 : 0"
+        : "ka.lt(kb) ? -1 : ka.gt(kb) ? 1 : 0"
+      : desc
         ? "kb < ka ? -1 : kb > ka ? 1 : 0"
         : "ka < kb ? -1 : ka > kb ? 1 : 0";
     return `[...${recv}].sort((__a, __b) => { const ka = (${args[0]})(__a), kb = (${args[0]})(__b); return ${cmp}; })`;
@@ -437,6 +455,17 @@ function projectionBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): bo
   const lam = e?.args[0];
   const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
   return bodyT?.kind === "primitive" && bodyT.name === "money";
+}
+
+/** True iff a collection op's receiver element type is `money` — its elements
+ *  are decimal.js `Decimal`s, so `contains` must use value equality (`.eq`)
+ *  rather than `.includes` (reference identity). */
+function receiverElementIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  const rt = e?.receiverType;
+  if (!rt) return false;
+  const unwrapped = rt.kind === "optional" ? rt.inner : rt;
+  const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
+  return elem?.kind === "primitive" && elem.name === "money";
 }
 
 /** True iff a `sum` reduction's numeric type is `money` — the λ-body type for

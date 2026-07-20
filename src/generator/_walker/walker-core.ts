@@ -68,6 +68,7 @@ import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import { escapeHtmlAttr } from "./a11y-emit.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
 import { storeMemberLocal, upperFirstName } from "./js-target-helpers.js";
@@ -1860,10 +1861,14 @@ export function testidAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== "testid") continue;
     const a = call.args[i]!;
-    // String literal → quoted attr (no braces).
+    // String literal → quoted attr (no braces).  HTML-attribute-escape the
+    // value: a JS backslash-escaped quote (`data-testid="a\"b"`) terminates the
+    // attribute at the inner `"` on every frontend, since JSX/HTML attribute
+    // values aren't JS strings.  Byte-identical to `JSON.stringify` for a value
+    // with no `" & < >`.
     if (a.kind === "literal" && a.lit === "string") {
       ctx.collectedTestids.add(a.value);
-      return ` data-testid=${JSON.stringify(a.value)}`;
+      return ` data-testid="${escapeHtmlAttr(a.value)}"`;
     }
     // Anything else → run through emitExpr; bind as a dynamic
     // attribute through the target.  Refs to params/state, binary

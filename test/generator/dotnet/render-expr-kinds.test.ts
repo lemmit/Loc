@@ -692,6 +692,38 @@ describe("dotnet renderCsExpr — lambda, new, list, object", () => {
   });
 });
 
+describe("dotnet renderCsExpr — A1 int-division widening + divTrunc", () => {
+  // `int / int` widens to `decimal`.  C# `int / int` truncates, so the
+  // numerator is cast to `decimal` to force fractional division.
+  it("renders int/int→decimal division with a `(decimal)` numerator cast", () => {
+    expect(
+      renderCsExpr({
+        kind: "binary",
+        op: "/",
+        left: litInt("5"),
+        right: litInt("2"),
+        leftType: INT,
+        rightType: INT,
+        resultType: DECIMAL,
+      }),
+    ).toBe("(decimal)(5) / 2");
+  });
+
+  // `a.divTrunc(b)` — C# int `/` already truncates toward zero.
+  it("renders the `divTrunc` intrinsic as native `recv / arg` (int `/` truncates)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("a"),
+        member: "divTrunc",
+        args: [litInt("2")],
+        receiverType: INT,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.A / 2");
+  });
+});
+
 describe("dotnet renderCsType — generic carriers (P3b)", () => {
   it("renders `paged` as the generic Paged<T> record over the domain type", () => {
     const t: TypeIR = {

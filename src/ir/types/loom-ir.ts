@@ -3548,6 +3548,12 @@ export type ExprIR =
        *  undefined; those paths only need operand-blind operator
        *  rendering. */
       leftType?: TypeIR;
+      /** Type of the RIGHT operand — same population policy as `leftType`.
+       *  Needed alongside `leftType` to distinguish an integer division that
+       *  widened to `decimal` (`int / int` — both operands integral, cast both)
+       *  from an already-fractional mixed division (`int / decimal` — the
+       *  decimal operand must NOT be re-wrapped). */
+      rightType?: TypeIR;
       /** Type of the binary expression as a whole — comparison/logical
        *  ops are `bool`; arithmetic ops follow the type-system's
        *  closed-money and numeric-widening rules.  Same population

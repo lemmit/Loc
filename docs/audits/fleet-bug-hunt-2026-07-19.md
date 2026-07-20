@@ -11,8 +11,40 @@ unique bugs**. None overlap in-flight open PRs.
 
 Snapshot: `main` @ `ad8aa3c` (plus the branch-local forms.ts record-threading
 fix). Like every file under `docs/audits/`, this is a snapshot — **not**
-authoritative for what ships today. Verify against fresh `main` before fixing;
-per instruction, none of these have been fixed by this audit.
+authoritative for what ships today. Verify against fresh `main` before fixing.
+
+> **Update (2026-07-19, follow-up PR):** section **E** (the Java backend's
+> incomplete Jackson-3 migration — E1/E2/E3) has been **fixed**: the stale
+> `com.fasterxml.jackson.databind`/`.core` references were repackaged to
+> `tools.jackson.*`, the Jackson-2-only mapper idioms migrated to the Jackson-3
+> builder API (`new ObjectMapper().findAndRegisterModules()` →
+> `JsonMapper.builder().findAndAddModules().build()`, and the `.visibility(…)`
+> builder calls → `.changeDefaultVisibility(vc -> vc.withVisibility(…))`), the
+> `openapi-customizer` swagger-core interop **kept** on Jackson 2 (swagger-core
+> is Jackson-2-based — its `Json.mapper()` throws the checked
+> `JsonProcessingException`), and the finder-param import collector corrected
+> (E3). Verified by `gradle testClasses bootJar` (JDK 25) on generated
+> document/`json`, event-sourced, OIDC-auth, and extern-resource projects. All
+> other sections below remain open.
+
+> **Update (2026-07-19, follow-up PR):** section **D1** (document-shape
+> repository breaking on an optional single containment) has been **fixed** —
+> in **both** the TypeScript and the Python document builders (the audit
+> flagged TS; Python had the identical bug and was fixed with it). The
+> `toDoc`/`fromDoc` helpers and the `Doc` type now None/null-guard a nullable
+> single containment (`coupon == null ? null : couponToDoc(coupon)` /
+> `(None if a.coupon is None else _coupon_to_doc(a.coupon))`), mirroring the
+> embedded builders. Verified by `tsc --noEmit` on the emitted Hono project
+> and `mypy --strict` on the emitted FastAPI project, plus regression tests in
+> both backends. Other sections remain open.
+
+> **Update (2026-07-19, follow-up PR):** section **F1** (scaffolded `money`
+> field rendered a `Decimal` as a React child) has been **fixed** — money now
+> emits the `Money` formatter primitive and the eight React packs' `MoneyValue`
+> accepts the `Decimal` structurally (see §F1 note). Verifying F1 surfaced a
+> **new, distinct** build-break, **F1b** (the scaffolded money *form*'s RHF
+> resolver input≠output typing), documented at §F1b and **not yet fixed**.
+> Other sections remain open.
 
 Severity legend: **build-break** — generated project fails its own compile
 gate; **wrong-value** — compiles but computes/serves incorrect results;
@@ -54,6 +86,24 @@ division is intended (TS → `Math.trunc(a / b)`, Python → `//`-with-sign-fix 
 result type to decimal, making C#/Java use decimal division). Either way all
 five renderers must agree.
 
+> **Update (2026-07-19, follow-up PR): A1 fixed — owner chose the fractional
+> semantics.** `int / int` (and `long/long`, `int/long`) now **widens to
+> `decimal`** in both type functions (`arithmeticResult`,
+> `binaryResultType`); `5 / 2` is `2.5` on every backend. `%`, `+`, `-`, `*`
+> stay int-preserving; money/decimal untouched. The binary IR gained
+> `rightType`, and a shared `isIntDivWidenedToDecimal` helper drives the three
+> backends whose native integer `/` was wrong: **.NET** `(decimal)(l) / r`,
+> **Java** `BigDecimal.valueOf(l).divide(BigDecimal.valueOf(r), DECIMAL128)`,
+> **Elixir** `Decimal.div(l, r)` (TS/Python already fractional — `decimal` is
+> `number`/`float` there). A deliberate truncating-division intrinsic
+> **`a.divTrunc(b)`** (int×int→int, toward zero; `queryable:false`) covers the
+> integer-division case: TS `Math.trunc(a/b)`, C#/Java `a / b`, Python
+> `int(a/b)`, Elixir `div(a,b)`. A `derived x: int = a / b` now **errors at
+> author time** (`type 'decimal' but declared type is 'int'`) — the intended
+> migration surface. Verified: `node tsc`, `python mypy --strict`, `dotnet
+> build /warnaserror`, `gradle testClasses bootJar` (JDK 25) all green on the
+> emitted projects. **A2 below is NOT fixed by this** — see its note.
+
 ### A2. `avg(λ)` over an int projection truncates on .NET; the same desugar doesn't compile on Java *(wrong-value / build-break)*
 
 `avg` desugars (`src/ir/lower/lower-expr.ts:659-705`) to
@@ -73,6 +123,16 @@ corroborated that Java's emission from the same desugar
 Primary file: `src/generator/dotnet/render-expr.ts:779` (sum leaf) + the
 desugar. Fix: coerce the numerator (or the division) to decimal for non-money
 numeric projections on the typed backends.
+
+> **Note (2026-07-19): A2 is NOT fixed by A1 — still open.** A1's decimal
+> division keys on `isIntDivWidenedToDecimal` (both operand *types* integral).
+> The `avg` desugar stamps its `/` node with `leftType: decimal` (numPrim),
+> so it correctly does not match — but its *operands* still render as `int`
+> (`.Sum(int)` / `.Count()`), so .NET's avg keeps truncating and Java's still
+> doesn't compile. The real fix belongs in the `avg` desugar itself: stamp the
+> division's operand types as `int` (so `isIntDivWidenedToDecimal` fires and
+> every backend boxes to decimal), or wrap `sum(λ)` in a decimal `convert`.
+> Tracked as its own follow-up.
 
 ### A3. Python `%` is floored modulo; every other backend truncates *(wrong-value)*
 
@@ -116,6 +176,15 @@ SameValueZero, i.e. reference identity for `Decimal` objects —
 `[new Decimal(5)].includes(new Decimal(5))` is `false`. .NET's
 `List<decimal>.Contains` is value-equal and correct. Fix: emit
 `recv.some(p => p.eq(value))` for money element types.
+
+> **Update (2026-07-19, follow-up PR): B1 + B2 fixed.** The TS collection
+> renderers now money-special-case both ops, reusing the existing min/max
+> pattern: `sortBy` compares projected money keys with `.lt`/`.gt`
+> (`projectionBodyIsMoney`); `money[].contains(x)` emits
+> `recv.some(__x => __x.eq(x))` (new `receiverElementIsMoney`). Non-money
+> stays native `<`/`.includes` (byte-identical). Verified: emitted `cart.ts`
+> uses `.lt`/`.gt` + `.eq`, `tsc --noEmit`-clean; unit tests in
+> `render-expr-kinds`. (B3 — the Elixir `sortBy` sibling — remains open below.)
 
 ### B3. Elixir `sortBy` uses structural term ordering on datetime/decimal keys *(wrong-value)*
 
@@ -165,6 +234,20 @@ Elixir `record.lines.first_or_null.label` (BadMapError at runtime —
 (compile error). The call form works everywhere. Fix at the shared layer:
 lower a bare collection-op MemberSuffix to `method-call` with
 `isCollectionOp` regardless of parens.
+
+> **Update (2026-07-19, follow-up PR): C1 fixed.** The shared lowering
+> (`lower-expr.ts`) now converts a property-style `first`/`firstOrNull` on a
+> collection receiver to the SAME `method-call` IR the `lines.first()` call
+> form produces, so every backend emits the op instead of a `.first`/
+> `.first_or_null` field access. Scoped to `first`/`firstOrNull` (the no-arg
+> ops backends DON'T handle property-style) and gated on a collection receiver,
+> so `count`/`length`/`distinct` and an entity field named `first` are
+> untouched. Verified: all five backends now emit the op (`(this._lines)[0]`,
+> `List.first(record.lines)`, `.stream().findFirst()`, `self._lines[0] if …`,
+> `.FirstOrDefault()`); node project `tsc --noEmit`-clean; IR + regression
+> tests (a prior test that pinned the buggy `member` shape was corrected).
+> (C2 — .NET `firstOrNull()` returning `default(T)` on value-type collections
+> — is a distinct wrong-value bug, still open below.)
 
 ### C2. .NET `firstOrNull()` over a value-type collection returns `default(T)`, not null *(wrong-value)*
 
@@ -243,6 +326,42 @@ throws "Objects are not valid as a React child". Unexercised by CI — every
 matrix example models money as a value object. Fix: give money its own
 ColumnKind (Money primitive or `.toString()`).
 
+> **Update (2026-07-19, follow-up PR): F1 fixed.** `money` gets its own
+> `{ tag: 'money' }` ColumnKind that emits the `Money` formatter primitive
+> (`<MoneyValue value={row.total} />`), and the eight React packs' `MoneyValue`
+> `value` param is widened structurally to `number | string | { toString():
+> string } | null | undefined` (the same pattern the Svelte packs already use
+> so it accepts a `Decimal` without importing decimal.js). `int`/`decimal`/
+> `long` stay `numeric` (plain numbers). Verified: the scaffolded list/detail
+> cells now `tsc`-clean; regression test in `walker-formatters`. **NOTE — a
+> *second*, distinct money-scaffold build-break surfaced during F1 verification
+> and is NOT yet fixed (see F1b).**
+
+### F1b. Scaffolded create/update **form** over a bare `money` field fails `tsc` (RHF resolver input≠output) *(build-break — NEW, not in the original 33)*
+
+Discovered while verifying F1. A scaffolded `CreateForm`/`UpdateForm` (or op/
+workflow form) over an aggregate with a bare `money` field emits
+`useForm<Create<Agg>Request>({ resolver: zodResolver(Create<Agg>Request), … })`.
+`Create<Agg>Request` is the schema's **output** type (`z.infer`/`z.output` —
+`total: Decimal`), but `zodResolver` types the resolver's **input** as
+`z.input` (`total: string | Decimal`, because `moneySchema` is a transform). So
+`Resolver<{total: string | Decimal}, …>` is not assignable to the
+`Resolver<{total: Decimal}, …>` the single-generic `useForm` expects → TS2322/
+TS2345 in `new.tsx` + `detail.tsx`. Money is the only field type whose
+`z.input ≠ z.output`, so only bare-`money` forms hit it (the matrix's
+money-as-VO cases have `amount: decimal`, input=output). Untested for the same
+reason as F1.
+
+Fix direction: emit the RHF three-generic form
+`useForm<Create<Agg>FormState, unknown, Create<Agg>Request>` (the `FormState` =
+`z.input` alias is already emitted by `api-module.ts` `dualTypeAliases`
+whenever a request reaches money), **conditionally** — only when the form
+reaches money, since the `FormState` alias is only emitted then — and add the
+`FormState` type import. Spans `form-of-decls` / `form-op-module` /
+`form-runs-decls` across the 8 React packs + the form-context builder. A
+focused cross-pack change; tracked here as its own item rather than rushed into
+the F1 PR.
+
 ### F2. `match { … }` in expression/text position silently emits `undefined` *(wrong-value, all JSX frontends)*
 
 `emitExpr` in the shared walker (`src/generator/_walker/walker-core.ts:1248-1465`)
@@ -261,6 +380,17 @@ so the attribute closes at the inner quote (TS1382). Visible text is correctly
 escaped; only attribute sites are not. Fix: brace-wrap the JS literal
 (`label={"…"}`) or use the existing `escapeHtmlAttr` (a11y-emit.ts).
 
+> **Update (2026-07-19, follow-up PR): F3 fixed.** Both `unwrapAsAttr` and
+> `testidAttr` now HTML-entity-escape the value inside `attr="…"` via the
+> existing `escapeHtmlAttr` (brace-wrapping was rejected — Vuetify/Vue also
+> splice `label={{{labelAttr}}}`, where `{…}` is literal text, not an
+> expression; entity escaping decodes in attribute values on JSX, Vue, Svelte,
+> and Angular alike). Byte-identical to the previous `JSON.stringify` form for
+> any value with no `" & < >` (the `acme.ddd` baseline fixture is unchanged).
+> Verified: a page with `"`/`&`/`<` in a `label:` and a `testid:` now
+> `tsc --noEmit`-clean; regression test (React + Vue) in
+> `text-escaping-cross-target`.
+
 ### F4/F5. Vue and Svelte action-button auth gates render the literal text "null" *(UX)*
 
 `controls.ts:270` passes the JSX render-nothing sentinel `"null"` as the else
@@ -271,6 +401,16 @@ special-cases it (`angular-target.ts:461`), but Vue
 (`src/generator/svelte/walker/svelte-target.ts:308`) emits `{:else} null {/if}`
 — users failing a `requires` gate see the word **null** where the hidden
 button should be nothing. Fix: mirror the Angular guard in both targets.
+
+> **Update (2026-07-19, follow-up PR): F4/F5 fixed.** Both `renderConditionalChild`
+> targets now drop the else arm entirely when `elseS === "null"` (the
+> render-nothing sentinel), mirroring the Angular guard — Vue emits only the
+> `<template v-if>`, Svelte only the `{#if}…{/if}`. (Feliz emits an F#
+> `if/then/else` and its build matrix includes an authgate scenario that is
+> green, so its `null` arm already renders nothing; Flutter is a phase-0 stub.)
+> Verified: generated Vue/Svelte `OrderActions` carry no literal `null` text;
+> regression assertions added to the existing `operation-button-gate` tests
+> (which previously passed *with* the bug present).
 
 ---
 

@@ -183,7 +183,6 @@ describe("flutterTarget — list-comprehension seam", () => {
 describe("flutterTarget — navigation seam", () => {
   it("renderNavigate interpolates :param segments into a Dart route string", () => {
     const s = flutterTarget.renderNavigate("/products/:id", [{ name: "id", value: "p.id" }]);
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting literal Dart string interpolation
     expect(s).toBe("Navigator.pushNamed(context, '/products/${p.id}')");
   });
 
@@ -201,7 +200,6 @@ describe("flutterTarget — navigation seam", () => {
 
 describe("flutterTarget — markup seams", () => {
   it("renderInterpolation coerces non-string, passes string straight", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting literal Dart string interpolation
     expect(flutterTarget.renderInterpolation("count")).toBe("Text('${count}')");
     expect(flutterTarget.renderInterpolation("name", prim("string"))).toBe("Text(name)");
   });

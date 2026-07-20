@@ -45,7 +45,8 @@
         "noAssignInExpressions": "error",
         "useIterableCallbackReturn": "error",
         "noThenProperty": "error",
-        "noSelfCompare": "error"
+        "noSelfCompare": "error",
+        "noTemplateCurlyInString": "off"
       },
       "performance": {
         "noAccumulatingSpread": "error"

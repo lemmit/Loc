@@ -209,7 +209,6 @@ function intervalBlock(
     "      running = true;",
     "      try {",
     "        await db.transaction(async (tx) => {",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: emitted source — `${lockKey}` is a template literal in the generated code, not this file's.
     "          const lock = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(${lockKey}) AS locked`);",
     "          const locked = (lock.rows[0] as { locked: boolean } | undefined)?.locked ?? false;",
     "          if (!locked) {",

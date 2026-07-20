@@ -778,6 +778,18 @@ When the receiver type is `T[]`:
 Within arithmetic, `int < long < decimal`.  An `int` is assignable to
 `long` or `decimal`; a `long` to `decimal`.
 
+**Division always yields a fractional result.**  Unlike `+`, `-`, `*`, `%`
+(which preserve the widened integer type), **`/` on two integers widens to
+`decimal`**: `int / int`, `int / long`, and `long / long` all type as
+`decimal`, so `5 / 2` is `2.5` on every backend rather than truncating
+differently per host.  A consequence: `derived half: int = a / b` is a
+**type error** (`decimal` is not assignable to `int`) — declare the field
+`decimal`, or use the truncating-division intrinsic **`a.divTrunc(b)`**
+(`int × int → int`, truncating toward zero, e.g. `(-5).divTrunc(2) == -2`) when
+you deliberately want integer division (page counts, bucketing, …).  Money and
+`decimal` operands are unaffected (`money / int → money`, `decimal / int →
+decimal`).
+
 ### `money` — precise decimal, distinct from `decimal`
 
 `money` is a primitive type for precise-decimal values that must

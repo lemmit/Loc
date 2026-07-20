@@ -327,10 +327,13 @@ export function entityToDocFn(
     entries.push(`${f.name}: ${serializeField(f.type, `a.${f.name}`, ctx)}`);
   }
   for (const c of entity.contains) {
+    const toDoc = lowerFirst(c.partName);
     entries.push(
       c.collection
-        ? `${c.name}: a.${c.name}.map((e) => ${lowerFirst(c.partName)}ToDoc(e))`
-        : `${c.name}: ${lowerFirst(c.partName)}ToDoc(a.${c.name})`,
+        ? `${c.name}: a.${c.name}.map((e) => ${toDoc}ToDoc(e))`
+        : c.optional
+          ? `${c.name}: a.${c.name} == null ? null : ${toDoc}ToDoc(a.${c.name})`
+          : `${c.name}: ${toDoc}ToDoc(a.${c.name})`,
     );
   }
   return lines(
@@ -364,10 +367,13 @@ export function entityFromDocFn(
     entries.push(`${f.name}: ${deserializeField(f.type, `d.${f.name}`, ctx)}`);
   }
   for (const c of entity.contains) {
+    const fromDoc = lowerFirst(c.partName);
     entries.push(
       c.collection
-        ? `${c.name}: (d.${c.name} ?? []).map((x) => ${lowerFirst(c.partName)}FromDoc(x))`
-        : `${c.name}: ${lowerFirst(c.partName)}FromDoc(d.${c.name})`,
+        ? `${c.name}: (d.${c.name} ?? []).map((x) => ${fromDoc}FromDoc(x))`
+        : c.optional
+          ? `${c.name}: d.${c.name} == null ? null : ${fromDoc}FromDoc(d.${c.name})`
+          : `${c.name}: ${fromDoc}FromDoc(d.${c.name})`,
     );
   }
   return lines(
@@ -390,7 +396,13 @@ export function docTypeAlias(
   void rootName;
   for (const f of entity.fields) members.push(`${f.name}: ${docFieldType(f.type, ctx)}`);
   for (const c of entity.contains) {
-    members.push(c.collection ? `${c.name}: ${c.partName}Doc[]` : `${c.name}: ${c.partName}Doc`);
+    members.push(
+      c.collection
+        ? `${c.name}: ${c.partName}Doc[]`
+        : c.optional
+          ? `${c.name}: ${c.partName}Doc | null`
+          : `${c.name}: ${c.partName}Doc`,
+    );
   }
   return `type ${entity.name}Doc = { ${members.join("; ")} };`;
 }

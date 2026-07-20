@@ -74,3 +74,56 @@ describe("python shape: document", () => {
     expect(repo).toContain("        return result");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Optional single containment (`contains coupon: Coupon?`) on a document
+// aggregate.  Regression: the doc (de)serialisers folded a nullable single
+// containment through the non-null `_coupon_to_doc(a: Coupon)` /
+// `_coupon_from_doc` helpers, so an unset value failed `mypy --strict`
+// (passing `Coupon | None` where `Coupon` is required) and dereferenced
+// `None` at runtime.  The embedded builder always guarded it; the document
+// builder was missed (TS had the same bug — fixed together).
+// ---------------------------------------------------------------------------
+describe("python document — optional single containment is null-safe", () => {
+  const SRC = `
+    system S {
+      subdomain Core {
+        context Shop {
+          aggregate Cart shape: document {
+            note: string
+            contains coupon: Coupon?
+            contains items: CartLine[]
+            create(note: string) { note := note }
+            entity Coupon { code: string }
+            entity CartLine { sku: string  qty: int }
+          }
+          repository Carts for Cart { }
+        }
+      }
+      api ShopApi from Core
+      storage pg { type: postgres }
+      resource shopState { for: Shop, kind: state, use: pg }
+      deployable api { platform: python contexts: [Shop] dataSources: [shopState] serves: ShopApi port: 3000 }
+    }
+  `;
+
+  it("None-guards the optional containment in _to_doc and _from_doc", async () => {
+    const { model, errors } = await parseString(SRC);
+    if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
+    const files = generateSystems(model).files;
+    const repo = files.get("api/app/db/repositories/cart_repository.py")!;
+    expect(repo, "cart_repository.py generated").toBeDefined();
+    // Serialize: None-guarded, not a bare `_coupon_to_doc(a.coupon)` (which the
+    // `Coupon | None` getter fails mypy --strict against).
+    expect(repo).toContain('"coupon": (None if a.coupon is None else _coupon_to_doc(a.coupon))');
+    // Deserialize: None-guarded.
+    expect(repo).toContain(
+      'coupon=(None if d["coupon"] is None else _coupon_from_doc(d["coupon"]))',
+    );
+    // Required collection containment unchanged.
+    expect(repo).toContain('"items": [_cart_line_to_doc(e) for e in a.items]');
+    // Neither path emits the unguarded single-containment form.
+    expect(repo).not.toMatch(/"coupon": _coupon_to_doc\(a\.coupon\)/);
+    expect(repo).not.toMatch(/coupon=_coupon_from_doc\(d\["coupon"\]\)/);
+  });
+});
