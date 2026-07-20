@@ -70,46 +70,6 @@ export function renderAggregateNotFoundException(basePkg: string): string {
   );
 }
 
-export function renderWireValidationException(basePkg: string): string {
-  return lines(
-    `package ${basePkg}.domain.common;`,
-    ``,
-    `import java.util.List;`,
-    ``,
-    `/**`,
-    ` * Wire-boundary validation failure — maps to the cross-backend 422`,
-    ` * problem envelope with the {@code errors[]} extension`,
-    ` * ({@code [{ pointer, message, code? }]}).`,
-    ` */`,
-    `public class WireValidationException extends RuntimeException {`,
-    `    /** {@code code} is the stable content-hash wire code (the i18n key) for a`,
-    `     *  messaged rule, or {@code null} for a message-less rule (omitted from the body). */`,
-    `    public record WireError(String pointer, String message, String code) {`,
-    `    }`,
-    ``,
-    `    private final List<WireError> errors;`,
-    ``,
-    `    public WireValidationException(List<WireError> errors) {`,
-    `        super("Validation failed");`,
-    `        this.errors = List.copyOf(errors);`,
-    `    }`,
-    ``,
-    `    public List<WireError> errors() {`,
-    `        return errors;`,
-    `    }`,
-    ``,
-    `    public static WireError error(String pointer, String message) {`,
-    `        return new WireError(pointer, message, null);`,
-    `    }`,
-    ``,
-    `    public static WireError error(String pointer, String message, String code) {`,
-    `        return new WireError(pointer, message, code);`,
-    `    }`,
-    `}`,
-    ``,
-  );
-}
-
 export function renderPagedRecord(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.common;`,

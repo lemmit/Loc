@@ -216,11 +216,9 @@ export function renderGradleBuild(
     `dependencies {`,
     `    implementation("org.springframework.boot:spring-boot-starter-web")`,
     `    implementation("org.springframework.boot:spring-boot-starter-data-jpa")`,
-    // Jakarta Bean Validation (Hibernate Validator) — enforces the wire-boundary
-    // single-field constraints (`@Size`/`@Pattern`/`@Min`/`@DecimalMin` on the
-    // request DTOs) at the `@Valid` controller seam, the Spring analog of .NET's
-    // FluentValidation / Python's Pydantic. springdoc also folds the annotations
-    // into /openapi.json (minLength/maxLength/pattern/minimum).
+    // spring-boot-starter-validation — enables the `@Valid` controller seam +
+    // MethodArgumentNotValidException machinery that runs the per-command Spring
+    // Validators (the .NET FluentValidation analog: one validator, all rules).
     `    implementation("org.springframework.boot:spring-boot-starter-validation")`,
     `    runtimeOnly("org.postgresql:postgresql")`,
     `    implementation("org.jmolecules:jmolecules-ddd:${JMOLECULES_VERSION}")`,

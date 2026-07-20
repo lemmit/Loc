@@ -35,31 +35,26 @@ async function gen() {
   const key = (suffix: string) => [...all.keys()].find((k) => k.endsWith(suffix))!;
   return {
     domain: all.get(key("features/products/Product.java"))!,
-    validators: all.get(key("features/products/ProductValidators.java"))!,
-    createRequest: all.get(key("features/products/CreateProductRequest.java"))!,
+    validator: all.get(key("features/products/CreateProductValidator.java"))!,
   };
 }
 
 describe("java — messaged rule → wire validator + domain floor text", () => {
-  it("surfaces the author text + a content-hash wire code on the wire validator", async () => {
-    const { validators } = await gen();
-    // messaged rule → 3-arg error() carrying the "msg.<hash>" wire code (i18n key)
-    expect(validators).toContain(
-      'errors.add(WireValidationException.error("/name", "Name must be 2-120 characters", "msg.j985f2"))',
+  it("surfaces the author text + a content-hash wire code via rejectValue", async () => {
+    const { validator } = await gen();
+    // messaged rule → rejectValue(field, "msg.<hash>", <text>) carrying the i18n key
+    expect(validator).toContain(
+      'errors.rejectValue("name", "msg.j985f2", "Name must be 2-120 characters")',
     );
-    expect(validators).toContain(
-      'errors.add(WireValidationException.error("/sku", "SKU is required", "msg.u3w71r"))',
-    );
+    expect(validator).toContain('errors.rejectValue("sku", "msg.u3w71r", "SKU is required")');
   });
 
-  it("moves a message-LESS single-field invariant to a Bean Validation annotation (no wire code)", async () => {
-    const { createRequest } = await gen();
-    // The message-less `invariant sku.length > 0` becomes a built-in `@Size` on
-    // the wire DTO (enforced at `@Valid`), carrying the derived-default message
-    // and no content-hash code — the messaged rules stay in the residual
-    // validator (see the test above).
-    expect(createRequest).toContain(
-      '@Size(min = 1, message = "Invariant violated: sku.length > 0")',
+  it("keeps a message-LESS single-field rule with the sentinel code (no wire code)", async () => {
+    const { validator } = await gen();
+    // The message-less `invariant sku.length > 0` uses the `loom.invariant`
+    // sentinel code, which the advice does NOT surface as a wire `code`.
+    expect(validator).toContain(
+      'errors.rejectValue("sku", "loom.invariant", "Invariant violated: sku.length > 0")',
     );
   });
 

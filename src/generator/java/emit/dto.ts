@@ -19,7 +19,6 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
-import { dtoConstraintsFor } from "./bean-validation.js";
 import {
   collectWireImports,
   domainToWire,
@@ -147,20 +146,6 @@ export function renderDtoFiles(
   const createInputs = forCreateInput(agg.fields);
   if (emitsRestCreate(agg)) {
     const imports = new Set<string>();
-    // Bean Validation constraints for the create shape — message-less
-    // single-field invariants become built-in annotations on the DTO
-    // (`@Size`/`@Pattern`/`@Min`/`@DecimalMin`), enforced at the `@Valid` seam.
-    // The type decision (`@Min` vs `@DecimalMin`) reads the BASE (unboxed)
-    // field type, so build the constraint map from those.
-    const createParamTypes = esCreateParams
-      ? esCreateParams.map((p) => ({ name: p.name, type: p.type }))
-      : createInputs.map((f) => ({ name: f.name, type: f.type }));
-    const createConstraints = dtoConstraintsFor(
-      agg.invariants,
-      createParamTypes,
-      new Set(createParamTypes.map((p) => p.name)),
-    );
-    for (const i of createConstraints.imports) imports.add(i);
     const components = (
       esCreateParams ??
       // A field carrying a declared default (`field: T = <expr>`) is optional at
@@ -174,9 +159,7 @@ export function renderDtoFiles(
       }))
     ).map((f) => {
       collectWireImports(f.type, imports);
-      const anns = createConstraints.byField.get(f.name);
-      const prefix = anns && anns.length > 0 ? `${anns.join(" ")} ` : "";
-      return `${prefix}${wireJavaType(f.type, "Request")} ${f.name}`;
+      return `${wireJavaType(f.type, "Request")} ${f.name}`;
     });
     out.push({
       name: `Create${agg.name}Request.java`,
@@ -189,21 +172,9 @@ export function renderDtoFiles(
   for (const op of agg.operations) {
     if (op.params.length === 0) continue;
     const imports = new Set<string>();
-    // Same field-level constraints as create, restricted to the op's params —
-    // an op that takes a field gets its `@Size`/`@Pattern`/… too.  (Op
-    // preconditions are cross-field / carry messages, so they stay in the
-    // residual programmatic validator.)
-    const opConstraints = dtoConstraintsFor(
-      agg.invariants,
-      op.params.map((p) => ({ name: p.name, type: p.type })),
-      new Set(op.params.map((p) => p.name)),
-    );
-    for (const i of opConstraints.imports) imports.add(i);
     const components = op.params.map((p) => {
       collectWireImports(p.type, imports);
-      const anns = opConstraints.byField.get(p.name);
-      const prefix = anns && anns.length > 0 ? `${anns.join(" ")} ` : "";
-      return `${prefix}${wireJavaType(p.type, "Request")} ${p.name}`;
+      return `${wireJavaType(p.type, "Request")} ${p.name}`;
     });
     out.push({
       name: `${upperFirst(op.name)}${agg.name}Request.java`,

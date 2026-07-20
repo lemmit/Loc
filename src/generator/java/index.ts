@@ -77,7 +77,6 @@ import {
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
-  renderWireValidationException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderJavaDispatcher } from "./emit/dispatch.js";
@@ -163,7 +162,7 @@ import {
   renderJavaDomainUnionFiles,
   renderJavaUnionWireFiles,
 } from "./emit/unions.js";
-import { renderJavaValidators } from "./emit/validator.js";
+import { renderJavaCommandValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -370,7 +369,6 @@ function emitProjectFromContexts(
     "domain-common",
     renderAggregateNotFoundException(basePkg),
   );
-  place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
@@ -1533,9 +1531,10 @@ function emitAggregate(
   )) {
     place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }
-  const validators = renderJavaValidators(agg, applicationPkg, basePkg);
-  if (validators) {
-    place(`${agg.name}Validators.java`, "service", validators, agg.name, agg.origin, construct);
+  // Wire-boundary validators — one Spring Validator per command shape, run at
+  // the controller's `@Valid` seam (registered via @InitBinder in api.ts).
+  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg)) {
+    place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
   }
   place(
     `${agg.name}Service.java`,

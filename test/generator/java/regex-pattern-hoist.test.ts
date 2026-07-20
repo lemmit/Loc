@@ -65,19 +65,16 @@ describe("java — regex Pattern hoisting", () => {
     expect(src).not.toMatch(/Pattern\.compile\([^)]*\)\.matcher/);
   });
 
-  it("hoists a residual (messaged) wire-validator regex to a static final Pattern", async () => {
-    // A messaged regex check stays in the programmatic validator (it carries an
-    // authored message + content-hash code), so the hoisting path still applies.
-    const src = await fileEndingWith("/EngineerValidators.java");
+  it("hoists a wire-validator regex to a static final Pattern in the Spring Validator", async () => {
+    // A regex check in the command's Spring Validator hoists to a reused
+    // `private static final Pattern` (the `email.matches(...)` check lands here).
+    const src = await fileEndingWith("/CreateEngineerValidator.java");
     expect(src).toMatch(/private static final Pattern MATCHES_PATTERN_0 = Pattern\.compile\(/);
     expect(src).toContain("MATCHES_PATTERN_0.matcher(email).find()");
     expect(src).not.toMatch(/Pattern\.compile\([^)]*\)\.matcher/);
   });
 
-  it("maps a message-less single-field regex to a `@Pattern` annotation on the DTO", async () => {
-    // A message-less regex is enforced by Bean Validation at the `@Valid` seam
-    // (Hibernate Validator caches the compiled pattern), so it does NOT reach
-    // the residual validator's hoist path.
+  it("hoists a message-less single-field regex too (rejectValue with the sentinel code)", async () => {
     const src = `
 system Reg {
   subdomain S {
@@ -95,10 +92,10 @@ system Reg {
 }
 `;
     const files = await generateSystemFiles(src);
-    const req = [...files.entries()].find(([k]) => /CreateAccountRequest\.java$/.test(k))![1];
-    expect(req).toContain("import jakarta.validation.constraints.Pattern;");
-    expect(req).toContain('@Pattern(regexp = "^[a-z0-9-]+$"');
-    // No residual validator for a single-field-only aggregate.
-    expect([...files.keys()].some((k) => /AccountValidators\.java$/.test(k))).toBe(false);
+    const v = [...files.entries()].find(([k]) => /CreateAccountValidator\.java$/.test(k))![1];
+    expect(v).toMatch(/private static final Pattern MATCHES_PATTERN_0 = Pattern\.compile\(/);
+    expect(v).toContain(
+      'if (!(MATCHES_PATTERN_0.matcher(slug).find())) errors.rejectValue("slug", "loom.invariant"',
+    );
   });
 });
