@@ -138,6 +138,7 @@ export function emitElixirChannelFiles(
   const unique = uniqueBindings(bindings);
   const hasRedis = unique.some((b) => b.transport === "redis");
   const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  const hasKafka = unique.some((b) => b.transport === "kafka");
   // event type -> binding, split by durability (design §5): ephemeral events
   // publish inline in the tee; durable (`work`) events ride the outbox relay.
   const routing = new Map<string, BrokerBinding>();
@@ -160,7 +161,7 @@ export function emitElixirChannelFiles(
   }
 
   const tupleFor = (b: BrokerBinding): string =>
-    `{${JSON.stringify(b.address)}, ${JSON.stringify(b.contextName)}, ${connByEnv.get(b.envVar)}, :${b.transport === "rabbitmq" ? "rabbitmq" : "redis"}}`;
+    `{${JSON.stringify(b.address)}, ${JSON.stringify(b.contextName)}, ${connByEnv.get(b.envVar)}, :${b.transport === "rabbitmq" ? "rabbitmq" : b.transport === "kafka" ? "kafka" : "redis"}}`;
   const routingMap = (entries: Map<string, BrokerBinding>): string =>
     entries.size === 0
       ? "%{}"

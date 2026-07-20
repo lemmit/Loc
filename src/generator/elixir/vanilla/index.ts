@@ -587,6 +587,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   if (channelBindings.some((b) => b.transport === "rabbitmq")) {
     (hexDeps as Record<string, string>).amqp = '"~> 4.0"';
   }
+  if (channelBindings.some((b) => b.transport === "kafka")) {
+    // brod (Apache 2.0 — Klarna's Erlang kafka client, the plain-driver
+    // choice matching Redix/amqp).
+    (hexDeps as Record<string, string>).brod = '"~> 4.4"';
+  }
 
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
