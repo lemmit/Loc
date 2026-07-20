@@ -184,7 +184,7 @@ function coerceLiteralToCsType(
   return rendered;
 }
 
-function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
+export function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
   if (e.kind !== "method-call" || e.member !== "create" || e.args.length !== 1) return null;
   const objArg = e.args[0];
   const receiver = e.receiver;
@@ -213,7 +213,7 @@ function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | null {
  *  optionally `.not.`) to an AwesomeAssertions fluent call. Returns null
  *  when the expression isn't an explicit matcher so the caller falls back
  *  to `Assert.True(<expr>)` for a bare boolean. */
-function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
+export function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
   if (sig?.on !== "value") return null;
@@ -282,7 +282,7 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
  *  into calls of currentUser-gated operations (whose method signature gained a
  *  trailing `User currentUser` parameter).  Everything else defers to
  *  `renderCreateCall` (typed `create({…})` input) / `renderCsExpr`. */
-function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
+export function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
   if (
     e.kind === "method-call" &&
     e.receiverType.kind === "entity" &&

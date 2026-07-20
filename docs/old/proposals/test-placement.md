@@ -524,6 +524,58 @@ describe("Ordering (integration)", () => {
   Compile-verified: a workflow + integration-test project (create → op → save →
   cascade) `tsc --noEmit`s clean. **Still deferred:** the testcontainers-node
   behavioural run-path that actually *runs* the tier in Loom's CI.
-- **3b** — the other four backends' integration renderers (against the same real
-  PG), outbox-async cascade draining if reactors are async, and the cross-backend
-  CI matrix.
+- **3b (python)** ✅ **SHIPPED (emit + run-verified)** — the **Python/FastAPI**
+  integration renderer (`python/emit/integration-tests.ts`): emits
+  `tests/test_<ctx>_integration.py` reading `LOOM_PG_URL`, applying the SQL
+  migrations via `run_migrations(engine)`, wiring a per-test `AsyncSession` +
+  repositories, and running create→`await repo.save` / op→mutate+save /
+  find→`await repo.<read>` (find_by_id nullable → `assert x is not None`;
+  findAll→`(await repo.all(…)).items`). Workflow context wires
+  `InProcessDispatcher(session)` (synchronous cascade), else
+  `NoopDomainEventDispatcher()`. The re-gate generalized to
+  `INTEGRATION_BACKENDS = {node, python}`. **Verified end-to-end:** the emitted
+  module passes `ruff` + `mypy --strict` and both legs (no-op + cascade) run
+  green under `pytest` against a real Postgres.
+- **3b (dotnet)** ✅ **SHIPPED (emit + run-verified)** — the **.NET/EF**
+  integration renderer (`dotnet/emit/integration-tests.ts`): emits
+  `Tests/<ns>.Tests/<Ctx>IntegrationTests.cs` reading `LOOM_PG_URL` (a libpq URL
+  → Npgsql keyword string), applying the EF migrations via
+  `db.Database.MigrateAsync()`, wiring a per-test `AppDbContext` + repositories
+  (`new <Agg>Repository(db, events, NullLogger<…>.Instance)`), and running
+  create→`await repo.SaveAsync` / op→mutate+save / find→`await repo.GetByIdAsync`
+  (nullable → `!`; findAll → `.All(…).Items`). The Tests-csproj gate widened to
+  count context tests; the re-gate is now `{node, python, dotnet}`. **Verified
+  end-to-end:** the emitted class builds **0-warning under `-warnaserror`**
+  (net10.0, SDK 10 container) and runs green under `dotnet test` against a real
+  Postgres (both the simple persist→read and the op-transition legs). **v1
+  constraint:** the dispatcher is the no-op — synchronous workflow cascade for
+  the non-node backends is the tracked follow-up (the app's in-process cascade is
+  DI-resolved).
+- **3b (java)** ✅ **SHIPPED (emit + run-verified)** — the **Java/Spring Boot**
+  integration renderer (`java/emit/integration-tests.ts`): emits a
+  `@SpringBootTest` at the base package (`src/test/java/<basePkg>/<Ctx>IntegrationTests.java`)
+  that **autowires** the Spring Data JPA repositories (they can't be
+  hand-constructed — they're DI beans over an EntityManager) and binds
+  `spring.datasource.*` from `LOOM_PG_URL` via `@DynamicPropertySource`; Flyway
+  applies the migrations on context boot. create→`repo.save` / op→mutate+save /
+  find→`repo.findById(…).orElseThrow()` (getById → plain; findAll → `List`). The
+  re-gate is now `{node, python, dotnet, java}`. **Verified end-to-end:** the
+  emitted class compiles + runs green under `gradle test` (JDK 25 / Gradle 9.6,
+  the CI toolchain) against a real Postgres.
+- **3b (elixir)** ✅ **SHIPPED (emit + run-verified)** — the
+  **Elixir/vanilla-Phoenix (Ecto)** integration renderer
+  (`elixir/vanilla/integration-tests-emit.ts`): emits
+  `test/<ctx>_integration_test.exs` — an `ExUnit` module that persists→reads
+  through the plain **context module** (not a hand-built repo) against the live
+  Ecto repo. create→`{:ok, o} = <Ctx>.create_<agg>(%{…})`, op→`{:ok, o} =
+  <Ctx>.<op>_<agg>(o, %{})`, find→`{:ok, f} = <Ctx>.get_<agg>(id)` / `list_<plural>()`.
+  DB isolation via `Ecto.Adapters.SQL.Sandbox` (per-test `checkout` +
+  `{:shared, self()}`); the harness applies the schema once with
+  `MIX_ENV=test mix ecto.create && mix ecto.migrate`. The re-gate is now the full
+  five: `{node, python, dotnet, java, elixir}`. **Verified end-to-end:** both the
+  persist→read and the op-transition legs run green under `mix test` (Elixir
+  1.18 / OTP 27) against a real Postgres.
+- **3b — ALL FIVE BACKENDS SHIPPED.** Remaining follow-ups: synchronous workflow
+  cascade for the non-node backends (node ships it via `createInProcessDispatcher`;
+  python ships it via `InProcessDispatcher`), outbox-async cascade draining if
+  reactors are async, and the cross-backend CI matrix that runs the tier per-PR.

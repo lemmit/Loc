@@ -89,6 +89,7 @@ import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaExternHook } from "./emit/extern.js";
 import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
+import { renderJavaContextIntegrationTest } from "./emit/integration-tests.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
 import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
@@ -603,6 +604,20 @@ function emitProjectFromContexts(
           undefined,
           `${ctx.name}.${svc.name}`,
         );
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3b) — a @SpringBootTest
+    // that autowires the JPA repositories, applies the Flyway migrations on boot
+    // (LOOM_PG_URL → spring.datasource.*), and persists→reads cross-aggregate.
+    // Placed at the base package so component scan finds the @SpringBootApplication.
+    const integrationTest = renderJavaContextIntegrationTest(
+      ctx,
+      basePkg,
+      (a) => pkgFor("entity", a),
+      (a) => pkgFor("repository-interface", a),
+      system?.sys?.user?.fields,
+    );
+    if (integrationTest) {
+      out.set(integrationTest.path, integrationTest.content);
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.

@@ -49,6 +49,7 @@ import { errorsPy } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
+import { renderPyContextIntegrationTest } from "./emit/integration-tests.js";
 import { renderPythonMetricsFile } from "./emit/metrics.js";
 import {
   emitPythonAuditMigration,
@@ -613,6 +614,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   for (const svc of merged.domainServices) {
     const svcTests = renderPyServiceTestsFile(svc, merged);
     if (svcTests) out.set(`tests/test_${snake(svc.name)}.py`, svcTests);
+  }
+
+  // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+  // repository-backed cross-aggregate test module reading LOOM_PG_URL, no HTTP.
+  // Python merges the deployable's contexts into one app, so this is one
+  // combined module (`merged.tests` carries every context's integration tests).
+  const integrationTests = renderPyContextIntegrationTest(merged);
+  if (integrationTests) {
+    out.set(`tests/test_${snake(merged.name)}_integration.py`, integrationTests);
   }
 
   // Domain-side repository PORTS (audit S7) — the `<Agg>RepositoryPort`

@@ -34,13 +34,17 @@ import {
   type Model,
 } from "../generated/ast.js";
 
-/** True when a `platform: node` deployable in the model hosts this context — the
- *  node backend emits a runnable integration test for it (Phase 3a), so the
- *  `loom.context-test-unsupported` warning is suppressed.  Other backends don't
- *  emit yet, so a context hosted only on them still warns. */
-function nodeHostsContext(model: Model, ctx: BoundedContext): boolean {
+// Backends whose integration renderer has landed (test-placement.md Phase 3a/3b)
+// — a context hosted by any of these emits a runnable integration test, so the
+// `loom.context-test-unsupported` warning is suppressed.  Grows as each backend
+// lands; a context hosted ONLY on a not-yet-shipped backend still warns.
+const INTEGRATION_BACKENDS = new Set(["node", "python", "dotnet", "java", "elixir"]);
+
+/** True when a deployable running an integration-capable backend hosts this
+ *  context. */
+function integrationBackendHostsContext(model: Model, ctx: BoundedContext): boolean {
   for (const node of AstUtils.streamAllContents(model)) {
-    if (isDeployable(node) && node.platform === "node") {
+    if (isDeployable(node) && INTEGRATION_BACKENDS.has(node.platform)) {
       if (node.contextRefs.some((r) => r.ref === ctx)) return true;
     }
   }
@@ -91,12 +95,12 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
         : inContext && !target
           ? (c as BoundedContext) // nested in a context with no `for`
           : undefined;
-    if (ctxNode && !nodeHostsContext(model, ctxNode)) {
+    if (ctxNode && !integrationBackendHostsContext(model, ctxNode)) {
       accept(
         "warning",
-        `Context integration tests currently emit on the node backend only ` +
-          `(test-placement.md Phase 3a). Context '${ctxNode.name}' is not hosted by a ` +
-          `'platform: node' deployable, so this 'test' produces no runnable test yet.`,
+        `Context integration tests emit on the node, python, dotnet, java, and elixir ` +
+          `backends (test-placement.md Phase 3a/3b). Context '${ctxNode.name}' is not hosted ` +
+          `by an integration-capable deployable, so this 'test' produces no runnable test yet.`,
         { node, property: "name", code: "loom.context-test-unsupported" },
       );
     }

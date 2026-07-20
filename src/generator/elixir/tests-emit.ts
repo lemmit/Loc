@@ -1,6 +1,7 @@
 import type { EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { voHasConstraints } from "./vanilla/changeset-validators.js";
+import { renderVanillaContextIntegrationTest } from "./vanilla/integration-tests-emit.js";
 import {
   renderVanillaAggregateTestModule,
   renderVanillaServiceTestModule,
@@ -60,6 +61,14 @@ export function emitAggregateTests(
       `test/${snake(ctx.name)}/${snake(svc.name)}_test.exs`,
       renderVanillaServiceTestModule(svc, contextModule, appModule, validatableVos),
     );
+    emitted = true;
+  }
+  // Context INTEGRATION test (test-placement.md, Phase 3b) — an ExUnit module
+  // that persists→reads through the context module against the live Ecto repo
+  // (Sandbox-isolated).  Emitted only when the context declares integration tests.
+  const integration = renderVanillaContextIntegrationTest(ctx, appModule);
+  if (integration) {
+    out.set(`test/${snake(ctx.name)}_integration_test.exs`, integration);
     emitted = true;
   }
   return emitted;
