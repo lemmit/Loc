@@ -45,4 +45,21 @@ describe("python generator — unique_violation → 409", () => {
       'return problem(\n                request, 409, "Conflict", "A resource with these values already exists."\n            )',
     );
   });
+
+  it("indents the fall-through domain-fault counter to its block (no IndentationError)", async () => {
+    const problem = (await generateSystemFiles(UNIQUE)).get("api/app/http/problem.py")!;
+    // The 23505 branch's `record_domain_fault` is nested under the `if` (12
+    // spaces); the FALL-THROUGH one after the `if` must sit at the handler-body
+    // level (8 spaces) with its sibling `log`/`return`.  A 12-space over-indent
+    // there is `IndentationError: unexpected indent` — the module won't import
+    // and the FastAPI backend never boots.
+    expect(problem).toContain(
+      '        log("warn", "disallowed", message=str(err), status=409)\n' +
+        '        record_domain_fault("disallowed")\n' +
+        '        return problem(request, 409, "Conflict", "The request conflicts with the current state.")',
+    );
+    // The exact bug shape — an 8-space `log` immediately followed by a 12-space
+    // `record_domain_fault` — must never be emitted.
+    expect(problem).not.toMatch(/\n {8}log\([^\n]*\n {12}record_domain_fault/);
+  });
 });
