@@ -12,6 +12,8 @@
 //   Later slices: policies, ProblemDetails parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
+import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";
+import type { ChannelIR } from "../../../ir/types/loom-ir.js";
 import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
@@ -19,6 +21,8 @@ import {
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
+import { snake, upperFirst } from "../../../util/naming.js";
+import { redisChannelBindings } from "../../_channels/bindings.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
 import { generateReactForContexts } from "../../react/index.js";
 import { generateSvelteForContexts } from "../../svelte/index.js";
@@ -30,8 +34,14 @@ import {
 import type { ApiRoute } from "../api-emit.js";
 import { toModulePrefix, toSnakeApp } from "../app-naming.js";
 import { actorIdKey, emitAuth } from "../auth-emit.js";
+import {
+  type ElixirChannelsCfg,
+  type ElixirConsumerRoute,
+  emitElixirChannelFiles,
+} from "../channels-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import { emitDomainServices } from "../domain-service-emit.js";
+import { renderEventModule } from "../events-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { emitLiveViewPages, type LiveRoute } from "../liveview-emit.js";
 import { emitMigrations } from "../migrations-emit.js";
@@ -131,6 +141,58 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   for (const [path, content] of resourceEmission.files) out.set(path, content);
   const resourceModules = buildPhoenixResourceModules(sysWithSources, appModule);
 
+  // Broker bindings (channels.md; M-T4.4 slice 6c): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  A wired-but-foreign
+  // channel joins the per-context dispatcher derivation as a stub with its
+  // REAL semantics knobs (the Hono/Python/.NET/Java pattern); every broker-
+  // carried event routes through the `<App>.Channels` tee at the emit seams.
+  const channelBindings = sys ? redisChannelBindings(deployable, sys) : [];
+  const hasChannels = channelBindings.length > 0;
+  const hostedChannelNames = new Set(
+    contexts.flatMap((c) => c.channels ?? []).map((ch) => ch.name),
+  );
+  const wiredForeignChannels: ChannelIR[] = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: b.delivery,
+      retention: b.retention,
+    }));
+  // Every broker-carried event's OWNING context module — dispatcher/handler
+  // pattern-matches qualify structs with the owner (same value as the local
+  // context for a co-hosted owner, so the map is safe to consult uniformly).
+  const eventOwnerModule = new Map<string, string>();
+  const carriedEventIrs: {
+    ev: (typeof contexts)[number]["events"][number];
+    ctxModule: string;
+    ctxName: string;
+  }[] = [];
+  if (sys) {
+    const carriedNames = new Set(channelBindings.flatMap((b) => b.events));
+    for (const sub of sys.subdomains) {
+      for (const c of sub.contexts) {
+        for (const ev of c.events) {
+          if (carriedNames.has(ev.name) && !eventOwnerModule.has(ev.name)) {
+            eventOwnerModule.set(ev.name, `${appModule}.${upperFirst(c.name)}`);
+            carriedEventIrs.push({
+              ev,
+              ctxModule: `${appModule}.${upperFirst(c.name)}`,
+              ctxName: c.name,
+            });
+          }
+        }
+      }
+    }
+  }
+  const channelsCfg: ElixirChannelsCfg | undefined = hasChannels
+    ? {
+        appModule,
+        brokerEvents: new Set(channelBindings.flatMap((b) => b.events)),
+        foreignEventModules: eventOwnerModule,
+      }
+    : undefined;
+
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
@@ -165,7 +227,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       out,
       sys ? resolveContextSchema(ctx, sys) : undefined,
     );
-    emitVanillaContextModule(appModule, ctx, out, sys, sourcemap);
+    emitVanillaContextModule(
+      appModule,
+      ctx,
+      out,
+      sys,
+      sourcemap,
+      channelsCfg,
+      wiredForeignChannels,
+    );
     // Extern seam — a generated behaviour + scaffold-once user-owned impl module
     // per aggregate with an `extern` op (proposal §3a).  The context above
     // delegates each extern op to `<Agg>ExternImpl`.  No-op when no extern ops.
@@ -241,7 +311,17 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // projection (collected here for the project-wide controller); the fold
     // handlers + dispatcher wiring are emitted by `emitDispatch` below.
     allProjections.push(...emitVanillaProjectionSchemas(appName, appModule, ctx, out, sys));
-    emitDispatch(appName, ctx, appModule, out, sys, "vanilla", sourcemap);
+    emitDispatch(
+      appName,
+      ctx,
+      appModule,
+      out,
+      sys,
+      "vanilla",
+      sourcemap,
+      channelsCfg,
+      wiredForeignChannels,
+    );
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
   }
@@ -404,11 +484,58 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     sys,
     out,
   );
+  // Broker transport files (M-T4.4 slice 6c) — channel-less projects stay
+  // byte-identical.  Foreign vocabulary first: a consumed event owned by a
+  // non-hosted context emits its struct module under the OWNER's namespace,
+  // so dispatcher/handler pattern-matches and the consumer's decode agree.
+  let channelChildren: string[] = [];
+  if (hasChannels && sys) {
+    const hostedCtxNames = new Set(contexts.map((c) => c.name));
+    const typesModule = `${appModule}.Types`;
+    for (const { ev, ctxModule, ctxName } of carriedEventIrs) {
+      if (hostedCtxNames.has(ctxName)) continue;
+      out.set(
+        `lib/${appName}/${snake(ctxName)}/events/${snake(ev.name)}.ex`,
+        renderEventModule(ev, ctxModule, typesModule),
+      );
+    }
+    // Consumer routes: each hosted context whose (widened) subscriptions
+    // consume a broker-carried event gets its dispatcher invoked on delivery.
+    const brokerEventNames = new Set(channelBindings.flatMap((b) => b.events));
+    const routeMap = new Map<string, ElixirConsumerRoute>();
+    for (const ctx of contexts) {
+      const subs = deriveEventSubscriptions(
+        [...(ctx.channels ?? []), ...wiredForeignChannels],
+        ctx.workflows,
+        ctx.projections ?? [],
+      );
+      for (const sub of subs) {
+        if (!brokerEventNames.has(sub.event)) continue;
+        const route = routeMap.get(sub.event) ?? {
+          event: sub.event,
+          eventCtxModule: eventOwnerModule.get(sub.event) ?? `${appModule}.${upperFirst(ctx.name)}`,
+          dispatchers: [],
+        };
+        const dispatcher = `${appModule}.${upperFirst(ctx.name)}.Dispatcher`;
+        if (!route.dispatchers.includes(dispatcher)) route.dispatchers.push(dispatcher);
+        routeMap.set(sub.event, route);
+      }
+    }
+    const emission = emitElixirChannelFiles(appName, appModule, channelBindings, carriedEventIrs, [
+      ...routeMap.values(),
+    ]);
+    for (const [path, content] of emission.files) out.set(path, content);
+    channelChildren = emission.children;
+  }
+
   // A `cron:` timer rides `crontab` (next-boundary computation) + `oban` (the
   // durable single-fire/retry job store); an `every:`-only timer needs neither.
   const hexDeps = usesCron
     ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"', oban: '"~> 2.19"' }
     : resourceEmission.hexDeps;
+  // Redix (MIT — design §6a): the redis pub/sub channel driver, wiring-gated
+  // so a channel-less mix.exs stays byte-identical.
+  if (hasChannels) (hexDeps as Record<string, string>).redix = '"~> 1.5"';
 
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
@@ -427,7 +554,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // via Plug.Static and the router adds the `/app/*` deep-link fallback
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
-    schedulerChildren,
+    [...schedulerChildren, ...channelChildren],
     usesOban,
   );
 
