@@ -626,8 +626,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
-${hangfireRecurringBlock}
-${
+${hangfireRecurringBlock}${
   usingDapper
     ? `
 // Dapper persistence: apply the self-contained schema (CREATE TABLE IF NOT
