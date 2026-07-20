@@ -271,7 +271,7 @@ export function emitDispatch(
     // An event-sourced workflow's handler folds the stream on load and appends
     // its own emitted events (the saga analogue of the ES aggregate).
     const { content, regions }: HandlerResult = sub.workflow.eventSourced
-      ? renderEsWorkflowHandler(contextModule, sub)
+      ? renderEsWorkflowHandler(contextModule, sub, channels)
       : renderHandler(appModule, contextModule, ctx, sub, sys, channels);
     const path = `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`;
     out.set(path, content);
@@ -760,6 +760,22 @@ function renderBody(
     if (!d.rebindsState) continue;
     const laterReadsState = dispatches.slice(i + 1).some((l) => /\bstate\b/.test(l.text));
     if (!laterReadsState) d.text = d.text.replace(/^state = /, "");
+  }
+
+  // A `let` binding nothing later reads must render as `_name` — an unused
+  // plain bind fails `mix compile --warnings-as-errors`.  Checked in FULL
+  // source order (a with-clause bind can be read by a dispatch and vice
+  // versa), then mutated in place like the state-rebind drop above.
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]!;
+    if (!l.bindName) continue;
+    const word = new RegExp(`\\b${l.bindName}\\b`);
+    const laterReads = lines.slice(i + 1).some((later) => word.test(later.text));
+    if (laterReads) continue;
+    l.text =
+      l.kind === "with-clause"
+        ? l.text.replace(`{:ok, ${l.bindName}}`, `{:ok, _${l.bindName}}`)
+        : l.text.replace(new RegExp(`^${l.bindName} = `), `_${l.bindName} = `);
   }
 
   // M13 — capture the per-statement anchors AFTER the assign-prefix-drop

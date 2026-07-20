@@ -18,11 +18,12 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../../ir/util/aggregate-flags.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { redisChannelBindings } from "../../_channels/bindings.js";
+import { brokerChannelBindings } from "../../_channels/bindings.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
 import { generateReactForContexts } from "../../react/index.js";
 import { generateSvelteForContexts } from "../../svelte/index.js";
@@ -141,13 +142,27 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   for (const [path, content] of resourceEmission.files) out.set(path, content);
   const resourceModules = buildPhoenixResourceModules(sysWithSources, appModule);
 
-  // Broker bindings (channels.md; M-T4.4 slice 6c): the redis-bound broadcast
-  // channelSources this deployable wires via `channels:`.  A wired-but-foreign
-  // channel joins the per-context dispatcher derivation as a stub with its
-  // REAL semantics knobs (the Hono/Python/.NET/Java pattern); every broker-
-  // carried event routes through the `<App>.Channels` tee at the emit seams.
-  const channelBindings = sys ? redisChannelBindings(deployable, sys) : [];
+  // Broker bindings (channels.md; M-T4.4 slices 6c + 7d): the broker-bound
+  // channelSources this deployable wires via `channels:` — redis broadcast
+  // and rabbitmq queue/work.  A wired-but-foreign channel joins the
+  // per-context dispatcher derivation as a stub with its REAL semantics
+  // knobs (the Hono/Python/.NET/Java pattern); every broker-carried event
+  // routes through the `<App>.Channels` tee at the emit seams.
+  const channelBindings = sys ? brokerChannelBindings(deployable, sys) : [];
   const hasChannels = channelBindings.length > 0;
+  // Durable-producer split (design §5): HOSTED durable events carried by a
+  // wired `queue`/`work` (or future `log`) channel ride the outbox relay,
+  // never the inline tee.  Hosted-only on purpose: the module-level
+  // migrations back the `__loom_outbox` table and can't see a foreign
+  // wiring; a foreign `queue`/`work` consumer relies on broker ack
+  // semantics + idempotent reactors (the slice-3 stance).
+  const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
   const hostedChannelNames = new Set(
     contexts.flatMap((c) => c.channels ?? []).map((ch) => ch.name),
   );
@@ -226,6 +241,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       ctx,
       out,
       sys ? resolveContextSchema(ctx, sys) : undefined,
+      channelsCfg,
+      wiredForeignChannels,
     );
     emitVanillaContextModule(
       appModule,
@@ -483,6 +500,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     deployable,
     sys,
     out,
+    channelsCfg,
+    wiredForeignChannels,
   );
   // Broker transport files (M-T4.4 slice 6c) — channel-less projects stay
   // byte-identical.  Foreign vocabulary first: a consumed event owned by a
@@ -521,9 +540,14 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
         routeMap.set(sub.event, route);
       }
     }
-    const emission = emitElixirChannelFiles(appName, appModule, channelBindings, carriedEventIrs, [
-      ...routeMap.values(),
-    ]);
+    const emission = emitElixirChannelFiles(
+      appName,
+      appModule,
+      channelBindings,
+      carriedEventIrs,
+      [...routeMap.values()],
+      { durableBroker: durableBrokerEvents.size > 0 },
+    );
     for (const [path, content] of emission.files) out.set(path, content);
     channelChildren = emission.children;
   }
@@ -533,9 +557,17 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const hexDeps = usesCron
     ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"', oban: '"~> 2.19"' }
     : resourceEmission.hexDeps;
-  // Redix (MIT — design §6a): the redis pub/sub channel driver, wiring-gated
-  // so a channel-less mix.exs stays byte-identical.
-  if (hasChannels) (hexDeps as Record<string, string>).redix = '"~> 1.5"';
+  // Channel drivers, wiring-gated so a channel-less mix.exs stays
+  // byte-identical: Redix (MIT — design §6a) for redis pub/sub; the hex
+  // `amqp` client (MIT, wrapping the official RabbitMQ Erlang client) for
+  // rabbitmq — same `~> 4.0` line the queue resource adapter pins, so a
+  // project wiring both never carries two conflicting requirements.
+  if (channelBindings.some((b) => b.transport === "redis")) {
+    (hexDeps as Record<string, string>).redix = '"~> 1.5"';
+  }
+  if (channelBindings.some((b) => b.transport === "rabbitmq")) {
+    (hexDeps as Record<string, string>).amqp = '"~> 4.0"';
+  }
 
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
