@@ -1004,6 +1004,7 @@ export function generateTypeScriptForContexts(
       withCronTimers: hasTimers && anyTimerUsesCron(ownedTimers),
       withRedisChannels: hasChannels && channelBindings.some((b) => b.transport === "redis"),
       withRabbitChannels: hasChannels && channelBindings.some((b) => b.transport === "rabbitmq"),
+      withKafkaChannels: hasChannels && channelBindings.some((b) => b.transport === "kafka"),
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -1120,6 +1121,10 @@ function projectPackageJson(
     /** M-T4.4 slice 3 — the `amqplib` broker-client dep (+ its types), added
      *  only when the deployable wires a rabbitmq-bound channelSource. */
     withRabbitChannels?: boolean;
+    /** M-T4.4 slice 4 — the `kafkajs` broker-client dep (MIT, ships its own
+     *  types), added only when the deployable wires a kafka-bound
+     *  channelSource. */
+    withKafkaChannels?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -1216,6 +1221,9 @@ function projectPackageJson(
           // Broker transport (M-T4.4 slice 3) — amqplib (MIT, design §6a)
           // speaks AMQP 0-9-1 to the compose-provisioned RabbitMQ sidecar.
           ...(opts.withRabbitChannels ? { amqplib: "^0.10.4" } : {}),
+          // Broker transport (M-T4.4 slice 4) — kafkajs (MIT, design §6a)
+          // only when a kafka-bound channelSource is wired.
+          ...(opts.withKafkaChannels ? { kafkajs: "^2.2.4" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,

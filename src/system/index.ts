@@ -858,6 +858,37 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
         `    timeout: 10s`,
         `    retries: 15`,
       ]);
+    } else if (s.type === "kafka" && transportStorages.has(s.name)) {
+      // Official apache/kafka image (Apache 2.0, single-node KRaft — design
+      // §6a: never bitnami, whose free tags are frozen/legacy).  The env
+      // block is the minimal combined broker+controller config with the
+      // in-network advertised listener (the default config advertises
+      // localhost, unreachable from sibling containers).
+      services.push([
+        `${slug}:`,
+        `  image: apache/kafka:4.1.0`,
+        `  environment:`,
+        `    KAFKA_NODE_ID: 1`,
+        `    KAFKA_PROCESS_ROLES: broker,controller`,
+        `    KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093`,
+        `    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${slug}:9092`,
+        `    KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER`,
+        `    KAFKA_CONTROLLER_QUORUM_VOTERS: 1@${slug}:9093`,
+        `    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"`,
+        `    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1`,
+        `    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1`,
+        `    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1`,
+        `    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0`,
+        // Auto-created topics get 3 partitions so a deployable's replicas
+        // actually share the group (1 partition would idle all but one) —
+        // per-key ordering rides the partition key, not the count.
+        `    KAFKA_NUM_PARTITIONS: 3`,
+        `  healthcheck:`,
+        `    test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]`,
+        `    interval: 5s`,
+        `    timeout: 10s`,
+        `    retries: 15`,
+      ]);
     } else if (s.type === "s3") {
       const volume = `${slug}-data`;
       volumes.push(volume);
@@ -952,7 +983,9 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     const url =
       b.transport === "rabbitmq"
         ? `amqp://guest:guest@${serviceSlug(b.storageName)}:5672`
-        : `redis://${serviceSlug(b.storageName)}:6379`;
+        : b.transport === "kafka"
+          ? `${serviceSlug(b.storageName)}:9092`
+          : `redis://${serviceSlug(b.storageName)}:6379`;
     lines.push(`    ${b.envVar}: ${JSON.stringify(url)}`);
   }
   // CORS allowlist for a backend that a separate-origin frontend may call:
