@@ -227,6 +227,27 @@ the log catalog and `wireShape` — additive changes (new metrics, new
 optional labels) are safe; renaming a metric/label or changing a
 histogram's buckets breaks dashboards + recording rules and requires a
 consumer migration.
+## Metrics collector (Prometheus)
+
+Every generated **backend** also exposes a Prometheus scrape target at
+**`GET /metrics`** (M-T7.1). The system composer wires a collector so
+`docker compose up` gives a running monitoring surface with zero setup:
+
+- The compose file adds a `prometheus` service (UI on **`:9090`**) that
+  mounts **`monitoring/prometheus.yml`** — a scrape config with one job per
+  backend deployable, hitting its `/metrics` on the compose network. Pure
+  static frontends emit no metrics and get no job.
+- On **Kubernetes** (`generate system --k8s`, and the Helm chart), each
+  backend pod carries the standard scrape-discovery annotations, so a
+  cluster Prometheus finds them automatically:
+
+  ```yaml
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+  prometheus.io/path: /metrics
+  ```
+
+Both are additive — a frontend-only system emits no collector.
 
 ## Verification
 

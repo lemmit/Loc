@@ -80,5 +80,12 @@ services:
       timeout: 3s
       retries: 10
 
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
 volumes:
   pgdata: {}

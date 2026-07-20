@@ -140,6 +140,13 @@ function renderDeploymentTemplate(w: WorkloadModel): string {
   lines.push("    metadata:");
   lines.push("      labels:");
   lines.push(`        app.kubernetes.io/name: ${w.name}`);
+  // Prometheus scrape discovery (M-T7.1) — parity with the raw k8s/ manifests.
+  if (w.emitsMetrics) {
+    lines.push("      annotations:");
+    lines.push('        prometheus.io/scrape: "true"');
+    lines.push(`        prometheus.io/port: "${w.containerPort}"`);
+    lines.push("        prometheus.io/path: /metrics");
+  }
   lines.push("    spec:");
   lines.push("      containers:");
   lines.push(`        - name: ${w.name}`);

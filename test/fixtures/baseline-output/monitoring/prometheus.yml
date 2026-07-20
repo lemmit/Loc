@@ -1,0 +1,17 @@
+# Auto-generated.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8080"]
+  - job_name: catalog_web
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["catalog_web:3000"]
+  - job_name: catalog_api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["catalog_api:8080"]
