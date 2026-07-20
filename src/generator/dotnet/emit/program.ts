@@ -105,6 +105,16 @@ export function renderProgram(
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
+    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+     *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
+     *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
+     *  jobs.  `every:`-only + timer-free deployables leave this false — no
+     *  Hangfire, byte-identical. */
+    hangfireCronTimers?: boolean;
+    /** The `AddScoped<…Job>()` DI lines for the Hangfire cron-job classes. */
+    hangfireJobDiRegistrations?: string[];
+    /** The `RecurringJob.AddOrUpdate<…>(…)` lines (run after `app.Build()`). */
+    hangfireRecurringRegistrations?: string[];
     /** Dapper persistence-port DI (M-T6.9): the CLOSED `AddScoped<…>` binding
      *  lines for the workflow / projection / event-store adapters.  Computed in
      *  index.ts (it holds the pre-merge context names the event stores key
@@ -161,10 +171,23 @@ export function renderProgram(
   const timerServices = options?.timerServices ?? [];
   const timerRegistrations =
     timerServices.length > 0
-      ? `\n// TimerSource schedulers (scheduling.md) — one hosted BackgroundService per\n// owned timer; each takes a transaction-scoped advisory lock (single-fire\n// across replicas) and dispatches its tick through the in-process dispatcher.\n${timerServices
+      ? `\n// TimerSource \`every:\` schedulers (scheduling.md) — one hosted BackgroundService\n// per sub-minute timer; each takes a transaction-scoped advisory lock (single-fire\n// across replicas) and dispatches its tick through the in-process dispatcher.\n${timerServices
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
+  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
+  // (single-fire across replicas), retries a failed job with backoff, and fires an
+  // overdue recurring job on server start (native missed-run replay).
+  const hangfireCronTimers = !!options?.hangfireCronTimers;
+  const hangfireJobDiRegistrations = options?.hangfireJobDiRegistrations ?? [];
+  const hangfireRecurringRegistrations = options?.hangfireRecurringRegistrations ?? [];
+  const hangfireDiBlock = hangfireCronTimers
+    ? `\n// Durable cron timers (scheduling.md Phase 2) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
+    : "";
+  const hangfireRecurringBlock = hangfireCronTimers
+    ? `\n// Register the durable cron timerSources as Hangfire recurring jobs (standard\n// 5-field cron).  Uses the service-based IRecurringJobManager (the static\n// RecurringJob API needs JobStorage.Current, unset on the DI path).  AddOrUpdate\n// is idempotent per stable id — re-registers on boot.\nusing (var hangfireScope = app.Services.CreateScope())\n{\n    var recurring = hangfireScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();\n${hangfireRecurringRegistrations.join("\n")}\n}\n`
+    : "";
   // Dapper resolves the singleton NpgsqlDataSource directly (no per-request
   // scope needed); the EF path scopes an AppDbContext.  The domain-`Create`
   // seed path resolves its repositories off the same provider either way.
@@ -366,7 +389,7 @@ using (var scope = app.Services.CreateScope())
   const authHandshake = oidc ? "app.MapAuthHandshake();\n" : "";
   return `// Auto-generated.
 using System.Text.Json;
-${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
+${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}${hangfireCronTimers ? "using Hangfire;\nusing Hangfire.PostgreSql;\n" : ""}using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${options?.hasChannels ? `\nusing ${ns}.Infrastructure.Channels;` : ""}${authUsing}
@@ -473,7 +496,7 @@ builder.Services.AddScoped(
 `
     : ""
 }
-${dispatcherRegistration}${timerRegistrations}
+${dispatcherRegistration}${timerRegistrations}${hangfireDiBlock}
 
 ${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
 ${authDi}
@@ -603,6 +626,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+${hangfireRecurringBlock}
 ${
   usingDapper
     ? `
@@ -876,11 +900,13 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Cronos — cron-expression parsing for `timerSource … cron:` BackgroundServices
-  // (scheduling.md, M-T4.1).  Ships only when an owned timer uses a real cron
-  // cadence (an `every:`-only deployable uses PeriodicTimer and needs no dep).
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
+  // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
+  // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1
+  // Hangfire pulls transitively (NU1903 under /warnaserror).
   const cronosRef = withCronTimers
-    ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.13.0" />`
+    ? `\n    <!-- Hangfire — durable cron timerSource scheduler (Postgres storage) -->\n    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.21" />\n    <PackageReference Include="Hangfire.PostgreSql" Version="1.20.12" />\n    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />`
     : "";
   // MailKit (smtp mailer, kind: mailer) and its transitive MimeKit carry a
   // moderate BouncyCastle advisory present on every published version; the
