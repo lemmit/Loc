@@ -98,10 +98,14 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a redis-bound
+    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
+    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+     *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
+     *  register the Noop concretely instead of the InProcess scoped line. */
+    outboxNoopInner?: boolean;
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
@@ -134,7 +138,11 @@ export function renderProgram(
   // depends on the scoped IMediator) so emitted events reach their reactor /
   // starter handlers.  Otherwise the default no-op stands (byte-identical).
   const innerRegistration = options?.hasOutbox
-    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\n${
+        options?.outboxNoopInner
+          ? "builder.Services.AddSingleton<NoopDomainEventDispatcher>();"
+          : "builder.Services.AddScoped<InProcessDomainEventDispatcher>();"
+      }\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
       : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
@@ -846,15 +854,20 @@ export function renderCsproj(
   usesSpecifications: boolean = false,
   oidc: boolean = false,
   withCronTimers: boolean = false,
-  withRedisChannels: boolean = false,
+  channelTransports: { redis: boolean; rabbit: boolean } = { redis: false, rabbit: false },
 ): string {
   // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
   // block.
-  // Broker channel transport (M-T4.4 slice 6a) — StackExchange.Redis (MIT,
-  // design §6a) speaks RESP to the compose-provisioned Valkey sidecar.
-  const redisChannelRef = withRedisChannels
+  // Broker channel transports (M-T4.4 slices 6a + 7b) — StackExchange.Redis
+  // (MIT, design §6a) speaks RESP to the compose-provisioned Valkey sidecar;
+  // RabbitMQ.Client (Apache-2.0, §6a) speaks AMQP 0-9-1 to the rabbitmq
+  // sidecar.  Per-transport wiring-gated.
+  const redisChannelRef = channelTransports.redis
     ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    : "";
+  const rabbitChannelRef = channelTransports.rabbit
+    ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
     : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
@@ -983,7 +996,7 @@ ${persistenceRefs}
     <!-- OpenAPI spec emitted at /openapi.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
-    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;
