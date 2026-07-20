@@ -11,6 +11,20 @@ import { execFileSync, execSync } from "node:child_process";
 import * as net from "node:net";
 import { expect } from "vitest";
 
+/**
+ * Unwrap a list-endpoint body to its row array.  The default `findAll`
+ * (`GET /api/<plural>`) returns a paged envelope `{ items, page, pageSize,
+ * total, totalPages }`; some list routes (e.g. `by_number`) still return a
+ * bare array.  Accept either so the isolation assertions are shape-agnostic.
+ */
+function rows<T>(body: unknown): T[] {
+  if (Array.isArray(body)) return body as T[];
+  if (body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)) {
+    return (body as { items: T[] }).items;
+  }
+  throw new Error(`expected a list or {items:[…]} envelope, got: ${JSON.stringify(body)}`);
+}
+
 /** The dev-stub verifier merges this base64-JSON over the built-in stub user. */
 export function claims(tenantId: string): Record<string, string> {
   return {
@@ -162,13 +176,13 @@ export async function assertCrossTenantIsolation(base: string): Promise<void> {
   expect(crossRead.status).toBe(404);
 
   // org-b's list does not contain the row; org-a's does.
-  const listB = (await (
-    await fetch(`${base}/api/invoices`, { headers: claims("org-b") })
-  ).json()) as Array<{ id: string }>;
+  const listB = rows<{ id: string }>(
+    await (await fetch(`${base}/api/invoices`, { headers: claims("org-b") })).json(),
+  );
   expect(listB.map((r) => r.id)).not.toContain(id);
-  const listA = (await (
-    await fetch(`${base}/api/invoices`, { headers: claims("org-a") })
-  ).json()) as Array<{ id: string }>;
+  const listA = rows<{ id: string }>(
+    await (await fetch(`${base}/api/invoices`, { headers: claims("org-a") })).json(),
+  );
   expect(listA.map((r) => r.id)).toContain(id);
 
   // A client-smuggled tenantId is ignored (internal field → not in the create
@@ -235,9 +249,9 @@ export async function assertCrossTenantIsolation(base: string): Promise<void> {
   expect(foreignOrg.status).toBe(404);
 
   // …and the list is scoped to exactly your own org.
-  const orgList = (await (
-    await fetch(`${base}/api/organizations`, { headers: claims(orgAId) })
-  ).json()) as Array<{ id: string }>;
+  const orgList = rows<{ id: string }>(
+    await (await fetch(`${base}/api/organizations`, { headers: claims(orgAId) })).json(),
+  );
   expect(orgList.map((o) => o.id)).toEqual([orgAId]);
 }
 
@@ -355,7 +369,9 @@ export async function assertHierarchyIsolation(base: string, pg: Postgres): Prom
   async function labels(plural: string, orgId: string): Promise<string[]> {
     const r = await fetch(`${base}/api/${plural}`, { headers: claims(orgId) });
     expect(r.status, await r.clone().text()).toBe(200);
-    return ((await r.json()) as Array<{ label: string }>).map((x) => x.label).sort();
+    return rows<{ label: string }>(await r.json())
+      .map((x) => x.label)
+      .sort();
   }
   async function getStatus(plural: string, orgId: string, rowId: string): Promise<number> {
     return (await fetch(`${base}/api/${plural}/${rowId}`, { headers: claims(orgId) })).status;
