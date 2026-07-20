@@ -98,8 +98,15 @@ export function languageFromPath(path: string): string {
       return "sql";
     case "cs":
       return "csharp";
+    case "ex":
+    case "exs":
+      return "elixir";
     case "html":
     case "htm":
+    // HEEx / EEx are HTML-with-embedded-Elixir; no dedicated grammar is
+    // vendored, so fall back to HTML for the markup highlighting.
+    case "heex":
+    case "eex":
       return "html";
     case "css":
       return "css";

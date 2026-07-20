@@ -17,13 +17,14 @@
 // The `.loom` folder sorts first in the tree (leading dot), so its files are
 // reliably rendered inside react-arborist's virtualized viewport.
 
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { selectExample, waitForPlaygroundReady } from "./_helpers";
 
 // Count the distinct Monaco token classes (`.mtk1`, `.mtk2`, …) in the active
 // read-only viewer.  Untokenized plaintext collapses to a single class; real
 // syntax highlighting produces several.
-async function distinctMonacoTokenClasses(page: import("@playwright/test").Page): Promise<number> {
+async function distinctMonacoTokenClasses(page: Page): Promise<number> {
   return page.evaluate(() => {
     const classes = new Set<string>();
     for (const el of document.querySelectorAll('[class*="mtk"]')) {
@@ -31,6 +32,25 @@ async function distinctMonacoTokenClasses(page: import("@playwright/test").Page)
     }
     return classes.size;
   });
+}
+
+// The generated tree is a react-arborist virtualized list, so a row far down
+// (or a deep file) isn't in the DOM until scrolled into view.  Wheel the
+// scrollable descendant until the first row matching `name` mounts, then
+// return it.
+async function revealRow(page: Page, tree: Locator, name: string | RegExp): Promise<Locator> {
+  const row = tree.getByText(name).first();
+  for (let i = 0; i < 120 && (await row.count()) === 0; i++) {
+    await tree.evaluate((el) => {
+      const scroller = [el, ...el.querySelectorAll<HTMLElement>("*")].find(
+        (n): n is HTMLElement => n instanceof HTMLElement && n.scrollHeight > n.clientHeight + 4,
+      );
+      scroller?.scrollBy(0, 300);
+    });
+    await page.waitForTimeout(50);
+  }
+  await expect(row).toBeVisible();
+  return row;
 }
 
 test("Generated explorer renders markdown and highlights code files", async ({ page }) => {
@@ -66,21 +86,33 @@ test("Generated explorer renders markdown and highlights code files", async ({ p
     .toBeGreaterThan(1);
 
   // 3) A standard code file (JSON) is likewise highlighted.  wire-spec.json
-  //    sits at the bottom of the `.loom` bundle, which react-arborist
-  //    virtualizes out of the initial viewport — scroll the list until the
-  //    row mounts, then open it.
-  const jsonRow = tree.getByText("wire-spec.json", { exact: true });
-  for (let i = 0; i < 80 && (await jsonRow.count()) === 0; i++) {
-    await tree.evaluate((el) => {
-      const scroller = [el, ...el.querySelectorAll<HTMLElement>("*")].find(
-        (n): n is HTMLElement => n instanceof HTMLElement && n.scrollHeight > n.clientHeight + 4,
-      );
-      scroller?.scrollBy(0, 300);
-    });
-    await page.waitForTimeout(60);
-  }
-  await expect(jsonRow).toBeVisible();
+  //    sits at the bottom of the `.loom` bundle, virtualized out of the
+  //    initial viewport — scroll until the row mounts, then open it.
+  const jsonRow = await revealRow(page, tree, "wire-spec.json");
   await jsonRow.click();
+  await expect
+    .poll(() => distinctMonacoTokenClasses(page), { timeout: 15_000 })
+    .toBeGreaterThan(1);
+});
+
+// Elixir isn't a VS Code built-in, so it has no codingame wrapper package — its
+// grammar is vendored and registered as a virtual extension (like `ddd`).  The
+// Phoenix LiveView example emits `.ex` / `.exs` sources; opening one must
+// tokenize, proving the vendored grammar reaches the viewer.
+test("Generated explorer highlights Elixir sources", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await selectExample(page, /Phoenix LiveView/);
+
+  await page.getByTestId("btn-generate").click();
+  await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({ timeout: 60_000 });
+
+  await page.getByTestId("explorer-mode").getByText("Generated").click();
+  const tree = page.getByTestId("explorer-tree");
+
+  const exRow = await revealRow(page, tree, /\.exs?$/);
+  await exRow.click();
   await expect
     .poll(() => distinctMonacoTokenClasses(page), { timeout: 15_000 })
     .toBeGreaterThan(1);

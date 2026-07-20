@@ -36,7 +36,12 @@ import "@codingame/monaco-vscode-fsharp-default-extension";
 import "@codingame/monaco-vscode-dart-default-extension";
 import "@codingame/monaco-vscode-groovy-default-extension";
 import "@codingame/monaco-vscode-ini-default-extension";
+// Elixir is NOT a VS Code built-in language, so codingame ships no wrapper
+// package for it — the grammar is vendored (see grammars/README.md) and
+// registered as a virtual extension the same way `ddd` is, below.
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
+import elixirLangConfig from "./grammars/elixir-language-configuration.json?raw";
+import elixirGrammar from "./grammars/elixir.tmLanguage.json?raw";
 import tmGrammar from "../../../vscode/grammars/ddd.tmLanguage.json?raw";
 import langConfig from "../../../vscode/language-configuration.json?raw";
 import loomTheme from "../../../vscode/themes/loom-dark.json?raw";
@@ -91,6 +96,35 @@ async function doInit(): Promise<void> {
           ["/ddd.tmLanguage.json", tmGrammar],
           ["/language-configuration.json", langConfig],
           ["/loom-dark.json", loomTheme],
+        ]),
+      },
+      {
+        // Elixir — vendored grammar (grammars/README.md), registered the same
+        // way as `ddd` because it has no codingame wrapper package.  Gives the
+        // generated-file viewer highlighting for the Phoenix backend's
+        // `.ex` / `.exs` sources.
+        config: {
+          name: "loom-elixir",
+          publisher: "loom",
+          version: "0.0.0",
+          engines: { vscode: "*" },
+          contributes: {
+            languages: [
+              {
+                id: "elixir",
+                extensions: [".ex", ".exs"],
+                aliases: ["Elixir"],
+                configuration: "./elixir-language-configuration.json",
+              },
+            ],
+            grammars: [
+              { language: "elixir", scopeName: "source.elixir", path: "./elixir.tmLanguage.json" },
+            ],
+          },
+        },
+        filesOrContents: new Map<string, string>([
+          ["/elixir.tmLanguage.json", elixirGrammar],
+          ["/elixir-language-configuration.json", elixirLangConfig],
         ]),
       },
     ],
