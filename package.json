@@ -53,6 +53,7 @@
     "test:channels-rabbit": "LOOM_CHANNELS_E2E_RABBIT=1 vitest run test/e2e/channels-e2e-rabbit.test.ts",
     "test:channels-dotnet": "LOOM_CHANNELS_E2E_DOTNET=1 vitest run test/e2e/channels-e2e-dotnet.test.ts",
     "test:channels-java": "LOOM_CHANNELS_E2E_JAVA=1 vitest run test/e2e/channels-e2e-java.test.ts",
+    "test:channels-elixir": "LOOM_CHANNELS_E2E_ELIXIR=1 vitest run test/e2e/channels-e2e-elixir.test.ts",
     "test:tenancy-python": "LOOM_TENANCY_E2E_PYTHON=1 vitest run test/e2e/tenancy-isolation-python.test.ts",
     "test:tenancy-java": "LOOM_TENANCY_E2E_JAVA=1 vitest run test/e2e/tenancy-isolation-java.test.ts",
     "test:tenancy-dotnet": "LOOM_TENANCY_E2E_DOTNET=1 vitest run test/e2e/tenancy-isolation-dotnet.test.ts",
