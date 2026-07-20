@@ -1,0 +1,26 @@
+// Context-integration e2e fixture (test-placement.md, Phase 3b runtime tier).
+// A `context`-nested `test` exercises create → operation (mutate + persist) →
+// find (read back) across the live repository on every backend.  The workflow
+// swaps `platform:` per matrix cell; everything else is backend-agnostic.
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        customerId: string
+        status: string
+        operation place() { precondition status == "Draft"  status := "Placed" }
+      }
+      repository Orders for Order { }
+      test "places an order and reads it back" {
+        let o = Order.create({ customerId: "c1", status: "Draft" })
+        o.place()
+        let found = Order.findById(o.id)
+        expect(found.status).toBe("Placed")
+      }
+    }
+  }
+  api ShopApi from Sales
+  storage db { type: postgres }
+  resource st { for: Ordering, kind: state, use: db }
+  deployable api { platform: node contexts: [Ordering] serves: ShopApi dataSources: [st] port: 8080 }
+}

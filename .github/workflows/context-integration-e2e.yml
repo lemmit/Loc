@@ -1,0 +1,129 @@
+name: Context integration (runtime e2e)
+
+# RUNS the emitted per-context integration test (test-placement.md, Phase 3b) on
+# every backend against a throwaway Postgres — the tier the per-PR COMPILE gates
+# are structurally blind to.  `tsc --noEmit` / `mix compile` / `gradle
+# testClasses` prove the emitted test compiles; only a real boot proves the
+# create → operation (mutate + persist) → find (read back) round-trip actually
+# works through the database.
+#
+# It already earned its keep: this tier caught a node ConcurrencyError the 3a
+# `tsc` gate could not — re-saving the created aggregate after an op tripped the
+# repository's optimistic-concurrency check (the in-memory version had gone stale
+# after the first save).  The fix (reload → mutate → save) ships with this gate.
+#
+# Fanned across all five backends as a matrix; the shared
+# `scripts/context-integration-e2e.sh` generates `shop.ddd` for the cell's
+# platform and drives that backend's native test runner (vitest / pytest /
+# dotnet test / gradle test / mix test).  Native toolchains (no docker-in-runner)
+# + a `services: postgres` container, mirroring tenancy-e2e.yml.
+#
+# Per-PR (path-scoped) — the whole point of the tier is to run per change, not
+# nightly; the native toolchains keep it lighter than the compose-boot gates.
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'src/generator/typescript/emit/integration-tests.ts'
+      - 'src/generator/python/emit/integration-tests.ts'
+      - 'src/generator/dotnet/emit/integration-tests.ts'
+      - 'src/generator/java/emit/integration-tests.ts'
+      - 'src/generator/elixir/vanilla/integration-tests-emit.ts'
+      - 'src/generator/elixir/tests-emit.ts'
+      - 'src/language/validators/test-placement.ts'
+      - 'src/ir/lower/lower-test.ts'
+      - 'test/e2e/fixtures/context-integration/**'
+      - 'scripts/context-integration-e2e.sh'
+      - 'package.json'
+      - '.github/workflows/context-integration-e2e.yml'
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [node, python, dotnet, java, elixir]
+    name: context-integration (${{ matrix.backend }})
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up uv (python)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up JDK (java)
+        if: matrix.backend == 'java'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # Java 25 toolchain needs Gradle 9.1+ (no wrapper is emitted).
+      - name: Set up Gradle (java)
+        if: matrix.backend == 'java'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Set up .NET (dotnet)
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Elixir/OTP (elixir)
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build Loom toolchain
+        run: npm run build
+
+      - name: Run context-integration runtime e2e (${{ matrix.backend }})
+        env:
+          PG_HOST: 127.0.0.1
+          PG_PORT: '5432'
+        run: bash scripts/context-integration-e2e.sh ${{ matrix.backend }}
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo "## Context integration runtime e2e failed (${{ matrix.backend }})" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'The gate generates the `shop.ddd` context-integration fixture for the ${{ matrix.backend }} backend and runs the emitted per-context integration test against Postgres — create → place() → findById → assert. See the run step above for the native runner output.' >> $GITHUB_STEP_SUMMARY
