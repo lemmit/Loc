@@ -95,7 +95,14 @@ jobs:
   coverage:
     name: coverage (merge shards)
     needs: test
-    if: always()
+    # `!cancelled()` not `always()`: still merge coverage when a shard's
+    # tests FAIL (the blob-upload step is always(), so failing shards still
+    # upload their blob → the merge succeeds), but SKIP when the run was
+    # cancelled (cancel-in-progress supersession) — a cancelled shard leaves
+    # no blob, and `always()` here made the merge hard-fail with
+    # `ENOENT: .vitest-reports`, turning every superseded run into a spurious
+    # red `tests-passed` on a stale SHA.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -183,7 +190,11 @@ jobs:
   tests-passed:
     name: tests passed
     needs: [test, coverage, lint]
-    if: always()
+    # `!cancelled()` so the rollup still runs (and reports red) when a real
+    # job fails, but SKIPS on cancellation — otherwise a superseded run's
+    # coverage is skipped, `coverage != success` trips the gate, and the
+    # stale SHA shows a spurious failure instead of "cancelled".
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Gate on upstream job results
