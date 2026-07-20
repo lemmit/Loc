@@ -208,6 +208,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+
 // Apply pending EF Core migrations before serving traffic.  Idempotent —
 // EF tracks applied versions in the __EFMigrationsHistory table.  Runs
 // synchronously at startup so the schema is current on first request.
