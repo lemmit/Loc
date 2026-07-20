@@ -536,6 +536,21 @@ describe("Ordering (integration)", () => {
   `INTEGRATION_BACKENDS = {node, python}`. **Verified end-to-end:** the emitted
   module passes `ruff` + `mypy --strict` and both legs (no-op + cascade) run
   green under `pytest` against a real Postgres.
-- **3b (remaining)** — the .NET, Java, and Elixir integration renderers (against
-  the same real PG), outbox-async cascade draining if reactors are async, and the
+- **3b (dotnet)** ✅ **SHIPPED (emit + run-verified)** — the **.NET/EF**
+  integration renderer (`dotnet/emit/integration-tests.ts`): emits
+  `Tests/<ns>.Tests/<Ctx>IntegrationTests.cs` reading `LOOM_PG_URL` (a libpq URL
+  → Npgsql keyword string), applying the EF migrations via
+  `db.Database.MigrateAsync()`, wiring a per-test `AppDbContext` + repositories
+  (`new <Agg>Repository(db, events, NullLogger<…>.Instance)`), and running
+  create→`await repo.SaveAsync` / op→mutate+save / find→`await repo.GetByIdAsync`
+  (nullable → `!`; findAll → `.All(…).Items`). The Tests-csproj gate widened to
+  count context tests; the re-gate is now `{node, python, dotnet}`. **Verified
+  end-to-end:** the emitted class builds **0-warning under `-warnaserror`**
+  (net10.0, SDK 10 container) and runs green under `dotnet test` against a real
+  Postgres (both the simple persist→read and the op-transition legs). **v1
+  constraint:** the dispatcher is the no-op — synchronous workflow cascade for
+  the non-node backends is the tracked follow-up (the app's in-process cascade is
+  DI-resolved).
+- **3b (remaining)** — the Java and Elixir integration renderers (against the
+  same real PG), outbox-async cascade draining if reactors are async, and the
   cross-backend CI matrix.

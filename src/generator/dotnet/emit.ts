@@ -36,6 +36,7 @@ export { renderEnum, renderValueObject } from "./emit/enums-vos.js";
 export { renderEventRecordConfiguration, renderEventRecordPoco } from "./emit/event-store.js";
 export { renderEvent, renderIDomainEvent } from "./emit/events.js";
 export { renderId } from "./emit/ids.js";
+export { renderContextIntegrationTest } from "./emit/integration-tests.js";
 export {
   joinDbSetName,
   joinEntityName,

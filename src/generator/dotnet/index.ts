@@ -122,6 +122,7 @@ import {
   joinEntityName,
   renderAbstractBaseEntity,
   renderConfiguration,
+  renderContextIntegrationTest,
   renderCsproj,
   renderDbContext,
   renderDockerfile,
@@ -413,6 +414,13 @@ function emitProjectFromContexts(
     for (const svc of ctx.domainServices) {
       const svcTests = renderServiceTestsFile(svc, ctx, ns);
       if (svcTests) out.set(`Tests/${ns}.Tests/Services/${svc.name}Tests.cs`, svcTests);
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+    // EF-repository-backed cross-aggregate xUnit class reading LOOM_PG_URL,
+    // applying the EF migrations, wiring the repos, and persisting→reading.
+    const integrationTests = renderContextIntegrationTest(ctx, ns);
+    if (integrationTests) {
+      out.set(`Tests/${ns}.Tests/${upperFirst(ctx.name)}IntegrationTests.cs`, integrationTests);
     }
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
     // Explicit application layer (unfoldable-api-derivation.md, A1): emit the
@@ -1817,7 +1825,8 @@ function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, str
   const anyTests =
     ctx.aggregates.some((a) => a.tests.length > 0) ||
     ctx.valueObjects.some((v) => v.tests.length > 0) ||
-    ctx.domainServices.some((s) => s.tests.length > 0);
+    ctx.domainServices.some((s) => s.tests.length > 0) ||
+    ctx.tests.length > 0;
   if (!anyTests) return;
   out.set(`Tests/${ns}.Tests/${ns}.Tests.csproj`, renderTestCsproj(ns));
 }
