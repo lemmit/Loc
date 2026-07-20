@@ -188,14 +188,25 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(strat!).toContain('issuer <> "/protocol/openid-connect/certs"');
   });
 
-  it("supervises the JWKS strategy so its cache is populated + rotation-healed", async () => {
+  it("warms the JWKS synchronously BEFORE the Endpoint (no cold-cache 401 window)", async () => {
     const files = await build(source({ oidc: true }));
-    // The strategy GenServer is added to the app supervision tree with a short
-    // poll interval so the signer cache warms promptly on cold start (the other
-    // backends fetch lazily on first verify).
-    expect(files.get("api/lib/api/application.ex")!).toContain(
-      "{ApiWeb.Auth.JwksStrategy, time_interval: 1_000}",
+    const app = files.get("api/lib/api/application.ex")!;
+    // first_fetch_sync fetches the keys at start; the retry budget rides out the
+    // IdP's boot/realm-import.
+    expect(app).toContain(
+      "{ApiWeb.Auth.JwksStrategy, first_fetch_sync: true, time_interval: 30_000, " +
+        "http_max_retries_per_fetch: 30, http_delay_per_retry: 1_000}",
     );
+    // It must be placed BEFORE the Endpoint IN THE SUPERVISION TREE so /health
+    // only serves once the signer cache is warm (the other backends fetch
+    // lazily on first verify).  Scope the ordering check to the `children`
+    // list — `ApiWeb.Endpoint` also appears earlier in the port-config read.
+    const children = app.slice(
+      app.indexOf("children = ["),
+      app.indexOf("]", app.indexOf("children = [")),
+    );
+    expect(children).toContain("JwksStrategy");
+    expect(children.indexOf("JwksStrategy")).toBeLessThan(children.indexOf("ApiWeb.Endpoint"));
   });
 
   it("pins Tesla to the built-in :httpc adapter so the joken_jwks fetch works (not Hackney)", async () => {

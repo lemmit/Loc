@@ -58,6 +58,9 @@ export function emitVanillaShellFiles(
   schedulerChildren: string[] = [],
   // Durable-timer (cron:) support: adds the Oban config block to config.exs.
   usesOban = false,
+  // OIDC JWKS strategy child(ren) — started BEFORE the Endpoint so a
+  // `first_fetch_sync` fetch warms the signer cache before `/health` serves.
+  preEndpointChildren: string[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
@@ -81,7 +84,7 @@ export function emitVanillaShellFiles(
   // not lib/<app>_web/telemetry.ex).
   out.set(
     `lib/${appName}/application.ex`,
-    renderApplication(appName, appModule, schedulerChildren),
+    renderApplication(appName, appModule, schedulerChildren, preEndpointChildren),
   );
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON

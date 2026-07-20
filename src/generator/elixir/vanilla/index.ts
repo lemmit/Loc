@@ -589,17 +589,25 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
 
   // JWKS strategy (OIDC only): the joken_jwks GenServer that fetches, caches,
-  // and periodically refreshes the issuer's signing keys.  Supervised so the
-  // signer cache is populated (and rotation-healed) for the Auth.Token verifier
-  // — the library analogue of the other backends' out-of-the-box JWKS clients.
-  // `time_interval: 1_000` polls every second: the other backends fetch the
-  // JWKS lazily on the first token verify (always warm by the first request);
-  // the joken_jwks poller warms in the background, and second-granularity
-  // polling closes the cold-start window (a token can arrive within a few
-  // seconds of the IdP coming up) while still rotation-healing.
+  // and periodically refreshes the issuer's signing keys for the Auth.Token
+  // verifier — the library analogue of the other backends' JWKS clients.
+  //
+  // `first_fetch_sync: true` fetches the keys synchronously at start, and the
+  // strategy is placed BEFORE the Endpoint in the supervision tree, so
+  // `/health` (and every route) comes up only once the signer cache is warm.
+  // The other backends fetch the JWKS lazily on the FIRST token verify, so
+  // they are always warm by the first request; the joken_jwks poller otherwise
+  // warms in the background and a token can arrive within a couple of seconds
+  // of the IdP coming up and 401 against a cold cache.  The retry budget
+  // (~30s) rides out the IdP's own boot/realm-import; if it is exhausted the
+  // strategy starts anyway (never crashes the boot) and the periodic poll
+  // heals once the IdP answers.
   const authChildren =
     authEnabled && sys.auth?.oidc
-      ? [`{${appModule}Web.Auth.JwksStrategy, time_interval: 1_000}`]
+      ? [
+          `{${appModule}Web.Auth.JwksStrategy, first_fetch_sync: true, ` +
+            `time_interval: 30_000, http_max_retries_per_fetch: 30, http_delay_per_retry: 1_000}`,
+        ]
       : [];
 
   // Shell files — emitted AFTER per-context emit so the router has the
@@ -619,8 +627,9 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // via Plug.Static and the router adds the `/app/*` deep-link fallback
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
-    [...authChildren, ...schedulerChildren, ...channelChildren],
+    [...schedulerChildren, ...channelChildren],
     usesOban,
+    authChildren,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
