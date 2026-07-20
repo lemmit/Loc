@@ -156,11 +156,19 @@ function derivedAccessorLines(contextModule: string, agg: EnrichedAggregateIR): 
   const out: string[] = [];
   for (const d of agg.derived) {
     if (!emit.has(d.name)) continue;
+    const body = renderExpr(d.expr, rc);
     out.push(
       "",
       `  @doc "Pure derived \`${d.name}\` — computed from struct state (no persistence)."`,
-      `  def ${snake(d.name)}(%__MODULE__{} = record), do: ${renderExpr(d.expr, rc)}`,
     );
+    // A block-bodied derived — a `match` renders to `cond do … end`, a find /
+    // option unwrap to `case … do … end`.  Bare in the one-liner `, do:` keyword
+    // form the trailing `do … end` binds to `def` itself, so Elixir sees
+    // `def/3` ("undefined function def/3") and won't compile.  Wrapping the block
+    // in parens rebinds the `do … end` to the block expression and keeps the
+    // keyword-form layout for the simple (single-line) deriveds unchanged.
+    const rendered = body.includes("\n") ? `(${body})` : body;
+    out.push(`  def ${snake(d.name)}(%__MODULE__{} = record), do: ${rendered}`);
   }
   return out;
 }
