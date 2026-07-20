@@ -4,30 +4,47 @@ import { lowerFirst } from "../../../util/naming.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
 
 // ---------------------------------------------------------------------------
-// Broker transport classes (M-T4.4 slice 6b — the Java/Spring Boot leg of the
-// Hono reference driver in `src/generator/typescript/emit/channels.ts`).
-// Emitted only when the deployable wires a redis-bound `broadcast`/`ephemeral`
-// channelSource via `channels:`; channel-less projects stay byte-identical.
+// Broker transport classes (M-T4.4 slices 6b + 7c — the Java/Spring Boot leg
+// of the Hono reference driver in `src/generator/typescript/emit/channels.ts`).
+// Emitted only when the deployable wires a broker-bound channelSource via
+// `channels:`; channel-less projects stay byte-identical.
 //
 // Carries the CloudEvents 1.0 envelope (same field pin —
 // `src/util/channels.ts`), a per-event codec over the DSL field names (wire
 // parity with the Hono/Python/.NET drivers: datetimes as ISO-8601 round-trip
 // strings, money as decimal strings, ids as their string form), the
 // `ChannelTransport` seam, the Lettuce pub/sub driver (Apache 2.0 — design
-// §6a), the `DomainEvent`-typed publish-tee `@EventListener` enforcing the §4
-// delivery-uniformity rule (its counterpart: dispatcher handlers for
-// broker-routed events DROP their local `@EventListener` — see
-// `DispatchCtx.brokerEvents`), and — where a hosted reactor subscribes — the
-// `ChannelConsumerService` invoking the SAME dispatcher handler methods
-// local events would reach.
+// §6a; `broadcast`/`ephemeral`), the com.rabbitmq:amqp-client driver
+// (Apache 2.0 — §6a; `queue`/`ephemeral`+`work`, design §4 topology: durable
+// fanout exchange per address, one durable queue per consuming deployable so
+// replicas compete, manual ack → bounded retry → DLX `loom.dlx` →
+// `loom.dlq.<address>` parking), the `DomainEvent`-typed publish-tee
+// `@EventListener` enforcing the §4 delivery-uniformity rule (its
+// counterpart: dispatcher handlers for broker-routed events DROP their local
+// `@EventListener` — see `DispatchCtx.brokerEvents`), and — where a hosted
+// reactor subscribes — the `ChannelConsumerService` invoking the SAME
+// dispatcher handler methods local events would reach.
+//
+// Producer path split (design §5, slice 7c): the tee publishes EPHEMERAL
+// broker-routed events inline; DURABLE (`work`) events land in
+// `__loom_outbox` inside the caller's @Transactional write (the tee IS the
+// outbox recorder on java) and are published by the `OutboxRelayService` on
+// drain via `ChannelRelayPublisher`, with the outbox row id as the envelope
+// id — the stable consumer-side idempotency key across broker redeliveries.
 //
 // Java one-public-class-per-file: this module returns one rendered file per
-// class, all placed under the `config` category (the CatalogLog package).
+// class, all placed under the `config` category (the CatalogLog package);
+// the outbox entity/repository render separately (persistence categories).
 // ---------------------------------------------------------------------------
 
 /** Lettuce (Apache 2.0) — the redis pub/sub client; wiring-gated into
  *  build.gradle.kts by the orchestrator. */
 export const LETTUCE_CORE_VERSION = "6.5.5.RELEASE";
+
+/** com.rabbitmq:amqp-client (Apache 2.0) — the plain AMQP 0-9-1 driver
+ *  (consistent with the Lettuce plain-driver choice; never MassTransit-style
+ *  frameworks); wiring-gated into build.gradle.kts by the orchestrator. */
+export const AMQP_CLIENT_VERSION = "5.25.0";
 
 /** One consumer dispatch target: a dispatcher handler method the
  *  ChannelConsumerService invokes when the named event arrives. */
@@ -126,16 +143,35 @@ export function renderJavaChannelFiles(
    *  ChannelConsumerService (a pure producer ships publish-only). */
   consumerHandlers: ChannelConsumerHandler[],
   sys: SystemIR,
+  /** M-T4.4 slice 7c: hosted durable events ride a broker-bound
+   *  `queue`/`work` channel — the tee records them in `__loom_outbox` and
+   *  the relay publishes on drain (design §5).  False on consumers that
+   *  don't host the durable channel's context (their module migrations
+   *  carry no outbox table; broker ack semantics own redelivery).  The two
+   *  packages are the layout-routed homes of the outbox entity/repository
+   *  (`renderJavaOutboxFiles`). */
+  opts: { durableBroker: boolean; outboxEntityPkg?: string; outboxRepoPkg?: string } = {
+    durableBroker: false,
+  },
 ): Map<string, string> {
   const pkg = `${basePkg}.config`;
   const unique = uniqueBindings(bindings);
+  const hasRedis = unique.some((b) => b.transport === "redis");
+  const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  // event type -> address, split by durability (design §5): ephemeral events
+  // publish inline in the tee; durable (`work`) events ride the outbox relay.
+  // First-by-declaration within each tier, mirroring the in-process
+  // dispatcher's routing rule.
   const routing = new Map<string, string>();
+  const durableRouting = new Map<string, string>();
   for (const b of unique) {
+    const target = b.retention === "ephemeral" ? routing : durableRouting;
     for (const ev of b.events) {
-      if (!routing.has(ev)) routing.set(ev, b.address);
+      if (!target.has(ev)) target.set(ev, b.address);
     }
   }
-  const carried = carriedEvents.filter((e) => routing.has(e.name));
+  const routed = new Set([...routing.keys(), ...durableRouting.keys()]);
+  const carried = carriedEvents.filter((e) => routed.has(e.name));
   const idValueTypeOf = (target: string): string => {
     for (const sub of sys.subdomains) {
       for (const c of sub.contexts) {
@@ -224,76 +260,233 @@ export function renderJavaChannelFiles(
     ),
   );
 
-  out.set(
-    "RedisChannelTransport.java",
-    lines(
-      `package ${pkg};`,
-      ``,
-      `import java.util.function.Consumer;`,
-      ``,
-      `import io.lettuce.core.RedisClient;`,
-      `import io.lettuce.core.api.StatefulRedisConnection;`,
-      `import io.lettuce.core.pubsub.RedisPubSubAdapter;`,
-      `import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;`,
-      ``,
-      `/** Redis (Valkey) driver — pub/sub over Lettuce (Apache 2.0, design §6a).`,
-      ` *  \`redis://host:port\` URLs come from LOOM_CHANNEL_*_URL; Lettuce parses`,
-      ` *  them natively. */`,
-      `public final class RedisChannelTransport implements ChannelTransport {`,
-      `    private final RedisClient client;`,
-      `    private StatefulRedisConnection<String, String> pub;`,
-      `    private StatefulRedisPubSubConnection<String, String> sub;`,
-      ``,
-      `    public RedisChannelTransport(String url) {`,
-      `        this.client = RedisClient.create(url);`,
-      `    }`,
-      ``,
-      `    @Override`,
-      `    public synchronized void publish(String address, LoomEventEnvelope envelope) {`,
-      `        if (pub == null) {`,
-      `            pub = client.connect();`,
-      `        }`,
-      `        pub.sync().publish(address, envelope.toJson());`,
-      `    }`,
-      ``,
-      `    @Override`,
-      `    public synchronized void subscribe(String address, String group, Consumer<LoomEventEnvelope> handler) {`,
-      `        if (sub == null) {`,
-      `            sub = client.connectPubSub();`,
-      `        }`,
-      `        sub.addListener(new RedisPubSubAdapter<String, String>() {`,
-      `            @Override`,
-      `            public void message(String channel, String message) {`,
-      `                if (!address.equals(channel)) {`,
-      `                    return;`,
-      `                }`,
-      `                LoomEventEnvelope envelope;`,
-      `                try {`,
-      `                    envelope = LoomEventEnvelope.fromJson(message);`,
-      `                } catch (RuntimeException e) {`,
-      `                    CatalogLog.event("channel_consume_failed", "warn", "address", address, "error", "malformed envelope");`,
-      `                    return;`,
-      `                }`,
-      `                handler.accept(envelope);`,
-      `            }`,
-      `        });`,
-      `        sub.sync().subscribe(address);`,
-      `    }`,
-      ``,
-      `    @Override`,
-      `    public synchronized void close() {`,
-      `        if (pub != null) {`,
-      `            pub.close();`,
-      `        }`,
-      `        if (sub != null) {`,
-      `            sub.close();`,
-      `        }`,
-      `        client.shutdown();`,
-      `    }`,
-      `}`,
-      ``,
-    ),
-  );
+  if (hasRedis)
+    out.set(
+      "RedisChannelTransport.java",
+      lines(
+        `package ${pkg};`,
+        ``,
+        `import java.util.function.Consumer;`,
+        ``,
+        `import io.lettuce.core.RedisClient;`,
+        `import io.lettuce.core.api.StatefulRedisConnection;`,
+        `import io.lettuce.core.pubsub.RedisPubSubAdapter;`,
+        `import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;`,
+        ``,
+        `/** Redis (Valkey) driver — pub/sub over Lettuce (Apache 2.0, design §6a).`,
+        ` *  \`redis://host:port\` URLs come from LOOM_CHANNEL_*_URL; Lettuce parses`,
+        ` *  them natively. */`,
+        `public final class RedisChannelTransport implements ChannelTransport {`,
+        `    private final RedisClient client;`,
+        `    private StatefulRedisConnection<String, String> pub;`,
+        `    private StatefulRedisPubSubConnection<String, String> sub;`,
+        ``,
+        `    public RedisChannelTransport(String url) {`,
+        `        this.client = RedisClient.create(url);`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void publish(String address, LoomEventEnvelope envelope) {`,
+        `        if (pub == null) {`,
+        `            pub = client.connect();`,
+        `        }`,
+        `        pub.sync().publish(address, envelope.toJson());`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void subscribe(String address, String group, Consumer<LoomEventEnvelope> handler) {`,
+        `        if (sub == null) {`,
+        `            sub = client.connectPubSub();`,
+        `        }`,
+        `        sub.addListener(new RedisPubSubAdapter<String, String>() {`,
+        `            @Override`,
+        `            public void message(String channel, String message) {`,
+        `                if (!address.equals(channel)) {`,
+        `                    return;`,
+        `                }`,
+        `                LoomEventEnvelope envelope;`,
+        `                try {`,
+        `                    envelope = LoomEventEnvelope.fromJson(message);`,
+        `                } catch (RuntimeException e) {`,
+        `                    CatalogLog.event("channel_consume_failed", "warn", "address", address, "error", "malformed envelope");`,
+        `                    return;`,
+        `                }`,
+        `                handler.accept(envelope);`,
+        `            }`,
+        `        });`,
+        `        sub.sync().subscribe(address);`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void close() {`,
+        `        if (pub != null) {`,
+        `            pub.close();`,
+        `        }`,
+        `        if (sub != null) {`,
+        `            sub.close();`,
+        `        }`,
+        `        client.shutdown();`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    );
+
+  if (hasRabbit)
+    out.set(
+      "RabbitChannelTransport.java",
+      lines(
+        `package ${pkg};`,
+        ``,
+        `import java.io.IOException;`,
+        `import java.nio.charset.StandardCharsets;`,
+        `import java.util.HashMap;`,
+        `import java.util.function.Consumer;`,
+        ``,
+        `import com.rabbitmq.client.AMQP;`,
+        `import com.rabbitmq.client.BuiltinExchangeType;`,
+        `import com.rabbitmq.client.Channel;`,
+        `import com.rabbitmq.client.Connection;`,
+        `import com.rabbitmq.client.ConnectionFactory;`,
+        `import com.rabbitmq.client.DefaultConsumer;`,
+        `import com.rabbitmq.client.Envelope;`,
+        ``,
+        `/** RabbitMQ driver — com.rabbitmq:amqp-client over AMQP 0-9-1 (design §4`,
+        ` *  topology): a durable fanout exchange per channel address; one durable`,
+        ` *  queue per consuming deployable (the consumer group) so replicas`,
+        ` *  compete; manual ack; a failed handler republishes with an attempt`,
+        ` *  header up to MAX_ATTEMPTS, then parks via DLX \`loom.dlx\` into`,
+        ` *  \`loom.dlq.&lt;address&gt;\`. */`,
+        `public final class RabbitChannelTransport implements ChannelTransport {`,
+        `    /** Bounded per-message retries before a poisoned message parks in the`,
+        `     *  DLQ (mirrors the outbox relay's MAX_ATTEMPTS). */`,
+        `    private static final int MAX_ATTEMPTS = 5;`,
+        ``,
+        `    private final String url;`,
+        `    private Connection connection;`,
+        `    private Channel channel;`,
+        ``,
+        `    public RabbitChannelTransport(String url) {`,
+        `        this.url = url;`,
+        `    }`,
+        ``,
+        `    private synchronized Channel channel() {`,
+        `        try {`,
+        `            if (connection == null) {`,
+        `                var factory = new ConnectionFactory();`,
+        `                factory.setUri(url);`,
+        `                connection = factory.newConnection();`,
+        `            }`,
+        `            if (channel == null) {`,
+        `                channel = connection.createChannel();`,
+        `                channel.basicQos(1);`,
+        `            }`,
+        `            return channel;`,
+        `        } catch (Exception e) {`,
+        `            throw new IllegalStateException("rabbitmq connection failed: " + e.getMessage(), e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void publish(String address, LoomEventEnvelope envelope) {`,
+        `        try {`,
+        `            var ch = channel();`,
+        `            ch.exchangeDeclare(address, BuiltinExchangeType.FANOUT, true);`,
+        `            var props = new AMQP.BasicProperties.Builder()`,
+        `                    .contentType("application/json").deliveryMode(2).build();`,
+        `            ch.basicPublish(address, "", props, envelope.toJson().getBytes(StandardCharsets.UTF_8));`,
+        `        } catch (IOException e) {`,
+        `            throw new IllegalStateException("rabbitmq publish failed: " + e.getMessage(), e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void subscribe(String address, String group, Consumer<LoomEventEnvelope> handler) {`,
+        `        // The queue name IS the consumer group: replicas of one deployable`,
+        `        // share it and compete; other deployables bind their own queue to`,
+        `        // the same exchange (fan-out across deployables, one-of-N within).`,
+        `        var queue = group == null ? address : group;`,
+        `        try {`,
+        `            var ch = channel();`,
+        `            ch.exchangeDeclare(address, BuiltinExchangeType.FANOUT, true);`,
+        `            ch.exchangeDeclare("loom.dlx", BuiltinExchangeType.DIRECT, true);`,
+        `            var dlq = "loom.dlq." + address;`,
+        `            ch.queueDeclare(dlq, true, false, false, null);`,
+        `            ch.queueBind(dlq, "loom.dlx", address);`,
+        `            var args = new HashMap<String, Object>();`,
+        `            args.put("x-dead-letter-exchange", "loom.dlx");`,
+        `            args.put("x-dead-letter-routing-key", address);`,
+        `            ch.queueDeclare(queue, true, false, false, args);`,
+        `            ch.queueBind(queue, address, "");`,
+        `            ch.basicConsume(queue, false, new DefaultConsumer(ch) {`,
+        `                @Override`,
+        `                public void handleDelivery(String consumerTag, Envelope delivery,`,
+        `                        AMQP.BasicProperties properties, byte[] body) throws IOException {`,
+        `                    LoomEventEnvelope envelope;`,
+        `                    try {`,
+        `                        envelope = LoomEventEnvelope.fromJson(new String(body, StandardCharsets.UTF_8));`,
+        `                    } catch (RuntimeException e) {`,
+        `                        // Malformed body: no retry can fix it — nack without`,
+        `                        // requeue routes through the queue's DLX into the DLQ.`,
+        `                        ch.basicNack(delivery.getDeliveryTag(), false, false);`,
+        `                        CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                                "error", "malformed envelope");`,
+        `                        return;`,
+        `                    }`,
+        `                    try {`,
+        `                        handler.accept(envelope);`,
+        `                        ch.basicAck(delivery.getDeliveryTag(), false);`,
+        `                    } catch (RuntimeException e) {`,
+        `                        var headers = properties.getHeaders();`,
+        `                        var attempts = 1;`,
+        `                        if (headers != null && headers.get("x-loom-attempts") != null) {`,
+        `                            attempts = Integer.parseInt(String.valueOf(headers.get("x-loom-attempts"))) + 1;`,
+        `                        }`,
+        `                        if (attempts >= MAX_ATTEMPTS) {`,
+        `                            // Parked, not lost: the DLX routes it into the DLQ.`,
+        `                            ch.basicNack(delivery.getDeliveryTag(), false, false);`,
+        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                                    "type", envelope.type(), "id", envelope.id(),`,
+        `                                    "attempts", String.valueOf(attempts), "error", String.valueOf(e.getMessage()));`,
+        `                        } else {`,
+        `                            // Bounded retry: republish with the attempt header and`,
+        `                            // ack the original (immediate nack-requeue would hot-loop).`,
+        `                            var retryHeaders = new HashMap<String, Object>();`,
+        `                            if (headers != null) {`,
+        `                                retryHeaders.putAll(headers);`,
+        `                            }`,
+        `                            retryHeaders.put("x-loom-attempts", attempts);`,
+        `                            var props = new AMQP.BasicProperties.Builder()`,
+        `                                    .contentType("application/json").deliveryMode(2)`,
+        `                                    .headers(retryHeaders).build();`,
+        `                            ch.basicPublish("", queue, props, body);`,
+        `                            ch.basicAck(delivery.getDeliveryTag(), false);`,
+        `                        }`,
+        `                    }`,
+        `                }`,
+        `            });`,
+        `        } catch (IOException e) {`,
+        `            throw new IllegalStateException("rabbitmq subscribe failed: " + e.getMessage(), e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void close() {`,
+        `        try {`,
+        `            if (channel != null) {`,
+        `                channel.close();`,
+        `            }`,
+        `            if (connection != null) {`,
+        `                connection.close();`,
+        `            }`,
+        `        } catch (Exception e) {`,
+        `            // Already closed / never connected — shutdown is best-effort.`,
+        `        }`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    );
 
   out.set(
     "ChannelBindings.java",
@@ -304,23 +497,34 @@ export function renderJavaChannelFiles(
       `import java.util.Map;`,
       ``,
       `/** The deployable's wired broker bindings (connection URL injected by`,
-      ` *  compose/k8s as LOOM_CHANNEL_&lt;NAME&gt;_URL) + the event-type → address`,
-      ` *  routing (first carrying broker-bound channel — mirrors the in-process`,
-      ` *  dispatcher's routing rule). */`,
+      ` *  compose/k8s as LOOM_CHANNEL_&lt;NAME&gt;_URL; \`group\` is the durable`,
+      ` *  queue the deployable's replicas COMPETE on for \`queue\` channels) +`,
+      ` *  the event-type → address routing (first carrying broker-bound channel`,
+      ` *  — mirrors the in-process dispatcher's routing rule).  Ephemeral`,
+      ` *  events publish inline in the tee; durable (\`work\`) events pass`,
+      ` *  through the outbox and publish on relay drain (design §5). */`,
       `public final class ChannelBindings {`,
-      `    public record Binding(String csName, String address, String envVar, String context) {`,
+      `    public record Binding(String csName, String address, String envVar, String context,`,
+      `            String transport, String group, boolean queue) {`,
       `    }`,
       ``,
       `    public static final List<Binding> ALL = List.of(`,
       unique
         .map(
           (b) =>
-            `            new Binding(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)})`,
+            `            new Binding(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)}, ${JSON.stringify(b.transport)}, ${JSON.stringify(b.group)}, ${b.delivery === "queue"})`,
         )
         .join(",\n") + ");",
       ``,
       `    public static final Map<String, String> ROUTING = Map.ofEntries(`,
       [...routing.entries()]
+        .map(
+          ([ev, addr]) => `            Map.entry(${JSON.stringify(ev)}, ${JSON.stringify(addr)})`,
+        )
+        .join(",\n") + ");",
+      ``,
+      `    public static final Map<String, String> DURABLE_ROUTING = Map.ofEntries(`,
+      [...durableRouting.entries()]
         .map(
           ([ev, addr]) => `            Map.entry(${JSON.stringify(ev)}, ${JSON.stringify(addr)})`,
         )
@@ -416,12 +620,25 @@ export function renderJavaChannelFiles(
       `                throw new IllegalStateException("channel binding '" + binding.csName()`,
       `                        + "' needs " + binding.envVar() + " (the broker URL compose/k8s injects)");`,
       `            }`,
-      `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, RedisChannelTransport::new));`,
+      hasRedis && hasRabbit
+        ? `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url,\n                    u -> "rabbitmq".equals(binding.transport())\n                            ? new RabbitChannelTransport(u)\n                            : new RedisChannelTransport(u)));`
+        : hasRabbit
+          ? `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, RabbitChannelTransport::new));`
+          : `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, RedisChannelTransport::new));`,
       `        }`,
       `    }`,
       ``,
       `    public ChannelTransport forSource(String csName) {`,
       `        return byCsName.get(csName);`,
+      `    }`,
+      ``,
+      `    public ChannelTransport forAddress(String address) {`,
+      `        for (var b : ChannelBindings.ALL) {`,
+      `            if (b.address().equals(address)) {`,
+      `                return byCsName.get(b.csName());`,
+      `            }`,
+      `        }`,
+      `        throw new IllegalStateException("no transport wired for channel address " + address);`,
       `    }`,
       ``,
       `    @PreDestroy`,
@@ -436,40 +653,23 @@ export function renderJavaChannelFiles(
   );
 
   out.set(
-    "ChannelPublishTee.java",
+    "ChannelEnvelopes.java",
     lines(
       `package ${pkg};`,
       ``,
       `import java.time.Instant;`,
+      `import java.util.Map;`,
       `import java.util.concurrent.atomic.AtomicLong;`,
       ``,
-      `import org.springframework.context.event.EventListener;`,
-      `import org.springframework.stereotype.Component;`,
-      ``,
-      `import ${basePkg}.domain.events.DomainEvent;`,
-      ``,
-      `/** Producer tee — the delivery-uniformity rule (design §4): an event`,
-      ` *  carried by a broker-bound channel is PUBLISHED and not fanned out`,
-      ` *  locally (its dispatcher handlers drop their local @EventListener);`,
-      ` *  co-located consumers receive it through their subscription exactly`,
-      ` *  like remote ones.  Events on no broker-bound channel are ignored here`,
-      ` *  — Spring's local fan-out already reaches their listeners. */`,
-      `@Component`,
-      `public class ChannelPublishTee {`,
+      `/** Envelope construction shared by the inline tee and the outbox relay`,
+      ` *  publisher.  Relay-published (durable) events pass their outbox row`,
+      ` *  id — the stable consumer-side idempotency key; inline (ephemeral)`,
+      ` *  publishes mint a process-local one. */`,
+      `public final class ChannelEnvelopes {`,
       `    private static final AtomicLong COUNTER = new AtomicLong();`,
-      `    private final ChannelTransports transports;`,
       ``,
-      `    public ChannelPublishTee(ChannelTransports transports) {`,
-      `        this.transports = transports;`,
-      `    }`,
-      ``,
-      `    @EventListener`,
-      `    public void on(DomainEvent event) {`,
-      `        var type = event.getClass().getSimpleName();`,
-      `        var address = ChannelBindings.ROUTING.get(type);`,
-      `        if (address == null) {`,
-      `            return;`,
-      `        }`,
+      `    public static LoomEventEnvelope forData(String type, Map<String, Object> data,`,
+      `            String address, String eventId) {`,
       `        ChannelBindings.Binding bound = null;`,
       `        for (var b : ChannelBindings.ALL) {`,
       `            if (b.address().equals(address)) {`,
@@ -480,19 +680,125 @@ export function renderJavaChannelFiles(
       `        if (bound == null) {`,
       `            throw new IllegalStateException("no transport wired for channel address " + address);`,
       `        }`,
-      `        var id = Long.toHexString(System.currentTimeMillis()) + "-"`,
-      `                + Long.toHexString(ProcessHandle.current().pid()) + "-"`,
-      `                + Long.toHexString(COUNTER.incrementAndGet());`,
-      `        var envelope = new LoomEventEnvelope("1.0", id, bound.context() + "." + type,`,
+      `        var id = eventId != null ? eventId`,
+      `                : Long.toHexString(System.currentTimeMillis()) + "-"`,
+      `                        + Long.toHexString(ProcessHandle.current().pid()) + "-"`,
+      `                        + Long.toHexString(COUNTER.incrementAndGet());`,
+      `        return new LoomEventEnvelope("1.0", id, bound.context() + "." + type,`,
       `                "/loom/" + bound.context(), Instant.now().toString(), "application/json",`,
-      `                address, ChannelCodec.toData(event));`,
-      `        transports.forSource(bound.csName()).publish(address, envelope);`,
-      `        CatalogLog.event("channel_published", "info", "address", address, "type", type, "id", id);`,
+      `                address, data);`,
+      `    }`,
+      ``,
+      `    private ChannelEnvelopes() {`,
       `    }`,
       `}`,
       ``,
     ),
   );
+
+  out.set(
+    "ChannelPublishTee.java",
+    lines(
+      `package ${pkg};`,
+      ``,
+      `import org.springframework.context.event.EventListener;`,
+      `import org.springframework.stereotype.Component;`,
+      ``,
+      `import ${basePkg}.domain.events.DomainEvent;`,
+      opts.durableBroker ? `import ${opts.outboxEntityPkg}.LoomOutboxMessage;` : null,
+      opts.durableBroker ? `import ${opts.outboxRepoPkg}.LoomOutboxRepository;` : null,
+      ``,
+      `/** Producer tee — the delivery-uniformity rule (design §4): an event`,
+      ` *  carried by a broker-bound channel is PUBLISHED and not fanned out`,
+      ` *  locally (its dispatcher handlers drop their local @EventListener);`,
+      ` *  co-located consumers receive it through their subscription exactly`,
+      ` *  like remote ones.  Events on no broker-bound channel are ignored here`,
+      ` *  — Spring's local fan-out already reaches their listeners.`,
+      ...(opts.durableBroker
+        ? [
+            ` *`,
+            ` *  Durable (\`work\`) events land in __loom_outbox instead (design §5):`,
+            ` *  this listener runs inside the service's @Transactional write, so`,
+            ` *  the row commits atomically with the aggregate change; the`,
+            ` *  OutboxRelayService publishes on drain. */`,
+          ]
+        : [` */`]),
+      `@Component`,
+      `public class ChannelPublishTee {`,
+      `    private final ChannelTransports transports;`,
+      opts.durableBroker ? `    private final LoomOutboxRepository outbox;` : null,
+      ``,
+      opts.durableBroker
+        ? `    public ChannelPublishTee(ChannelTransports transports, LoomOutboxRepository outbox) {`
+        : `    public ChannelPublishTee(ChannelTransports transports) {`,
+      `        this.transports = transports;`,
+      opts.durableBroker ? `        this.outbox = outbox;` : null,
+      `    }`,
+      ``,
+      `    @EventListener`,
+      `    public void on(DomainEvent event) {`,
+      `        var type = event.getClass().getSimpleName();`,
+      ...(durableRouting.size > 0
+        ? opts.durableBroker
+          ? [
+              `        if (ChannelBindings.DURABLE_ROUTING.containsKey(type)) {`,
+              `            // Design §5: durable events ride the outbox — the relay publishes.`,
+              `            outbox.save(new LoomOutboxMessage(type, ChannelCodec.toData(event)));`,
+              `            return;`,
+              `        }`,
+            ]
+          : [
+              `        if (ChannelBindings.DURABLE_ROUTING.containsKey(type)) {`,
+              `            // Design §5: a durable event rides its OWNING producer's outbox`,
+              `            // relay — never an inline publish.`,
+              `            return;`,
+              `        }`,
+            ]
+        : []),
+      `        var address = ChannelBindings.ROUTING.get(type);`,
+      `        if (address == null) {`,
+      `            return;`,
+      `        }`,
+      `        var envelope = ChannelEnvelopes.forData(type, ChannelCodec.toData(event), address, null);`,
+      `        transports.forAddress(address).publish(address, envelope);`,
+      `        CatalogLog.event("channel_published", "info", "address", address, "type", type, "id", envelope.id());`,
+      `    }`,
+      `}`,
+      ``,
+    ),
+  );
+
+  if (opts.durableBroker)
+    out.set(
+      "ChannelRelayPublisher.java",
+      lines(
+        `package ${pkg};`,
+        ``,
+        `import java.util.Map;`,
+        ``,
+        `/** Design §5, the relay half of the producer split: a drained durable`,
+        ` *  outbox row whose channel is broker-bound publishes here, carrying`,
+        ` *  its outbox row id as the envelope id (the consumer-side idempotency`,
+        ` *  key).  Rows on non-broker durable channels return false. */`,
+        `public final class ChannelRelayPublisher {`,
+        `    public static boolean tryPublish(ChannelTransports transports, String type,`,
+        `            Map<String, Object> data, String eventId) {`,
+        `        var address = ChannelBindings.DURABLE_ROUTING.get(type);`,
+        `        if (address == null) {`,
+        `            return false;`,
+        `        }`,
+        `        var envelope = ChannelEnvelopes.forData(type, data, address, eventId);`,
+        `        transports.forAddress(address).publish(address, envelope);`,
+        `        CatalogLog.event("channel_published", "info", "address", address, "type", type, "id", eventId);`,
+        `        return true;`,
+        `    }`,
+        ``,
+        `    private ChannelRelayPublisher() {`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    );
 
   if (consumerHandlers.length > 0) {
     // One switch arm per event; each arm invokes every subscribed handler
@@ -508,23 +814,57 @@ export function renderJavaChannelFiles(
     ].sort((a, b) => a.dispatcherClass.localeCompare(b.dispatcherClass));
     const arms = [...byEvent.entries()].map(([event, hs]) =>
       [
-        `                                case ${JSON.stringify(event)} -> {`,
-        `                                    var e = (${event}) ChannelCodec.fromData(bare, envelope.data());`,
-        ...hs.map(
-          (h) =>
-            `                                    ${lowerFirst(h.dispatcherClass)}.${h.method}(e);`,
-        ),
-        `                                }`,
+        `            case ${JSON.stringify(event)} -> {`,
+        `                var e = (${event}) ChannelCodec.fromData(bare, envelope.data());`,
+        ...hs.map((h) => `                ${lowerFirst(h.dispatcherClass)}.${h.method}(e);`),
+        `            }`,
       ].join("\n"),
     );
+    // Queue (rabbit) subscriptions ride the STRICT path — a failed dispatch
+    // must propagate on the driver's delivery thread so its bounded-retry /
+    // DLX-park owns it.  Broadcast (redis) subscriptions keep the logged
+    // single-thread-executor path (fire-and-forget contract).
+    const strictSubscribe = [
+      `            transports.forSource(binding.csName()).subscribe(binding.address(), binding.group(),`,
+      `                    envelope -> {`,
+      `                        dispatch(envelope);`,
+      `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),`,
+      `                                "type", envelope.type(), "id", envelope.id());`,
+      `                    });`,
+    ];
+    const loggedSubscribe = [
+      `            transports.forSource(binding.csName()).subscribe(binding.address(), null,`,
+      `                    envelope -> executor.submit(() -> {`,
+      `                        try {`,
+      `                            dispatch(envelope);`,
+      `                            CatalogLog.event("channel_consumed", "info", "address", binding.address(),`,
+      `                                    "type", envelope.type(), "id", envelope.id());`,
+      `                        } catch (RuntimeException e) {`,
+      `                            CatalogLog.event("channel_consume_failed", "warn", "address", binding.address(),`,
+      `                                    "type", envelope.type(), "error", String.valueOf(e.getMessage()));`,
+      `                        }`,
+      `                    }));`,
+    ];
+    const subscribeBody =
+      hasRedis && hasRabbit
+        ? [
+            `            if (binding.queue()) {`,
+            ...strictSubscribe.map((l) => `    ${l}`),
+            `            } else {`,
+            ...loggedSubscribe.map((l) => `    ${l}`),
+            `            }`,
+          ]
+        : hasRabbit
+          ? strictSubscribe
+          : loggedSubscribe;
     out.set(
       "ChannelConsumerService.java",
       lines(
         `package ${pkg};`,
         ``,
-        `import java.util.concurrent.ExecutorService;`,
-        `import java.util.concurrent.Executors;`,
-        ``,
+        hasRedis ? `import java.util.concurrent.ExecutorService;` : null,
+        hasRedis ? `import java.util.concurrent.Executors;` : null,
+        hasRedis ? `` : null,
         `import org.springframework.context.SmartLifecycle;`,
         `import org.springframework.stereotype.Component;`,
         ``,
@@ -533,18 +873,32 @@ export function renderJavaChannelFiles(
           .map((h) => `import ${h.dispatcherPkg}.${h.dispatcherClass};`),
         `import ${basePkg}.domain.events.*;`,
         ``,
-        `/** Consumer loop — subscribes every wired address and invokes the SAME`,
+        `/** Consumer loop — subscribes every wired address (competing-consumer`,
+        ` *  group on \`queue\` channels, broadcast otherwise) and invokes the SAME`,
         ` *  dispatcher handler methods local events would reach, so reactors and`,
         ` *  event-triggered starters run identically for local and remote events.`,
-        ` *  Handler work leaves the driver's event loop through a single-thread`,
-        ` *  executor (per-connection ordering preserved). */`,
+        ...(hasRabbit
+          ? [
+              ` *  Queue deliveries dispatch ON the driver's delivery thread so a`,
+              ` *  failure propagates into its bounded-retry / DLX-park path.`,
+            ]
+          : []),
+        ...(hasRedis
+          ? [
+              ` *  Broadcast handler work leaves the driver's event loop through a`,
+              ` *  single-thread executor (per-connection ordering preserved).`,
+            ]
+          : []),
+        ` */`,
         `@Component`,
         `public class ChannelConsumerService implements SmartLifecycle {`,
         `    private final ChannelTransports transports;`,
         ...dispatchers.map(
           (h) => `    private final ${h.dispatcherClass} ${lowerFirst(h.dispatcherClass)};`,
         ),
-        `    private final ExecutorService executor = Executors.newSingleThreadExecutor();`,
+        hasRedis
+          ? `    private final ExecutorService executor = Executors.newSingleThreadExecutor();`
+          : null,
         `    private volatile boolean running;`,
         ``,
         `    public ChannelConsumerService(ChannelTransports transports${dispatchers
@@ -557,34 +911,28 @@ export function renderJavaChannelFiles(
         ),
         `    }`,
         ``,
+        `    private void dispatch(LoomEventEnvelope envelope) {`,
+        `        var bare = envelope.type().contains(".")`,
+        `                ? envelope.type().substring(envelope.type().indexOf('.') + 1)`,
+        `                : envelope.type();`,
+        `        switch (bare) {`,
+        ...arms,
+        `            default -> {`,
+        `            }`,
+        `        }`,
+        `    }`,
+        ``,
         `    @Override`,
         `    public void start() {`,
         `        for (var binding : ChannelBindings.ALL) {`,
-        `            transports.forSource(binding.csName()).subscribe(binding.address(), null,`,
-        `                    envelope -> executor.submit(() -> {`,
-        `                        var bare = envelope.type().contains(".")`,
-        `                                ? envelope.type().substring(envelope.type().indexOf('.') + 1)`,
-        `                                : envelope.type();`,
-        `                        try {`,
-        `                            switch (bare) {`,
-        ...arms,
-        `                                default -> {`,
-        `                                }`,
-        `                            }`,
-        `                            CatalogLog.event("channel_consumed", "info", "address", binding.address(),`,
-        `                                    "type", envelope.type(), "id", envelope.id());`,
-        `                        } catch (RuntimeException e) {`,
-        `                            CatalogLog.event("channel_consume_failed", "warn", "address", binding.address(),`,
-        `                                    "type", envelope.type(), "error", String.valueOf(e.getMessage()));`,
-        `                        }`,
-        `                    }));`,
+        ...subscribeBody,
         `        }`,
         `        running = true;`,
         `    }`,
         ``,
         `    @Override`,
         `    public void stop() {`,
-        `        executor.shutdown();`,
+        hasRedis ? `        executor.shutdown();` : null,
         `        running = false;`,
         `    }`,
         ``,
@@ -599,4 +947,222 @@ export function renderJavaChannelFiles(
   }
 
   return out;
+}
+
+/** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
+ *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
+ *  `__loom_outbox` table, its Spring Data repository, and the polling relay
+ *  that publishes drained rows to the broker (design §5; the tee in
+ *  `renderJavaChannelFiles` is the recording half).  The payload stores the
+ *  DSL-keyed `ChannelCodec.toData` map, so the relay builds envelopes
+ *  without reconstructing event records.  Emitted only when hosted durable
+ *  events ride a broker-bound channel.
+ *
+ *  Consumer-side saga `last_event_id` dedup is NOT wired on java yet — the
+ *  documented in-mission residual; broker ack semantics + idempotent
+ *  reactors carry redelivery (the slice-3 stance). */
+export function renderJavaOutboxFiles(
+  basePkg: string,
+  pkgs: { configPkg: string; entityPkg: string; repoPkg: string },
+): {
+  name: string;
+  category: "infra-persistence" | "spring-data-repository" | "config";
+  content: string;
+}[] {
+  return [
+    {
+      name: "LoomOutboxMessage.java",
+      category: "infra-persistence",
+      content: lines(
+        `package ${pkgs.entityPkg};`,
+        ``,
+        `import java.time.Instant;`,
+        `import java.util.Map;`,
+        `import java.util.UUID;`,
+        ``,
+        `import org.hibernate.annotations.JdbcTypeCode;`,
+        `import org.hibernate.type.SqlTypes;`,
+        ``,
+        `import jakarta.persistence.Column;`,
+        `import jakarta.persistence.Entity;`,
+        `import jakarta.persistence.Id;`,
+        `import jakarta.persistence.Table;`,
+        ``,
+        `/** One owed durable event (dispatch-delivery-semantics.md): written by`,
+        ` *  the ChannelPublishTee inside the caller's transaction, drained by`,
+        ` *  the OutboxRelayService (M-T4.4 design §5).  Maps the shared`,
+        ` *  __loom_outbox table the module migrations own. */`,
+        `@Entity`,
+        `@Table(name = "__loom_outbox")`,
+        `public class LoomOutboxMessage {`,
+        `    @Id`,
+        `    private UUID id = UUID.randomUUID();`,
+        ``,
+        `    @Column(name = "occurred_at", nullable = false)`,
+        `    private Instant occurredAt = Instant.now();`,
+        ``,
+        `    @Column(nullable = false)`,
+        `    private String type;`,
+        ``,
+        `    @JdbcTypeCode(SqlTypes.JSON)`,
+        `    @Column(nullable = false)`,
+        `    private Map<String, Object> payload;`,
+        ``,
+        `    @Column(name = "dispatched_at")`,
+        `    private Instant dispatchedAt;`,
+        ``,
+        `    @Column(nullable = false)`,
+        `    private int attempts;`,
+        ``,
+        `    protected LoomOutboxMessage() {`,
+        `    }`,
+        ``,
+        `    public LoomOutboxMessage(String type, Map<String, Object> payload) {`,
+        `        this.type = type;`,
+        `        this.payload = payload;`,
+        `    }`,
+        ``,
+        `    public UUID getId() {`,
+        `        return id;`,
+        `    }`,
+        ``,
+        `    public String getType() {`,
+        `        return type;`,
+        `    }`,
+        ``,
+        `    public Map<String, Object> getPayload() {`,
+        `        return payload;`,
+        `    }`,
+        ``,
+        `    public int getAttempts() {`,
+        `        return attempts;`,
+        `    }`,
+        ``,
+        `    public void setAttempts(int attempts) {`,
+        `        this.attempts = attempts;`,
+        `    }`,
+        ``,
+        `    public void setDispatchedAt(Instant dispatchedAt) {`,
+        `        this.dispatchedAt = dispatchedAt;`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    },
+    {
+      name: "LoomOutboxRepository.java",
+      category: "spring-data-repository",
+      content: lines(
+        `package ${pkgs.repoPkg};`,
+        ``,
+        `import java.util.List;`,
+        `import java.util.UUID;`,
+        ``,
+        `import org.springframework.data.jpa.repository.JpaRepository;`,
+        ``,
+        `import ${pkgs.entityPkg}.LoomOutboxMessage;`,
+        ``,
+        `public interface LoomOutboxRepository extends JpaRepository<LoomOutboxMessage, UUID> {`,
+        `    List<LoomOutboxMessage> findTop50ByDispatchedAtIsNullAndAttemptsLessThanOrderByOccurredAtAsc(`,
+        `            int attempts);`,
+        `}`,
+        ``,
+      ),
+    },
+    {
+      name: "OutboxRelayService.java",
+      category: "config",
+      content: lines(
+        `package ${pkgs.configPkg};`,
+        ``,
+        `import java.time.Instant;`,
+        `import java.util.concurrent.ExecutorService;`,
+        `import java.util.concurrent.Executors;`,
+        ``,
+        `import org.springframework.context.SmartLifecycle;`,
+        `import org.springframework.stereotype.Component;`,
+        ``,
+        `import ${pkgs.repoPkg}.LoomOutboxRepository;`,
+        ``,
+        `/** Drains __loom_outbox to the broker at-least-once (design §5) —`,
+        ` *  consumers must tolerate redelivery; the envelope carries the row id`,
+        ` *  as the idempotency key.  Rows that exhaust MAX_ATTEMPTS stay in the`,
+        ` *  table and log event_dead_lettered once.  Handlers for broker-routed`,
+        ` *  events are invoked by the ChannelConsumerService on delivery, never`,
+        ` *  locally (§4 delivery uniformity). */`,
+        `@Component`,
+        `public class OutboxRelayService implements SmartLifecycle {`,
+        `    private static final int MAX_ATTEMPTS = 5;`,
+        `    private static final long INTERVAL_MS = 500;`,
+        ``,
+        `    private final LoomOutboxRepository outbox;`,
+        `    private final ChannelTransports transports;`,
+        `    private final ExecutorService executor = Executors.newSingleThreadExecutor();`,
+        `    private volatile boolean running;`,
+        ``,
+        `    public OutboxRelayService(LoomOutboxRepository outbox, ChannelTransports transports) {`,
+        `        this.outbox = outbox;`,
+        `        this.transports = transports;`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public void start() {`,
+        `        running = true;`,
+        `        executor.submit(() -> {`,
+        `            while (running) {`,
+        `                try {`,
+        `                    drain();`,
+        `                } catch (RuntimeException e) {`,
+        `                    CatalogLog.event("outbox_relay_error", "warn", "error", String.valueOf(e.getMessage()));`,
+        `                }`,
+        `                try {`,
+        `                    Thread.sleep(INTERVAL_MS);`,
+        `                } catch (InterruptedException e) {`,
+        `                    Thread.currentThread().interrupt();`,
+        `                    return;`,
+        `                }`,
+        `            }`,
+        `        });`,
+        `    }`,
+        ``,
+        `    private void drain() {`,
+        `        var rows = outbox.findTop50ByDispatchedAtIsNullAndAttemptsLessThanOrderByOccurredAtAsc(`,
+        `                MAX_ATTEMPTS);`,
+        `        for (var row : rows) {`,
+        `            try {`,
+        `                // Design §5: broker-bound durable rows publish on drain (the`,
+        `                // envelope carries the row id — the consumer-side idempotency`,
+        `                // key).  A non-broker durable row has no local redelivery path`,
+        `                // on java; either way the row completes.`,
+        `                ChannelRelayPublisher.tryPublish(transports, row.getType(), row.getPayload(),`,
+        `                        row.getId().toString());`,
+        `                row.setDispatchedAt(Instant.now());`,
+        `                outbox.save(row);`,
+        `            } catch (RuntimeException e) {`,
+        `                row.setAttempts(row.getAttempts() + 1);`,
+        `                outbox.save(row);`,
+        `                if (row.getAttempts() >= MAX_ATTEMPTS) {`,
+        `                    CatalogLog.event("event_dead_lettered", "warn", "type", row.getType(),`,
+        `                            "attempts", String.valueOf(row.getAttempts()),`,
+        `                            "error", String.valueOf(e.getMessage()));`,
+        `                }`,
+        `            }`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public void stop() {`,
+        `        running = false;`,
+        `        executor.shutdown();`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public boolean isRunning() {`,
+        `        return running;`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    },
+  ];
 }
