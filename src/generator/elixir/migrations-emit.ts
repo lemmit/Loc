@@ -114,6 +114,12 @@ const MODULE_VERSION_STRIDE = 1_000_000;
  *  no `updated_at` column present the migration emits a plain
  *  `timestamps()`, so non-audit output is unchanged. */
 function timestampsMacro(table: TableShape): string | null {
+  // The transactional outbox (dispatch-delivery-semantics.md) is a fixed
+  // machinery shape shared by every backend: its time columns are the
+  // explicit `occurred_at`/`dispatched_at`, and the relay writers never
+  // populate Ecto timestamps — a bundled NOT NULL `inserted_at` would
+  // reject every insert.
+  if (table.name === "__loom_outbox") return null;
   const hasUpdatedAt = table.columns.some((c) => c.name === "updated_at");
   return hasUpdatedAt ? null : "timestamps()";
 }

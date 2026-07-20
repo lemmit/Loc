@@ -35,6 +35,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
+  ChannelIR,
   DeployableIR,
   EnrichedBoundedContextIR,
   EventIR,
@@ -44,6 +45,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 
 /** The owner of a timer is DERIVED (never stamped): the deployable whose
@@ -137,6 +139,7 @@ function renderEveryTimerModule(
   ts: TimerSourceIR,
   event: EventIR | undefined,
   hasDispatcher: boolean,
+  channels: ElixirChannelsCfg | undefined,
 ): string {
   const mod = `${appModule}.Scheduler.${upperFirst(ts.name)}`;
   const contextModule = `${appModule}.${upperFirst(ts.context)}`;
@@ -153,10 +156,10 @@ function renderEveryTimerModule(
   ]);
 
   const lockedBody =
-    hasDispatcher && event
+    event && (hasDispatcher || channels)
       ? [
           `        event = ${tickEventStruct(contextModule, ts, event)}`,
-          `        ${contextModule}.Dispatcher.dispatch(event)`,
+          `        ${elixirDispatchCall("event", contextModule, hasDispatcher, channels)}`,
           `        ${fireLog}`,
         ]
       : [`        ${fireLog}`];
@@ -237,6 +240,7 @@ function renderCronTimerWorker(
   ts: TimerSourceIR,
   event: EventIR | undefined,
   hasDispatcher: boolean,
+  channels: ElixirChannelsCfg | undefined,
 ): string {
   const mod = `${appModule}.Scheduler.${upperFirst(ts.name)}Worker`;
   const contextModule = `${appModule}.${upperFirst(ts.context)}`;
@@ -247,10 +251,10 @@ function renderCronTimerWorker(
   ]);
 
   const body =
-    hasDispatcher && event
+    event && (hasDispatcher || channels)
       ? [
           `    event = ${tickEventStruct(contextModule, ts, event)}`,
-          `    ${contextModule}.Dispatcher.dispatch(event)`,
+          `    ${elixirDispatchCall("event", contextModule, hasDispatcher, channels)}`,
           `    ${fireLog}`,
           "    :ok",
         ]
@@ -477,6 +481,12 @@ export function emitVanillaScheduler(
   deployable: DeployableIR,
   sys: SystemIR,
   out: Map<string, string>,
+  /** Broker tee config (channels.md) — presence routes a tick's dispatch
+   *  through `<App>.Channels.dispatch/2` so broker-carried tick events
+   *  publish instead of fanning out locally. */
+  channels?: ElixirChannelsCfg,
+  /** Wired-but-foreign channels widening the dispatcher-existence check. */
+  wiredForeignChannels: ChannelIR[] = [],
 ): { schedulerChildren: string[]; usesCron: boolean; usesOban: boolean } {
   const timers = ownedElixirTimers(sys, deployable);
   if (timers.length === 0) return { schedulerChildren: [], usesCron: false, usesOban: false };
@@ -492,11 +502,11 @@ export function emitVanillaScheduler(
   for (const ts of timers) {
     const ctx = ctxByName.get(ts.context);
     const event = ctx?.events.find((e) => e.name === ts.event);
-    const hasDispatcher = ctx ? contextHasDispatcher(ctx) : false;
+    const hasDispatcher = ctx ? contextHasDispatcher(ctx, wiredForeignChannels) : false;
     if (ts.cadence.kind === "cron") {
       out.set(
         `lib/${appName}/scheduler/${snake(ts.name)}_worker.ex`,
-        renderCronTimerWorker(appModule, ts, event, hasDispatcher),
+        renderCronTimerWorker(appModule, ts, event, hasDispatcher, channels),
       );
       out.set(
         `lib/${appName}/scheduler/${snake(ts.name)}.ex`,
@@ -505,7 +515,7 @@ export function emitVanillaScheduler(
     } else {
       out.set(
         `lib/${appName}/scheduler/${snake(ts.name)}.ex`,
-        renderEveryTimerModule(appModule, ts, event, hasDispatcher),
+        renderEveryTimerModule(appModule, ts, event, hasDispatcher, channels),
       );
     }
     schedulerChildren.push(`${appModule}.Scheduler.${upperFirst(ts.name)}`);

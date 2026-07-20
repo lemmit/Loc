@@ -30,6 +30,7 @@ import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ChannelIR,
   EnrichedBoundedContextIR,
   EventIR,
   FindIR,
@@ -38,6 +39,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
@@ -85,6 +87,12 @@ export function emitVanillaEventSourcedFiles(
   /** The context's Postgres schema for the shared `<ctx>_events` log's
    *  `@schema_prefix` (matches the migration `prefix:`); undefined ⇒ public. */
   ctxSchema?: string,
+  /** Broker tee config (channels.md) — presence routes the append-time
+   *  fan-out through `<App>.Channels.dispatch/2` instead of the local
+   *  dispatcher, so ES-appended broker events publish like state-path ones. */
+  channels?: ElixirChannelsCfg,
+  /** Wired-but-foreign channels widening the dispatcher-existence check. */
+  wiredForeignChannels: ChannelIR[] = [],
 ): void {
   const ctxModule = upperFirst(ctx.name);
   const appSnake = toAppSnake(appModule);
@@ -92,7 +100,7 @@ export function emitVanillaEventSourcedFiles(
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e]));
   // The context's `Dispatcher` is only emitted when it has resolvable workflow
   // subscriptions; gate the append-time fan-out on its existence.
-  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, wiredForeignChannels);
   for (const agg of ctx.aggregates) {
     if (!isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
@@ -112,6 +120,7 @@ export function emitVanillaEventSourcedFiles(
         eventsByName,
         customFindsOfAgg(ctx, agg),
         hasDispatcher,
+        channels,
       ),
     );
   }
@@ -272,6 +281,7 @@ function renderEsRepository(
   eventsByName: Map<string, EventIR>,
   finds: FindIR[],
   hasDispatcher: boolean,
+  channels: ElixirChannelsCfg | undefined,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
@@ -283,8 +293,10 @@ function renderEsRepository(
   // Fan each appended event into the context Dispatcher so workflow saga /
   // channel handlers fire (the event-sourced analogue of the state path's
   // emit→PubSub).  Runs inside the append transaction, like the workflow
-  // `emit` broadcast.  Only when the context emits a Dispatcher at all.
-  const dispatchLine = hasDispatcher ? `\n\n        ${contextModule}.Dispatcher.dispatch(ev)` : "";
+  // `emit` broadcast.  With channels wired the line becomes the broker tee
+  // (which forwards non-broker events to the local dispatcher).
+  const dispatchCall = elixirDispatchCall("ev", contextModule, hasDispatcher, channels);
+  const dispatchLine = dispatchCall ? `\n\n        ${dispatchCall}` : "";
 
   // Event types that may appear in this aggregate's stream — its appliers'
   // event set (ES discipline: every emitted event has a matching applier).
