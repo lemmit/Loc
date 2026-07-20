@@ -2030,13 +2030,6 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 // column (System.Text.Json list serialisation) — kept in lockstep with
 // `arrayElemCs` in `src/generator/dotnet/emit/dapper.ts` (ir/validate may not
 // import generator/, so the two lists are mirrored, not shared).
-const DAPPER_ARRAY_ELEM_KINDS: ReadonlySet<string> = new Set([
-  "primitive",
-  "enum",
-  "valueobject",
-  "id",
-]);
-
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -2154,34 +2147,14 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // A scalar / enum / value-object / id COLLECTION field on a part IS
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
-        // primitive-collection JSON mapping).  The ONLY element kind left gated
-        // is `entity`: a part FIELD (not a `contains`) typed as an array of a
-        // sibling ENTITY.  That is an impossible storage shape rather than a
-        // Dapper gap — an un-owned by-value entity collection has no persistence
-        // identity/ownership model (a domain entity has no scalar column form and
-        // no snapshot DTO on the relational shape, so it cannot ride a jsonb
-        // list).  efcore only APPEARS to accept it — it COMPILES `List<Entity>`
-        // mapped as a plain scalar `Property`, but EF has no relational mapping
-        // for a collection of an entity type without owned-type config, so it is
-        // not a real backing store there either.
-        // The intended model is `contains <name>: <Entity>[]` (ownership) or
-        // `<name>: <Entity> id[]` (a reference collection) — both supported.
-        const contains = a.contains ?? [];
-        if (contains.length > 0 && a.persistedAs !== "eventLog") {
-          for (const part of a.parts ?? []) {
-            for (const pf of part.fields) {
-              const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
-              if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
-                reject(
-                  where,
-                  `has a part ('${part.name}') with a by-value collection field of ENTITY element ` +
-                    `kind '${pt.element.kind}' — an un-owned entity collection has no relational ` +
-                    `storage shape. Use 'contains ${pf.name}: …[]' (ownership) or ` +
-                    `'${pf.name}: … id[]' (a reference collection) instead`,
-                );
-            }
-          }
-        }
+        // primitive-collection JSON mapping).  A part FIELD typed as an array of
+        // a sibling ENTITY used to be gated here as an "impossible storage
+        // shape", but since `contains` became optional (#2161) such a field
+        // lowers to a containment (its own grandchild table, part-in-part above),
+        // never a by-value column — and a cross-aggregate entity is a structural
+        // error — so no un-owned entity collection can reach this check.  The
+        // gate (and its `DAPPER_ARRAY_ELEM_KINDS` set) was therefore unreachable
+        // dead code and has been removed.
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
         // upsert SET), INCLUDING principal-referencing stamp values — the
