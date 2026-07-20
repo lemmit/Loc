@@ -592,7 +592,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // and periodically refreshes the issuer's signing keys.  Supervised so the
   // signer cache is populated (and rotation-healed) for the Auth.Token verifier
   // — the library analogue of the other backends' out-of-the-box JWKS clients.
-  const authChildren = authEnabled && sys.auth?.oidc ? [`${appModule}Web.Auth.JwksStrategy`] : [];
+  // `time_interval: 1_000` polls every second: the other backends fetch the
+  // JWKS lazily on the first token verify (always warm by the first request);
+  // the joken_jwks poller warms in the background, and second-granularity
+  // polling closes the cold-start window (a token can arrive within a few
+  // seconds of the IdP coming up) while still rotation-healing.
+  const authChildren =
+    authEnabled && sys.auth?.oidc
+      ? [`{${appModule}Web.Auth.JwksStrategy, time_interval: 1_000}`]
+      : [];
 
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter

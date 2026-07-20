@@ -190,8 +190,27 @@ describe("Phoenix OIDC verifier emission", () => {
 
   it("supervises the JWKS strategy so its cache is populated + rotation-healed", async () => {
     const files = await build(source({ oidc: true }));
-    // The strategy GenServer is added to the app supervision tree.
-    expect(files.get("api/lib/api/application.ex")!).toContain("ApiWeb.Auth.JwksStrategy");
+    // The strategy GenServer is added to the app supervision tree with a short
+    // poll interval so the signer cache warms promptly on cold start (the other
+    // backends fetch lazily on first verify).
+    expect(files.get("api/lib/api/application.ex")!).toContain(
+      "{ApiWeb.Auth.JwksStrategy, time_interval: 1_000}",
+    );
+  });
+
+  it("pins Tesla to the built-in :httpc adapter so the joken_jwks fetch works (not Hackney)", async () => {
+    const files = await build(source({ oidc: true }));
+    // joken_jwks fetches the JWKS via Tesla, whose default adapter is Hackney
+    // (not a dependency); left unset the fetch raises at runtime and every token
+    // 401s.  Pin it to OTP's :httpc, verifying the peer for an https issuer.
+    const config = files.get("api/config/config.exs")!;
+    expect(config).toContain("config :tesla,");
+    expect(config).toContain(
+      "adapter: {Tesla.Adapter.Httpc, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get()]]}",
+    );
+    // Only under OIDC (no joken_jwks ⇒ no Tesla ⇒ byte-identical config).
+    const stub = await build(source({ oidc: false }));
+    expect(stub.get("api/config/config.exs")!).not.toContain("config :tesla,");
   });
 
   it("maps claims onto the user shape via dotted paths (id ← sub)", async () => {

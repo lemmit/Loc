@@ -138,7 +138,10 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/metrics_controller.ex`,
     renderVanillaMetricsController(appModule),
   );
-  out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban));
+  out.set(
+    "config/config.exs",
+    renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban, authEnabled && oidc),
+  );
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
   out.set("config/runtime.exs", renderVanillaRuntime(appName, appModule));
@@ -689,7 +692,19 @@ function renderVanillaConfig(
   appModule: string,
   swooshSmtpOnly = false,
   usesOban = false,
+  oidc = false,
 ): string {
+  // OIDC only: joken_jwks fetches the issuer's JWKS through Tesla, whose
+  // default adapter is Hackney (which we don't depend on) — left unset the
+  // fetch raises `Tesla.Adapter.Hackney.call/2 is undefined`, the signer cache
+  // never populates, and every token 401s.  Pin Tesla to OTP's built-in
+  // `:httpc` (the same client the OIDC handshake uses, backed by the declared
+  // `:inets`/`:ssl`); the ssl opts verify the peer against the system CA store
+  // for an https issuer and are ignored for a plain-http (dev) one.
+  const teslaConfig = oidc
+    ? `\nconfig :tesla,
+  adapter: {Tesla.Adapter.Httpc, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get()]]}\n`
+    : "";
   // gen_smtp-backed Swoosh (the smtp mailer) needs no HTTP API client; disable
   // the default so `:swoosh` boots without hackney.  Omitted entirely when no
   // smtp-only mailer is present, so a mailer-free app's config is unchanged.
@@ -717,7 +732,7 @@ config :${appName}, ${appModule}Web.Endpoint,
   live_view: [signing_salt: "loom_dev"]
 
 config :phoenix, :json_library, Jason
-${obanConfig}
+${teslaConfig}${obanConfig}
 # JSON Logger formatter — emits one structured JSON object per line so
 # the cross-backend observability catalog envelope (event, request_id,
 # method, path, status, duration_ms, …) is parseable upstream the same
