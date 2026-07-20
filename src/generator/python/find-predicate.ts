@@ -12,8 +12,6 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
-  isDeepScopeFilter,
-  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -159,6 +157,45 @@ function lower(
   principalAccessor: string,
 ): string | null {
   switch (e.kind) {
+    case "authz-filter": {
+      // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node
+      // so a missing arm is a `tsc` error here, not a silent authorization
+      // bypass.
+      switch (e.filter.kind) {
+        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // predicate: a column can't be both NULL and NOT NULL.  Self-contained
+        // (uses the always-present `id` column + `and_`, already an import
+        // here), so no extra SQLAlchemy import and no self-comparison ruff lint.
+        case "deny": {
+          ops.add("and_");
+          const idCol = `${row}.id`;
+          return `and_(${idCol}.is_(None), ${idCol}.isnot(None))`;
+        }
+        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // descendant-or-self materialized-path scope with the NULL-dataKey
+        // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).
+        // `Column.startswith(v)` lowers to `LIKE v || '%'` (SQLAlchemy
+        // auto-escapes `%`/`_` in `v`).
+        case "scope": {
+          const col = `${row}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
+          const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+          // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
+          const org = `${principalAccessor}.${snake(deepScopeAnchorClaim(e))}`;
+          const tenant = `${principalAccessor}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+          ops.add("or_");
+          ops.add("and_");
+          return (
+            `or_(and_(${col}.isnot(None), or_(${col} == ${org}, ` +
+            `${col}.startswith(${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}))), ` +
+            `and_(${col}.is_(None), ${tenantCol} == ${tenant}))`
+          );
+        }
+        default: {
+          const _exhaustive: never = e.filter;
+          throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+        }
+      }
+    }
     case "binary": {
       // A5 temporal — `datetime ± days/hours/minutes(n)` renders as
       // SQL interval arithmetic (`side ± make_interval(…, n)`), composing on
@@ -225,33 +262,9 @@ function lower(
       return renderPyExpr(e);
     }
     case "method-call": {
-      // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
-      // predicate: a column can't be both NULL and NOT NULL.  Self-contained
-      // (uses the always-present `id` column + `and_`, already an import here),
-      // so no extra SQLAlchemy import and no self-comparison ruff lint.
-      if (isDenyFilter(e)) {
-        ops.add("and_");
-        const idCol = `${row}.id`;
-        return `and_(${idCol}.is_(None), ${idCol}.isnot(None))`;
-      }
-      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
-      // materialized-path scope with the NULL-dataKey fallback to the tenant
-      // floor (see `DEEP_SCOPE_SEMANTICS`).  `Column.startswith(v)` lowers to
-      // `LIKE v || '%'` (SQLAlchemy auto-escapes `%`/`_` in `v`).
-      if (isDeepScopeFilter(e)) {
-        const col = `${row}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
-        const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
-        // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
-        const org = `${principalAccessor}.${snake(deepScopeAnchorClaim(e))}`;
-        const tenant = `${principalAccessor}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
-        ops.add("or_");
-        ops.add("and_");
-        return (
-          `or_(and_(${col}.isnot(None), or_(${col} == ${org}, ` +
-          `${col}.startswith(${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}))), ` +
-          `and_(${col}.is_(None), ${tenantCol} == ${tenant}))`
-        );
-      }
+      // (The `deep` / DENY authorization filter sentinels moved to the
+      // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
+      // above, no longer a `method-call` marker here.)
       // `this.<refColl>.contains(x)` → correlated EXISTS against the
       // field's join table.
       if (

@@ -23,8 +23,6 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
-  isDeepScopeFilter,
-  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -129,30 +127,42 @@ export function lowerToDrizzle(
 
   function lowerExpr(e: ExprIR): string | null {
     if (e.kind === "paren") return lowerExpr(e.inner);
-    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false term:
-    // a column can't be both NULL and NOT NULL, so `and(isNull(id), isNotNull(id))`
-    // matches no row.  Self-contained (uses the always-present `id` column and
-    // standard Drizzle ops), so it needs no `sql` import and works on any table.
-    if (isDenyFilter(e)) {
-      for (const op of ["and", "isNull", "isNotNull"]) ops.add(op);
-      const idCol = `schema.${tableName}.id`;
-      return `and(isNull(${idCol}), isNotNull(${idCol}))`;
-    }
-    // `deep` read level (multi-tenancy Phase 2 P2.4) — the materialized-path
-    // descendant-or-self scope with the NULL-dataKey fallback to the tenant
-    // floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as a Drizzle operator tree.
-    if (isDeepScopeFilter(e)) {
-      const col = `schema.${tableName}.${TENANT_OWNED_DATA_KEY_FIELD}`;
-      const tenantCol = `schema.${tableName}.${TENANT_OWNED_TENANT_ID_FIELD}`;
-      // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
-      const org = `${principal}.${deepScopeAnchorClaim(e)}`;
-      const tenant = `${principal}.${TENANT_OWNED_TENANT_ID_FIELD}`;
-      for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
-      return (
-        `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
-        `like(${col}, ${org} + ${JSON.stringify(`${DATA_KEY_PATH_DELIMITER}%`)}))), ` +
-        `and(isNull(${col}), eq(${tenantCol}, ${tenant})))`
-      );
+    // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node so
+    // a missing arm is a `tsc` error here, not a silent authorization bypass.
+    if (e.kind === "authz-filter") {
+      switch (e.filter.kind) {
+        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // term: a column can't be both NULL and NOT NULL, so
+        // `and(isNull(id), isNotNull(id))` matches no row.  Self-contained (uses
+        // the always-present `id` column and standard Drizzle ops), so it needs
+        // no `sql` import and works on any table.
+        case "deny": {
+          for (const op of ["and", "isNull", "isNotNull"]) ops.add(op);
+          const idCol = `schema.${tableName}.id`;
+          return `and(isNull(${idCol}), isNotNull(${idCol}))`;
+        }
+        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the
+        // materialized-path descendant-or-self scope with the NULL-dataKey
+        // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as
+        // a Drizzle operator tree.
+        case "scope": {
+          const col = `schema.${tableName}.${TENANT_OWNED_DATA_KEY_FIELD}`;
+          const tenantCol = `schema.${tableName}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+          // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
+          const org = `${principal}.${deepScopeAnchorClaim(e)}`;
+          const tenant = `${principal}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+          for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
+          return (
+            `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
+            `like(${col}, ${org} + ${JSON.stringify(`${DATA_KEY_PATH_DELIMITER}%`)}))), ` +
+            `and(isNull(${col}), eq(${tenantCol}, ${tenant})))`
+          );
+        }
+        default: {
+          const _exhaustive: never = e.filter;
+          throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+        }
+      }
     }
     if (e.kind === "binary") {
       if (e.op === "&&" || e.op === "||") {

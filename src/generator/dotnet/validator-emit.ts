@@ -272,9 +272,12 @@ function renderFluentPredicate(e: ExprIR): string {
     case "match":
     case "list":
     case "action-ref":
+    case "authz-filter":
       // `classifyForWire` excludes these — reaching the renderer is a
       // bug upstream.  Emit a syntactically-valid placeholder so a
-      // failing build is louder than a silently-wrong rule.
+      // failing build is louder than a silently-wrong rule.  (An
+      // `authz-filter` sentinel is a query-filter node, never a
+      // wire-boundary invariant.)
       return `false /* UNRENDERABLE:${e.kind} */`;
   }
 }

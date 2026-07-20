@@ -2,7 +2,7 @@ import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
-  isDenyFilter,
+  deepScopeAnchorClaim,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -278,10 +278,27 @@ const ELIXIR_DOC_TARGET: ExprTarget<RenderCtx> = {
 };
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
-  // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
-  // query fragment; no row satisfies it.  Intercepted before the shared expr
-  // dispatcher, which has no arm for the sentinel method-call.
-  if (isDenyFilter(e)) return 'fragment("false")';
+  // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node,
+  // intercepted before the shared expr dispatcher (which throws on the
+  // `authz-filter` kind).  A missing arm is a `tsc` error here, not a silent
+  // authorization bypass.  (The vanilla capability-filter path intercepts the
+  // `scope` sentinel first — this arm keeps `renderExpr` total for it too.)
+  if (e.kind === "authz-filter") {
+    switch (e.filter.kind) {
+      // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
+      // query fragment; no row satisfies it.
+      case "deny":
+        return 'fragment("false")';
+      // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
+      // fail-closed materialized-path scope fragment.
+      case "scope":
+        return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e));
+      default: {
+        const _exhaustive: never = e.filter;
+        throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+      }
+    }
+  }
   // `filterArgs` renders inside an Ecto query filter, where money/decimal are
   // data-layer-native (the Postgres column) rather than `Decimal` structs.
   // `docMap` (DEBT-07 document shape) reads its fields out of the string-keyed

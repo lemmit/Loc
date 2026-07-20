@@ -171,6 +171,11 @@ function constructionEvaluable(
       // UI-handler-arg form — never appears in a construction-evaluable
       // invariant body.
       return false;
+    case "authz-filter":
+      // Authorization/tenancy query-filter sentinel (M-T9.9) — never appears in
+      // an invariant body (it lives only in an aggregate's context/write-scope
+      // filters).
+      return false;
   }
 }
 
@@ -307,6 +312,10 @@ function exprIsTranslatable(
       return false;
     case "action-ref":
       // UI-handler-arg form — never wire-translatable.
+      return false;
+    case "authz-filter":
+      // Authorization/tenancy query-filter sentinel (M-T9.9) — never appears in
+      // an invariant body, so never wire-translatable.
       return false;
   }
 }
@@ -622,6 +631,10 @@ function firstFieldRef(e: ExprIR): string | null {
       return null;
     case "action-ref":
       // UI-handler-arg form — carries no field reference.
+      return null;
+    case "authz-filter":
+      // Authorization/tenancy query-filter sentinel (M-T9.9) — never appears in
+      // an invariant body, so carries no wire-field reference.
       return null;
   }
 }
