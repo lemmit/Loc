@@ -24,6 +24,7 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import {
@@ -36,7 +37,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { redisChannelBindings } from "../_channels/bindings.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -60,9 +61,11 @@ import {
 } from "./emit/audit.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
+  AMQP_CLIENT_VERSION,
   type ChannelConsumerHandler,
   LETTUCE_CORE_VERSION,
   renderJavaChannelFiles,
+  renderJavaOutboxFiles,
 } from "./emit/channels.js";
 import {
   renderAggregateNotFoundException,
@@ -313,8 +316,22 @@ function emitProjectFromContexts(
   // broker-carried event type is broker-routed: its dispatcher handlers drop
   // the local @EventListener (design §4 delivery uniformity) and are invoked
   // by the ChannelConsumerService on delivery instead.
-  const channelBindings = system ? redisChannelBindings(system.deployable, system.sys) : [];
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   const hasChannels = channelBindings.length > 0;
+  // Durable broker-bound events (M-T4.4 slice 7c): HOSTED durable events
+  // carried by a wired `queue`/`work` (or future `log`) channel — their
+  // producer path rides the outbox relay (design §5), never the inline tee.
+  // Hosted-only on purpose: the module-level migrations are what back the
+  // `__loom_outbox` table, and they can't see a foreign wiring; a foreign
+  // `queue`/`work` consumer relies on broker ack semantics + idempotent
+  // reactors (the slice-3 stance).
+  const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
   const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   const wiredForeignChannels: ChannelIR[] = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
@@ -967,8 +984,26 @@ function emitProjectFromContexts(
       carriedEvents,
       consumerHandlers,
       system.sys,
+      {
+        durableBroker: durableBrokerEvents.size > 0,
+        outboxEntityPkg: pkgFor("infra-persistence"),
+        outboxRepoPkg: pkgFor("spring-data-repository"),
+      },
     )) {
       place(name, "config", content);
+    }
+    // Transactional-outbox tier (M-T4.4 slice 7c, design §5): the JPA entity
+    // over the MigrationsIR-owned __loom_outbox + its repository + the
+    // polling relay that publishes drained rows to the broker.  Only where
+    // HOSTED durable events ride a broker-bound channel.
+    if (durableBrokerEvents.size > 0) {
+      for (const f of renderJavaOutboxFiles(basePkg, {
+        configPkg: pkgFor("config"),
+        entityPkg: pkgFor("infra-persistence"),
+        repoPkg: pkgFor("spring-data-repository"),
+      })) {
+        place(f.name, f.category, f.content);
+      }
     }
   }
 
@@ -1099,9 +1134,15 @@ function emitProjectFromContexts(
       jobrunr: ownsCronTimer,
       extraDeps: {
         ...resourceEmission.deps,
-        // Redis pub/sub channel driver (M-T4.4 slice 6b) — wiring-gated so a
-        // channel-less build.gradle.kts stays byte-identical.
-        ...(hasChannels ? { "io.lettuce:lettuce-core": LETTUCE_CORE_VERSION } : {}),
+        // Broker channel drivers (M-T4.4 slices 6b + 7c) — per-transport
+        // wiring-gated so a channel-less (or single-transport)
+        // build.gradle.kts stays byte-identical.
+        ...(channelBindings.some((b) => b.transport === "redis")
+          ? { "io.lettuce:lettuce-core": LETTUCE_CORE_VERSION }
+          : {}),
+        ...(channelBindings.some((b) => b.transport === "rabbitmq")
+          ? { "com.rabbitmq:amqp-client": AMQP_CLIENT_VERSION }
+          : {}),
       },
       // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the
