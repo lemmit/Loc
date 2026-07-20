@@ -1153,8 +1153,9 @@ function printApply(node: import("../generated/ast.js").Apply): string {
 }
 
 function printTestBlock(node: TestBlock): string {
+  const forHead = node.target ? ` for ${node.target.$refText}` : "";
   const verifies = node.verifies ? ` verifies ${node.verifies.$refText}` : "";
-  return block(`test ${quote(node.name)}${verifies}`, node.body.map(printTestStatement));
+  return block(`test ${quote(node.name)}${forHead}${verifies}`, node.body.map(printTestStatement));
 }
 
 /** TestStatement adds `expect` (with a method matcher) over the ordinary

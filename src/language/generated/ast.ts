@@ -1045,7 +1045,7 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment.$type);
 }
 
-export type ContextMember = Aggregate | Channel | CommandHandler | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | PolicyDecl | Projection | QueryHandler | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
+export type ContextMember = Aggregate | Channel | CommandHandler | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | PolicyDecl | Projection | QueryHandler | Repository | Retrieval | Seed | StampDecl | TestBlock | ValueObject | View | Workflow;
 
 export const ContextMember = {
     $type: 'ContextMember'
@@ -2305,7 +2305,7 @@ export function isModel(item: unknown): item is Model {
     return reflection.isInstance(item, Model.$type);
 }
 
-export type ModelMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Component | Deployable | EnumDecl | FunctionDecl | Layout | Migration | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
+export type ModelMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Component | Deployable | EnumDecl | FunctionDecl | Layout | Migration | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestBlock | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = {
     $type: 'ModelMember'
@@ -3662,10 +3662,11 @@ export function isTernaryExpr(item: unknown): item is TernaryExpr {
 }
 
 export interface TestBlock extends langium.AstNode {
-    readonly $container: Aggregate;
+    readonly $container: Aggregate | BoundedContext | Model;
     readonly $type: 'TestBlock';
     body: Array<TestStatement>;
     name: string;
+    target?: langium.Reference<Aggregate>;
     verifies?: langium.Reference<TestCase>;
 }
 
@@ -3673,6 +3674,7 @@ export const TestBlock = {
     $type: 'TestBlock',
     body: 'body',
     name: 'name',
+    target: 'target',
     verifies: 'verifies'
 } as const;
 
@@ -7214,13 +7216,18 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 name: {
                     name: TestBlock.name
                 },
+                target: {
+                    name: TestBlock.target,
+                    referenceType: Aggregate.$type,
+                    optional: true
+                },
                 verifies: {
                     name: TestBlock.verifies,
                     referenceType: TestCase.$type,
                     optional: true
                 }
             },
-            superTypes: [AggregateMember.$type]
+            superTypes: [AggregateMember.$type, ContextMember.$type, ModelMember.$type]
         },
         TestCase: {
             name: TestCase.$type,

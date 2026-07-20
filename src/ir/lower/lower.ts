@@ -230,6 +230,35 @@ import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive
 // hierarchical IR built around those expressions.
 // ---------------------------------------------------------------------------
 
+// Hoisted unit tests (`test "…" for <Agg> { … }` written at context or file
+// root, outside the aggregate) grouped by their resolved home aggregate AST
+// node.  Populated once per project in `lowerProject`, consumed in
+// `lowerAggregate`, where each hoisted block is lowered under the SAME
+// per-aggregate `inner` env a colocated test uses — so a hoisted test
+// re-lowers byte-identically to the nested form (test-placement.md, Phase 1).
+let hoistedTestsByAgg: Map<Aggregate, TestBlock[]> = new Map();
+
+/** Scan every document for hoisted `TestBlock`s — those whose container is a
+ *  `context` or the file root, i.e. NOT an aggregate — and index them by the
+ *  aggregate their `for` head resolves to.  A nested (aggregate-member) test
+ *  keeps its existing containment path and is skipped here; an unresolved
+ *  `for` target (a linker error) drops out via the `?.ref` guard. */
+function indexHoistedTests(models: ReadonlyArray<Model>): void {
+  const index = new Map<Aggregate, TestBlock[]>();
+  for (const model of models) {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (!isTestBlock(node)) continue;
+      if (isAggregate(node.$container)) continue; // nested — handled in lowerAggregate
+      const home = node.target?.ref;
+      if (!home) continue; // missing/unresolved `for` — validator/linker owns it
+      const list = index.get(home);
+      if (list) list.push(node);
+      else index.set(home, [node]);
+    }
+  }
+  hoistedTestsByAgg = index;
+}
+
 export function lowerModel(model: Model): RawLoomModel {
   // Single-document lowering = a one-element project (composes the file's
   // own `system` with any top-level domain members it declares).
@@ -257,6 +286,10 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   // file.  Installed before any body is lowered; first declaration wins on
   // a cross-enum value-name collision (the validator owns the ambiguity).
   // See `setAmbientEnumIndex` in lower-expr.ts.
+  // Index hoisted `test … for <Agg>` blocks (context/root) by home aggregate,
+  // before any aggregate is lowered.  Reset per project so a re-run doesn't
+  // leak the previous project's tests.
+  indexHoistedTests(models);
   const ambientEnumIndex = new Map<string, string>();
   for (const m of allMembers) {
     if (!isEnumDecl(m)) continue;
@@ -1444,6 +1477,14 @@ function lowerAggregate(
   const tests: TestIR[] = [];
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
+  }
+  // Hoisted `test … for <this aggregate>` blocks (declared at context/root
+  // scope) lower under the SAME `inner` env as colocated tests and append to
+  // this aggregate's suite — so placement is a source-location choice with no
+  // effect on the emitted unit file.  Nested tests come first (source order
+  // within the aggregate), then hoisted ones in document-scan order.
+  for (const block of hoistedTestsByAgg.get(agg) ?? []) {
+    tests.push(lowerTest(block, inner));
   }
   // Capability source nodes — read structurally from agg.members,
   // concatenated with anything propagated from the enclosing context.
