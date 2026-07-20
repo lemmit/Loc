@@ -449,9 +449,18 @@ function emitProjectFromContexts(
   const mergedBase = mergeContexts(contexts);
   // Foreign events a hosted workflow consumes through a wired channel join
   // the deployable's event vocabulary (record class + DomainEvent routing).
+  // EVERY broker-carried event joins too, subscribed or not — the consumer's
+  // codec must decode a carried type it has no reactor for (the dispatch
+  // no-ops), or the broker driver would wrongly dead-letter it as unknown
+  // (the 8a python fix, applied here for parity).
   const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
   const foreignConsumedEvents = system
-    ? [...new Set(mergedSubscriptions.map((sub) => sub.event))]
+    ? [
+        ...new Set([
+          ...mergedSubscriptions.map((sub) => sub.event),
+          ...channelBindings.flatMap((b) => b.events),
+        ]),
+      ]
         .filter((name) => !knownEventNames.has(name))
         .flatMap((name) => {
           for (const sub of system.sys.subdomains) {
