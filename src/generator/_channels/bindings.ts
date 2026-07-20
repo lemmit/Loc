@@ -13,8 +13,8 @@
 import type { DeployableIR, SystemIR } from "../../ir/types/loom-ir.js";
 import { channelAddress, channelSourceEnvVar, consumerGroup } from "../../util/channels.js";
 
-/** The transports a shipped slice provisions.  Kafka joins in slice 4. */
-export type BrokerTransport = "redis" | "rabbitmq";
+/** The transports a shipped slice provisions. */
+export type BrokerTransport = "redis" | "rabbitmq" | "kafka";
 
 /** One broker-bound channel wiring on a deployable. */
 export interface BrokerBinding {
@@ -42,6 +42,10 @@ export interface BrokerBinding {
   envVar: string;
   /** Carried event type names (the channel's `carries:` list). */
   events: string[];
+  /** The channel's declared partition/ordering key field (`key:`) — a
+   *  field common to the carried events.  Kafka partitions by its value
+   *  (`loomkey` ?? envelope id, design §4); other transports ignore it. */
+  key?: string;
 }
 
 /** delivery/retention combos each shipped transport realises.  Narrower than
@@ -52,6 +56,11 @@ export interface BrokerBinding {
 const SHIPPED_COMBOS: Record<BrokerTransport, ReadonlySet<string>> = {
   redis: new Set(["broadcast/ephemeral"]),
   rabbitmq: new Set(["queue/ephemeral", "queue/work"]),
+  // Kafka (slice 4): the log — per-partition ordering keyed by
+  // `loomkey` ?? envelope id; one consumer group per deployable (a
+  // `broadcast` deployable's group sees every record, `queue` replicas
+  // compete within their group — design §4).
+  kafka: new Set(["broadcast/log", "queue/work"]),
 };
 
 /** The deployable's broker-bound channel wirings across every shipped
@@ -66,7 +75,7 @@ export function brokerChannelBindings(deployable: DeployableIR, sys: SystemIR): 
     const cs = sys.channelSources.find((c) => c.name === csName);
     if (!cs) continue;
     const type = storageType.get(cs.storageName);
-    if (type !== "redis" && type !== "rabbitmq") continue;
+    if (type !== "redis" && type !== "rabbitmq" && type !== "kafka") continue;
     const transport: BrokerTransport = type;
     for (const sub of sys.subdomains) {
       for (const ctx of sub.contexts) {
@@ -86,6 +95,7 @@ export function brokerChannelBindings(deployable: DeployableIR, sys: SystemIR): 
           group: consumerGroup(address, deployable.name),
           envVar: channelSourceEnvVar(cs.name),
           events: [...ch.carries],
+          key: ch.key,
         });
       }
     }
