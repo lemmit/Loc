@@ -82,17 +82,40 @@ function findCallOf(
 
 const repoHandle = (aggName: string): string => `repos.${lowerFirst(aggName)}`;
 
+/** Names of let-bound aggregates that a later operation mutates — those
+ *  bindings are reassigned (reloaded fresh before the op), so they must be
+ *  `let`, not `const`. */
+function reassignedBindings(t: TestIR): Set<string> {
+  const names = new Set<string>();
+  for (const s of t.statements) {
+    if (
+      s.kind === "expression" &&
+      s.expr.kind === "method-call" &&
+      s.expr.receiverType.kind === "entity" &&
+      !s.expr.isCollectionOp &&
+      s.expr.receiver.kind === "ref"
+    ) {
+      names.add(s.expr.receiver.name);
+    }
+  }
+  return names;
+}
+
 /** Render one integration-test statement.  Creates and mutating ops persist via
  *  the repository; let-bound finds await a repository read; everything else
  *  defers to the shared expression / matcher renderers. */
-function renderStmt(s: TestStmtIR, ctx: BoundedContextIR): string[] {
+function renderStmt(s: TestStmtIR, ctx: BoundedContextIR, reassigned: Set<string>): string[] {
   switch (s.kind) {
     case "let": {
       const create = createCallOf(s.expr, ctx);
       if (create && s.expr.kind === "method-call" && s.expr.args[0]?.kind === "object") {
         const input = renderCreateInput(s.expr.args[0], create.agg, ctx);
+        // A binding a later op mutates must be `let` — the op reloads it fresh
+        // from the repo (so its optimistic-concurrency version matches the DB
+        // row) before mutating + re-saving.
+        const decl = reassigned.has(s.name) ? "let" : "const";
         return [
-          `const ${s.name} = ${create.agg.name}.${create.method}(${input});`,
+          `${decl} ${s.name} = ${create.agg.name}.${create.method}(${input});`,
           `await ${repoHandle(create.agg.name)}.save(${s.name});`,
         ];
       }
@@ -105,17 +128,22 @@ function renderStmt(s: TestStmtIR, ctx: BoundedContextIR): string[] {
       return [`const ${s.name} = ${renderTsExpr(s.expr)};`];
     }
     case "expression": {
-      // A mutating operation on a let-bound aggregate instance → mutate in place,
-      // then persist (mirrors the route handler's load → mutate → save).
+      // A mutating operation on a let-bound aggregate instance → RELOAD fresh,
+      // mutate, then persist (the route handler's load → mutate → save).  The
+      // reload matters: after the create's save the in-memory aggregate's
+      // optimistic-concurrency version is stale (the DB row advanced), so
+      // re-saving the same object would raise a ConcurrencyError.
       if (
         s.expr.kind === "method-call" &&
         s.expr.receiverType.kind === "entity" &&
-        !s.expr.isCollectionOp
+        !s.expr.isCollectionOp &&
+        s.expr.receiver.kind === "ref"
       ) {
         const aggName = s.expr.receiverType.name;
         const recv = renderTsExpr(s.expr.receiver);
         const args = s.expr.args.map((a) => renderTsExpr(a)).join(", ");
         return [
+          `${recv} = (await ${repoHandle(aggName)}.findById(${recv}.id))!;`,
           `${recv}.${s.expr.member}(${args});`,
           `await ${repoHandle(aggName)}.save(${recv});`,
         ];
@@ -139,8 +167,9 @@ function renderStmt(s: TestStmtIR, ctx: BoundedContextIR): string[] {
 }
 
 function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
+  const reassigned = reassignedBindings(t);
   const out: string[] = [`  it(${JSON.stringify(t.name)}, async () => {`];
-  for (const s of t.statements) out.push(...renderStmt(s, ctx).map((l) => `    ${l}`));
+  for (const s of t.statements) out.push(...renderStmt(s, ctx, reassigned).map((l) => `    ${l}`));
   out.push("  });");
   return out;
 }

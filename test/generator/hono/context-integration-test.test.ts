@@ -89,7 +89,11 @@ system Ship {
     expect(f, "fulfillment.integration.test.ts").toBeDefined();
     expect(f).toContain('import { createInProcessDispatcher } from "../http/workflows";');
     expect(f).toContain("const events = createInProcessDispatcher(db);");
-    // op → mutate-in-place + save (the emit fans out through the dispatcher).
+    // op → RELOAD fresh (optimistic-concurrency version) → mutate → save (the
+    // emit fans out through the dispatcher).  The mutated binding is `let`, and
+    // the reload precedes the op so the second save's version matches the DB.
+    expect(f).toContain("let o = Order.create(");
+    expect(f).toContain("o = (await repos.order.findById(o.id))!;");
     expect(f).toContain("o.place();");
     expect(f).toContain("await repos.order.save(o);");
   });
