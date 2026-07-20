@@ -157,10 +157,10 @@ The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
 ## Metrics (Prometheus)
 
-Alongside the log stream, every **Hono** deployable exposes a Prometheus
-scrape target at **`GET /metrics`** — the standard "monitoring" surface a
-dashboard or alert rule consumes. (Cross-backend renderers for
-.NET/Phoenix/Java/Python are the next slice; the catalog below is already
+Alongside the log stream, the **Hono** and **Python** deployables expose a
+Prometheus scrape target at **`GET /metrics`** — the standard "monitoring"
+surface a dashboard or alert rule consumes. (Renderers for
+.NET/Java/Phoenix follow in sibling slices; the catalog below is already
 platform-neutral so they emit the same series.)
 
 Same design as the log catalog: one platform-neutral source of truth,
@@ -226,8 +226,8 @@ Each suite:
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
 
-The Hono suite additionally scrapes `GET /metrics` and asserts the
-Prometheus exposition carries the default runtime metrics plus the
+The Hono and Python suites additionally scrape `GET /metrics` and assert
+the Prometheus exposition carries the default runtime metrics plus the
 `http_requests_total` / `http_request_duration_seconds` series for the
 `/health` request (route-template + status labels).
 

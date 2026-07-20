@@ -17,6 +17,8 @@ export const PYTHON_PINS = {
     // UUIDv7 (time-ordered ids) — stdlib `uuid.uuid7` only lands in 3.14;
     // `uuid6` backports it (`from uuid6 import uuid7`) and is typed.
     "uuid6>=2024.7.10",
+    // Prometheus metrics (GET /metrics) — ships type stubs (py.typed).
+    "prometheus-client>=0.21,<1",
   ],
   devDependencies: ["mypy>=1.13,<2", "ruff>=0.8,<1", "pytest>=8.3,<9", "pytest-asyncio>=0.24,<2"],
 } as const;
