@@ -133,7 +133,7 @@ export function buildPyDispatchFile(
         channelTeeClass('"OutboxDispatcher"'),
         "",
         "",
-        outboxBlock(durableEvents, { durableBroker: true, pureProducer: true }),
+        outboxBlock(durableEvents, { durableBroker: true, pureProducer: true, hasRealtime }),
         "",
         "",
         "def make_dispatcher(session: AsyncSession) -> ChannelTeeDispatcher:",
@@ -832,7 +832,7 @@ function outboxBlock(
   durableEvents: EventIR[],
   opts: { durableBroker: boolean; pureProducer: boolean; hasRealtime?: boolean },
 ): string {
-  if (opts.pureProducer) return pureProducerOutboxBlock(durableEvents);
+  if (opts.pureProducer) return pureProducerOutboxBlock(durableEvents, opts.hasRealtime ?? false);
   const relayDispatcher = opts.hasRealtime
     ? "RealtimeDispatcher(InProcessDispatcher(session))"
     : "InProcessDispatcher(session)";
@@ -982,7 +982,7 @@ function outboxBlock(
  *  the relay publishes drained rows to the broker (design §5) and never
  *  redelivers locally — there are no handlers, so no `_current_event_id`
  *  and no `_dispatch_chained`. */
-function pureProducerOutboxBlock(durableEvents: EventIR[]): string {
+function pureProducerOutboxBlock(durableEvents: EventIR[], hasRealtime: boolean): string {
   const toArms = durableEvents.flatMap((ev, i) => [
     `    ${i === 0 ? "if" : "elif"} isinstance(event, ${ev.name}):`,
     `        return {${ev.fields.map((f) => `"${f.name}": ${toPayload(`event.${snake(f.name)}`, f.type)}`).join(", ")}}`,
@@ -1002,7 +1002,10 @@ function pureProducerOutboxBlock(durableEvents: EventIR[]): string {
     "    Everything else passes to the wrapped Noop.",
     `    """`,
     "",
-    "    def __init__(self, session: AsyncSession, inner: NoopDomainEventDispatcher) -> None:",
+    hasRealtime
+      ? // Realtime (broadcast) wraps the Noop, so the inner is the tee chain.
+        '    def __init__(self, session: AsyncSession, inner: "RealtimeDispatcher | NoopDomainEventDispatcher") -> None:'
+      : "    def __init__(self, session: AsyncSession, inner: NoopDomainEventDispatcher) -> None:",
     "        self._session = session",
     "        self._inner = inner",
     "",
