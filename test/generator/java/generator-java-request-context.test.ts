@@ -98,36 +98,46 @@ describe("Java execution-context carrier", () => {
     expect(rc).toContain("MDC.remove(PARENT_ID);");
   });
 
-  it("CatalogLog stamps the MDC carrier ids onto every log line", async () => {
-    // Log-line enrichment: the catalog writer reads the ambient frame from MDC
-    // so request_id / scope_id / actor_id ride every line emitted in a request,
-    // joining logs to the audit / provenance rows of the same frame.  (Java's
-    // catalog is a hand-rolled writer, not logback — without this it emitted
-    // only `event` + the explicit fields, the gap that reddened java-obs-e2e.)
-    const catalog = get(await generateSystemFiles(SYSTEM("")), "/config/CatalogLog.java");
-    expect(catalog).toContain("import org.slf4j.MDC;");
-    // Cross-backend envelope: ts + level lead every line, ahead of event.
-    expect(catalog).toContain("import java.time.Instant;");
-    expect(catalog).toContain('"{\\"ts\\":\\"');
-    expect(catalog).toContain("Instant.now().toString()");
-    expect(catalog).toContain(',\\"level\\":\\"');
-    // Runtime level filtering: emission gated by LOG_LEVEL (default info),
-    // trace folds to debug (Java has no trace level).
-    expect(catalog).toContain('System.getenv("LOG_LEVEL")');
+  it("CatalogLog logs through SLF4J; logback.xml renders the JSON envelope + MDC ids", async () => {
+    // The catalog logs through SLF4J on a dedicated `loomCatalog` logger; the
+    // JSON writing, string escaping, and MDC enrichment are the logging stack's
+    // job (logstash-logback-encoder in logback.xml), NOT a hand-rolled writer.
+    // request_id / scope_id / actor_id ride every request-scoped line via MDC so
+    // logs join to the audit / provenance rows of the same frame.
+    const files = await generateSystemFiles(SYSTEM(""));
+    const catalog = get(files, "/config/CatalogLog.java");
+    // Logs via SLF4J, not System.out — no hand-rolled JSON writer / escaper.
+    expect(catalog).toContain('LoggerFactory.getLogger("loomCatalog")');
+    expect(catalog).toContain("import org.slf4j.spi.LoggingEventBuilder;");
+    expect(catalog).not.toContain("System.out.println");
+    expect(catalog).not.toContain("StringBuilder");
+    // Public API + call-site surface is unchanged (catalog-parity gates it).
     expect(catalog).toContain(
       "public static void event(String name, String level, Object... kvs) {",
     );
+    // Envelope fields are structured key/value pairs the encoder serialises.
+    expect(catalog).toContain('.addKeyValue("level", lvl)');
+    expect(catalog).toContain('.addKeyValue("event", name)');
+    expect(catalog).toContain("builder.addKeyValue(String.valueOf(kvs[i]), kvs[i + 1])");
+    // Runtime level filtering: emission gated by LOG_LEVEL (default info),
+    // trace folds to debug (Java has no trace level).
+    expect(catalog).toContain('System.getenv("LOG_LEVEL")');
     expect(catalog).toContain('if (l.equals("trace")) {');
-    expect(catalog).toContain(
-      'appendId(sb, "request_id", MDC.get(RequestContext.CORRELATION_ID));',
+
+    // logback.xml wires the JSON envelope: ts from the timestamp provider, the
+    // carrier ids from the whitelisted MDC keys (correlation_id → request_id).
+    const logback = get(files, "src/main/resources/logback.xml");
+    expect(logback).toContain(
+      'class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder"',
     );
-    expect(catalog).toContain('appendId(sb, "scope_id", MDC.get(RequestContext.SCOPE_ID));');
-    expect(catalog).toContain('appendId(sb, "actor_id", MDC.get(RequestContext.ACTOR_ID));');
-    // Only present-in-MDC ids are appended → boot-time lines (no frame) stay bare.
-    expect(catalog).toContain(
-      "private static void appendId(StringBuilder sb, String key, String value) {",
-    );
-    expect(catalog).toContain("if (value != null) {");
+    expect(logback).toContain("<fieldName>ts</fieldName>");
+    expect(logback).toContain("<includeMdcKeyName>correlation_id</includeMdcKeyName>");
+    expect(logback).toContain("<includeMdcKeyName>scope_id</includeMdcKeyName>");
+    expect(logback).toContain("<includeMdcKeyName>actor_id</includeMdcKeyName>");
+    expect(logback).toContain("<mdcKeyFieldName>correlation_id=request_id</mdcKeyFieldName>");
+    expect(logback).toContain("<keyValuePairs/>");
+    // Catalog logger is dedicated + non-additive (JSON stays off the text console).
+    expect(logback).toContain('<logger name="loomCatalog" level="TRACE" additivity="false">');
   });
 
   it("UserFilter stamps the principal's actor_id after the verifier succeeds", async () => {

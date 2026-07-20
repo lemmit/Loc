@@ -96,6 +96,7 @@ import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
   renderLifecycleCatalog,
+  renderLogbackConfig,
   renderMigrationCatalogCallback,
   renderRequestCatalogFilter,
 } from "./emit/observability.js";
@@ -1198,6 +1199,9 @@ function emitProjectFromContexts(
   );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
+  // logback.xml behind the observability catalog (CatalogLog logs through
+  // SLF4J; logstash-logback-encoder renders the JSON envelope).
+  out.set("src/main/resources/logback.xml", renderLogbackConfig());
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
   out.set(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),

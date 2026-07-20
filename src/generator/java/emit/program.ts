@@ -48,6 +48,14 @@ export const JMOLECULES_VERSION = "2.0.1";
  *  cross-backend conformance harness diffs. */
 export const SPRINGDOC_VERSION = "3.0.3";
 
+/** logstash-logback-encoder — the JSON encoder for the observability catalog
+ *  channel (`logback.xml`).  It serialises the SLF4J key/value pairs + MDC +
+ *  timestamp into the cross-backend `{ts,level,event,…}` envelope, so the JSON
+ *  writing and escaping are the logging stack's job (correct by construction)
+ *  rather than a hand-rolled StringBuilder writer.  NOT BOM-managed — pinned
+ *  here; requires logback 1.5+ (which Spring Boot 4.x brings). */
+export const LOGSTASH_ENCODER_VERSION = "8.1";
+
 /** Nimbus JOSE+JWT — the JWKS/JWT library the generated OIDC verifier uses
  *  (D-AUTH-OIDC).  Pinned explicitly: unlike Flyway / Spring Security, the
  *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
@@ -220,6 +228,11 @@ export function renderGradleBuild(
     // collides with the hand-emitted HealthController.
     `    implementation("org.springframework.boot:spring-boot-starter-actuator")`,
     `    implementation("io.micrometer:micrometer-registry-prometheus")`,
+    // Structured-log JSON encoder for the observability catalog channel
+    // (config/logback.xml).  Renders the SLF4J key/value pairs + MDC carrier
+    // ids + timestamp into the cross-backend `{ts,level,event,…}` envelope, so
+    // CatalogLog logs through SLF4J instead of hand-serialising JSON.
+    `    implementation("net.logstash.logback:logstash-logback-encoder:${LOGSTASH_ENCODER_VERSION}")`,
     // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
     `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x

@@ -124,24 +124,32 @@ describe("log-event catalog — Java emission parity", () => {
     ).toEqual([]);
   });
 
-  it("the CatalogLog writer leads every line with the ts + level envelope keys", async () => {
-    // The cross-backend envelope is { ts, level, event, request_id, … }; the
-    // Java writer must emit `ts` (Instant.now) and `level` ahead of `event`,
-    // and gate emission on LOG_LEVEL.
-    const java = sourceFor(await generateSystemFiles(JAVA_SYSTEM), ".java");
-    expect(java, "CatalogLog must emit a ts key").toContain('"ts\\":\\"');
-    expect(java, "CatalogLog must emit a level key").toContain('"level\\":\\"');
-    expect(java, "CatalogLog must source ts from Instant.now()").toContain("Instant.now()");
+  it("the CatalogLog envelope leads every line with the ts + level keys", async () => {
+    // The cross-backend envelope is { ts, level, event, request_id, … }.  Java
+    // logs through SLF4J: `level` + `event` are structured key/value pairs, `ts`
+    // is the timestamp provider in logback.xml, and emission gates on LOG_LEVEL.
+    const files = await generateSystemFiles(JAVA_SYSTEM);
+    const java = sourceFor(files, ".java");
+    expect(java, "CatalogLog must emit a level key/value").toContain('.addKeyValue("level", lvl)');
+    expect(java, "CatalogLog must emit an event key/value").toContain(
+      '.addKeyValue("event", name)',
+    );
     expect(java, "CatalogLog must gate emission on LOG_LEVEL").toContain(
       'System.getenv("LOG_LEVEL")',
+    );
+    const logback = files.get(
+      [...files.keys()].find((k) => k.endsWith("src/main/resources/logback.xml"))!,
+    )!;
+    expect(logback, "logback.xml must emit a ts timestamp field").toContain(
+      "<fieldName>ts</fieldName>",
     );
   });
 
   it("the request bracket carries the cross-backend `duration_ms` field (not camelCase)", async () => {
-    // Java's writer takes raw "key", value pairs, so the field name is a bare
-    // string literal with no naming helper — easy to drift to camelCase and
-    // silently break a `jq 'select(.event=="request_end").duration_ms'` query
-    // that works on every other backend.
+    // The field name is a bare string literal passed as a key/value pair — easy
+    // to drift to camelCase and silently break a
+    // `jq 'select(.event=="request_end").duration_ms'` query that works on every
+    // other backend.
     const java = sourceFor(await generateSystemFiles(JAVA_SYSTEM), ".java");
     expect(java).toContain('"duration_ms", durationMs');
     expect(java).not.toContain('"durationMs"');
