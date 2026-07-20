@@ -150,7 +150,7 @@ function renderPySubjectTests(
 }
 
 /** A test name slug usable as a python identifier, deduped per file. */
-function testFnName(name: string, used: Set<string>): string {
+export function testFnName(name: string, used: Set<string>): string {
   const base =
     `test_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`.replace(/_+$/, "") || "test_case";
   let candidate = base;
@@ -178,7 +178,11 @@ function renderTest(t: TestIR, ctx: BoundedContextIR, used: Set<string>): string
 /** Render a test-body expression: `<Agg>.create({ … })` object literals
  *  become coerced keyword arguments; everything else defers to
  *  `renderPyExpr`. */
-function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, string>): string {
+export function renderTestExpr(
+  e: ExprIR,
+  ctx: BoundedContextIR,
+  lets?: Map<string, string>,
+): string {
   // Calls of currentUser-gated ops thread the synthetic actor as the
   // trailing argument (mirrors the TS test emitter).  The aggregate
   // resolves through the receiver's type when lowered, else through the
@@ -213,7 +217,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, str
   return renderPyExpr(e);
 }
 
-function renderCreateInput(
+export function renderCreateInput(
   obj: Extract<ExprIR, { kind: "object" }>,
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -265,7 +269,7 @@ const MATCHER_OP: Record<string, string> = {
 
 /** `expect(x).<matcher>(y)` / `.not.<matcher>(y)` → a comparison assert.
  *  Returns null for bare boolean assertions (caller wraps those). */
-function renderExplicitMatcher(
+export function renderExplicitMatcher(
   expr: ExprIR,
   ctx: BoundedContextIR,
   lets?: Map<string, string>,
@@ -286,7 +290,7 @@ function renderExplicitMatcher(
   return negate ? `    assert not (${cmp})` : `    assert ${cmp}`;
 }
 
-function renderTestStmt(
+export function renderTestStmt(
   s: TestStmtIR,
   ctx: BoundedContextIR,
   lets?: Map<string, string>,

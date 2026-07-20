@@ -524,6 +524,18 @@ describe("Ordering (integration)", () => {
   Compile-verified: a workflow + integration-test project (create → op → save →
   cascade) `tsc --noEmit`s clean. **Still deferred:** the testcontainers-node
   behavioural run-path that actually *runs* the tier in Loom's CI.
-- **3b** — the other four backends' integration renderers (against the same real
-  PG), outbox-async cascade draining if reactors are async, and the cross-backend
-  CI matrix.
+- **3b (python)** ✅ **SHIPPED (emit + run-verified)** — the **Python/FastAPI**
+  integration renderer (`python/emit/integration-tests.ts`): emits
+  `tests/test_<ctx>_integration.py` reading `LOOM_PG_URL`, applying the SQL
+  migrations via `run_migrations(engine)`, wiring a per-test `AsyncSession` +
+  repositories, and running create→`await repo.save` / op→mutate+save /
+  find→`await repo.<read>` (find_by_id nullable → `assert x is not None`;
+  findAll→`(await repo.all(…)).items`). Workflow context wires
+  `InProcessDispatcher(session)` (synchronous cascade), else
+  `NoopDomainEventDispatcher()`. The re-gate generalized to
+  `INTEGRATION_BACKENDS = {node, python}`. **Verified end-to-end:** the emitted
+  module passes `ruff` + `mypy --strict` and both legs (no-op + cascade) run
+  green under `pytest` against a real Postgres.
+- **3b (remaining)** — the .NET, Java, and Elixir integration renderers (against
+  the same real PG), outbox-async cascade draining if reactors are async, and the
+  cross-backend CI matrix.
