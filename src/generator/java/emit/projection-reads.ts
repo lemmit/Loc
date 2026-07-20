@@ -3,6 +3,7 @@ import type {
   ProjectionIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
@@ -44,10 +45,15 @@ export function renderJavaProjectionReads(
   ctx: EnrichedBoundedContextIR,
   pctx: ProjectionReadsCtx,
 ): Map<string, { category: "workflow-service" | "api-common"; content: string }> | null {
-  if (ctx.projections.length === 0) return null;
+  // FOLDED (materialized) projections only — the event-folded read model with a
+  // physical `<Proj>Row` table.  Query-time projections (read-path-architecture.md
+  // rev.13) have no read-model row; they are served by
+  // `renderJavaQueryProjections` instead.
+  const folded = ctx.projections.filter(isMaterializedProjection);
+  if (folded.length === 0) return null;
   const out = new Map<string, { category: "workflow-service" | "api-common"; content: string }>();
 
-  for (const proj of ctx.projections) {
+  for (const proj of folded) {
     out.set(`${upperFirst(proj.name)}Response.java`, {
       category: "workflow-service",
       content: renderProjectionResponseDto(proj, pctx),
@@ -93,6 +99,7 @@ function renderProjectionsController(
   pctx: ProjectionReadsCtx,
 ): string {
   const className = `${ctx.name}ProjectionsController`;
+  const folded = ctx.projections.filter(isMaterializedProjection);
   const corrValueType = (proj: ProjectionIR): string => {
     const t = corrWire(proj).type;
     const inner = t.kind === "optional" ? t.inner : t;
@@ -101,10 +108,10 @@ function renderProjectionsController(
     }
     return javaValueTypeForId(inner.valueType);
   };
-  const anyUuid = ctx.projections.some((p) => corrValueType(p) === "UUID");
+  const anyUuid = folded.some((p) => corrValueType(p) === "UUID");
 
   const routes: string[] = [];
-  for (const proj of ctx.projections) {
+  for (const proj of folded) {
     const T = `${upperFirst(proj.name)}Response`;
     const slug = snake(proj.name);
     const repo = projectionRepoField(proj);
@@ -135,13 +142,13 @@ function renderProjectionsController(
   }
   while (routes[routes.length - 1] === "") routes.pop();
 
-  const fieldDecls = ctx.projections.map(
+  const fieldDecls = folded.map(
     (p) => `    private final ${upperFirst(p.name)}RowRepository ${projectionRepoField(p)};`,
   );
-  const ctorParams = ctx.projections
+  const ctorParams = folded
     .map((p) => `${upperFirst(p.name)}RowRepository ${projectionRepoField(p)}`)
     .join(", ");
-  const ctorAssigns = ctx.projections.map(
+  const ctorAssigns = folded.map(
     (p) => `        this.${projectionRepoField(p)} = ${projectionRepoField(p)};`,
   );
 
