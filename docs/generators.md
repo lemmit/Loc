@@ -858,8 +858,17 @@ Known frontier (M-T1.16): modal open-state, typed in-flight form state, enum DU 
 The **mobile axis** — a new development branch outside the web-target matrix, not
 a sixth web SPA.  `src/generator/flutter/` emits a **Dart/Flutter (Material 3)
 app on Riverpod** per flutter deployable.  Like Feliz it is **self-hosting** (own
-SDK build — `flutter build web`, not the vite static pipeline) so it hosts only
-its own `framework: flutter` UI.  Structurally Flutter is a **Feliz clone**: a
+SDK build, not the vite static pipeline) so it hosts only its own
+`framework: flutter` UI.
+
+**One Dart source, three build surfaces.**  The emitted project's `Makefile`
+builds **web** (`make web` → `flutter build web`, the surface compose serves via
+the emitted nginx `Dockerfile`), **Android** (`make apk`), and **iOS**
+(`make ipa`) from the same UI — "web-vs-native is a build target, not a modelling
+mode."  The native `android/`/`ios/` folders are SDK-owned boilerplate and are
+**not** vendored; `make prepare` (`flutter create --platforms=…`) materialises
+them on demand.  Compose serves only the web surface (mobile artifacts aren't a
+compose concern), and **CI gates only the web build** — see the CI row.  Structurally Flutter is a **Feliz clone**: a
 non-JSX, function-call-tree target (`Column(children: [ … ])`) that rides the
 **same shared markup walker** (`walker-core.ts`) through `flutter-target.ts` +
 a Dart expression-leaf table, and — like Feliz — supplies its own `interChildSeparator`
@@ -872,7 +881,7 @@ seam because Dart list literals are comma-separated.
 | Data / reads | `QueryView` resolves to a Riverpod `FutureProvider` (`reads-emit.ts`) that `GET`s the collection (unwrapping the paged `{items}` envelope) or a `FutureProvider.family` for byId; the widget renders `AsyncValue.when(loading/error/data)` with `empty:` folded in.  `For` lowers to `.map(...).toList()`. |
 | Forms | `CreateForm`/`OperationForm`/`DestroyForm` render self-contained `StatefulWidget`s in `lib/forms.dart` (`forms-emit.ts`) — typed field widgets by wire type (`TextFormField`/`SwitchListTile`/`DropdownButtonFormField`/`showDatePicker`, value objects flattened), a foreign-key `X id` becomes a runtime-loaded dropdown (`initState` GETs `/<target-collection>`, options labelled by the target's derived `display`), `GlobalKey<FormState>` validation, `http` POST/PUT/DELETE via `apiUri`, pop-on-success. |
 | Design | The procedural **flutterMaterial** pack (`src/generator/flutter/pack.ts`, Feliz-`pack.ts` model — emits Material widget trees, no `.hbs`). |
-| CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). |
+| CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). **Web only** — no gate compiles the native `apk`/`ipa` surface, so native-only regressions aren't caught per-PR (tracked in `docs/new-plan/T1-…` / the Flutter parity proposal). |
 
 `Modal { trigger: Button(…), OperationForm(of:, op:) }` renders as a trigger `ElevatedButton` whose `onPressed` opens an `AlertDialog` wrapping the op-form widget (`showDialog`); the op-form pops its own route on success, dismissing the dialog.  `WorkflowForm(runs: <wf>)` renders as a `StatefulWidget` (like `CreateForm`) that POSTs the workflow params to the command route `/workflows/<wf>`.
 

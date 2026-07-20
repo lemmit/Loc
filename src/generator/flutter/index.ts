@@ -4,14 +4,22 @@
 // native), so it dispatches straight through its own `emitProject` and is
 // absent from `STATIC_BUNDLE_FRAMEWORKS`.
 //
-// WALKING SKELETON: page bodies render through the shared `walkBody` engine with
-// `flutterTarget` (the WalkerTarget seam) + the procedural `flutterMaterial`
-// pack, exactly as Feliz drives `walkBody` with `felizTarget` + `felizPack()`.
-// The Dart wire-model classes come from `renderDartModels`.  Forms / workflows /
-// match-await and the native (non-web) surface are deferred to full parity — the
-// display path (List / Detail) is what the skeleton proves end-to-end.  No Dart
-// is compiled locally (no Flutter SDK); `generated-flutter-build.yml` owns the
-// "is the Dart real" gate.
+// Page bodies render through the shared `walkBody` engine with `flutterTarget`
+// (the WalkerTarget seam) + the procedural `flutterMaterial` pack, exactly as
+// Feliz drives `walkBody` with `felizTarget` + `felizPack()`.  The Dart
+// wire-model classes come from `renderDartModels`.  The display path (List /
+// Detail), forms (`CreateForm`/`OperationForm`/`WorkflowForm`/`DestroyForm`),
+// `match await` async effects, Riverpod state/actions, and user components all
+// emit; the remaining frontier (a handful of component variants, VO-array
+// fields with non-scalar sub-fields, realtime, etc.) falls back to a diagnostic
+// comment — never broken Dart.  The live gap list is `parity.ts`
+// (`analyzeFlutterParity`) and `docs/generators.md` → "Flutter mobile"; the
+// gap-fill plan is `docs/old/proposals/flutter-parity-and-native-gates.md`.
+//
+// BUILD SURFACES: one Dart source → web (served by the emitted nginx Dockerfile
+// in compose), Android (`make apk`), iOS (`make ipa`).  No Dart is compiled
+// locally (no Flutter SDK); `generated-flutter-build.yml` owns the "is the Dart
+// real" gate — WEB ONLY, native isn't gated per-PR yet.
 
 import type {
   DeployableIR,

@@ -16,9 +16,12 @@ import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 // Deployable contract mirrors `react`: `targets:` a backend, inherits its
 // contexts via enrichment, owns no database.
 //
-// PHASE 0: `composeService` is a minimal stub (a web-served bundle shape,
-// modelled on Feliz); the Phase 1 composer track (E) replaces it with the real
-// `flutter build web` Dockerfile + the native artifact opt-out.
+// `composeService` serves the web surface: the generator emits a real
+// `flutter build web` → nginx Dockerfile (see `generator/flutter/index.ts`
+// DOCKERFILE), and this shape (structurally identical to Feliz's) wires it
+// into the compose stack on :3000 behind the API proxy.  The same emitted
+// project also builds native Android/iOS via its Makefile (`make apk`/`ipa`),
+// which compose does not serve — mobile artifacts aren't a compose concern.
 // ---------------------------------------------------------------------------
 
 const flutterPlatform: PlatformSurface = {
