@@ -148,7 +148,7 @@ export function renderVuePage(input: VuePageShellInput): string {
   // the bare name (`id`), so bind plain consts off `useRoute()`; a
   // param change remounts via the router's default behaviour for
   // generated CRUD pages.
-  // Form wiring (the reactive()+zod runtime, D-VUE-FRONTEND):
+  // Form wiring (the vee-validate `useLoomForm` runtime, D-VUE-FRONTEND):
   //   - an aggregate create-form gets `const form = useLoomForm(...)`
   //     + the `create` mutation handle the pack's primitive-form-of
   //     markup references;

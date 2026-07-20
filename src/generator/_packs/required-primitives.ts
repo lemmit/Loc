@@ -225,7 +225,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = 
     form: TSX_FORM,
   },
   // Vue packs own forms + field inputs the way TSX packs do
-  // (hand-rolled reactive() + zod form helper), so the required
+  // (vee-validate `useLoomForm` helper over the shared zod schema), so the required
   // surface mirrors TSX exactly — the Vite+vue-router SPA shape needs
   // no shell template beyond the shared set (vite config / theme /
   // app shell are all covered by SHARED_SHELL names).

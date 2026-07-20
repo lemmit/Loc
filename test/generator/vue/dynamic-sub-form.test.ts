@@ -1,7 +1,8 @@
 // Vue dynamic sub-form rows — a `CreateForm`/`OperationForm` whose aggregate has
 // an `X[]` field of a value object (`items: LineItem[]`) renders a repeatable
 // row group instead of the disabled "(arrays not yet supported)" stub.  Vue's
-// `useLoomForm` is a plain `reactive()` object, so array fields work natively:
+// `useLoomForm` holds `values` in a local `reactive()` object (the current draft
+// vee-validate validates against on submit), so array fields work natively:
 // each row `v-model`s `form.values.items[index].<sub>` (numeric sub-fields coerce
 // via `@update:model-value`), an Add button `.push`es a fresh row, and a per-row
 // Remove `.splice`s it out.  Proven to `vue-tsc --noEmit` + `vite build` for both
