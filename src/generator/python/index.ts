@@ -163,10 +163,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Foreign events a hosted workflow consumes through a wired channel join
   // the deployable's event vocabulary: `app/domain/events.py` needs the
   // dataclass (the reactor handler constructs/matches it) and the
-  // DomainEvent union carries it.
+  // DomainEvent union carries it.  EVERY broker-carried event joins too,
+  // subscribed or not — the consumer's codec must decode a carried type it
+  // has no reactor for (the dispatch no-ops), or the broker driver would
+  // wrongly dead-letter it as unknown.
   const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
   const mergedSubscriptions = dispatchSubscriptionsOf(mergedPre);
-  const foreignConsumedEvents = [...new Set(mergedSubscriptions.map((s) => s.event))]
+  const carriedEventNames = channelBindings.flatMap((b) => b.events);
+  const foreignConsumedEvents = [
+    ...new Set([...mergedSubscriptions.map((s) => s.event), ...carriedEventNames]),
+  ]
     .filter((name) => !knownEventNames.has(name))
     .flatMap((name) => {
       for (const sub of args.sys.subdomains) {
@@ -238,14 +244,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // added ONLY when this deployable owns a cron timer; an every-only (or
   // timer-free) project stays byte-identical.
   const timerDeps = hasDurableTimers ? ["procrastinate>=3,<4", "psycopg[binary]>=3.2,<4"] : [];
-  // Broker transports (M-T4.4 slices 2b + 7a) — redis-py (MIT, design §6a)
-  // speaks RESP to the compose-provisioned Valkey sidecar; aio-pika
-  // (Apache-2.0) speaks AMQP 0-9-1 to the rabbitmq sidecar.  Per-transport
-  // wiring-gated so a channel-less (or single-transport) pyproject stays
-  // byte-identical.
+  // Broker transports (M-T4.4 slices 2b + 7a + 8a) — redis-py (MIT, design
+  // §6a) speaks RESP to the compose-provisioned Valkey sidecar; aio-pika
+  // (Apache-2.0) speaks AMQP 0-9-1 to the rabbitmq sidecar; aiokafka
+  // (Apache-2.0, the asyncio-native kafka client) speaks to the
+  // apache/kafka sidecar.  Per-transport wiring-gated so a channel-less
+  // (or single-transport) pyproject stays byte-identical.
   const channelDeps = [
     ...(channelBindings.some((b) => b.transport === "redis") ? ["redis>=5.2,<7"] : []),
     ...(channelBindings.some((b) => b.transport === "rabbitmq") ? ["aio-pika>=9.5,<10"] : []),
+    ...(channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka>=0.12,<0.13"] : []),
   ];
   out.set(
     "pyproject.toml",
@@ -253,6 +261,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       slug,
       [...resources.deps, ...oidcDeps, ...timerDeps, ...channelDeps],
       [...resources.devDeps],
+      channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka"] : [],
     ),
   );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
@@ -706,6 +715,9 @@ function renderPyproject(
   slug: string,
   extraDeps: readonly string[] = [],
   extraDevDeps: readonly string[] = [],
+  /** Untyped third-party modules to exempt from `mypy --strict`'s
+   *  import-untyped gate (e.g. aiokafka ships no py.typed marker). */
+  untypedModules: readonly string[] = [],
 ): string {
   const dep = (r: string) => `  "${r}",`;
   return lines(
@@ -744,6 +756,14 @@ function renderPyproject(
     `python_version = "3.13"`,
     "strict = true",
     "",
+    ...untypedModules.flatMap((m) => [
+      `# ${m} ships no py.typed marker — silence the import-untyped gate for`,
+      "# it alone; the generated call sites still typecheck strictly.",
+      "[[tool.mypy.overrides]]",
+      `module = "${m}.*"`,
+      "ignore_missing_imports = true",
+      "",
+    ]),
     "[tool.pytest.ini_options]",
     `asyncio_mode = "auto"`,
     `pythonpath = ["."]`,
