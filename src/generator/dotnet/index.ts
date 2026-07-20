@@ -37,7 +37,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { redisChannelBindings } from "../_channels/bindings.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -296,12 +296,16 @@ function emitProjectFromContexts(
   // enricher-stored `eventSubscriptions`; OR them in so a projection-only context
   // still gets the Mediator dispatcher + IDomainEvent notification plumbing (the
   // fold handlers, discovered by assembly scan, otherwise never run).
-  // Broker bindings (channels.md; M-T4.4 slice 6a): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4 slices 6a + 7b): the broker-bound
   // channelSources this deployable wires via `channels:`.  A wired-but-foreign
   // channel joins the carrier set as a stub with its REAL semantics knobs, so
   // the subscription derivation routes a hosted reactor off a channel declared
-  // in a non-hosted context (mirrors the Hono/Python orchestrators).
-  const channelBindings = system ? redisChannelBindings(system.deployable, system.sys) : [];
+  // in a non-hosted context (mirrors the Hono/Python orchestrators).  The
+  // stubs feed ONLY the subscription derivation — the outbox/idempotency
+  // machinery keys off HOSTED durable channels, matching what the
+  // module-level migrations back; a foreign `queue`/`work` consumer relies on
+  // broker ack semantics + idempotent reactors (the slice-3 stance).
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   const wiredForeignChannels = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
@@ -321,6 +325,21 @@ function emitProjectFromContexts(
   const hasSubscriptions =
     contexts.some((c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0) ||
     hasChannelConsumers;
+  // Durable broker-bound events (M-T4.4 slice 7b): HOSTED durable events
+  // carried by a wired `queue`/`work` (or future `log`) channel — their
+  // producer path rides the outbox relay (design §5), never the inline tee.
+  const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
+  // The outbox tier now also boots for the workflow-less durable-broker
+  // PRODUCER (the Hono forceOutbox twin): no subscription, but the relay
+  // must still drain the outbox to publish.
+  const hasOutboxTier =
+    (hasSubscriptions || durableBrokerEvents.size > 0) && hostedDurable.size > 0;
   // Persistence-neutral `ConcurrencyConflictException` — only the Dapper
   // adapter needs it (its version-CAS `SaveAsync` throws it; the EF path keys
   // its 409 arm on `DbUpdateConcurrencyException` instead), so gate the emit on
@@ -481,11 +500,12 @@ function emitProjectFromContexts(
         merged.events,
         hasChannelConsumers,
         system.sys,
-        hasSubscriptions && durableEventTypes(merged).size > 0
+        hasOutboxTier
           ? "OutboxDomainEventDispatcher"
           : hasSubscriptions
             ? "InProcessDomainEventDispatcher"
             : "NoopDomainEventDispatcher",
+        { hasOutbox: hasOutboxTier, durableBroker: durableBrokerEvents.size > 0 },
       ),
     );
   }
@@ -509,25 +529,35 @@ function emitProjectFromContexts(
   // registration lines are shared.
   const durableTypes = [...new Set(contexts.flatMap((c) => [...durableEventTypes(c)]))].sort();
   const outboxUsesDapper = system?.deployable.persistence === "dapper";
-  const hasOutbox = hasSubscriptions && durableTypes.length > 0;
+  const hasOutbox = hasOutboxTier;
   if (hasOutbox) {
+    // The workflow-less durable-broker producer wraps the Noop (no in-process
+    // dispatcher exists); the relay publishes broker-bound rows on drain
+    // (M-T4.4 slice 7b, design §5) instead of redelivering them locally.
+    const outboxInner = hasSubscriptions
+      ? "InProcessDomainEventDispatcher"
+      : "NoopDomainEventDispatcher";
+    const relayOpts = { durableBroker: durableBrokerEvents.size > 0, hasSubscriptions };
     out.set("Domain/Common/OutboxDelivery.cs", renderOutboxDelivery(ns));
     if (outboxUsesDapper) {
       out.set(
         "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
-        renderDapperOutboxDispatcher(ns, durableTypes),
+        renderDapperOutboxDispatcher(ns, durableTypes, outboxInner),
       );
       out.set(
         "Infrastructure/Events/OutboxRelayService.cs",
-        renderDapperOutboxRelay(ns, durableTypes),
+        renderDapperOutboxRelay(ns, durableTypes, relayOpts),
       );
     } else {
       out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
       out.set(
         "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
-        renderOutboxDispatcher(ns, durableTypes),
+        renderOutboxDispatcher(ns, durableTypes, outboxInner),
       );
-      out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+      out.set(
+        "Infrastructure/Events/OutboxRelayService.cs",
+        renderOutboxRelay(ns, durableTypes, relayOpts),
+      );
     }
   }
   // Auth files — emitted only when the deployable opts in
@@ -852,6 +882,11 @@ function emitProjectFromContexts(
     timers: hasTimers ? ownedTimers : [],
     hasChannels,
     hasChannelConsumers,
+    outboxNoopInner: hasOutbox && !hasSubscriptions,
+    channelTransports: {
+      redis: channelBindings.some((b) => b.transport === "redis"),
+      rabbit: channelBindings.some((b) => b.transport === "rabbitmq"),
+    },
     authRequired,
     actorIdProp,
     usesValidators,
@@ -1575,6 +1610,14 @@ function emitProject(
     /** Broker channels (M-T4.4 slice 6a) — see renderProgram/renderCsproj. */
     hasChannels?: boolean;
     hasChannelConsumers?: boolean;
+    /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
+     *  the per-transport csproj package refs (StackExchange.Redis /
+     *  RabbitMQ.Client). */
+    channelTransports?: { redis: boolean; rabbit: boolean };
+    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+     *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
+     *  instead of the InProcess scoped line. */
+    outboxNoopInner?: boolean;
     /** Transactional outbox (dispatch-delivery-semantics.md): registers the
      *  outbox-wrapping dispatcher + the relay BackgroundService. */
     hasOutbox?: boolean;
@@ -1640,6 +1683,7 @@ function emitProject(
       hasChannels: !!options?.hasChannels,
       hasChannelConsumers: !!options?.hasChannelConsumers,
       hasOutbox: !!options?.hasOutbox,
+      outboxNoopInner: !!options?.outboxNoopInner,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,
@@ -1671,7 +1715,10 @@ function emitProject(
       // Hangfire packages ship only when an owned timerSource uses a real `cron:`
       // expression (an `every:`-only deployable uses PeriodicTimer, no dep).
       anyTimerUsesCron(timers),
-      !!options?.hasChannels,
+      options?.channelTransports ?? {
+        redis: !!options?.hasChannels,
+        rabbit: false,
+      },
     ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));

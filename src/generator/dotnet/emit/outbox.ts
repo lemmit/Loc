@@ -49,9 +49,14 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
 }
 
 /** The outbox-recording dispatcher: durable events INSERT into the outbox
- *  (the relay delivers); everything else delegates to the in-process
- *  Mediator dispatcher. */
-export function renderOutboxDispatcher(ns: string, durableTypes: readonly string[]): string {
+ *  (the relay delivers); everything else delegates to the inner dispatcher —
+ *  the in-process Mediator one where reactors live, the Noop in the
+ *  workflow-less durable-broker producer shape (M-T4.4 slice 7b). */
+export function renderOutboxDispatcher(
+  ns: string,
+  durableTypes: readonly string[],
+  inner = "InProcessDomainEventDispatcher",
+): string {
   const set = durableTypes.map((t) => `"${t}"`).join(", ");
   return `// Auto-generated.
 using System.Collections.Generic;
@@ -67,14 +72,14 @@ namespace ${ns}.Infrastructure.Events;
 /// <summary>Records durable events (channels with retention: log | work) in
 /// the __loom_outbox table instead of dispatching inline; the
 /// OutboxRelayService delivers them at-least-once.  Ephemeral events
-/// delegate to the in-process dispatcher unchanged.</summary>
+/// delegate to the inner dispatcher unchanged.</summary>
 public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
 {
     private static readonly HashSet<string> DurableEventTypes = new() { ${set} };
     private readonly AppDbContext _db;
-    private readonly InProcessDomainEventDispatcher _inner;
+    private readonly ${inner} _inner;
 
-    public OutboxDomainEventDispatcher(AppDbContext db, InProcessDomainEventDispatcher inner)
+    public OutboxDomainEventDispatcher(AppDbContext db, ${inner} inner)
     {
         _db = db;
         _inner = inner;
@@ -128,11 +133,65 @@ public static class OutboxDelivery
 
 /** The polling relay: a BackgroundService draining undispatched outbox rows
  *  (ordered by occurred_at) through the in-process dispatcher; failures bump
- *  `attempts` and dead-letter (log only — the row stays) after MaxAttempts. */
-export function renderOutboxRelay(ns: string, durableTypes: readonly string[]): string {
+ *  `attempts` and dead-letter (log only — the row stays) after MaxAttempts.
+ *
+ *  `durableBroker` (M-T4.4 slice 7b, design §5): drained rows whose channel
+ *  is broker-bound publish via `ChannelRelayPublisher` (envelope id = row
+ *  id) instead of redelivering locally.  `hasSubscriptions: false` is the
+ *  workflow-less durable-broker producer — there is no in-process dispatcher
+ *  to fall back to, so unpublishable rows simply complete. */
+export function renderOutboxRelay(
+  ns: string,
+  durableTypes: readonly string[],
+  opts: { durableBroker: boolean; hasSubscriptions: boolean } = {
+    durableBroker: false,
+    hasSubscriptions: true,
+  },
+): string {
   const arms = durableTypes
     .map((t) => `            "${t}" => JsonSerializer.Deserialize<${t}>(payload),`)
     .join("\n");
+  const channelsUsing = opts.durableBroker ? `using ${ns}.Infrastructure.Channels;\n` : "";
+  const transportsField = opts.durableBroker
+    ? "\n    private readonly ChannelTransports _transports;"
+    : "";
+  const ctorParams = opts.durableBroker
+    ? `IServiceScopeFactory scopes, ChannelTransports transports, ILogger<OutboxRelayService> log`
+    : `IServiceScopeFactory scopes, ILogger<OutboxRelayService> log`;
+  const ctorAssign = opts.durableBroker ? "\n        _transports = transports;" : "";
+  const innerResolve = opts.hasSubscriptions
+    ? "\n        var inner = scope.ServiceProvider.GetRequiredService<InProcessDomainEventDispatcher>();"
+    : "";
+  const localDispatch = `// The row id rides on an AsyncLocal so saga handlers'
+                // idempotent-consumer markers can no-op on redelivery
+                // (dispatch-delivery-semantics.md §3).
+                OutboxDelivery.CurrentEventId = row.Id.ToString();
+                try
+                {
+                    if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
+                }
+                finally
+                {
+                    OutboxDelivery.CurrentEventId = null;
+                }`;
+  const dispatchBlock = opts.durableBroker
+    ? opts.hasSubscriptions
+      ? `// Design §5: a broker-bound durable row publishes on drain (the
+                // envelope carries the row id — the consumer-side idempotency
+                // key); the rest redeliver through the local dispatcher.
+                if (ev is null || !await ChannelRelayPublisher.TryPublishAsync(_transports, ev, row.Id.ToString(), _log))
+                {
+                    ${localDispatch.split("\n").join("\n    ")}
+                }`
+      : `// Design §5: broker-bound durable rows publish on drain (the
+                // envelope carries the row id — the consumer-side idempotency
+                // key).  A non-broker durable row has no subscriber in this
+                // shape; either way the row completes.
+                if (ev is not null)
+                {
+                    await ChannelRelayPublisher.TryPublishAsync(_transports, ev, row.Id.ToString(), _log);
+                }`
+    : localDispatch;
   return `// Auto-generated.
 using System;
 using System.Text.Json;
@@ -144,25 +203,25 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Events;
-using ${ns}.Infrastructure.Persistence;
+${channelsUsing}using ${ns}.Infrastructure.Persistence;
 
 namespace ${ns}.Infrastructure.Events;
 
-/// <summary>Drains __loom_outbox through the in-process dispatcher
-/// (at-least-once — consumers must tolerate redelivery).  Rows that exhaust
-/// MaxAttempts stay in the table and log event_dead_lettered once.</summary>
+/// <summary>Drains __loom_outbox at-least-once — consumers must tolerate
+/// redelivery.  Rows that exhaust MaxAttempts stay in the table and log
+/// event_dead_lettered once.</summary>
 public sealed class OutboxRelayService : BackgroundService
 {
     private const int MaxAttempts = 5;
     private const int BatchSize = 50;
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(500);
 
-    private readonly IServiceScopeFactory _scopes;
+    private readonly IServiceScopeFactory _scopes;${transportsField}
     private readonly ILogger<OutboxRelayService> _log;
 
-    public OutboxRelayService(IServiceScopeFactory scopes, ILogger<OutboxRelayService> log)
+    public OutboxRelayService(${ctorParams})
     {
-        _scopes = scopes;
+        _scopes = scopes;${ctorAssign}
         _log = log;
     }
 
@@ -185,8 +244,7 @@ public sealed class OutboxRelayService : BackgroundService
     private async Task DrainAsync(CancellationToken cancellationToken)
     {
         await using var scope = _scopes.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var inner = scope.ServiceProvider.GetRequiredService<InProcessDomainEventDispatcher>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();${innerResolve}
         var rows = await db.LoomOutbox
             .Where(m => m.DispatchedAt == null && m.Attempts < MaxAttempts)
             .OrderBy(m => m.OccurredAt)
@@ -197,18 +255,7 @@ public sealed class OutboxRelayService : BackgroundService
             try
             {
                 var ev = Deserialize(row.Type, row.Payload);
-                // The row id rides on an AsyncLocal so saga handlers'
-                // idempotent-consumer markers can no-op on redelivery
-                // (dispatch-delivery-semantics.md §3).
-                OutboxDelivery.CurrentEventId = row.Id.ToString();
-                try
-                {
-                    if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
-                }
-                finally
-                {
-                    OutboxDelivery.CurrentEventId = null;
-                }
+                ${dispatchBlock}
                 row.DispatchedAt = DateTime.UtcNow;
             }
             catch (OperationCanceledException)
