@@ -46,6 +46,10 @@ export const LETTUCE_CORE_VERSION = "6.5.5.RELEASE";
  *  frameworks); wiring-gated into build.gradle.kts by the orchestrator. */
 export const AMQP_CLIENT_VERSION = "5.25.0";
 
+/** org.apache.kafka:kafka-clients (Apache 2.0) — the plain Kafka driver
+ *  (design §6a; the Lettuce/amqp-client plain-driver choice). */
+export const KAFKA_CLIENTS_VERSION = "3.9.1";
+
 /** One consumer dispatch target: a dispatcher handler method the
  *  ChannelConsumerService invokes when the named event arrives. */
 export interface ChannelConsumerHandler {
@@ -63,6 +67,30 @@ function uniqueBindings(bindings: BrokerBinding[]): BrokerBinding[] {
     seen.add(b.csName);
     return true;
   });
+}
+
+/** The per-binding driver pick in `ChannelTransports` — a ctor reference
+ *  when one driver is wired, a transport-discriminated conditional chain
+ *  when several are (fixed kafka → rabbitmq → redis order; the last wired
+ *  driver is the fallback arm, so pre-kafka outputs stay byte-identical). */
+function transportPickLine(hasRedis: boolean, hasRabbit: boolean, hasKafka: boolean): string {
+  const drivers: [string, string][] = [];
+  if (hasKafka) drivers.push(["kafka", "KafkaChannelTransport"]);
+  if (hasRabbit) drivers.push(["rabbitmq", "RabbitChannelTransport"]);
+  if (hasRedis) drivers.push(["redis", "RedisChannelTransport"]);
+  const last = drivers[drivers.length - 1];
+  if (!last) throw new Error("renderJavaChannelFiles called with no wired broker transport");
+  if (drivers.length === 1) {
+    return `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, ${last[1]}::new));`;
+  }
+  const arms = drivers
+    .slice(0, -1)
+    .map(
+      ([t, cls]) =>
+        `${JSON.stringify(t)}.equals(binding.transport())\n                            ? new ${cls}(u)\n                            : `,
+    )
+    .join("");
+  return `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url,\n                    u -> ${arms}new ${last[1]}(u)));`;
 }
 
 /** Java expression serialising one event record component into its
@@ -158,6 +186,7 @@ export function renderJavaChannelFiles(
   const unique = uniqueBindings(bindings);
   const hasRedis = unique.some((b) => b.transport === "redis");
   const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  const hasKafka = unique.some((b) => b.transport === "kafka");
   // event type -> address, split by durability (design §5): ephemeral events
   // publish inline in the tee; durable (`work`) events ride the outbox relay.
   // First-by-declaration within each tier, mirroring the in-process
@@ -204,6 +233,13 @@ export function renderJavaChannelFiles(
       `        String time,`,
       `        String dataContentType,`,
       `        String loomChannel,`,
+      ...(hasKafka
+        ? [
+            `        /** The channel's key: field value — kafka's partition key`,
+            `         *  (loomkey ?? id, design §4); null off the kafka path. */`,
+            `        String loomKey,`,
+          ]
+        : []),
       `        Map<String, Object> data) {`,
       ``,
       `    private static final JsonMapper JSON = JsonMapper.builder().build();`,
@@ -217,6 +253,9 @@ export function renderJavaChannelFiles(
       `        m.put("time", time);`,
       `        m.put("datacontenttype", dataContentType);`,
       `        m.put("loomchannel", loomChannel);`,
+      ...(hasKafka
+        ? [`        if (loomKey != null) {`, `            m.put("loomkey", loomKey);`, `        }`]
+        : []),
       `        m.put("data", data);`,
       `        return JSON.writeValueAsString(m);`,
       `    }`,
@@ -232,6 +271,7 @@ export function renderJavaChannelFiles(
       `                (String) m.get("time"),`,
       `                (String) m.get("datacontenttype"),`,
       `                (String) m.get("loomchannel"),`,
+      ...(hasKafka ? [`                (String) m.get("loomkey"),`] : []),
       `                (Map<String, Object>) m.get("data"));`,
       `    }`,
       `}`,
@@ -488,6 +528,174 @@ export function renderJavaChannelFiles(
       ),
     );
 
+  if (hasKafka)
+    out.set(
+      "KafkaChannelTransport.java",
+      lines(
+        `package ${pkg};`,
+        ``,
+        `import java.time.Duration;`,
+        `import java.util.ArrayList;`,
+        `import java.util.List;`,
+        `import java.util.Properties;`,
+        `import java.util.function.Consumer;`,
+        ``,
+        `import org.apache.kafka.clients.admin.Admin;`,
+        `import org.apache.kafka.clients.admin.NewTopic;`,
+        `import org.apache.kafka.clients.consumer.ConsumerConfig;`,
+        `import org.apache.kafka.clients.consumer.KafkaConsumer;`,
+        `import org.apache.kafka.clients.producer.KafkaProducer;`,
+        `import org.apache.kafka.clients.producer.ProducerConfig;`,
+        `import org.apache.kafka.clients.producer.ProducerRecord;`,
+        `import org.apache.kafka.common.errors.TopicExistsException;`,
+        `import org.apache.kafka.common.errors.WakeupException;`,
+        `import org.apache.kafka.common.serialization.StringDeserializer;`,
+        `import org.apache.kafka.common.serialization.StringSerializer;`,
+        ``,
+        `/** Kafka driver — kafka-clients over the log (design §4 topology): one`,
+        ` *  topic per channel address (idempotently admin-created before the`,
+        ` *  group join); per-partition ordering with partition key = loomkey ??`,
+        ` *  envelope id; consumption always rides the deployable's consumer`,
+        ` *  GROUP (broadcast across deployables, competing within).  Offsets`,
+        ` *  commit after the batch's handlers resolve.  Dead-letter v1: a`,
+        ` *  failed or malformed record parks onto &lt;address&gt;.dlq and the`,
+        ` *  offset advances — logged and kept, never a hot-loop. */`,
+        `public final class KafkaChannelTransport implements ChannelTransport {`,
+        `    private final String bootstrap;`,
+        `    private KafkaProducer<String, String> producer;`,
+        `    private final List<KafkaConsumer<String, String>> consumers = new ArrayList<>();`,
+        `    private final List<Thread> loops = new ArrayList<>();`,
+        `    private volatile boolean closing;`,
+        ``,
+        `    public KafkaChannelTransport(String url) {`,
+        `        this.bootstrap = url.startsWith("kafka://") ? url.substring("kafka://".length()) : url;`,
+        `    }`,
+        ``,
+        `    private synchronized KafkaProducer<String, String> producer() {`,
+        `        if (producer == null) {`,
+        `            var props = new Properties();`,
+        `            props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);`,
+        `            producer = new KafkaProducer<>(props, new StringSerializer(), new StringSerializer());`,
+        `        }`,
+        `        return producer;`,
+        `    }`,
+        ``,
+        `    private void ensureTopic(String topic) {`,
+        `        // Subscribing to a not-yet-produced topic stalls the group join;`,
+        `        // idempotently create it (3 partitions / rf 1 — the compose`,
+        `        // sidecar's defaults; an existing topic keeps its own shape).`,
+        `        var props = new Properties();`,
+        `        props.put("bootstrap.servers", bootstrap);`,
+        `        try (var admin = Admin.create(props)) {`,
+        `            admin.createTopics(List.of(new NewTopic(topic, 3, (short) 1))).all().get();`,
+        `        } catch (Exception e) {`,
+        `            if (!(e.getCause() instanceof TopicExistsException)) {`,
+        `                throw new IllegalStateException("kafka topic ensure failed: " + e.getMessage(), e);`,
+        `            }`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void publish(String address, LoomEventEnvelope envelope) {`,
+        `        var key = envelope.loomKey() != null ? envelope.loomKey() : envelope.id();`,
+        `        try {`,
+        `            producer().send(new ProducerRecord<>(address, key, envelope.toJson())).get();`,
+        `        } catch (InterruptedException e) {`,
+        `            Thread.currentThread().interrupt();`,
+        `            throw new IllegalStateException("kafka publish interrupted", e);`,
+        `        } catch (Exception e) {`,
+        `            throw new IllegalStateException("kafka publish failed: " + e.getMessage(), e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    private void park(String address, String key, String raw) {`,
+        `        try {`,
+        `            producer().send(new ProducerRecord<>(address + ".dlq", key, raw)).get();`,
+        `        } catch (InterruptedException e) {`,
+        `            Thread.currentThread().interrupt();`,
+        `        } catch (Exception e) {`,
+        `            CatalogLog.event("channel_consume_failed", "warn", "address", address,`,
+        `                    "error", "dlq park failed: " + e.getMessage());`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void subscribe(String address, String group, Consumer<LoomEventEnvelope> handler) {`,
+        `        ensureTopic(address);`,
+        `        var props = new Properties();`,
+        `        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);`,
+        `        props.put(ConsumerConfig.GROUP_ID_CONFIG, group != null ? group : address);`,
+        `        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");`,
+        `        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");`,
+        `        var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new StringDeserializer());`,
+        `        consumer.subscribe(List.of(address));`,
+        `        consumers.add(consumer);`,
+        `        var loop = new Thread(() -> {`,
+        `            try {`,
+        `                while (!closing) {`,
+        `                    var records = consumer.poll(Duration.ofMillis(500));`,
+        `                    for (var record : records) {`,
+        `                        LoomEventEnvelope envelope;`,
+        `                        try {`,
+        `                            envelope = LoomEventEnvelope.fromJson(record.value());`,
+        `                        } catch (RuntimeException e) {`,
+        `                            // Malformed record: park + advance (v1 log + park).`,
+        `                            park(address, record.key(), record.value());`,
+        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                                    "error", "malformed envelope");`,
+        `                            continue;`,
+        `                        }`,
+        `                        try {`,
+        `                            handler.accept(envelope);`,
+        `                        } catch (RuntimeException e) {`,
+        `                            // v1 log + park: keep the partition moving (a raw`,
+        `                            // retry would stall every record behind this one).`,
+        `                            park(address, record.key(), record.value());`,
+        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                                    "type", envelope.type(), "id", envelope.id(),`,
+        `                                    "error", String.valueOf(e.getMessage()));`,
+        `                        }`,
+        `                    }`,
+        `                    // Offsets commit after the batch's handlers resolved (or`,
+        `                    // parked) — at-least-once with the envelope id as the`,
+        `                    // consumer-side dedup key.`,
+        `                    if (!records.isEmpty()) {`,
+        `                        consumer.commitSync();`,
+        `                    }`,
+        `                }`,
+        `            } catch (WakeupException e) {`,
+        `                // close() woke the poll — the shutdown path.`,
+        `            } finally {`,
+        `                consumer.close();`,
+        `            }`,
+        `        }, "loom-kafka-" + (group != null ? group : address));`,
+        `        loop.setDaemon(true);`,
+        `        loop.start();`,
+        `        loops.add(loop);`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public synchronized void close() {`,
+        `        closing = true;`,
+        `        for (var consumer : consumers) {`,
+        `            consumer.wakeup();`,
+        `        }`,
+        `        for (var loop : loops) {`,
+        `            try {`,
+        `                loop.join(5000);`,
+        `            } catch (InterruptedException e) {`,
+        `                Thread.currentThread().interrupt();`,
+        `            }`,
+        `        }`,
+        `        if (producer != null) {`,
+        `            producer.close();`,
+        `        }`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    );
+
   out.set(
     "ChannelBindings.java",
     lines(
@@ -504,15 +712,19 @@ export function renderJavaChannelFiles(
       ` *  events publish inline in the tee; durable (\`work\`) events pass`,
       ` *  through the outbox and publish on relay drain (design §5). */`,
       `public final class ChannelBindings {`,
-      `    public record Binding(String csName, String address, String envVar, String context,`,
-      `            String transport, String group, boolean queue) {`,
+      hasKafka
+        ? `    public record Binding(String csName, String address, String envVar, String context,`
+        : `    public record Binding(String csName, String address, String envVar, String context,`,
+      hasKafka
+        ? `            String transport, String group, boolean queue, String key) {`
+        : `            String transport, String group, boolean queue) {`,
       `    }`,
       ``,
       `    public static final List<Binding> ALL = List.of(`,
       unique
         .map(
           (b) =>
-            `            new Binding(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)}, ${JSON.stringify(b.transport)}, ${JSON.stringify(b.group)}, ${b.delivery === "queue"})`,
+            `            new Binding(${JSON.stringify(b.csName)}, ${JSON.stringify(b.address)}, ${JSON.stringify(b.envVar)}, ${JSON.stringify(b.contextName)}, ${JSON.stringify(b.transport)}, ${JSON.stringify(b.group)}, ${b.delivery === "queue"}${hasKafka ? `, ${b.key === undefined ? "null" : JSON.stringify(b.key)}` : ""})`,
         )
         .join(",\n") + ");",
       ``,
@@ -620,11 +832,7 @@ export function renderJavaChannelFiles(
       `                throw new IllegalStateException("channel binding '" + binding.csName()`,
       `                        + "' needs " + binding.envVar() + " (the broker URL compose/k8s injects)");`,
       `            }`,
-      hasRedis && hasRabbit
-        ? `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url,\n                    u -> "rabbitmq".equals(binding.transport())\n                            ? new RabbitChannelTransport(u)\n                            : new RedisChannelTransport(u)));`
-        : hasRabbit
-          ? `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, RabbitChannelTransport::new));`
-          : `            byCsName.put(binding.csName(), byUrl.computeIfAbsent(url, RedisChannelTransport::new));`,
+      transportPickLine(hasRedis, hasRabbit, hasKafka),
       `        }`,
       `    }`,
       ``,
@@ -684,9 +892,23 @@ export function renderJavaChannelFiles(
       `                : Long.toHexString(System.currentTimeMillis()) + "-"`,
       `                        + Long.toHexString(ProcessHandle.current().pid()) + "-"`,
       `                        + Long.toHexString(COUNTER.incrementAndGet());`,
-      `        return new LoomEventEnvelope("1.0", id, bound.context() + "." + type,`,
-      `                "/loom/" + bound.context(), Instant.now().toString(), "application/json",`,
-      `                address, data);`,
+      ...(hasKafka
+        ? [
+            `        // The channel's key: field value rides as loomkey — kafka's`,
+            `        // partition key (design §4), so one aggregate's events keep order.`,
+            `        String loomKey = null;`,
+            `        if (bound.key() != null && data.get(bound.key()) != null) {`,
+            `            loomKey = String.valueOf(data.get(bound.key()));`,
+            `        }`,
+            `        return new LoomEventEnvelope("1.0", id, bound.context() + "." + type,`,
+            `                "/loom/" + bound.context(), Instant.now().toString(), "application/json",`,
+            `                address, loomKey, data);`,
+          ]
+        : [
+            `        return new LoomEventEnvelope("1.0", id, bound.context() + "." + type,`,
+            `                "/loom/" + bound.context(), Instant.now().toString(), "application/json",`,
+            `                address, data);`,
+          ]),
       `    }`,
       ``,
       `    private ChannelEnvelopes() {`,
@@ -828,8 +1050,9 @@ export function renderJavaChannelFiles(
       `            transports.forSource(binding.csName()).subscribe(binding.address(), binding.group(),`,
       `                    envelope -> {`,
       `                        dispatch(envelope);`,
-      `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),`,
-      `                                "type", envelope.type(), "id", envelope.id());`,
+      hasKafka
+        ? `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id(),\n                                "key", String.valueOf(envelope.loomKey()));`
+        : `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id());`,
       `                    });`,
     ];
     const loggedSubscribe = [
@@ -846,16 +1069,19 @@ export function renderJavaChannelFiles(
       `                    }));`,
     ];
     const subscribeBody =
-      hasRedis && hasRabbit
+      hasRedis && (hasRabbit || hasKafka)
         ? [
-            `            if (binding.queue()) {`,
+            hasKafka
+              ? `            if (binding.queue() || "kafka".equals(binding.transport())) {`
+              : `            if (binding.queue()) {`,
             ...strictSubscribe.map((l) => `    ${l}`),
             `            } else {`,
             ...loggedSubscribe.map((l) => `    ${l}`),
             `            }`,
           ]
-        : hasRabbit
-          ? strictSubscribe
+        : hasRabbit || hasKafka
+          ? // rabbit and kafka both dispatch strictly on the driver thread.
+            strictSubscribe
           : loggedSubscribe;
     out.set(
       "ChannelConsumerService.java",

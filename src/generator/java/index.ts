@@ -69,6 +69,7 @@ import { renderAuthFiles } from "./emit/auth.js";
 import {
   AMQP_CLIENT_VERSION,
   type ChannelConsumerHandler,
+  KAFKA_CLIENTS_VERSION,
   LETTUCE_CORE_VERSION,
   renderJavaChannelFiles,
   renderJavaOutboxFiles,
@@ -1239,6 +1240,9 @@ function emitProjectFromContexts(
           : {}),
         ...(channelBindings.some((b) => b.transport === "rabbitmq")
           ? { "com.rabbitmq:amqp-client": AMQP_CLIENT_VERSION }
+          : {}),
+        ...(channelBindings.some((b) => b.transport === "kafka")
+          ? { "org.apache.kafka:kafka-clients": KAFKA_CLIENTS_VERSION }
           : {}),
       },
       // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
