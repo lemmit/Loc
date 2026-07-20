@@ -67,6 +67,11 @@ import {
   type VanillaProjectionRef,
 } from "./projections-emit.js";
 import { emitVanillaProvenance } from "./provenance-emit.js";
+import {
+  emitVanillaQueryProjectionModules,
+  emitVanillaQueryProjectionsController,
+  type VanillaQueryProjectionRef,
+} from "./query-projections-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaScheduler } from "./scheduler-emit.js";
@@ -213,6 +218,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
   const allProjections: VanillaProjectionRef[] = [];
+  const allQueryProjections: VanillaQueryProjectionRef[] = [];
   const workflowGroups: WorkflowControllerGroup[] = [];
   // The principal id field name a `currentUser` lifecycle stamp resolves to
   // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block —
@@ -328,6 +334,13 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // projection (collected here for the project-wide controller); the fold
     // handlers + dispatcher wiring are emitted by `emitDispatch` below.
     allProjections.push(...emitVanillaProjectionSchemas(appName, appModule, ctx, out, sys));
+    // Query-time projections (read-path-architecture.md rev.13): a live read
+    // (source find + join bulk-loads + select) — no folded read-model table, so
+    // its own `run/1` module here and a `QueryProjectionsController` after the
+    // loop (sibling of the folded ProjectionsController).
+    allQueryProjections.push(
+      ...emitVanillaQueryProjectionModules(appName, appModule, ctx, out, sourcemap),
+    );
     emitDispatch(
       appName,
       ctx,
@@ -348,6 +361,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // projections (the per-context schema emit above intentionally does NOT write
   // the controller — sibling of ViewsController).
   apiRoutes.push(...emitVanillaProjectionsController(appName, appModule, allProjections, out));
+  // One deployable-level QueryProjectionsController over every hosted context's
+  // query-time projections (sibling of the folded ProjectionsController; the
+  // per-context module emit above intentionally does NOT write the controller).
+  apiRoutes.push(
+    ...emitVanillaQueryProjectionsController(appName, appModule, allQueryProjections, out),
+  );
   // One deployable-level WorkflowsController over every hosted context's command
   // workflows (the per-context emit above intentionally does NOT write it).
   emitVanillaWorkflowsController(appName, appModule, workflowGroups, out);

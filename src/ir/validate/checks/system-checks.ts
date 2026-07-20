@@ -99,8 +99,8 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // A backend NOT in `PROJECTION_QT_SUPPORTED` has no emitter for it, so gate a
 // query-time projection hosted on such a deployable with an honest diagnostic
 // until its port lands — the same reviewed-gap discipline as the paged gate.
-// Node is the first (PR-C).
-const PROJECTION_QT_SUPPORTED = new Set(["node", "python"]);
+// Node (PR-C), Python (PR-D), and Elixir (PR-E) have ported it.
+const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir"]);
 
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
