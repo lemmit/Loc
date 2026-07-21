@@ -34,6 +34,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   ProjectionIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesPrincipalContextFilter,
@@ -42,6 +43,7 @@ import {
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
+import { stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 
@@ -67,6 +69,7 @@ export function emitVanillaQueryProjectionModules(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const typesModule = `${appModule}.Types`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const wfsByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
   const refs: VanillaQueryProjectionRef[] = [];
   for (const proj of projs) {
     const path = `lib/${appName}/${ctxSnake}/query_projections/${snake(proj.name)}.ex`;
@@ -76,6 +79,7 @@ export function emitVanillaQueryProjectionModules(
       contextModule,
       typesModule,
       aggsByName,
+      wfsByName,
     );
     out.set(path, content);
     sourcemap?.file(path, content, proj.origin, `${ctx.name}.${proj.name}`);
@@ -93,12 +97,17 @@ function renderQueryProjectionModule(
   contextModule: string,
   typesModule: string,
   aggsByName: Map<string, AggregateIR>,
+  wfsByName: Map<string, WorkflowIR>,
 ): string {
   const query = proj.query!;
   const source = query.source!;
-  const sourceMod = `${contextModule}.${upperFirst(source)}`;
   const moduleName = `${contextModule}.QueryProjections.${upperFirst(proj.name)}`;
-  const sourceAgg = aggsByName.get(source);
+  // A workflow-sourced projection reads the workflow's persisted saga-state
+  // Ecto schema (`<Wf>State`) — NON-event-sourced by validation — not an
+  // aggregate schema module; it has no aggregate capability filter to honour.
+  const wf = query.sourceKind === "workflow" ? wfsByName.get(source) : undefined;
+  const sourceMod = wf ? stateModule(contextModule, wf) : `${contextModule}.${upperFirst(source)}`;
+  const sourceAgg = wf ? undefined : aggsByName.get(source);
 
   // In-memory projection context (enum → declared atom); the `where` below uses
   // a `filterArgs` clone (enum → dumped declared string — Ecto won't cast an
@@ -115,8 +124,17 @@ function renderQueryProjectionModule(
   // delete / tenancy) exactly like every other read; a principal (tenancy)
   // filter scopes by the `current_user` the controller threads into `run/1`.
   const principal = sourceAgg ? aggregateUsesPrincipalContextFilter(sourceAgg) : false;
+  // A projection `… ignoring <Cap>` / `ignoring *` OMITS the named capability
+  // filter(s) on the source aggregate for this read only (plain Ecto drops the
+  // bypassed `where:` conjunct).
   const cap = sourceAgg
-    ? vanillaCapabilityFilter(sourceAgg, contextModule, { actor: principal })
+    ? vanillaCapabilityFilter(sourceAgg, contextModule, {
+        actor: principal,
+        bypass:
+          query.bypassAll || (query.bypassCaps?.length ?? 0) > 0
+            ? { bypassAll: query.bypassAll, bypassCaps: query.bypassCaps }
+            : undefined,
+      })
     : null;
   const filter = query.filter ? renderExpr(query.filter, queryCtx) : null;
   const where = combineWhere(filter, cap);
@@ -166,7 +184,7 @@ defmodule ${moduleName} do
   @moduledoc """
   Query-time projection: ${upperFirst(proj.name)}
 
-  Source aggregate: ${upperFirst(source)}
+  ${wf ? "Source workflow" : "Source aggregate"}: ${upperFirst(source)}${wf ? " (saga instance state)" : ""}
   Form: query-time (live read — no folded read-model table)
   Foundation: vanilla (plain Ecto).
   """
@@ -250,6 +268,33 @@ function renderQueryProjectionAction(
   const slug = snake(proj.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const projModule = `${contextModule}.QueryProjections.${upperFirst(proj.name)}`;
+  const webModule = `${appModule}Web`;
+  // Read-side `requires` authorization gate (default-deny): a 403 returned
+  // before the query runs when the `currentUser`-only predicate fails — the
+  // read-side analogue of a repository `find … requires <gate>` (mirrors
+  // `renderFindActions`).  Ungated projections stay byte-identical.
+  const gate = proj.query?.requires
+    ? renderExpr(proj.query.requires, {
+        thisName: "record",
+        contextModule,
+        foundation: "vanilla",
+      })
+    : null;
+  if (gate) {
+    return `  @doc "GET /api/projections/${slug}"
+  def ${slug}(conn, _params) do
+    current_user = Map.get(conn.assigns, :current_user)
+
+    if not (${gate}) do
+      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: projection ${proj.name}`,
+      )})
+    else
+      data = ${projModule}.run(current_user)
+      json(conn, data)
+    end
+  end`;
+  }
   return `  @doc "GET /api/projections/${slug}"
   def ${slug}(conn, _params) do
     current_user = Map.get(conn.assigns, :current_user)

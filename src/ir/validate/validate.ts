@@ -9,6 +9,7 @@ import { validateMigrationDataSteps } from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
   validateFindGates,
+  validateProjectionGates,
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
@@ -75,6 +76,7 @@ import {
   validateUiRealtimeSupport,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
+  validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
 import {
@@ -170,6 +172,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRealtimeTenantBroadcast(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
+    validateWorkflowSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
@@ -206,6 +209,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
     validateFindGates(c, diags);
+    validateProjectionGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);

@@ -2784,20 +2784,26 @@ export function isPrimitiveType(item: unknown): item is PrimitiveType {
 export interface Projection extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Projection';
+    bypass: Array<string>;
+    bypassAll: boolean;
     filter?: Expression;
+    gate?: Expression;
     joins: Array<ProjectionJoin>;
     key?: LooseName;
     members: Array<ProjectionMember>;
     name: string;
     params: Array<Parameter>;
     selects: Array<ProjectionSelect>;
-    source?: langium.Reference<Aggregate>;
+    source?: langium.Reference<ProjectionSource>;
     sourceAlias?: string;
 }
 
 export const Projection = {
     $type: 'Projection',
+    bypass: 'bypass',
+    bypassAll: 'bypassAll',
     filter: 'filter',
+    gate: 'gate',
     joins: 'joins',
     key: 'key',
     members: 'members',
@@ -2877,6 +2883,16 @@ export const ProjectionSelect = {
 
 export function isProjectionSelect(item: unknown): item is ProjectionSelect {
     return reflection.isInstance(item, ProjectionSelect.$type);
+}
+
+export type ProjectionSource = Aggregate | Workflow;
+
+export const ProjectionSource = {
+    $type: 'ProjectionSource'
+} as const;
+
+export function isProjectionSource(item: unknown): item is ProjectionSource {
+    return reflection.isInstance(item, ProjectionSource.$type);
 }
 
 export interface Property extends langium.AstNode {
@@ -4375,6 +4391,7 @@ export type DddAstType = {
     ProjectionMember: ProjectionMember
     ProjectionOn: ProjectionOn
     ProjectionSelect: ProjectionSelect
+    ProjectionSource: ProjectionSource
     Property: Property
     QueryHandler: QueryHandler
     Repository: Repository
@@ -4527,7 +4544,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type, NamedDecl.$type, Targetable.$type, TestSubject.$type]
+            superTypes: [ContextMember.$type, NamedDecl.$type, ProjectionSource.$type, Targetable.$type, TestSubject.$type]
         },
         AggregateMember: {
             name: AggregateMember.$type,
@@ -6428,8 +6445,22 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Projection: {
             name: Projection.$type,
             properties: {
+                bypass: {
+                    name: Projection.bypass,
+                    defaultValue: [],
+                    optional: true
+                },
+                bypassAll: {
+                    name: Projection.bypassAll,
+                    defaultValue: false,
+                    optional: true
+                },
                 filter: {
                     name: Projection.filter,
+                    optional: true
+                },
+                gate: {
+                    name: Projection.gate,
                     optional: true
                 },
                 joins: {
@@ -6461,7 +6492,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 source: {
                     name: Projection.source,
-                    referenceType: Aggregate.$type,
+                    referenceType: ProjectionSource.$type,
                     optional: true
                 },
                 sourceAlias: {
@@ -6524,6 +6555,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 field: {
                     name: ProjectionSelect.field
                 }
+            },
+            superTypes: []
+        },
+        ProjectionSource: {
+            name: ProjectionSource.$type,
+            properties: {
             },
             superTypes: []
         },
@@ -7627,7 +7664,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type, Targetable.$type]
+            superTypes: [ContextMember.$type, ProjectionSource.$type, Targetable.$type]
         },
         WorkflowCreateDecl: {
             name: WorkflowCreateDecl.$type,

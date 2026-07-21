@@ -1966,6 +1966,8 @@ function mergeViewsAsFinds(
       params: [],
       returnType: arrayReturn,
       ...(p.query?.filter ? { filter: p.query.filter } : {}),
+      ...(p.query?.bypassAll ? { bypassAll: true } : {}),
+      ...(p.query?.bypassCaps ? { bypassCaps: p.query.bypassCaps } : {}),
     })),
   ];
   if (!repo) {

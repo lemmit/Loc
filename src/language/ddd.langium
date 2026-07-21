@@ -1464,16 +1464,27 @@ ProjectionMember:
 // NO query clause is today's folded read model (Property + `on(e)` folds
 // only).  `from`/`join`/`select` lead each clause; `join`/`select` stay SOFT
 // keywords (CommonSoftKeywords) so a field / value named `join` / `select`
-// keeps parsing.
+// keeps parsing.  `ignoring */A, …` (the shared `IgnoringClause`) bypasses the
+// SOURCE aggregate's capability query-filters for this read — the same
+// filter-bypass a repository `find … ignoring` carries (named-filter-bypass.md
+// §11), sits in the `where` position so it reads `where … ignoring …`.
 //
 // NOTE: the `order by` ordering clause (and its `loom.projection-paged-sort-
 // not-columnar` gate) lands WITH the per-backend query-time emit (PR-C):
 // reserving the pervasive domain word `order` needs a wider soft-keyword sweep
 // than this surface-only slice warrants, and ordering is only observable once
 // the read is actually emitted (paged reads).
+// A query-time projection's `from` source — an AGGREGATE (read through its
+// repository) or a WORKFLOW (read through its persisted instance / saga-state
+// rows, `instanceWireShape`).  The validator restricts the workflow case
+// (`select`-projection only, no `join`s).
+type ProjectionSource = Aggregate | Workflow;
+
 fragment ProjectionQueryClauses:
-    ('from' source=[Aggregate:ID] ('as' sourceAlias=ID)?)?
+    ('from' source=[ProjectionSource:ID] ('as' sourceAlias=ID)?)?
+    ('requires' gate=Expression)?
     ('where' filter=Expression)?
+    IgnoringClause?
     (joins+=ProjectionJoin)*
     ('select' selects+=ProjectionSelect (',' selects+=ProjectionSelect)*)?;
 

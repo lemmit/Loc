@@ -1441,10 +1441,15 @@ export interface ProjectionIR {
  *  candidate-rooted language (the same `criterion` / `find … where` dialect);
  *  the LINQ shape is purely structural. */
 export interface ProjectionQueryIR {
-  /** `from <Source> [as <alias>]` — the query source aggregate, by name.
-   *  Undefined for the folded+`join` hybrid (no `from`; `join`s resolve
+  /** `from <Source> [as <alias>]` — the query source aggregate / workflow, by
+   *  name.  Undefined for the folded+`join` hybrid (no `from`; `join`s resolve
    *  stored id columns instead). */
   source?: string;
+  /** Whether `source` names an AGGREGATE (read through its repository) or a
+   *  WORKFLOW (read through its persisted instance / saga-state rows,
+   *  `instanceWireShape`).  Absent ⇒ aggregate (the default / folded-hybrid
+   *  case).  A workflow source is `select`-projection only (no `join`s). */
+  sourceKind?: "aggregate" | "workflow";
   /** The author's alias for the source candidate (`from Order as o`).  `this`
    *  / bare stays the default; the alias resolves identically (like
    *  `criterion … of T as o`). */
@@ -1469,6 +1474,24 @@ export interface ProjectionQueryIR {
    *  built for by-id follows, populated by reading the
    *  DECLARED `join`s. */
   auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
+  /** Authorization gate (D-AUTH-OIDC / default-deny) — an optional
+   *  `requires <expr>` clause evaluated against `currentUser` *before* the query
+   *  runs; failure → 403.  Distinct from `filter`: the filter scopes which rows
+   *  return (queryable, pushed to SQL), the gate decides whether the caller may
+   *  hit the endpoint at all.  Lowered in the bare context scope (currentUser
+   *  only, no source row), so it may reference `currentUser` + constants but not
+   *  aggregate fields — the projection twin of `FindIR.requires`.  Emitted as a
+   *  403-before-query check in each backend's query-projection route. */
+  requires?: ExprIR;
+  /** `ignoring *` — bypass EVERY capability query-filter on the source
+   *  aggregate for this query-time read (named-filter-bypass.md §11).  Mutually
+   *  exclusive with `bypassCaps`.  Threaded into the synthesised source
+   *  `FindIR`, so it rides the same bypass path as a repository `find … ignoring`.
+   *  See `FindIR.bypassAll`. */
+  bypassAll?: boolean;
+  /** `ignoring A, B` — resolved capability names whose filters this read
+   *  bypasses (named-filter-bypass.md §11).  See `FindIR.bypassCaps`. */
+  bypassCaps?: string[];
 }
 
 /** One `join <Aggregate> as <alias> on <idRef>` follow. */

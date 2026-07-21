@@ -21,7 +21,7 @@
 // `lower.ts` orchestrator.
 
 import type { Projection, ProjectionOn } from "../../language/generated/ast.js";
-import { isAggregate, isProperty } from "../../language/generated/ast.js";
+import { isAggregate, isProperty, isWorkflow } from "../../language/generated/ast.js";
 import type {
   FieldIR,
   ProjectionIR,
@@ -31,10 +31,18 @@ import type {
   StmtIR,
 } from "../types/loom-ir.js";
 import { joinRefPath, mapVarForPath } from "./id-follow.js";
+import { resolveBypass } from "./lower-capabilities.js";
 import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
 import { lowerStatement } from "./lower-stmt.js";
-import { type Env, inAggregate, inProjection, lowerType, withLocal } from "./lower-types.js";
+import {
+  type Env,
+  inAggregate,
+  inProjection,
+  inWorkflow,
+  lowerType,
+  withLocal,
+} from "./lower-types.js";
 import { originFor } from "./origin.js";
 
 /** Lower a `projection <Name>[(params)] [keyed by <field>] { … }` declaration.
@@ -64,7 +72,7 @@ export function lowerProjection(p: Projection, env: Env): ProjectionIR {
 
 /** Whether the projection declares any query-time comprehension clause. */
 function hasQueryClauses(p: Projection): boolean {
-  return !!p.source || !!p.filter || p.joins.length > 0 || p.selects.length > 0;
+  return !!p.source || !!p.gate || !!p.filter || p.joins.length > 0 || p.selects.length > 0;
 }
 
 /** Lower the query-time comprehension (`from`/`where`/`join`/`select`).
@@ -74,14 +82,21 @@ function hasQueryClauses(p: Projection): boolean {
  *  resolve stored id columns).  Params bind as locals; each join alias binds as
  *  an entity-typed local so `c.name` in `select`/`where` resolves. */
 function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
-  const sourceAgg = p.source?.ref;
-  const sourceName = sourceAgg?.name ?? p.source?.$refText;
+  const sourceRef = p.source?.ref;
+  const sourceName = sourceRef?.name ?? p.source?.$refText;
+  const sourceIsWorkflow = !!sourceRef && isWorkflow(sourceRef);
 
-  // Candidate scope: the `from` source (aliased like `criterion … of T as o`),
-  // or the projection row for the folded+join hybrid.
+  // Candidate scope: the `from` source.  An AGGREGATE binds `this`/alias to its
+  // fields (`inAggregate`, aliased like `criterion … of T as o`); a WORKFLOW
+  // binds `this`/alias to its instance state fields (`inWorkflow`) — the same
+  // source-agnostic predicate machinery the removed workflow-source view used.
+  // No `from` ⇒ the projection row itself (folded+join hybrid).
   let scope: Env = { ...env, locals: new Map() };
-  if (sourceAgg && isAggregate(sourceAgg)) {
-    scope = inAggregate(scope, sourceAgg);
+  if (sourceRef && isAggregate(sourceRef)) {
+    scope = inAggregate(scope, sourceRef);
+    if (p.sourceAlias) scope = { ...scope, candidateAlias: p.sourceAlias };
+  } else if (sourceRef && isWorkflow(sourceRef)) {
+    scope = inWorkflow(scope, sourceRef);
     if (p.sourceAlias) scope = { ...scope, candidateAlias: p.sourceAlias };
   } else {
     scope = inProjection(scope, p);
@@ -114,7 +129,14 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
     type: inferExprType(s.expr, scope),
   }));
 
-  const query: ProjectionQueryIR = { joins, auxiliaries };
+  const query: ProjectionQueryIR = { joins, auxiliaries, ...resolveBypass(p) };
+  if (sourceIsWorkflow) query.sourceKind = "workflow";
+  // The `requires` gate lowers in the BARE context env (not `scope`), so
+  // `currentUser` resolves but the source row's fields do not — it decides
+  // endpoint access before any row exists, so it may reference only the
+  // principal (+ constants).  A source-field ref is then an unknown ref the
+  // validator rejects (the projection twin of the find gate).
+  if (p.gate) query.requires = lowerExpr(p.gate, env);
   if (sourceName) query.source = sourceName;
   if (p.sourceAlias) query.sourceAlias = p.sourceAlias;
   if (p.filter) {

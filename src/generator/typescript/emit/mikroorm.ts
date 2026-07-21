@@ -1473,6 +1473,8 @@ function synthProjectionFinds(
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
       filter: p.query?.filter,
+      bypassAll: p.query?.bypassAll,
+      bypassCaps: p.query?.bypassCaps,
     }));
   return [...projectionFinds];
 }

@@ -86,7 +86,7 @@ The comparison binds **one column against one value** (a parameter, literal, or 
 
 ## The queryable subset
 
-A `find … where` (and a `retrieval` `where`, a `view` `where`, a capability `filter`) is **not** a general expression — it must lower to SQL. The oracle `firstNonQueryableNode` admits exactly: comparisons (`== != < <= > >=`), `&& || !`, parenthesised groups, `this.<column>` and one-level `this.<vo>.<sub>` flattened value-object refs, `currentUser.<field>`, parameter refs, and literals. Membership over a reference collection (`this.<refColl>.contains(x)`) is the one collection op admitted (it lowers to an `EXISTS` subquery). Everything richer is rejected — lambdas, collection projections (`.count` / `.first`), arithmetic operators, value-object construction, calls, ternaries, `match`, conversions, and column-vs-column comparisons.
+A `find … where` (and a `retrieval` `where`, a `projection` `where`, a capability `filter`) is **not** a general expression — it must lower to SQL. The oracle `firstNonQueryableNode` admits exactly: comparisons (`== != < <= > >=`), `&& || !`, parenthesised groups, `this.<column>` and one-level `this.<vo>.<sub>` flattened value-object refs, `currentUser.<field>`, parameter refs, and literals. Membership over a reference collection (`this.<refColl>.contains(x)`) is the one collection op admitted (it lowers to an `EXISTS` subquery). Everything richer is rejected — lambdas, collection projections (`.count` / `.first`), arithmetic operators, value-object construction, calls, ternaries, `match`, conversions, and column-vs-column comparisons.
 
 ```ddd
 repository Orders for Order {
@@ -325,6 +325,16 @@ On .NET this threads `IgnoreQueryFilters()` into both the count and the page que
 var total = await _db.Orders.IgnoreQueryFilters().Where(x => x.Customer == c).CountAsync(ct);
 var items = await _db.Orders.IgnoreQueryFilters().Where(x => x.Customer == c)
     .Skip(offset).Take(pageSize).ToListAsync(ct);
+```
+
+A **query-time projection** carries the same clause — `ignoring` sits in the `where` position (`from <Agg> where … ignoring … join … select …`) and bypasses the `from` source aggregate's capability filters for that read. It rides the same synthesised source find, so all five backends honor it identically (soft-deleted / cross-tenant rows become visible to that projection only):
+
+```ddd
+projection PurgeAudit {
+  id: Order id  status: string
+  from Order as o ignoring softDeletable       // include soft-deleted rows
+  select id = o.id, status = o.status
+}
 ```
 
 The bypass is visible in generated code only when a capability actually contributes a filter to that aggregate; with no `filter` capability installed there is nothing to suppress and the clause is a no-op. See [`../capabilities.md`](../capabilities.md) for the `filter` capability that produces these query-layer predicates.

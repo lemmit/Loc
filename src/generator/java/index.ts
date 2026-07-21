@@ -907,6 +907,7 @@ function emitProjectFromContexts(
       routePrefix,
       entityPkgOf: (a) => pkgFor("entity", a),
       repoPkgOf: (a) => pkgFor("repository-interface", a),
+      stateRepoPkg: pkgFor("spring-data-repository"),
     });
     if (queryProjectionFiles) {
       const qpRowOrigin = new Map<string, ProjectionIR>(

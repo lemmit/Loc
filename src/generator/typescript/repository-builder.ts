@@ -160,6 +160,8 @@ export function buildRepositoryFile(
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
       filter: p.query?.filter,
+      bypassAll: p.query?.bypassAll,
+      bypassCaps: p.query?.bypassCaps,
     }));
 
   // Individual methods, hoisted so the same strings feed BOTH the class body

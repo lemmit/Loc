@@ -41,7 +41,7 @@ import type {
   ExprIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import { renderSqlRestriction } from "./render-sql-restriction.js";
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
@@ -126,6 +126,15 @@ function bypassesForAggregate(agg: AggregateIR, ctx: BoundedContextIR): FilterBy
   }
   for (const r of repoRuns) {
     if (r.aggName === agg.name) bypasses.push(r.bypass);
+  }
+  // A query-time projection's `ignoring` bypasses its `from` source aggregate's
+  // filters through the synthesised source find — so it PROMOTES the cap too.
+  for (const p of ctx.projections ?? []) {
+    const q = p.query;
+    if (!isQueryTimeProjection(p) || q?.source !== agg.name) continue;
+    if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
+      bypasses.push({ bypassAll: q.bypassAll, bypassCaps: q.bypassCaps });
+    }
   }
   return bypasses;
 }
