@@ -45,6 +45,18 @@ on:
       - 'test/behavioral/**'
       - 'package.json'
       - '.github/workflows/behavioral-e2e.yml'
+      # This tier boots ONLY the node/Hono backend (api + unit).  A change
+      # confined to another backend's emitter cannot alter its behaviour —
+      # skip it per-PR when only that code changed.  push:main stays broad.
+      - '!src/generator/java/**'
+      - '!src/generator/dotnet/**'
+      - '!src/generator/python/**'
+      - '!src/generator/elixir/**'
+      - '!src/platform/java.ts'
+      - '!src/platform/dotnet.ts'
+      - '!src/platform/dotnet/**'
+      - '!src/platform/python.ts'
+      - '!src/platform/elixir.ts'
   workflow_dispatch:
   merge_group:
 permissions:

@@ -23,21 +23,11 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/generated-vue-e2e.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'designs/**'
-      - 'examples/vue-showcase.ddd'
-      - 'vue/**'
-      - 'api/**'
-      - 'docker/**'
-      - 'stacks/**'
-      - 'test/e2e/generated-vue-e2e.test.ts'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'langium-config.json'
-      - '.github/workflows/generated-vue-e2e.yml'
+  # Post-merge only.  This route-driven smoke (navigate every param-less
+  # page) has caught zero regressions per-PR in practice, while the
+  # per-PR generated-vue-build (vue-tsc + vite build) already covers the
+  # Vue surface.  Run it on push:main as the regression net; force a
+  # pre-merge run with workflow_dispatch.
   workflow_dispatch:
 
 concurrency:

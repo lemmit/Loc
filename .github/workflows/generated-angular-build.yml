@@ -42,6 +42,20 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/generated-angular-build.yml'
+      # A change confined to a non-Angular backend cannot alter the Angular
+      # bundle — skip this gate per-PR when only that code changed.  The
+      # push:main trigger above keeps the broad `src/**` net post-merge.
+      - '!src/generator/java/**'
+      - '!src/generator/dotnet/**'
+      - '!src/generator/python/**'
+      - '!src/generator/elixir/**'
+      - '!src/platform/java.ts'
+      - '!src/platform/dotnet.ts'
+      - '!src/platform/dotnet/**'
+      - '!src/platform/python.ts'
+      - '!src/platform/elixir.ts'
+      - '!src/platform/hono/**'
+      - '!src/platform/hono.ts'
   workflow_dispatch:
 
 concurrency:
@@ -56,11 +70,17 @@ jobs:
     steps:
       - id: set
         run: |
-          PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CASES='["showcase","store","file"]'
+            # Slim PR slice: the two most representative cases (feature
+            # showcase + the shared signal-store surface) × two
+            # representative packs (Material + PrimeNG).  spartanNg, the
+            # `minimal`/`scaffold`/`file` cases, and full pack drift are
+            # caught by the push:main sweep below one merge later.
+            CASES='["showcase","store"]'
+            PACKS='["angularMaterial@v1", "primeng@v1"]'
           else
             CASES='["minimal","scaffold","showcase","store","file"]'
+            PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           fi
           echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

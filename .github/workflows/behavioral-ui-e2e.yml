@@ -48,6 +48,18 @@ on:
       - 'test/behavioral/**'
       - 'package.json'
       - '.github/workflows/behavioral-ui-e2e.yml'
+      # This tier boots the node/Hono backend + the React/Mantine frontend.
+      # A change confined to another backend's emitter cannot alter it —
+      # skip it per-PR when only that code changed.  push:main stays broad.
+      - '!src/generator/java/**'
+      - '!src/generator/dotnet/**'
+      - '!src/generator/python/**'
+      - '!src/generator/elixir/**'
+      - '!src/platform/java.ts'
+      - '!src/platform/dotnet.ts'
+      - '!src/platform/dotnet/**'
+      - '!src/platform/python.ts'
+      - '!src/platform/elixir.ts'
   workflow_dispatch:
   merge_group:
 permissions:

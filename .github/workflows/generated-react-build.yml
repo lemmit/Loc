@@ -60,6 +60,20 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/generated-react-build.yml'
+      # A change confined to a non-React backend cannot alter the React
+      # bundle — skip this gate per-PR when only that code changed.  The
+      # push:main trigger above keeps the broad `src/**` net post-merge.
+      - '!src/generator/java/**'
+      - '!src/generator/dotnet/**'
+      - '!src/generator/python/**'
+      - '!src/generator/elixir/**'
+      - '!src/platform/java.ts'
+      - '!src/platform/dotnet.ts'
+      - '!src/platform/dotnet/**'
+      - '!src/platform/python.ts'
+      - '!src/platform/elixir.ts'
+      - '!src/platform/hono/**'
+      - '!src/platform/hono.ts'
   workflow_dispatch:
 
 concurrency:
@@ -77,17 +91,20 @@ jobs:
     steps:
       - id: set
         run: |
-          # Pack list is identical in both branches; declared once.
-          PACKS='["mantine@v7","mantine@v9","shadcn@v3","shadcn@v4","mui@v5","mui@v7","chakra@v2","chakra@v3"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Slim PR slice — 8 cells.  showcase.ddd × every pack
-            # family@version.  showcase is the feature-comprehensive
-            # cross-generator conformance fixture (#401), so this
-            # catches nearly all pack-template / generator drift.
-            # Per-example drift on the other 10 examples is deferred
-            # to the push:main sweep below.
+            # Slim PR slice — 2 cells.  showcase.ddd (the
+            # feature-comprehensive cross-generator conformance fixture,
+            # #401) × two representative packs: one Mantine (the React
+            # baseline) and one shadcn (the Tailwind/Radix family).  This
+            # catches nearly all pack-template / generator drift; the
+            # remaining packs (mui, chakra, older versions) and per-example
+            # drift are deferred to the push:main sweep below.  Full sweep
+            # is one merge later — or force it with workflow_dispatch.
             EXAMPLES='["examples/showcase.ddd"]'
+            PACKS='["mantine@v9","shadcn@v4"]'
           else
+            # Full pack Cartesian on push:main + workflow_dispatch.
+            PACKS='["mantine@v7","mantine@v9","shadcn@v3","shadcn@v4","mui@v5","mui@v7","chakra@v2","chakra@v3"]'
             # Full Cartesian — push:main and workflow_dispatch.  This
             # list MUST match the `examples` const in
             # test/e2e/generated-react-build.test.ts (pinned by the
