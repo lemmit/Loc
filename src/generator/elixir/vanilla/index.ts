@@ -588,6 +588,28 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     (hexDeps as Record<string, string>).amqp = '"~> 4.0"';
   }
 
+  // JWKS strategy (OIDC only): the joken_jwks GenServer that fetches, caches,
+  // and periodically refreshes the issuer's signing keys for the Auth.Token
+  // verifier — the library analogue of the other backends' JWKS clients.
+  //
+  // `first_fetch_sync: true` fetches the keys synchronously at start, and the
+  // strategy is placed BEFORE the Endpoint in the supervision tree, so
+  // `/health` (and every route) comes up only once the signer cache is warm.
+  // The other backends fetch the JWKS lazily on the FIRST token verify, so
+  // they are always warm by the first request; the joken_jwks poller otherwise
+  // warms in the background and a token can arrive within a couple of seconds
+  // of the IdP coming up and 401 against a cold cache.  The retry budget
+  // (~30s) rides out the IdP's own boot/realm-import; if it is exhausted the
+  // strategy starts anyway (never crashes the boot) and the periodic poll
+  // heals once the IdP answers.
+  const authChildren =
+    authEnabled && sys.auth?.oidc
+      ? [
+          `{${appModule}Web.Auth.JwksStrategy, first_fetch_sync: true, ` +
+            `time_interval: 30_000, http_max_retries_per_fetch: 30, http_delay_per_retry: 1_000}`,
+        ]
+      : [];
+
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
   // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
@@ -607,6 +629,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     embedReact && !!deployable.uiName,
     [...schedulerChildren, ...channelChildren],
     usesOban,
+    authChildren,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto

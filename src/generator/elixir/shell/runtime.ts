@@ -13,6 +13,12 @@ export function renderApplication(
   // module names, appended to the supervision tree so each starts at boot
   // (after the Repo it locks against + the Endpoint).  Empty ⇒ byte-identical.
   schedulerChildren: string[] = [],
+  // Children that must start BEFORE the Endpoint (OIDC JWKS strategy): the
+  // `first_fetch_sync` JWKS fetch blocks until the issuer's keys are cached, so
+  // placing it ahead of the Endpoint gates `/health` on a warm signer cache —
+  // the backend does not accept traffic until it can verify tokens, matching
+  // the other backends' fetch-on-first-verify.  Empty ⇒ byte-identical.
+  preEndpointChildren: string[] = [],
 ): string {
   // Catalog server-lifecycle events.  Same identities Hono + .NET
   // emit so a cross-backend dashboard pivots on one event name.
@@ -51,7 +57,7 @@ defmodule ${appModule}.Application do
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
-      ${appModule}.Telemetry,
+      ${appModule}.Telemetry${preEndpointChildren.map((c) => `,\n      ${c}`).join("")},
       ${appModule}Web.Endpoint${schedulerChildren.map((c) => `,\n      ${c}`).join("")}
     ]
 

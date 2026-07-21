@@ -1,8 +1,9 @@
 // OIDC turnkey auth on Phoenix (D-AUTH-OIDC) — an `auth { oidc }` block makes
-// the generated ApiWeb.Auth plug a REAL OIDC verifier (JOSE + the issuer's
-// JWKS), pulls {:jose, ...} + :inets/:ssl into mix.exs, and adds the /auth/me
-// session probe.  This fixture compiles all of that under `mix compile
-// --warnings-as-errors` against plain Ecto/Phoenix (the vanilla build gate).
+// the generated Auth plug a REAL OIDC verifier (joken + joken_jwks against the
+// issuer's JWKS), pulls {:joken, ...} + {:joken_jwks, ...} + :inets/:ssl into
+// mix.exs, and adds the /auth/me session probe.  This fixture compiles all of
+// that under `mix compile --warnings-as-errors` against plain Ecto/Phoenix
+// (the vanilla build gate).
 system Helpdesk {
   user {
     id: string

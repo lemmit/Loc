@@ -1042,5 +1042,13 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   lines.push(`    interval: 5s`);
   lines.push(`    timeout: 3s`);
   lines.push(`    retries: 10`);
+  // Elixir OIDC: the generated Phoenix app warms the issuer's JWKS synchronously
+  // BEFORE its Endpoint starts (so `/health` serves only once tokens can be
+  // verified — no cold-cache 401 window).  That blocks boot on the IdP's own
+  // boot/realm-import, so give the healthcheck extra startup grace under compose
+  // `--wait`; the fetch degrades gracefully (never crashes) if the budget runs out.
+  if (oidc && d.platform === "elixir") {
+    lines.push(`    start_period: 60s`);
+  }
   return lines;
 }

@@ -11,12 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // `docker-compose.yml` *as-is* — the containerized Phoenix release (which
 // runs migrations then serves) + the bundled dev Keycloak + postgres — gets a
 // real token for the seeded `demo` user via the password grant, and asserts
-// the generated ApiWeb.Auth OIDC verifier (JOSE + the issuer's JWKS, reached
-// over host.docker.internal) validates it and maps the claims onto the
-// user {} shape.  This is the RUNTIME proof the compile/Dialyzer gates can't
-// give — e.g. the :httpc JWKS fetch, the JOSE verify_strict alg set, the
-// :persistent_term cache, and the iss check actually working against a real
-// IdP (the Phoenix analogue of the bug the .NET runtime e2e caught).
+// the generated Auth OIDC verifier (joken + joken_jwks against the issuer's
+// JWKS, reached over host.docker.internal) validates it and maps the claims
+// onto the user {} shape.  This is the RUNTIME proof the compile/Dialyzer gates
+// can't give — e.g. the joken_jwks strategy's JWKS fetch, the signature verify,
+// and the iss/aud/exp checks actually working against a real IdP (the Phoenix
+// analogue of the bug the .NET runtime e2e caught).
 //
 // Uses the full compose (not a native `mix phx.server`) so the generated
 // release Dockerfile owns all prod boot/config/migration wiring — no blind
