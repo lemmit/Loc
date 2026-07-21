@@ -244,13 +244,12 @@ a system-scoped one:
    workflow is a context orchestrator). Even the case that *looks* operational is
    context-local: "poll an external API every 5 min" is a **workflow in the
    integration's own context** (call the API, process the result — domain work),
-   and the interval is just a **config-valued cadence**
-   (`every config("RATES_POLL", 5m)`) — env-tunable like any config, never a
-   *scope* driver. So there is no domain-vs-operational split to hoist on: cadence
-   is always a **context-local value**, and `job` is **context-scope**, declared
-   beside the aggregate/workflow it drives. (The RFC hoisted only because cadence
-   was a bare source literal with no config path — swappability never required
-   system scope.)
+   and the interval is a **literal on the job** beside it. So there is no
+   domain-vs-operational split to hoist on: cadence is always a **context-local
+   value**, and `job` is **context-scope**, declared beside the aggregate/workflow
+   it drives. (The RFC hoisted only because its split what/when model wanted the
+   cadence swappable *separately* from the domain reaction; a unified context-local
+   `job` has no such split.)
 
 Note the `api`/`job` analogy is about **shape**, not scope: `api` faces *outward*
 (aggregates a subdomain into an external HTTP surface → system-scope), `job` faces
@@ -308,10 +307,13 @@ routing binding, orthogonal.
 4. **`job` block scope** — *resolved: context-scope* (declared beside the
    aggregate/workflow it drives). The RFC's system-scope was for the cadence
    *binding* in its split what/when model; `job` unifies them and is tied to one
-   context via its target. Cadence is always a context-local value; env-tuning is a
-   **config-valued cadence** (`every config(...)`), the same mechanism as any
-   config — not a scope concern. Remaining: pin the `config(...)`-in-cadence surface.
-5. **Route target: command vs handler** — targeting the *command* (single owner ⇒
+   context via its target. Cadence is a context-local literal.
+5. **Cadence env-tunability (NOT discussed — flagged, not designed)** — whether a
+   job's cadence should vary per environment is a reasonable future idea but was
+   not part of this design. Loom has **no config-valued expression today** — the
+   only env mechanism is `env("VAR")` in the auth block (not generalized), so there
+   is no existing surface to lean on. Left open; do not assume a `config(...)`.
+6. **Route target: command vs handler** — targeting the *command* (single owner ⇒
    handler derived) reads cleaner but can't point at a workflow `handle` or reuse
    one handler across routes; targeting the *handler* keeps today's flexibility.
    (Separate design point — see the route-overload discussion.)
