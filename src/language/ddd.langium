@@ -1474,8 +1474,14 @@ ProjectionMember:
 // reserving the pervasive domain word `order` needs a wider soft-keyword sweep
 // than this surface-only slice warrants, and ordering is only observable once
 // the read is actually emitted (paged reads).
+// A query-time projection's `from` source — an AGGREGATE (read through its
+// repository) or a WORKFLOW (read through its persisted instance / saga-state
+// rows, `instanceWireShape`).  The validator restricts the workflow case
+// (`select`-projection only, no `join`s).
+type ProjectionSource = Aggregate | Workflow;
+
 fragment ProjectionQueryClauses:
-    ('from' source=[Aggregate:ID] ('as' sourceAlias=ID)?)?
+    ('from' source=[ProjectionSource:ID] ('as' sourceAlias=ID)?)?
     ('requires' gate=Expression)?
     ('where' filter=Expression)?
     IgnoringClause?

@@ -2794,7 +2794,7 @@ export interface Projection extends langium.AstNode {
     name: string;
     params: Array<Parameter>;
     selects: Array<ProjectionSelect>;
-    source?: langium.Reference<Aggregate>;
+    source?: langium.Reference<ProjectionSource>;
     sourceAlias?: string;
 }
 
@@ -2883,6 +2883,16 @@ export const ProjectionSelect = {
 
 export function isProjectionSelect(item: unknown): item is ProjectionSelect {
     return reflection.isInstance(item, ProjectionSelect.$type);
+}
+
+export type ProjectionSource = Aggregate | Workflow;
+
+export const ProjectionSource = {
+    $type: 'ProjectionSource'
+} as const;
+
+export function isProjectionSource(item: unknown): item is ProjectionSource {
+    return reflection.isInstance(item, ProjectionSource.$type);
 }
 
 export interface Property extends langium.AstNode {
@@ -4381,6 +4391,7 @@ export type DddAstType = {
     ProjectionMember: ProjectionMember
     ProjectionOn: ProjectionOn
     ProjectionSelect: ProjectionSelect
+    ProjectionSource: ProjectionSource
     Property: Property
     QueryHandler: QueryHandler
     Repository: Repository
@@ -4533,7 +4544,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type, NamedDecl.$type, Targetable.$type, TestSubject.$type]
+            superTypes: [ContextMember.$type, NamedDecl.$type, ProjectionSource.$type, Targetable.$type, TestSubject.$type]
         },
         AggregateMember: {
             name: AggregateMember.$type,
@@ -6481,7 +6492,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 source: {
                     name: Projection.source,
-                    referenceType: Aggregate.$type,
+                    referenceType: ProjectionSource.$type,
                     optional: true
                 },
                 sourceAlias: {
@@ -6544,6 +6555,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 field: {
                     name: ProjectionSelect.field
                 }
+            },
+            superTypes: []
+        },
+        ProjectionSource: {
+            name: ProjectionSource.$type,
+            properties: {
             },
             superTypes: []
         },
@@ -7647,7 +7664,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type, Targetable.$type]
+            superTypes: [ContextMember.$type, ProjectionSource.$type, Targetable.$type]
         },
         WorkflowCreateDecl: {
             name: WorkflowCreateDecl.$type,

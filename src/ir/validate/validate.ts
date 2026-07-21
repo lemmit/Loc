@@ -76,6 +76,7 @@ import {
   validateUiRealtimeSupport,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
+  validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
 import {
@@ -171,6 +172,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRealtimeTenantBroadcast(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
+    validateWorkflowSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);

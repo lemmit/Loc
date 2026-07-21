@@ -149,6 +149,38 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
   }
 }
 
+// A query-time projection sourced `from <Workflow>` (its persisted instance /
+// saga-state rows, `instanceWireShape`) reads the workflow store, not an
+// aggregate repository — a distinct per-backend emit path.  Backends in
+// `PROJECTION_WF_SOURCE_SUPPORTED` have ported it; others gate the read HONESTLY
+// (rather than emit a broken reference to a non-existent workflow repository)
+// until their port lands.  Mirrors `validateQueryTimeProjectionBackend`.
+const PROJECTION_WF_SOURCE_SUPPORTED = new Set(["node"]);
+
+export function validateWorkflowSourceProjectionBackend(
+  sys: SystemIR,
+  diags: LoomDiagnostic[],
+): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform) || PROJECTION_WF_SOURCE_SUPPORTED.has(d.platform))
+      continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (p.query?.sourceKind !== "workflow") continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-workflow-source-unsupported-backend",
+          message: `projection '${p.name}' is sourced 'from ${p.query.source}' (a workflow's instance rows), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
+          source: `${c.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.auth?.ui) continue;

@@ -29,6 +29,80 @@ export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic
     if (proj.correlationField !== undefined) validateKey(ctx, proj, diags);
     validateHandlers(ctx, proj, diags);
     validateQueryComprehension(ctx, proj, diags);
+    validateWorkflowSource(ctx, proj, diags);
+  }
+}
+
+/** Workflow-source query-time projection gates (the projection twin of the
+ *  removed workflow-source view; workflow-instance-views.md).  A projection
+ *  `from <Workflow>` reads the workflow's persisted instance rows
+ *  (`instanceWireShape`) at query time.  Option A: NON-event-sourced (saga-state
+ *  table) sources with `where`/`select` only.
+ *
+ *   - `loom.projection-workflow-source-not-observable` — the workflow has no
+ *     readable instance state (no id-shaped correlation field).
+ *   - `loom.projection-workflow-source-eventsourced-unsupported` — an
+ *     event-sourced workflow source (its instances are a per-request fold, no
+ *     state table); the emit path for it is deferred (honest gate).
+ *   - `loom.projection-workflow-source-join-unsupported` — a `join` follow over
+ *     a workflow source (by-id follows are aggregate-rooted).
+ *   - `loom.projection-workflow-source-ignoring-unsupported` — an `ignoring`
+ *     bypass over a workflow source (a workflow has no capability query-filters
+ *     to bypass). */
+function validateWorkflowSource(
+  ctx: BoundedContextIR,
+  proj: ProjectionIR,
+  diags: LoomDiagnostic[],
+): void {
+  const q = proj.query;
+  if (q?.sourceKind !== "workflow" || !q.source) return;
+  const at = `${ctx.name}/${proj.name}`;
+  const wf = ctx.workflows.find((w) => w.name === q.source);
+  if (!wf) return; // an unresolved source is reported elsewhere.
+  if (!wf.instanceWireShape) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-workflow-source-not-observable",
+      message:
+        `projection '${proj.name}': workflow '${wf.name}' has no observable instance state ` +
+        "(it needs a single id-shaped correlation/state field), so it can't be a projection source.",
+      source: at,
+    });
+    return;
+  }
+  if (wf.eventSourced) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-workflow-source-eventsourced-unsupported",
+      message:
+        `projection '${proj.name}': workflow '${wf.name}' is event-sourced, whose instances are a ` +
+        "per-request fold of its event stream (no state table). A projection over an event-sourced " +
+        "workflow source is not emitted yet — source it from a state-backed (non-event-sourced) " +
+        "workflow, or fold the events into a keyed 'projection' instead.",
+      source: at,
+    });
+  }
+  if (q.joins.length > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-workflow-source-join-unsupported",
+      message:
+        `projection '${proj.name}': a 'join' follow over a workflow source is not supported ` +
+        "(by-id joins resolve an aggregate's identity, not a workflow instance). Read the " +
+        "workflow's instance fields directly in 'select', or source the projection from an aggregate.",
+      source: at,
+    });
+  }
+  if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-workflow-source-ignoring-unsupported",
+      message:
+        `projection '${proj.name}': an 'ignoring' capability-filter bypass over a workflow source ` +
+        "has no effect — a workflow instance read carries no capability query-filters. Remove the " +
+        "'ignoring' clause.",
+      source: at,
+    });
   }
 }
 
