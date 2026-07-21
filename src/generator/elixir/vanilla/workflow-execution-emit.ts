@@ -221,8 +221,13 @@ export function lowerStatements(
   ctx?: BoundedContextIR,
 ): BodyLine[] {
   const lines: BodyLine[] = [];
-  for (const st of stmts) {
-    for (const line of lowerStatement(st, contextModule, renderCtx, ctx)) {
+  for (let i = 0; i < stmts.length; i++) {
+    const st = stmts[i]!;
+    // M-T6.21 — pass the downstream statements so a `let` binding no later
+    // statement references can be `_`-prefixed; an unread real-named bind trips
+    // `mix compile --warnings-as-errors` (the same move the for-each / if-let
+    // body binds already make via `bindUsedLater`).
+    for (const line of lowerStatement(st, contextModule, renderCtx, ctx, stmts.slice(i + 1))) {
       lines.push({ ...line, origin: st.origin });
     }
   }
@@ -234,6 +239,7 @@ function lowerStatement(
   contextModule: string,
   renderCtx: RenderCtx,
   ctx?: BoundedContextIR,
+  rest: WorkflowStmtIR[] = [],
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -301,12 +307,18 @@ function lowerStatement(
       // `let foo = <expr>` (pure binding inside a workflow body) →
       // `foo <- (<expr>)` — a with-clause binding always succeeds.
       // `bindName` is undefined so a subsequent `factory-let` (an
-      // aggregate-shaped value) wins the `{:ok, <last>}` result slot.
+      // aggregate-shaped value) wins the `{:ok, <last>}` result slot — which
+      // also means underscoring an unused binding can never change the
+      // workflow's return value.  M-T6.21: a binding no later statement reads
+      // (e.g. `let label = match … { … }` with no following use) is
+      // `_`-prefixed so `mix compile --warnings-as-errors` stays clean; the
+      // expression is still evaluated, only the binding is discarded.
       const expr = renderExpr(st.expr, renderCtx);
+      const bind = bindUsedLater(st.name, rest) ? snake(st.name) : `_${snake(st.name)}`;
       return [
         {
           kind: "with-clause",
-          text: `${snake(st.name)} <- (${expr})`,
+          text: `${bind} <- (${expr})`,
           bindName: undefined,
         },
       ];
@@ -1013,6 +1025,16 @@ function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): 
       return;
     case "resource-call":
       collectRefNames(st.call, acc);
+      return;
+    case "domain-service-call":
+      // `Transfer.run(a, b, q)` — its call args may reference an earlier
+      // `let q = …`; without this the binding reads as unused and gets wrongly
+      // `_`-prefixed, then the service call references an undefined variable.
+      collectRefNames(st.call, acc);
+      return;
+    case "assign":
+      // `total := q.amount` reads the binding `q`.
+      collectRefNames(st.value, acc);
       return;
     case "repo-run":
       for (const a of st.retrievalArgs) collectRefNames(a, acc);
