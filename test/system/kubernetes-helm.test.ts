@@ -183,3 +183,121 @@ describe("kubernetes / helm — secret widening + probe alignment", () => {
     expect(dep).toMatch(/readinessProbe[\s\S]*?path: \/ready/);
   });
 });
+
+// Broker channel wiring (M-T4.4 slice 5b): a wired channelSource gets an
+// enabled-gated in-cluster broker workload in the chart (+ raw view), and
+// each wired deployable's LOOM_CHANNEL_*_URL rides the shared Secret with
+// the §7 credentials — overridable per deployable via `channels:` values.
+const BROKER_SRC = `
+system Acme {
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order {}
+      event OrderPlaced { order: Order id, at: datetime }
+      channel Lifecycle {
+        carries: OrderPlaced
+        delivery: broadcast
+        retention: log
+      }
+    }
+  }
+  subdomain Fulfilment {
+    context Shipping {
+      aggregate Shipment with crudish {
+        orderRef: Order id
+        status: string
+      }
+      repository Shipments for Shipment {}
+      workflow Fulfil {
+        orderId: Order id
+        create(p: OrderPlaced) by p.order {
+          let s = Shipment.create({ orderRef: p.order, status: "Pending" })
+        }
+      }
+    }
+  }
+  storage primary { type: postgres }
+  storage bus { type: kafka }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  resource shippingState { for: Shipping, kind: state, use: primary }
+  channelSource lifecycleBus { for: Lifecycle, use: bus }
+  deployable salesApi { platform: node contexts: [Orders] dataSources: [ordersState] channels: [lifecycleBus] port: 3000 }
+  deployable shipApi  { platform: node contexts: [Shipping] dataSources: [shippingState] channels: [lifecycleBus] port: 3001 }
+}`;
+
+describe("kubernetes / helm — broker channel wiring (M-T4.4 slice 5b)", () => {
+  it("emits an enabled-gated broker workload in the chart with the §7 auth config", async () => {
+    const files = await filesFor(BROKER_SRC, true);
+    const broker = files.get("helm/templates/bus-broker.yaml") ?? "";
+    expect(broker).toContain("{{- if .Values.brokers.bus.enabled }}");
+    expect(broker).toContain("image: apache/kafka:4.1.0");
+    // SASL/PLAIN on the client listener; advertised host = the release-
+    // prefixed broker Service.
+    expect(broker).toContain(
+      'value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,CLIENT:SASL_PLAINTEXT"',
+    );
+    expect(broker).toContain(
+      'value: {{ printf "CLIENT://%[1]s-bus:9092,PLAINTEXT://%[1]s-bus:9094" (include "loom.fullname" .) | quote }}',
+    );
+    expect(broker).toContain(
+      'user_sales_api=\\"loom-dev-bus-sales_api\\" user_ship_api=\\"loom-dev-bus-ship_api\\"',
+    );
+    const values = files.get("helm/values.yaml") ?? "";
+    expect(values).toContain("brokers:");
+    expect(values).toContain("  bus:\n    enabled: true");
+    // Per-deployable channels override knob, empty by default.
+    expect(values).toContain('    LOOM_CHANNEL_LIFECYCLE_BUS_URL: ""');
+  });
+
+  it("routes the credentialed channel URL through the shared Secret with an in-cluster default", async () => {
+    const files = await filesFor(BROKER_SRC, true);
+    const secret = files.get("helm/templates/secret.yaml") ?? "";
+    expect(secret).toContain(
+      'sales-api-loom-channel-lifecycle-bus-url: {{ .Values.salesApi.channels.LOOM_CHANNEL_LIFECYCLE_BUS_URL | default (printf "kafka://sales_api:loom-dev-bus-sales_api@%s-bus:9092" (include "loom.fullname" .)) | quote }}',
+    );
+    const deployment = files.get("helm/templates/sales-api-deployment.yaml") ?? "";
+    expect(deployment).toContain("- name: LOOM_CHANNEL_LIFECYCLE_BUS_URL");
+    expect(deployment).toContain("key: sales-api-loom-channel-lifecycle-bus-url");
+  });
+
+  it("mirrors the broker + secret into the raw k8s/ view with plain service names", async () => {
+    const files = await filesFor(BROKER_SRC, true);
+    const broker = files.get("k8s/bus-broker.yaml") ?? "";
+    expect(broker).toContain("image: apache/kafka:4.1.0");
+    expect(broker).toContain('value: "CLIENT://bus:9092,PLAINTEXT://bus:9094"');
+    const secret = files.get("k8s/secret.yaml") ?? "";
+    expect(secret).toContain(
+      'sales-api-loom-channel-lifecycle-bus-url: "kafka://sales_api:loom-dev-bus-sales_api@bus:9092"',
+    );
+  });
+
+  it("mounts the generated rabbit definitions via a ConfigMap on a rabbitmq storage", async () => {
+    const rabbitSrc = BROKER_SRC.replace("type: kafka", "type: rabbitmq")
+      .replace("delivery: broadcast", "delivery: queue")
+      .replace("retention: log", "retention: work");
+    const files = await filesFor(rabbitSrc, true);
+    const broker = files.get("helm/templates/bus-broker.yaml") ?? "";
+    expect(broker).toContain("kind: ConfigMap");
+    expect(broker).toContain("loom-definitions.json: |");
+    expect(broker).toContain('"hashing_algorithm": "rabbit_password_hashing_sha256"');
+    expect(broker).toContain("mountPath: /etc/rabbitmq/loom-definitions.json");
+    expect(broker).toContain("image: rabbitmq:4-management-alpine");
+  });
+
+  it("emits no broker artifacts for a channel-less system", async () => {
+    const files = await filesFor(SRC, true);
+    for (const path of files.keys()) {
+      expect(path).not.toContain("-broker.yaml");
+    }
+    expect(files.get("helm/values.yaml")).not.toContain("brokers:");
+  });
+});

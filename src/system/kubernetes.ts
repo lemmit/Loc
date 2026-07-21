@@ -1,3 +1,14 @@
+import {
+  brokerUrl,
+  devPassword,
+  kafkaJaasConfig,
+  renderRabbitDefinitions,
+} from "../generator/_channels/auth.js";
+import {
+  type BrokerTransport,
+  brokerChannelBindings,
+  channelTransportStorageNames,
+} from "../generator/_channels/bindings.js";
 import type { DeployableIR, SystemIR } from "../ir/types/loom-ir.js";
 import { platformFor } from "../platform/registry.js";
 
@@ -83,6 +94,12 @@ export interface WorkloadModel {
    *  `.Values.<key>.secrets.<NAME>` map.  Keeps secrets out of the
    *  plaintext `ConfigMap`. */
   secretEnv: SecretEnv[];
+  /** Broker channel URLs (`LOOM_CHANNEL_<NAME>_URL` — M-T4.4 slice 5b).
+   *  Secret-sourced (they embed the §7 credentials); `value` is the raw
+   *  view's in-cluster URL (plain service name), `chartFormat` the printf
+   *  format the chart's Secret template resolves with the release fullname
+   *  (`%s-<broker>`), overridable via `.Values.<key>.channels.<NAME>`. */
+  channelEnv: (SecretEnv & { chartFormat: string })[];
 }
 
 /** A sensitive env entry sourced from the shared `Secret`. */
@@ -154,6 +171,14 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
         apiBackend = { name: kName(target.name), servicePort: target.port };
       }
     }
+    // Broker channel URLs (M-T4.4 slice 5b): the same credentialed URLs
+    // compose injects, re-hosted at the in-cluster broker Service.
+    const channelEnv = brokerChannelBindings(d, sys).map((b) => ({
+      name: b.envVar,
+      secretKey: `${name}-${kName(b.envVar)}`,
+      value: brokerUrl(b, d.name, kName(b.storageName)),
+      chartFormat: brokerUrl(b, d.name, `%s-${kName(b.storageName)}`),
+    }));
     const secretKeys = new Set(shape.secretEnvKeys ?? []);
     for (const [k, v] of shape.env) {
       if (shape.dependsOnDb && isDbConnection(v)) {
@@ -197,8 +222,127 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
       configEnv,
       dbEnv,
       secretEnv,
+      channelEnv,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Broker workloads (M-T4.4 slice 5b) — the in-cluster siblings of the compose
+// broker sidecars, carrying the same §7 auth provisioning.  Rendered by both
+// the raw view here and the chart (enabled-gated per broker: set
+// `.Values.brokers.<storage>.enabled=false` and point the deployables'
+// `channels:` URLs at a managed broker instead).
+// ---------------------------------------------------------------------------
+
+export interface BrokerModel {
+  storageName: string;
+  /** values.yaml key under `brokers:` — the storage name verbatim (no
+   *  hyphens, so no `index` gymnastics in templates). */
+  valuesKey: string;
+  /** DNS-1123 workload/service name. */
+  name: string;
+  transport: BrokerTransport;
+  image: string;
+  port: number;
+  /** Container args (valkey's requirepass). */
+  args: string[];
+  /** Env, with every `%s` in a value standing for the service-name prefix
+   *  (chart: the release fullname via printf; raw: dropped).  Only kafka's
+   *  advertised listeners use it. */
+  env: [string, string][];
+  /** Readiness/liveness exec probe command. */
+  probe: string[];
+  /** ConfigMap-mounted files (rabbit definitions + conf). */
+  files: { fileName: string; mountPath: string; content: string }[];
+}
+
+export function buildBrokers(sys: SystemIR): BrokerModel[] {
+  const out: BrokerModel[] = [];
+  for (const storageName of channelTransportStorageNames(sys)) {
+    const s = sys.storages.find((st) => st.name === storageName);
+    if (!s || (s.type !== "redis" && s.type !== "rabbitmq" && s.type !== "kafka")) continue;
+    const name = kName(storageName);
+    if (s.type === "redis") {
+      const pass = devPassword(storageName);
+      out.push({
+        storageName,
+        valuesKey: storageName,
+        name,
+        transport: "redis",
+        image: "valkey/valkey:8-alpine",
+        port: 6379,
+        args: ["valkey-server", "--requirepass", pass],
+        env: [],
+        probe: ["valkey-cli", "-a", pass, "ping"],
+        files: [],
+      });
+    } else if (s.type === "rabbitmq") {
+      out.push({
+        storageName,
+        valuesKey: storageName,
+        name,
+        transport: "rabbitmq",
+        image: "rabbitmq:4-management-alpine",
+        port: 5672,
+        args: [],
+        env: [],
+        probe: ["rabbitmq-diagnostics", "-q", "ping"],
+        files: [
+          {
+            fileName: "10-loom.conf",
+            mountPath: "/etc/rabbitmq/conf.d/10-loom.conf",
+            content: "# Auto-generated.\nload_definitions = /etc/rabbitmq/loom-definitions.json\n",
+          },
+          {
+            fileName: "loom-definitions.json",
+            mountPath: "/etc/rabbitmq/loom-definitions.json",
+            content: renderRabbitDefinitions(sys, storageName),
+          },
+        ],
+      });
+    } else {
+      // Same single-node KRaft + SASL/PLAIN CLIENT listener as compose; the
+      // advertised host is the broker's own Service (`%s` = name prefix in
+      // the chart, empty in the raw view).
+      out.push({
+        storageName,
+        valuesKey: storageName,
+        name,
+        transport: "kafka",
+        image: "apache/kafka:4.1.0",
+        port: 9092,
+        args: [],
+        env: [
+          ["KAFKA_NODE_ID", "1"],
+          ["KAFKA_PROCESS_ROLES", "broker,controller"],
+          ["KAFKA_LISTENERS", "CLIENT://:9092,PLAINTEXT://:9094,CONTROLLER://:9093"],
+          ["KAFKA_ADVERTISED_LISTENERS", `CLIENT://%s-${name}:9092,PLAINTEXT://%s-${name}:9094`],
+          ["KAFKA_CONTROLLER_LISTENER_NAMES", "CONTROLLER"],
+          ["KAFKA_CONTROLLER_QUORUM_VOTERS", "1@localhost:9093"],
+          [
+            "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP",
+            "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,CLIENT:SASL_PLAINTEXT",
+          ],
+          ["KAFKA_INTER_BROKER_LISTENER_NAME", "PLAINTEXT"],
+          ["KAFKA_LISTENER_NAME_CLIENT_SASL_ENABLED_MECHANISMS", "PLAIN"],
+          ["KAFKA_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG", kafkaJaasConfig(sys, storageName)],
+          ["KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1"],
+          ["KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1"],
+          ["KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1"],
+          ["KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS", "0"],
+          ["KAFKA_NUM_PARTITIONS", "3"],
+        ],
+        probe: [
+          "/opt/kafka/bin/kafka-broker-api-versions.sh",
+          "--bootstrap-server",
+          "localhost:9094",
+        ],
+        files: [],
+      });
+    }
+  }
+  return out;
 }
 
 /** Same compose-safe slug as `src/system/index.ts` — kept local so this
@@ -261,7 +405,7 @@ function renderDeployment(sys: SystemIR, w: WorkloadModel): string {
     lines.push("            - configMapRef:");
     lines.push(`                name: ${w.name}-config`);
   }
-  const secretRefs = [...w.dbEnv, ...w.secretEnv];
+  const secretRefs = [...w.dbEnv, ...w.secretEnv, ...w.channelEnv];
   if (secretRefs.length > 0) {
     lines.push("          env:");
     for (const e of secretRefs) {
@@ -338,10 +482,94 @@ function renderSecret(sys: SystemIR, workloads: WorkloadModel[]): string {
   // Placeholder values — REPLACE with your managed-DB URLs / real secrets.
   // The dev-compose values are kept as recognisable defaults.
   for (const w of workloads) {
-    for (const e of [...w.dbEnv, ...w.secretEnv]) {
+    for (const e of [...w.dbEnv, ...w.secretEnv, ...w.channelEnv]) {
       lines.push(`  ${e.secretKey}: ${JSON.stringify(e.value)}`);
     }
   }
+  return lines.join("\n") + "\n";
+}
+
+/** Raw broker workload — Deployment + Service (+ file ConfigMap), the
+ *  chart-defaults view of the enabled-gated broker subchart (5b). */
+function renderBroker(sys: SystemIR, b: BrokerModel): string {
+  const lines: string[] = [];
+  if (b.files.length > 0) {
+    lines.push("apiVersion: v1");
+    lines.push("kind: ConfigMap");
+    lines.push("metadata:");
+    lines.push(`  name: ${b.name}-files`);
+    lines.push(...commonLabels(sys, b.name));
+    lines.push("data:");
+    for (const f of b.files) {
+      lines.push(`  ${f.fileName}: |`);
+      for (const l of f.content.replace(/\n$/, "").split("\n")) lines.push(`    ${l}`);
+    }
+    lines.push("---");
+  }
+  lines.push("apiVersion: apps/v1");
+  lines.push("kind: Deployment");
+  lines.push("metadata:");
+  lines.push(`  name: ${b.name}`);
+  lines.push(...commonLabels(sys, b.name));
+  lines.push("spec:");
+  lines.push("  replicas: 1");
+  lines.push("  selector:");
+  lines.push("    matchLabels:");
+  lines.push(`      app.kubernetes.io/name: ${b.name}`);
+  lines.push("  template:");
+  lines.push("    metadata:");
+  lines.push("      labels:");
+  lines.push(`        app.kubernetes.io/name: ${b.name}`);
+  lines.push("    spec:");
+  lines.push("      containers:");
+  lines.push(`        - name: ${b.name}`);
+  lines.push(`          image: ${b.image}`);
+  if (b.args.length > 0) {
+    lines.push(`          args: [${b.args.map((a) => JSON.stringify(a)).join(", ")}]`);
+  }
+  lines.push("          ports:");
+  lines.push(`            - containerPort: ${b.port}`);
+  if (b.env.length > 0) {
+    lines.push("          env:");
+    for (const [k, v] of b.env) {
+      lines.push(`            - name: ${k}`);
+      // Raw view: the service is plainly named, so the fullname prefix
+      // slot resolves to nothing.
+      lines.push(`              value: ${JSON.stringify(v.replaceAll("%s-", ""))}`);
+    }
+  }
+  if (b.files.length > 0) {
+    lines.push("          volumeMounts:");
+    for (const f of b.files) {
+      lines.push(`            - name: files`);
+      lines.push(`              mountPath: ${f.mountPath}`);
+      lines.push(`              subPath: ${f.fileName}`);
+    }
+  }
+  lines.push("          readinessProbe:");
+  lines.push("            exec:");
+  lines.push(`              command: [${b.probe.map((c) => JSON.stringify(c)).join(", ")}]`);
+  lines.push("            initialDelaySeconds: 5");
+  lines.push("            periodSeconds: 5");
+  if (b.files.length > 0) {
+    lines.push("      volumes:");
+    lines.push("        - name: files");
+    lines.push("          configMap:");
+    lines.push(`            name: ${b.name}-files`);
+  }
+  lines.push("---");
+  lines.push("apiVersion: v1");
+  lines.push("kind: Service");
+  lines.push("metadata:");
+  lines.push(`  name: ${b.name}`);
+  lines.push(...commonLabels(sys, b.name));
+  lines.push("spec:");
+  lines.push("  type: ClusterIP");
+  lines.push("  selector:");
+  lines.push(`    app.kubernetes.io/name: ${b.name}`);
+  lines.push("  ports:");
+  lines.push(`    - port: ${b.port}`);
+  lines.push(`      targetPort: ${b.port}`);
   return lines.join("\n") + "\n";
 }
 
@@ -355,8 +583,13 @@ export function renderKubernetesManifests(sys: SystemIR): Map<string, string> {
     out.set(`k8s/${w.name}-service.yaml`, renderService(sys, w));
     if (w.configEnv.length > 0) out.set(`k8s/${w.name}-config.yaml`, renderConfigMap(sys, w));
   }
-  if (workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0)) {
+  if (
+    workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0 || w.channelEnv.length > 0)
+  ) {
     out.set("k8s/secret.yaml", renderSecret(sys, workloads));
+  }
+  for (const b of buildBrokers(sys)) {
+    out.set(`k8s/${b.name}-broker.yaml`, renderBroker(sys, b));
   }
   return out;
 }

@@ -1,6 +1,12 @@
 import type { SystemIR } from "../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../util/api-base.js";
-import { buildWorkloads, kName, type WorkloadModel } from "./kubernetes.js";
+import {
+  type BrokerModel,
+  buildBrokers,
+  buildWorkloads,
+  kName,
+  type WorkloadModel,
+} from "./kubernetes.js";
 
 // ---------------------------------------------------------------------------
 // Helm chart emitter (D-K8S-FORMAT — see docs/kubernetes.md).
@@ -67,7 +73,7 @@ function renderHelpers(sys: SystemIR): string {
   ].join("\n");
 }
 
-function renderValues(_sys: SystemIR, workloads: WorkloadModel[]): string {
+function renderValues(_sys: SystemIR, workloads: WorkloadModel[], brokers: BrokerModel[]): string {
   const lines: string[] = [];
   lines.push("# Auto-generated chart values.  Override per environment with");
   lines.push("# `--set key=value` or `-f values.prod.yaml`.");
@@ -112,11 +118,29 @@ function renderValues(_sys: SystemIR, workloads: WorkloadModel[]): string {
       lines.push("    # values are placeholders — replace for production.");
       for (const e of w.secretEnv) lines.push(`    ${e.name}: ${JSON.stringify(e.value)}`);
     }
+    if (w.channelEnv.length > 0) {
+      lines.push("  channels:");
+      lines.push("    # Broker connection URLs (M-T4.4 §7 — credentials ride the");
+      lines.push("    # URL).  Empty = the chart's own enabled broker with its dev");
+      lines.push("    # credentials; set to a full URL to use a managed broker");
+      lines.push("    # (then disable the matching `brokers.<name>` block).");
+      for (const e of w.channelEnv) lines.push(`    ${e.name}: ""`);
+    }
     if (w.exposesUi) {
       lines.push("  ingress:");
       lines.push("    enabled: false");
       lines.push('    host: ""');
     }
+  }
+  for (const b of brokers) {
+    if (brokers[0] === b) {
+      lines.push("brokers:");
+      lines.push("  # In-cluster broker workloads (M-T4.4 slice 5b), auth-provisioned");
+      lines.push("  # exactly like the compose sidecars (§7).  Disable one and point");
+      lines.push("  # the deployables' `channels:` URLs at a managed broker instead.");
+    }
+    lines.push(`  ${b.valuesKey}:`);
+    lines.push("    enabled: true");
   }
   return lines.join("\n") + "\n";
 }
@@ -161,7 +185,7 @@ function renderDeploymentTemplate(w: WorkloadModel): string {
     lines.push("            - configMapRef:");
     lines.push(`                name: ${FULLNAME}-${w.name}-config`);
   }
-  const secretRefs = [...w.dbEnv, ...w.secretEnv];
+  const secretRefs = [...w.dbEnv, ...w.secretEnv, ...w.channelEnv];
   if (secretRefs.length > 0) {
     lines.push("          env:");
     for (const e of secretRefs) {
@@ -291,7 +315,111 @@ function renderSecretTemplate(workloads: WorkloadModel[]): string {
     for (const e of w.secretEnv) {
       lines.push(`  ${e.secretKey}: {{ .Values.${w.valuesKey}.secrets.${e.name} | quote }}`);
     }
+    for (const e of w.channelEnv) {
+      // Empty values default -> the chart's own broker Service (release-
+      // prefixed name) with the dev credentials; a set value wins verbatim.
+      lines.push(
+        `  ${e.secretKey}: {{ .Values.${w.valuesKey}.channels.${e.name} | default (printf ${JSON.stringify(e.chartFormat)} (include "loom.fullname" .)) | quote }}`,
+      );
+    }
   }
+  return lines.join("\n") + "\n";
+}
+
+/** Broker workload template (M-T4.4 slice 5b) — Deployment + Service (+
+ *  file ConfigMap), enabled-gated per broker under `.Values.brokers`. */
+function renderBrokerTemplate(b: BrokerModel): string {
+  const lines: string[] = [];
+  lines.push(`{{- if .Values.brokers.${b.valuesKey}.enabled }}`);
+  if (b.files.length > 0) {
+    lines.push("apiVersion: v1");
+    lines.push("kind: ConfigMap");
+    lines.push("metadata:");
+    lines.push(`  name: ${FULLNAME}-${b.name}-files`);
+    lines.push("  labels:");
+    lines.push(`    app.kubernetes.io/name: ${b.name}`);
+    lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+    lines.push("data:");
+    for (const f of b.files) {
+      lines.push(`  ${f.fileName}: |`);
+      for (const l of f.content.replace(/\n$/, "").split("\n")) lines.push(`    ${l}`);
+    }
+    lines.push("---");
+  }
+  lines.push("apiVersion: apps/v1");
+  lines.push("kind: Deployment");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${b.name}`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${b.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("spec:");
+  lines.push("  replicas: 1");
+  lines.push("  selector:");
+  lines.push("    matchLabels:");
+  lines.push(`      app.kubernetes.io/name: ${b.name}`);
+  lines.push("  template:");
+  lines.push("    metadata:");
+  lines.push("      labels:");
+  lines.push(`        app.kubernetes.io/name: ${b.name}`);
+  lines.push("    spec:");
+  lines.push("      containers:");
+  lines.push(`        - name: ${b.name}`);
+  lines.push(`          image: ${b.image}`);
+  if (b.args.length > 0) {
+    lines.push(`          args: [${b.args.map((a) => JSON.stringify(a)).join(", ")}]`);
+  }
+  lines.push("          ports:");
+  lines.push(`            - containerPort: ${b.port}`);
+  if (b.env.length > 0) {
+    lines.push("          env:");
+    for (const [k, v] of b.env) {
+      lines.push(`            - name: ${k}`);
+      if (v.includes("%s-")) {
+        // The service-name prefix slot resolves to the release fullname.
+        lines.push(
+          `              value: {{ printf ${JSON.stringify(v.replaceAll("%s-", "%[1]s-"))} (include "loom.fullname" .) | quote }}`,
+        );
+      } else {
+        lines.push(`              value: ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  if (b.files.length > 0) {
+    lines.push("          volumeMounts:");
+    for (const f of b.files) {
+      lines.push("            - name: files");
+      lines.push(`              mountPath: ${f.mountPath}`);
+      lines.push(`              subPath: ${f.fileName}`);
+    }
+  }
+  lines.push("          readinessProbe:");
+  lines.push("            exec:");
+  lines.push(`              command: [${b.probe.map((c) => JSON.stringify(c)).join(", ")}]`);
+  lines.push("            initialDelaySeconds: 5");
+  lines.push("            periodSeconds: 5");
+  if (b.files.length > 0) {
+    lines.push("      volumes:");
+    lines.push("        - name: files");
+    lines.push("          configMap:");
+    lines.push(`            name: ${FULLNAME}-${b.name}-files`);
+  }
+  lines.push("---");
+  lines.push("apiVersion: v1");
+  lines.push("kind: Service");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${b.name}`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${b.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("spec:");
+  lines.push("  type: ClusterIP");
+  lines.push("  selector:");
+  lines.push(`    app.kubernetes.io/name: ${b.name}`);
+  lines.push("  ports:");
+  lines.push(`    - port: ${b.port}`);
+  lines.push(`      targetPort: ${b.port}`);
+  lines.push("{{- end }}");
   return lines.join("\n") + "\n";
 }
 
@@ -346,8 +474,9 @@ function gated(w: WorkloadModel, body: string): string {
 export function renderHelmChart(sys: SystemIR): Map<string, string> {
   const out = new Map<string, string>();
   const workloads = buildWorkloads(sys);
+  const brokers = buildBrokers(sys);
   out.set("helm/Chart.yaml", renderChartYaml(sys));
-  out.set("helm/values.yaml", renderValues(sys, workloads));
+  out.set("helm/values.yaml", renderValues(sys, workloads, brokers));
   out.set("helm/templates/_helpers.tpl", renderHelpers(sys));
   for (const w of workloads) {
     out.set(`helm/templates/${w.name}-deployment.yaml`, gated(w, renderDeploymentTemplate(w)));
@@ -359,8 +488,13 @@ export function renderHelmChart(sys: SystemIR): Map<string, string> {
       out.set(`helm/templates/${w.name}-ingress.yaml`, gated(w, renderIngressTemplate(w)));
     }
   }
-  if (workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0)) {
+  if (
+    workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0 || w.channelEnv.length > 0)
+  ) {
     out.set("helm/templates/secret.yaml", renderSecretTemplate(workloads));
+  }
+  for (const b of brokers) {
+    out.set(`helm/templates/${b.name}-broker.yaml`, renderBrokerTemplate(b));
   }
   out.set("helm/templates/NOTES.txt", renderNotes(sys, workloads));
   return out;
