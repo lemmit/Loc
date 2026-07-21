@@ -113,6 +113,20 @@ export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPr
   return lowerOver(e, rowClassName(wf.name), [], "current_user");
 }
 
+/** Lower a projection-sourced query-time projection's `where` filter
+ *  (projection.md — `from <Projection>`) to a predicate over the SOURCE folded
+ *  projection's read-model `<Proj>Row`.  The source candidate refs (`t.total`)
+ *  bind to that row's columns exactly as an aggregate/workflow filter binds to
+ *  its row; a validated projection source is materialized (has a `<Proj>Row`
+ *  table), carries NO `join`/`ignoring`, and a read-model row holds no reference
+ *  collections, so the association/join arms never fire here. */
+export function lowerProjectionFilterToSqlAlchemy(
+  e: ExprIR,
+  sourceProjName: string,
+): PyPredicate | null {
+  return lowerOver(e, rowClassName(sourceProjName), [], "current_user");
+}
+
 function lowerOver(
   e: ExprIR,
   row: string,

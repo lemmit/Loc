@@ -447,6 +447,19 @@ projection <Name>[(params)] [keyed by <k>] {
 }
 ```
 
+**`from <Source>` kinds** (all read `this`/alias the same way — the predicate
+machinery is source-agnostic; validator restricts the non-aggregate cases to
+`where`/`select`, no `join`/`ignoring`):
+
+- **aggregate** — read through its repository (the default; the aggregate's
+  capability filters apply, and `ignoring` can bypass them).
+- **workflow** — read the workflow's persisted instance / saga-state rows
+  (`instanceWireShape`). Non-event-sourced only; the source must be observable
+  (an id-shaped correlation field).
+- **projection** — read another **materialized** (folded, `on(e)`) projection's
+  persisted `<Proj>Row` read-model table. A query-time source projection (no row
+  table) is rejected (`loom.projection-source-not-materialized`).
+
 Derived facts (not declared, not stamped):
 
 - **keyed collection vs singleton** ← `keyed by` **present or absent.**

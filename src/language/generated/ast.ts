@@ -2885,7 +2885,7 @@ export function isProjectionSelect(item: unknown): item is ProjectionSelect {
     return reflection.isInstance(item, ProjectionSelect.$type);
 }
 
-export type ProjectionSource = Aggregate | Workflow;
+export type ProjectionSource = Aggregate | Projection | Workflow;
 
 export const ProjectionSource = {
     $type: 'ProjectionSource'
@@ -6500,7 +6500,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ContextMember.$type]
+            superTypes: [ContextMember.$type, ProjectionSource.$type]
         },
         ProjectionJoin: {
             name: ProjectionJoin.$type,
