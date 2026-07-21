@@ -2,7 +2,7 @@
 //
 // The page-IR-walking emitter (`src/generator/react/pages-emitter.ts`)
 // must produce output that is byte-for-byte identical to the legacy
-// per-aggregate / per-workflow / per-view direct walk in the bulk-
+// per-aggregate / per-workflow direct walk in the bulk-
 // scaffold case.  This test runs the FULL system generator against
 // `examples/acme.ddd` and diffs every emitted file against the
 // committed baseline at `test/fixtures/baseline-output/`.
@@ -89,7 +89,7 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
   it("page objects emit through `emitPageObjectsForUi` when ui is set", async () => {
     // Defence-in-depth: if a refactor accidentally re-routes the
     // page-object emission back through the legacy aggregate /
-    // workflow / view loops, the byte-equivalence test would still
+    // workflow loops, the byte-equivalence test would still
     // pass (same builder, same content, same paths).  This test
     // confirms the path itself by checking that `e2e/pages/*.ts`
     // files are emitted at all (they require both `ui.pages` to
@@ -101,8 +101,6 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     expect([...files.keys()]).toContain("web_app/e2e/pages/customer.ts");
     expect([...files.keys()]).toContain("web_app/e2e/pages/product.ts");
     expect([...files.keys()]).toContain("web_app/e2e/pages/workflows/place_order.ts");
-    expect([...files.keys()]).toContain("web_app/e2e/pages/views/active_orders.ts");
-    expect([...files.keys()]).toContain("web_app/e2e/pages/views/order_summary.ts");
   });
 
   it("the new page-IR path is the active one (acme's webApp has uiName populated)", async () => {
@@ -124,11 +122,10 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     expect(ui).toBeDefined();
     // Expander populated `ui.pages` with the scaffold rewrite for
     // Catalog + Sales + CustomerMgmt — at least one Home,
-    // WorkflowsIndex, ViewsIndex plus per-aggregate set.
+    // WorkflowsIndex plus per-aggregate set.
     const pageNames = ui!.pages.map((p) => p.name);
     expect(pageNames).toContain("Home");
     expect(pageNames).toContain("WorkflowsIndex");
-    expect(pageNames).toContain("ViewsIndex");
     // Aggregate pages are role-named (`List`), scoped to their per-aggregate
     // area — Catalog/Sales/CustomerMgmt each contribute one `List`.
     expect(pageNames.filter((n) => n === "List").length).toBeGreaterThanOrEqual(3);

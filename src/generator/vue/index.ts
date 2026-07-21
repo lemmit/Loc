@@ -27,7 +27,6 @@ import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
-import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -177,7 +176,6 @@ export function generateVueForContexts(
   const pageCtx: PageNameCtx = {
     aggregateNames: [...aggregatesIRByName.keys()],
     workflowNames: [...workflowsByName.keys()],
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
 
   // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
@@ -396,18 +394,12 @@ export function generateVueForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  // Shared views / workflows api modules — 1:1 with the inventory,
-  // same builders as React with the vue-query import.
+  // Shared workflows api module — 1:1 with the inventory,
+  // same builder as React with the vue-query import.
   if (hasAnyWorkflow(contexts)) {
     out.set(
       "src/api/workflows.ts",
       buildWorkflowsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
-    );
-  }
-  if (hasAnyView(contexts)) {
-    out.set(
-      "src/api/views.ts",
-      buildViewsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
     );
   }
 
@@ -735,7 +727,7 @@ function renderNestedRouter(
 
 // ---------------------------------------------------------------------------
 // Nav sections — default sidebar derived from scaffold page origins
-// (Aggregates / Workflows / Views).  Explicit `menu { … }` blocks
+// (Aggregates / Workflows).  Explicit `menu { … }` blocks
 // arrive with the parity slice (`deriveSidebarFromUi` mirror).
 // ---------------------------------------------------------------------------
 
@@ -752,7 +744,6 @@ function deriveNavSections(
 ): Array<{ label: string; entries: NavEntryVM[] }> {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
-  const views: NavEntryVM[] = [];
   for (const page of pages) {
     if (!page.route) continue;
     const o = classifyPage(page, nameCtx);
@@ -765,18 +756,11 @@ function deriveNavSections(
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
       });
-    } else if (o.kind === "view-list") {
-      views.push({
-        to: page.route,
-        label: humanize(o.viewName),
-        testId: `nav-view-${snake(o.viewName)}`,
-      });
     }
   }
   const sections: Array<{ label: string; entries: NavEntryVM[] }> = [];
   if (aggregates.length > 0) sections.push({ label: "Aggregates", entries: aggregates });
   if (workflows.length > 0) sections.push({ label: "Workflows", entries: workflows });
-  if (views.length > 0) sections.push({ label: "Views", entries: views });
   return sections;
 }
 

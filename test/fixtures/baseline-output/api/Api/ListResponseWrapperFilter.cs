@@ -11,7 +11,6 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
     {
         ("ProductResponse", "ProductListResponse"),
         ("OrderResponse", "OrderListResponse"),
-        ("OrderSummaryRow", "OrderSummaryResponse"),
         ("CustomerResponse", "CustomerListResponse"),
     };
 

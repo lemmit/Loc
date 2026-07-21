@@ -30,7 +30,7 @@
 //
 // The triage is a DERIVED fact (read-decls × `contextFilterOrigins`), computed
 // here at codegen — never stamped on the IR.  The bypass SET (capability names)
-// rides the IR (`FindIR`/`ViewIR`/the `repo-run` stmt); the predicate identity
+// rides the IR (`FindIR`/the `repo-run` stmt); the predicate identity
 // is derived in this emitter.
 // ---------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { renderSqlRestriction } from "./render-sql-restriction.js";
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
- *  carried by capability NAME on `FindIR` / `ViewIR` / the repo-run stmt.
+ *  carried by capability NAME on `FindIR` / the repo-run stmt.
  *  Named caps match `AggregateIR.contextFilterOrigins`; a filter with an
  *  `undefined` origin (bare/hand-written) is never bypassable. */
 export interface FilterBypass {
@@ -118,13 +118,6 @@ function bypassesForAggregate(agg: AggregateIR, ctx: BoundedContextIR): FilterBy
       }
     }
   }
-  for (const v of ctx.views) {
-    if (v.source.kind === "aggregate" && v.source.name === agg.name) {
-      if (v.bypassAll || (v.bypassCaps?.length ?? 0) > 0) {
-        bypasses.push({ bypassAll: v.bypassAll, bypassCaps: v.bypassCaps });
-      }
-    }
-  }
   const repoRuns: { aggName: string; bypass: FilterBypass }[] = [];
   for (const wf of ctx.workflows) {
     for (const c of wf.creates) collectRepoRunBypasses(c.statements, repoRuns);
@@ -137,7 +130,7 @@ function bypassesForAggregate(agg: AggregateIR, ctx: BoundedContextIR): FilterBy
   return bypasses;
 }
 
-/** The NON-PRINCIPAL capabilities PROMOTED on `agg` — those a `find` / `view` /
+/** The NON-PRINCIPAL capabilities PROMOTED on `agg` — those a `find` /
  *  inline `Repo.run` read in the context bypasses (its `bypassCaps` names the
  *  cap, or `bypassAll`).  This is the §11.6 triage: a promoted capability leaves
  *  the always-on `@SQLRestriction` and is emitted as a bypassable `@Filter`

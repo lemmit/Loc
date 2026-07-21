@@ -27,7 +27,6 @@ import {
   isSubdomain,
   isSystem,
   isValueObject,
-  isView,
   isWorkflow,
   type Model,
   type System,
@@ -49,7 +48,6 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   FindDecl: "find",
   Deployable: "deployable",
   Workflow: "workflow",
-  View: "view",
   Page: "page",
   Component: "component",
   Operation: "operation",
@@ -131,7 +129,6 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
   const aggregates: OutlineDecl[] = [];
   const valueObjects: OutlineDecl[] = [];
   const workflows: string[] = [];
-  const views: string[] = [];
   const pages: string[] = [];
   const enums: string[] = [];
   const events: string[] = [];
@@ -150,7 +147,6 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
       const d = outlineDecl(m);
       if (d) valueObjects.push(d);
     } else if (isWorkflow(m)) pushAddr(m, workflows);
-    else if (isView(m)) pushAddr(m, views);
     else if (isPage(m)) pushAddr(m, pages);
     else if (isEnumDecl(m)) pushAddr(m, enums);
     else if (isEventDecl(m)) pushAddr(m, events);
@@ -162,7 +158,6 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
     aggregates,
     valueObjects,
     workflows,
-    views,
     pages,
     enums,
     events,

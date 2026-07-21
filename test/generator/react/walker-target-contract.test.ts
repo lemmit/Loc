@@ -422,19 +422,6 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(use.argsRendered).toEqual(["<<ref>>", "<<literal>>"]);
   });
 
-  it("buildHookUse: TSX view-kind goes through the dedicated view-hook naming", () => {
-    const detected: DetectedApiCall = {
-      aggregateName: "activeOrders",
-      operation: "activeOrders",
-      args: [],
-      kind: "view",
-    };
-    const use = tsxTarget.buildHookUse(detected, () => "");
-    expect(use.varName).toBe("activeOrdersView");
-    expect(use.hookName).toBe("useActiveOrdersView");
-    expect(use.importFrom).toBe("../api/views");
-  });
-
   it("buildHookUse: HEEx throws (Phoenix LiveView doesn't hoist hooks)", () => {
     const detected: DetectedApiCall = {
       aggregateName: "Customer",

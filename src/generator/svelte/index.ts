@@ -41,7 +41,6 @@ import {
   emitSveltePagesForUi,
 } from "./routes-emitter.js";
 import { renderSvelteStoreModule, storeModulePath } from "./store-builder.js";
-import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -104,7 +103,6 @@ export function generateSvelteForContexts(
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
 
   const design = deployable.design ?? "shadcnSvelte@v1";
@@ -129,9 +127,6 @@ export function generateSvelteForContexts(
   }
   if (hasAnyWorkflow(contexts)) {
     out.set("src/lib/api/workflows.ts", buildWorkflowsApiModule(contexts));
-  }
-  if (hasAnyView(contexts)) {
-    out.set("src/lib/api/views.ts", buildViewsApiModule(contexts));
   }
 
   // Pages + components through the shared walker.
@@ -236,7 +231,6 @@ export function generateSvelteForContexts(
   // `requiresJs` condition on any nav entry whose linked page declares a
   // `requires` gate, so the app-shell can hide a forbidden page's link.
   const workflows = allWorkflows(contexts);
-  const views = allViews(contexts);
   const kindOf = (p: (typeof ui.pages)[number]) => classifyPage(p, pageCtx);
   const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
   const scaffoldedAggregates = aggregates
@@ -255,16 +249,7 @@ export function generateSvelteForContexts(
       }),
     )
     .map((w) => w.wf);
-  const scaffoldedViewNames = views
-    .filter(({ view }) =>
-      ui.pages.some((p) => {
-        const k = kindOf(p);
-        return k.kind === "view-list" && k.viewName === view.name;
-      }),
-    )
-    .map((v) => v.view.name);
   const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
-  const hasViewsIndex = ui.pages.some((p) => kindOf(p).kind === "views-index");
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,
@@ -276,14 +261,7 @@ export function generateSvelteForContexts(
         // forbidden page's link.  Absent ⇒ link always shown.
         requiresJs: e.requiresJs,
       })),
-    })) ??
-    defaultNavSections(
-      scaffoldedAggregates,
-      scaffoldedWorkflows,
-      scaffoldedViewNames,
-      hasWorkflowsIndex,
-      hasViewsIndex,
-    );
+    })) ?? defaultNavSections(scaffoldedAggregates, scaffoldedWorkflows, hasWorkflowsIndex);
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused binding would be a svelte-check error.
   const navUsesSession = navSections.some(

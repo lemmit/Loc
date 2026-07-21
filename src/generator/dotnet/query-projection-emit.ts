@@ -14,10 +14,9 @@ import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 // .NET query-time projection emission (read-path-architecture.md rev.13).
 //
 // A query-time projection (`projection X { from <Agg> [as a] where … join …
-// select … }`, no `on(e)` folds) is the always-current read model that was a
-// `view`'s full form.  It reads live, exactly the way an aggregate full-form
-// `view` does on this backend (view.ts): the source read rides a synthesized
-// parameterless repository find (`mergeViewsAsFinds` also folds query-time
+// select … }`, no `on(e)` folds) is the always-current read model of the
+// query-time projection read.  It reads live: the source read rides a synthesized
+// parameterless repository find (`mergeViewsAsFinds` folds query-time
 // projections in), each `join <Agg> as c on <idRef>` bulk-loads the followed
 // aggregate through its repository `FindManyByIdsAsync(...)` into a
 // `Dictionary<XId, Agg>` keyed by `.Id` (.NET has no lazy nav for an `X id` FK,

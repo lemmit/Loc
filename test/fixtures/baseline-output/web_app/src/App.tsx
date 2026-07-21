@@ -15,9 +15,6 @@ import CustomerNew from "./pages/customers/new";
 import CustomerDetail from "./pages/customers/detail";
 import WorkflowsIndex from "./pages/workflows/index";
 import PlaceOrderWorkflowPage from "./pages/workflows/place_order";
-import ViewsIndex from "./pages/views/index";
-import ActiveOrdersViewPage from "./pages/views/active_orders";
-import OrderSummaryViewPage from "./pages/views/order_summary";
 
 // App-level error boundary catches render-time crashes from any
 // page component.  Without it, an unhandled exception inside
@@ -143,10 +140,6 @@ function AppShellLayout() {
           <Divider my="xs" label="Workflows" labelPosition="left" />
           <NavLink component={RouterLink} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />
           <NavLink component={RouterLink} to="/workflows/place_order" label="Place Order" active={isActive("/workflows/place_order")} data-testid="nav-workflow-place_order" />
-          <Divider my="xs" label="Views" labelPosition="left" />
-          <NavLink component={RouterLink} to="/views" label="All views" active={isActive("/views", { exact: true })} data-testid="nav-views" />
-          <NavLink component={RouterLink} to="/views/active_orders" label="Active Orders" active={isActive("/views/active_orders")} data-testid="nav-view-active_orders" />
-          <NavLink component={RouterLink} to="/views/order_summary" label="Order Summary" active={isActive("/views/order_summary")} data-testid="nav-view-order_summary" />
         </Stack>
       </AppShell.Navbar>
       <AppShell.Main id="main-content">
@@ -175,9 +168,6 @@ export default function App() {
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/workflows" element={<WorkflowsIndex />} />
         <Route path="/workflows/place_order" element={<PlaceOrderWorkflowPage />} />
-        <Route path="/views" element={<ViewsIndex />} />
-        <Route path="/views/active_orders" element={<ActiveOrdersViewPage />} />
-        <Route path="/views/order_summary" element={<OrderSummaryViewPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

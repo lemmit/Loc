@@ -8,7 +8,7 @@
 // root read in the generated repository:
 //   - the auto find_by_id / all / find_many_by_ids,
 //   - each custom find (its own `where` conjoined via `and_(...)`),
-//   - each view (views merge into repository finds on python).
+//   - each custom find.
 // No read method gains a parameter — the accessor reads the request-scoped
 // principal the auth middleware stashed.  `auth: required` emits the User
 // dataclass + `current_user_var` + fail-closed `require_current_user()` the
@@ -58,12 +58,6 @@ describe("python generator — principal (tenancy) capability filter", () => {
   it("ANDs the principal into a custom find's own where", async () => {
     expect(await repo()).toContain(
       `select(AccountRow).where(and_((AccountRow.balance >= min), ${PRINCIPAL}))`,
-    );
-  });
-
-  it("ANDs the principal into the view-derived find", async () => {
-    expect(await repo()).toContain(
-      `select(AccountRow).where(and_((AccountRow.balance >= 1000), ${PRINCIPAL}))`,
     );
   });
 

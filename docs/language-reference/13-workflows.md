@@ -21,7 +21,7 @@ workflow fulfillment {
 }
 ```
 
-A workflow with event consumers but no id-shaped state field is `loom.workflow-correlation-required`; two id-shaped fields is `loom.correlation-field-ambiguous`. The correlation field surfaces a read model — each backend emits a `GET /workflows/<wf>/instances` + `/{id}` route returning the instance state (`FulfillmentInstanceResponse { orderId }`), and the field can back a [view](12-views.md) (`view X = fulfillment where …`).
+A workflow with event consumers but no id-shaped state field is `loom.workflow-correlation-required`; two id-shaped fields is `loom.correlation-field-ambiguous`. The correlation field surfaces a read model — each backend emits a `GET /workflows/<wf>/instances` + `/{id}` route returning the instance state (`FulfillmentInstanceResponse { orderId }`), which clients read to inspect in-flight workflow instances.
 
 ## `create` / `handle` — starters & continuations
 

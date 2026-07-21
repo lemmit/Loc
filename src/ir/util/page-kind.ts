@@ -2,8 +2,8 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { PageIR } from "../types/loom-ir.js";
 
 /** The classification of a page by what the scaffold synthesised it as — an
- *  aggregate's list/new/detail, a workflow's form/instance pages, a view's
- *  table, the singleton index pages, or a hand-written `custom` page.
+ *  aggregate's list/new/detail, a workflow's form/instance pages, the
+ *  singleton index pages, or a hand-written `custom` page.
  *
  *  This used to be *stamped* onto `PageIR.origin` at lower time (by
  *  `inferPageOrigin` + `resourceScaffoldOrigins`).  Slice 3c removed that
@@ -19,23 +19,20 @@ export type PageKind =
   | { kind: "workflow-form"; workflowName: string; contextName: string }
   | { kind: "workflow-instances-list"; workflowName: string; contextName: string }
   | { kind: "workflow-instance-detail"; workflowName: string; contextName: string }
-  | { kind: "view-list"; viewName: string; contextName: string }
   | { kind: "workflows-index" }
-  | { kind: "views-index" }
   | { kind: "home" }
   | { kind: "custom" };
 
-/** The declaration names a page is classified against — the aggregates,
- *  workflows, and views served by the page's ui.  Every consumer already has
- *  these (the generators iterate them; lowering carries the expand context), so
- *  threading this tiny shape is cheaper than re-stamping `origin`. */
+/** The declaration names a page is classified against — the aggregates and
+ *  workflows served by the page's ui.  Every consumer already has these (the
+ *  generators iterate them; lowering carries the expand context), so threading
+ *  this tiny shape is cheaper than re-stamping `origin`. */
 export interface PageNameCtx {
   // Arrays, not bare `Iterable` — `classifyPage` runs once per page over the
   // same ctx, so a single-use `Map.keys()` iterator would be exhausted after
   // the first page and silently misclassify the rest.
   aggregateNames: readonly string[];
   workflowNames: readonly string[];
-  viewNames: readonly string[];
 }
 
 /** Derive a page's {@link PageKind} from its role-scoped `name` + `area`.
@@ -46,13 +43,12 @@ export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameC
   const area = page.area ?? [];
 
   // Singleton dashboard pages, identified by their reserved names.  The scaffold
-  // mints exactly these names (`Home` / `WorkflowsIndex` / `ViewsIndex`); a
-  // hand-written page sharing one is treated as that dashboard too, consistent
-  // with the scaffold's override-by-name contract (write `page Home { … }` to
-  // replace the generated landing page).
+  // mints exactly these names (`Home` / `WorkflowsIndex`); a hand-written page
+  // sharing one is treated as that dashboard too, consistent with the
+  // scaffold's override-by-name contract (write `page Home { … }` to replace
+  // the generated landing page).
   if (name === "Home") return { kind: "home" };
   if (name === "WorkflowsIndex") return { kind: "workflows-index" };
-  if (name === "ViewsIndex") return { kind: "views-index" };
 
   // Aggregate pages are role-named (`List`/`New`/`Detail`) inside their
   // per-aggregate `area <Plural>` block — the area's last segment identifies
@@ -70,7 +66,7 @@ export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameC
     }
   }
 
-  // Workflow / view pages keep their full declared names.
+  // Workflow pages keep their full declared names.
   for (const wfName of ctx.workflowNames) {
     const p = upperFirst(wfName);
     if (name === `${p}Workflow`)
@@ -79,9 +75,6 @@ export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameC
       return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
     if (name === `${p}InstanceDetail`)
       return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
-  }
-  for (const viewName of ctx.viewNames) {
-    if (name === `${viewName}View`) return { kind: "view-list", viewName, contextName: "" };
   }
 
   return { kind: "custom" };

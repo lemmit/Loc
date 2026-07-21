@@ -14,7 +14,6 @@ import { generateVanillaElixirProject } from "./vanilla/index.js";
 // File layout (vanilla/):
 //   lib/<app>/<ctx>/<agg>.ex                  — Ecto schema modules
 //   lib/<app>/<ctx>/workflows/<wf>.ex          — workflow modules
-//   lib/<app>/<ctx>/views/<view>.ex            — view query modules
 //   lib/<app>/<ctx>.ex                         — context module
 //   lib/<app>/repo.ex                          — Ecto.Repo
 //   lib/<app>/application.ex                   — supervision tree
@@ -53,7 +52,7 @@ export interface GenerateElixirArgs {
   styleAdapter?: StyleAdapter;
   /** Generate-time source-map recorder (`--sourcemap`).  Threaded straight
    *  through to the vanilla orchestrator, which records whole-file
-   *  construct regions as it places each per-aggregate/-view/-workflow/-page
+   *  construct regions as it places each per-aggregate/-workflow/-page
    *  artifact.  Absent → every recorder call is a no-op (see
    *  `SourceMapRecorder.file`). */
   sourcemap?: SourceMapRecorder;

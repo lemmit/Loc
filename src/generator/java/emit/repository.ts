@@ -63,7 +63,7 @@ export interface JavaRepoCtx {
   provenance?: boolean;
   /** §11.6: the PROMOTED non-principal capabilities for this aggregate — those
    *  some read `ignoring`s, emitted as bypassable Hibernate named @Filters on the
-   *  entity (capability-filter.ts).  A find / view / retrieval that drops one of
+   *  entity (capability-filter.ts).  A find / retrieval that drops one of
    *  these is wrapped with `session.disableFilter`/`enableFilter` in the impl. */
   promotedCaps?: ReadonlySet<string>;
   /** §11.6: per-retrieval-name UNION bypass spec, drawn from the inline
@@ -346,7 +346,7 @@ export function renderJavaSpringDataRepository(
   // renders to JPQL with a SpEL accessor for the ambient request principal —
   // unlike a non-principal filter (which rides the entity's static
   // `@SQLRestriction`), it must be AND-ed into every query that can return a
-  // row: each find/retrieval/view below, plus `findAll`/`findById` (which JPA
+  // row: each find/retrieval below, plus `findAll`/`findById` (which JPA
   // derives, so we override them with a scoped @Query).  `null` when the
   // aggregate has no principal filter — every other repository stays identical.
   const principalClause = principalJpqlClause(agg, enumsPkg);
@@ -516,7 +516,7 @@ export function renderJavaRepositoryImpl(
   const tenantScopeAnd = injectAccessor
     ? `.and(${agg.name}Criteria.tenantScope(currentUserAccessor.user()))`
     : "";
-  // §11.6 selective bypass: a find / view / retrieval read that `ignoring`s a
+  // §11.6 selective bypass: a find / retrieval read that `ignoring`s a
   // PROMOTED capability runs with that cap's Hibernate named @Filter DISABLED.
   // The impl wraps the delegate body with `session.disableFilter/enableFilter`;
   // the @SQLRestriction-resident caps + principal filters are unaffected here

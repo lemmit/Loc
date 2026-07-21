@@ -94,7 +94,6 @@ import {
   isUnique,
   isUserBlock,
   isValueObject,
-  isView,
   isWorkflow,
   type TestBlock,
 } from "../../language/generated/ast.js";
@@ -159,7 +158,6 @@ import type {
   TimerSourceIR,
   UserIR,
   ValueObjectIR,
-  ViewIR,
   WorkflowIR,
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
@@ -215,7 +213,6 @@ import {
   withLocal,
 } from "./lower-types.js";
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
-import { lowerView } from "./lower-view.js";
 import { lowerCommandHandler, lowerQueryHandler, lowerWorkflow } from "./lower-workflow.js";
 import { originFor } from "./origin.js";
 import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive-expander.js";
@@ -787,13 +784,12 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
 }
 
 /** A page's classification context for the given ui — the served aggregate /
- *  workflow / view names `classifyPage` matches role-scoped page names against
+ *  workflow names `classifyPage` matches role-scoped page names against
  *  (slice 3c: replaces the stamped `PageIR.origin`). */
 function nameCtxOf(ctx: WalkerExpandContext): PageNameCtx {
   return {
     aggregateNames: [...ctx.aggregatesByName.keys()],
     workflowNames: [...ctx.workflowsByName.keys()],
-    viewNames: [...ctx.viewsByName.keys()],
   };
 }
 
@@ -899,7 +895,7 @@ function applyPageSideEffects(sys: SystemIR): void {
       // inside an `area { … }` block already had its `emitPath` set from the
       // area containment path in `lowerUi` (`src/pages/orders/list.tsx`).  Only
       // fall back to the conventional path for area-less scaffold pages (the
-      // Home / Workflows / Views index singletons, workflow + view pages).
+      // Home / Workflows index singletons, workflow pages).
       if (!page.area || page.area.length === 0) {
         page.emitPath = conventionalEmitPath(kind, ctx);
       }
@@ -945,12 +941,8 @@ function conventionalEmitPath(kind: PageKind, ctx: WalkerExpandContext): string 
     const file = kind.kind === "workflow-instances-list" ? "instances" : "instance_detail";
     return `src/pages/workflows/${snakeOnly(wf.name)}/${file}.tsx`;
   }
-  if (kind.kind === "view-list") {
-    return `src/pages/views/${snakeOnly(kind.viewName)}.tsx`;
-  }
   if (kind.kind === "home") return "src/pages/home.tsx";
   if (kind.kind === "workflows-index") return "src/pages/workflows/index.tsx";
-  if (kind.kind === "views-index") return "src/pages/views/index.tsx";
   // `custom` pages emit at the default `src/pages/<page-snake>.tsx`
   // path — return undefined so the page-emitter falls back to its
   // default.
@@ -1084,7 +1076,6 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const commandHandlers: CommandHandlerIR[] = [];
   const queryHandlers: QueryHandlerIR[] = [];
-  const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
   const domainServices: DomainServiceIR[] = [];
   const channels: ChannelIR[] = [];
@@ -1105,7 +1096,6 @@ function lowerContext(
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isDomainService(m)) domainServices.push(lowerDomainService(m, env));
-    else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
     else if (isChannel(m)) channels.push(lowerChannel(m));
     else if (isProjection(m)) projections.push(lowerProjection(m, env));
@@ -1192,7 +1182,6 @@ function lowerContext(
     workflows,
     ...(commandHandlers.length > 0 ? { commandHandlers } : {}),
     ...(queryHandlers.length > 0 ? { queryHandlers } : {}),
-    views,
     criteria,
     domainServices,
     channels,
@@ -1528,7 +1517,7 @@ function lowerRepository(
       // row's fields do not — the gate decides endpoint access before any row
       // exists, so it may reference only the principal (+ constants).
       // Referencing an aggregate field is then a name-resolution error, exactly
-      // the restriction we want (the read-side twin of the view gate).
+      // the restriction we want.
       const gateEnv = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       return {
         name: f.name,

@@ -110,7 +110,6 @@ export function emitDbContext(ctx: EmitCtx): Lines {
     aggregates: ctx.contexts.flatMap((c) => c.aggregates),
     repositories: ctx.contexts.flatMap((c) => c.repositories),
     workflows: ctx.contexts.flatMap((c) => c.workflows),
-    views: ctx.contexts.flatMap((c) => c.views),
   } as import("../../../ir/types/loom-ir.js").EnrichedBoundedContextIR;
   return splitLines(renderDbContext(merged, ns));
 }

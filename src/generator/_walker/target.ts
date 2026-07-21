@@ -217,7 +217,7 @@ export interface TargetHookUse {
    *  (e.g. `useCreateCustomer`, `useActiveOrdersView`). */
   hookName: string;
   /** Module-relative import path
-   *  (e.g. `../api/customer`, `../api/views`). */
+   *  (e.g. `../api/customer`, `../api/workflows`). */
   importFrom: string;
   /** Pre-rendered argument strings for parameterised hooks
    *  (`useCustomerById(id)`).  Empty for paramless reads. */

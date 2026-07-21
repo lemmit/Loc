@@ -383,7 +383,7 @@ function emitRouteHandler(
     out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
   // A handler that returns a domain aggregate projects it to its wire shape via
-  // the owning repo's `toWire(...)` (the same projection the read/view routes
+  // the owning repo's `toWire(...)` (the same projection the read routes
   // use), so the route serialises the contract — not the raw domain entity.
   // Reuse the repo the body already built for that aggregate; construct one when
   // the return aggregate was never loaded (e.g. a freshly created entity).

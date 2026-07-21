@@ -31,7 +31,6 @@ shape of the compiler pipeline that turns these features into code.
 | 9 | [Payloads, records & unions](09-payloads-and-unions.md) | `payload`/`command`/`query`/`response`/`error`, anonymous `or`, named unions, the tagged wire. |
 | 10 | [Repositories & queries](10-repositories-and-queries.md) | `repository`, `find`, the queryable subset, `criterion`, `retrieval`, `loads`, pagination. |
 | 11 | [Capabilities, filters & stamps](11-capabilities-filters-stamps.md) | `capability`, `with`/`implements`, `filter`, `stamp`, `ignoring`, `auditable`/`softDeletable`/`crudish`. |
-| 12 | [Views](12-views.md) | Shorthand and full `view`, `bind` projections, `requires`, queryable filters. |
 | 13 | [Workflows](13-workflows.md) | `create`/`handle`/`on`/`apply`, `eventSourced`, `transactional`, isolation, resource consumption. |
 | 14 | [APIs, storage, resources & channels](14-apis-storage-resources-channels.md) | `api`, `storage`, `resource`, `channel`, `channelSource`. |
 | 15 | [UI: pages & structure](15-ui-pages-structure.md) | `ui`, `page`, `component`, `area`, `state`, `derived`, `action`, `menu`, `layout`, `scaffold`. |

@@ -23,7 +23,6 @@ const CORE_KEYWORDS = [
   "event",
   "repository",
   "workflow",
-  "view",
   "deployable",
   "ui",
   "api",

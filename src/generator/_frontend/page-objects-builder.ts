@@ -245,7 +245,7 @@ export function buildPageObjectModule(
 // ---------------------------------------------------------------------------
 // fillBlock — emit the lines that fill one input from `input.<path>`,
 // branching on type so dates, numbers, selects, switches each take the
-// right Playwright action.  Exported so the workflow + view page
+// right Playwright action.  Exported so the workflow page
 // objects drive their own forms with the same per-type interaction
 // conventions instead of forking the logic.
 // ---------------------------------------------------------------------------

@@ -182,14 +182,6 @@ system Storybook {
         }
       }
 
-      // ---------------------------------------------------------
-      // STORY: read-model view.
-      //   Generates a /views/active-tasks page rendering a Table
-      //   filtered by status; the row type is the aggregate itself
-      //   (where-only view shape).
-      // ---------------------------------------------------------
-      view ActiveTasks = Task where status == Active
-
     }
   }
 

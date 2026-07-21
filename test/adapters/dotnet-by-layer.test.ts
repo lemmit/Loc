@@ -95,18 +95,6 @@ describe("byLayer LayoutAdapter (real)", () => {
     ).toBe("Application/Orders/Commands/CreateOrderCommandValidator.cs");
   });
 
-  it("routes view artifacts (per-context) under Application/Views/", () => {
-    expect(p({ name: "ActiveOrdersQuery.cs", category: "view-query" })).toBe(
-      "Application/Views/ActiveOrdersQuery.cs",
-    );
-    expect(p({ name: "ActiveOrdersHandler.cs", category: "view-handler" })).toBe(
-      "Application/Views/ActiveOrdersHandler.cs",
-    );
-    expect(p({ name: "CustomerOrdersRow.cs", category: "view-row" })).toBe(
-      "Application/Views/CustomerOrdersRow.cs",
-    );
-  });
-
   it("routes workflow artifacts (per-context) under Application/Workflows/", () => {
     expect(p({ name: "PlaceOrderRequest.cs", category: "workflow-request" })).toBe(
       "Application/Workflows/PlaceOrderRequest.cs",

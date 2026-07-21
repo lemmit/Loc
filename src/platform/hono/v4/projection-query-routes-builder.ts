@@ -1,27 +1,31 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
-import type { EnrichedBoundedContextIR, ExprIR, ProjectionIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedBoundedContextIR,
+  ExprIR,
+  ProjectionIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import {
   isQueryTimeProjection,
   queryProjectionUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { idsSourceForAux, zodForRow } from "./view-routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono query-time projection routes emission (read-path-architecture.md
 // rev.13, § "projection generalises").
 //
 // A QUERY-TIME projection (`from <Agg> [as a] where … join … select …`, no
-// `on(e)` folds) is the always-current read model that was a `view`'s full
-// form.  It reads the SAME way that full form does — the repository synthesises
+// `on(e)` folds) is the always-current read model of the query-time projection
+// read.  It reads live — the repository synthesises
 // a parameterless `repo.<projName>()` find from the projection's `where`
 // (repository-builder.ts), the route bulk-loads every `join` follow
 // (`query.auxiliaries`) through the followed aggregate's repository, and
 // projects each row through the `select` expressions (rewriting `X id` follows
-// to the loaded-alias map, exactly as `emitViewRoute`'s full-form path does).
+// to the loaded-alias map).
 //
 // One file per context — `http/projections.ts` — mounted under `/projections`
-// in `http/index.ts` (a distinct namespace from `/views`; the folded projection
+// in `http/index.ts` (the folded projection
 // read model keeps its own by-key route elsewhere).  Only backends that have
 // ported this emit are permitted a query-time projection by the IR validator
 // (`loom.projection-query-time-unsupported`); node is the first.
@@ -128,7 +132,7 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
 /** One query-time projection route: `GET /<projName>` under `/projections`.
  *  Sources filtered aggregate rows via the synthesised `repo.<projName>()`
  *  find, bulk-loads each `join` follow, then projects each row through the
- *  `select` expressions — the full-form view read, parameterised by the
+ *  `select` expressions — the query-time projection read, parameterised by the
  *  projection's own row shape. */
 function emitQueryProjectionRoute(p: ProjectionIR): string[] {
   const T = upperFirst(p.name);
@@ -205,4 +209,93 @@ function renderProjectionSelect(
     if (alias) return `${alias.mapVar}.get(${alias.idRow} as string)!.${expr.member}`;
   }
   return renderTsExpr(expr, { thisName: "r" });
+}
+
+/** Pick the id-source expression for an auxiliary's bulk load.
+ *  Length-1 paths source from the row var (`rows.map(r => r.<f>)`);
+ *  length-2+ paths source from the prior map (the auxiliary whose
+ *  path is the current path's prefix).
+ *
+ *  `fromRow` distinguishes the projection source: a `<Proj>Row` read-model
+ *  column is nullable `string | null` (not the aggregate's non-nullable branded
+ *  `<Agg>Id`), so a first-hop follow off a projection row drops NULLs and
+ *  re-brands each value with `Ids.<Agg>Id(...)` before `findManyByIds`.  Later
+ *  hops read hydrated aggregates and already hold proper id types. */
+export function idsSourceForAux(
+  aux: { path: string[]; aggName: string; mapVar: string },
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+  fromRow = false,
+): string {
+  if (aux.path.length === 1) {
+    if (fromRow) {
+      return `rows.map((r) => r.${aux.path[0]!}).filter((x): x is string => x !== null).map((x) => Ids.${aux.aggName}Id(x))`;
+    }
+    return `rows.map((r) => r.${aux.path[0]!})`;
+  }
+  const prevPath = aux.path.slice(0, -1).join(".");
+  const prev = pathToMap.get(prevPath);
+  if (!prev) return `[]`;
+  const finalField = aux.path[aux.path.length - 1]!;
+  return `[...${prev.mapVar}.values()].map((a) => a.${finalField})`;
+}
+
+/** Zod schema for a projection-output field's TS type.  Decimals stay as
+ *  `z.number()`, ids emit as `z.string()`, enum values are emitted
+ *  inline as a string-literal union pulled from `enumValues`. */
+export function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
+  switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+          return "z.number().int()";
+        case "decimal":
+          return "z.number()";
+        case "money":
+          return "z.string()";
+        case "string":
+        case "guid":
+          return "z.string()";
+        case "bool":
+          return "z.boolean()";
+        case "datetime":
+          return "z.string()";
+        case "json":
+          return "z.unknown()";
+        case "File":
+          return "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })";
+        case "duration":
+          // A5: expression-only primitive — never a projection-row / wire type.
+          throw new Error("internal: 'duration' is expression-only and never reaches a view row");
+      }
+    /* eslint-disable-next-line no-fallthrough */
+    case "id":
+      return "z.string()";
+    case "enum": {
+      const values = enumValues.get(t.name) ?? [];
+      const lits = values.map((v) => `"${v}"`).join(", ");
+      return values.length > 0 ? `z.enum([${lits}])` : "z.string()";
+    }
+    case "valueobject":
+      return "z.unknown()";
+    case "entity":
+      return "z.unknown()";
+    case "array":
+      return `z.array(${zodForRow(t.element, enumValues)})`;
+    case "optional":
+      return `${zodForRow(t.inner, enumValues)}.nullish()`;
+    case "action":
+    case "slot":
+      throw new Error("zodForRow: 'slot' type is UI-only and should not reach a view-row schema.");
+    case "genericInstance":
+      throw new Error(
+        `zodForRow: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
+      );
+    case "union":
+    case "none":
+      throw new Error(
+        `zodForRow: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
+      );
+  }
 }

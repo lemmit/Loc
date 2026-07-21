@@ -1,5 +1,5 @@
-// `ignoring` filter-bypass clause (named-filter-bypass.md §11) parses at all
-// three read sites: a repository `find`, a `view`, and an inline
+// `ignoring` filter-bypass clause (named-filter-bypass.md §11) parses at both
+// read sites: a repository `find` and an inline
 // `Repo.findAll(...)`/`Repo.run(...)` call.  Both the `*` wildcard and a
 // comma-separated capability list are admitted.  `ignoring` is a soft keyword,
 // so a field / parameter named `ignoring` keeps parsing.
@@ -12,9 +12,7 @@ import {
   isPostfixChain,
   isSubdomain,
   isSystem,
-  isView,
   type Model,
-  type View,
 } from "../../../src/language/generated/ast.js";
 import { parseString } from "../../_helpers/parse.js";
 
@@ -51,16 +49,6 @@ async function findDecl(name: string, source: string): Promise<FindDecl> {
     }
   }
   throw new Error(`find ${name} not found`);
-}
-
-async function viewDecl(name: string, source: string): Promise<View> {
-  const { model } = await parseString(source, { validate: false });
-  for (const c of contexts(model)) {
-    for (const member of c.members) {
-      if (isView(member) && member.name === name) return member;
-    }
-  }
-  throw new Error(`view ${name} not found`);
 }
 
 describe("ignoring filter-bypass clause parses", () => {
@@ -101,14 +89,6 @@ describe("ignoring filter-bypass clause parses", () => {
       }`),
     );
     expect(f.bypass).toEqual(["softDeletable", "auditable"]);
-  });
-
-  it("view shorthand: `ignoring <Cap>` after where", async () => {
-    const v = await viewDecl(
-      "ActiveOrders",
-      wrap(`view ActiveOrders = Order where this.total > 0 ignoring softDeletable`),
-    );
-    expect(v.bypass).toEqual(["softDeletable"]);
   });
 
   it("inline read: `Repo.findAll(...) ignoring <Cap>` is a PostfixChain bypass", async () => {

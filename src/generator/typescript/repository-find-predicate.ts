@@ -437,7 +437,7 @@ export function lowerToDrizzle(
 // EF Core installs these once via `HasQueryFilter` and applies them to
 // every query automatically.  Drizzle has no global query filter, so the
 // generated repository must AND each predicate into every root-table read
-// site (findById / findManyByIds / find* / view finds).  Principal-
+// site (findById / findManyByIds / find*).  Principal-
 // referencing filters (tenancy: `currentUser.tenantId`) are deferred —
 // the IR validator (`validatePrincipalContextFilterSupport`) rejects them
 // on Hono — so only non-principal predicates reach codegen here.
@@ -463,7 +463,7 @@ export function nonPrincipalContextFilterEntries(
 }
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
- *  carried index-by-name on `FindIR` / `ViewIR` / the repo-run stmt.  Named
+ *  carried index-by-name on `FindIR` / the repo-run stmt.  Named
  *  capabilities are matched against `AggregateIR.contextFilterOrigins`; a
  *  filter whose origin is `undefined` (hand-written/bare) is never bypassable
  *  — only capability-contributed filters can be `ignoring`-dropped. */

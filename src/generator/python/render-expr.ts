@@ -303,8 +303,8 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       return snake(e.name);
     case "this-prop":
       // Wire DTO: the verbatim camelCase attribute.  Inside the aggregate
-      // class: the private backing field.  Outside (row scope, e.g. view
-      // binds): the public property.
+      // class: the private backing field.  Outside (row scope, e.g. projection
+      // reads): the public property.
       if (ctx.wireField) return `${ctx.thisName}.${e.name}`;
       return fromOutside ? `${ctx.thisName}.${snake(e.name)}` : `self._${snake(e.name)}`;
     case "this-vo-prop":

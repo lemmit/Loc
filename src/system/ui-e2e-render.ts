@@ -8,7 +8,6 @@ import type {
   SystemIR,
   TestE2EIR,
   TestStmtIR,
-  ViewIR,
   WorkflowIR,
 } from "../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../util/intrinsic-matchers.js";
@@ -66,11 +65,10 @@ export function renderUIE2EFile(
   // reachable — `targets:` already populated `moduleNames` during
   // lowering, so this is the same set the api hooks know about.
   const contexts = collectContextsFor(reactDeployable, modulesByName);
-  // Page-object imports per aggregate / workflow / view referenced
+  // Page-object imports per aggregate / workflow referenced
   // anywhere in the bodies.
   const aggregates = collectReferencedAggregates(uiTests, contexts);
   const workflows = collectReferencedWorkflows(uiTests, contexts);
-  const views = collectReferencedViews(uiTests, contexts);
 
   // Render every test body first, then derive imports from what actually
   // appears — keeps `<Agg>ListPage` / `<Agg>DetailPage` out of the import
@@ -107,12 +105,6 @@ export function renderUIE2EFile(
     const cap = upperFirst(wf.name);
     if (refs(`${cap}WorkflowPage`)) {
       lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
-    }
-  }
-  for (const v of views) {
-    const cap = upperFirst(v.name);
-    if (refs(`${cap}ViewPage`)) {
-      lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
     }
   }
   lines.push("");
@@ -205,22 +197,6 @@ function collectReferencedWorkflows(
   return out;
 }
 
-function collectReferencedViews(tests: TestE2EIR[], contexts: BoundedContextIR[]): ViewIR[] {
-  const seen = new Set<string>();
-  const out: ViewIR[] = [];
-  walkAllExprs(tests, (e) => {
-    const call = matchUiCall(e);
-    if (call && call.kind === "view") {
-      const v = findViewByName(call.viewName, contexts);
-      if (v && !seen.has(v.name)) {
-        seen.add(v.name);
-        out.push(v);
-      }
-    }
-  });
-  return out;
-}
-
 function walkAllExprs(tests: TestE2EIR[], visit: (e: ExprIR) => void): void {
   const walk = (e: ExprIR | undefined): void => {
     if (!e) return;
@@ -265,16 +241,6 @@ function findWorkflowByName(name: string, contexts: BoundedContextIR[]): Workflo
     for (const w of c.workflows) {
       if (lowerFirst(w.name) === name) return w;
       if (snake(w.name) === name) return w;
-    }
-  }
-  return undefined;
-}
-
-function findViewByName(name: string, contexts: BoundedContextIR[]): ViewIR | undefined {
-  for (const c of contexts) {
-    for (const v of c.views) {
-      if (lowerFirst(v.name) === name) return v;
-      if (snake(v.name) === name) return v;
     }
   }
   return undefined;
@@ -511,18 +477,15 @@ function renderLiteral(lit: string, value: string): string {
 //
 //   ui.<aggregateSlug>.<method>(...)   — aggregate operation / verb
 //   ui.workflows.<name>({...})         — workflow form invocation
-//   ui.views.<name>()                  — view table read
 //
-// The first two reserve `workflows` and `views` as the slug names;
-// the validator should already reject an aggregate declared with
-// either of those names (the reservation list should be extended to
-// cover them if it doesn't already).
+// The workflow form reserves `workflows` as a slug name; the validator
+// should already reject an aggregate declared with that name (the
+// reservation list should be extended to cover it if it doesn't already).
 // ---------------------------------------------------------------------------
 
 type UiCallShape =
   | { kind: "aggregate"; aggregateSlug: string; method: string; args: ExprIR[] }
-  | { kind: "workflow"; workflowName: string; args: ExprIR[] }
-  | { kind: "view"; viewName: string; args: ExprIR[] };
+  | { kind: "workflow"; workflowName: string; args: ExprIR[] };
 
 /** Resolve `ui.<X>.<Y>(...)` into a tagged shape, or `null` when the
  *  expression isn't a UI call. */
@@ -534,9 +497,6 @@ function matchUiCall(e: ExprIR): UiCallShape | null {
   if (r.member === "workflows") {
     return { kind: "workflow", workflowName: e.member, args: e.args };
   }
-  if (r.member === "views") {
-    return { kind: "view", viewName: e.member, args: e.args };
-  }
   return {
     kind: "aggregate",
     aggregateSlug: r.member,
@@ -547,7 +507,6 @@ function matchUiCall(e: ExprIR): UiCallShape | null {
 
 function renderUiCall(call: UiCallShape, ctx: RenderCtx): string {
   if (call.kind === "workflow") return renderWorkflowCall(call, ctx);
-  if (call.kind === "view") return renderViewCall(call, ctx);
   return renderAggregateCall(call, ctx);
 }
 
@@ -569,30 +528,6 @@ function renderWorkflowCall(
   const cap = upperFirst(wf.name);
   const body = call.args[0] ? renderUIExpr(call.args[0], ctx) : "{}";
   return `await new ${cap}WorkflowPage(page).run(${body})`;
-}
-
-function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderCtx): string {
-  void call.args; // views take no args at the call site (parameterless reads)
-  const view = findViewByName(call.viewName, ctx.contexts);
-  if (!view) {
-    const known = ctx.contexts
-      .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
-      .sort()
-      .join(", ");
-    throw new Error(
-      `ui e2e: unknown view 'ui.views.${call.viewName}' on this deployable. ` +
-        `Available views: ${known || "(none)"}.`,
-    );
-  }
-  const cap = upperFirst(view.name);
-  // Returns the row list — wrap so the binding (`let rows = ...`)
-  // resolves to the array, not the Promise.
-  return [
-    "await (async () => {",
-    `  const __view = await new ${cap}ViewPage(page).goto();`,
-    `  return await __view.rows();`,
-    "})()",
-  ].join(" ");
 }
 
 function renderAggregateCall(

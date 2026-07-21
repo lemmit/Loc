@@ -13,9 +13,6 @@ export default function Home() {
         <Card withBorder padding="md">
           <Title order={4}>1 workflow</Title>
         </Card>
-        <Card withBorder padding="md">
-          <Title order={4}>2 views</Title>
-        </Card>
       </Stack>
     </Stack>
   );

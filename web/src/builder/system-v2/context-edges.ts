@@ -1,11 +1,11 @@
 // Pure walker that derives the relational structure of a BoundedContext: the
-// repository→aggregate / view→aggregate / aggregate→event / workflow→…
+// repository→aggregate / aggregate→event / workflow→…
 // relationships that turn a context's children-list into a tree.
 //
 // The aggregate-level walker (`aggregate-edges.ts`) is the source of truth for
 // per-aggregate behaviour — we lift `rel.emits` from each aggregate into a
 // context-level "aggregate → event" edge here, so the two layers stay
-// consistent. Direct ref fields (`Repository.aggregate`, `View.source`) come
+// consistent. Direct ref fields (`Repository.aggregate`) come
 // straight off the AST; workflows walk their statement bodies for top-level
 // receiver names (aggregates + repositories) and emits.
 
@@ -21,7 +21,6 @@ import type {
   Repository,
   RequiresStmt,
   Statement,
-  View,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
 import {
@@ -48,8 +47,6 @@ function workflowStatements(wf: Workflow): Statement[] {
 export interface ContextRelations {
   /** repository name → aggregate name */
   repoFor: Map<string, string>;
-  /** view name → aggregate name */
-  viewSource: Map<string, string>;
   /** aggregate name → set of event names emitted by its operations */
   emits: Map<string, Set<string>>;
   /** workflow name → set of aggregate names the body calls into via
@@ -182,7 +179,6 @@ function collectWorkflow(
 export function computeContextRelations(ctx: BoundedContext): ContextRelations {
   const rel: ContextRelations = {
     repoFor: new Map(),
-    viewSource: new Map(),
     emits: new Map(),
     workflowUses: new Map(),
     workflowUsesRepo: new Map(),
@@ -200,10 +196,6 @@ export function computeContextRelations(ctx: BoundedContext): ContextRelations {
       const r = m as Repository;
       const a = r.aggregate?.$refText;
       if (a) rel.repoFor.set(r.name, a);
-    } else if (m.$type === "View") {
-      const v = m as View;
-      const a = v.source?.$refText;
-      if (a) rel.viewSource.set(v.name, a);
     } else if (m.$type === "Aggregate") {
       const a = m as Aggregate;
       const sub = computeAggregateRelations(a);

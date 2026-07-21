@@ -22,7 +22,6 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ThemeIR,
-  ViewIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -52,7 +51,6 @@ export function renderTheme(t: ThemeIR | undefined, pack: LoadedPack): string {
 export function renderAppShell(
   aggs: AggregateIR[],
   workflows: WorkflowIR[],
-  views: ViewIR[],
   systemName: string,
   sidebarOverride: import("./view-models.js").NavSectionVM[] | undefined,
   extraRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined,
@@ -82,11 +80,10 @@ export function renderAppShell(
    *  and the realtime wire exists — App imports and mounts the renderless
    *  `<RealtimeHandlers />` component (channels.md Part I). */
   hasRealtimeHandlers = false,
-  /** Whether a scaffold-synthesised `ViewsIndex` / `WorkflowsIndex` page
-   *  exists — gates the `/views` / `/workflows` index import+route so an
-   *  explicit (non-scaffold) view/workflow page doesn't dangle against a
+  /** Whether a scaffold-synthesised `WorkflowsIndex` page
+   *  exists — gates the `/workflows` index import+route so an
+   *  explicit (non-scaffold) workflow page doesn't dangle against a
    *  missing index module.  Mirrors `hasScaffoldHome`. */
-  hasViewsIndex: boolean = true,
   hasWorkflowsIndex: boolean = true,
   /** Whether this react deployable is `auth: ui` (verified session claims
    *  available client-side).  Gates the menu-link `requires` hiding in the
@@ -100,7 +97,6 @@ export function renderAppShell(
     ...prepareAppShellVM(
       aggs,
       workflows,
-      views,
       systemName,
       sidebarOverride,
       extraRoutes,
@@ -109,7 +105,6 @@ export function renderAppShell(
       namedLayouts,
       layoutImports,
       observableWorkflows,
-      hasViewsIndex,
       hasWorkflowsIndex,
       authUi,
     ),

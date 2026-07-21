@@ -112,7 +112,7 @@ export function renderQueryHandler(args: {
   returnType: string;
   body: string;
   /** Additional constructor-injected dependencies — used by slice
-   *  1C to inject `ICurrentUserAccessor` for finds/views whose
+   *  1C to inject `ICurrentUserAccessor` for finds whose
    *  filter references currentUser. */
   extraDeps?: { type: string; field: string }[];
   /** Extra `using` namespaces to add to the file's import list. */

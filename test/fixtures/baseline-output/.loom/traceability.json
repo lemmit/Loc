@@ -215,12 +215,6 @@
         "suite": "Acme e2e",
         "kind": "ui",
         "testCaseId": null
-      },
-      {
-        "name": "active orders view renders the rendered rows",
-        "suite": "Acme e2e",
-        "kind": "ui",
-        "testCaseId": null
       }
     ]
   },

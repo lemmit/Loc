@@ -7,7 +7,6 @@ import {
   opGetById,
   opList,
   opOperation,
-  opView,
   opWorkflow,
   snakeId,
 } from "../../../src/ir/util/openapi-ids.js";
@@ -21,7 +20,7 @@ const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 describe("openapi-ids canonical tokens", () => {
   // Each row: [tokens, expected camel (Hono/.NET), expected snake (Phoenix)].
   // The camel column pins byte-identical parity with Hono's pre-existing
-  // scheme for the showcase aggregates / ops / finds / workflows / views.
+  // scheme for the showcase aggregates / ops / finds / workflows.
   const cases: Array<[readonly string[], string, string]> = [
     [opCreate("Project"), "createProject", "create_project"],
     [opGetById("Project"), "getProjectById", "get_project_by_id"],
@@ -32,7 +31,6 @@ describe("openapi-ids canonical tokens", () => {
     [opFind("Project", "byName"), "byNameProject", "by_name_project"],
     [opFind("Build", "bySha"), "byShaBuild", "by_sha_build"],
     [opWorkflow("registerProject"), "registerProjectWorkflow", "register_project_workflow"],
-    [opView("activeProjects"), "activeProjectsView", "active_projects_view"],
   ];
 
   for (const [tokens, expectCamel, expectSnake] of cases) {

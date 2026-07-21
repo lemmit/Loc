@@ -4,7 +4,7 @@ import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
-import { isAggregate, isOperation, isPage, isView, isWorkflow } from "../../../src/language/generated/ast.js";
+import { isAggregate, isOperation, isPage, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
@@ -51,15 +51,13 @@ function collectBodies(ast: unknown): BodyEntry[] {
 function collectOptions(ast: unknown): Record<string, string[]> {
   const aggregate = new Set<string>();
   const workflow = new Set<string>();
-  const view = new Set<string>();
   const page = new Set<string>();
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (isAggregate(node)) aggregate.add(node.name);
     else if (isWorkflow(node)) workflow.add(node.name);
-    else if (isView(node)) view.add(node.name);
     else if (isPage(node)) page.add(node.name);
   }
-  return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), view: [...view].sort(), page: [...page].sort() };
+  return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), page: [...page].sort() };
 }
 
 // Operation names per aggregate — drives the contextual `op:` dropdown on a Form

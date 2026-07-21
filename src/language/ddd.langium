@@ -901,7 +901,7 @@ QualifiedName returns string:
 // down to a single operation, plus deployables and api contracts.
 type Targetable =
     Subdomain | BoundedContext | Aggregate | ValueObject | EventDecl
-  | Repository | Workflow | View | Operation | Deployable | Api;
+  | Repository | Workflow | Operation | Deployable | Api;
 
 // ---------------------------------------------------------------------------
 // Top-level
@@ -913,7 +913,7 @@ BoundedContext:
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
+    EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow
     | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService
     | Projection | PolicyDecl | CommandHandler | QueryHandler
     // A unit `test` hoisted out of its aggregate, sitting beside it in the
@@ -1502,49 +1502,6 @@ ProjectionOn:
     '{'
         body+=Statement*
     '}';
-
-// View — a saved, strongly-typed query over one source aggregate or
-// workflow.  Two forms share the same head:
-//
-//   Shorthand:
-//     view ActiveOrders = Order where status == Confirmed
-//     Result shape = source aggregate's existing wire shape.
-//
-//   Full form:
-//     view OrderSummary {
-//       orderId: Id<Order>
-//       lineCount: int
-//       from Order where status != Cancelled
-//       bind orderId = id, lineCount = lines.count
-//     }
-//     Output shape declared as fields, each backed by a typed
-//     bind expression evaluated against the source aggregate.
-//
-// A view's source is an aggregate (the wire shape is its repository read),
-// a workflow (the wire shape is its persisted instance / saga-state row),
-// or a projection (the wire shape is its persisted `<Proj>Row` read model).
-// The grammar admits all three; the validator restricts the workflow case
-// (shorthand only, non-event-sourced) but permits the full-form bind-follow
-// over a projection source (reading projection + repos at query time is legal
-// because a view is a query, not a replayable fold).
-type ViewSource = Aggregate | Workflow | Projection;
-
-View:
-    'view' name=ID
-    (
-        '=' source=[ViewSource:ID] ('requires' gate=Expression)? 'where' filter=Expression IgnoringClause?
-      | '{'
-            fields+=Property*
-            'from' source=[ViewSource:ID]
-            ('requires' gate=Expression)?
-            ('where' filter=Expression)?
-            IgnoringClause?
-            'bind' binds+=BindEntry (',' binds+=BindEntry)* ','?
-        '}'
-    );
-
-BindEntry:
-    name=ID '=' expr=Expression;
 
 // Seed — first-boot data for a context's aggregates.  Declarative form: a
 // named dataset of typed records, each lowering through the aggregate's

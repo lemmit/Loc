@@ -31,7 +31,6 @@ import {
   isSubdomain,
   isSystem,
   isValueObject,
-  isView,
   isWorkflow,
   type Model,
 } from "./generated/ast.js";
@@ -108,7 +107,7 @@ function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguous: Set
     if (!("members" in ctx)) return;
     for (const m of (ctx as { members: AstNode[] }).members) {
       if (isAggregate(m) || isValueObject(m)) indexEntity(m);
-      else if (isWorkflow(m) || isView(m) || isPage(m)) put(m);
+      else if (isWorkflow(m) || isPage(m)) put(m);
       else if (isEnumDecl(m) || isEventDecl(m) || isRepository(m)) put(m);
     }
   };

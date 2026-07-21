@@ -66,8 +66,8 @@ export interface JavaRenderContext {
   bareProps?: boolean;
   /** Render `this`-rooted property / id refs through the public
    *  accessors (`a.name()`, `a.id()`).  Needed when the receiver is an
-   *  aggregate read from OUTSIDE its package (view binds in the views
-   *  service) — package-private fields are unreachable there. */
+   *  aggregate read from OUTSIDE its package (query-projection reads in the
+   *  view-service package) — package-private fields are unreachable there. */
   accessorProps?: boolean;
   /** Tier resolver for a `domain-service` call (domain-services.md rev. 4,
    *  Slice 1 — the `reading` tier).  Returns `true` when `<service>.<op>` is a
@@ -330,7 +330,7 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   literal: renderLiteral,
   // Within the owning class the id is a direct field read; lambda-param
   // receivers (`x.id`) read the package-visible field the same way.
-  // Cross-package contexts (view binds) go through the accessor.
+  // Cross-package contexts (query-projection reads) go through the accessor.
   id: (ctx) => (ctx.accessorProps ? `${ctx.thisName}.id()` : `${ctx.thisName}.id`),
   ref: renderRef,
   member: (recv, e, ctx) => renderMember(recv, e, ctx),

@@ -134,7 +134,7 @@
 | vanilla-phoenix-foundation.md | partial (slices 0–6) | residue → M-T6.2, M-T6.10 |
 | with-implements-split.md | proposed | M-T5.9(b) |
 | workflow-and-applier.md | partial (appliers+ES shipped) | M-T4.7; projections → M-T4.2 |
-| workflow-instance-views.md | shipped (#1037) | Phoenix OpenAPI defer → M-T6.2 |
+| workflow-instance-views.md | superseded (the `view` feature was hard-removed in read-path slice 7; workflow instance state is read via the `/workflows/<wf>/instances` routes) | — |
 | workflow-instance-visibility.md | shipped (#1035) | — |
 | workflow-resource-consumption.md | partial | M-T4.8 |
 | maybe-one-day/dotnet-in-playground.md | parked idea | no mission (revisit with M-T8.7 / server-side generation) |

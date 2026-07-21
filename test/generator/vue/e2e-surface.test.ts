@@ -43,7 +43,7 @@ describe("vue e2e surface", () => {
     expect(smoke).not.toContain("./pages/");
   });
 
-  it("emits framework-neutral page objects per aggregate / workflow / view", async () => {
+  it("emits framework-neutral page objects per aggregate / workflow", async () => {
     const files = await vueFiles();
     const customer = files.get("e2e/pages/customer.ts")!;
     expect(customer).toContain("export class CustomerListPage");
@@ -54,7 +54,6 @@ describe("vue e2e surface", () => {
     // `customers-row-…`) — the cross-framework testid contract.
     expect(customer).toContain("customers-list-create");
     expect(files.has("e2e/pages/workflows/place_order.ts")).toBe(true);
-    expect(files.has("e2e/pages/views/active_orders.ts")).toBe(true);
   });
 
   it("`test e2e … against <vue-deployable>` dispatches to a Playwright ui spec", async () => {
@@ -63,7 +62,6 @@ describe("vue e2e surface", () => {
     expect(spec).toContain(`import { test, expect } from "./fixtures";`);
     expect(spec).toContain("OrderListPage");
     expect(spec).toContain("PlaceOrderWorkflowPage");
-    expect(spec).toContain("ActiveOrdersViewPage");
   });
 
   it("vue page testids line up with the page objects' locators", async () => {

@@ -183,21 +183,9 @@ export const tsxTarget: WalkerTarget = {
   /** Turn a detected api call into React-Query naming + import.
    *  `Customer.create` → `{ varName: "customerCreate", hookName:
    *  "useCreateCustomer", importFrom: "../api/customer", argsRendered: [] }`.
-   *  View hooks (`Views.activeOrders`) take a different naming
-   *  shape (`activeOrdersView` / `useActiveOrdersView` /
-   *  `"../api/views"`).  Mirrors the formula at
+   *  Mirrors the formula at
    *  `walker/api-hooks.ts:60-103` pre-extraction. */
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
-    if (detected.kind === "view") {
-      const viewName = detected.aggregateName;
-      const viewPascal = upperFirstName(viewName);
-      return {
-        varName: `${lowerFirstName(viewName)}View`,
-        hookName: `use${viewPascal}View`,
-        importFrom: "../api/views",
-        argsRendered: [],
-      };
-    }
     if (detected.kind === "workflow-instance") {
       // `Fulfillment.instances.all` → useAllFulfillmentInstances();
       // `Fulfillment.instances.byId(id)` → useFulfillmentInstanceById(id).

@@ -14,7 +14,7 @@
 // POCO, routed from `emitAggregate`).  CROSS-CUTTING artifacts stay layered
 // (delegated to `byLayer`): context-level Domain primitives (ids, enums, value
 // objects, events, common), shared Infrastructure (dbcontext, dispatcher,
-// interceptor, migrations), per-context views / workflows, the separate Tests
+// interceptor, migrations), per-context workflows, the separate Tests
 // project, and the project root.  That is the intended vertical-slice shape:
 // one folder per feature for its own code; shared scaffolding stays central.
 //
@@ -96,7 +96,7 @@ function featurePathFor(artifact: DotnetArtifact): string | null {
       // Cross-cutting / shared artifacts stay layered: context-level
       // Domain primitives (ids, enums, value objects, events,
       // domain-common), shared Infrastructure (dbcontext, dispatcher,
-      // interceptor, migrations), per-context views / workflows, the
+      // interceptor, migrations), per-context workflows, the
       // separate Tests project, and the project root.
       return null;
   }

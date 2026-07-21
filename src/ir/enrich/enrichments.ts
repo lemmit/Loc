@@ -1018,7 +1018,7 @@ function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
 /** Derive a projection's canonical wire shape (projection.md) — the correlation
  *  field as the id token, then the remaining state fields as properties.
  *  Structurally identical to a workflow instance's `instanceWireShape`, so the
- *  read endpoint + `view`-over-projection (v1.1) reuse the same DTO machinery. */
+ *  read endpoint + query-time projection read reuse the same DTO machinery. */
 function enrichProjection(proj: ProjectionIR): ProjectionIR {
   const fields = proj.stateFields;
   const corr = proj.correlationField;

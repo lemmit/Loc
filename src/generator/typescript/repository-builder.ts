@@ -10,7 +10,6 @@ import {
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
   isQueryTimeProjection,
-  viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
@@ -59,7 +58,7 @@ export function buildRepositoryFile(
   ctx: EnrichedBoundedContextIR,
   emitTrace = false,
 ): string {
-  // Walk every find's filter (and any matching view filters — both
+  // Walk every find's filter (and any matching capability filters — both
   // lower to Drizzle predicates on the same table) to figure out
   // which Drizzle operators we'll need.  Default operators (eq / and
   // / inArray) are always pulled in; the lowering may add ne / gt /
@@ -75,14 +74,10 @@ export function buildRepositoryFile(
     drizzleOps.add("asc");
     drizzleOps.add("desc");
   }
-  const viewFilters = ctx.views
-    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name && v.filter)
-    .map((v) => v.filter!);
   const allFilters = [
     ...(repo?.finds ?? [])
       .map((f) => f.filter)
       .filter((x): x is import("../../ir/types/loom-ir.js").ExprIR => !!x),
-    ...viewFilters,
     // Non-principal capability filters (`filter !this.isDeleted`) AND
     // into every root read; include them in the ops walk so the import
     // narrower keeps `and` / `not` / comparison helpers they need.
@@ -136,16 +131,12 @@ export function buildRepositoryFile(
   // into each root-table read site below; child/containment reads
   // (parentId-keyed) are unaffected — the filter constrains root rows.
   const filterPred = contextFilterPredicate(agg, lowerFirst(plural(agg.name)), ctx, drizzleOps);
-  // If any find or matching view filter references currentUser, the
+  // If any find or matching capability filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
   // the closure-captured Drizzle predicate reads.  Pull the User
   // type in as a type-only import so the file compiles even when
   // the verifier hook isn't wired yet.
-  const repoUsesUser =
-    (repo?.finds ?? []).some(findUsesCurrentUser) ||
-    ctx.views
-      .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
-      .some(viewUsesCurrentUser);
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
   // A principal-referencing capability `filter` (`filter this.tenantId ==
   // currentUser.tenantId`) reads the ambient principal via `requireCurrentUser()`
   // inside every root read's predicate — so the repo imports that accessor
@@ -156,29 +147,12 @@ export function buildRepositoryFile(
   const valueObjectsUsed = collectValueObjects(agg, ctx);
   const enumsUsed = collectEnums(agg, ctx);
   const voOrEnumImports = [...valueObjectsUsed, ...enumsUsed];
-  // Synthesised parameterless finds for each context-level view sourced
-  // from this aggregate.  Lowering reuses the find path so the
-  // validator's queryable checks + bulk hydration all work for free.
-  const viewFinds: FindIR[] = ctx.views
-    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
-    .map((view) => ({
-      name: lowerFirst(view.name),
-      params: [],
-      returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
-      filter: view.filter,
-      // Carry the view's `ignoring` clause onto the synthesised find so its
-      // capability-filter conjunction drops the bypassed origins (the view
-      // read honours the bypass exactly as a find would).
-      bypassAll: view.bypassAll,
-      bypassCaps: view.bypassCaps,
-    }));
-
   // Query-time projections (read-path-architecture.md rev.13) sourced from this
-  // aggregate synthesise the SAME kind of parameterless-find repository read a
-  // full-form view does — `repo.<projName>()` returns the filtered aggregate
+  // aggregate synthesise a parameterless-find repository read —
+  // `repo.<projName>()` returns the filtered aggregate
   // rows the projection route then follows (`join`) + projects (`select`).  A
   // parameterised projection's `where` still lowers criterion params away at
-  // compile time, so the synthesised find stays parameterless like a view's.
+  // compile time, so the synthesised find stays parameterless.
   const projectionFinds: FindIR[] = ctx.projections
     .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
     .map((p) => ({
@@ -204,9 +178,9 @@ export function buildRepositoryFile(
   // Hard delete — emitted only when the aggregate has a canonical `destroy`
   // (declared or via `crudish`), so plain aggregates' repos are unchanged.
   const deleteM = agg.canonicalDestroy ? deleteMethod(agg, ctx) : null;
-  // Find / view queries — capability filter AND-ed into each read.
+  // Find queries — capability filter AND-ed into each read.
   const findMs = (repo?.finds ?? []).map((find) => findQueryMethod(agg, find, ctx, filterPred));
-  const viewFindMs = [...viewFinds, ...projectionFinds].map((find) =>
+  const viewFindMs = [...projectionFinds].map((find) =>
     findQueryMethod(agg, find, ctx, filterPred),
   );
   // `run<Name>` per context retrieval targeting this aggregate.

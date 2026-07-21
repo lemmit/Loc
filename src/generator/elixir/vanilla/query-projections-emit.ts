@@ -3,9 +3,9 @@
 // (read-path-architecture.md rev.13, § "projection generalises").
 //
 // A QUERY-TIME projection (`from <Agg> [as a] where … join … select …`, no
-// `on(e)` folds) is the always-current read model that was a `view`'s full
-// form.  Unlike a FOLDED projection it has NO physical `<Proj>Row` table — it
-// reads live, the SAME way a full-form view does:
+// `on(e)` folds) is the always-current read model of the query-time projection
+// read.  Unlike a FOLDED projection it has NO physical `<Proj>Row` table — it
+// reads live, the query-time comprehension:
 //
 //   - source rows come from `from(record in <SourceAgg>, where: <filter+cap>)
 //     |> Repo.all()` (the projection `where`, AND-ed with the source

@@ -8,8 +8,8 @@
 // both targets.
 //
 // This module mirrors src/generator/react/page-objects-builder.ts for the
-// scaffold archetype pages (aggregate-list / new / detail / workflow-form /
-// view-list) and src/generator/react/walker-page-objects.ts for the
+// scaffold archetype pages (aggregate-list / new / detail / workflow-form)
+// and src/generator/react/walker-page-objects.ts for the
 // general param/route pattern.
 //
 // Output shape per page:
@@ -96,15 +96,12 @@ export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): 
   // The page's kind + emitted name are derived from its role-scoped name + area
   // (slice 3c — no stamped `origin`).
   const workflowNames: string[] = [];
-  const viewNames: string[] = [];
   for (const bc of contextByAggName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);
-    for (const v of bc.views) viewNames.push(v.name);
   }
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregatesByName.keys()],
     workflowNames,
-    viewNames,
   };
   const origin = classifyPage(page, nameCtx);
   const emitName = pageEmitName(page, nameCtx);
@@ -142,18 +139,8 @@ export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): 
       if (!wf || !ctx) return buildFallback(page, emitName);
       return buildWorkflowFormPageObject(page, wf, ctx, emitName);
     }
-    case "view-list": {
-      const ctx = [...contextByAggName.values()].find((c) =>
-        c.views.some((v) => v.name === origin.viewName),
-      );
-      const view = ctx?.views.find((v) => v.name === origin.viewName);
-      if (!view || !ctx) return buildFallback(page, emitName);
-      return buildViewListPageObject(page, view, emitName);
-    }
     case "workflows-index":
       return buildWorkflowsIndexPageObject(page, emitName);
-    case "views-index":
-      return buildViewsIndexPageObject(page, emitName);
     case "home":
       return buildHomePageObject(page, emitName);
     // Workflow-instance read pages (workflow-instance-visibility.md) use the
@@ -529,49 +516,6 @@ function buildWorkflowFormPageObject(
 }
 
 // ---------------------------------------------------------------------------
-// View-list page object
-// ---------------------------------------------------------------------------
-
-function buildViewListPageObject(
-  page: PageIR,
-  view: import("../../ir/types/loom-ir.js").ViewIR,
-  emitName: string,
-): string {
-  const slug = snake(view.name);
-  const className = `${upperFirst(emitName)}Page`;
-  const route = page.route ?? `/views/${slug}`;
-
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page, Locator } from "@playwright/test";`);
-  lines.push(``);
-  lines.push(`export class ${className} {`);
-  lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  readonly page: Page;`);
-  lines.push(`  constructor(page: Page) {`);
-  lines.push(`    this.page = page;`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async goto(): Promise<this> {`);
-  lines.push(`    await this.page.goto(${className}.url);`);
-  lines.push(`    await this.page.getByTestId("view-${slug}").waitFor();`);
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  row(idx: number): Locator {`);
-  lines.push(`    return this.page.getByTestId(\`view-${slug}-row-\${idx}\`);`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async rowCount(): Promise<number> {`);
-  lines.push(`    return await this.page.getByTestId("view-${slug}").locator("tbody tr").count();`);
-  lines.push(`  }`);
-  lines.push(`}`);
-  lines.push(``);
-
-  return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
 // Workflows-index page object
 // ---------------------------------------------------------------------------
 
@@ -602,44 +546,6 @@ function buildWorkflowsIndexPageObject(page: PageIR, emitName: string): string {
   lines.push(``);
   lines.push(`  async runWorkflow(slug: string): Promise<void> {`);
   lines.push(`    await this.page.getByTestId(\`workflow-\${slug}-run\`).click();`);
-  lines.push(`  }`);
-  lines.push(`}`);
-  lines.push(``);
-
-  return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Views-index page object
-// ---------------------------------------------------------------------------
-
-function buildViewsIndexPageObject(page: PageIR, emitName: string): string {
-  const className = `${upperFirst(emitName)}Page`;
-  const route = page.route ?? "/views";
-
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page, Locator } from "@playwright/test";`);
-  lines.push(``);
-  lines.push(`export class ${className} {`);
-  lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  readonly page: Page;`);
-  lines.push(`  constructor(page: Page) {`);
-  lines.push(`    this.page = page;`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async goto(): Promise<this> {`);
-  lines.push(`    await this.page.goto(${className}.url);`);
-  lines.push(`    await this.page.getByTestId("views-index").waitFor();`);
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  viewCard(slug: string): Locator {`);
-  lines.push(`    return this.page.getByTestId(\`view-card-\${slug}\`);`);
-  lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async openView(slug: string): Promise<void> {`);
-  lines.push(`    await this.page.getByTestId(\`view-\${slug}-open\`).click();`);
   lines.push(`  }`);
   lines.push(`}`);
   lines.push(``);

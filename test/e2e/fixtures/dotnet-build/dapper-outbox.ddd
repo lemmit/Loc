@@ -77,10 +77,6 @@ system DapperOutbox {
         }
         apply(r: Reconciled) { done := true }
       }
-
-      // Workflow-sourced view over the ES workflow's instance read model —
-      // group-folds `<ctx>_events` via Dapper, filter applied in-memory.
-      view ReconcileDone = Reconcile where this.done
     }
   }
 

@@ -114,8 +114,6 @@ subdomain Finance {
     }
     repository Receipts for Receipt { }
     repository TagLists for TagList { }
-
-    view UnpaidInvoices = Invoice where status == Issued
   }
 
   context Ledger {

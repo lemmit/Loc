@@ -1,7 +1,7 @@
 // Printer arms for the `ignoring` filter-bypass clause (named-filter-bypass.md
-// §11): find + view (print-structural) and the inline read (print-expr).  Each
-// case round-trips through parse → print → re-parse with stable bypass fields,
-// guarding `print-completeness` against the three new grammar attachments.
+// §11): find (print-structural) and the inline read (print-expr).  Each case
+// round-trips through parse → print → re-parse with stable bypass fields,
+// guarding `print-completeness` against the grammar attachments.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -9,7 +9,6 @@ import {
   isPostfixChain,
   isSubdomain,
   isSystem,
-  isView,
   type Model,
 } from "../../../src/language/generated/ast.js";
 import { printStructural } from "../../../src/language/print/index.js";
@@ -64,17 +63,6 @@ describe("ignoring filter-bypass printer", () => {
     expect(printed).toContain("ignoring *");
   });
 
-  it("view shorthand: `ignoring <Cap>` round-trips and re-parses with the same bypass", async () => {
-    const { printed, model } = await printAndReparse(
-      wrap(`view ActiveOrders = Order where this.total > 0 ignoring softDeletable`),
-    );
-    expect(printed).toContain("ignoring softDeletable");
-    const v = contexts(model)
-      .flatMap((c) => c.members)
-      .find((m) => isView(m) && m.name === "ActiveOrders");
-    expect(v && isView(v) ? v.bypass : undefined).toEqual(["softDeletable"]);
-  });
-
   it("inline read: `Repo.findAll(...) ignoring <Cap>` round-trips", async () => {
     const { printed, model } = await printAndReparse(
       wrap(`repository R for Order { }
@@ -96,19 +84,5 @@ describe("ignoring filter-bypass printer", () => {
                 if (stmt.$type === "LetStmt" && isPostfixChain(stmt.expr))
                   bypass = stmt.expr.bypass;
     expect(bypass).toEqual(["softDeletable"]);
-  });
-
-  it("view full form: `ignoring` prints between where and bind", async () => {
-    const { printed } = await printAndReparse(
-      wrap(`view OrderTotals {
-          total: int
-          from Order
-          where this.total > 0
-          ignoring softDeletable
-          bind total = this.total
-        }`),
-    );
-    expect(printed).toContain("ignoring softDeletable");
-    expect(printed).toContain("bind total");
   });
 });

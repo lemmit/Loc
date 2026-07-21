@@ -43,7 +43,6 @@ import {
   isSubdomain,
   isSystem,
   isUi,
-  isView,
   isWorkflow,
   type MacroArg,
   type MacroCall,
@@ -149,7 +148,6 @@ interface Inventory {
   Subdomain: Map<string, AstNode>;
   BoundedContext: Map<string, AstNode>;
   Workflow: Map<string, AstNode>;
-  View: Map<string, AstNode>;
   ValueObject: Map<string, AstNode>;
   EnumDecl: Map<string, AstNode>;
   /** Reusable predicate specifications (`criterion X(...) of T = …`) keyed by
@@ -166,7 +164,6 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
     Subdomain: new Map(),
     BoundedContext: new Map(),
     Workflow: new Map(),
-    View: new Map(),
     ValueObject: new Map(),
     EnumDecl: new Map(),
     Criterion: new Map(),
@@ -180,7 +177,6 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
       else if (isSubdomain(node)) inv.Subdomain.set(named.name, node);
       else if (isBoundedContext(node)) inv.BoundedContext.set(named.name, node);
       else if (isWorkflow(node)) inv.Workflow.set(named.name, node);
-      else if (isView(node)) inv.View.set(named.name, node);
       else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
       else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
       else if (isCriterion(node)) inv.Criterion.set(named.name, node);

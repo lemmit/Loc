@@ -729,7 +729,7 @@ generator uses (`src/generator/_walker/walker-core.ts`) with
 
 The structural mirror of the React frontend, driven by the SAME shared
 markup walker (`src/generator/_walker/`) through `vueTarget` and the
-SAME `_frontend/` api/views/workflows module builders (only the
+SAME `_frontend/` api/workflows module builders (only the
 TanStack Query import specifier differs).  Design packs: `vuetify`
 (default) and `shadcnVue` (reka-ui + Tailwind 4, source-copy).  See
 [D-VUE-FRONTEND](decisions.md) and `docs/old/plans/vue-frontend-plan.md`.
@@ -938,8 +938,7 @@ phoenix_app/
 │       ├── dispatcher.ex                         # in-process event router (when a channel carries a subscribed event)
 │       ├── workflows/order_fulfillment_state.ex  # saga-state Ecto.Schema (correlation-keyed)
 │       ├── workflows/order_fulfillment/start_order_placed.ex   # event-create starter handle/1
-│       ├── workflows/order_fulfillment/on_shipment_requested.ex # on(...) reactor handle/1
-│       └── views/active_orders.ex                # Ecto query function (where filter)
+│       └── workflows/order_fulfillment/on_shipment_requested.ex # on(...) reactor handle/1
 │   └── sales.ex                                  # context module — schema list + public functions
 ├── lib/phoenix_app_web.ex                        # __using__ macro
 └── lib/phoenix_app_web/
@@ -971,7 +970,6 @@ Aggregate IR maps onto Ecto/Phoenix:
 | `event LineAdded { … }` | plain `defstruct` module under `<Ctx>.Events.<Event>` |
 | `repository finds: find byCustomer(...) where ...` | a context query function `def by_customer(customer_id) = Repo.all(from … where: …)` |
 | `workflow placeOrder(...) { ... }` | a context function wrapping `Repo.transaction(fn -> with … end)` |
-| `view ActiveOrders = Order where …` | thin module wrapping `from o in Order, where: …` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
 | `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](old/proposals/channels.md). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no schema; each concrete is a standalone `Ecto.Schema` on its own table; the context module gains `list_parties/0` (the union of the concrete `list_<concrete>/0` reads). |
@@ -1024,16 +1022,16 @@ Per deployable it emits:
 | Domain | typed-id records (`@Embeddable`, `newId()`), enums (DSL-cased constants — the wire), VO records running invariants in the compact constructor, event records implementing a `DomainEvent` marker (jMolecules-annotated), aggregate/part classes with package-private fields + record-style accessors, `create(...)` factory, `pullEvents()`, positional part `_create` factories |
 | Persistence | JPA annotations mirroring the shared `MigrationsIR` schema (`@EmbeddedId` typed ids, flattened-VO `@AttributeOverride`s, unidirectional `@OneToMany` containments with `nullable = false` join columns, `@ElementCollection` join tables for `X id[]` + value collections, `@MappedSuperclass` TPC bases); repository triple — domain port (`save`/`findById`/`getById`/`findAll`/`delete` + declared finds), Spring Data interface with `@Query` JPQL finds, `@Repository` impl mapping misses to 404 |
 | Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |
-| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` brought to cross-backend parity by an `OpenApiContractCustomizer` (named `<Agg>ListResponse`/`<View>Response` array wrappers, RFC 7807 error responses, named enum components, empty request bodies for param-less ops, per-component `required` sets, `Workflow`/`View` operationId suffixes) |
+| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` brought to cross-backend parity by an `OpenApiContractCustomizer` (named `<Agg>ListResponse` array wrappers, RFC 7807 error responses, named enum components, empty request bodies for param-less ops, per-component `required` sets, `Workflow` operationId suffixes) |
 | Auth | `auth: required` + `user {}` → typed `User` record, `UserVerifier` boundary + accept-all dev stub, 401 filter, ThreadLocal accessor; `currentUser` threads into ops as a trailing parameter |
-| Workflows / views | `POST /workflows/<snake>` via a per-context `@Service` (loops over `Repo.run(...)` retrievals incl. the call-site `page:` tuple, workflow-level `emit` logging the `domain_event` envelope); `GET /views/<snake>` (shorthand reuses `<Agg>Response`; full form gets a `<View>Row` from bind expressions) |
+| Workflows | `POST /workflows/<snake>` via a per-context `@Service` (loops over `Repo.run(...)` retrievals incl. the call-site `page:` tuple, workflow-level `emit` logging the `domain_event` envelope) |
 | Retrievals / criteria | reified criteria → `<Agg>Criteria` `Specification<T>` factories (java consumes `CriterionIR` directly — the first backend to); `run<Name>` port methods: an exact-criterion-ref retrieval rides `JpaSpecificationExecutor.findAll(spec, Sort)`, composed `where`s fall back to `@Query` JPQL with `order by`; paged runs via the `OffsetLimitPageRequest` Pageable |
 | Paged finds | `find x(): T paged` → `Paged<T>` envelope over Spring Data `Pageable` (1-based, `page=1&pageSize=20` defaults) |
 | Exception-less returns | `operation f(): X or NotFound` → sealed domain union + variant records, Jackson-polymorphic `<U>Response` wire DTO (`type` tag), controller switch: error variants → RFC-7807 `ProblemDetail` at their mapped status, success → 200 |
 | Inheritance | TPC via `@MappedSuperclass`; TPH (`sharedTable`) via JPA `SINGLE_TABLE` — the base owns the shared table + `@DiscriminatorColumn("kind")`, concretes carry `@DiscriminatorValue` and share the base `<Base>Id` |
 | Single containments | hidden owning `_parent` `@OneToOne` on the part (JPA has no unidirectional one-to-one with the FK on the part table) + inverse `mappedBy` with cascade/orphanRemoval on the root |
 | Seeding | `seed` blocks → `<Ctx>SeedRunner` `ApplicationRunner`: domain rows through `create(...)` + the port save, raw rows as schema-qualified INSERTs, ship-once `__loom_seed` marker (`default` always, others via `LOOM_SEED`) |
-| Capability filters | non-principal predicates → Hibernate `@SQLRestriction` (static SQL on every SELECT) on relational + `shape(embedded)` roots, in-app `findAll().stream()` for `shape(document)`; **principal** (tenancy) predicates → SpEL-principal JPQL clause AND-ed into the scoped `findAll`/`findById` overrides + finds/retrievals/views |
+| Capability filters | non-principal predicates → Hibernate `@SQLRestriction` (static SQL on every SELECT) on relational + `shape(embedded)` roots, in-app `findAll().stream()` for `shape(document)`; **principal** (tenancy) predicates → SpEL-principal JPQL clause AND-ed into the scoped `findAll`/`findById` overrides + finds/retrievals |
 | Fullstack (`ui:`) | controllers move under `/api`, `SpaWebConfig` serves the SPA bundle (`UI_DIR`, index.html fallback), React project under `ClientApp/`, node stage in the Dockerfile; the auth filter guards `/api/*` only |
 | Extern ops | per-op handler interface + throwing dev-stub `@Component`; service runs `check<Op>` → handler → invariants → save |
 | Tests | `test "…"` → JUnit 5 classes under `src/test/java` |
@@ -1057,19 +1055,10 @@ actor + jsonb intersection is deferred), and provenance/audited (gated —
 no runtime emitted; the node and .NET backends do implement these).  See
 `docs/old/plans/java-backend-implementation.md` for the execution record.
 
-**Cross-aggregate view `follows` IS implemented.** A full-form view whose
-output bind reaches another aggregate via `X id` (`customerName =
-customerId.name`, single- or multi-hop) bulk-loads each foreign aggregate
-through its own (tenancy-scoped) `findAll()` into a `Map<idValue, Agg>`
-and rewrites the traversal to a map lookup — the java analogue of the
-node / python / .NET pattern (`findAll()` rather than a bulk-by-ids method
-so the read stays behind the foreign repository's principal `@Query`).
-
 **Value-object read-model fields ARE implemented.** A VO-typed
-workflow-instance field, projection row field, or view Row field emits
+workflow-instance field or projection row field emits
 its `<Vo>Response` record co-located in the consuming package
-(`application.workflows` for instance/projection reads,
-`application.views` for view rows), the read-model analogue of an
+(`application.workflows` for instance/projection reads), the read-model analogue of an
 aggregate response's nested VO records.  Only an *entity* (containment
 part) read-model field stays gated
 (`loom.java-workflow-instance-field-unsupported` /
@@ -1259,7 +1248,7 @@ Out of scope for v1 (intentional):
 - **Production identity provider**: `auth: required` + a `user {}`
   block emit a *first-class* auth surface on every backend — a typed
   principal, a request boundary (401), `requires` 403 gates on
-  operations / views / pages, `currentUser`/tenancy capability filters,
+  operations / pages, `currentUser`/tenancy capability filters,
   and an OIDC turnkey verifier — but the default verifier is an
   accept-all **dev stub**.  Wiring a real IdP (or replacing the stub)
   is the deployment's job; see [`auth.md`](auth.md).  (Fine-grained RBAC

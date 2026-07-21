@@ -35,7 +35,7 @@
 //   - a call whose receiver names a `workflow` in the context
 //                                         → loom.domain-service-no-workflow-start
 //   - a `reading`/`mutating` domain service called from an aggregate
-//     operation/create/destroy or a view body
+//     operation/create/destroy
 //                                         → loom.domain-service-infra-call-from-aggregate
 //     (pure services are exempt — they carry no infrastructure)
 //
@@ -54,7 +54,6 @@ import type {
   OperationIR,
   ParamIR,
   StmtIR,
-  ViewIR,
 } from "../../types/loom-ir.js";
 import { aggregateOpResolver, classifyDomainServiceTier } from "../../util/domain-service-tier.js";
 import { isWriteMethod } from "../../util/repo-methods.js";
@@ -71,7 +70,7 @@ export function validateDomainServices(ctx: BoundedContextIR, diags: LoomDiagnos
     checkAnemic(ctx, svc, diags);
   }
   // The infra-call gate is a cross-declaration check — it needs the set of
-  // NON-pure services, then a scan of every aggregate / view body for a call
+  // NON-pure services, then a scan of every aggregate body for a call
   // into one.  Run it once per context after the per-service checks.
   checkInfraCallsFromAggregates(ctx, diags);
 }
@@ -147,7 +146,7 @@ function checkOperationBody(
  *  `mutating`) domain service runs infrastructure (a repository read / a write),
  *  so it must be orchestrated by the application layer (workflow / command
  *  handler), never called from inside an aggregate `operation`/`create`/`destroy`
- *  body or a view body.  PURE services are exempt (no infrastructure).  The
+ *  body.  PURE services are exempt (no infrastructure).  The
  *  closest analog is the UI mutating-command gate (`ui-checks.ts`
  *  `checkMissingEffectMarker`). */
 function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
@@ -171,7 +170,7 @@ function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnos
     diags.push({
       severity: "error",
       code: "loom.domain-service-infra-call-from-aggregate",
-      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation or a view.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
+      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
       source,
     });
   };
@@ -180,9 +179,6 @@ function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnos
     for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])]) {
       scanAggregateOp(ctx, agg, op, flag);
     }
-  }
-  for (const view of ctx.views) {
-    scanView(ctx, view, flag);
   }
 }
 
@@ -199,21 +195,6 @@ function scanAggregateOp(
       if (e.kind === "call" && e.callKind === "domain-service") flag(where, source, e);
     });
   }
-}
-
-function scanView(
-  ctx: BoundedContextIR,
-  view: ViewIR,
-  flag: (where: string, source: string, call: Extract<ExprIR, { kind: "call" }>) => void,
-): void {
-  const where = `view '${view.name}'`;
-  const source = `${ctx.name}/${view.name}`;
-  const visit = (e: ExprIR): void => {
-    if (e.kind === "call" && e.callKind === "domain-service") flag(where, source, e);
-  };
-  walkExpr(view.requires, visit);
-  walkExpr(view.filter, visit);
-  for (const bind of view.output?.binds ?? []) walkExpr(bind.expr, visit);
 }
 
 /** `loom.domain-service.single-aggregate` — soft warning when every

@@ -96,7 +96,7 @@ function claimPathFor(field: string, auth: AuthIR): string {
 
 function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
   // User shape lives in its own module so any per-aggregate file (or
-  // workflow / view route) can `import type { User }` without
+  // workflow route) can `import type { User }` without
   // pulling the verifier registry alongside.
   const fields = user.fields.map((f) => {
     // FieldIR.optional is already encoded via the type when the source
@@ -130,7 +130,7 @@ function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
       "// User-claim shape decoded from the inbound JWT.  The verifier",
       "// hook (auth/verifier.ts) returns `UserClaims`; the auth middleware",
       "// derives the request principal `User` from it (adding `orgPath` under",
-      "// tenancy).  Downstream route handlers / workflow handlers / view binds",
+      "// tenancy).  Downstream route handlers / workflow handlers",
       "// reference `User` via the magic `currentUser` identifier.",
       "export interface UserClaims {",
       ...fields,

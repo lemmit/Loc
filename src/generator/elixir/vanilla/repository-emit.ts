@@ -209,7 +209,7 @@ function renderRepository(
   // `has_many`/`has_one`, AND the reference-collection `many_to_many` in one
   // round-trip, so the serializer materialises every wire field (an unloaded
   // assoc serialises as `%Ecto.Association.NotLoaded{}`).  Shared with the
-  // shorthand `view` query (`read-preload.ts`) — both project the same wireShape.
+  // query-time projection read (`read-preload.ts`) — both project the same wireShape.
   const preloadRels = readPreloadRels(agg, ctx, sys);
   const preload = preloadRels.length > 0 ? ` |> Repo.preload([${preloadRels.join(", ")}])` : "";
   const findFns = finds.map((f) =>

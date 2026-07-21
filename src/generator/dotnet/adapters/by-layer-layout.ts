@@ -59,11 +59,8 @@ export type DotnetArtifactCategory =
   | "execution-context-behavior"
   | "extern-handler-interface"
   | "extern-handler-stub"
-  // View + workflow artifacts live under per-context shared folders,
+  // Workflow artifacts live under per-context shared folders,
   // not under any single aggregate's plural folder.
-  | "view-query"
-  | "view-handler"
-  | "view-row"
   | "workflow-request"
   | "workflow-command"
   | "workflow-handler"
@@ -157,18 +154,10 @@ function pathForCategory(artifact: DotnetArtifact): string {
     case "query-handler":
       if (!agg) throw new Error(`byLayer.pathFor: '${cat}' missing aggregateName (${name})`);
       return `Application/${aggFolder(agg)}/Queries/${name}`;
-    case "view-query":
-    case "view-handler":
-    case "view-row":
-      // Views are per-context, not per-aggregate.  All view artifacts
-      // collect under Application/Views/ to match the existing
-      // emitter's placement.
-      return `Application/Views/${name}`;
     case "workflow-request":
     case "workflow-command":
     case "workflow-handler":
-      // Same rationale as views — workflows live outside any single
-      // aggregate's plural folder.
+      // Workflows live outside any single aggregate's plural folder.
       return `Application/Workflows/${name}`;
     case "validation-behavior":
       return `Application/Common/${name}`;

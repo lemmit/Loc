@@ -19,7 +19,7 @@
 // from a list + `state {}` + display primitives).  See
 // docs/page-metamodel.md §9 for the current closed set.
 
-ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
+ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder]) {
 
   // ── 1. Mixed-granularity scaffolding ────────────────────────────
   // Catalog: take the whole module.  Sales: cherry-pick — Customer +
@@ -131,9 +131,9 @@ ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Produc
     title: "Sales dashboard"
 
     body: Dashboard(items: [
-      Card { "Confirmed orders", Stat { view ActiveOrders, format: "count" } },
+      Card { "Confirmed orders", Stat { api Sales.Order.all, format: "count" } },
       Card { "EUR/USD",          Stat { api ExchangeRates.usd("EUR"), decimals: 4 } },
-      Card { "Customer breakdown", Table { view CustomerOrders }, span: 2 }
+      Card { "Customer breakdown", Table { api Sales.Customer.all }, span: 2 }
     ])
 
     menu { section: "Reports", label: "Dashboard", order: 0 }

@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { prepareAppShellVM } from "../../../src/generator/react/templating/preparers/app-shell.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateSystems } from "../../../src/system/index.js";
@@ -290,14 +289,13 @@ describe("react generator", () => {
       expect(app).toMatch(/\.loom-skip-link:focus/);
     });
 
-    it("sidebar groups Aggregates / Workflows / Views with Dividers + active highlighting", async () => {
+    it("sidebar groups Aggregates / Workflows with Dividers + active highlighting", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
       // Section headers (Mantine Divider with label).
       expect(app).toMatch(/<Divider my="xs" label="Aggregates" labelPosition="left" \/>/);
       expect(app).toMatch(/<Divider my="xs" label="Workflows" labelPosition="left" \/>/);
-      expect(app).toMatch(/<Divider my="xs" label="Views" labelPosition="left" \/>/);
       // Per-aggregate NavLink with active prop wired through useLocation.
       expect(app).toMatch(
         /<NavLink component=\{RouterLink\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
@@ -316,7 +314,7 @@ describe("react generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      // Single aggregate, no workflows, no views.
+      // Single aggregate, no workflows.
       const doc = await helper(
         `
         system Plain {
@@ -336,11 +334,9 @@ describe("react generator", () => {
       const { files } = generateSystems(doc.parseResult.value as Model);
       const app = files.get("web/src/App.tsx")!;
       expect(app).toMatch(/<Divider my="xs" label="Aggregates"/);
-      // No workflows / views section emitted.
+      // No workflows section emitted.
       expect(app).not.toMatch(/label="Workflows"/);
-      expect(app).not.toMatch(/label="Views"/);
       expect(app).not.toMatch(/data-testid="nav-workflows"/);
-      expect(app).not.toMatch(/data-testid="nav-views"/);
     });
   });
 
@@ -654,83 +650,7 @@ describe("react generator", () => {
     });
   });
 
-  describe("view list pages", () => {
-    it("emits an api/views.ts module with a query hook per view", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const api = files.get("web_app/src/api/views.ts")!;
-      // Shorthand view reuses the source aggregate's list response.
-      expect(api).toMatch(/export const ActiveOrdersResponse = OrderListResponse;/);
-      expect(api).toMatch(/export function useActiveOrdersView\(\)/);
-      expect(api).toMatch(/api\.get\(`\/views\/active_orders`\)/);
-      // Full-form view emits its own row + array schemas.
-      expect(api).toMatch(/export const OrderSummaryRow = z\.object\(\{/);
-      expect(api).toMatch(/orderId: z\.string\(\)/);
-      expect(api).toMatch(/status: OrderStatusSchema/);
-      expect(api).toMatch(/lineCount: z\.number\(\)\.int\(\)/);
-      expect(api).toMatch(/export const OrderSummaryResponse = z\.array\(OrderSummaryRow\);/);
-      expect(api).toMatch(/export function useOrderSummaryView\(\)/);
-    });
-
-    it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const app = files.get("web_app/src/App.tsx")!;
-      expect(app).toMatch(/import ViewsIndex from "\.\/pages\/views\/index"/);
-      expect(app).toMatch(/import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders"/);
-      expect(app).toMatch(/import OrderSummaryViewPage from "\.\/pages\/views\/order_summary"/);
-      expect(app).toMatch(/<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/);
-      expect(app).toMatch(
-        /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
-      );
-      expect(app).toMatch(
-        /<NavLink component=\{RouterLink\} to="\/views" label="All views"[\s\S]*?data-testid="nav-views"/,
-      );
-      expect(app).toMatch(
-        /<NavLink component=\{RouterLink\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
-      );
-    });
-
-    it("gates the /views index import+route on a scaffold ViewsIndex page existing", () => {
-      // The ViewsIndex (and WorkflowsIndex) singleton index page is only
-      // synthesised by the scaffold macro.  An explicit view page in a
-      // non-scaffold ui has none, so the App shell must NOT import
-      // `./pages/views/index` (it would dangle → TS2307) — but the
-      // per-view page still mounts.  Mirrors the `hasScaffoldHome` gate.
-      const views = [{ name: "ActiveProjects" }] as unknown as Parameters<
-        typeof prepareAppShellVM
-      >[2];
-      const args = (hasViewsIndex: boolean) =>
-        prepareAppShellVM(
-          [],
-          [],
-          views,
-          "Sys",
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          [],
-          hasViewsIndex,
-          true,
-        );
-
-      const noIndex = args(false);
-      expect(noIndex.imports.some((i) => i.from === "./pages/views/index")).toBe(false);
-      expect(noIndex.routes.some((r) => r.path === "/views")).toBe(false);
-      // the per-view page is still wired regardless.
-      expect(noIndex.imports.some((i) => i.from === "./pages/views/active_projects")).toBe(true);
-      expect(noIndex.routes.some((r) => r.path === "/views/active_projects")).toBe(true);
-
-      const withIndex = args(true);
-      expect(withIndex.imports.some((i) => i.from === "./pages/views/index")).toBe(true);
-      expect(withIndex.routes.some((r) => r.path === "/views")).toBe(true);
-    });
-  });
-
-  describe("DSL e2e for ui.workflows.* + ui.views.*", () => {
+  describe("DSL e2e for ui.workflows.*", () => {
     it("emits a Playwright page object per workflow", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -748,27 +668,6 @@ describe("react generator", () => {
       expect(po).toMatch(/async run\(input: PlaceOrderRequest\): Promise<void>/);
     });
 
-    it("emits a Playwright page object per view", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const po = files.get("web_app/e2e/pages/views/order_summary.ts")!;
-      expect(po).toMatch(/export class OrderSummaryViewPage/);
-      // Row shape interface declared locally — keeps the page object
-      // self-contained.
-      expect(po).toMatch(/export interface OrderSummaryRowText \{/);
-      expect(po).toMatch(/orderId: string;/);
-      expect(po).toMatch(/lineCount: string;/);
-      // rows() reads the rendered table body structurally (pack-agnostic
-      // `<tbody><tr><td>`), indexing cells in column order — so it returns
-      // the actual rendered row content, not empty stubs.
-      expect(po).toMatch(/async rows\(\): Promise<OrderSummaryRowText\[\]>/);
-      expect(po).toMatch(/getByTestId\("view-order_summary"\)\.locator\("tbody tr"\)/);
-      expect(po).toMatch(/const cells = body\.nth\(i\)\.locator\("td"\)/);
-      // First projected column maps to cell 0.
-      expect(po).toMatch(/const c_0 = \(await cells\.nth\(0\)\.innerText\(\)\)\.trim\(\)/);
-      expect(po).toMatch(/orderId: c_0/);
-    });
-
     it("UI spec lowers ui.workflows.<name>(...) to the generated page object's run()", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -779,19 +678,6 @@ describe("react generator", () => {
       );
       // The workflow call lowers to `await new <Cap>WorkflowPage(page).run({...})`.
       expect(ui).toMatch(/await new PlaceOrderWorkflowPage\(page\)\.run\(/);
-    });
-
-    it("UI spec lowers ui.views.<name>() to the generated page object's rows()", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
-      expect(ui).toMatch(
-        /import \{ ActiveOrdersViewPage \} from "\.\/pages\/views\/active_orders"/,
-      );
-      // The view call lowers to a goto + rows() pair, wrapped so the
-      // let-binding resolves to the array (not a Promise).
-      expect(ui).toMatch(/new ActiveOrdersViewPage\(page\)\.goto\(\)/);
-      expect(ui).toMatch(/await __view\.rows\(\)/);
     });
 
     it("validator rejects ui.workflows.<unknown>", async () => {
@@ -827,41 +713,6 @@ describe("react generator", () => {
           (d) =>
             d.severity === "error" &&
             /unknown workflow 'ui\.workflows\.doesNotExist'/.test(d.message),
-        ),
-      ).toBe(true);
-    });
-
-    it("validator rejects ui.views.<unknown>", async () => {
-      const { parseHelper } = await import("langium/test");
-      const { lowerModel } = await import("../../../src/ir/lower/lower.js");
-      const { enrichLoomModel } = await import("../../../src/ir/enrich/enrichments.js");
-      const { validateLoomModel } = await import("../../../src/ir/validate/validate.js");
-      const services = createDddServices(NodeFileSystem);
-      const helper = parseHelper(services.Ddd);
-      const doc = await helper(
-        `
-        system Demo {
-          subdomain M {
-            context C {
-              aggregate A { name: string  derived display: string = name }
-              repository As for A { }
-            }
-          }
-          ui WebApp with scaffold(subdomains: [M]) { }
-          deployable api { platform: dotnet, contexts: [C], port: 8080 }
-          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
-          test e2e "bad" against web {
-            let r = ui.views.doesNotExist()
-          }
-        }
-      `,
-        { validation: true },
-      );
-      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
-      const diags = validateLoomModel(loom);
-      expect(
-        diags.some(
-          (d) => d.severity === "error" && /unknown view 'ui\.views\.doesNotExist'/.test(d.message),
         ),
       ).toBe(true);
     });

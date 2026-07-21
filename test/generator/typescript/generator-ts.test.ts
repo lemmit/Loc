@@ -994,206 +994,6 @@ describe("typescript generator", () => {
     expect(saveIdx).toBeGreaterThan(txOpen);
     expect(saveIdx).toBeLessThan(txClose);
   });
-
-  it("emits a Hono /views router + per-view repository method", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-        }
-        repository Orders for Order { }
-        view ActiveOrders = Order where status == Confirmed
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
-
-    // 1. http/views.ts mounts the route; reuses the aggregate's
-    //    list response schema for OpenAPI symmetry.
-    const views = files.get("http/views.ts")!;
-    expect(views).toMatch(/import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes"/);
-    expect(views).toMatch(/path: "\/active_orders"/);
-    expect(views).toMatch(/operationId: "activeOrdersView"/);
-    expect(views).toMatch(/schema: OrderListResponse/);
-    expect(views).toMatch(/await repo\.activeOrders\(\)/);
-    expect(views).toMatch(/rows\.map\(\(r\) => repo\.toWire\(r\)\)/);
-
-    // 2. http/index.ts mounts /views.
-    const httpIndex = files.get("http/index.ts")!;
-    expect(httpIndex).toMatch(/import \{ viewsRoutes \} from "\.\/views"/);
-    expect(httpIndex).toMatch(/app\.route\("\/api\/views", viewsRoutes\(db, events\)\)/);
-
-    // 3. The repository file gained an activeOrders() method whose
-    //    Drizzle query embeds the lowered predicate.
-    const repo = files.get("db/repositories/order-repository.ts")!;
-    expect(repo).toMatch(/async activeOrders\(\): Promise<Order\[\]>/);
-    expect(repo).toMatch(/eq\(schema\.orders\.status, "Confirmed"\)/);
-
-    // 4. The aggregate routes file's response schema is exported so
-    //    the views router can import it without duplicating shapes.
-    const aggRoutes = files.get("http/order.routes.ts")!;
-    expect(aggRoutes).toMatch(/export const OrderResponse = z\.object/);
-    expect(aggRoutes).toMatch(/export const OrderListResponse =/);
-  });
-
-  it("emits a custom-shape view with per-row projection (full form)", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-          contains lines: OrderLine[]
-          entity OrderLine { quantity: int, invariant quantity > 0 }
-        }
-        repository Orders for Order { }
-        view OrderSummary {
-          orderId: Order id
-          status: OrderStatus
-          lineCount: int
-          from Order where status == Confirmed
-          bind orderId = id, status = status, lineCount = lines.count
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
-    const views = files.get("http/views.ts")!;
-
-    // Custom Zod schema declared at top of the file.
-    expect(views).toMatch(
-      /const OrderSummaryRow = z\.object\(\{[\s\S]+?orderId: z\.string\(\),[\s\S]+?status: z\.enum\(\["Draft", "Confirmed"\]\),[\s\S]+?lineCount: z\.number\(\)\.int\(\),[\s\S]+?\}\)/,
-    );
-    expect(views).toMatch(/const OrderSummaryResponse = z\.array\(OrderSummaryRow\)/);
-
-    // Route uses the custom response schema.
-    expect(views).toMatch(/schema: OrderSummaryResponse/);
-
-    // Body projects through bind expressions rooted at row var `r`.
-    expect(views).toMatch(/orderId: r\.id/);
-    expect(views).toMatch(/status: r\.status/);
-    expect(views).toMatch(/lineCount: r\.lines\.length/);
-    expect(views).toMatch(/projected as z\.infer<typeof OrderSummaryResponse>/);
-  });
-
-  it("rewrites X id follow refs to bulk-load + map lookups", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string, email: string  derived display: string = name }
-        aggregate Order {
-          customerId: Customer id
-          status: OrderStatus
-        }
-        repository Customers for Customer { }
-        repository Orders for Order { }
-        view CustomerOrders {
-          orderId: Order id
-          customerName: string
-          customerEmail: string
-          status: OrderStatus
-          from Order where status == Confirmed
-          bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
-    const views = files.get("http/views.ts")!;
-
-    // Foreign aggregate's repo is imported and instantiated.
-    expect(views).toMatch(
-      /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/,
-    );
-    expect(views).toMatch(/const customerRepo = new CustomerRepository\(db, events\)/);
-    // Bulk load + map by id.
-    expect(views).toMatch(
-      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)\.map\(\(a\) => \[a\.id as string, a\]\)\)/,
-    );
-    // Projection rewrites the Id-follow refs.
-    expect(views).toMatch(/customerName: customerById\.get\(r\.customerId as string\)!\.name/);
-    expect(views).toMatch(/customerEmail: customerById\.get\(r\.customerId as string\)!\.email/);
-
-    // Repo gained findManyByIds.
-    const customerRepo = files.get("db/repositories/customer-repository.ts")!;
-    expect(customerRepo).toMatch(
-      /async findManyByIds\(ids: Ids\.CustomerId\[\]\): Promise<Customer\[\]>/,
-    );
-    expect(customerRepo).toMatch(/\.where\(inArray\(schema\.customers\.id, ids\)\)/);
-  });
-
-  it("emits projection-sourced view routes (shorthand read + full-form bind-follow)", async () => {
-    // projection.md v1.1 — a `view` over a projection reads its `<Proj>Row`
-    // read-model table directly (shorthand) and may bind-follow `X id` columns
-    // into repositories (full form).  The full-form follow re-brands the
-    // nullable read-model column via `Ids.<Agg>Id(...)` before `findManyByIds`.
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Placed, Shipped }
-        event OrderPlaced  { order: Order id, customer: Customer id }
-        event OrderShipped { order: Order id }
-        aggregate Customer { name: string }
-        repository Customers for Customer { }
-        aggregate Order { status: OrderStatus  customer: Customer id }
-        repository Orders for Order { }
-        projection OrderBook keyed by order {
-          order: Order id
-          customer: Customer id
-          status: OrderStatus
-          on(e: OrderPlaced)  { order := e.order  customer := e.customer  status := Placed }
-          on(e: OrderShipped) { status := Shipped }
-        }
-        view ShippedRows = OrderBook where status == Shipped
-        view ShippedOrders {
-          customerName: string
-          from OrderBook where status == Shipped
-          bind customerName = customer.name
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
-    const views = files.get("http/views.ts")!;
-
-    // Shorthand: direct SQL-pushed read of the `<Proj>Row` drizzle table, no
-    // aggregate repository, projected through the projection wire shape.
-    expect(views).toMatch(/path: "\/shipped_rows"/);
-    expect(views).toMatch(
-      /await db\.select\(\)\.from\(schema\.orderBooks\)\.where\(eq\(schema\.orderBooks\.status, "Shipped"\)\)/,
-    );
-
-    // Full form: reads the same table, then bulk-loads the followed aggregate —
-    // re-branding the NULLABLE read-model column (`string | null`) via
-    // `Ids.CustomerId(...)` (dropping NULLs) so `findManyByIds` type-checks.
-    expect(views).toMatch(/import \* as Ids from "\.\.\/domain\/ids"/);
-    expect(views).toMatch(
-      /rows\.map\(\(r\) => r\.customer\)\.filter\(\(x\): x is string => x !== null\)\.map\(\(x\) => Ids\.CustomerId\(x\)\)/,
-    );
-    expect(views).toMatch(/customerName: customerById\.get\(r\.customer as string\)!\.name/);
-  });
-
   it("workflow op-call to a parameterless extern calls the aggregate-owned op", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
@@ -1263,52 +1063,6 @@ describe("typescript generator", () => {
     expect(wf).toMatch(/order\.deduct\(amount\);/);
     expect(wf).not.toMatch(/await handler\(order/);
   });
-
-  it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Region { name: string, countryCode: string  derived display: string = name }
-        aggregate Customer { name: string, regionId: Region id  derived display: string = name }
-        aggregate Order { customerId: Customer id, status: OrderStatus }
-        repository Regions for Region { }
-        repository Customers for Customer { }
-        repository Orders for Order { }
-        view OrdersWithRegion {
-          orderId: Order id
-          regionName: string
-          countryCode: string
-          from Order where status == Confirmed
-          bind orderId = id,
-               regionName = customerId.regionId.name,
-               countryCode = customerId.regionId.countryCode
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
-      "http/views.ts",
-    )!;
-
-    // Both auxiliaries loaded; Customer first, then Region keyed by
-    // customer.regionId values.
-    expect(wf).toMatch(
-      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)/,
-    );
-    expect(wf).toMatch(
-      /const regionByCustomerId = new Map\(\(await regionRepo\.findManyByIds\(\[\.\.\.customerById\.values\(\)\]\.map\(\(a\) => a\.regionId\)\)\)/,
-    );
-    // Chained projection.
-    expect(wf).toMatch(
-      /regionName: regionByCustomerId\.get\(customerById\.get\(r\.customerId as string\)!\.regionId as string\)!\.name/,
-    );
-  });
-
   it("emits <Vo>Schema / <Enum>Schema declarations for value-object + enum workflow params", async () => {
     // Regression for the Banking-system "Bundle import failed:
     // Can't find variable: MoneySchema" runtime crash.  The
@@ -1707,7 +1461,7 @@ describe("typescript generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // currentUser inside find / view filters
+    // currentUser inside find filters
     // -----------------------------------------------------------------------
 
     const SRC_FILTER_AUTH = `
@@ -1725,7 +1479,6 @@ describe("typescript generator", () => {
             repository Orders for Order {
               find mine(): Order[] where customerId == currentUser.customerId
             }
-            view MyOrders = Order where customerId == currentUser.customerId
           }
         }
         deployable api {
@@ -1750,16 +1503,6 @@ describe("typescript generator", () => {
       expect(route).toMatch(/const currentUser = \(c as unknown as \{ get\(k: "currentUser"\)/);
       expect(route).toMatch(/repo\.mine\(currentUser\)/);
     });
-
-    it('view route reads c.get("currentUser") and threads it into the repo call', async () => {
-      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
-      const views = files.get("http/views.ts")!;
-      expect(views).toMatch(
-        /const currentUser = \(httpCtx as unknown as \{ get\(k: "currentUser"\)/,
-      );
-      expect(views).toMatch(/repo\.myOrders\(currentUser\)/);
-    });
-
     // -----------------------------------------------------------------------
     // `requires` clauses
     // -----------------------------------------------------------------------

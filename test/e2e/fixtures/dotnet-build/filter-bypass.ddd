@@ -3,7 +3,6 @@
 // all three read sites under `dotnet build /warnaserror`:
 //   - a repository find that bypasses a named capability filter (`ignoring softDeletable`)
 //   - a repository find that bypasses ALL filters (`ignoring *`)
-//   - a view whose read bypasses the named filter
 //   - an inline `Repo.findAll(...) ignoring …` in a workflow body
 //
 // `softDeletable` contributes the EF `IsDeletedFilter` named query filter (via
@@ -26,7 +25,6 @@ system PS {
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where this.total > 0 ignoring softDeletable
       workflow Sweep {
         create(x: int) {
           let scoped = Orders.findAll(BigOrders()) ignoring softDeletable

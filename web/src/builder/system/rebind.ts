@@ -1,5 +1,5 @@
 import { AstUtils, type AstNode, type Reference } from "langium";
-import type { Api, Model, Repository, View } from "../../../../src/language/generated/ast.js";
+import type { Api, Model, Repository } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 import type { NodeKind } from "./model";
@@ -8,7 +8,6 @@ import type { NodeKind } from "./model";
 // Rebind a construct's single outgoing reference from the inspector:
 //   repository … for <Aggregate>     (repository → aggregate)
 //   api …        from <Subdomain>     (api → subdomain)
-//   view …       from <Aggregate>     (view → aggregate)
 //
 // A reference's `$refNode` is the CST node of the referenced *name token* (set
 // by the parser, no linking needed), so a rebind is a single targeted text edit
@@ -17,16 +16,15 @@ import type { NodeKind } from "./model";
 // multi-valued and out of scope here.
 // ---------------------------------------------------------------------------
 
-export type RebindKind = "repository" | "api" | "view";
+export type RebindKind = "repository" | "api";
 
-const REBINDABLE: RebindKind[] = ["repository", "api", "view"];
+const REBINDABLE: RebindKind[] = ["repository", "api"];
 export const isRebindKind = (kind: NodeKind): kind is RebindKind =>
   (REBINDABLE as NodeKind[]).includes(kind);
 
 const KIND_TO_TYPE: Record<RebindKind, string> = {
   repository: "Repository",
   api: "Api",
-  view: "View",
 };
 
 /** What the reference points at — drives both the option list and the label. */
@@ -40,8 +38,6 @@ function refOf(node: AstNode, kind: RebindKind): Reference | undefined {
       return (node as Repository).aggregate;
     case "api":
       return (node as Api).source;
-    case "view":
-      return (node as View).source;
   }
 }
 

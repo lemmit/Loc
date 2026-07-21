@@ -1,12 +1,11 @@
 // -------------------------------------------------------------------------
-// Id-follow analysis — the bulk-load planning shared by the view full-form
-// binds and the projection `join` clauses.  A cross-aggregate reference is an
+// Id-follow analysis — the bulk-load planning for cross-aggregate follows.
+// A cross-aggregate reference is an
 // `X id` (opaque handle); reading the referenced aggregate is a batched
 // load-by-id through its own repository (boundary-respecting, N+1-visible).
-// This leaf owns the path/mapVar machinery both `lower-view` (which INFERS
-// follows by walking bind expressions for id-dots) and `lower-projection`
-// (which reads DECLARED `join` clauses) consume — relocated here from
-// `lower-view` so neither leaf imports the other (pipeline-layering).
+// This leaf owns the path/mapVar machinery the projection `join` lowering
+// (`lower-projection`, which reads DECLARED `join` clauses) consumes, plus the
+// INFER path that walks bind expressions for id-dots.
 // -------------------------------------------------------------------------
 
 import type { ExprIR } from "../types/loom-ir.js";
@@ -24,8 +23,8 @@ export interface Auxiliary {
  *  `["customerId"]` with target Customer; two-hop (`customerId.regionId.name`)
  *  yields paths `["customerId"]` (Customer) AND `["customerId", "regionId"]`
  *  (Region) — the longer path's prerequisites get loaded first thanks to
- *  dependency ordering at emission time.  Used by `lower-view` (inferred
- *  follows); the projection path uses the declared `join` clauses instead. */
+ *  dependency ordering at emission time.  Used for inferred
+ *  follows; the projection path uses the declared `join` clauses instead. */
 export function collectIdFollows(
   expr: ExprIR,
   out: Map<string, { path: string[]; aggName: string }>,
@@ -138,7 +137,7 @@ export function joinRefPath(e: ExprIR): string[] {
 }
 
 /** Order a set of inferred follow paths (shortest first) into emitter-ready
- *  auxiliaries, minting each `mapVar`.  Used by `lower-view`. */
+ *  auxiliaries, minting each `mapVar`. */
 export function orderAuxiliaries(
   auxByKey: Map<string, { path: string[]; aggName: string }>,
 ): Auxiliary[] {

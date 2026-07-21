@@ -34,13 +34,6 @@ system FulfillmentSys {
         apply(pr: PaymentRegistered) { paid := paid + pr.amount }
         apply(fc: FulfillmentCancelled) { cancelled := true }
       }
-      // Views over an event-sourced workflow's instance read model: an ES
-      // workflow has no `<Wf>State` table, so each backend group-folds the
-      // `<wf>_events` stream into instances and applies the filter IN-MEMORY
-      // (the read-side consumer of #1497's instance read-model).  Exercises the
-      // ES workflow-view emit path on every backend compile gate.
-      view CancelledFulfillments = OrderFulfillment where cancelled == true
-      view PaidFulfillments = OrderFulfillment where paid > 0
     }
   }
   api FulfillmentApi from Fulfillment

@@ -598,17 +598,16 @@ describe("validation", () => {
       expect(orderListPages.length).toBe(1);
     });
 
-    it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {
+    it("accepts well-formed scaffold directives (modules / aggregates)", async () => {
       const { errors } = await parse(`
         system S {
           subdomain Sales {
             context Orders {
               aggregate Order { status: string }
               repository Orders for Order { }
-              view ActiveOrders = Order where status == "open"
             }
           }
-          ui WebApp with scaffold(subdomains: [Sales], aggregates: [Order], views: [ActiveOrders]) {
+          ui WebApp with scaffold(subdomains: [Sales], aggregates: [Order]) {
           }
         }
       `);
@@ -1821,95 +1820,6 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("accepts a well-formed full-form view (fields + bind)", async () => {
-    const loom = await loomFrom(`
-      context T {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-          contains lines: OrderLine[]
-          entity OrderLine { quantity: int, invariant quantity > 0 }
-        }
-        repository Orders for Order { }
-        view OrderSummary {
-          orderId: Order id
-          status: OrderStatus
-          lineCount: int
-          from Order where status == Confirmed
-          bind orderId = id, status = status, lineCount = lines.count
-        }
-      }
-    `);
-    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
-    expect(errors, JSON.stringify(errors)).toEqual([]);
-  });
-
-  it("rejects a full-form view with a field missing its bind", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order { status: string }
-        repository Orders for Order { }
-        view X {
-          a: string
-          b: string
-          from Order
-          bind a = status
-        }
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some(
-        (d) => d.severity === "error" && /field 'b' has no bind expression/.test(d.message),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
-  it("rejects a full-form view with a stray bind (no matching field)", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order { status: string }
-        repository Orders for Order { }
-        view X {
-          a: string
-          from Order
-          bind a = status, ghost = status
-        }
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" && /bind 'ghost' has no matching declared field/.test(d.message),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
-  it("rejects duplicate binds on the same field", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order { status: string }
-        repository Orders for Order { }
-        view X {
-          a: string
-          from Order
-          bind a = status, a = status
-        }
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some(
-        (d) => d.severity === "error" && /field 'a' is bound more than once/.test(d.message),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
   // -----------------------------------------------------------------------
   // Workflow validation
   // -----------------------------------------------------------------------
@@ -2191,106 +2101,6 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  // -----------------------------------------------------------------------
-  // View validation
-  // -----------------------------------------------------------------------
-
-  it("accepts a well-formed view with a queryable filter", async () => {
-    const loom = await loomFrom(`
-      context T {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-        }
-        repository Orders for Order { }
-        view ActiveOrders = Order where status == Confirmed
-      }
-    `);
-    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
-    expect(errors, JSON.stringify(errors)).toEqual([]);
-  });
-
-  it("rejects view with an unknown source aggregate", async () => {
-    const loom = await loomFrom(`
-      context T {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order { status: OrderStatus }
-        repository Orders for Order { }
-        view ActiveOrders = NoSuch where status == Confirmed
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    // Langium's cross-ref drops to "Unknown" sentinel when it can't
-    // resolve, so the validator surfaces "source 'Unknown' is not an
-    // aggregate, workflow, or projection".  Either rejection mechanism is
-    // fine for the user; the test asserts the diagnostic exists in some
-    // recognisable form.
-    expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /is not an aggregate, workflow, or projection in context/.test(d.message),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
-  it("rejects view filter using a collection lambda (not queryable)", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order {
-          customerId: string
-          status: string
-          contains lines: OrderLine[]
-          entity OrderLine { quantity: int }
-        }
-        repository Orders for Order { }
-        view BadOrders = Order where lines.any(l => l.quantity > 0)
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some((d) => d.severity === "error" && /where-clause is not queryable/.test(d.message)),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
-  it("rejects view filter referencing an unknown field", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order {
-          customerId: string
-          status: string
-        }
-        repository Orders for Order { }
-        view BadOrders = Order where this.unknownField == "x"
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some((d) => d.severity === "error" && /references unknown field/.test(d.message)),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
-  it("rejects view name colliding with an aggregate", async () => {
-    const loom = await loomFrom(`
-      context T {
-        aggregate Order { status: string }
-        repository Orders for Order { }
-        view Order = Order where status == "x"
-      }
-    `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some(
-        (d) => d.severity === "error" && /view 'Order' collides with the aggregate/.test(d.message),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
-  });
-
   it("accepts every isolation level on a transactional workflow", async () => {
     for (const level of ["readUncommitted", "readCommitted", "repeatableRead", "serializable"]) {
       const loom = await loomFrom(`
@@ -2546,23 +2356,6 @@ describe("Loom IR validation (post-lowering)", async () => {
             repository Orders for Order {
               find mine(): Order[] where customerId == currentUser.id
             }
-          }
-        }
-      }
-    `);
-    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
-    expect(errors, JSON.stringify(errors)).toEqual([]);
-  });
-
-  it("accepts currentUser inside a view where filter", async () => {
-    const loom = await loomFrom(`
-      system Acme {
-        user { id: string, customerId: string }
-        subdomain M {
-          context T {
-            aggregate Order { customerId: string, status: string }
-            repository Orders for Order { }
-            view MyOrders = Order where customerId == currentUser.customerId
           }
         }
       }

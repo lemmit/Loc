@@ -122,8 +122,6 @@ subdomain Crm {
       find open(): Opportunity[] where OpenOpportunity
     }
 
-    view OpenPipeline = Opportunity where stage != Won && stage != Lost
-
     seed default {
       Lead { name: "Jane Prospect", company: "Hooli", status: New, source: "Website", score: 65 }
       PersonContact { displayName: "John Buyer", email: "john@hooli.example",

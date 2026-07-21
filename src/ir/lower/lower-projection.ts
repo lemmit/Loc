@@ -5,7 +5,7 @@
 //
 //   • FOLDED (today's projection) — declared state fields + pure `on(e: Event)`
 //     folds over FOREIGN events, `keyed by` a correlation column.  Materialized.
-//   • QUERY-TIME (was `view`'s full form) — a LINQ/SQL-shaped comprehension:
+//   • QUERY-TIME (the query-time projection read) — a LINQ/SQL-shaped comprehension:
 //     `from <Source> [as a]` / `where <criterion>` / `join <Agg> as c on <idRef>`
 //     / `select field = …`.  Computed per read, always-current.
 //

@@ -10,9 +10,9 @@
 // on a scaffolded page reveals real `.ddd` source.  The full family is in place:
 // `scaffoldList` (per-type columns + `rowTestid` + the find-filter bar),
 // `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows + related-entity
-// cards), `scaffoldOperations`, `scaffoldWorkflowForm`, `scaffoldViewList`, the
+// cards), `scaffoldOperations`, `scaffoldWorkflowForm`, the
 // workflow-instance list/detail, and the `scaffoldHome` / `scaffoldWorkflowsIndex`
-// / `scaffoldViewsIndex` dashboards.  (The old IR-phase ⑤c expanders these once
+// dashboards.  (The old IR-phase ⑤c expanders these once
 // mirrored are deleted — there is no sentinel layer left.)
 
 import type {
@@ -24,7 +24,6 @@ import type {
   Property,
   TypeRef,
   ValueObject,
-  View,
   Workflow,
 } from "../../../language/generated/ast.js";
 import { plural, snake } from "../../../util/naming.js";
@@ -161,59 +160,10 @@ export function scaffoldWorkflowForm(wfName: string): Expression {
   ]);
 }
 
-/** `scaffoldViewList` — scaffolds a view's read page body:
- *  `Stack(Heading, QueryView(of: Views.<View>, …, Paper(Table)))`.  Columns come from the view's own output record
- *  when it declares one, else the source's shape — a workflow source's instance
- *  wire shape, or the source aggregate's fields. */
-export function scaffoldViewList(view: View): Expression {
-  const humanView = humanize(view.name);
-  const cols = columnsFromProperties(viewColumnFields(view)).map((c) => ({
-    value: callExpr("Column", [
-      { value: stringLit(humanize(c.name)) },
-      { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
-    ]),
-  }));
-  const table = callExpr("Table", [
-    ...cols,
-    { name: "rows", value: nameRefExpr("rows") },
-    { name: "striped", value: boolLit(true) },
-    { name: "highlight", value: boolLit(true) },
-    { name: "sticky", value: boolLit(true) },
-    { name: "keyExpr", value: stringLit("idx") },
-  ]);
-  return callExpr("Stack", [
-    {
-      value: callExpr("Heading", [
-        { value: stringLit(humanView) },
-        { name: "level", value: intLit(2) },
-      ]),
-    },
-    {
-      value: callExpr("QueryView", [
-        { name: "of", value: memberAccess(nameRefExpr("Views"), view.name) },
-        { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
-        {
-          name: "error",
-          value: callExpr("Alert", [
-            { value: stringLit(`Couldn't load ${humanView.toLowerCase()}`) },
-          ]),
-        },
-        { name: "empty", value: callExpr("Empty", [{ value: stringLit("No rows.") }]) },
-        { name: "data", value: lambda("rows", callExpr("Paper", [{ value: table }])) },
-      ]),
-    },
-    { name: "testid", value: stringLit(`view-${snake(view.name)}`) },
-  ]);
-}
-
 /** `scaffoldHome` — the welcome page body: one summary `Card` per non-empty
- *  section (aggregates / workflows / views).
+ *  section (aggregates / workflows).
  *  Counts come from the scaffold macro's gathered inventory. */
-export function scaffoldHome(counts: {
-  aggregates: number;
-  workflows: number;
-  views: number;
-}): Expression {
+export function scaffoldHome(counts: { aggregates: number; workflows: number }): Expression {
   const cards: Array<{ value: Expression }> = [];
   if (counts.aggregates > 0) {
     cards.push({
@@ -245,24 +195,6 @@ export function scaffoldHome(counts: {
           value: callExpr("Anchor", [
             { value: stringLit("Open workflows →") },
             { name: "to", value: stringLit("/workflows") },
-          ]),
-        },
-      ]),
-    });
-  }
-  if (counts.views > 0) {
-    cards.push({
-      value: callExpr("Card", [
-        {
-          value: callExpr("Heading", [
-            { value: stringLit(pluralizeCount(counts.views, "view", "views")) },
-            { name: "level", value: intLit(4) },
-          ]),
-        },
-        {
-          value: callExpr("Anchor", [
-            { value: stringLit("Open views →") },
-            { name: "to", value: stringLit("/views") },
           ]),
         },
       ]),
@@ -326,46 +258,6 @@ export function scaffoldWorkflowsIndex(workflows: readonly Workflow[]): Expressi
     },
     { value: callExpr("Stack", cards) },
     { name: "testid", value: stringLit("workflows-index") },
-  ]);
-}
-
-/** `scaffoldViewsIndex` — the views index page body: Breadcrumbs + Heading +
- *  one `Card` per view. */
-export function scaffoldViewsIndex(views: readonly View[]): Expression {
-  const cards = views.map((view) => {
-    const slug = snake(view.name);
-    return {
-      value: callExpr("Card", [
-        {
-          value: callExpr("Heading", [
-            { value: stringLit(humanize(view.name)) },
-            { name: "level", value: intLit(4) },
-          ]),
-        },
-        {
-          value: callExpr("Anchor", [
-            { value: stringLit("Open →") },
-            { name: "to", value: stringLit(`/views/${slug}`) },
-            { name: "testid", value: stringLit(`view-${slug}-open`) },
-          ]),
-        },
-        { name: "testid", value: stringLit(`view-card-${slug}`) },
-      ]),
-    };
-  });
-  return callExpr("Stack", [
-    { value: breadcrumbs("Views", "views") },
-    {
-      value: callExpr("Heading", [
-        { value: stringLit("Views") },
-        { name: "level", value: intLit(2) },
-      ]),
-    },
-    {
-      value: callExpr("Text", [{ value: stringLit("Saved queries.  Open one to inspect rows.") }]),
-    },
-    { value: callExpr("Stack", cards) },
-    { name: "testid", value: stringLit("views-index") },
   ]);
 }
 
@@ -772,17 +664,6 @@ function valueObjectTarget(type: TypeRef): ValueObject | undefined {
   return ref?.$type === "ValueObject" ? ref : undefined;
 }
 
-/** The property list a view's columns walk: its declared output record when
- *  present, else the source shape — a workflow source's instance wire shape or
- *  the source aggregate's fields. */
-function viewColumnFields(view: View): Property[] {
-  if (view.fields.length > 0) return view.fields;
-  const src = view.source.ref;
-  if (src?.$type === "Workflow") return workflowInstanceProperties(src);
-  if (src?.$type === "Aggregate") return propertiesOf(src.members);
-  return [];
-}
-
 /** A workflow's correlation field — the single id-shaped state property — or
  *  `undefined` when absent/ambiguous (no persisted instance, matching the
  *  enrichment gate). */
@@ -796,7 +677,7 @@ function workflowCorrelation(wf: Workflow): Property | undefined {
 /** A workflow's persisted-instance properties in wire-shape order — the
  *  correlation field first (the `token`), then the remaining state fields in
  *  declaration order.  Twin of `wireFieldsForWorkflow`; no correlation ⇒ no
- *  instance shape (empty).  Shared by the view-list and instance builders. */
+ *  instance shape (empty).  Shared by the instance builders. */
 function workflowInstanceProperties(wf: Workflow): Property[] {
   const corr = workflowCorrelation(wf);
   if (!corr) return [];
@@ -876,7 +757,7 @@ export function scalarColumnsForAggregate(agg: Aggregate): ScaffoldColumn[] {
 }
 
 /** One `ScaffoldColumn` per displayable property — dispatched by type, skipping
- *  value-objects/arrays.  Shared by the aggregate-list and view-list columns. */
+ *  value-objects/arrays.  Drives the aggregate-list columns. */
 function columnsFromProperties(props: readonly Property[]): ScaffoldColumn[] {
   const out: ScaffoldColumn[] = [];
   for (const p of props) {
@@ -898,9 +779,8 @@ function propertiesOf(members: readonly { $type: string }[]): Property[] {
  *  exactly such fields (`tenantOwned` → `tenantId`/`dataKey` internal,
  *  `softDeletable` → `isDeleted` internal), which is why a plain `with
  *  scaffold` over a `tenantOwned`/`softDeletable` aggregate would otherwise
- *  emit an uncompilable frontend.  (Views keep the wider set on purpose — an
- *  admin view response may include `internal` — so this narrowing is applied
- *  only at the crudish aggregate list/detail sites, not `viewColumnFields`.) */
+ *  emit an uncompilable frontend.  Applied at the crudish aggregate
+ *  list/detail sites. */
 function apiVisibleProperties(members: readonly { $type: string }[]): Property[] {
   return propertiesOf(members).filter((p) => p.access !== "internal" && p.access !== "secret");
 }
@@ -1073,7 +953,7 @@ export function scaffoldList(
   // M-T2.6) reads the server's page off the `Paged<T>` envelope: rows are
   // `rows.items`, the pager's page count is `rows.totalPages`, and the sortable
   // headers + pager write `pageNum`/`sortKey`/`sortDir` state that the query's
-  // `of:` args feed back for a refetch (no client slice/sort).  A filter view
+  // `of:` args feed back for a refetch (no client slice/sort).  A filter query
   // (a user `find … : T[]`, unbounded array) stays CLIENT-paged: `rows` is the
   // array, sliced/sorted in the browser.
   const makeTable = (serverPaged: boolean): Expression =>
@@ -1106,7 +986,7 @@ export function scaffoldList(
 
   // One QueryView per query expression — built per call so the filter arms
   // below never share `ExprIR`/AST nodes.  `paged` marks the server-paged `all`
-  // view (unwrap `.data.items`; the Table reads the envelope).
+  // query (unwrap `.data.items`; the Table reads the envelope).
   const makeQueryView = (ofExpr: Expression, serverPaged: boolean): Expression =>
     callExpr("QueryView", [
       { name: "of", value: ofExpr },

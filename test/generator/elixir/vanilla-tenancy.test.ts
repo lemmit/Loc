@@ -36,7 +36,6 @@ system TenancyShop {
         find byMinBalance(min: int): Account[] where this.balance >= min
       }
       retrieval RichAccounts(min: int) of Account { where: balance >= min  sort: [balance desc] }
-      view BigAccounts = Account where balance >= 1000
     }
   }
   storage pg { type: postgres }
@@ -108,13 +107,6 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
       "query = from(record in Api.Ledger.Account, where: record.balance >= ^min)",
     );
     expect(ret).toContain(`query = where(query, [record], record.tenant_id == ${PIN})`);
-  });
-
-  it("uses the run/1 current_user in the view (no `_ = current_user` discard)", async () => {
-    const view = file(await gen(), "/ledger/views/big_accounts.ex");
-    expect(view).toContain("def run(current_user \\\\ nil) do");
-    expect(view).not.toContain("_ = current_user");
-    expect(view).toContain(`(record.balance >= 1000) and (record.tenant_id == ${PIN})`);
   });
 
   it("emits the Auth plug and splices it into the :api router pipeline", async () => {

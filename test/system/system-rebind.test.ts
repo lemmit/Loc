@@ -40,11 +40,6 @@ describe("System builder — rebind a construct's reference", () => {
     expect(out).toMatch(/find byCustomer\(customerId: Customer id\)/);
   });
 
-  it("rebinds a view's source aggregate", () => {
-    const out = rebindReference(sales, "view", "ActiveOrders", "Customer");
-    expect(out).toMatch(/view ActiveOrders = Customer where\b/);
-  });
-
   it("rebinds an api's source module", () => {
     const out = rebindReference(acme, "api", "CustomerMgmtApi", "Sales");
     expect(out).toMatch(/api CustomerMgmtApi from Sales\b/);

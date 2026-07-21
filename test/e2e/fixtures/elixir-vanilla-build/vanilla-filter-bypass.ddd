@@ -31,7 +31,6 @@ system Catalog {
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where total > 0 ignoring softDeletable
       workflow Sweep {
         create(min: int) {
           let xs = Orders.findAll(BigOrders()) ignoring softDeletable

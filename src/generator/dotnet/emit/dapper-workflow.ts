@@ -91,8 +91,8 @@ function stateColumns(wf: WorkflowIR, durable: boolean, accBase = "s"): DapperCo
   return cols;
 }
 
-/** The read-model columns for a projection (public alias for view-handler
- *  reuse).  Non-key columns are NULLABLE (a fold upserts only the fields an
+/** The read-model columns for a projection.
+ *  Non-key columns are NULLABLE (a fold upserts only the fields an
  *  event carries — projectionTableShape). */
 export function dapperProjectionColumns(proj: ProjectionIR): DapperColumn[] {
   return projectionColumns(proj);

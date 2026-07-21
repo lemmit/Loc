@@ -1720,12 +1720,7 @@ deferral or an off-Ash workaround:
    deliberately *off the Ash action surface*, because the dispatcher mutates
    it imperatively (load-or-allocate / route-or-drop), not via changeset
    actions (`proposals/channels.md`; `dispatch-emit.ts`).
-3. **Workflow-instance `view` sources** — shipped on Hono/.NET/React, **deferred
-   on Phoenix** for the same reason: the saga is Ecto-not-Ash, so a workflow
-   view can't reuse the aggregate `Ash.Query.filter` path, and promoting the
-   saga to an Ash resource would drag the imperative write path onto changeset
-   actions (`proposals/workflow-instance-views.md`).
-4. **Exception-less variant returns** — Phoenix is the odd backend out; the
+3. **Exception-less variant returns** — Phoenix is the odd backend out; the
    `Plug.ErrorHandler` rescue tower that translates `Ash.Error.*` is a
    *designed-in* feature on Ash that fights the cross-backend typed-`or`-union
    dispatch (`proposals/exception-less.md`; D-VANILLA-PHOENIX-FOUNDATION §1).
@@ -1740,14 +1735,14 @@ the issue, not the framework.
 **Decision.**
 
 1. **Feature-direction policy.** New Phoenix domain capabilities that hit the
-   Ash action-model boundary — event sourcing, workflow-instance views,
+   Ash action-model boundary — event sourcing,
    exception-less returns, future saga / projection / outbox work — target
    **`foundation: vanilla`** as their Phoenix home. `foundation: ash` is
    **feature-frozen at that boundary**: it is fully supported for the CRUD/admin
    sweet spot and gets cheap parity where it falls out naturally, but we do
    **not** grow bespoke Ash workarounds (custom data layers, AshEvents/AshCommanded
    bridges, action-wrapping) to force ill-fitting patterns onto it. This makes
-   explicit the de-facto pattern already in the tree (1–4 above).
+   explicit the de-facto pattern already in the tree (1–3 above).
 2. **Vanilla is the next foundation investment.** Building the vanilla emit
    subtree (P2 of `proposals/vanilla-phoenix-foundation.md`) is now the gating
    dependency for *multiple* deferred features, so its cost is paid once instead
@@ -1768,7 +1763,7 @@ the issue, not the framework.
 
 **Affects.** No code change. Sequencing/roadmap: elevates
 `proposals/vanilla-phoenix-foundation.md` P2 to the next Phoenix work item;
-sets the policy the workflow-instance-views Phoenix follow-up and any future
+sets the policy any future
 Ash-boundary feature are evaluated against. **Depends on
 D-VANILLA-PHOENIX-FOUNDATION**; **informs D-VANILLA-DEFAULT** (its
 stabilisation signals double as the sunset-review trigger).
@@ -1835,7 +1830,7 @@ three locked choices:
    leaf seams.  Where Vue genuinely diverges from the JSX family the
    CONTRACT grew (renderInterpolation / renderAttrBinding /
    renderMatchChild) rather than the walker forking — every extension
-   byte-identical for TSX/HEEx.  The api/views/workflows module
+   byte-identical for TSX/HEEx.  The api/workflows module
    builders moved to `src/generator/_frontend/` and are shared
    verbatim (TanStack Query's call surface is identical across
    react-query and vue-query; one import-specifier knob).
@@ -1909,7 +1904,7 @@ this removal.
 
 **Superseded (2026-06-19).** The `scaffold*` page-body sentinels
 (`scaffoldList` / `scaffoldDetails` / `scaffoldNewForm` / `scaffoldOperations`
-/ `scaffoldWorkflowForm` / `scaffoldViewList` / `scaffoldInstanceList` /
+/ `scaffoldWorkflowForm` / `scaffoldInstanceList` /
 `scaffoldInstanceDetails`) — together with their phase-⑤c expander
 (`src/ir/lower/walker-primitive-expander.ts`) — have now been **removed
 entirely**: they were "scaffolds that aren't scaffolds" — opaque,
@@ -1921,12 +1916,12 @@ now fails validation with "Unknown builder type". Embedding a list/detail in a
 custom page therefore means writing the body explicitly (the example
 `web/src/examples/extern-showcase.ddd` shows the inlined list tree).
 
-**Update (2026-06-20).** The three **singleton index-page sentinels** (`Home` /
-`WorkflowsIndex` / `ViewsIndex`) — the last holdouts — are gone too. They are
-now ordinary scaffold macros (`scaffoldHome` / `scaffoldWorkflowsIndex` /
-`scaffoldViewsIndex` in `_body-builders.ts`) emitting full bodies from the
+**Update (2026-06-20).** The two **singleton index-page sentinels** (`Home` /
+`WorkflowsIndex`) — the last holdouts — are gone too. They are
+now ordinary scaffold macros (`scaffoldHome` / `scaffoldWorkflowsIndex`
+in `_body-builders.ts`) emitting full bodies from the
 gathered inventory; the `expandInlineScaffoldPrimitives` expander, the ⑤c pass,
-the `Home`/`WorkflowsIndex`/`ViewsIndex` registry primitives, and the page
+the `Home`/`WorkflowsIndex` registry primitives, and the page
 `origin`/`source` fields are all removed. `walker-primitive-expander.ts` is now
 just `buildExpandContext`. A page's kind is derived on demand from its
 role-scoped name + area via `classifyPage` (`src/ir/util/page-kind.ts`).

@@ -44,7 +44,7 @@ export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic
  *   - `loom.projection-query-time-unsupported` — the HONEST not-yet-emitted
  *     gate: any comprehension clause (`from`/`where`/`join`/`select`) is
  *     surface+IR-complete but has no backend emitter yet.  Lifted per backend
- *     as each ports the `view`-full-form emitter.  (The `order by` clause, the
+ *     as each ports the query-time projection emitter.  (The `order by` clause, the
  *     groupby / singleton-whole-table-aggregation / paged-sort refinements land
  *     WITH that emit, where they first become reachable.)
  */

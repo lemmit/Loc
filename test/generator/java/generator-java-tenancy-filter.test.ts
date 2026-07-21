@@ -9,7 +9,7 @@
 //   - the JPA-derived findAll/findById (re-declared as scoped @Query overrides,
 //     so a guessed cross-tenant id can't leak),
 //   - each custom find,
-//   - each view (views merge into repository finds on java).
+//   - each custom find.
 // The null-safe `?.` keeps it fail-closed.  The non-principal @SQLRestriction
 // path is unaffected; the entity carries no principal @SQLRestriction.
 // ---------------------------------------------------------------------------
@@ -42,10 +42,6 @@ describe("java generator — principal (tenancy) capability filter", () => {
 
   it("ANDs the principal into a custom find's own where", async () => {
     expect(await repo()).toContain(`where (e.balance >= :min) and (e.tenantId = ${SPEL})`);
-  });
-
-  it("ANDs the principal into the view-derived find", async () => {
-    expect(await repo()).toContain(`where (e.balance >= 1000) and (e.tenantId = ${SPEL})`);
   });
 
   it("does NOT put the principal filter on the entity @SQLRestriction", async () => {

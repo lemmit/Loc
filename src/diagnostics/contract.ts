@@ -116,7 +116,6 @@ export interface OutlineContext {
   aggregates: OutlineDecl[];
   valueObjects: OutlineDecl[];
   workflows: string[];
-  views: string[];
   pages: string[];
   enums: string[];
   events: string[];

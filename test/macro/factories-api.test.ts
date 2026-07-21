@@ -8,7 +8,7 @@
 //     assignStmt, assignStmtPath, not, thisRef, nullLit
 //   - UI factories: stringLit, boolLit, nameRefExpr, callExpr,
 //     routeProp, bodyProp, pageMenuMeta, page
-//   - Cross-decl helpers: aggregatesIn, workflowsIn, viewsIn,
+//   - Cross-decl helpers: aggregatesIn, workflowsIn,
 //     targetFields
 //   - Origin tracking: _withOrigin propagation + originOf walking
 //     up `$container` chain
@@ -37,7 +37,6 @@ import {
   primType,
   targetFields,
   thisRef,
-  viewsIn,
   workflowsIn,
 } from "../../src/macros/api/factories.js";
 import { _withOrigin, ORIGIN_PROP, originOf } from "../../src/macros/api/factories-internals.js";
@@ -320,7 +319,7 @@ describe("origin tracking", () => {
   });
 });
 
-describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
+describe("cross-decl helpers (aggregatesIn / workflowsIn)", () => {
   async function parseSubdomain(): Promise<Subdomain> {
     const { model } = await parseString(`
       system S {
@@ -332,7 +331,6 @@ describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
             workflow fulfil {
       create() { }
     }
-            view ActiveOrders = Order where name == "x"
           }
         }
       }
@@ -362,11 +360,6 @@ describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
   it("workflowsIn(subdomain) returns declared workflows", async () => {
     const mod = await parseSubdomain();
     expect(workflowsIn(mod).map((w) => w.name)).toEqual(["fulfil"]);
-  });
-
-  it("viewsIn(subdomain) returns declared views", async () => {
-    const mod = await parseSubdomain();
-    expect(viewsIn(mod).map((v) => v.name)).toEqual(["ActiveOrders"]);
   });
 });
 

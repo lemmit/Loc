@@ -2,13 +2,10 @@
 // Java read-model shapes (M-T6.4).  Shapes that used to CRASH java codegen with
 // an ungated `throw new Error`, now IMPLEMENTED:
 //
-//   1. VO-typed workflow-instance / projection / view read-model fields — the
+//   1. VO-typed workflow-instance / projection read-model fields — the
 //      `<Vo>Response` record is co-located in the consuming package
-//      (application.workflows / application.views) and the read-model DTO / Row
-//      references it (parity with the aggregate response path).
-//   2. cross-aggregate view `follows` — the foreign aggregate is bulk-loaded via
-//      its tenancy-scoped `findAll()` into a `Map<idValue, Agg>` and the `X id`
-//      traversal is rewritten to a map lookup.
+//      (application.workflows) and the read-model DTO / Row references it
+//      (parity with the aggregate response path).
 //
 // The entity (containment-part) variant of the read-model fields stays a
 // defensive `loom.java-*-field-unsupported` backstop, but a part type never
@@ -47,9 +44,6 @@ system S {
         cost: Money
         create(p: OrderPlaced) by p.order { cost := Money { amount: 0, currency: "USD" } }
       }
-      // Workflow-sourced view — its <View>Row also surfaces the VO field, in a
-      // different package (application.views).
-      view CostlyFulfillments = Fulfillment where cost.amount > 0
     }
   }
   api A from Sales
@@ -91,38 +85,7 @@ system S {
   deployable d { platform: ${platform}, contexts: [Orders], dataSources: [st], serves: A, port: 4000 }
 }`;
 
-// Cross-aggregate view `follows` — an output bind reaches another aggregate via
-// `X id` (`customerId.name`), producing `output.auxiliaries`.
-const viewFollowsDdd = (platform: string): string => `
-system S {
-  subdomain Sales {
-    context Orders {
-      aggregate Customer {
-        name: string
-      }
-      aggregate Order {
-        customerId: Customer id
-        status: string
-      }
-      repository Customers for Customer { }
-      repository Orders for Order { }
-      view CustomerOrders {
-        orderId: Order id
-        customerName: string
-        from Order where status == "x"
-        bind orderId = id,
-             customerName = customerId.name
-      }
-    }
-  }
-  api A from Sales
-  storage pg { type: postgres }
-  resource st { for: Orders, kind: state, use: pg }
-  deployable d { platform: ${platform}, contexts: [Orders], dataSources: [st], serves: A, port: 4000 }
-}`;
-
 const WF_ROOT = "d/src/main/java/com/loom/d/application/workflows";
-const VIEW_ROOT = "d/src/main/java/com/loom/d/application/views";
 
 describe("java read-model VO fields (M-T6.4 implementation)", () => {
   it("no longer gates a VO-typed saga instance field on java", async () => {
@@ -140,13 +103,6 @@ describe("java read-model VO fields (M-T6.4 implementation)", () => {
     expect(dto).toContain("MoneyResponse cost");
   });
 
-  it("emits MoneyResponse into application.views for the workflow-sourced view Row", async () => {
-    const files = await generateSystemFiles(workflowVoDdd("java"));
-    expect(files.get(`${VIEW_ROOT}/MoneyResponse.java`)).toBeDefined();
-    const row = files.get(`${VIEW_ROOT}/CostlyFulfillmentsRow.java`)!;
-    expect(row).toContain("MoneyResponse cost");
-  });
-
   it("no longer gates a VO-typed projection row field on java", async () => {
     expect(await codesFor(projectionVoDdd("java"))).not.toContain(
       "loom.java-projection-field-unsupported",
@@ -158,25 +114,5 @@ describe("java read-model VO fields (M-T6.4 implementation)", () => {
     expect(files.get(`${WF_ROOT}/MoneyResponse.java`)).toBeDefined();
     const dto = files.get(`${WF_ROOT}/OrderBoardResponse.java`)!;
     expect(dto).toContain("MoneyResponse cost");
-  });
-});
-
-describe("java cross-aggregate view follows (M-T6.4 implementation)", () => {
-  it("no longer gates a cross-aggregate view follows on java", async () => {
-    expect(await codesFor(viewFollowsDdd("java"))).not.toContain(
-      "loom.java-view-follows-unsupported",
-    );
-  });
-
-  it("bulk-loads the foreign aggregate and rewrites the follow to a map lookup", async () => {
-    const files = await generateSystemFiles(viewFollowsDdd("java"));
-    const svc = files.get(`${VIEW_ROOT}/OrdersViews.java`)!;
-    // Foreign aggregate loaded via its tenancy-scoped findAll() into an id map.
-    expect(svc).toContain("var customerById = customersRepository.findAll().stream()");
-    expect(svc).toContain("Collectors.toMap(__a -> __a.id().value(), __a -> __a)");
-    // The `customerId.name` follow is rewritten to a map lookup by id value.
-    expect(svc).toContain("customerById.get(a.customerId().value()).name()");
-    // The foreign repository is injected.
-    expect(svc).toContain("CustomerRepository customersRepository");
   });
 });

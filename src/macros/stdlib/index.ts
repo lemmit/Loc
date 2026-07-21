@@ -11,7 +11,6 @@ import scaffoldHandlers from "./scaffold/scaffoldHandlers.macro.js";
 import scaffoldPaged from "./scaffold/scaffoldPaged.macro.js";
 import scaffoldPagedApi from "./scaffold/scaffoldPagedApi.macro.js";
 import scaffoldSubdomain from "./scaffold/scaffoldSubdomain.macro.js";
-import scaffoldView from "./scaffold/scaffoldView.macro.js";
 import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
 import softDelete from "./softDelete/softDelete.macro.js";
 import softDeleteByDefault from "./softDelete/softDeleteByDefault.macro.js";
@@ -45,10 +44,9 @@ export function loadStdlibMacros(): void {
   registerMacro(crudish);
   // Scaffold family: leaves + composers + top-level dispatcher.
   // Composability all the way: scaffold → scaffoldSubdomain →
-  // scaffoldContext → scaffoldAggregate / Workflow / View.
+  // scaffoldContext → scaffoldAggregate / Workflow.
   registerMacro(scaffoldAggregate);
   registerMacro(scaffoldWorkflow);
-  registerMacro(scaffoldView);
   registerMacro(scaffoldContext);
   registerMacro(scaffoldSubdomain);
   registerMacro(scaffold);

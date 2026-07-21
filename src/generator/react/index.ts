@@ -18,7 +18,6 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
-import { allViews, buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import {
   allWorkflows,
   buildWorkflowsApiModule,
@@ -174,13 +173,11 @@ export function generateReactForContexts(
   }
 
   const workflows = allWorkflows(contexts);
-  const views = allViews(contexts);
   // Name-context for `classifyPage` (slice 3c): a page's kind is derived from
   // its role-scoped name + area against the served decls, not a stamped origin.
   const pageCtx: PageNameCtx = {
     aggregateNames: aggregates.map(({ agg }) => agg.name),
     workflowNames: workflows.map(({ wf }) => wf.name),
-    viewNames: views.map(({ view }) => view.name),
   };
 
   // Single codegen path: every `src/pages/...` file (scaffold-derived
@@ -219,12 +216,6 @@ export function generateReactForContexts(
   // `emitPageObjectsForUi`.
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
-  }
-
-  // View UI — same shape as workflows: only the shared views API
-  // module needs an unconditional emit.
-  if (hasAnyView(contexts)) {
-    out.set("src/api/views.ts", buildViewsApiModule(contexts));
   }
 
   out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));
@@ -306,7 +297,7 @@ export function generateReactForContexts(
   // to register their import + route in App.tsx so React Router
   // can mount them.  Pages that override a scaffolded shape at the
   // conventional name keep the conventional path and are routed
-  // by the per-aggregate / -workflow / -view loop in
+  // by the per-aggregate / -workflow loop in
   // `prepareAppShellVM`.  Pages with `layout: none` go to a
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
@@ -328,7 +319,7 @@ export function generateReactForContexts(
   const namedLayouts = layoutPrep.namedLayouts;
   const layoutImports = layoutPrep.extraImports;
 
-  // App.tsx's per-aggregate / -workflow / -view route block emits
+  // App.tsx's per-aggregate / -workflow route block emits
   // imports for scaffold-derived page files (`./pages/<plural>/list`,
   // etc.).  Those files exist only when the ui declared `scaffold:`
   // covering the target — explicit-page-only uis (no scaffold) would
@@ -348,12 +339,6 @@ export function generateReactForContexts(
       return k.kind === "workflow-form" && k.workflowName === wf.name;
     }),
   );
-  const scaffoldedViews = views.filter(({ view }) =>
-    ui.pages.some((p) => {
-      const k = kindOf(p);
-      return k.kind === "view-list" && k.viewName === view.name;
-    }),
-  );
   // Observable workflows (workflow-instance-visibility.md) — those whose
   // scaffold produced read-only instance pages.  A superset of the form set in
   // one direction (an event-triggered-only saga has instance pages but no
@@ -368,13 +353,12 @@ export function generateReactForContexts(
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).
   const hasScaffoldHome = ui.pages.some((p) => kindOf(p).kind === "home");
-  // Same for the `ViewsIndex` / `WorkflowsIndex` singleton index pages:
-  // they are only synthesised by the scaffold macro, so an explicit-page
-  // ui with a view/workflow page but no scaffold has none.  The App shell
-  // must then skip the `/views` (resp. `/workflows`) index import+route or
-  // it dangles against a missing `./pages/views/index` module (TS2307) —
-  // the per-view / per-workflow pages still mount.
-  const hasViewsIndex = ui.pages.some((p) => kindOf(p).kind === "views-index");
+  // Same for the `WorkflowsIndex` singleton index page:
+  // it is only synthesised by the scaffold macro, so an explicit-page
+  // ui with a workflow page but no scaffold has none.  The App shell
+  // must then skip the `/workflows` index import+route or
+  // it dangles against a missing `./pages/workflows/index` module (TS2307) —
+  // the per-workflow pages still mount.
   const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
 
   out.set(
@@ -382,7 +366,6 @@ export function generateReactForContexts(
     renderAppShell(
       scaffoldedAggregates.map((a) => a.agg),
       scaffoldedWorkflows.map((w) => w.wf),
-      scaffoldedViews.map((v) => v.view),
       sys.name,
       sidebarOverride,
       extraRoutes,
@@ -393,7 +376,6 @@ export function generateReactForContexts(
       layoutImports,
       observableWorkflows.map((w) => w.wf),
       hasRealtimeHandlers,
-      hasViewsIndex,
       hasWorkflowsIndex,
       authUi,
     ),
@@ -409,7 +391,7 @@ export function generateReactForContexts(
   // expression.  Mirrors the Hono backend's conditional dep gate.
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   // Shared `moneySchema` helper — single home for the precise-
-  // decimal wire shape; every api/view/workflow module references
+  // decimal wire shape; every api/workflow module references
   // it rather than redeclaring the string-to-Decimal transform per
   // field.  Surfaces parse failures as typed Zod issues.  Emitted
   // only when something in the project uses money.

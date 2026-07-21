@@ -8,7 +8,7 @@ documents its **source-equivalent**.
 The stdlib ships three families:
 
 - **Scaffolding** — `scaffold`, `scaffoldSubdomain`, `scaffoldContext`,
-  `scaffoldAggregate`, `scaffoldWorkflow`, `scaffoldView`.
+  `scaffoldAggregate`, `scaffoldWorkflow`.
   Synthesise UI pages from a domain.
 - **CRUDish** — `crudish`.  Adds a generated `create(...)` factory,
   `update(...)` operation, and `destroy {}` terminator to an aggregate.
@@ -48,14 +48,13 @@ per-element composers, which fan out to leaf macros.
 
 | Macro | Target | What it emits |
 |---|---|---|
-| `scaffold(subdomains:, contexts:, aggregates:, workflows:, views:)` | `ui` | Home / Workflows-index / Views-index singletons + invokes the composers below. |
+| `scaffold(subdomains:, contexts:, aggregates:, workflows:)` | `ui` | Home / Workflows-index singletons + invokes the composers below. |
 | `scaffoldSubdomain(of: S)` | `ui` | One `scaffoldContext` per context in subdomain `S`. |
-| `scaffoldContext(of: C)` | `ui` | One `scaffoldAggregate` / `scaffoldWorkflow` / `scaffoldView` per member of context `C`. |
+| `scaffoldContext(of: C)` | `ui` | One `scaffoldAggregate` / `scaffoldWorkflow` per member of context `C`. |
 | `scaffoldAggregate(of: Agg)` | `ui` | A List page, a New (create-form) page, and a Detail page for `Agg`. |
 | `scaffoldWorkflow(of: W)` | `ui` | A Form page for workflow `W`. |
-| `scaffoldView(of: V)` | `ui` | A List page for view `V`. |
 
-`scaffoldAggregate`, `scaffoldWorkflow`, and `scaffoldView` are the
+`scaffoldAggregate` and `scaffoldWorkflow` are the
 **leaves** — they don't invoke other macros.  Everything else is a
 composer that delegates via `invokeMacro`.
 
@@ -63,13 +62,13 @@ composer that delegates via `invokeMacro`.
 
 Unfolding one level on `with scaffold(subdomains: [Sales])` reveals one
 `with scaffoldSubdomain(of: Sales)` per supplied subdomain.  Unfolding *that*
-reveals per-context composers, then per-aggregate / workflow / view
+reveals per-context composers, then per-aggregate / workflow
 leaves.  Users can drill into a single aggregate's scaffold without
 flattening the whole UI.
 
 The leaves all delegate page-shape decisions to `pagesForAggregate`
-/ `pageForWorkflow` / `pageForView` in `src/macros/stdlib/scaffold/_pages.ts`
-— so all six macros agree on what a "list page" looks like.
+/ `pageForWorkflow` in `src/macros/stdlib/scaffold/_pages.ts`
+— so all the macros agree on what a "list page" looks like.
 
 ### Overriding a scaffolded page
 
@@ -117,7 +116,7 @@ The mechanism is scope-local override-by-name in the macro splicer
 (`mergeScopedMembers`, `src/macros/expander.ts`): a synthesised member
 whose name collides with one already present at that scope is dropped,
 and same-named `area` blocks merge recursively.  The singleton dashboard
-pages (`Home`, the workflows/views indexes) override the same way — write
+pages (`Home`, the workflows index) override the same way — write
 your own `page Home { … }` and the scaffolded one steps aside.
 
 **Override vs. unfold.**  Override-by-name *replaces* a page wholesale
@@ -306,7 +305,7 @@ defineMacro({
 
 The `macro-api` (`src/macros/api/`) exposes typed AST factory helpers
 (`operation`, `param`, `primType`, `boolLit`, `callExpr`, …) and
-inspection utilities (`writableUpdateFields`, `viewsIn`,
+inspection utilities (`writableUpdateFields`,
 `workflowsIn`, `aggregatesIn`).  Anything you can write by hand in
 `.ddd` source, a macro can produce.
 

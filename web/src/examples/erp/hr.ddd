@@ -82,8 +82,5 @@ subdomain People {
     repository Departments for Department {
       find inMyTenant(): Department[] where tenantId == currentUser.tenantId
     }
-
-    view MyActiveEmployees =
-      Employee where status == Active && tenantId == currentUser.tenantId
   }
 }

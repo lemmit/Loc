@@ -420,7 +420,7 @@ function payloadFieldToWire(f: FieldIR, payloads: readonly PayloadIR[]): string 
  *  the same fixpoint the aggregate DTO pass runs — then each is rendered.  Used
  *  wherever a read shape surfaces a VO outside an aggregate's own
  *  `application.<agg>` package (workflow-instance / projection reads →
- *  `application.workflows`, view rows → `application.views`). */
+ *  `application.workflows`, projection read rows → `application.views`). */
 export function voResponseRecords(
   voNames: Iterable<string>,
   voLookup: ReadonlyMap<string, readonly FieldIR[]>,

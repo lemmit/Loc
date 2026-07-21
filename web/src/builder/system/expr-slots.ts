@@ -4,7 +4,6 @@ import {
   isWorkflowCreateDecl,
   type Aggregate,
   type AssignOrCallStmt,
-  type BindEntry,
   type BoundedContext,
   type DerivedProp,
   type EmitStmt,
@@ -28,7 +27,6 @@ import {
   type TernaryExpr,
   type UnaryExpr,
   type ValueObject,
-  type View,
   type Workflow,
   type WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
@@ -58,8 +56,6 @@ export type ExprSlot =
   | { kind: "function"; owner: string; name: string }
   | { kind: "derived"; owner: string; name: string }
   | { kind: "invariant"; owner: string; index: number }
-  | { kind: "viewFilter"; owner: string }
-  | { kind: "viewBind"; owner: string; name: string }
   | { kind: "findFilter"; owner: string; name: string }
   | { kind: "stmtExpr"; owner: string; op: string; index: number; field?: number }
   | { kind: "wfStmt"; owner: string; index: number; field?: number };
@@ -192,13 +188,6 @@ function wfStatements(wf: Workflow): Statement[] {
   return primaryWfCreate(wf)?.body ?? [];
 }
 
-function findView(ast: Model, name: string): View | null {
-  for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === "View" && (n as View).name === name) return n as View;
-  }
-  return null;
-}
-
 function findRepo(ast: Model, name: string): Repository | null {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "Repository" && (n as Repository).name === name) return n as Repository;
@@ -207,13 +196,6 @@ function findRepo(ast: Model, name: string): Repository | null {
 }
 
 export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
-  if (slot.kind === "viewFilter") {
-    return findView(ast, slot.owner)?.filter ?? null;
-  }
-  if (slot.kind === "viewBind") {
-    const bind = findView(ast, slot.owner)?.binds.find((b: BindEntry) => b.name === slot.name);
-    return bind ? bind.expr : null;
-  }
   if (slot.kind === "findFilter") {
     const find = findRepo(ast, slot.owner)?.finds.find((f: FindDecl) => f.name === slot.name);
     return find?.filter ?? null;
@@ -295,20 +277,6 @@ export function workflowSlotOptions(node: AstNode): SlotOption[] {
   return out;
 }
 
-/** Expression slots on a view: the `where` filter (if any) and each bind. */
-export function viewSlotOptions(node: AstNode): SlotOption[] {
-  if (node.$type !== "View") return [];
-  const view = node as View;
-  const out: SlotOption[] = [];
-  if (view.filter) {
-    out.push({ value: "filter", label: `where: ${printExpr(view.filter)}`, slot: { kind: "viewFilter", owner: view.name } });
-  }
-  for (const b of view.binds) {
-    out.push({ value: `bind:${b.name}`, label: `bind ${b.name}`, slot: { kind: "viewBind", owner: view.name, name: b.name } });
-  }
-  return out;
-}
-
 /** Expression slots on a repository: each `find` decl's `where` filter. */
 export function repoSlotOptions(node: AstNode): SlotOption[] {
   if (node.$type !== "Repository") return [];
@@ -371,11 +339,7 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   let lets: string[] = [];
   let ctxNode: AstNode | null = null;
 
-  if (slot.kind === "viewFilter" || slot.kind === "viewBind") {
-    const view = findView(ast, slot.owner);
-    owner = findAgg(ast, view?.source?.$refText);
-    ctxNode = view;
-  } else if (slot.kind === "findFilter") {
+  if (slot.kind === "findFilter") {
     const repo = findRepo(ast, slot.owner);
     owner = findAgg(ast, repo?.aggregate?.$refText);
     params = repo?.finds.find((f) => f.name === slot.name)?.params ?? [];

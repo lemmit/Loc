@@ -78,9 +78,6 @@ describe("scaffold — observable workflow instance pages", () => {
       workflowNames: loom.systems.flatMap((s) =>
         s.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.workflows.map((w) => w.name))),
       ),
-      viewNames: loom.systems.flatMap((s) =>
-        s.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.views.map((v) => v.name))),
-      ),
     };
     expect(classifyPage(list, nameCtx).kind).toBe("workflow-instances-list");
     expect(classifyPage(detail, nameCtx).kind).toBe("workflow-instance-detail");

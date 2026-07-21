@@ -13,6 +13,4 @@ public interface IOrderRepository
     Task DeleteAsync(Order aggregate, CancellationToken cancellationToken = default);
     Task<Paged<Order>> All(int page, int pageSize, string sort, string dir, CancellationToken cancellationToken = default);
     Task<List<Order>> ByCustomer(string customerId, CancellationToken cancellationToken = default);
-    Task<List<Order>> ActiveOrders(CancellationToken cancellationToken = default);
-    Task<List<Order>> OrderSummary(CancellationToken cancellationToken = default);
 }

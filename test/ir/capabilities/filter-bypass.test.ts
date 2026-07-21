@@ -2,7 +2,7 @@
 // the three fail-fast IR validator gates.
 //
 // Lowering: the grammar `bypass`/`bypassAll` fields resolve onto FindIR /
-// ViewIR / repo-run WorkflowStmtIR as `bypassCaps` (resolved capability names)
+// repo-run WorkflowStmtIR as `bypassCaps` (resolved capability names)
 // / `bypassAll` (the `*` wildcard).
 //
 // Validator (validateFilterBypassSupport), over a full system with a deployable:
@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
-import type { FindIR, ViewIR } from "../../../src/ir/types/loom-ir.js";
+import type { FindIR } from "../../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 import { parseString } from "../../_helpers/parse.js";
@@ -31,16 +31,6 @@ function findInModel(
   throw new Error(`find ${name} not found`);
 }
 
-function viewInModel(
-  ir: { systems: { subdomains: { contexts: { views: ViewIR[] }[] }[] }[] },
-  name: string,
-): ViewIR {
-  for (const s of ir.systems)
-    for (const m of s.subdomains)
-      for (const c of m.contexts) for (const v of c.views) if (v.name === name) return v;
-  throw new Error(`view ${name} not found`);
-}
-
 const LOWER_SRC = `
   system S {
     capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
@@ -52,7 +42,6 @@ const LOWER_SRC = `
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where this.total > 0 ignoring softDeletable
       workflow Sweep {
         create(x: int) {
           let xs = OrderRepo.findAll(BigOrders()) ignoring softDeletable
@@ -79,12 +68,6 @@ describe("ignoring filter-bypass lowering", () => {
     const normal = findInModel(ir, "normal");
     expect(normal.bypassAll).toBeUndefined();
     expect(normal.bypassCaps).toBeUndefined();
-  });
-
-  it("resolves the view bypass clause", async () => {
-    const ir = await buildLoomModel(LOWER_SRC);
-    const v = viewInModel(ir, "ActiveOrders");
-    expect(v.bypassCaps).toEqual(["softDeletable"]);
   });
 
   it("resolves inline repo-run bypass (named + `*`) in the workflow body", async () => {
@@ -237,9 +220,11 @@ describe("ignoring filter-bypass validator gates", () => {
     expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-no-filter"]);
   });
 
-  it("fires on a view bypass, not just finds", async () => {
+  it("fires on an inline repo-run bypass of an unknown capability", async () => {
     const diags = await bypassDiags(
-      systemWith(`view ActiveOrders = Order where this.total > 0 ignoring tenantScoped`),
+      systemWith(`repository R for Order {
+        find recent(): Order[] where this.total > 0 ignoring tenantScoped
+      }`),
     );
     expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unknown-capability"]);
   });

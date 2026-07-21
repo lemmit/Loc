@@ -95,7 +95,7 @@ function queryViewOfArgs(body: ExprIR): ExprIR[] {
 
 /** Collect the `.all` / `.byId` reads a ui's pages issue — deduped by `varName`
  *  across the whole ui.  Only aggregate-rooted reads (`<handle>.<Agg>.all` /
- *  `.byId(id)`) project a provider; view / workflow-instance reads are skipped
+ *  `.byId(id)`) project a provider; projection / workflow-instance reads are skipped
  *  (a follow-up), so the caller's hoist over the same detector stays consistent
  *  (an un-emitted provider would just be an unresolved var, never silent). */
 export function collectFlutterReads(

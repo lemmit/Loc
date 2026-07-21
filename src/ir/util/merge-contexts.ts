@@ -38,7 +38,6 @@ export function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBou
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
-    views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
     domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),

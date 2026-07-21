@@ -111,7 +111,7 @@ export function renderFindActions(
   const principal = aggregateUsesPrincipalContextFilter(agg);
   // Read-side `requires` authorization gate (default-deny): a 403 returned
   // before the query when the currentUser-only predicate fails — the read-side
-  // analogue of an operation's `requires` and the twin of the view gate.
+  // analogue of an operation's `requires`.
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const webModule = `${appModule}Web`;
   const actions = httpFindsOf(ctx, agg).map((f) => {

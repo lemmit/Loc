@@ -132,7 +132,7 @@ Rules:
   type space; top-level `component` declarations resolve from every page
   body in every ui in every system (ui-scope components shadow on name
   collision).  See [`page-metamodel.md`](page-metamodel.md) §5.1.
-- Aggregates, events, repositories, workflows, and views stay inside
+- Aggregates, events, repositories, and workflows stay inside
   a context, as before.
 - Cross-context aggregate references are **not** changed by this
   feature.  Today's rule applies: `X id` only resolves to an
@@ -161,9 +161,9 @@ preserved at [`plans/multi-file-source.md`](old/plans/multi-file-source.md).
 | `deployable name { platform: angular, targets: <other-deployable>, port: N }` | An Angular SPA frontend deployable (angularMaterial design pack), same `targets:` contract as `react`. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` subdomain. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
-| `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
+| `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow expressions is typed against this shape.  See [`auth.md`](auth.md). |
 | `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every frontend (react, vue, svelte, angular) and Phoenix LiveView deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
-| `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
+| `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
 | `storage Name { type: postgres\|redis\|kafka\|s3\|rabbitmq\|restApi\|… }` | Typed physical store / service reusable across deployables.  `type:` names the built-in **sourceType** that realizes it.  v0 fully supports `postgres`; object-store / queue / external-api types (`s3`, `rabbitmq`, `restApi`) activate dev-compose sidecars + client emission; the rest parse but don't activate generator output.  Optional `config { k: v }` map for vendor parameters (region, bucket, vhost, …).  See [`resources.md`](resources.md). |
 | `resource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | The configured binding (renamed from `dataSource`) from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` / `objectStore` / `queue` / `api` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape`, `config { … }`.  Every backend deployable hosting an aggregate must list a matching `resource` under its `dataSources:` field.  See [`resources.md`](resources.md) for the full model (sourceTypes, kinds, capabilities, interfaces) and workflow-level consumption. |
 | `ui Name { … }` | Block of pages, components, menu, and api parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
@@ -323,14 +323,12 @@ Inside an aggregate or an `entity` part:
 | `derived inspect: string = Expression` | **Reserved** — declares the aggregate's developer-facing debug form.  Auto-generated when omitted (structural form, sensitive fields shown as `<redacted>`).  Backends emit it as `ToString()` / `[util.inspect.custom]` / `Inspect` so debugger watches, exceptions, and logger output get a useful representation. |
 | `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
 | `function name(params): TypeRef = Expression` | Pure helper (expression form); callable from any expression in the same aggregate. Stays SQL-inlinable like a `criterion`. |
-| `function name(params): TypeRef { … }` | Pure helper (block form); `let` + branch (ternary/`match`) + bug-regime `precondition`/`requires`, ending in `return`. Still **pure** — no mutation, no `emit`, no repository / operation / domain-service / extern call. **Not queryable** (a block-form call is rejected in a `where` / `criterion` / view filter). |
+| `function name(params): TypeRef { … }` | Pure helper (block form); `let` + branch (ternary/`match`) + bug-regime `precondition`/`requires`, ending in `return`. Still **pure** — no mutation, no `emit`, no repository / operation / domain-service / extern call. **Not queryable** (a block-form call is rejected in a `where` / `criterion` filter). |
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
 | `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (argument validation, 400). |
 | `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs(eventLog)` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
-| `view name = Aggregate where filter` | Shorthand: saved query, source's wire shape.  Exposed at `GET /views/<snake>`. |
-| `view name { fields ... from Aggregate where? bind ... }` | Full form: declared output shape with bind-expression projections.  See `views.md`. |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
 | `test "name" { … }` | Test block; lowers to vitest / xUnit (root only). |
 
@@ -451,7 +449,7 @@ system.
 ### Field access modifiers
 
 Every property gets an **access modifier** that governs how it
-participates in input DTOs, the update wire shape, and view / API
+participates in input DTOs, the update wire shape, and API
 read exposure.  The grammar form is
 
 ```
@@ -461,20 +459,20 @@ name: TypeRef [provenanced] [sensitive(...)] [immutable|managed|token|internal|s
 The default — no keyword — is `editable`.  The five keywords (and
 the implicit `editable`) form this matrix:
 
-| Modifier | Client read | In `create(...)` input | In `update(...)` input | In view payloads |
+| Modifier | Client read | In `create(...)` input | In `update(...)` input | In UI-read payloads |
 |---|---|---|---|---|
 | `editable` *(default)* | ✓ | ✓ | ✓ | ✓ |
 | `immutable` | ✓ | ✓ | ✗ (server rejects) | ✓ |
 | `managed` | ✓ | ✗ (server owns it) | ✗ | ✓ |
 | `token` | ✓ | ✗ | ✗ body — sent as an optimistic-concurrency *precondition* (like `id`/`version`) | ✓ |
-| `internal` | ✗ (never exposed via API) | ✗ | ✗ | ✓ (views may project it) |
+| `internal` | ✗ (never exposed via API) | ✗ | ✗ | ✓ (the UI may read it) |
 | `secret` | ✗ (never disclosed) | ✓ | ✓ (write-only) | ✗ |
 
 This table is not prose that can drift from behaviour — each column is a
 projection function in `src/ir/enrich/wire-projection.ts` that every backend
 shares: **Client read** = `forApiRead`, **create input** = `forCreateInput`,
 **update input** = `forUpdateInput` (with `token` fields split out by
-`forPreconditionInput`), **view payloads** = `forUiRead`. If a generated
+`forPreconditionInput`), **UI-read payloads** = `forUiRead`. If a generated
 `create({ … })` / read DTO surprises you, this is the authority.
 
 > **Common gotcha.** Passing a `managed` field into `.create({ … })` (e.g.
@@ -492,7 +490,7 @@ aggregate User {
   createdAt: datetime managed              // server stamps it
   passwordHash: string secret              // accepted on create + update; never sent back
   version: int token                       // round-tripped for optimistic concurrency
-  isDeleted: bool internal                 // hidden from clients; views may read
+  isDeleted: bool internal                 // hidden from clients; UI may read
   slug: string immutable                   // set once at creation, never updated
 }
 ```
@@ -734,7 +732,7 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 A **backtick-delimited** template with `{expr}` holes. It lowers to plain string
 concatenation of the literal segments and the `string()`-converted holes, so it is
 exactly `"…" + string(hole) + …` written more legibly — it works anywhere a `string`
-expression is valid (derived members, labels, view binds, function bodies).
+expression is valid (derived members, labels, function bodies).
 
 ```ddd
 derived label: string = `Order #{quantity} for {customerName}`
@@ -758,7 +756,7 @@ get label(): string { return "Order #" + String(this._quantity) + " for " + this
 - **Escaping** — a literal brace or backtick in the text is `\{` / `\}` / `` \` ``;
   `\n` / `\t` / `\\` behave as in a string literal.
 - **Not queryable** — an interpolated string desugars to `+`/`convert`, so (like any
-  concatenation) it cannot appear in a `find` / `view` `where:` clause.
+  concatenation) it cannot appear in a `find` `where:` clause.
 
 ### Collection operators
 

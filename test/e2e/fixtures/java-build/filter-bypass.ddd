@@ -15,7 +15,6 @@
 //   * a bare `filter this.price > 0` — NOT bypassable (no capability origin),
 //     so it STAYS in @SQLRestriction (always-on) even though softDeletable left.
 //   * `allRows` uses `ignoring *` (bypass every promoted capability).
-//   * a view `ignoring softDeletable` (rides a synthesized find — bypasses too).
 system BypassShop {
   capability softDeletable {
     isDeleted: bool
@@ -34,7 +33,6 @@ system BypassShop {
         find allRows(): Product[] ignoring *
         find normal(): Product[] where this.name != ""
       }
-      view ActiveProducts = Product where this.price > 0 ignoring softDeletable
     }
   }
   api CatalogApi from Sales

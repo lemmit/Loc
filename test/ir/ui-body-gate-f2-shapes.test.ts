@@ -1,7 +1,7 @@
 // Bucket V / F2 — adversarial coverage of the method-call receiver-resolution
 // gate (`loom.method-call-unresolved-receiver`).  Pins that every body-method-
 // call shape the React/Vue walker resolves CLEANLY (aggregate-rooted op,
-// api-param-rooted op, `Views.<v>` member-then-call, `<wf>.instances.all`
+// api-param-rooted op, `<wf>.instances.all`
 // workflow-instance hook, and a `CreateForm` `onSubmit:` shell-local) is
 // ADMITTED, while a genuinely-unresolvable receiver still REJECTS.  Guards
 // against F2 widening into a false positive that would break valid `.ddd`.
@@ -35,7 +35,6 @@ const page = (binding: string, dep: string, body: string) => `
         repository Customers for Customer { }
         repository Orders for Order { }
         workflow placeOrder { create(orderId: Order id) { let o = Orders.getById(orderId) } }
-        view ActiveOrders = Order where true
       }
     }
     api SalesApi from Sales
@@ -77,7 +76,6 @@ describe("F2 adversarial matrix", () => {
       "api-param-rooted op",
       page("api Sales: SalesApi", ", ui: WebApp { Sales: api }", "Sales.Order.create(draft)"),
     ],
-    ["Views member then call", page("", "", "Views.ActiveOrders.refetch()")],
     ["workflow instances.all then call", page("", "", "placeOrder.instances.all.refetch()")],
     [
       "CreateForm onSubmit shell-local",

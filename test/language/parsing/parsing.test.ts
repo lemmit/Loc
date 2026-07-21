@@ -180,34 +180,6 @@ describe("parsing & validation of examples", () => {
     expect(errors).toEqual([]);
   });
 
-  it("parses a view declaration (smoke)", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context T {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-        }
-        repository Orders for Order { }
-        view ActiveOrders = Order where status == Confirmed
-      }
-      `,
-      { validation: true },
-    );
-    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
-      [],
-    );
-    const ctx = (doc.parseResult.value as Model).members[0] as
-      | import("../../../src/language/generated/ast.js").BoundedContext
-      | undefined;
-    const views = ctx!.members.filter((m) => m.$type === "View");
-    expect(views).toHaveLength(1);
-  });
-
   it("parses a workflow declaration (smoke)", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
@@ -715,7 +687,6 @@ describe("page metamodel — grammar smoke tests", () => {
         }
         test e2e "smoke" against web {
           ui.workflows.placeOrder({ customerId: "x" })
-          let rows = ui.views.activeOrders()
         }
       }
     `);

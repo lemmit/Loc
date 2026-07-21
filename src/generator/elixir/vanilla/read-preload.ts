@@ -7,14 +7,14 @@
 // then either `Enum.map`s over (→ `Protocol.UndefinedError`) or hands to Jason
 // (→ `Jason.EncodeError`); either way a 500.
 //
-// The REST repository read (`repository-emit.ts`) and the shorthand `view`
-// query (`view-emit.ts`) both serialise structs through the same wireShape, so
-// both need the SAME preload list.  Deriving it here once keeps them in
-// lock-step: without it the repository read preloaded and the shorthand view did
-// not, so a `view X = Agg where …` over an aggregate with a value-object
+// The REST repository read (`repository-emit.ts`) and the query-time projection
+// read (`query-projections-emit.ts`) both serialise structs through the same
+// wireShape, so both need the SAME preload list.  Deriving it here once keeps
+// them in lock-step: without it the repository read preloaded and the projection
+// read did not, so a projection over an aggregate with a value-object
 // collection / relational containment crashed at runtime (audit
 // `generated-code-ddd-review-2026-07.md`: "a `NotLoaded` Jason crash on the
-// no-preload shorthand view").
+// no-preload projection read").
 
 import type { AggregateIR, BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";

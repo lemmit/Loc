@@ -120,8 +120,10 @@ A criterion reference is **inlined at compile time** wherever a boolean
 expression is expected. Today that means:
 
 ```ddd
-// View filter:
-view ActiveCustomers = Customer where ActiveCustomer
+// Repository find filter (bare criterion):
+repository Customers for Customer {
+  find active(): Customer[] where ActiveCustomer
+}
 
 // Repository find filter (composed + parameterised):
 repository Customers for Customer {
@@ -204,7 +206,7 @@ model. They're worth trusting; both fire early:
 | Code | Fires when | Steers you to |
 |---|---|---|
 | `loom.repository-find-deprecated` | A `repository` declares a `find` returning a collection (`: T[]`) — a bespoke list finder accreting on the repo. | Pass a criterion to `run` (`Repo.run(<Criterion>(args))`) or name a `retrieval` instead. A unique-key reconstitution find returning a single `T` / `T?` stays fine. |
-| `loom.index-suggestion` | A field is read on a query filter (`find … where`, criterion, view filter) but has no index. | Add `index: <Agg>.<field>` on the aggregate's `kind: state` resource — the column then shows up in the migration. |
+| `loom.index-suggestion` | A field is read on a query filter (`find … where`, criterion) but has no index. | Add `index: <Agg>.<field>` on the aggregate's `kind: state` resource — the column then shows up in the migration. |
 
 The intent is "pit of success": the compiler notices a performance smell in a
 DDD model — an unusual and welcome nudge — and points at the idiomatic fix
@@ -217,5 +219,4 @@ before it becomes a slow query in production.
 - [`docs/old/proposals/reified-criteria.md`](old/proposals/reified-criteria.md) —
   the Specification-reification design (shipped for retrieval criteria;
   the remaining-work register for `find` / capability-filter reification).
-- [`docs/views.md`](views.md) — views, whose `where` accepts a criterion.
 - [`docs/workflow.md`](workflow.md) — repository finds.

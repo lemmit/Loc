@@ -8,8 +8,8 @@
 // Construct ids mirror the generator's own `construct:` strings recorded
 // into `.loom/sourcemap.json` — `${ctx.name}.${agg.name}` /
 // `${ctx.name}.${agg.name}.${op.name}` (all five backends),
-// `${ctx.name}.${wf.name}` / `${ctx.name}.${view.name}` (dotnet workflow /
-// view files only; see src/generator/dotnet/{workflow,view}-emit.ts). This
+// `${ctx.name}.${wf.name}` (dotnet workflow files only; see
+// src/generator/dotnet/workflow-emit.ts). This
 // file must stay in sync with those call sites, not invent its own scheme.
 // dotnet's `${ctx.name}.${base.name}` TPC-scaffolding construct is
 // deliberately NOT recognised here — scaffolding bases have no dedicated
@@ -27,7 +27,6 @@ import {
   isOperation,
   isPage,
   isUi,
-  isView,
   isWorkflow,
 } from "../generated/ast.js";
 
@@ -62,12 +61,6 @@ export function constructIdAt(document: LangiumDocument, offset: number): string
   if (wf) {
     const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
     if (ctx) return [`${ctx.name}.${wf.name}`];
-  }
-
-  const view = AstUtils.getContainerOfType(node, isView);
-  if (view) {
-    const ctx = AstUtils.getContainerOfType(view, isBoundedContext);
-    if (ctx) return [`${ctx.name}.${view.name}`];
   }
 
   // Pages/components (M8 frontend bracket): recorded as

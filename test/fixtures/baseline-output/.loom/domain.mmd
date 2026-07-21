@@ -59,12 +59,6 @@ classDiagram
     +all() Order paged
     +byCustomer(customerId) Order[]
   }
-  class ActiveOrders {
-    <<view>>
-  }
-  class OrderSummary {
-    <<view>>
-  }
   %% CustomerMgmt / Customers
   class Customer {
     <<aggregate>>
@@ -90,6 +84,4 @@ classDiagram
   Order ..> OrderConfirmed : emits
   OrderLine ..> Product : ref
   Orders ..> Order : manages
-  ActiveOrders ..> Order : reads
-  OrderSummary ..> Order : reads
   Customers ..> Customer : manages

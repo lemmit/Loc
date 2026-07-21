@@ -27,7 +27,6 @@ system PythonTenancy {
       repository Accounts for Account {
         find byMinBalance(min: int): Account[] where this.balance >= min
       }
-      view BigAccounts = Account where balance >= 1000
     }
   }
 

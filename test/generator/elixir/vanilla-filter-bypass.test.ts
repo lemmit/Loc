@@ -28,7 +28,6 @@ system Catalog {
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where total > 0 ignoring softDeletable
       workflow Sweep {
         create(min: int) {
           let xs = Orders.findAll(BigOrders()) ignoring softDeletable
@@ -102,12 +101,6 @@ describe("vanilla ignoring filter-bypass — predicate omission", () => {
     expect(defBody(repo, "find_by_id")).toContain(
       "where: record.id == ^id and (record.is_deleted == false)",
     );
-  });
-
-  it("the view's `ignoring` drops the conjunct", async () => {
-    const view = file(await gen(), "/shop/views/active_orders.ex");
-    expect(view).toContain("from(record in Api.Shop.Order, where: record.total > 0)");
-    expect(view).not.toContain("is_deleted");
   });
 
   it("the retrieval gates each capability filter as a skippable `where` stage", async () => {

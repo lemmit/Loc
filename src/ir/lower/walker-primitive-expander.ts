@@ -1,11 +1,11 @@
-// System expand-context builder — the per-UI index of aggregates / workflows /
-// views, derived once from the lowered system shape.
+// System expand-context builder — the per-UI index of aggregates / workflows,
+// derived once from the lowered system shape.
 //
 // Consumed in `lower.ts` by the scaffold post-passes (`classifyPage`'s
 // name-context, the non-constructible drops, the emit-path side effects).  The
-// scaffold pages — including the Home / Workflows / Views dashboards — carry
-// their full body tree directly from the macro's `_body-builders.ts`
-// scaffolders, so there is no inline sentinel left to expand here.
+// scaffold pages — including the Home / Workflows dashboards — carry their full
+// body tree directly from the macro's `_body-builders.ts` scaffolders, so there
+// is no inline sentinel left to expand here.
 
 import type { AggregateIR, BoundedContextIR, SystemIR, UiIR } from "../types/loom-ir.js";
 
@@ -19,8 +19,6 @@ export interface WalkerExpandContext {
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workflow by name. */
   workflowsByName: ReadonlyMap<string, import("../types/loom-ir.js").WorkflowIR>;
-  /** View by name. */
-  viewsByName: ReadonlyMap<string, import("../types/loom-ir.js").ViewIR>;
 }
 
 /** Build the expand context from the system + a specific UI.  Used by
@@ -29,7 +27,6 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
   const aggregatesByName = new Map<string, AggregateIR>();
   const bcByAggregate = new Map<string, BoundedContextIR>();
   const workflowsByName = new Map<string, import("../types/loom-ir.js").WorkflowIR>();
-  const viewsByName = new Map<string, import("../types/loom-ir.js").ViewIR>();
   for (const m of sys.subdomains) {
     for (const ctx of m.contexts) {
       for (const agg of ctx.aggregates) {
@@ -39,9 +36,6 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
       for (const wf of ctx.workflows) {
         workflowsByName.set(wf.name, wf);
       }
-      for (const v of ctx.views) {
-        viewsByName.set(v.name, v);
-      }
     }
   }
   return {
@@ -49,6 +43,5 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
     aggregatesByName,
     bcByAggregate,
     workflowsByName,
-    viewsByName,
   };
 }

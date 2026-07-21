@@ -122,8 +122,6 @@ subdomain Procurement {
       find byPurchaseOrder(poId: PurchaseOrder id): GoodsReceipt[] where this.poId == poId
     }
 
-    view PendingPurchaseOrders = PurchaseOrder where status == Draft
-
     // Transactional receipt: create the receipt row AND flip the PO to
     // Received atomically — if `markReceived` throws, the receipt rolls
     // back too.

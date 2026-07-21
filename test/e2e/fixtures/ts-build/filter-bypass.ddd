@@ -2,7 +2,7 @@
 // bypass.md §11) on node/Hono.  node honors a bypass by OMITTING the bypassed
 // capability's predicate from the Drizzle `and(...)` chain; `ignoring *` drops
 // every capability predicate.  This pins that the bypass read sites a
-// `generate ts` project emits — repository finds + a view read — type-check
+// `generate ts` project emits — repository finds — type-check
 // under strict tsc.  `softDeletable` is the built-in prelude capability (adds
 // `isDeleted`/`deletedAt` + a `!this.isDeleted` read filter).
 context Shop {
@@ -15,6 +15,4 @@ context Shop {
     find allRows(): Order[] ignoring *
     find normal(): Order[] where this.total > 0
   }
-
-  view ActiveOrders = Order where this.total > 0 ignoring softDeletable
 }

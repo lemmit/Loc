@@ -451,7 +451,7 @@ export function buildRoutesFile(
   // AND a nested part must precede the sibling that references it
   // (`Shipment.labels: z.array(LabelResponse)`), hence children-first.
   // Aggregate-level + part-level response schemas are exported so
-  // the per-context views router (`http/views.ts`) can reuse them
+  // the projection query routes can reuse them
   // verbatim without duplicating field-by-field declarations.
   for (const part of partsChildrenFirst(agg.parts)) {
     lines.push(...emitResponseDtoSchema(part, ctx, /*isAgg*/ false));

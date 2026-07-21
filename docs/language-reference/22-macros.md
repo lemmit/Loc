@@ -191,14 +191,13 @@ The scaffold family synthesises UI pages from a domain. It is composable end to 
 
 | Macro | Target | Emits |
 |---|---|---|
-| `scaffold(subdomains:, contexts:, aggregates:, workflows:, views:)` | `ui` | Home / Workflows-index / Views-index singletons + invokes the composers below |
+| `scaffold(subdomains:, contexts:, aggregates:, workflows:)` | `ui` | Home / Workflows-index singletons + invokes the composers below |
 | `scaffoldSubdomain(of: S)` | `ui` | one `scaffoldContext` per context in subdomain `S` |
-| `scaffoldContext(of: C)` | `ui` | one `scaffoldAggregate`/`scaffoldWorkflow`/`scaffoldView` per member of `C` |
+| `scaffoldContext(of: C)` | `ui` | one `scaffoldAggregate`/`scaffoldWorkflow` per member of `C` |
 | `scaffoldAggregate(of: Agg)` | `ui` | a List, New (create-form), and Detail page for `Agg` (one `area` block) |
 | `scaffoldWorkflow(of: W)` | `ui` | a Form page for workflow `W` |
-| `scaffoldView(of: V)` | `ui` | a List page for view `V` |
 
-`scaffoldAggregate` / `scaffoldWorkflow` / `scaffoldView` are the **leaves**; everything above is a composer that delegates via `invokeMacro`. An `abstract aggregate` base is skipped by the leaf (it owns no table/routes — only its concrete `extends` subtypes get pages).
+`scaffoldAggregate` / `scaffoldWorkflow` are the **leaves**; everything above is a composer that delegates via `invokeMacro`. An `abstract aggregate` base is skipped by the leaf (it owns no table/routes — only its concrete `extends` subtypes get pages).
 
 Unfold is **one level only** — `scaffold(subdomains: [Sales])` does not flatten to pages; it reveals the next composer down plus the singleton pages emitted directly. Drill into a single `scaffoldAggregate` to materialise just its three pages as source while leaving the rest of the UI under the macro.
 

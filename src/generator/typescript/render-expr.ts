@@ -29,7 +29,7 @@ import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 // the TS leaf table (`TS_TARGET`) plus the thin `renderTsExpr` entry point.
 //
 // Render context lets callers swap the implicit `this` for an external
-// row variable (e.g. `r` for view bind projections).  When the context's
+// row variable (e.g. `r` for projection reads).  When the context's
 // `thisName` is something other than `"this"`, this-rooted refs render
 // as `${thisName}.<getter>` (public getters, no underscore) — the only
 // access available outside the aggregate class.  When `thisName` is
@@ -111,7 +111,7 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   },
   match(arms, otherwise) {
     // Lower a match expression to a chained ternary so it can appear inside
-    // `derived` bodies, view binds, and other TS-rendered expression
+    // `derived` bodies and other TS-rendered expression
     // positions.  Right-fold: each arm wraps the previous tail.
     let out = otherwise ?? "undefined";
     for (const arm of [...arms].reverse()) {
@@ -239,7 +239,7 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       return e.name;
     case "this-prop":
       // Inside the aggregate class: read the private backing field.
-      // Outside (view bind projections, e.g. row `r`): use the public
+      // Outside (projection reads, e.g. row `r`): use the public
       // getter, which is just the bare name on the runtime instance.
       return fromOutside ? `${ctx.thisName}.${e.name}` : `this._${e.name}`;
     case "this-vo-prop":
@@ -257,7 +257,7 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       // Magic identifier for the system's user-claim shape — matches
       // the parameter / local that each per-request emitter
       // materialises (operation methods get a `currentUser: User`
-      // param, workflow + view-route handlers introduce a local).  A
+      // param, workflow handlers introduce a local).  A
       // caller with no such binding (the persist-time stamp helper)
       // overrides it via `principalExpr`.
       return ctx.principalExpr ?? "currentUser";

@@ -5,9 +5,9 @@
 // `contextFilterPredicate`.  A read carrying `ignoring <Cap>` / `ignoring *`
 // simply OMITS the named capability conjunct for that read only — no runtime
 // machinery, the bypass is baked in at codegen.  This fixture is the decisive
-// check that the resulting repository (a find that drops a conjunct, a view
-// that drops a conjunct, an `ignoring *` find that drops every cap predicate,
-// and a bare always-applied `filter`) stays ruff- + mypy --strict-clean.
+// check that the resulting repository (a find that drops a conjunct, an
+// `ignoring *` find that drops every cap predicate, and a bare always-applied
+// `filter`) stays ruff- + mypy --strict-clean.
 //
 // Triage shapes exercised on `Product`:
 //   * softDeletable — a capability filter (`not is_deleted`) BYPASSED by
@@ -34,7 +34,6 @@ system BypassShop {
         find allRows(): Product[] ignoring *
         find normal(): Product[] where this.name != ""
       }
-      view ActiveProducts = Product where this.price > 0 ignoring softDeletable
     }
   }
   api CatalogApi from Sales

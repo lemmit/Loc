@@ -130,7 +130,7 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
     c.params.length > 0 ? "    }" : null,
     c.params.length > 0 ? "" : null,
     `    public override bool IsSatisfiedBy(${candidate} ${CANDIDATE}) => ${body};`,
-    // Query face — for `find`/`view`/`filter`/`retrieval` consumption (a
+    // Query face — for `find`/`filter`/`retrieval` consumption (a
     // later slice). Selectability decides: only queryable criteria carry it.
     queryable ? "" : null,
     queryable

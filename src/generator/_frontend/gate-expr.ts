@@ -1,14 +1,14 @@
 // Frontend authorization-gate expression renderer (D-AUTH-OIDC, UI gate).
 //
-// A `page { requires <expr> }` (and, later, an operation/view UI gate) carries a
+// A `page { requires <expr> }` (and, later, an operation UI gate) carries a
 // currentUser-only boolean `ExprIR` — the same gate the backend evaluates to a
 // 403.  The generated frontend evaluates it client-side against the verified
 // session claims (`useSession().user`) so a forbidden page renders a `<Forbidden/>`
 // fallback instead of its body, the read-side mirror of the backend gate.
 //
 // This is a deliberately small, closed renderer — NOT the full backend
-// `render-expr`.  The gate validator (`loom.view-gate-not-current-user` and the
-// operation `requires` rules) restricts gates to `currentUser` + constants +
+// `render-expr`.  The gate validator (the page/operation `requires` rules)
+// restricts gates to `currentUser` + constants +
 // boolean/comparison operators, so only that subset is rendered here; anything
 // outside it throws (a gate the UI can't evaluate is a generation-time error, not
 // silent degradation).  The output is plain JS boolean syntax, identical across

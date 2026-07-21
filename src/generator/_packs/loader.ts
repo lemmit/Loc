@@ -206,7 +206,7 @@ export function registerHelpersOnce(): void {
     return new Handlebars.SafeString(arr.join(s));
   });
   // String concatenation — enables dynamic partial dispatch via
-  // `{{> (concat "cell-" kind)}}` in page-list/view-table/part-table
+  // `{{> (concat "cell-" kind)}}` in page-list/part-table
   // templates.  Last arg is Handlebars' options object — drop it.
   Handlebars.registerHelper("concat", function (this: unknown, ...args: unknown[]) {
     return args.slice(0, -1).map(String).join("");

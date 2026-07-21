@@ -91,7 +91,7 @@ export interface Env {
   >;
   /** System-wide user-claim shape — the lowered `user { ... }` block.
    *  Threaded down by the lowering structure layer so every
-   *  expression context (operation / workflow / view / test) can
+   *  expression context (operation / workflow / test) can
    *  resolve the magic `currentUser` identifier.  Undefined for
    *  systems / loose contexts that don't declare a user block. */
   user?: UserIR;

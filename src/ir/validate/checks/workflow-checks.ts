@@ -1,12 +1,11 @@
 // -------------------------------------------------------------------------
-// Workflow + view checks — correlation typing, workflow-body legality,
-// resource-op expressions, and view query semantics.
+// Workflow checks — correlation typing, workflow-body legality, and
+// resource-op expressions.
 // -------------------------------------------------------------------------
 
 import { createInputFields, omittableCreateInputs } from "../../enrich/wire-projection.js";
 import { verbsForKind } from "../../resource-verbs.js";
 import type {
-  AggregateIR,
   BoundedContextIR,
   EventIR,
   ExprIR,
@@ -17,7 +16,6 @@ import type {
 import { findUsesCurrentUser } from "../../types/loom-ir.js";
 import { walkExprDeep, walkStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
-import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } from "./shared.js";
 
 // ---------------------------------------------------------------------------
 // Workflow validation.
@@ -50,17 +48,6 @@ import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } fro
 // A workflow's event consumers — `on(e: Event)` reactors and event-triggered
 // `create(e: Event) by` starters — as `{ event, label }` pairs.  Shared by the
 // channel-routing checks (`reactor-event-uncarried`, `reactor-channel-ambiguous`).
-/** Lint message for a view whose source is event-sourced — see the two
- *  `diags.push` sites in the view loop (kept inline there so the diagnostic-code
- *  completeness scan sees the literal `code:`). */
-function eventSourcedRefoldMessage(
-  viewName: string,
-  sourceName: string,
-  sourceKind: "workflow" | "aggregate",
-): string {
-  return `view '${viewName}': source '${sourceName}' is an event-sourced ${sourceKind}, so this view re-folds its event stream in memory on every request (O(all events), no index). Consider a \`projection\` folded from the same events and a view over that instead.`;
-}
-
 function eventConsumersOf(wf: WorkflowIR): { event: string; label: string }[] {
   return [
     ...(wf.subscriptions ?? []).map((s) => ({ event: s.event, label: `on(${s.event})` })),
@@ -941,233 +928,5 @@ function checkResourceOpExpr(
       message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
       source: `${ctx.name}/${wf.name}`,
     });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// View validation.
-//
-// A `view <Name> = <Source> where <Filter>` is a saved, strongly-typed
-// query.  This validator enforces:
-//
-//   1. The view name is unique within the context (no clash with
-//      aggregates / value objects / enums / events / repositories /
-//      workflows or other views).
-//   2. The source aggregate exists in the same context.  (The Langium
-//      cross-ref already gates this; the IR check guards against
-//      downstream IR construction bugs.)
-//   3. The where-clause is queryable (same restrictions as repository
-//      find filters): no collection ops, no lambdas, no chained
-//      traversal beyond `field` / `field.subfield`.  Reuses
-//      `firstNonQueryableNode`.
-//   4. Every column reference in the filter resolves to a real field
-//      on the source aggregate.  Reuses `firstUnknownColumnRef`.
-//   5. No comparison sets one column against another (Drizzle's
-//      operators model column-vs-value, not column-vs-column).
-//      Reuses `firstColumnVsColumn`.
-//
-// All four reuses come from the v6/v8 work — views inherit the
-// existing query semantics rather than introducing new ones.
-// ---------------------------------------------------------------------------
-
-export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
-  // Same name-set the workflow validator builds.
-  const namesUsed = new Map<string, string>();
-  for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
-  for (const v of ctx.valueObjects) namesUsed.set(v.name, "value object");
-  for (const e of ctx.enums) namesUsed.set(e.name, "enum");
-  for (const ev of ctx.events) namesUsed.set(ev.name, "event");
-  for (const r of ctx.repositories) namesUsed.set(r.name, "repository");
-  for (const wf of ctx.workflows) namesUsed.set(wf.name, "workflow");
-  const seen = new Set<string>();
-  for (const view of ctx.views) {
-    if (seen.has(view.name)) {
-      diags.push({
-        severity: "error",
-        code: "loom.duplicate-view",
-        message: `context '${ctx.name}': view '${view.name}' is declared more than once.`,
-        source: `${ctx.name}/${view.name}`,
-      });
-    } else {
-      seen.add(view.name);
-    }
-    const clash = namesUsed.get(view.name);
-    if (clash) {
-      diags.push({
-        severity: "error",
-        code: "loom.view-name-collision",
-        message: `context '${ctx.name}': view '${view.name}' collides with the ${clash} of the same name.`,
-        source: `${ctx.name}/${view.name}`,
-      });
-    }
-    // Resolve the source — an aggregate, a workflow's instance state
-    // (workflow-instance-views.md), or a projection's `<Proj>Row` read model
-    // (projection.md v1.1).  `columnSource` is the member set the filter's
-    // `this.<col>` refs resolve against (an aggregate's fields / containments /
-    // derived, or a workflow's / projection's `stateFields`).  Full-form
-    // bind-follow is aggregate-only for a workflow source (rejected below) but
-    // PERMITTED for a projection source — reading projection + repos at query
-    // time is legal because a view is a query, not a replayable fold.
-    let columnSource: Pick<AggregateIR, "fields" | "contains" | "derived">;
-    if (view.source.kind === "projection") {
-      const proj = ctx.projections.find((p) => p.name === view.source.name);
-      if (!proj) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-unknown-source",
-          message: `view '${view.name}': source '${view.source.name}' is not an aggregate, workflow, or projection in context '${ctx.name}'.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      // A projection's read-model schema is its `stateFields`; full-form
-      // bind-follow (`view.output`) is intentionally allowed here (no
-      // `fullform-unsupported` gate, unlike the workflow arm).
-      columnSource = { fields: proj.stateFields, contains: [], derived: [] };
-    } else if (view.source.kind === "workflow") {
-      const wf = ctx.workflows.find((w) => w.name === view.source.name);
-      if (!wf) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-unknown-source",
-          message: `view '${view.name}': source '${view.source.name}' is not an aggregate or workflow in context '${ctx.name}'.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      // A workflow source needs an observable instance read model: a single
-      // id-shaped correlation field.  Both state-table sagas and event-sourced
-      // workflows qualify — the ES path reads the fold-projected instance read
-      // model (group-fold `<wf>_events`) instead of a `<Wf>State` table.
-      if (!wf.correlationField) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-workflow-not-observable",
-          message: `view '${view.name}': workflow '${wf.name}' has no observable instance state (it needs a single id-shaped correlation/state field), so it can't be a view source.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      // Full-form (bind-projected) views over a workflow are deferred (v1
-      // shorthand only) — see workflow-instance-views.md §Deferred.
-      if (view.output) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-workflow-fullform-unsupported",
-          message: `view '${view.name}': full-form (bind-projected) views over a workflow source are not supported yet; use the shorthand form (\`view ${view.name} = ${wf.name} where ...\`).`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      // An event-sourced workflow has no state table, so a view over it
-      // re-folds the whole `<wf>_events` stream in memory on every request and
-      // filters in application code — functionally a projection recomputed per
-      // call (O(all events), no index, no SQL pushdown).  Nudge the author
-      // toward a projection; a WARNING, not an error — the ES-workflow-view path
-      // ships and stays valid.
-      if (wf.eventSourced) {
-        diags.push({
-          severity: "warning",
-          code: "loom.view-source-eventsourced-refold",
-          message: eventSourcedRefoldMessage(view.name, wf.name, "workflow"),
-          source: `${ctx.name}/${view.name}`,
-        });
-      }
-      columnSource = { fields: wf.stateFields ?? [], contains: [], derived: [] };
-    } else {
-      const agg = ctx.aggregates.find((a) => a.name === view.source.name);
-      if (!agg) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-unknown-source",
-          message: `view '${view.name}': source '${view.source.name}' is not an aggregate, workflow, or projection in context '${ctx.name}'.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      // Same refold cost for an event-sourced aggregate (`persistedAs(eventLog)`):
-      // the read re-folds the event stream through the repository's findAll on
-      // every query.  A projection folds it once at write time into an indexed
-      // row table a projection-view reads with a SQL-pushed filter.  Warning only.
-      if (agg.persistedAs === "eventLog") {
-        diags.push({
-          severity: "warning",
-          code: "loom.view-source-eventsourced-refold",
-          message: eventSourcedRefoldMessage(view.name, agg.name, "aggregate"),
-          source: `${ctx.name}/${view.name}`,
-        });
-      }
-      columnSource = agg;
-    }
-    if (view.filter) {
-      const offending = firstNonQueryableNode(view.filter);
-      if (offending) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-where-not-queryable",
-          message:
-            `view '${view.name}': where-clause is not queryable (${offending}). ` +
-            `Allowed: comparisons, &&/||/!, parens, ` +
-            `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-        continue;
-      }
-      const unknown = firstUnknownColumnRef(view.filter, columnSource, ctx);
-      if (unknown) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-where-unknown-field",
-          message: `view '${view.name}': where-clause references unknown field ${unknown} on source '${view.source.name}'.`,
-          source: `${ctx.name}/${view.name}`,
-        });
-      }
-      const bothCols = firstColumnVsColumn(view.filter);
-      if (bothCols) {
-        diags.push({
-          severity: "error",
-          code: "loom.view-where-column-column",
-          message:
-            `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
-            `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
-          source: `${ctx.name}/${view.name}`,
-        });
-      }
-    }
-    // Full-form view: bind exhaustiveness + per-bind name validity.
-    if (view.output) {
-      const fieldNames = new Set(view.output.fields.map((f) => f.name));
-      const boundNames = new Set(view.output.binds.map((b) => b.name));
-      for (const f of view.output.fields) {
-        if (!boundNames.has(f.name)) {
-          diags.push({
-            severity: "error",
-            code: "loom.view-field-unbound",
-            message: `view '${view.name}': field '${f.name}' has no bind expression.  Add 'bind ${f.name} = ...' to the body.`,
-            source: `${ctx.name}/${view.name}`,
-          });
-        }
-      }
-      const seenBinds = new Set<string>();
-      for (const b of view.output.binds) {
-        if (!fieldNames.has(b.name)) {
-          diags.push({
-            severity: "error",
-            code: "loom.view-bind-no-field",
-            message: `view '${view.name}': bind '${b.name}' has no matching declared field.  Either declare 'name: Type' at the top of the view or remove the bind.`,
-            source: `${ctx.name}/${view.name}`,
-          });
-        }
-        if (seenBinds.has(b.name)) {
-          diags.push({
-            severity: "error",
-            code: "loom.view-bind-duplicate",
-            message: `view '${view.name}': field '${b.name}' is bound more than once.`,
-            source: `${ctx.name}/${view.name}`,
-          });
-        }
-        seenBinds.add(b.name);
-      }
-    }
   }
 }

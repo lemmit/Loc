@@ -4,7 +4,7 @@
 // `.IgnoreQueryFilters(["<Name>"])` (or the parameterless overload for `*`) on
 // the `_db.<Set>` IQueryable before `.Where(...)`.
 //
-// Covered: repository find, view (via mergeViewsAsFinds), and inline
+// Covered: repository find and inline
 // `Repo.findAll(...)` in a workflow body.  The EF filter name must match the
 // `HasQueryFilter("<Name>", ...)` the entity configuration emits.
 
@@ -23,7 +23,6 @@ const SRC = `
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where this.total > 0 ignoring softDeletable
       workflow Sweep {
         create(x: int) {
           let xs = OrderRepo.findAll(BigOrders()) ignoring softDeletable
@@ -69,14 +68,6 @@ describe("dotnet ignoring filter-bypass emission", () => {
   it("find `ignoring *` → parameterless IgnoreQueryFilters()", async () => {
     const repo = get(await files(), "Infrastructure/Repositories/OrderRepository.cs");
     expect(repo).toContain("_db.Orders.IgnoreQueryFilters().ToListAsync");
-  });
-
-  it("the view bypass rides the synthesized find", async () => {
-    const repo = get(await files(), "Infrastructure/Repositories/OrderRepository.cs");
-    expect(repo).toContain("public async Task<List<Order>> ActiveOrders(");
-    // recent + the view both resolve to the same named filter → two installs.
-    const named = [...repo.matchAll(/IgnoreQueryFilters\(\["IsDeletedFilter"\]\)/g)];
-    expect(named.length).toBe(2);
   });
 
   it("inline `Repo.findAll(...) ignoring <Cap>` passes a DOMAIN FilterBypass (capability names), not EF filter names (audit S7)", async () => {

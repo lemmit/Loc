@@ -24,7 +24,6 @@ const KIND_TO_TYPE: Record<NodeKind, string> = {
   valueobject: "ValueObject",
   event: "EventDecl",
   repository: "Repository",
-  view: "View",
   workflow: "Workflow",
   deployable: "Deployable",
   api: "Api",
