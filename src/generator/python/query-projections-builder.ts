@@ -3,11 +3,13 @@ import type {
   ExprIR,
   ProjectionIR,
   WireField,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { isQueryTimeProjection, queryProjectionUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
+import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import { renderPyExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -34,22 +36,55 @@ export function buildPyQueryProjectionsFile(
 
   const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
 
+  // A `from <Workflow>` projection reads the workflow's persisted saga-state
+  // table (`<Wf>Row`) directly — workflows have no repository — applying the
+  // `where` in SQL and projecting instance fields via `select`.  Lower each
+  // one's filter once (reused by the route + the SQLAlchemy-op import scan).
+  const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const isWorkflowSourced = (p: ProjectionIR): boolean =>
+    p.query?.sourceKind === "workflow" && !!p.query.source && wfByName.has(p.query.source);
+  const wfLowered = new Map<string, PyPredicate | null>();
+  for (const p of projections) {
+    if (!isWorkflowSourced(p)) continue;
+    const wf = wfByName.get(p.query!.source!)!;
+    wfLowered.set(
+      p.name,
+      p.query!.filter ? lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf) : null,
+    );
+  }
+
   const models = projections.map((p) => projectionRowModels(p, ctx)).join("");
-  const routeBlocks = projections.map((p) => projectionRoute(p, dispatcherExpr));
+  const routeBlocks = projections.map((p) =>
+    isWorkflowSourced(p)
+      ? workflowProjectionRoute(p, wfByName.get(p.query!.source!)!, wfLowered.get(p.name) ?? null)
+      : projectionRoute(p, dispatcherExpr),
+  );
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routeBlocks.join("\n\n\n")}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
 
-  // Repos touched: the query source + every join follow target.
+  // Repos touched: the query source + every join follow target.  A WORKFLOW
+  // source reads its saga-state table directly (no repository), so it never
+  // contributes a repository import.
   const repoAggs = [
     ...new Set(
       projections.flatMap((p) => [
-        ...(p.query?.source ? [p.query.source] : []),
+        ...(p.query?.source && !isWorkflowSourced(p) ? [p.query.source] : []),
         ...(p.query?.auxiliaries ?? []).map((a) => a.aggName),
       ]),
     ),
   ].sort();
+  // Saga-state row classes read from `app.db.schema` (one per workflow source),
+  // plus the SQLAlchemy helpers a workflow-projection route calls: `select` for
+  // the saga read + any `and_`/`or_`/`not_`/`func` its lowered filter needs.
+  const wfProjections = projections.filter(isWorkflowSourced);
+  const schemaRows = [...new Set(wfProjections.map((p) => `${p.query!.source!}Row`))]
+    .filter(refersTo)
+    .sort();
+  const saOps = new Set<string>(wfProjections.length > 0 ? ["select"] : []);
+  for (const pred of wfLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
+  const saNames = [...saOps].filter(refersTo).sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
@@ -59,6 +94,7 @@ export function buildPyQueryProjectionsFile(
     "",
     `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null].filter(Boolean).join(", ")}`,
     "from pydantic import BaseModel, RootModel",
+    saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
@@ -68,6 +104,7 @@ export function buildPyQueryProjectionsFile(
     refersTo("User") ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
+    schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("ForbiddenError") ? "from app.domain.errors import ForbiddenError" : null,
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     !hasDispatch && refersTo("NoopDomainEventDispatcher")
@@ -165,6 +202,49 @@ function projectionRoute(proj: ProjectionIR, dispatcherExpr: string): string {
   out.push("        }");
   out.push("        for r in rows");
   out.push("    ]");
+  return out.join("\n");
+}
+
+/** `GET /projections/<name>` for a `from <Workflow>` projection: read the
+ *  workflow's persisted saga-state table (`<Wf>Row`) directly — workflows have
+ *  no repository — with the `where` pushed to SQL, then project each row's
+ *  instance fields through `select` (the candidate alias `f` → the row var `r`).
+ *  A validated workflow source carries no `join`/`ignoring`, so there is no
+ *  bulk-load / alias-map step. */
+function workflowProjectionRoute(
+  proj: ProjectionIR,
+  wf: WorkflowIR,
+  pred: PyPredicate | null,
+): string {
+  const fn = snake(proj.name);
+  const row = `${wf.name}Row`;
+  const where = pred ? `.where(${pred.expr})` : "";
+  // A `requires` gate (default-deny) — or a currentUser-scoped select — binds the
+  // request principal off the request scope; a failing gate raises ForbiddenError
+  // (→ 403) BEFORE the saga read runs.
+  const gate = proj.query!.requires;
+  const needsUser = queryProjectionUsesCurrentUser(proj) || !!gate;
+  const sig = [...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(", ");
+  const out: string[] = [
+    `@router.get("/${fn}", response_model=${proj.name}Response, operation_id="projection${proj.name}")`,
+    `async def ${fn}_projection(${sig}) -> list[dict[str, object]]:`,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...(gate
+      ? [
+          `    if not (${renderPyExpr(gate)}):`,
+          `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
+        ]
+      : []),
+    `    rows = (await session.execute(select(${row})${where})).scalars().all()`,
+    "    return [",
+    "        {",
+    ...(proj.query!.selects ?? []).map(
+      (s) => `            "${s.field}": ${renderPyExpr(s.expr, { thisName: "r" })},`,
+    ),
+    "        }",
+    "        for r in rows",
+    "    ]",
+  ].filter((l): l is string => l != null);
   return out.join("\n");
 }
 

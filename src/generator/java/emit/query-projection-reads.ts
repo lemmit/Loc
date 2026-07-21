@@ -1,9 +1,15 @@
-import type { EnrichedBoundedContextIR, ExprIR, ProjectionIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedBoundedContextIR,
+  ExprIR,
+  ProjectionIR,
+  WorkflowIR,
+} from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
+import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Query-time projections (read-path-architecture.md rev.13) — the Java port.
@@ -62,6 +68,9 @@ export interface QueryProjectionCtx {
   routePrefix?: string;
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
+  /** Saga-state Spring Data repository package (infrastructure.repositories) —
+   *  where a `from <Workflow>`-sourced projection reads the `<Wf>StateRepository`. */
+  stateRepoPkg: string;
 }
 
 interface JoinMap {
@@ -82,6 +91,10 @@ export function renderJavaQueryProjections(
   const explicitImports = new Set<string>();
   const methods: string[] = [];
   const repoAggs = new Set<string>();
+  // Workflows whose persisted saga-state repository a `from <Workflow>`-sourced
+  // projection reads (NON-event-sourced, observable — guaranteed by the IR
+  // validator).  Injected alongside the aggregate repositories.
+  const stateRepoWfs = new Set<WorkflowIR>();
   const routes: string[] = [];
   // Authorization gates on query-time projections (D-AUTH-OIDC / default-deny) —
   // a `requires <expr>` clause runs in the controller action BEFORE delegating
@@ -95,7 +108,6 @@ export function renderJavaQueryProjections(
 
   for (const proj of projections) {
     const source = proj.query!.source!;
-    repoAggs.add(source);
     const findName = lowerFirst(proj.name);
     const rowName = `${upperFirst(proj.name)}Row`;
     const shape = proj.wireShape ?? [];
@@ -123,50 +135,90 @@ export function renderJavaQueryProjections(
       ),
     });
 
-    // Each `join <Agg> as c on <idRef>` → a `Map<idValue, Agg>` loaded via the
-    // followed aggregate's own tenancy-scoped `findAll()`.  The alias binds to
-    // that map + the source-row key expression the join keys on.
-    const aliasMap = new Map<string, JoinMap>();
-    const aggMapVar = new Map<string, string>();
-    const mapLines: string[] = [];
-    const joins = proj.query!.joins;
-    for (const join of joins) {
-      repoAggs.add(join.aggregate);
-      let mapVar = aggMapVar.get(join.aggregate);
-      if (!mapVar) {
-        mapVar = `${lowerFirst(join.aggregate)}ById`;
-        aggMapVar.set(join.aggregate, mapVar);
-        imports.add("java.util.Map");
-        imports.add("java.util.stream.Collectors");
-        mapLines.push(
-          `        var ${mapVar} = ${repoField(join.aggregate)}.findAll().stream()`,
-          `            .collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));`,
-        );
-      }
-      // The join keys on `<idRef>` rendered off the source row `a`, then `.value()`
-      // to reach the raw FK the map is keyed by.
-      const keyExpr = `${renderJavaExpr(join.idRef, { thisName: "a", accessorProps: true })}.value()`;
-      aliasMap.set(join.alias, { mapVar, keyExpr });
-    }
-
-    // Project each row through the `select` expressions, keyed by wire field.
     const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
-    const args = shape.map((f) => {
-      const sel = selectByField.get(f.name);
-      if (!sel) return `null`;
-      collectJavaExprImports(sel.expr, imports);
-      return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
-    });
 
-    methods.push(
-      `    public List<${rowName}> ${findName}() {`,
-      ...mapLines,
-      `        return ${repoField(source)}.${findName}().stream()`,
-      `            .map(a -> new ${rowName}(${args.join(", ")}))`,
-      `            .toList();`,
-      `    }`,
-      ``,
-    );
+    if (proj.query!.sourceKind === "workflow") {
+      // `from <Workflow>` — read the persisted saga-state through the
+      // `<Wf>StateRepository` (workflows have no aggregate repository), apply the
+      // `where` filter in-memory, and project the `select` off each state row
+      // `x`.  The validator guarantees a NON-event-sourced observable workflow,
+      // NO `join`, NO `ignoring` — so this is just findAll + filter + map.
+      const wf = ctx.workflows.find((w) => w.name === source);
+      if (!wf) throw new Error(`java query-projection: workflow source '${source}' not found`);
+      stateRepoWfs.add(wf);
+      const repo = stateRepoField(wf);
+      const args = shape.map((f) => {
+        const sel = selectByField.get(f.name);
+        if (!sel) return `null`;
+        collectJavaExprImports(sel.expr, imports);
+        return domainToWire(
+          f.type,
+          renderJavaExpr(sel.expr, { thisName: "x", accessorProps: true }),
+        );
+      });
+      const filter = proj.query!.filter;
+      const filterLine = filter
+        ? (() => {
+            collectJavaExprImports(filter, imports);
+            return `            .filter(x -> ${renderJavaExpr(filter, { thisName: "x", accessorProps: true })})`;
+          })()
+        : undefined;
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        `        return ${repo}.findAll().stream()`,
+        ...(filterLine ? [filterLine] : []),
+        `            .map(x -> new ${rowName}(${args.join(", ")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+    } else {
+      repoAggs.add(source);
+
+      // Each `join <Agg> as c on <idRef>` → a `Map<idValue, Agg>` loaded via the
+      // followed aggregate's own tenancy-scoped `findAll()`.  The alias binds to
+      // that map + the source-row key expression the join keys on.
+      const aliasMap = new Map<string, JoinMap>();
+      const aggMapVar = new Map<string, string>();
+      const mapLines: string[] = [];
+      const joins = proj.query!.joins;
+      for (const join of joins) {
+        repoAggs.add(join.aggregate);
+        let mapVar = aggMapVar.get(join.aggregate);
+        if (!mapVar) {
+          mapVar = `${lowerFirst(join.aggregate)}ById`;
+          aggMapVar.set(join.aggregate, mapVar);
+          imports.add("java.util.Map");
+          imports.add("java.util.stream.Collectors");
+          mapLines.push(
+            `        var ${mapVar} = ${repoField(join.aggregate)}.findAll().stream()`,
+            `            .collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));`,
+          );
+        }
+        // The join keys on `<idRef>` rendered off the source row `a`, then `.value()`
+        // to reach the raw FK the map is keyed by.
+        const keyExpr = `${renderJavaExpr(join.idRef, { thisName: "a", accessorProps: true })}.value()`;
+        aliasMap.set(join.alias, { mapVar, keyExpr });
+      }
+
+      // Project each row through the `select` expressions, keyed by wire field.
+      const args = shape.map((f) => {
+        const sel = selectByField.get(f.name);
+        if (!sel) return `null`;
+        collectJavaExprImports(sel.expr, imports);
+        return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
+      });
+
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        ...mapLines,
+        `        return ${repoField(source)}.${findName}().stream()`,
+        `            .map(a -> new ${rowName}(${args.join(", ")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+    }
     // The `requires` gate: bind the principal (when the predicate reads it) then
     // a 403 on failure, BEFORE the read — mirroring the find gate in api.ts.
     const gate = proj.query!.requires;
@@ -203,6 +255,22 @@ export function renderJavaQueryProjections(
       explicitImports.add(`${qpctx.repoPkgOf(a)}.${a}Repository`);
     if (qpctx.entityPkgOf(a) !== qpctx.pkg) explicitImports.add(`${qpctx.entityPkgOf(a)}.${a}`);
   }
+  // Injected dependencies: the aggregate repositories above plus a
+  // `<Wf>StateRepository` for every `from <Workflow>`-sourced projection.  The
+  // state var (`x`) is `var`-inferred off `findAll()`, so only the repository
+  // type needs importing (not the `<Wf>State` entity).
+  const stateWfList = [...stateRepoWfs].sort((a, b) => a.name.localeCompare(b.name));
+  for (const wf of stateWfList) {
+    if (qpctx.stateRepoPkg !== qpctx.pkg)
+      explicitImports.add(`${qpctx.stateRepoPkg}.${workflowStateClass(wf)}Repository`);
+  }
+  const injected: { type: string; field: string }[] = [
+    ...repoFields.map((a) => ({ type: `${a}Repository`, field: repoField(a) })),
+    ...stateWfList.map((wf) => ({
+      type: `${workflowStateClass(wf)}Repository`,
+      field: stateRepoField(wf),
+    })),
+  ];
 
   out.set(`${serviceName}.java`, {
     category: "view-service",
@@ -222,12 +290,10 @@ export function renderJavaQueryProjections(
       `@Service`,
       `@Transactional(readOnly = true)`,
       `public class ${serviceName} {`,
-      ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
+      ...injected.map((d) => `    private final ${d.type} ${d.field};`),
       ``,
-      `    public ${serviceName}(${repoFields
-        .map((a) => `${a}Repository ${repoField(a)}`)
-        .join(", ")}) {`,
-      ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
+      `    public ${serviceName}(${injected.map((d) => `${d.type} ${d.field}`).join(", ")}) {`,
+      ...injected.map((d) => `        this.${d.field} = ${d.field};`),
       `    }`,
       ``,
       ...methods,
@@ -286,4 +352,10 @@ function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
 
 function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
+}
+
+/** The saga-state repository field for a `from <Workflow>` projection
+ *  (`fulfilStateRepository`) — mirrors the workflow-instances reader's naming. */
+function stateRepoField(wf: WorkflowIR): string {
+  return `${lowerFirst(wf.name)}StateRepository`;
 }

@@ -155,7 +155,7 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
 // `PROJECTION_WF_SOURCE_SUPPORTED` have ported it; others gate the read HONESTLY
 // (rather than emit a broken reference to a non-existent workflow repository)
 // until their port lands.  Mirrors `validateQueryTimeProjectionBackend`.
-const PROJECTION_WF_SOURCE_SUPPORTED = new Set(["node"]);
+const PROJECTION_WF_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
 
 export function validateWorkflowSourceProjectionBackend(
   sys: SystemIR,

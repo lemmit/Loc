@@ -4,6 +4,7 @@ import {
   type EnrichedBoundedContextIR,
   type ExprIR,
   exprUsesCurrentUser,
+  type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
@@ -100,6 +101,16 @@ export function lowerToSqlAlchemy(
     agg.associations ?? [],
     opts?.principalAccessor ?? "current_user",
   );
+}
+
+/** Lower a workflow-sourced query-time projection's `where` filter (projection.md
+ *  — `from <Workflow>`) to a predicate over the saga-state `<Wf>Row`.  The source
+ *  candidate refs (`f.attempts`) bind to the row's columns exactly as an aggregate
+ *  filter binds to its row; a validated workflow source is non-event-sourced and
+ *  observable (has a `<Wf>Row` table), carries NO `join`/`ignoring`, and saga rows
+ *  hold no reference collections, so the association/join arms never fire here. */
+export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPredicate | null {
+  return lowerOver(e, rowClassName(wf.name), [], "current_user");
 }
 
 function lowerOver(

@@ -90,12 +90,16 @@ describe("query-time projection `from <Workflow>` validation", () => {
     ).toContain("loom.projection-workflow-source-ignoring-unsupported");
   });
 
-  it("loom.projection-workflow-source-unsupported-backend — a non-node backend (emit not ported)", async () => {
-    expect(
-      await codes(
-        `projection P { orderId: Order id  from Fulfil as f select orderId = f.orderId }`,
-        "java",
-      ),
-    ).toContain("loom.projection-workflow-source-unsupported-backend");
+  it("accepts a workflow-sourced projection on every shipping backend", async () => {
+    // All five backends have ported the saga-state read, so none trips the
+    // backend-support gate (`loom.projection-workflow-source-unsupported-backend`
+    // stays a dormant safety-net for future backends).
+    for (const platform of ["node", "python", "java", "dotnet", "elixir"]) {
+      const cs = await codes(
+        `projection P { orderId: Order id  attempts: int  from Fulfil as f where f.attempts > 0 select orderId = f.orderId, attempts = f.attempts }`,
+        platform,
+      );
+      expect(cs, `platform ${platform}`).toEqual([]);
+    }
   });
 });

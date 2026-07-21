@@ -9,6 +9,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectToResponse, wireType } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
+import { workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET query-time projection emission (read-path-architecture.md rev.13).
@@ -96,6 +97,13 @@ interface JoinMap {
 }
 
 function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: string): string {
+  // A workflow-sourced projection (`from <Workflow>`) reads the workflow's
+  // persisted saga-state DbSet (workflows have no aggregate repository), applies
+  // the `where` filter, and projects instance fields via `select`.  Validation
+  // guarantees a non-event-sourced observable workflow with no `join`/`ignoring`.
+  if (proj.query!.sourceKind === "workflow") {
+    return renderWorkflowHandler(proj, ctx, ns);
+  }
   const source = proj.query!.source!;
   const rowName = `${upperFirst(proj.name)}Row`;
   const queryName = `${upperFirst(proj.name)}QpQuery`;
@@ -214,6 +222,108 @@ ${ctor}
     {
 ${gate}        var domain = await _repo.${upperFirst(proj.name)}(cancellationToken);
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
+    }
+}
+`;
+}
+
+/** Render the handler for a workflow-sourced query-time projection.  Reads the
+ *  saga-state DbSet (`_db.<Wf>State DbSet`) through the injected `AppDbContext`
+ *  — NOT an aggregate repository — applies the `where` filter EF-side, and
+ *  projects each state row through the `select` expressions into `<Proj>Row`.
+ *  The non-event-sourced + EF path only (validation defers ES). */
+function renderWorkflowHandler(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const rowName = `${upperFirst(proj.name)}Row`;
+  const queryName = `${upperFirst(proj.name)}QpQuery`;
+  const handlerName = `${upperFirst(proj.name)}QpHandler`;
+  const source = proj.query!.source!;
+  const wf = ctx.workflows.find((w) => w.name === source);
+  if (!wf) {
+    throw new Error(
+      `Query-time projection ${proj.name}: workflow source '${source}' not found in context ${ctx.name}`,
+    );
+  }
+  const dbSet = workflowStateDbSet(wf);
+
+  const usings = new Set<string>();
+  const filter = proj.query!.filter;
+  const where = filter ? renderCsExpr(filter, { thisName: "r", efQuery: true }) : undefined;
+  if (filter) collectCsExprUsings(filter, usings);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+
+  // Authorization gate (default-deny) — same shape as the aggregate handler.
+  const requires = proj.query!.requires;
+  const gateUsesUser = exprUsesCurrentUser(requires);
+  if (requires) {
+    collectCsExprUsings(requires, usings);
+    usings.add(`${ns}.Domain.Common`); // ForbiddenException
+    if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  }
+
+  // Project each state row through the `select` expressions, keyed by wire field.
+  // A source-alias read (`f.orderId`) lowers to a member off the current row, so
+  // renderCsExpr with `thisName: "r"` yields `r.OrderId`.
+  const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
+  const args = (proj.wireShape ?? []).map((f) => {
+    const sel = selectByField.get(f.name);
+    if (!sel) return "default!";
+    return projectToResponse(renderCsExpr(sel.expr, { thisName: "r" }), f.type, ctx);
+  });
+  const projection = `new ${rowName}(${args.join(", ")})`;
+
+  // Ctor injects AppDbContext (not an aggregate repo), plus the request principal
+  // when a `currentUser` gate is present.
+  const fields: string[] = [`    private readonly AppDbContext _db;`];
+  const ctorParams: string[] = [`AppDbContext db`];
+  const ctorAssigns: string[] = [`_db = db`];
+  if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
+  const ctor =
+    ctorParams.length === 1
+      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+
+  let gate = "";
+  if (requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: projection ${proj.name}`,
+    )});\n`;
+  }
+
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Projections;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${rowName}>>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gate}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
+        return rows.Select(r => ${projection}).ToList();
     }
 }
 `;
