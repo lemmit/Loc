@@ -22,7 +22,7 @@ only because one half of it was missing.
 | consumer | `workflow on(e)` | `commandHandler` (1 agg) / `workflow create(cmd)` (N aggs) |
 | failure model | each reactor's own retry | **retry → `onExhausted` on the owner** |
 | HTTP trigger | — | `api { route … -> handler }` |
-| clock trigger | `job { … emit E }` | `job { … -> handler }` (one system-scope construct) |
+| clock trigger | `job { … emit E }` | `job { … -> handler }` (one context-scope construct) |
 
 ## What already exists (verified on `main`)
 
@@ -205,7 +205,7 @@ The net is a *smaller* surface despite adding `send`/`job`/`bff`:
 
 ## Scheduling — one `job` construct (timerSource folds in)
 
-**Decision: one system-scope `job` construct; `timerSource` retires into it.**
+**Decision: one context-scope `job` construct; `timerSource` retires into it.**
 
 ### Why timerSource was proposed (scheduling.md RFC)
 The problem: Loom could react to *events* but not to *time* — reaping/expiry,
@@ -227,27 +227,45 @@ a `channelSource`-twin binding (`timerSource`). It fired an *event* because, at 
 time, there was **no command-dispatch surface** (`send` didn't exist) — a tick
 event was the only cadence-blind way to reach domain logic.
 
-### Why `job` replaces it now
-With `send`/`job`, a clock can dispatch a command directly. A `job` block passes
-the RFC's three-point checklist **precisely because it's a separate system-scope
-trigger surface, not a workflow member**: (1) the cadence lives in a `job` block,
-not among workflow triggers; (2) `job` is stateless dispatch — instance identity
-comes from the target workflow; (3) **it must be system-scope** (beside `api` /
-`channelSource`), so cadence stays operational and env-swappable — the RFC's
-load-bearing constraint, now `job`'s hard placement rule.
+### Why `job` replaces it now — and why it's context-scope
+With `send`/`job`, a clock can dispatch a command directly. A `job` block still
+passes the RFC's three-point checklist — but as a **context-scoped** construct, not
+a system-scoped one:
+
+1. **Trigger uniformity** — `job` is a separate construct, not a cadence member
+   among `create`/`on`/`handle`. ✓
+2. **No instance identity** — `job` is stateless dispatch; identity comes from the
+   target workflow. ✓
+3. **Infra-in-domain** — *here the RFC was over-general.* It hoisted **cadence** to
+   system scope because it **split** the concern (the *what* — a tick event +
+   reactor — lived in the context; the *when* — cadence — was hoisted so ops could
+   swap it). `job` **unifies** what+when, and the unified thing is **tied to one
+   context** through its target (a command is single-aggregate/single-context; a
+   workflow is a context orchestrator). And cadence is only *sometimes* infra:
+   "expire unpaid orders after 30 min" is a **business policy** (domain); "poll
+   every 5 min" is operational. So `job` is **context-scope** — declared beside the
+   aggregate/workflow it drives — and the genuinely-operational cadences get a
+   **per-deployable / per-env override** (`every: config("POLL_INTERVAL", 5m)`),
+   which gives the RFC's swappability *without* banishing the declaration from the
+   domain. (Swappability never required system scope — the RFC hoisted only because
+   cadence was a bare source literal with no override path.)
+
+Note the `api`/`job` analogy is about **shape**, not scope: `api` faces *outward*
+(aggregates a subdomain into an external HTTP surface → system-scope), `job` faces
+*inward* (an internal clock triggering domain work in one context → context-scope).
+Same trigger→handler shape, opposite direction, different scope.
 
 **`timerSource` with `->` is a category error** — `timerSource` is a `*Source`
 *binding* (the `channelSource`/`dataSource` family: `for:` / `use:` clauses), while
 `->` is the *dispatch* arrow (the `route`/`api` family). So the choice was never
-"add `->` to timerSource"; it was one construct or two. One wins: the
-`channelSource`-twin identity was a *mechanism* to keep cadence system-scope and
-reuse the reaction machinery — a system-scope `job` block delivers both without a
-second keyword, and "job" reads correctly for the dominant single-owner case
-(`timerSource` reads as "a source of events," wrong for a command).
+"add `->` to timerSource"; it was one construct or two. One wins, and "job" reads
+correctly for the dominant single-owner case (`timerSource` reads as "a source of
+events," wrong for a command).
 
 ### The one construct
-`job` is system-scope; the **target verb reveals the kind** (the `->`/`emit`
-cardinality lens — `->` dispatches to one owner, `emit` fans out to N):
+`job` is context-scope (declared beside the aggregate/workflow it drives); the
+**target verb reveals the kind** (the `->`/`emit` cardinality lens — `->`
+dispatches to one owner, `emit` fans out to N):
 
 ```
 job Nightly {
@@ -269,7 +287,7 @@ IR/engine identical.
 produce       emit E                     send C
 consume       workflow on(e)             commandHandler / workflow create(cmd)
 HTTP trigger  —                          api  { route … -> handler }
-clock trigger job { … emit E }           job  { … -> handler }   (one system-scope construct)
+clock trigger job { … emit E }           job  { … -> handler }   (one context-scope construct)
 transport     channel (carries:)         derived queue; mediator in-deployable / broker across
 failure       per-reactor retry          retries + onExhausted on the owner
 ```
@@ -282,13 +300,15 @@ routing binding, orthogonal.
 1. **`send` vs `dispatch`** as the keyword (messaging convention: events are
    published/emitted, commands are *sent* → `send`).
 2. **`bff` marker name** — `bff` / `composition` / `portal` / `readModel`.
-3. **timerSource/job** — *resolved:* one system-scope `job` construct
-   (`-> Command` dispatch / `emit Event` fan-out); `timerSource` retires via
-   codemod. Remaining: confirm the codemod covers every shipped `timerSource`
-   form (cron/every/in/overlap).
-4. **`job` block scope** — *resolved: system-level* (beside `api`), forced by the
-   RFC's "cadence is operational, not domain" constraint — a context-scoped `job`
-   would re-leak infra into the domain.
+3. **timerSource/job** — *resolved:* one `job` construct (`-> Command` dispatch /
+   `emit Event` fan-out); `timerSource` retires via codemod. Remaining: confirm the
+   codemod covers every shipped `timerSource` form (cron/every/in/overlap).
+4. **`job` block scope** — *resolved: context-scope* (declared beside the
+   aggregate/workflow it drives). The RFC's system-scope was for the cadence
+   *binding* in its split what/when model; `job` unifies them and is tied to one
+   context via its target. Operational cadences get a per-deployable/env override
+   rather than scope-hoisting. Remaining: design the cadence-override surface
+   (`config(...)`-valued cadence vs a deployable-level override block).
 5. **Route target: command vs handler** — targeting the *command* (single owner ⇒
    handler derived) reads cleaner but can't point at a workflow `handle` or reuse
    one handler across routes; targeting the *handler* keeps today's flexibility.
