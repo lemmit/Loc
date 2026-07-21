@@ -199,9 +199,17 @@ public sealed class RedisChannelTransport : IChannelTransport
     public RedisChannelTransport(string url, ILogger log)
     {
         _log = log;
-        // redis://host:port URLs come from LOOM_CHANNEL_*_URL; the client
-        // wants host:port configuration strings.
+        // redis://[:pass@]host:port URLs come from LOOM_CHANNEL_*_URL; the
+        // client wants host:port configuration strings, with the requirepass
+        // credential (M-T4.4 \u00a77) as a password= option.
         var config = url.StartsWith("redis://", StringComparison.Ordinal) ? url["redis://".Length..] : url;
+        var at = config.LastIndexOf('@');
+        if (at >= 0)
+        {
+            var userinfo = config[..at];
+            var pass = userinfo.StartsWith(':') ? userinfo[1..] : userinfo[(userinfo.IndexOf(':') + 1)..];
+            config = $"{config[(at + 1)..]},password={Uri.UnescapeDataString(pass)}";
+        }
         _connection = new(() => ConnectionMultiplexer.ConnectAsync(config));
     }
 
@@ -429,20 +437,44 @@ public static class ChannelRelayPublisher
 /// Offsets commit after the handler resolves.  Dead-letter v1: a failed or
 /// malformed record parks onto &lt;address&gt;.dlq and the offset advances —
 /// logged and kept, never a hot-loop.</summary>
-public sealed class KafkaChannelTransport : IChannelTransport
+public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
 {
     private readonly string _bootstrap;
     private readonly ILogger _log;
     private readonly Lazy<IProducer<string, string>> _producer;
     private readonly List<Task> _loops = new();
     private readonly CancellationTokenSource _stopping = new();
+    private readonly string? _saslUser;
+    private readonly string? _saslPass;
+
+    private T ApplySasl<T>(T config) where T : ClientConfig
+    {
+        if (_saslUser is null) return config;
+        config.SecurityProtocol = SecurityProtocol.SaslPlaintext;
+        config.SaslMechanism = SaslMechanism.Plain;
+        config.SaslUsername = _saslUser;
+        config.SaslPassword = _saslPass;
+        return config;
+    }
 
     public KafkaChannelTransport(string url, ILogger log)
     {
         _log = log;
-        _bootstrap = url.StartsWith("kafka://", StringComparison.Ordinal) ? url["kafka://".Length..] : url;
+        // kafka://user:pass@host:port[,host2] — userinfo (when present)
+        // becomes SASL/PLAIN (M-T4.4 §7); a credential-less URL stays on
+        // PLAINTEXT, the pre-auth contract.
+        var bare = url.StartsWith("kafka://", StringComparison.Ordinal) ? url["kafka://".Length..] : url;
+        var at = bare.LastIndexOf('@');
+        if (at >= 0)
+        {
+            var userinfo = bare[..at];
+            var colon = userinfo.IndexOf(':');
+            _saslUser = Uri.UnescapeDataString(colon >= 0 ? userinfo[..colon] : userinfo);
+            _saslPass = Uri.UnescapeDataString(colon >= 0 ? userinfo[(colon + 1)..] : "");
+        }
+        _bootstrap = at >= 0 ? bare[(at + 1)..] : bare;
         _producer = new(() =>
-            new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = _bootstrap }).Build());
+            new ProducerBuilder<string, string>(ApplySasl(new ProducerConfig { BootstrapServers = _bootstrap })).Build());
     }
 
     private async Task EnsureTopicAsync(string topic)
@@ -450,7 +482,7 @@ public sealed class KafkaChannelTransport : IChannelTransport
         // Subscribing to a not-yet-produced topic stalls the group join;
         // idempotently create it (3 partitions / rf 1 — the compose
         // sidecar's defaults; an existing topic keeps its own shape).
-        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = _bootstrap }).Build();
+        using var admin = new AdminClientBuilder(ApplySasl(new AdminClientConfig { BootstrapServers = _bootstrap })).Build();
         try
         {
             await admin.CreateTopicsAsync(new[]
@@ -478,13 +510,13 @@ public sealed class KafkaChannelTransport : IChannelTransport
     public async Task SubscribeAsync(string address, string? group, Func<LoomEventEnvelope, Task> handler)
     {
         await EnsureTopicAsync(address);
-        var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        var consumer = new ConsumerBuilder<string, string>(ApplySasl(new ConsumerConfig
         {
             BootstrapServers = _bootstrap,
             GroupId = group ?? address,
             EnableAutoCommit = false,
             AutoOffsetReset = AutoOffsetReset.Latest,
-        }).Build();
+        })).Build();
         consumer.Subscribe(address);
         _loops.Add(Task.Run(async () =>
         {
@@ -551,6 +583,10 @@ public sealed class KafkaChannelTransport : IChannelTransport
         await Task.WhenAll(_loops);
         if (_producer.IsValueCreated) _producer.Value.Dispose();
     }
+
+    // CA1001 (the disposal path already downcasts after CloseAsync): the
+    // cancellation source is the one field CloseAsync doesn't release.
+    public void Dispose() => _stopping.Dispose();
 }
 `
     : "";

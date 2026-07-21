@@ -107,9 +107,7 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
   it("emits the brod publisher: keyed produce_sync via :hash + idempotent topic ensure", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const broker = files.get("sales_api/lib/sales_api/kafka_broker.ex") ?? "";
-    expect(broker).toContain(
-      ":ok = :brod.start_client(state.endpoints, state.client, auto_start_producers: true)",
-    );
+    expect(broker).toContain("[auto_start_producers: true] ++ state.conn_config");
     // One aggregate's events keep order: :hash partitioner over the key.
     expect(broker).toContain(":ok = :brod.produce_sync(state.client, address, :hash, key, json)");
     // Idempotent admin create before first publish — 3 partitions / rf 1
@@ -117,7 +115,13 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
     expect(broker).toContain(
       "%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}",
     );
-    expect(broker).toContain('|> String.replace_prefix("kafka://", "")');
+    expect(broker).toContain('String.replace_prefix(url, "kafka://", "")');
+    // §7 SASL/PLAIN from the URL's userinfo; credential-less URLs keep the
+    // empty conn config (plain PLAINTEXT — the pre-auth contract the native
+    // e2e harnesses still use).
+    expect(broker).toContain(
+      "[user, pass] -> [sasl: {:plain, URI.decode(user), URI.decode(pass)}]",
+    );
     const app = files.get("sales_api/lib/sales_api/application.ex") ?? "";
     expect(app).toContain(
       'Supervisor.child_spec({SalesApi.KafkaBroker, [env_var: "LOOM_CHANNEL_LIFECYCLE_BUS_URL", name: :loom_channels_0]}, id: :loom_channels_0)',
@@ -176,7 +180,9 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
     // Apache 2.0 image (§6a licensing — never bitnami).
     expect(compose).toContain("image: apache/kafka:4.1.0");
     expect(compose).toContain("KAFKA_NUM_PARTITIONS: 3");
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "bus:9092"');
+    expect(compose).toContain(
+      'LOOM_CHANNEL_LIFECYCLE_BUS_URL: "kafka://sales_api:loom-dev-bus-sales_api@bus:9092"',
+    );
   });
 
   it("keeps the rabbit (7d) shape intact — 4-arity transmit, no kafka artifacts, no cmake", async () => {

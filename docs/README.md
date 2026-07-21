@@ -30,6 +30,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`payloads.md`](payloads.md) | `payload` / `command` / `query` / `response` / `error` records, the generic carriers `paged` / `envelope`, and discriminated unions (`A or B`, `payload Foo = A \| B`, `T option`) with their tagged `type` wire. |
 | [`inheritance.md`](inheritance.md) | `abstract aggregate`, `extends`, `inheritanceUsing(sharedTable \| ownTable)` — TPC (all backends) vs TPH (Hono only), and the polymorphic `find all <Base>` reader. |
 | [`workflow.md`](workflow.md) | `workflow` blocks, transactional vs non-transactional, isolation levels, event drain semantics. |
+| [`channels.md`](channels.md) | `channel` / `channelSource` / the deployable `channels:` clause — cross-deployable eventing over redis/rabbitmq/kafka brokers, the CloudEvents envelope, outbox-relayed publishing, per-broker topology and auth. |
 | [`resources.md`](resources.md) | `storage` / `resource`, source types, the `objectStore` / `queue` / `api` kinds, the `config` map, and workflow-level resource consumption (`files.put`, `jobs.enqueue`, `rates.get`). |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
 | [`criterion.md`](criterion.md) | `criterion` — reusable named predicate specifications, shared across queries, validation, and permissions. |

@@ -182,6 +182,31 @@ the same process, so there is nothing to split.
   under `/api`). A fullstack host (Phoenix LiveView, or a backend that mounts
   its own `ui:`) keeps the single `/` catch-all — it already serves its `/api`.
 
+## Broker channels (M-T4.4 slice 5b)
+
+A wired `channelSource` adds its broker to the chart, auth-provisioned
+exactly like the compose sidecars (design §7):
+
+- **One enabled-gated broker workload per wired broker storage** —
+  `helm/templates/<name>-broker.yaml` (Deployment + `ClusterIP` Service, plus
+  a ConfigMap for RabbitMQ's mounted `load_definitions` file), gated on
+  `.Values.brokers.<storage>.enabled` (default `true`). The images match
+  compose: `valkey/valkey:8-alpine` (with `--requirepass`),
+  `rabbitmq:4-management-alpine` (definitions provision the `loom` vhost +
+  one user per deployable with name-scoped permissions, and suppress the
+  default `guest` account), `apache/kafka:4.1.0` (single-node KRaft,
+  SASL/PLAIN on the client listener, one JAAS `user_<name>` per wired
+  deployable; the advertised listener resolves to the release-prefixed
+  broker Service).
+- **`LOOM_CHANNEL_<NAME>_URL` rides the shared `Secret`** — it embeds the
+  per-deployable §7 credentials (`redis://:<pass>@…`,
+  `amqp://<user>:<pass>@…/loom`, `kafka://<user>:<pass>@…`). The default is
+  computed in the Secret template against the in-cluster broker Service;
+  override per deployable via `.Values.<deployable>.channels.<ENV>` to point
+  at a managed broker (then set the matching `brokers.<storage>.enabled=false`).
+- The raw `k8s/` view mirrors both with the defaults baked in (plain service
+  names). Channel-less systems emit no broker artifacts — byte-identical.
+
 ## Seams this does NOT cover (v1)
 
 - **Image build/push.** Loom emits Dockerfiles, not a registry push. The
