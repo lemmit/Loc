@@ -1043,12 +1043,19 @@ comparisons, `Objects.equals` reference equality, `Instant` ordering via
 `isBefore`/`isAfter`, find-anywhere regex via `Pattern…find()`, Streams
 collection ops with type-directed `sum` reduction.
 
+Both the `ui:` embedded-SPA mount and the D-PHOENIX-SURFACE `hosts:` UI
+hosting are implemented (M-T6.5): a `hosts:` binding onto a
+`framework:`-owning `ui { }` block embeds that framework's SPA
+(react / vue / svelte) into the Spring project — controllers under
+`/api/*`, `SpaWebConfig` serving `UI_DIR` with an `index.html` fallback,
+the SPA under `ClientApp/`, and a node `spa-build` Dockerfile stage — the
+dotnet `hosts:` twin, at full hosting parity.
+
 **Not yet implemented — every gap fails fast at validate time** (never a
 silent downgrade): the reserved `axon` event-store adapter and `jooq`
 persistence adapter (both `stubAdapter` — the default JPA persistence
-*does* emit `persistedAs(eventLog)`), `hosts:` UI
-hosting (`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA
-mount is implemented), resource-op clients, a **principal-referencing
+*does* emit `persistedAs(eventLog)`),
+resource-op clients, a **principal-referencing
 capability filter on a non-relational aggregate**
 (`loom.context-filter-unsupported` — each half ships alone; only the
 actor + jsonb intersection is deferred), and provenance/audited (gated —

@@ -1,0 +1,38 @@
+// Java `hosts:` fullstack embed (M-T6.5) — the D-PHOENIX-SURFACE binding.
+// A `platform: java` deployable `hosts:` a separately-declared `ui { }`
+// block (which owns its `framework:`), embedding that framework's SPA
+// into the Spring project exactly like the `ui:` sugar does — the dotnet
+// `hosts:` twin.  Controllers move under /api/*, SpaWebConfig serves the
+// bundle from UI_DIR with the index.html fallback, the SPA lands under
+// ClientApp/, and the Dockerfile gains the node spa-build stage.
+system FSH {
+  subdomain D {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+  api A from D
+  ui Store {
+    framework: react
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable fshApp {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    hosts: Store
+    port: 8081
+    design: mantine
+  }
+}

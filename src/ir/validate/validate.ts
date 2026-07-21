@@ -56,7 +56,6 @@ import {
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
   validateInheritanceStorage,
-  validateJavaFullstackSupport,
   validateJavaReadModelShapes,
   validateJavaStampSupport,
   validateMikroOrmSupport,
@@ -152,7 +151,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
-    validateJavaFullstackSupport(sys, diags);
     validateJavaReadModelShapes(sys, diags);
     validateJavaStampSupport(sys, diags);
     validateDotnetStampSupport(sys, diags);
