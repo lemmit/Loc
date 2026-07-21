@@ -241,14 +241,16 @@ a system-scoped one:
    reactor — lived in the context; the *when* — cadence — was hoisted so ops could
    swap it). `job` **unifies** what+when, and the unified thing is **tied to one
    context** through its target (a command is single-aggregate/single-context; a
-   workflow is a context orchestrator). And cadence is only *sometimes* infra:
-   "expire unpaid orders after 30 min" is a **business policy** (domain); "poll
-   every 5 min" is operational. So `job` is **context-scope** — declared beside the
-   aggregate/workflow it drives — and the genuinely-operational cadences get a
-   **per-deployable / per-env override** (`every: config("POLL_INTERVAL", 5m)`),
-   which gives the RFC's swappability *without* banishing the declaration from the
-   domain. (Swappability never required system scope — the RFC hoisted only because
-   cadence was a bare source literal with no override path.)
+   workflow is a context orchestrator). Even the case that *looks* operational is
+   context-local: "poll an external API every 5 min" is a **workflow in the
+   integration's own context** (call the API, process the result — domain work),
+   and the interval is just a **config-valued cadence**
+   (`every config("RATES_POLL", 5m)`) — env-tunable like any config, never a
+   *scope* driver. So there is no domain-vs-operational split to hoist on: cadence
+   is always a **context-local value**, and `job` is **context-scope**, declared
+   beside the aggregate/workflow it drives. (The RFC hoisted only because cadence
+   was a bare source literal with no config path — swappability never required
+   system scope.)
 
 Note the `api`/`job` analogy is about **shape**, not scope: `api` faces *outward*
 (aggregates a subdomain into an external HTTP surface → system-scope), `job` faces
@@ -306,9 +308,9 @@ routing binding, orthogonal.
 4. **`job` block scope** — *resolved: context-scope* (declared beside the
    aggregate/workflow it drives). The RFC's system-scope was for the cadence
    *binding* in its split what/when model; `job` unifies them and is tied to one
-   context via its target. Operational cadences get a per-deployable/env override
-   rather than scope-hoisting. Remaining: design the cadence-override surface
-   (`config(...)`-valued cadence vs a deployable-level override block).
+   context via its target. Cadence is always a context-local value; env-tuning is a
+   **config-valued cadence** (`every config(...)`), the same mechanism as any
+   config — not a scope concern. Remaining: pin the `config(...)`-in-cadence surface.
 5. **Route target: command vs handler** — targeting the *command* (single owner ⇒
    handler derived) reads cleaner but can't point at a workflow `handle` or reuse
    one handler across routes; targeting the *handler* keeps today's flexibility.
