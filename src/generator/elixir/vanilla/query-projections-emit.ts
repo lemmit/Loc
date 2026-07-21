@@ -115,8 +115,17 @@ function renderQueryProjectionModule(
   // delete / tenancy) exactly like every other read; a principal (tenancy)
   // filter scopes by the `current_user` the controller threads into `run/1`.
   const principal = sourceAgg ? aggregateUsesPrincipalContextFilter(sourceAgg) : false;
+  // A projection `… ignoring <Cap>` / `ignoring *` OMITS the named capability
+  // filter(s) on the source aggregate for this read only (plain Ecto drops the
+  // bypassed `where:` conjunct).
   const cap = sourceAgg
-    ? vanillaCapabilityFilter(sourceAgg, contextModule, { actor: principal })
+    ? vanillaCapabilityFilter(sourceAgg, contextModule, {
+        actor: principal,
+        bypass:
+          query.bypassAll || (query.bypassCaps?.length ?? 0) > 0
+            ? { bypassAll: query.bypassAll, bypassCaps: query.bypassCaps }
+            : undefined,
+      })
     : null;
   const filter = query.filter ? renderExpr(query.filter, queryCtx) : null;
   const where = combineWhere(filter, cap);

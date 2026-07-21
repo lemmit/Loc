@@ -990,6 +990,11 @@ function printProjection(node: import("../generated/ast.js").Projection): string
     items.push(`from ${node.source.$refText}${node.sourceAlias ? ` as ${node.sourceAlias}` : ""}`);
   }
   if (node.filter) items.push(`where ${printExpr(node.filter)}`);
+  // `ignoring */A, B` — source-aggregate capability-filter bypass, printed in
+  // grammar order (after `where`, before `join`).  Trim the leading space the
+  // shared helper adds for the tail-append case.
+  const ignoring = printIgnoringClause(node).trimStart();
+  if (ignoring) items.push(ignoring);
   for (const j of node.joins) {
     items.push(`join ${j.aggregate.$refText} as ${j.alias} on ${printExpr(j.idRef)}`);
   }

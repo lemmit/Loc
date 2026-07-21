@@ -82,3 +82,43 @@ describe("node/Drizzle ignoring filter-bypass emission", () => {
     expect(whereClause(r, "findManyByIds")).toContain("eq(schema.orders.isDeleted, false)");
   });
 });
+
+// A query-time projection's `ignoring` rides the synthesised source find, so the
+// emitted `repo.<projName>()` read drops the bypassed conjunct exactly like a
+// hand-written `find … ignoring`.
+const PROJ_SRC = `
+  system S {
+    capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
+    subdomain D { context C {
+      aggregate Order with softDeletable { status: string }
+      repository OrderRepo for Order { }
+      projection AllOrders { status: string  from Order as o ignoring softDeletable select status = o.status }
+      projection LiveOrders { status: string  from Order as o where o.status == "open" select status = o.status }
+    }}
+    storage primary { type: postgres }
+    resource cState { for: C, kind: state, use: primary }
+    deployable api { platform: node  contexts: [C]  dataSources: [cState]  port: 3000 }
+  }
+`;
+
+describe("node/Drizzle projection `ignoring` emission", () => {
+  let pcache: Map<string, string> | undefined;
+  async function projRepo(): Promise<string> {
+    pcache ??= (await generateSystems(await parseValid(PROJ_SRC))).files;
+    const k = [...pcache.keys()].find((key) => key.endsWith("db/repositories/order-repository.ts"));
+    expect(k, "order-repository.ts not emitted").toBeDefined();
+    return pcache.get(k!)!;
+  }
+
+  it("`ignoring <Cap>` drops the source-read filter for the projection find", async () => {
+    const r = await projRepo();
+    const allOrders = methodBody(r, "allOrders");
+    expect(allOrders).not.toContain(".where(");
+    expect(allOrders).toContain("this.db.select().from(schema.orders);");
+  });
+
+  it("a projection with no `ignoring` keeps the capability filter", async () => {
+    const r = await projRepo();
+    expect(whereClause(r, "liveOrders")).toContain("eq(schema.orders.isDeleted, false)");
+  });
+});

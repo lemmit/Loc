@@ -1915,6 +1915,20 @@ function bypassReadsInContext(ctx: BoundedContextIR): BypassRead[] {
     for (const h of wf.handlers ?? []) collectBypassRepoRuns(h.statements, wf.name, out);
     for (const on of wf.subscriptions ?? []) collectBypassRepoRuns(on.statements, wf.name, out);
   }
+  // A query-time projection's `ignoring` clause bypasses its `from` source
+  // aggregate's capability filters — same triage as a repository find.
+  for (const p of ctx.projections ?? []) {
+    const q = p.query;
+    if (!q?.source) continue;
+    if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
+      out.push({
+        bypassAll: q.bypassAll,
+        bypassCaps: q.bypassCaps,
+        aggName: q.source,
+        site: `query-time projection '${p.name}'`,
+      });
+    }
+  }
   return out;
 }
 

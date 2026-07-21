@@ -39,6 +39,8 @@ export function queryProjectionFindsFor(
   params: never[];
   returnType: { kind: "array"; element: { kind: "entity"; name: string } };
   filter?: ExprIR;
+  bypassAll?: boolean;
+  bypassCaps?: string[];
 }[] {
   return (ctx.projections ?? [])
     .filter((p) => isQueryTimeProjection(p) && p.query?.source === aggName)
@@ -47,6 +49,8 @@ export function queryProjectionFindsFor(
       params: [] as never[],
       returnType: { kind: "array" as const, element: { kind: "entity" as const, name: aggName } },
       ...(p.query?.filter ? { filter: p.query.filter } : {}),
+      ...(p.query?.bypassAll ? { bypassAll: true } : {}),
+      ...(p.query?.bypassCaps ? { bypassCaps: p.query.bypassCaps } : {}),
     }));
 }
 

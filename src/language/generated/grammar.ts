@@ -11505,6 +11505,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "cardinality": "?"
           },
           {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@135"
+            },
+            "arguments": [],
+            "cardinality": "?"
+          },
+          {
             "$type": "Assignment",
             "feature": "joins",
             "operator": "+=",

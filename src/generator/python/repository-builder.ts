@@ -552,6 +552,8 @@ export function queryProjectionViews(
       name: p.name,
       source: { kind: "aggregate" as const, name: agg.name },
       ...(p.query?.filter ? { filter: p.query.filter } : {}),
+      ...(p.query?.bypassAll ? { bypassAll: true } : {}),
+      ...(p.query?.bypassCaps ? { bypassCaps: p.query.bypassCaps } : {}),
     }));
 }
 

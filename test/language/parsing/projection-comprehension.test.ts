@@ -64,6 +64,52 @@ describe("parsing — projection comprehension", () => {
     expect(proj.source?.$refText).toBe("Order");
   });
 
+  it("parses `ignoring *` / `ignoring <Cap>` on a query-time projection", async () => {
+    const { model, errors } = await parseString(
+      wrap(`
+        projection AllOrders {
+          status: OrderStatus
+          from Order as o ignoring softDeletable
+          select status = o.status
+        }
+        projection PurgedOrders {
+          status: OrderStatus
+          from Order as o ignoring *
+          select status = o.status
+        }
+      `),
+    );
+    expect(errors).toEqual([]);
+    const ctx = model.members.find(isBoundedContext)!;
+    const all = ctx.members.filter(isProjection).find((p) => p.name === "AllOrders")!;
+    expect(all.bypass).toEqual(["softDeletable"]);
+    expect(all.bypassAll).toBe(false);
+    const purged = ctx.members.filter(isProjection).find((p) => p.name === "PurgedOrders")!;
+    expect(purged.bypassAll).toBe(true);
+    expect(purged.bypass).toEqual([]);
+  });
+
+  it("round-trips a projection `ignoring` clause through the structural printer", async () => {
+    const src = wrap(`
+      projection AllOrders {
+        status: OrderStatus
+        from Order as o ignoring softDeletable
+        select status = o.status
+      }
+    `);
+    const { model } = await parseString(src);
+    const proj = model.members
+      .find(isBoundedContext)!
+      .members.filter(isProjection)
+      .find((p) => p.name === "AllOrders")!;
+    const printed = printStructural(proj);
+    expect(printed).toContain("from Order as o");
+    expect(printed).toContain("ignoring softDeletable");
+    // The reparse of the printed source is clean (no drift).
+    const { errors } = await parseString(wrap(printed));
+    expect(errors).toEqual([]);
+  });
+
   it("still parses today's folded projection (no query clauses) unchanged", async () => {
     const { errors } = await parseString(
       wrap(`

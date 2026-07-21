@@ -2784,6 +2784,8 @@ export function isPrimitiveType(item: unknown): item is PrimitiveType {
 export interface Projection extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Projection';
+    bypass: Array<string>;
+    bypassAll: boolean;
     filter?: Expression;
     joins: Array<ProjectionJoin>;
     key?: LooseName;
@@ -2797,6 +2799,8 @@ export interface Projection extends langium.AstNode {
 
 export const Projection = {
     $type: 'Projection',
+    bypass: 'bypass',
+    bypassAll: 'bypassAll',
     filter: 'filter',
     joins: 'joins',
     key: 'key',
@@ -6428,6 +6432,16 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Projection: {
             name: Projection.$type,
             properties: {
+                bypass: {
+                    name: Projection.bypass,
+                    defaultValue: [],
+                    optional: true
+                },
+                bypassAll: {
+                    name: Projection.bypassAll,
+                    defaultValue: false,
+                    optional: true
+                },
                 filter: {
                     name: Projection.filter,
                     optional: true

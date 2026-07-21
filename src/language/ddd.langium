@@ -1464,7 +1464,10 @@ ProjectionMember:
 // NO query clause is today's folded read model (Property + `on(e)` folds
 // only).  `from`/`join`/`select` lead each clause; `join`/`select` stay SOFT
 // keywords (CommonSoftKeywords) so a field / value named `join` / `select`
-// keeps parsing.
+// keeps parsing.  `ignoring */A, …` (the shared `IgnoringClause`) bypasses the
+// SOURCE aggregate's capability query-filters for this read — the same
+// filter-bypass a repository `find … ignoring` carries (named-filter-bypass.md
+// §11), sits in the `where` position so it reads `where … ignoring …`.
 //
 // NOTE: the `order by` ordering clause (and its `loom.projection-paged-sort-
 // not-columnar` gate) lands WITH the per-backend query-time emit (PR-C):
@@ -1474,6 +1477,7 @@ ProjectionMember:
 fragment ProjectionQueryClauses:
     ('from' source=[Aggregate:ID] ('as' sourceAlias=ID)?)?
     ('where' filter=Expression)?
+    IgnoringClause?
     (joins+=ProjectionJoin)*
     ('select' selects+=ProjectionSelect (',' selects+=ProjectionSelect)*)?;
 

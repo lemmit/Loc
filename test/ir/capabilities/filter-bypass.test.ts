@@ -229,3 +229,99 @@ describe("ignoring filter-bypass validator gates", () => {
     expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unknown-capability"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Query-time projection `ignoring` — the projection twin of a repository
+// `find … ignoring` (the synthesised source find carries the same bypass, so
+// the three gates apply to a projection read identically).
+// ---------------------------------------------------------------------------
+
+/** The lowered query on the named projection. */
+function projectionQueryInModel(
+  ir: {
+    systems: {
+      subdomains: {
+        contexts: {
+          projections: { name: string; query?: { bypassAll?: boolean; bypassCaps?: string[] } }[];
+        }[];
+      }[];
+    }[];
+  },
+  name: string,
+): { bypassAll?: boolean; bypassCaps?: string[] } {
+  for (const s of ir.systems)
+    for (const m of s.subdomains)
+      for (const c of m.contexts)
+        for (const p of c.projections) if (p.name === name && p.query) return p.query;
+  throw new Error(`projection query ${name} not found`);
+}
+
+describe("projection `ignoring` filter-bypass", () => {
+  const PROJ_SRC = `
+    system S {
+      capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
+      subdomain D { context C {
+        aggregate Order with softDeletable { status: string }
+        repository Orders for Order { }
+        projection AllOrders { status: string  from Order as o ignoring softDeletable select status = o.status }
+        projection PurgedOrders { status: string  from Order as o ignoring * select status = o.status }
+        projection LiveOrders { status: string  from Order as o where o.status == "open" select status = o.status }
+      }}
+    }
+  `;
+
+  it("resolves `ignoring <Cap>` / `ignoring *` onto ProjectionQueryIR", async () => {
+    const ir = await buildLoomModel(PROJ_SRC);
+    const all = projectionQueryInModel(ir, "AllOrders");
+    expect(all.bypassCaps).toEqual(["softDeletable"]);
+    expect(all.bypassAll).toBeUndefined();
+
+    const purged = projectionQueryInModel(ir, "PurgedOrders");
+    expect(purged.bypassAll).toBe(true);
+    expect(purged.bypassCaps).toBeUndefined();
+
+    const live = projectionQueryInModel(ir, "LiveOrders");
+    expect(live.bypassAll).toBeUndefined();
+    expect(live.bypassCaps).toBeUndefined();
+  });
+
+  const projSystemWith = (projBody: string, platform = "node") => `
+    system S {
+      capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
+      capability auditable { createdAt: datetime  stamp onCreate { createdAt := now() } }
+      subdomain D { context C {
+        aggregate Order with softDeletable, auditable { status: string }
+        repository Orders for Order { }
+        ${projBody}
+      }}
+      ${deployable(platform)}
+    }
+  `;
+
+  it("accepts a valid projection bypass on a node deployable", async () => {
+    const diags = await bypassDiags(
+      projSystemWith(
+        `projection AllOrders { status: string  from Order as o ignoring softDeletable select status = o.status }`,
+      ),
+    );
+    expect(diags).toEqual([]);
+  });
+
+  it("loom.filter-bypass-unknown-capability — projection ignores an unimplemented cap", async () => {
+    const diags = await bypassDiags(
+      projSystemWith(
+        `projection P { status: string  from Order as o ignoring tenantScoped select status = o.status }`,
+      ),
+    );
+    expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unknown-capability"]);
+  });
+
+  it("loom.filter-bypass-no-filter — projection ignores a stamps-only cap", async () => {
+    const diags = await bypassDiags(
+      projSystemWith(
+        `projection P { status: string  from Order as o ignoring auditable select status = o.status }`,
+      ),
+    );
+    expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-no-filter"]);
+  });
+});

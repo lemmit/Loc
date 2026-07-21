@@ -31,6 +31,7 @@ import type {
   StmtIR,
 } from "../types/loom-ir.js";
 import { joinRefPath, mapVarForPath } from "./id-follow.js";
+import { resolveBypass } from "./lower-capabilities.js";
 import { criterionRefOf, inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
 import { lowerStatement } from "./lower-stmt.js";
@@ -114,7 +115,7 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
     type: inferExprType(s.expr, scope),
   }));
 
-  const query: ProjectionQueryIR = { joins, auxiliaries };
+  const query: ProjectionQueryIR = { joins, auxiliaries, ...resolveBypass(p) };
   if (sourceName) query.source = sourceName;
   if (p.sourceAlias) query.sourceAlias = p.sourceAlias;
   if (p.filter) {

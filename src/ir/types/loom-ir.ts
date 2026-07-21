@@ -1469,6 +1469,15 @@ export interface ProjectionQueryIR {
    *  built for by-id follows, populated by reading the
    *  DECLARED `join`s. */
   auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
+  /** `ignoring *` — bypass EVERY capability query-filter on the source
+   *  aggregate for this query-time read (named-filter-bypass.md §11).  Mutually
+   *  exclusive with `bypassCaps`.  Threaded into the synthesised source
+   *  `FindIR`, so it rides the same bypass path as a repository `find … ignoring`.
+   *  See `FindIR.bypassAll`. */
+  bypassAll?: boolean;
+  /** `ignoring A, B` — resolved capability names whose filters this read
+   *  bypasses (named-filter-bypass.md §11).  See `FindIR.bypassCaps`. */
+  bypassCaps?: string[];
 }
 
 /** One `join <Aggregate> as <alias> on <idRef>` follow. */
