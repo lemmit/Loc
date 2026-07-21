@@ -75,7 +75,7 @@ export function buildPyQueryProjectionsFile(
   const routeBlocks = projections.map((p) =>
     isWorkflowSourced(p) || isProjectionSourced(p)
       ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
-      : projectionRoute(p, dispatcherExpr),
+      : projectionRoute(p, dispatcherExpr, ctx),
   );
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routeBlocks.join("\n\n\n")}`;
 
@@ -167,9 +167,21 @@ function projectionRowModels(proj: ProjectionIR, ctx: EnrichedBoundedContextIR):
 }
 
 /** `GET /projections/<name>`: source rows via the synthesised repo find,
- *  bulk-load each `join` follow, then project each row through `select`. */
-function projectionRoute(proj: ProjectionIR, dispatcherExpr: string): string {
+ *  bulk-load each `join` follow, then project each row through `select`.
+ *
+ *  Shorthand form (`from <Agg> where …`, no declared fields / no `select`): the
+ *  enriched `wireShape` already equals the source aggregate's full wire shape, so
+ *  each row is just the aggregate's OWN domain→wire serialization — `repo.to_wire(r)`
+ *  — exactly what the aggregate's findAll route returns per row. No per-`select`
+ *  projection dict is built. */
+function projectionRoute(
+  proj: ProjectionIR,
+  dispatcherExpr: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const source = proj.query!.source!;
+  const isShorthand =
+    (proj.query!.selects?.length ?? 0) === 0 && !!ctx.aggregates.find((a) => a.name === source);
   const fn = snake(proj.name);
   // A `requires` gate (default-deny) — or a currentUser-scoped where/select —
   // binds the request principal off the request scope; a failing gate raises
@@ -216,6 +228,13 @@ function projectionRoute(proj: ProjectionIR, dispatcherExpr: string): string {
     );
     if (join)
       aliasMap.set(join.alias, { mapVar, idRow: renderPyExpr(join.idRef, { thisName: "r" }) });
+  }
+  if (isShorthand) {
+    // No declared fields / no `select`: each row is the source aggregate's own
+    // domain→wire serialization, which equals `<Proj>Row` (same field
+    // names/order/types, since `wireShape` was enriched to the aggregate's).
+    out.push("    return [repo.to_wire(r) for r in rows]");
+    return out.join("\n");
   }
   out.push("    return [");
   out.push("        {");

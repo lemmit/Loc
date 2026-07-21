@@ -338,3 +338,42 @@ projection PurgeAudit {
 ```
 
 The bypass is visible in generated code only when a capability actually contributes a filter to that aggregate; with no `filter` capability installed there is nothing to suppress and the clause is a no-op. See [`../capabilities.md`](../capabilities.md) for the `filter` capability that produces these query-layer predicates.
+
+## Shorthand projection — the `select`-less form
+
+A query-time projection may omit **both** its declared row fields **and** the `select` clause. The row shape is then the **source aggregate's own full wire shape**, and the read returns each filtered source row serialized through the aggregate's own domain→wire mapper — the exact serialization its `findAll` route uses. This is the read-model shorthand: a filtered, capability-scoped view over an aggregate with no field remapping, and the replacement for the removed `view X = A where P` form.
+
+```ddd
+// Full-select form: an explicit row shape reprojected field-by-field.
+projection ActiveOrdersVerbose {
+  id: Order id  status: string
+  from Order as o where o.status == "active"
+  select id = o.id, status = o.status
+}
+
+// Shorthand: no fields, no select — the row IS Order's wire shape.
+projection ActiveOrders {
+  from Order as o where o.status == "active"
+}
+```
+
+The shorthand `ActiveOrders` exposes `GET /projections/active_orders` returning the same `Order` wire rows the aggregate's own list route emits, filtered to `status == "active"`:
+
+```ts
+// api/http/query-projections.ts (Hono)
+const ActiveOrdersRow = z.object({
+  id: z.string(),
+  total: z.number().int(),
+  status: z.string(),
+  version: z.number().int(),
+}).openapi("ActiveOrdersRow");            // ← Order's full wire shape, derived
+
+// … route handler …
+const repo = new OrderRepository(db, events);
+const rows = await repo.activeOrders();   // synthesised source find + `where`
+const projected = rows.map((r) => repo.toWire(r));   // the aggregate's own mapper
+```
+
+All five backends emit the same shape — `.NET` `domain.Select(d => new ActiveOrdersRow(d.Id.Value, d.Total, d.Status, d.Version))`, Java `.map(a -> new ActiveOrdersRow(a.id().value(), …))`, Python `[repo.to_wire(r) for r in rows]`, Elixir `Enum.map(rows, &serialize/1)` — each reusing that backend's aggregate wire serializer, so a shorthand projection row is byte-identical to the aggregate's own read.
+
+**Aggregate source only.** The shorthand form is supported for a `from <Aggregate>` source. A `select`-less projection over a `from <Workflow>` or `from <Projection>` source is rejected (`loom.projection-shorthand-nonaggregate`) — those sources have no aggregate wire shape to inherit, so they still require an explicit `select`. A projection that declares row fields but omits the `select` to fill them is a different error (`loom.projection-fields-without-select`) — that is a half-written projection, not the shorthand.

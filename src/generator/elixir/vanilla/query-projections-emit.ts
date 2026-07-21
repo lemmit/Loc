@@ -46,6 +46,8 @@ import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import { hasRefColls, preloadSuffix } from "./ref-collection-emit.js";
+import { renderWireSerialize } from "./wire-serialize.js";
 
 /** One project-wide query-time projection, paired with its owning context. */
 export interface VanillaQueryProjectionRef {
@@ -79,6 +81,7 @@ export function emitVanillaQueryProjectionModules(
       appModule,
       contextModule,
       typesModule,
+      ctx,
       aggsByName,
       wfsByName,
       projsByName,
@@ -98,6 +101,7 @@ function renderQueryProjectionModule(
   appModule: string,
   contextModule: string,
   typesModule: string,
+  ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
   wfsByName: Map<string, WorkflowIR>,
   projsByName: Map<string, ProjectionIR>,
@@ -119,6 +123,18 @@ function renderQueryProjectionModule(
       ? projectionRowModule(contextModule, srcProj)
       : `${contextModule}.${upperFirst(source)}`;
   const sourceAgg = wf || srcProj ? undefined : aggsByName.get(source);
+
+  // SHORTHAND projection (`projection P { from <Agg> as a where … }` — no
+  // declared fields, no `select`): the enriched `<Proj>Row` shape equals the
+  // SOURCE AGGREGATE's full wire shape, so each row must be that aggregate's own
+  // domain→wire serialization (exactly what its findAll returns per record) —
+  // NOT an empty select-projected map.  Detected only for an aggregate source
+  // (workflow/projection sources always carry selects).  Falls back to the
+  // existing select-projection path when the source aggregate can't be resolved.
+  const isShorthand =
+    sourceAgg !== undefined &&
+    (query.sourceKind === undefined || query.sourceKind === "aggregate") &&
+    (query.selects?.length ?? 0) === 0;
 
   // In-memory projection context (enum → declared atom); the `where` below uses
   // a `filterArgs` clone (enum → dumped declared string — Ecto won't cast an
@@ -150,6 +166,11 @@ function renderQueryProjectionModule(
   const filter = query.filter ? renderExpr(query.filter, queryCtx) : null;
   const where = combineWhere(filter, cap);
 
+  // A shorthand row is the source aggregate's own wire serialization, so any
+  // reference-collection relationships must be preloaded on the source read (the
+  // aggregate's own findAll preloads them too) for `__ref_ids/1` to project ids.
+  const preload = isShorthand && sourceAgg ? preloadSuffix(sourceAgg).trim() : "";
+
   const lines: string[] = [];
   lines.push(principal ? "" : "    _ = current_user");
   lines.push("    rows =");
@@ -159,6 +180,7 @@ function renderQueryProjectionModule(
   } else {
     lines.push(`      Repo.all(${sourceMod})`);
   }
+  if (preload) lines.push(`      ${preload}`);
 
   // Each `join <Agg> as a on <idRef>` → a batched id→struct map.  The alias `a`
   // is bound to `{ mapVar, idRow }` so a `select … = a.field` reads through it.
@@ -180,15 +202,36 @@ function renderQueryProjectionModule(
     if (join) aliasMap.set(join.alias, { mapVar, idRow });
   }
 
-  const selects = query.selects ?? [];
-  lines.push(`    Enum.map(rows, fn record ->`);
-  lines.push(`      %{`);
-  selects.forEach((s, i) => {
-    const tail = i === selects.length - 1 ? "" : ",";
-    lines.push(`        ${s.field}: ${renderSelectEcto(s.expr, aliasMap, renderCtx)}${tail}`);
-  });
-  lines.push(`      }`);
-  lines.push(`    end)`);
+  // Shorthand: reuse the aggregate's OWN wireShape-driven `serialize/1` (+ its
+  // nested part/VO helpers, and `__ref_ids/1` when the aggregate has reference
+  // collections) so each row == the aggregate wire shape (id / props / derived /
+  // version), byte-identical to what its findAll returns.  Emitted as private
+  // functions on this module and mapped over the source rows.
+  let projectionHelpers = "";
+  if (isShorthand && sourceAgg) {
+    lines.push(`    Enum.map(rows, &serialize/1)`);
+    const wire = renderWireSerialize(sourceAgg, ctx, { contextModule });
+    const refIds = hasRefColls(sourceAgg)
+      ? `
+
+  defp __ref_ids(%Ecto.Association.NotLoaded{}), do: []
+  defp __ref_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
+  defp __ref_ids(_), do: []`
+      : "";
+    projectionHelpers = `\n\n${wire.serialize}${
+      wire.helpers.length > 0 ? `\n\n${wire.helpers.join("\n\n")}` : ""
+    }${refIds}`;
+  } else {
+    const selects = query.selects ?? [];
+    lines.push(`    Enum.map(rows, fn record ->`);
+    lines.push(`      %{`);
+    selects.forEach((s, i) => {
+      const tail = i === selects.length - 1 ? "" : ",";
+      lines.push(`        ${s.field}: ${renderSelectEcto(s.expr, aliasMap, renderCtx)}${tail}`);
+    });
+    lines.push(`      }`);
+    lines.push(`    end)`);
+  }
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -207,7 +250,7 @@ defmodule ${moduleName} do
   @spec run(any()) :: [map()]
   def run(current_user \\\\ nil) do
 ${lines.filter((l) => l !== "").join("\n")}
-  end
+  end${projectionHelpers}
 end
 `;
 }

@@ -244,10 +244,17 @@ function emitQueryProjectionRoute(
         idRow: renderTsExpr(join.idRef, { thisName: "r" }),
       });
   }
-  const projectedFields = (p.query!.selects ?? [])
-    .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
-    .join(",\n");
-  out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+  if ((p.query!.selects?.length ?? 0) === 0) {
+    // SHORTHAND (no `select`): the row IS the source aggregate's wire shape, so
+    // serialise each source row through the repository's `toWire` (the same
+    // projection the aggregate's own read routes use) — no per-field mapping.
+    out.push(`    const projected = rows.map((r) => repo.toWire(r));`);
+  } else {
+    const projectedFields = (p.query!.selects ?? [])
+      .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
+      .join(",\n");
+    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+  }
   out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
   out.push(`  },`);
   out.push(`);`);
