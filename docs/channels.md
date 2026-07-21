@@ -213,8 +213,17 @@ structural half.
 - **Topic/queue ACLs beyond v1** — rabbit permissions are name-scoped per
   deployable; kafka topic ACLs and redis per-service ACLs are deferred.
 - **Browser delivery** (M-T1.10) — the edge relay / room topology consumes
-  the same `ChannelTransport` seam but is a separate mission; realtime SSE v1
-  remains Hono-only.
+  the same `ChannelTransport` seam but is a separate mission; realtime SSE now
+  ships on node/dotnet/java/python (`backendServesRealtime()`,
+  `src/ir/util/channels.ts:14`), plus native LiveView PubSub on elixir
+  (`src/generator/elixir/realtime-liveview.ts`), consumed by the
+  react/vue/svelte/angular/feliz frontends. Remaining gaps: **tenant rooms are
+  node-only** — dotnet/java/python broadcast every carried event to every
+  connected browser regardless of tenant scope (gated by the
+  `loom.realtime-tenant-broadcast` warning, `system-checks.ts:773`), so
+  tenant-scoped payloads cross the tenant boundary on the wire on those three
+  backends; and Flutter has no realtime consumer yet (warned via
+  `loom.ui-realtime-unsupported`).
 - **Elixir/java saga `last_event_id` dedup residual** — the column exists in
   migrations but hosted-durable consumer dedup is wired only on
   node/python/dotnet; elixir and java rely on broker ack semantics +
