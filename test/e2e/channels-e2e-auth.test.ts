@@ -287,6 +287,36 @@ describe.skipIf(!ENABLED)("broker auth e2e — all three brokers authed (M-T4.4 
     boot("ship_api", SHIP_PORT, "ship_api");
     await waitFor(ready(SALES_PORT), 120_000, "salesApi /ready");
     await waitFor(ready(SHIP_PORT), 120_000, "shipApi /ready");
+
+    // /ready precedes the consumers actually being attached, and all three
+    // transports drop (redis, rabbit fanout with no bound queue) or skip
+    // (kafka `latest` offsets) records published before attachment — so
+    // gate on each broker's own view of its consumers before the test
+    // fires.  The loopback control surfaces need no credentials.
+    await waitFor(
+      async () =>
+        sh(
+          `docker exec loom-channels-auth-valkey valkey-cli -a ${requirepass} pubsub channels`,
+        ).includes("loom.Orders.Lifecycle"),
+      60_000,
+      "redis subscriber attached",
+    );
+    await waitFor(
+      async () =>
+        sh(`docker exec loom-channels-auth-mq rabbitmqctl list_consumers -p loom --quiet`).includes(
+          "loom.Orders.Handoff.shipApi",
+        ),
+      60_000,
+      "rabbit consumer attached to the group queue",
+    );
+    await waitFor(
+      async () =>
+        sh(
+          `docker exec loom-channels-auth-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9094 --describe --group loom.Orders.Archive.shipApi --members`,
+        ).includes("loom-channels"),
+      60_000,
+      "kafka group member joined",
+    );
   }, 900_000);
 
   const killGroup = (app: ChildProcess, signal: NodeJS.Signals): void => {
