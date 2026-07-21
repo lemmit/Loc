@@ -45,6 +45,7 @@ export function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBou
     projections: contexts.flatMap((c) => c.projections ?? []),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
+    tests: contexts.flatMap((c) => c.tests ?? []),
     eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
     // Application-layer explicit handlers (unfoldable-api-derivation.md) — a
     // plain union, so a merged-context consumer (e.g. the .NET Program.cs extern

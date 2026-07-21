@@ -1,13 +1,27 @@
 // Auto-generated.  Do not edit by hand.
 // Loom form runtime — the Vue analogue of the React packs'
-// react-hook-form + zodResolver stack, hand-rolled per
-// D-VUE-FRONTEND: a reactive() form object, zod parse on submit, and
-// a per-field error map the generated field inputs bind to.
+// react-hook-form + zodResolver stack (D-VUE-FRONTEND).  Built on
+// vee-validate's `useForm` for validation + submit orchestration; the
+// wire schema is the SAME shared zod request schema the api module
+// exports, adapted to vee-validate's `TypedSchema` contract by the
+// local `toTypedSchema` below.
+//
+// NB: the adapter is emitted inline rather than pulled from
+// `@vee-validate/zod` because that package's peer range pins zod 3
+// (`zod@^3.24.0`), while the generated stack is zod 4 — so a plain
+// `npm install` would ERESOLVE.  vee-validate core carries no zod peer,
+// and the `TypedSchema` contract is tiny + stable, so wrapping the zod
+// schema here keeps the dependency graph clean.
 import { reactive } from "vue";
+import { type TypedSchema, useForm } from "vee-validate";
 import type { z } from "zod";
 
 export interface LoomForm<T extends Record<string, unknown>> {
-  /** Reactive form values — field inputs bind `v-model="form.values.x"`. */
+  /** Reactive form values — field inputs bind `v-model="form.values.x"`.
+   *  Held locally (not vee-validate's internal `values`, which is not
+   *  meant to be mutated directly) so array push/splice + nested
+   *  `v-model` writes the pack templates emit keep working; the current
+   *  snapshot is pushed into vee-validate on each submit. */
   values: T;
   /** Per-field error messages keyed by dot-path; `__global` carries
    *  whole-form failures (server rejections that don't map to a
@@ -15,14 +29,34 @@ export interface LoomForm<T extends Record<string, unknown>> {
   errors: Record<string, string | undefined>;
   /** True while an async submit handler is in flight. */
   submitting: boolean;
-  /** Build a form `@submit.prevent` handler: clears errors, zod-
-   *  parses `values`, maps issues onto `errors`, and only then runs
-   *  the supplied handler with the PARSED data.  A handler throw is
-   *  captured as a server error (field map when the error carries a
-   *  ProblemDetails-style `errors` record, `__global` otherwise). */
+  /** Build a form `@submit.prevent` handler: pushes the current values
+   *  into vee-validate, validates against the typed schema (populating
+   *  `errors`), and only then runs the supplied handler with the PARSED
+   *  data.  A handler throw is captured as a server error (field map
+   *  when the error carries a ProblemDetails-style `errors` record,
+   *  `__global` otherwise). */
   handleSubmit(handler: (vals: T) => Promise<void> | void): (e?: Event) => Promise<void>;
   setError(path: string, message: string): void;
   clearErrors(): void;
+}
+
+/** Adapt a zod schema to vee-validate's `TypedSchema` contract — the
+ *  local stand-in for `@vee-validate/zod`'s `toTypedSchema` (see the
+ *  header note on the zod-4 peer mismatch). */
+function toTypedSchema<T>(schema: z.ZodType<T>): TypedSchema<Record<string, unknown>, T> {
+  return {
+    __type: "VVTypedSchema",
+    async parse(values) {
+      const result = await schema.safeParseAsync(values);
+      if (result.success) return { value: result.data, errors: [] };
+      return {
+        errors: result.error.issues.map((issue) => ({
+          path: issue.path.join(".") || undefined,
+          errors: [issue.message],
+        })),
+      };
+    },
+  };
 }
 
 export function useLoomForm<T extends Record<string, unknown>>(
@@ -34,36 +68,41 @@ export function useLoomForm<T extends Record<string, unknown>>(
   initialValues: Record<string, unknown>,
 ): LoomForm<T> {
   const values = reactive(initialValues) as T;
-  const errors = reactive<Record<string, string | undefined>>({});
-  const state = reactive({ submitting: false });
+  const form = useForm({
+    validationSchema: toTypedSchema(schema),
+    initialValues: initialValues as Record<string, unknown>,
+  });
+
+  // `form.errors` is a ComputedRef keyed by dot-path (only errored
+  // fields present).  Expose it as a plain lookup so the pack markup's
+  // `form.errors["x"]` reads track the underlying ref reactively.
+  const errors = new Proxy({} as Record<string, string | undefined>, {
+    get: (_target, key: string | symbol): string | undefined =>
+      typeof key === "string" ? form.errors.value[key] : undefined,
+  });
 
   function clearErrors(): void {
-    for (const k of Object.keys(errors)) errors[k] = undefined;
+    form.setErrors({});
   }
   function setError(path: string, message: string): void {
-    errors[path] = message;
+    form.setFieldError(path, message);
   }
 
   function handleSubmit(handler: (vals: T) => Promise<void> | void) {
-    return async (e?: Event): Promise<void> => {
-      e?.preventDefault();
-      clearErrors();
-      const parsed = schema.safeParse(values);
-      if (!parsed.success) {
-        for (const issue of parsed.error.issues) {
-          const path = issue.path.join(".") || "__global";
-          if (errors[path] === undefined) errors[path] = issue.message;
-        }
-        return;
-      }
-      state.submitting = true;
+    const run = form.handleSubmit(async (vals) => {
       try {
-        await handler(parsed.data);
+        await handler(vals as T);
       } catch (err) {
         applyServerError(err, setError);
-      } finally {
-        state.submitting = false;
       }
+    });
+    return async (e?: Event): Promise<void> => {
+      e?.preventDefault();
+      // Feed the locally-held draft into vee-validate, then validate +
+      // dispatch through its submit runner (which short-circuits when
+      // invalid, leaving `errors` populated).
+      form.setValues(values as Record<string, unknown>, false);
+      await run(e);
     };
   }
 
@@ -71,7 +110,7 @@ export function useLoomForm<T extends Record<string, unknown>>(
     values,
     errors,
     get submitting() {
-      return state.submitting;
+      return form.isSubmitting.value;
     },
     handleSubmit,
     setError,

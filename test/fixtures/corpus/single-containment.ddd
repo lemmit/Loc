@@ -9,6 +9,18 @@ system SC {
         operation ship(carrier: string, tracking: string) {
           shipment := Shipment { carrier: carrier, trackingCode: tracking }
         }
+
+        // Pure-domain (unit) test — a SINGLE (non-collection) containment set
+        // through an op and read back off the domain object.  A single
+        // containment is `T | null` on the domain object (unset at create, set
+        // by `ship`), so the read exercises the emitters' null-safe field access
+        // (TS `!`, Python `cast`); the elixir/java/dotnet reads are already safe.
+        test "ship folds the single containment, read back through the struct" {
+          let o = Order.create({ code: "SC1" })
+          o.ship("UPS", "1Z999")
+          expect(o.shipment.carrier).toBe("UPS")
+          expect(o.shipment.trackingCode).toBe("1Z999")
+        }
       }
       repository Orders for Order { }
     }

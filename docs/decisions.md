@@ -1824,7 +1824,7 @@ surface excludes `svelte` until that lands.  The in-browser playground
 preview is likewise deferred (Svelte compiler in the VFS bundler).
 
 See `docs/old/plans/svelte-frontend-plan.md` for the slice history.
-## D-VUE-FRONTEND — reuse the shared walker, Vite+vue-router SPA, hand-rolled forms
+## D-VUE-FRONTEND — reuse the shared walker, Vite+vue-router SPA, vee-validate forms
 
 `platform: vue` (Phase B of the platform-expansion roadmap;
 `docs/old/plans/vue-frontend-plan.md`) ships as the third frontend with
@@ -1843,10 +1843,18 @@ three locked choices:
    route table in `src/router.ts`, `<script setup lang="ts">` SFC
    pages, the same two-stage vite-build/vite-preview docker runtime
    as React.  No Nuxt.
-3. **Hand-rolled `reactive()`+zod forms** (`src/lib/form.ts` —
-   `useLoomForm`): draft values, zod parse on submit, per-field error
-   map, ProblemDetails-style server-error application.  No
-   third-party form dependency — one validation story across packs.
+3. **vee-validate forms** (`src/lib/form.ts` — `useLoomForm`): the Vue
+   analog of the React packs' react-hook-form.  `useForm` drives
+   validation + submit over the SAME shared zod request schema, adapted
+   by a locally-emitted `toTypedSchema` (`@vee-validate/zod` is NOT a
+   dep — its peer pins zod 3 while the stack is zod 4, so a plain
+   `npm install` would ERESOLVE; vee-validate core carries no zod
+   peer).  `values` stays a local `reactive()` draft (so pack markup's
+   `v-model` + array push/splice keep working) and is pushed into
+   vee-validate on submit; per-field error map + ProblemDetails-style
+   server-error application preserved.  The `useLoomForm` seam keeps
+   the same surface, so pack markup + testids are unchanged across
+   packs.
 
 Packs: `vuetify@v3` (npm-package model, the default) and
 `shadcnVue@v1` (source-copy: reka-ui + Tailwind 4 + a components-ui

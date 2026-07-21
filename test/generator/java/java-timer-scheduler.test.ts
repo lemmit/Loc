@@ -1,12 +1,13 @@
-// timerSource → Java/Spring scheduler emission (scheduling.md, M-T4.1).
+// timerSource → Java/Spring scheduler emission (scheduling.md, M-T4.1 + Phase 2).
 //
 // The Java sibling of test/platform/hono-timer-scheduler.test.ts, pinned at the
 // lowest catching altitude: pure in-memory `generateSystems` (no docker, no
-// gradle, no LOOM_* env). Asserts the emitted `TimerScheduler.java` shape
-// (transaction-scoped advisory-lock single-fire, dispatch through Spring's
-// ApplicationEventPublisher, @Scheduled cron→6-field vs fixedRate per cadence,
-// the tick construction, @EnableScheduling) — and that a timer-free java
-// deployable is byte-identical (no scheduler artifacts at all).
+// gradle, no LOOM_* env). Asserts that `cron:` timers run on JobRunr (a job bean
+// + JobRunrConfig wiring the core: SQL storage + background server + Spring
+// activator + scheduleRecurrently with the standard cron verbatim), `every:`
+// timers keep the in-process `@Scheduled(fixedRate)` + advisory lock in
+// TimerScheduler.java, the JobRunr gradle dep — and that a timer-free java
+// deployable is byte-identical.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -48,44 +49,57 @@ system Plain {
 }
 `;
 
-describe("timerSource → Java scheduler", () => {
-  it("emits TimerScheduler.java with single-fire, dispatch, and per-cadence @Scheduled", async () => {
+const get =
+  (files: Map<string, string>) =>
+  (suffix: string): string =>
+    [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";
+
+describe("timerSource → Java durable scheduler", () => {
+  it("runs cron: on a JobRunr job bean + JobRunrConfig", async () => {
     const { model, errors } = await parseString(WITH_TIMERS);
     expect(errors).toEqual([]);
-    const files = generateSystems(model).files;
-    const get = (suffix: string): string =>
-      [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";
+    const g = get(generateSystems(model).files);
 
-    const scheduler = get("d/src/main/java/com/loom/d/TimerScheduler.java");
+    // cron: → a JobRunr job bean (no advisory lock — JobRunr owns single-fire;
+    // rethrows so JobRunr's automatic retry engages).
+    const job = g("d/src/main/java/com/loom/d/SweepTimerJob.java");
+    expect(job).not.toBe("");
+    expect(job).toContain("public class SweepTimerJob");
+    expect(job).toContain("public void execute()");
+    expect(job).toContain("events.publishEvent(new SweepTick(SweepId.newId(), Instant.now()))");
+    expect(job).toContain("throw err; // let JobRunr's automatic retry engage");
+    expect(job).not.toContain("pg_try_advisory_xact_lock");
+
+    // JobRunrConfig wires the core (no SB starter): SQL storage + background
+    // server + Spring activator + a recurring job with the STANDARD cron verbatim.
+    const cfg = g("d/src/main/java/com/loom/d/config/JobRunrConfig.java");
+    expect(cfg).not.toBe("");
+    expect(cfg).toContain("JobRunr.configure()");
+    expect(cfg).toContain(".useJobActivator(ctx::getBean)");
+    expect(cfg).toContain(".useBackgroundJobServer()");
+    expect(cfg).toContain("SqlStorageProviderFactory.using(dataSource)");
+    expect(cfg).toContain(
+      'scheduler.<SweepTimerJob>scheduleRecurrently("timerSweep", "*/5 * * * *", SweepTimerJob::execute);',
+    );
+
+    // JobRunr core dep, gated on the owned cron timer.
+    expect(g("d/build.gradle.kts")).toContain('implementation("org.jobrunr:jobrunr:');
+  });
+
+  it("keeps every: timers in-process (@Scheduled + advisory lock), not JobRunr", async () => {
+    const { model } = await parseString(WITH_TIMERS);
+    const g = get(generateSystems(model).files);
+
+    const scheduler = g("d/src/main/java/com/loom/d/TimerScheduler.java");
     expect(scheduler).not.toBe("");
-    // @Component enabled via @EnableScheduling (no other file changes).
-    expect(scheduler).toContain("@Component");
     expect(scheduler).toContain("@EnableScheduling");
-    // Single-fire via a TRANSACTION-SCOPED advisory lock (auto-released on tx
-    // commit — a plain session lock + pool would leak the unlock onto a
-    // different connection). Keyed per timer, same FNV-1a derivation as Hono.
-    expect(scheduler).toContain("pg_try_advisory_xact_lock");
-    expect(scheduler).toContain("tx.executeWithoutResult");
-    expect(scheduler).toContain("static int timerLockKey");
-    expect(scheduler).toContain("h = 0x811c9dc5");
-    // No manual session-lock unlock (the tx commit releases it).
-    expect(scheduler).not.toContain("pg_advisory_unlock");
-    // Dispatches through Spring's in-process publisher, inside the lock tx.
-    expect(scheduler).toContain("events.publishEvent(build.get())");
-    // Catalog obs events (cross-backend parity).
-    expect(scheduler).toContain('CatalogLog.event("timer_fired"');
-    expect(scheduler).toContain('CatalogLog.event("timer_lock_contended"');
-    expect(scheduler).toContain('CatalogLog.event("timer_skipped_overlap"');
-    // The failure path wraps across lines — assert the event token + call.
-    expect(scheduler).toContain('"timer_emit_failed"');
-    expect(scheduler).toContain("String.valueOf(err.getMessage())");
-    // cron: → 5-field lifted to Spring's 6-field (prepended seconds);
-    // every: → fixedRate in ms.
-    expect(scheduler).toContain('@Scheduled(cron = "0 */5 * * * *")');
     expect(scheduler).toContain("@Scheduled(fixedRate = 15000)");
-    // The tick construction: mint an id per tick, stamp the fire time.
-    expect(scheduler).toContain("new SweepTick(SweepId.newId(), Instant.now())");
+    expect(scheduler).toContain("pg_try_advisory_xact_lock");
+    expect(scheduler).toContain("static int timerLockKey");
     expect(scheduler).toContain("new HealthTick(Instant.now())");
+    // The cron timer is NOT a @Scheduled method here — it lives on JobRunr.
+    expect(scheduler).not.toContain("SweepTick");
+    expect(scheduler).not.toContain("@Scheduled(cron");
   });
 
   it("is byte-identical for a timer-free deployable (no scheduler artifacts)", async () => {
@@ -93,7 +107,8 @@ describe("timerSource → Java scheduler", () => {
     const files = generateSystems(model).files;
     const keys = [...files.keys()];
     expect(keys.some((k) => k.endsWith("TimerScheduler.java"))).toBe(false);
-    // No @EnableScheduling anywhere in the emitted java tree.
+    expect(keys.some((k) => k.endsWith("JobRunrConfig.java"))).toBe(false);
     expect([...files.values()].some((c) => c.includes("@EnableScheduling"))).toBe(false);
+    expect(get(files)("d/build.gradle.kts")).not.toContain("jobrunr");
   });
 });

@@ -158,6 +158,46 @@ system G {
     expect(cs).toContain("defp validate_vo(changeset, field, new_fun) do");
   });
 
+  it("vanilla: exposes a derived field as a pure-core accessor + reads it in a test (B18)", async () => {
+    // A `derived` field has no Ecto struct column (the wire path computes it
+    // inline), so a domain test reading `o.isDraft` used to emit a KeyError-raising
+    // `o.is_draft`.  The pure core now exposes `def is_draft(record), do: …`, and
+    // the test routes the read to that accessor — parity with node/java/dotnet/python.
+    const SRC = `
+system Van {
+  subdomain Sales { context Selling {
+    enum Status { Draft, Placed }
+    aggregate Order {
+      status: Status
+      derived isDraft: bool = status == Status.Draft
+      operation place() { status := Status.Placed }
+      test "a fresh order is a draft" {
+        let o = Order.create({ status: Draft })
+        expect(o.isDraft).toBe(true)
+        o.place()
+        expect(o.isDraft).toBe(false)
+      }
+    }
+    repository Orders for Order { }
+  } }
+  api A from Sales
+  storage pg { type: postgres }
+  resource st { for: Selling, kind: state, use: pg }
+  deployable api { platform: elixir contexts: [Selling] dataSources: [st] serves: A port: 4000 }
+}
+`;
+    const files = await generateSystemFiles(SRC);
+    // The schema module carries the derived accessor (pure, no persistence).
+    const agg = findFile(files, /api\/lib\/api\/selling\/order\.ex$/);
+    expect(agg).toContain("def is_draft(%__MODULE__{} = record), do: record.status == :Draft");
+    // The domain test routes `o.isDraft` to the accessor, NOT a struct read.
+    const src = findFile(files, /api\/test\/selling\/order_test\.exs$/);
+    expect(src).toContain("assert Api.Selling.Order.is_draft(o) == true");
+    expect(src).toContain("assert Api.Selling.Order.is_draft(o) == false");
+    expect(src).not.toContain("o.is_draft");
+    expect(src).not.toContain("@tag :skip");
+  });
+
   it("vanilla: a shape it can't lower skips WITH the concrete reason (not a silent swallow)", async () => {
     // `toThrow` over a plain local is a shape the pure-core emitter deliberately
     // can't lower — it degrades to `@tag :skip`, but now carries the recorded

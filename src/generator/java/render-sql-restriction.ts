@@ -1,5 +1,4 @@
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import { isDenyFilter } from "../../ir/util/tenant-stance.js";
 import { snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -16,10 +15,23 @@ import { snake } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 export function renderSqlRestriction(e: ExprIR): string {
-  // DENY carve-out (authorization Phase 4 — deny-wins).  The static (no-principal)
-  // always-false restriction appended to every SELECT for a read-denied entity.
-  if (isDenyFilter(e)) return "1 = 0";
   switch (e.kind) {
+    case "authz-filter":
+      // Only the DENY carve-out (authorization Phase 4 — deny-wins) reaches the
+      // static (no-principal) restriction path: the always-false `1 = 0`
+      // appended to every SELECT for a read-denied entity.  A `scope` sentinel
+      // is principal-referencing and is routed to the `tenantScope` Specification
+      // instead, so it never lands here — the exhaustive switch throws if it did.
+      switch (e.filter.kind) {
+        case "deny":
+          return "1 = 0";
+        case "scope":
+          throw unsupported("principal-referencing `scope` filter (needs the Specification path)");
+        default: {
+          const _exhaustive: never = e.filter;
+          throw unsupported(`authz-filter kind '${(_exhaustive as { kind: string }).kind}'`);
+        }
+      }
     case "paren":
       return `(${renderSqlRestriction(e.inner)})`;
     case "unary":

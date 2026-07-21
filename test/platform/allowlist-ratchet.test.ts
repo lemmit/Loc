@@ -67,7 +67,7 @@ const REGISTERED: Ratchet[] = [
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).
-  { file: "test/e2e/corpus-java-build.test.ts", name: "JAVA_COMPILE_SKIP", kind: "record", max: 1 },
+  { file: "test/e2e/corpus-java-build.test.ts", name: "JAVA_COMPILE_SKIP", kind: "record", max: 0 },
   {
     file: "test/e2e/corpus-python-build.test.ts",
     name: "PYTHON_COMPILE_SKIP",

@@ -31,6 +31,7 @@ import type { OriginRef } from "../../../ir/types/origin.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
+import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** Event-sourced workflows in a context. */
@@ -409,6 +410,10 @@ function bodyUsesState(statements: WorkflowStmtIR[]): boolean {
 export function renderEsWorkflowHandler(
   contextModule: string,
   sub: EsSub,
+  /** Broker tee config (channels.md) — presence routes the post-append
+   *  re-publish through `<App>.Channels.dispatch/2`, so broker-carried
+   *  saga events publish instead of fanning out locally. */
+  channels?: ElixirChannelsCfg,
 ): { content: string; regions: { text: string; origin: OriginRef | undefined }[] } {
   const wf = sub.workflow;
   // contextModule is `<appModule>.<Context>`; strip the context segment for the
@@ -478,9 +483,16 @@ export function renderEsWorkflowHandler(
     `events = [${emits.join(", ")}]`,
     `:ok <- ${streamMod}.append(sid, events)`,
   ];
+  // The handler runs FROM the local Dispatcher (it exists by construction),
+  // so the re-publish is the plain dispatcher call — or the broker tee when
+  // channels are wired, so broker-carried saga events publish for remote
+  // (and co-located) consumers instead of fanning out locally.
+  const republish = channels
+    ? `Enum.each(events, fn ev -> ${elixirDispatchCall("ev", contextModule, true, channels)} end)`
+    : `Enum.each(events, &${contextModule}.Dispatcher.dispatch/1)`;
   const withBlock = [
     `      with ${withClauses.join(",\n           ")} do`,
-    `        Enum.each(events, &${contextModule}.Dispatcher.dispatch/1)`,
+    `        ${republish}`,
     `        :ok`,
     `      end`,
   ].join("\n");

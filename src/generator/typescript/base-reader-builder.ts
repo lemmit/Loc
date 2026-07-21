@@ -14,7 +14,7 @@
 // hydrateConcreteFromSharedRow.
 
 import type { EnrichedAggregateIR, EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoney } from "../../ir/types/loom-ir.js";
+import { aggregateUsesMoneyDeep } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { hydrateConcreteFromSharedRow } from "./repository-find-builder.js";
@@ -84,7 +84,6 @@ export function buildBaseReaderFile(
     `  switch (row.kind) {`,
     ...cases,
     `    default:`,
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${row.kind} is emitted into the generated source, not interpolated here
     "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
     `  }`,
     `}`,
@@ -108,7 +107,11 @@ export function buildBaseReaderFile(
       ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
       : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
   }
-  const usesMoney = concretes.some(aggregateUsesMoney);
+  // Deep check: a concrete whose only money usage is inside a value-object
+  // field still makes the base reader's hydrate emit `new Decimal(...)` (it
+  // recurses into the VO). The shallow `aggregateUsesMoney` misses that, so the
+  // import was dropped while the body used `Decimal` → TS2304.
+  const usesMoney = concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects));
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",

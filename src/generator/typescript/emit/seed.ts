@@ -201,13 +201,11 @@ function renderSeedFile(
       "}",
       "",
       "async function alreadySeeded(db: Db, dataset: string): Promise<boolean> {",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: ${dataset} is a drizzle sql-template parameter in the emitted source
       '  const r = await db.execute(sql`SELECT 1 FROM "__loom_seed" WHERE "dataset" = ${dataset}`);',
       "  return r.rows.length > 0;",
       "}",
       "",
       "async function markSeeded(db: Db, dataset: string): Promise<void> {",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: ${dataset} is a drizzle sql-template parameter in the emitted source
       '  await db.execute(sql`INSERT INTO "__loom_seed" ("dataset") VALUES (${dataset})`);',
       "}",
       "",

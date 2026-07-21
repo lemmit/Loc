@@ -12,10 +12,12 @@
 //     via Hibernate's JSON FormatMapper, swapped for a field-visibility
 //     Jackson mapper (LoomJsonFormatMapperConfig) so the
 //     package-private part classes serialize.  Reference collections
-//     on embedded aggregates stay gated
-//     (loom.java-embedded-refcoll-unsupported — Hibernate's
-//     structured-JSON path bypasses the FormatMapper for @Embeddable
-//     ids).
+//     (`X id[]`) fold into a jsonb id-array column via a per-target
+//     `AttributeConverter` (`<Target>IdJsonListConverter`) that unwraps
+//     the `List<XId>` to a plain `List<String>` so the FormatMapper
+//     serialises `["v1","v2"]` — the cross-backend id-array shape
+//     (M-T6.19; the @Embeddable-id structured-JSON path that bypassed
+//     the FormatMapper is sidestepped).
 //
 // Both boot-verified end-to-end against Postgres via
 // test/e2e/fixtures/java-build/document.ddd / embedded.ddd.
@@ -39,7 +41,9 @@ describe("java generator — shape: document", () => {
     expect(entity).not.toContain("@EmbeddedId");
     expect(files.has(`${root}/features/articles/ArticleJpaRepository.java`)).toBe(false);
     const impl = files.get(`${root}/features/articles/ArticleRepositoryImpl.java`)!;
-    expect(impl).toContain(".visibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)");
+    expect(impl).toContain(
+      ".withVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)",
+    );
     expect(impl).toContain(
       '"insert into cms.articles (id, data, version) values (?, ?::jsonb, 1) "',
     );
@@ -84,7 +88,7 @@ describe("java generator — shape: embedded", () => {
     );
   });
 
-  it("gates reference collections on embedded aggregates fail-fast", async () => {
+  it("maps embedded reference collections through a jsonb id-array converter (M-T6.19)", async () => {
     const withRefColl = EMB.replace(
       "        code: string\n",
       "        code: string\n        tagIds: Tag id[]\n",
@@ -92,11 +96,29 @@ describe("java generator — shape: embedded", () => {
       "      repository Orders for Order {",
       "      aggregate Tag with crudish { label: string }\n      repository Tags for Tag { }\n      repository Orders for Order {",
     );
+    // No longer gated — it generates and validates clean.
     const loom = await buildLoomModel(withRefColl);
     const errors = validateLoomModel(loom).filter(
       (d) => d.code === "loom.java-embedded-refcoll-unsupported",
     );
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]!.message).toContain("tagIds");
+    expect(errors).toEqual([]);
+
+    const files = await generateSystemFiles(withRefColl);
+    const root = "emb_api/src/main/java/com/loom/embapi";
+    // The `List<TagId>` field rides @Convert + @JdbcTypeCode(JSON) so the
+    // FormatMapper serialises the bare id `value`s into the jsonb column.
+    const entity = files.get(`${root}/features/orders/Order.java`)!;
+    expect(entity).toContain("@Convert(converter = TagIdJsonListConverter.class)");
+    expect(entity).toContain("@JdbcTypeCode(SqlTypes.JSON)");
+    expect(entity).toContain('@Column(name = "tag_ids", nullable = false)');
+    // The per-target converter unwraps `List<TagId>` to a plain `List<String>`
+    // (the JSON FormatMapper erases the element type on read, so String is the
+    // relational element type) and re-types each id on the way back in.
+    const conv = files.get(`${root}/domain/ids/TagIdJsonListConverter.java`)!;
+    expect(conv).toContain(
+      "public class TagIdJsonListConverter implements AttributeConverter<List<TagId>, List<String>>",
+    );
+    expect(conv).toContain("for (TagId __e : attribute) out.add(String.valueOf(__e.value()));");
+    expect(conv).toContain("out.add(new TagId(UUID.fromString(__v)));");
   });
 });

@@ -747,13 +747,14 @@ system D {
     );
   });
 
-  // The one part-collection element kind that stays gated: a by-value array of a
-  // sibling ENTITY (a plain field, not a `contains`).  This is an impossible
-  // storage shape, not a Dapper gap — an un-owned entity collection has no
-  // relational identity/ownership model, and efcore only appears to accept it
-  // (it maps `List<Entity>` as a scalar Property that EF rejects at model-build).
-  // The precise message points at the two supported alternatives.
-  it("rejects a by-value ENTITY-array part field (impossible storage shape)", async () => {
+  // Formerly the one gated part-collection element kind: a by-value array of a
+  // sibling ENTITY (`tags: Tag[]` as a plain field).  Since `contains` became
+  // optional (#2161), an entity-typed field IS a containment — `tags: Tag[]`
+  // now means `contains tags: Tag[]`, exactly the ownership form the old
+  // "impossible storage shape" gate pointed to.  It stores as a real grandchild
+  // table (owned by LineItem) that round-trips, so there is nothing to reject:
+  // the field can no longer be expressed as an un-owned by-value entity array.
+  it("emits a bare entity-array part field as an inferred nested containment", async () => {
     const src = `
 system D {
   api A from S
@@ -768,18 +769,17 @@ system D {
   } }
   storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
-    const { errors } = await emit(src);
-    // The gate fires with the sharpened message (element kind 'entity', with the
-    // `contains` / `id[]` guidance).
-    expect(
-      errors.some(
-        (e) =>
-          /persistence: dapper/.test(e) &&
-          /entity element kind 'entity'/i.test(e) &&
-          /contains tags/.test(e) &&
-          /tags: … id\[\]/.test(e),
-      ),
-    ).toBe(true);
+    const { files, errors } = await emit(src);
+    // No "impossible storage shape" gate — the inferred containment is valid.
+    expect(errors).toEqual([]);
+    // `tags: Tag[]` stores as a grandchild table owned by LineItem (line_item_id
+    // FK) — the ownership storage the old gate recommended, now applied for free.
+    const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
+    expect(schema).toMatch(/CREATE TABLE IF NOT EXISTS tags \(/);
+    expect(schema).toContain("line_item_id");
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    expect(repo).toContain("INSERT INTO tags");
+    expect(repo).toContain("FROM tags WHERE line_item_id = ANY(@ids)");
   });
 });
 
@@ -820,10 +820,12 @@ system D {
     expect(schema).toContain("data jsonb not null");
     expect(schema).toContain("version int not null");
     expect(schema).not.toContain("CREATE TABLE IF NOT EXISTS cart_lines"); // parts fold into the blob
-    // The repository (de)serialises the whole aggregate through the snapshot.
+    // The repository (de)serialises the whole aggregate through the snapshot,
+    // stamping the row's version onto it so the optimistic-concurrency CAS
+    // compares against the persisted value (PR #2095).
     const repo = files.get("api/Infrastructure/Repositories/CartRepository.cs")!;
     expect(repo).toContain(
-      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)!)",
+      "Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__d.data, __json)! with { Version = __d.version })",
     );
     expect(repo).toContain(
       "System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json)",

@@ -212,6 +212,20 @@ describe.skipIf(!ENABLED)(
         const r = await fetch(`http://127.0.0.1:${httpPort}/health`);
         expect(r.status).toBe(200);
 
+        // 5b. Prometheus scrape (M-T7.1): /metrics (Actuator + Micrometer,
+        // remapped from /actuator/prometheus) exposes the JVM/process meters
+        // + the HTTP counter/histogram recorded for the /health request,
+        // labelled by the matched route TEMPLATE.
+        const m = await fetch(`http://127.0.0.1:${httpPort}/metrics`);
+        expect(m.status).toBe(200);
+        const metricsBody = await m.text();
+        expect(metricsBody).toMatch(/jvm_memory_used_bytes/);
+        expect(metricsBody).toMatch(
+          /http_requests_total\{method="GET",route="\/health",status="200"\}/,
+        );
+        expect(metricsBody).toMatch(/http_request_duration_seconds_bucket\{/);
+        expect(metricsBody).toMatch(/http_request_duration_seconds_count\{/);
+
         // 6. Graceful shutdown → server_shutdown + server_drained.
         app.kill("SIGTERM");
         {

@@ -255,6 +255,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.obs.log import RequestContext, log, new_id, open_context, reset_context
+from app.obs.metrics import record_http_request
 
 
 class ObservabilityMiddleware:
@@ -299,23 +300,41 @@ class ObservabilityMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception:
+            duration_ms = int((time.monotonic() - started) * 1000)
             log(
                 "info",
                 "request_end",
                 method=method,
                 path=path,
                 status=500,
-                duration_ms=int((time.monotonic() - started) * 1000),
+                duration_ms=duration_ms,
             )
+            record_http_request(method, _route_template(scope, path), 500, duration_ms)
             reset_context(token)
             raise
+        duration_ms = int((time.monotonic() - started) * 1000)
         log(
             "info",
             "request_end",
             method=method,
             path=path,
             status=status_code,
-            duration_ms=int((time.monotonic() - started) * 1000),
+            duration_ms=duration_ms,
         )
+        # Record the same finished request against the Prometheus HTTP metrics
+        # — same seam as request_end.  Labelled by the matched route TEMPLATE
+        # (not the raw path) so cardinality stays bounded.
+        record_http_request(method, _route_template(scope, path), status_code, duration_ms)
         reset_context(token)
+
+
+def _route_template(scope: Scope, fallback: str) -> str:
+    """The matched route's path template (\`/api/carts/{cart_id}\`) for a
+    bounded Prometheus \`route\` label.  Starlette stores the matched Route on
+    the scope after routing; before a match (404) it falls back to the raw
+    path, which for parameter-less probes (/health, /metrics) is already the
+    template."""
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    return template if isinstance(template, str) else fallback
 `;

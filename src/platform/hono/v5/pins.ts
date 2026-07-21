@@ -39,6 +39,7 @@ export const BACKEND_PINS = {
     "drizzle-orm": "^0.45.0",
     pg: "^8.13.0",
     pino: "^10.3.0",
+    "prom-client": "^15.1.0",
     uuidv7: "^1.0.2",
   },
   devDependencies: {

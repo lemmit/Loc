@@ -36,7 +36,7 @@ context X {
     e: int
     f: int
     ${extra}
-    derived label: int = ${rhs}
+    derived label: decimal = ${rhs}
   }
   repository Foos for Foo { }
 }

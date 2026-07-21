@@ -444,6 +444,11 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       // Named-action references are a UI-handler-arg form — never reached by
       // the e2e (api) renderer; keep the switch total with a placeholder.
       return `/* action:${e.actionName} */`;
+    case "authz-filter":
+      // Authorization/tenancy query-filter sentinel (M-T9.9) — a repository
+      // filter node, never reached by the e2e (api) renderer; keep the switch
+      // total with a placeholder.
+      return `/* authz-filter:${e.filter.kind} */`;
   }
 }
 

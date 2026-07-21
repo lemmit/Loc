@@ -75,9 +75,13 @@ describe("redis broker transport — python leg (M-T4.4 slice 2b)", () => {
       expect(main).toContain("await close_channel_transports()");
     }
     // salesApi is a pure producer (no hosted reactor): its dispatch.py is the
-    // tee over the Noop, and no consumer loop starts.
+    // tee over the Noop, and no consumer loop starts.  The broadcast channel
+    // also makes its events UI-observable, so the realtime tee sits inside
+    // the broker tee (channels.md Part I).
     const producerDispatch = files.get("sales_api/app/dispatch.py") ?? "";
-    expect(producerDispatch).toContain("ChannelTeeDispatcher(NoopDomainEventDispatcher())");
+    expect(producerDispatch).toContain(
+      "ChannelTeeDispatcher(RealtimeDispatcher(NoopDomainEventDispatcher()))",
+    );
     expect(files.get("sales_api/app/main.py")).not.toContain("start_channel_consumers");
     expect(files.get("sales_api/app/channels.py")).not.toContain("_run_channel_consumers");
     // shipApi hosts the Fulfil reactor: the consumer loop starts at boot and

@@ -4,6 +4,7 @@ import type {
   ProjectionIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -47,13 +48,18 @@ export function emitVanillaProjectionSchemas(
   out: Map<string, string>,
   sys?: SystemIR,
 ): VanillaProjectionRef[] {
-  if (ctx.projections.length === 0) return [];
+  // FOLDED (materialized) projections only — the event-folded read model with a
+  // physical `<Proj>Row` table.  Query-time projections (read-path-architecture.md
+  // rev.13) have no read-model table; they are emitted by
+  // `emitVanillaQueryProjectionModules` instead.
+  const folded = ctx.projections.filter(isMaterializedProjection);
+  if (folded.length === 0) return [];
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const schema = sys ? resolveContextSchema(ctx, sys) : undefined;
   const enumsByName = new Map<string, EnumIR>(ctx.enums.map((e) => [e.name, e]));
   const refs: VanillaProjectionRef[] = [];
-  for (const proj of ctx.projections) {
+  for (const proj of folded) {
     out.set(
       `lib/${appName}/${ctxSnake}/projections/${snake(proj.name)}_row.ex`,
       renderProjectionRowSchema(contextModule, proj, enumsByName, schema),

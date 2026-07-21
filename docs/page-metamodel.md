@@ -56,12 +56,44 @@ Three rules:
 
 **Channel subscription (channels.md Part I):** two further `ui` members —
 `channel <name>: <Ctx>.<Channel>` subscribes the UI to a context's
-`delivery: broadcast` channel, and `on <name>.<Event>(e) { toast(<expr>) }`
-renders the arriving event as a toast (v1 handler bodies are toast-only;
-`loom.ui-handler-unsupported`).  The handlers compile to one renderless
-`RealtimeHandlers` component mounted by the App shell, fed by the
-`src/api/realtime.ts` SSE client; the toast call routes through each design
-pack's `realtime-toast` micro-template.
+`delivery: broadcast` channel, and `on <name>.<Event>(e) { … }` runs a
+handler as the event arrives.  A handler body admits two actions
+(anything else is `loom.ui-handler-unsupported`):
+
+- `toast(<expr>)` — show the arriving event as a message notification.
+- `refetch(<Aggregate>[, …])` — invalidate that aggregate's query cache,
+  the realtime twin of a mutation's `onSuccess` invalidation.  Each target
+  must name an aggregate declared in the system (`loom.ui-handler-refetch-target`
+  otherwise); the invalidation reuses the exact `["<snake-plural>"]` query
+  key the aggregate's api hooks register, so a live event and a local
+  mutation refresh the same cache entries.
+
+The handlers compile to one renderless `RealtimeHandlers` component mounted
+by the App shell, fed by the `src/api/realtime.ts` SSE client; the toast
+call routes through each design pack's `realtime-toast` micro-template, and
+each `refetch` emits `qc.invalidateQueries` against the frontend's query
+client (react-/vue-/svelte-query alike).
+
+```ddd
+channel Orders: Fulfillment.Lifecycle
+on Orders.OrderShipped(e) {
+  toast("Order " + e.orderNumber + " shipped")
+  refetch(Order)
+}
+```
+
+generates (React `src/components/RealtimeHandlers.tsx`):
+
+```tsx
+const qc = useQueryClient();
+// …
+switch (event.type) {
+  case "OrderShipped":
+    notifications.show({ message: "Order " + String(event.orderNumber ?? "") + " shipped" });
+    qc.invalidateQueries({ queryKey: ["orders"] });
+    break;
+}
+```
 
 ---
 

@@ -338,7 +338,10 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     out.push({
       name: d.name,
       type: d.type,
-      optional: false,
+      // A derived's declared type carries its nullability (`derived x: T? = …`);
+      // hardcoding `false` made an optional derived land in wire-spec.json's
+      // `required` array while every backend serves it nullish.
+      optional: d.type.kind === "optional",
       source: "derived",
       access: "editable",
     });
@@ -378,7 +381,7 @@ export function wireFieldsForPart(part: EntityPartIR): WireField[] {
     out.push({
       name: d.name,
       type: d.type,
-      optional: false,
+      optional: d.type.kind === "optional",
       source: "derived",
       access: "editable",
     });
@@ -401,7 +404,7 @@ export function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
     out.push({
       name: d.name,
       type: d.type,
-      optional: false,
+      optional: d.type.kind === "optional",
       source: "derived",
       access: "editable",
     });

@@ -207,7 +207,6 @@ describe("e2e harness — principal forwarding", () => {
     // The bearer token is read from the env and only becomes an Authorization
     // header when present (auth-less runs send nothing).
     expect(e2e).toContain("const token = process.env.E2E_BEARER_TOKEN;");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(e2e).toContain("if (token) headers.authorization = `Bearer ${token}`;");
     // The dev-stub principal is base64-encoded into x-loom-dev-claims, the exact
     // channel every backend's dev-stub verifier merges over its built-in identity.

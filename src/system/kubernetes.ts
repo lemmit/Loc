@@ -60,6 +60,10 @@ export interface WorkloadModel {
   /** Whether this workload should get an optional `Ingress` (it serves a
    *  browser-facing UI). */
   exposesUi: boolean;
+  /** Whether this workload serves Prometheus metrics at `/metrics` (every
+   *  backend does; pure static frontends don't) — gates the pod's
+   *  prometheus.io scrape annotations. */
+  emitsMetrics: boolean;
   /** When this is a frontend SPA that targets a DISTINCT backend deployable,
    *  the backend's service coordinates — so the SPA's `Ingress` can route
    *  `/api` → that backend and `/` → this SPA on one host (same-origin: the
@@ -186,6 +190,9 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
       readinessPath: shape.dependsOnDb ? "/ready" : shape.healthPath,
       dependsOnDb: shape.dependsOnDb,
       exposesUi: exposesUi(d),
+      // Backends expose Prometheus metrics at /metrics (M-T7.1); pure static
+      // frontends do not.  Drives the pod's prometheus.io scrape annotations.
+      emitsMetrics: !platform.isFrontend,
       apiBackend,
       configEnv,
       dbEnv,
@@ -231,6 +238,16 @@ function renderDeployment(sys: SystemIR, w: WorkloadModel): string {
   lines.push("    metadata:");
   lines.push("      labels:");
   lines.push(`        app.kubernetes.io/name: ${w.name}`);
+  // Prometheus scrape discovery (M-T7.1): the standard prometheus.io pod
+  // annotations a Prometheus (agent/Operator with the pod-annotation
+  // relabel config) uses to find + scrape this backend's /metrics.  Only
+  // backends emit metrics; static frontends get none.
+  if (w.emitsMetrics) {
+    lines.push("      annotations:");
+    lines.push('        prometheus.io/scrape: "true"');
+    lines.push(`        prometheus.io/port: "${w.containerPort}"`);
+    lines.push("        prometheus.io/path: /metrics");
+  }
   lines.push("    spec:");
   lines.push("      containers:");
   lines.push(`        - name: ${w.name}`);

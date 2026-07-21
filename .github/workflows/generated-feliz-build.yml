@@ -231,7 +231,7 @@ jobs:
           npx vite preview --port 4173 --strictPort &
           PREVIEW_PID=$!
           trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:4173/ >/dev/null && break
             sleep 1
           done
@@ -292,7 +292,7 @@ jobs:
           npx vite preview --port 4175 --strictPort &
           PREVIEW_PID=$!
           trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:4175/ >/dev/null && break
             sleep 1
           done
@@ -368,7 +368,7 @@ jobs:
           npx vite preview --port 4176 --strictPort &
           PREVIEW_PID=$!
           trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:4176/ >/dev/null && break
             sleep 1
           done

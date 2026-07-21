@@ -44,5 +44,13 @@ describe("python generator — unique_violation → 409", () => {
     expect(problem).toContain(
       'return problem(\n                request, 409, "Conflict", "A resource with these values already exists."\n            )',
     );
+
+    // The non-23505 fallback path's fault counter sits at the handler-body
+    // indent (8 spaces) — an over-indented line here is an IndentationError
+    // that crashes the app at import (the parity gate's python_api boot).
+    expect(problem).toContain(
+      '        log("warn", "disallowed", message=str(err), status=409)\n        record_domain_fault("disallowed")\n        return problem(request, 409, "Conflict",',
+    );
+    expect(problem).not.toMatch(/\n {9,}record_domain_fault\("disallowed"\)\n {8}return/);
   });
 });

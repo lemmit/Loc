@@ -19,6 +19,7 @@ import type {
   UserIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { backendServesRealtime } from "../../ir/util/channels.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
@@ -46,6 +47,7 @@ import {
 import { felizTarget } from "./feliz-target.js";
 import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
+import { felizRealtimeRefetchAggregates, renderFelizRealtime } from "./realtime.js";
 import {
   msgCase,
   renderInit,
@@ -753,6 +755,10 @@ function renderAppFs(
    *  gate requires it).  Drives the `CurrentUser` record + decoder emitted when
    *  a page carries a `requires` UI gate. */
   user?: UserIR,
+  /** True when the targeted backend serves the realtime SSE wire
+   *  (`backendServesRealtime`).  Gates the `on <channel>.<Event>` handler
+   *  subscription — a frontend pointed at a non-SSE backend emits none. */
+  backendRealtime = false,
 ): string {
   const pages = ui.pages;
   if (pages.length === 0) {
@@ -843,6 +849,22 @@ function renderAppFs(
     if (!readFields.has(r.field)) {
       readFields.add(r.field);
       reads.push(r);
+    }
+  }
+  // Realtime `on <channel>.<Event>` handlers (channels.md Part I) —
+  // subscribe to the backend SSE wire and, per event, toast + re-fetch the
+  // affected aggregate's list read.  Each refetch target is folded into the
+  // read set (like the idselect fk targets above) so its
+  // `Api.<all>`/`<All>Loaded`/Model wiring exists for the subscription to
+  // re-issue.  Gated on the backend actually serving the wire.
+  const hasRealtime = backendRealtime && (ui.notifications?.length ?? 0) > 0;
+  if (hasRealtime) {
+    for (const agg of felizRealtimeRefetchAggregates(ui)) {
+      const r = felizAllRead(agg);
+      if (!readFields.has(r.field)) {
+        readFields.add(r.field);
+        reads.push(r);
+      }
     }
   }
   const hasReads = reads.length > 0;
@@ -1048,8 +1070,11 @@ function renderAppFs(
     hasHttp && "open Fable.SimpleHttp",
     // Browser.Dom provides `window` for the auth sign-in/out redirects.
     authUi && "open Browser.Dom",
-    // A FileUpload mints its multipart FormData via the JS-interop escape hatch.
-    hasFileUploads && "open Fable.Core.JsInterop",
+    // A FileUpload mints its multipart FormData via the JS-interop escape
+    // hatch; the realtime subscription uses `?`/`jsNative`/`Emit` too
+    // (`jsNative` lives in `Fable.Core`, the `?` operator in `.JsInterop`).
+    hasRealtime && "open Fable.Core",
+    (hasFileUploads || hasRealtime) && "open Fable.Core.JsInterop",
     // Auth session gate — SessionState (gates the Model) + the Auth probe module.
     // Under a page gate the probe decodes the verified claims into `CurrentUser`
     // (record + decoder ahead of the claims-variant Auth module); a gate-free
@@ -1109,10 +1134,15 @@ function renderAppFs(
     init,
     "",
     update,
+    // Realtime subscription module (channels.md Part I) — references `Msg`,
+    // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
+    hasRealtime ? "" : false,
+    hasRealtime ? renderFelizRealtime(ui) : false,
     "",
     views.join("\n"),
     "",
     "Program.mkProgram init update view",
+    hasRealtime ? "|> Program.withSubscription realtimeSub" : false,
     '|> Program.withReactSynchronous "root"',
     "|> Program.run",
     "",
@@ -1365,7 +1395,8 @@ export function generateFelizForContexts(
     hasEffects ||
     hasFileUploads;
   const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
-  out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user));
+  const backendRealtime = backendServesRealtime(target?.platform);
+  out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user, backendRealtime));
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);

@@ -46,7 +46,7 @@ on:
       - 'package.json'
       - '.github/workflows/behavioral-e2e.yml'
   workflow_dispatch:
-
+  merge_group:
 permissions:
   contents: read
 

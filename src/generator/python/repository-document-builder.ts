@@ -380,10 +380,14 @@ export function entityToDoc(
     entries.push(`"${snake(f.name)}": ${serialize(f.type, `a.${snake(f.name)}`, ctx)}`);
   }
   for (const c of entity.contains) {
+    const toDoc = `_${snake(c.partName)}_to_doc`;
+    const acc = `a.${snake(c.name)}`;
     entries.push(
       containsType(c)
-        ? `"${snake(c.name)}": [_${snake(c.partName)}_to_doc(e) for e in a.${snake(c.name)}]`
-        : `"${snake(c.name)}": _${snake(c.partName)}_to_doc(a.${snake(c.name)})`,
+        ? `"${snake(c.name)}": [${toDoc}(e) for e in ${acc}]`
+        : c.optional
+          ? `"${snake(c.name)}": (None if ${acc} is None else ${toDoc}(${acc}))`
+          : `"${snake(c.name)}": ${toDoc}(${acc})`,
     );
   }
   return lines(
@@ -416,10 +420,14 @@ export function entityFromDoc(
     entries.push(`${snake(f.name)}=${deserialize(f.type, `d["${snake(f.name)}"]`, ctx)}`);
   }
   for (const c of entity.contains) {
+    const fromDoc = `_${snake(c.partName)}_from_doc`;
+    const acc = `d["${snake(c.name)}"]`;
     entries.push(
       containsType(c)
-        ? `${snake(c.name)}=[_${snake(c.partName)}_from_doc(x) for x in cast(list[object], d["${snake(c.name)}"])]`
-        : `${snake(c.name)}=_${snake(c.partName)}_from_doc(d["${snake(c.name)}"])`,
+        ? `${snake(c.name)}=[${fromDoc}(x) for x in cast(list[object], ${acc})]`
+        : c.optional
+          ? `${snake(c.name)}=(None if ${acc} is None else ${fromDoc}(${acc}))`
+          : `${snake(c.name)}=${fromDoc}(${acc})`,
     );
   }
   // The JSONB column types as `object`; cast each access to the doc dict.

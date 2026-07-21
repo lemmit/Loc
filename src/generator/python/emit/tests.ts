@@ -2,14 +2,17 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type ContainmentIR,
+  type DomainServiceIR,
   type ExprIR,
   operationUsesCurrentUser,
   type TestIR,
   type TestStmtIR,
   type TypeIR,
+  type ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../../util/naming.js";
-import { renderPyExpr } from "../render-expr.js";
+import { renderPyExpr, renderPyType } from "../render-expr.js";
 
 // A currentUser-gated operation's method signature picks up a trailing
 // `current_user: User` parameter; a domain `test` block has no auth
@@ -43,18 +46,55 @@ const TEST_ACTOR_PY =
 // ---------------------------------------------------------------------------
 
 export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string | null {
-  if (agg.tests.length === 0) return null;
+  return renderPySubjectTests(agg.name, agg.tests, ctx, {
+    module: `app.domain.${snake(agg.name)}`,
+    symbols: [agg.name, ...agg.parts.map((p) => p.name)],
+  });
+}
+
+/** Value-object unit-test module (test-placement.md, Phase 2).  The VO is
+ *  imported through the shared `app.domain.value_objects` narrowing — no
+ *  dedicated subject import. */
+export function renderPyVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
+  return renderPySubjectTests(vo.name, vo.tests, ctx, null);
+}
+
+/** Domain-service unit-test module (test-placement.md, Phase 2).  A service op
+ *  renders as a bare module-level function (`snake(op)(…)`), so the test imports
+ *  the referenced op functions from `app.domain.services.<snake(svc)>`. */
+export function renderPyServiceTestsFile(
+  svc: DomainServiceIR,
+  ctx: BoundedContextIR,
+): string | null {
+  return renderPySubjectTests(svc.name, svc.tests, ctx, {
+    module: `app.domain.services.${snake(svc.name)}`,
+    symbols: svc.operations.map((o) => snake(o.name)),
+  });
+}
+
+/** Shared pytest-module renderer for any subject.  `subjectImport` names the
+ *  module + symbols carrying the subject's own code (an aggregate's per-agg
+ *  module, a service's ops module); `null` for a value object, imported through
+ *  the `app.domain.value_objects` narrowing.  Symbols are narrowed to names the
+ *  body actually references. */
+function renderPySubjectTests(
+  describeName: string,
+  tests: readonly TestIR[],
+  ctx: BoundedContextIR,
+  subjectImport: { module: string; symbols: string[] } | null,
+): string | null {
+  if (tests.length === 0) return null;
 
   const body: string[] = [];
   const usedNames = new Set<string>();
-  for (const t of agg.tests) {
+  for (const t of tests) {
     body.push("", "");
     body.push(...renderTest(t, ctx, usedNames));
   }
   const bodyStr = body.join("\n");
 
   const refs = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(bodyStr);
-  const domainNames = [agg.name, ...agg.parts.map((p) => p.name)].filter(refs);
+  const subjectNames = subjectImport ? subjectImport.symbols.filter(refs) : [];
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refs)
     .sort();
@@ -78,9 +118,12 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
   const usesMath = /\bmath\./.test(bodyStr);
   const usesActor = bodyStr.includes("SimpleNamespace(");
+  // `cast(...)` appears both from the synthetic actor and from null-safe
+  // nullable-field reads (`cast(Shipment, o.shipment).carrier`).
+  const usesCast = usesActor || /\bcast\(/.test(bodyStr);
 
   const out: string[] = [];
-  out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
+  out.push(`"""Domain tests for ${describeName}.  Auto-generated."""`);
   if (usesDatetime || usesTimedelta || usesDecimal || usesMath || usesPytest || usesActor) {
     out.push("");
   }
@@ -94,12 +137,12 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   }
   if (usesDecimal) out.push("from decimal import Decimal");
   if (usesActor) out.push("from types import SimpleNamespace");
-  if (usesActor) out.push("from typing import cast");
+  if (usesCast) out.push("from typing import cast");
   if (usesPytest) out.push("import pytest");
   out.push("");
   if (usesActor) out.push("from app.auth.user import User");
-  if (domainNames.length > 0) {
-    out.push(`from app.domain.${snake(agg.name)} import ${domainNames.join(", ")}`);
+  if (subjectImport && subjectNames.length > 0) {
+    out.push(`from ${subjectImport.module} import ${subjectNames.join(", ")}`);
   }
   if (idNames.length > 0) {
     out.push(`from app.domain.ids import ${idNames.join(", ")}`);
@@ -111,7 +154,7 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
 }
 
 /** A test name slug usable as a python identifier, deduped per file. */
-function testFnName(name: string, used: Set<string>): string {
+export function testFnName(name: string, used: Set<string>): string {
   const base =
     `test_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`.replace(/_+$/, "") || "test_case";
   let candidate = base;
@@ -139,7 +182,47 @@ function renderTest(t: TestIR, ctx: BoundedContextIR, used: Set<string>): string
 /** Render a test-body expression: `<Agg>.create({ … })` object literals
  *  become coerced keyword arguments; everything else defers to
  *  `renderPyExpr`. */
-function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, string>): string {
+/** True when a member read yields `T | None` on the generated domain object —
+ *  an OPTIONAL field, or a SINGLE (non-collection) containment (which is
+ *  `T | None` even when required, since it's unset at create and set later by an
+ *  op).  A further access on it fails `mypy --strict` (`Item "None" … has no
+ *  attribute`), so it's wrapped in `cast(T, …)`.  Mirror of the TS emitter's
+ *  `isNullableMemberRead`. */
+function isNullableMemberReadPy(e: ExprIR, ctx: BoundedContextIR): boolean {
+  if (e.kind !== "member") return false;
+  if (e.memberType.kind === "optional") return true;
+  if (e.receiverType.kind === "entity") {
+    const typeName = e.receiverType.name;
+    const member = e.member;
+    const owner: { contains?: readonly ContainmentIR[] } | undefined =
+      ctx.aggregates.find((a) => a.name === typeName) ??
+      ctx.aggregates.flatMap((a) => a.parts ?? []).find((p) => p.name === typeName);
+    const c = owner?.contains?.find((x) => x.name === member);
+    if (c && !c.collection) return true;
+  }
+  return false;
+}
+
+export function renderTestExpr(
+  e: ExprIR,
+  ctx: BoundedContextIR,
+  lets?: Map<string, string>,
+): string {
+  // A member read whose RECEIVER is a nullable field (single containment or
+  // optional field, both `T | None` on the domain object) fails `mypy --strict`
+  // on the follow-on access.  Wrap the receiver in `cast(T, …)` so the read
+  // type-checks: `o.shipment.carrier` → `cast(Shipment, o.shipment).carrier`.
+  // The op that sets it ran earlier in the test, so the cast is sound.
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "member" &&
+    isNullableMemberReadPy(e.receiver, ctx)
+  ) {
+    const recv = renderTestExpr(e.receiver, ctx, lets);
+    const rt = e.receiver.memberType;
+    const inner = rt.kind === "optional" ? rt.inner : rt;
+    return `cast(${renderPyType(inner)}, ${recv}).${snake(e.member)}`;
+  }
   // Calls of currentUser-gated ops thread the synthetic actor as the
   // trailing argument (mirrors the TS test emitter).  The aggregate
   // resolves through the receiver's type when lowered, else through the
@@ -174,7 +257,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, str
   return renderPyExpr(e);
 }
 
-function renderCreateInput(
+export function renderCreateInput(
   obj: Extract<ExprIR, { kind: "object" }>,
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -226,7 +309,7 @@ const MATCHER_OP: Record<string, string> = {
 
 /** `expect(x).<matcher>(y)` / `.not.<matcher>(y)` → a comparison assert.
  *  Returns null for bare boolean assertions (caller wraps those). */
-function renderExplicitMatcher(
+export function renderExplicitMatcher(
   expr: ExprIR,
   ctx: BoundedContextIR,
   lets?: Map<string, string>,
@@ -247,7 +330,7 @@ function renderExplicitMatcher(
   return negate ? `    assert not (${cmp})` : `    assert ${cmp}`;
 }
 
-function renderTestStmt(
+export function renderTestStmt(
   s: TestStmtIR,
   ctx: BoundedContextIR,
   lets?: Map<string, string>,

@@ -21,11 +21,19 @@ import { snake, upperFirst } from "../../util/naming.js";
 //                                      `conn.assigns.current_user`.  When the
 //                                      system declares an `auth { oidc }`
 //                                      block (D-AUTH-OIDC) `verify_token/1` is
-//                                      a REAL OIDC verifier (JOSE + the
-//                                      issuer's JWKS); without one it's the
-//                                      permissive dev stub (matches the Hono /
-//                                      .NET dev-stub verifiers so a fresh
-//                                      stack boots end-to-end).
+//                                      a REAL OIDC verifier delegating to
+//                                      `Auth.Token` (joken + joken_jwks — the
+//                                      issuer's cached JWKS); without one it's
+//                                      the permissive dev stub (matches the
+//                                      Hono / .NET dev-stub verifiers so a
+//                                      fresh stack boots end-to-end).
+//
+//   lib/<app>_web/auth/token.ex      — (OIDC) Joken.Config token config:
+//                                      signature via the JokenJwks hook +
+//                                      iss/aud/exp/nbf validation.
+//   lib/<app>_web/auth/jwks_strategy.ex
+//                                    — (OIDC) joken_jwks strategy: the cached,
+//                                      periodically-refreshed JWKS keyed by kid.
 //
 //   lib/<app>_web/live_auth.ex       — Phoenix.LiveView on_mount hook for the
 //                                      WebSocket path (session-based stub).
@@ -37,7 +45,9 @@ import { snake, upperFirst } from "../../util/naming.js";
 //
 // The router wiring (plug + live_session on_mount + the /auth scope) is
 // applied in renderRouter via the `authEnabled` flag.  The OIDC verifier
-// pulls in `{:jose, ...}` + `:inets`/`:ssl` (mix.exs) — see renderMixExs.
+// pulls in `{:joken, ...}` + `{:joken_jwks, ...}` + `:inets`/`:ssl` (mix.exs)
+// — see renderMixExs — and its JWKS strategy GenServer is added to the app
+// supervision tree (see vanilla/index.ts `authChildren`).
 // ---------------------------------------------------------------------------
 
 export interface AuthEmitArgs {
@@ -91,6 +101,11 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   // LiveAuth's dev_user fallback grants LiveViews out of the box.
   if (auth) {
     files.set(`lib/${appName}_web/browser_auth.ex`, renderBrowserAuth(webModule));
+    // OIDC verifier engine (D-AUTH-OIDC): the Joken.Config token config and the
+    // joken_jwks strategy the plug's `verify_token/1` delegates to — the
+    // idiomatic library JWKS client the other four backends get out of the box.
+    files.set(`lib/${appName}_web/auth/token.ex`, renderOidcToken(webModule, auth));
+    files.set(`lib/${appName}_web/auth/jwks_strategy.ex`, renderJwksStrategy(webModule));
   }
   files.set(
     `lib/${appName}_web/controllers/auth_controller.ex`,
@@ -278,9 +293,9 @@ ${devClaimStringFields
     : "";
   // OIDC verifier vs dev stub.  The OIDC path additionally needs the JWKS
   // discovery/verification helpers; the dev stub needs none.
-  const verifierSection = auth ? renderOidcVerifier(auth) : renderDevStubVerifier();
+  const verifierSection = auth ? renderOidcVerifier(auth, webModule) : renderDevStubVerifier();
   const verifierDoc = auth
-    ? "validates the inbound JWT against the issuer's JWKS (D-AUTH-OIDC)"
+    ? "validates the inbound JWT via joken + joken_jwks against the issuer's JWKS (D-AUTH-OIDC)"
     : "is a permissive DEV STUB — replace verify_token/1 for production";
   // DEV STUB only: expose the built-in admin principal so LiveAuth can grant
   // LiveViews the SAME out-of-the-box identity this plug grants every :api
@@ -443,174 +458,80 @@ ${mergeDevClaimsDef}${putOrgPathDef}${putRootOrgDef}end
 
 // ---------------------------------------------------------------------------
 // OIDC verifier section (D-AUTH-OIDC) — the batteries-included fill-in.
-// Validates the bearer token's signature against the issuer's JWKS
-// (discovered lazily, cached in :persistent_term), then checks iss / exp.
-// JWKS fetch uses OTP's built-in :httpc (no extra HTTP-client dep); the
+// Signature verification + the cached, periodically-refreshed JWKS (keyed by
+// `kid`, with key-rotation healing) are owned by the idiomatic `joken` +
+// `joken_jwks` libraries (rendered into `Auth.Token` / `Auth.JwksStrategy`) —
+// the Elixir analogue of jose createRemoteJWKSet / Nimbus / PyJWKClient /
+// ConfigurationManager.  The plug's `verify_token/1` delegates to
+// `Auth.Token.verify_and_validate/1` and enforces required-claim presence; the
 // issuer is read at RUNTIME (a module attribute would freeze the empty
-// compile-time env into the release).  A plain-http issuer (the bundled dev
-// Keycloak / loopback) is honoured — :httpc imposes no https requirement, so
-// dev works out of the box (the inverse of the .NET RequireHttps gotcha).
+// compile-time env into the release).
 // ---------------------------------------------------------------------------
 
-function renderOidcVerifier(auth: AuthIR): string {
-  // The OIDC_ISSUER env override wins; the DECLARED value is the fallback
-  // (12-factor, same contract as every other backend's verifier).
+function renderOidcVerifier(auth: AuthIR, webModule: string): string {
   // Audience parity: when the auth block declares an `audience:`, the token's
-  // `aud` must carry it — the other four backends validate it, and a verifier
-  // that skips the check accepts tokens the rest of the system rejects.
-  const audCheck = auth.oidc.audience
+  // `aud` must CARRY it — the other four backends validate it, and a verifier
+  // that skips the check accepts tokens the rest of the system rejects.  The
+  // value check rides Auth.Token's `aud` validator; here we only enforce that
+  // the claim is PRESENT (joken skips validators for absent claims).  Both are
+  // gated on a non-empty runtime `audience()`, preserving the original
+  // escape hatch (OIDC_AUDIENCE="" disables the aud check).
+  const audiencePresence = auth.oidc.audience ? ` and aud_present?(claims)` : "";
+  const audPresentDef = auth.oidc.audience
     ? `
-
-    aud_ok =
-      case audience() do
-        "" -> true
-        expected -> Map.get(claims, "aud") |> List.wrap() |> Enum.member?(expected)
-      end`
+  # Enforce aud PRESENCE only when an audience is actually configured — an
+  # empty runtime \`audience()\` disables the aud check (the escape hatch the
+  # hand-rolled verifier had; Auth.Token's aud validator honours the same "").
+  defp aud_present?(claims) do
+    case audience() do
+      "" -> true
+      _ -> Map.has_key?(claims, "aud")
+    end
+  end
+`
     : "";
-  const audOkTerm = auth.oidc.audience ? " and aud_ok" : "";
   const audienceFn = auth.oidc.audience
     ? `
-  defp audience, do: ${envOrDeclared("OIDC_AUDIENCE", auth.oidc.audience)}
+  @doc false
+  def audience, do: ${envOrDeclared("OIDC_AUDIENCE", auth.oidc.audience)}
 `
     : "";
   return `  # ---------------------------------------------------------------------------
-  # OIDC token verification (D-AUTH-OIDC).
+  # OIDC token verification (D-AUTH-OIDC) — delegated to joken + joken_jwks.
   # ---------------------------------------------------------------------------
 
   # Trailing-slash-trimmed issuer, read at runtime (NOT a module attribute —
   # that would bake the empty compile-time env into the release).  The env
-  # override wins; the declared \`issuer:\` is the fallback (12-factor).
-  defp issuer, do: (${envOrDeclared("OIDC_ISSUER", auth.oidc.issuer)}) |> String.trim_trailing("/")
+  # override wins; the declared \`issuer:\` is the fallback (12-factor).  Public
+  # so Auth.Token / Auth.JwksStrategy read the same value.
+  @doc false
+  def issuer, do: (${envOrDeclared("OIDC_ISSUER", auth.oidc.issuer)}) |> String.trim_trailing("/")
 ${audienceFn}
-
   defp verify_token(nil), do: {:error, :no_token}
 
   defp verify_token(token) when is_binary(token) do
-    with {:ok, kid} <- token_kid(token),
-         {:ok, jwk} <- signing_key(kid),
-         {true, %JOSE.JWT{fields: claims}, _} <-
-           JOSE.JWT.verify_strict(jwk, ["RS256", "RS384", "RS512", "ES256", "ES384"], token),
-         :ok <- check_claims(claims) do
+    # joken_jwks supplies the signer by \`kid\` from the issuer's cached JWKS and
+    # joken verifies the signature (alg = the IdP's published asymmetric keys,
+    # so no symmetric/\`none\` alg-confusion path) + validates iss / exp / nbf
+    # (+ aud when configured); \`require_claims/1\` enforces required-claim
+    # presence.
+    with {:ok, claims} <- ${webModule}.Auth.Token.verify_and_validate(token),
+         :ok <- require_claims(claims) do
       {:ok, claims}
     else
       _ -> {:error, :invalid_token}
     end
   end
 
-  # The token's \`kid\` (key id) from its protected header — selects which JWKS
-  # key verifies it.
-  defp token_kid(token) do
-    with [header_b64 | _] <- String.split(token, "."),
-         {:ok, json} <- Base.url_decode64(header_b64, padding: false),
-         {:ok, %{"kid" => kid}} <- Jason.decode(json) do
-      {:ok, kid}
-    else
-      _ -> :error
-    end
+  # joken's validators only run for claims PRESENT in the token, so enforce the
+  # required-claim presence the other backends do — a token missing iss / exp
+  # (or aud when an audience is configured) is rejected, not silently accepted.
+  defp require_claims(claims) do
+    if is_binary(Map.get(claims, "iss")) and is_integer(Map.get(claims, "exp"))${audiencePresence},
+      do: :ok,
+      else: :error
   end
-
-  # Key rotation: a kid the cached JWKS doesn't know may be a NEW key the
-  # IdP rotated in after we cached — refetch once (rate-limited) and retry
-  # before rejecting, so rotation heals without a restart (the other
-  # backends' JWKS clients do this out of the box).
-  defp signing_key(kid) do
-    case find_key(jwks(), kid) || find_key(refreshed_jwks(), kid) do
-      nil -> :error
-      key_map -> {:ok, JOSE.JWK.from_map(key_map)}
-    end
-  end
-
-  defp find_key(keys, kid), do: Enum.find(keys, fn key -> key["kid"] == kid end)
-
-  # iss must equal the configured issuer; exp must be in the future.
-  defp check_claims(claims) do
-    now = System.system_time(:second)
-    iss_ok = Map.get(claims, "iss") == issuer()
-
-    exp_ok =
-      case Map.get(claims, "exp") do
-        exp when is_integer(exp) -> exp > now
-        _ -> false
-      end${audCheck}
-
-    if iss_ok and exp_ok${audOkTerm}, do: :ok, else: :error
-  end
-
-  # The issuer's JWKS keys, discovered via the OIDC discovery document and
-  # cached in :persistent_term (lazy, no supervised process).  Only a
-  # NON-EMPTY key set is cached: a failed fetch returns [] for this request
-  # (verify rejects with 401, never a 500) and the next request retries —
-  # caching the empty list would poison every later verify with a permanent
-  # 401 (e.g. one request racing the IdP's boot/realm import).
-  defp jwks do
-    case :persistent_term.get({__MODULE__, :jwks}, nil) do
-      nil ->
-        case fetch_jwks() do
-          [] ->
-            []
-
-          keys ->
-            :persistent_term.put({__MODULE__, :jwks}, keys)
-            keys
-        end
-
-      keys ->
-        keys
-    end
-  end
-
-  # Forced refetch on a kid miss, rate-limited to one fetch per 30s (a burst
-  # of unknown-kid tokens — e.g. garbage \`kid\`s from an attacker — must not
-  # hammer the IdP).  A successful refetch replaces the cache; a failed one
-  # leaves the previous keys in place, so known-kid tokens keep verifying
-  # through an IdP outage.
-  defp refreshed_jwks do
-    now = System.system_time(:second)
-    last = :persistent_term.get({__MODULE__, :jwks_refreshed_at}, 0)
-
-    if now - last < 30 do
-      []
-    else
-      :persistent_term.put({__MODULE__, :jwks_refreshed_at}, now)
-
-      case fetch_jwks() do
-        [] ->
-          []
-
-        keys ->
-          :persistent_term.put({__MODULE__, :jwks}, keys)
-          keys
-      end
-    end
-  end
-
-  defp fetch_jwks do
-    with {:ok, %{"jwks_uri" => jwks_uri}} <-
-           http_get_json(issuer() <> "/.well-known/openid-configuration"),
-         {:ok, %{"keys" => keys}} <- http_get_json(jwks_uri) do
-      keys
-    else
-      _ -> []
-    end
-  end
-
-  # GET a URL and JSON-decode the body via OTP's :httpc.  For an https issuer
-  # the system CA store verifies the peer; plain http (dev) needs no ssl opts.
-  defp http_get_json(url) do
-    _ = :inets.start()
-    _ = :ssl.start()
-
-    http_opts =
-      if String.starts_with?(url, "https"),
-        do: [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get()]],
-        else: []
-
-    case :httpc.request(:get, {String.to_charlist(url), []}, http_opts, body_format: :binary) do
-      {:ok, {{_, 200, _}, _headers, body}} -> Jason.decode(body)
-      _ -> :error
-    end
-  end
-
+${audPresentDef}
   # Reads a dotted claim path off the (string-keyed) claims map; nil when any
   # segment is missing.  Only the OIDC build_user maps via paths, so this lives
   # in the OIDC section (the dev stub reads flat claim keys directly).
@@ -623,6 +544,121 @@ ${audienceFn}
       _key, _acc -> nil
     end)
   end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Auth.Token — the Joken.Config token config (D-AUTH-OIDC).  Signature is
+// supplied per request by the JokenJwks hook (the cached JWKS keyed by kid);
+// the validators check the standard claims with a small clock-skew leeway.
+// ---------------------------------------------------------------------------
+
+function renderOidcToken(webModule: string, auth: AuthIR): string {
+  // Audience: the `aud` claim must CARRY the configured audience (parity with
+  // the other backends' ValidateAudience).  Only emitted when declared.
+  const audClaim = auth.oidc.audience
+    ? `
+    |> add_claim("aud", nil, fn aud, _claims, _ctx ->
+      case ${webModule}.Auth.audience() do
+        "" -> true
+        expected -> aud |> List.wrap() |> Enum.member?(expected)
+      end
+    end)`
+    : "";
+  return `# Auto-generated.
+defmodule ${webModule}.Auth.Token do
+  @moduledoc """
+  Joken token config for the inbound OIDC access token (D-AUTH-OIDC).
+
+  Signature verification is supplied per-request by the \`JokenJwks\` hook +
+  \`${webModule}.Auth.JwksStrategy\` (the cached, periodically-refreshed JWKS,
+  keyed by the token's \`kid\`).  The strategy derives each signer from the
+  issuer's PUBLISHED asymmetric keys, so only the IdP's real signing
+  algorithms verify — there is no symmetric / \`none\` alg-confusion path.
+
+  \`token_config/0\` validates the standard claims (iss / exp / nbf, plus aud
+  when an audience is configured) with a small clock-skew leeway; required-claim
+  PRESENCE is enforced by \`${webModule}.Auth.verify_token/1\` (joken skips
+  validators for absent claims).
+  """
+
+  use Joken.Config
+
+  # The JWKS strategy supplies the signer keyed by the token's \`kid\`.
+  add_hook(JokenJwks, strategy: ${webModule}.Auth.JwksStrategy)
+
+  # Clock-skew leeway (seconds) applied to the exp / nbf time checks.
+  @leeway 30
+
+  def token_config do
+    %{}
+    |> add_claim("iss", nil, fn iss, _claims, _ctx -> iss == ${webModule}.Auth.issuer() end)
+    |> add_claim("exp", nil, fn exp, _claims, _ctx ->
+      is_integer(exp) and exp + @leeway > System.system_time(:second)
+    end)
+    |> add_claim("nbf", nil, fn nbf, _claims, _ctx ->
+      not is_integer(nbf) or nbf - @leeway <= System.system_time(:second)
+    end)${audClaim}
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Auth.JwksStrategy — the joken_jwks strategy (D-AUTH-OIDC).  Fetches +
+// caches + periodically refreshes the issuer's JWKS, so key rotation heals
+// without a restart (what the other backends' JWKS clients do out of the box).
+// Started in the app supervision tree (vanilla/index.ts `authChildren`).
+// ---------------------------------------------------------------------------
+
+function renderJwksStrategy(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.Auth.JwksStrategy do
+  @moduledoc """
+  \`joken_jwks\` strategy (D-AUTH-OIDC): fetches the issuer's JWKS, caches the
+  signers keyed by \`kid\`, and refreshes them periodically — so IdP key
+  rotation heals without a restart (the same guarantee the other backends'
+  JWKS clients give out of the box).  Started in the app supervision tree.
+  """
+
+  use JokenJwks.DefaultStrategyTemplate
+
+  # Resolve the JWKS URL from the issuer's OIDC discovery document at strategy
+  # start (the env override rides through \`${webModule}.Auth.issuer/0\`).  Falls
+  # back to the standard certs path when discovery is unreachable at boot — the
+  # \`depends_on: keycloak\` compose ordering only waits for the container to
+  # START, so the first request can race the realm import; the polling fetcher
+  # then retries once the IdP answers.
+  def init_opts(opts) do
+    Keyword.merge(opts, jwks_url: jwks_url())
+  end
+
+  defp jwks_url do
+    issuer = ${webModule}.Auth.issuer()
+
+    case discover(issuer <> "/.well-known/openid-configuration") do
+      {:ok, %{"jwks_uri" => uri}} when is_binary(uri) -> uri
+      _ -> issuer <> "/protocol/openid-connect/certs"
+    end
+  end
+
+  # GET + JSON-decode via OTP's :httpc (no extra HTTP-client dep).  https
+  # verifies against the system CA store; plain http (dev) needs no ssl opts.
+  defp discover(url) do
+    _ = :inets.start()
+    _ = :ssl.start()
+
+    http_opts =
+      if String.starts_with?(url, "https"),
+        do: [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get()], timeout: 5_000],
+        else: [timeout: 5_000]
+
+    case :httpc.request(:get, {String.to_charlist(url), []}, http_opts, body_format: :binary) do
+      {:ok, {{_, 200, _}, _headers, body}} -> Jason.decode(body)
+      _ -> :error
+    end
+  end
+end
 `;
 }
 

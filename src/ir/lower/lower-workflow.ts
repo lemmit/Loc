@@ -217,9 +217,25 @@ function lowerWorkflowCreate(
     eventBinding = c.params[0].name;
     eventRef = t.kind === "entity" ? t.name : undefined;
   }
-  const statements: WorkflowStmtIR[] = [];
+  // `requires Expr` — the authorization gate (authorization.md §11.3).  A
+  // relocated first-body `requires` statement: a bool pre-check that denies
+  // with 403 before the orchestration runs.  Lowered in the param-bound env
+  // (currentUser + the create's command params; a saga starter has no `this`
+  // instance) and prepended, reusing the workflow renderer's `requires`→403
+  // (`ensure(_, :forbidden)` / `ForbiddenError`) path with no new emitter.
+  const gateEnv = inner;
+  const statements: WorkflowStmtIR[] = c.gate
+    ? [{ kind: "requires", expr: lowerExpr(c.gate, gateEnv), source: cstText(c.gate) }]
+    : [];
   for (const s of c.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    const lowered = lowerWorkflowStatement(
+      s,
+      inner,
+      aggsByName,
+      reposByName,
+      repoForAgg,
+      saveResolver,
+    );
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
   }
@@ -254,9 +270,21 @@ function lowerHandle(
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
-  const statements: WorkflowStmtIR[] = [];
+  // `requires Expr` — authorization gate (authorization.md §11.3), lowered as a
+  // prepended 403 pre-check in the param-bound env (currentUser + command
+  // params).  See `lowerWorkflowCreate`.
+  const statements: WorkflowStmtIR[] = h.gate
+    ? [{ kind: "requires", expr: lowerExpr(h.gate, inner), source: cstText(h.gate) }]
+    : [];
   for (const s of h.body) {
-    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    const lowered = lowerWorkflowStatement(
+      s,
+      inner,
+      aggsByName,
+      reposByName,
+      repoForAgg,
+      saveResolver,
+    );
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
   }
@@ -346,6 +374,7 @@ export function lowerCommandHandler(
     aggsByName,
     reposByName,
     repoForAgg,
+    saveResolver,
   );
   return {
     name: h.name,
@@ -395,6 +424,7 @@ export function lowerQueryHandler(
     aggsByName,
     reposByName,
     repoForAgg,
+    saveResolver,
   );
   return {
     name: h.name,
@@ -418,6 +448,7 @@ function lowerHandlerBody(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): { statements: WorkflowStmtIR[]; returnValue?: ExprIR } {
   const statements: WorkflowStmtIR[] = [];
   let returnValue: ExprIR | undefined;
@@ -427,7 +458,7 @@ function lowerHandlerBody(
       returnValue = lowerExpr(s.value, inner);
       continue;
     }
-    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg, saveResolver);
     statements.push(l.stmt);
     inner = l.envAfter;
   }
@@ -455,7 +486,14 @@ function lowerOn(
   const statements: WorkflowStmtIR[] = [];
   let bodyEnv = inner;
   for (const s of o.body) {
-    const lowered = lowerWorkflowStatement(s, bodyEnv, aggsByName, reposByName, repoForAgg);
+    const lowered = lowerWorkflowStatement(
+      s,
+      bodyEnv,
+      aggsByName,
+      reposByName,
+      repoForAgg,
+      saveResolver,
+    );
     statements.push(lowered.stmt);
     bodyEnv = lowered.envAfter;
   }
@@ -485,8 +523,16 @@ function lowerWorkflowStatement(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): LoweredWorkflowStmt {
-  const lowered = lowerWorkflowStatementInner(stmt, env, aggsByName, reposByName, repoForAgg);
+  const lowered = lowerWorkflowStatementInner(
+    stmt,
+    env,
+    aggsByName,
+    reposByName,
+    repoForAgg,
+    saveResolver,
+  );
   return {
     ...lowered,
     stmt: { ...lowered.stmt, origin: lowered.stmt.origin ?? originFor(stmt) },
@@ -499,6 +545,7 @@ function lowerWorkflowStatementInner(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): LoweredWorkflowStmt {
   if (isPreconditionStmt(stmt)) {
     return {
@@ -547,15 +594,27 @@ function lowerWorkflowStatementInner(
     const body: WorkflowStmtIR[] = [];
     let walkEnv = bodyEnv;
     for (const s of stmt.body) {
-      const lowered = lowerWorkflowStatement(s, walkEnv, aggsByName, reposByName, repoForAgg);
+      const lowered = lowerWorkflowStatement(
+        s,
+        walkEnv,
+        aggsByName,
+        reposByName,
+        repoForAgg,
+        saveResolver,
+      );
       body.push(lowered.stmt);
       walkEnv = lowered.envAfter;
     }
-    const savesPerIteration = computeSaves(body, repoForAgg, {
-      name: stmt.var,
-      aggName: varAggName,
-      repoName,
-    });
+    const savesPerIteration = computeSaves(
+      body,
+      repoForAgg,
+      {
+        name: stmt.var,
+        aggName: varAggName,
+        repoName,
+      },
+      saveResolver,
+    );
     return {
       stmt: {
         kind: "for-each",
@@ -584,23 +643,42 @@ function lowerWorkflowStatementInner(
     const thenBody: WorkflowStmtIR[] = [];
     let thenEnv = withLocal(env, stmt.var, "let", varType);
     for (const s of stmt.thenBody) {
-      const lowered = lowerWorkflowStatement(s, thenEnv, aggsByName, reposByName, repoForAgg);
+      const lowered = lowerWorkflowStatement(
+        s,
+        thenEnv,
+        aggsByName,
+        reposByName,
+        repoForAgg,
+        saveResolver,
+      );
       thenBody.push(lowered.stmt);
       thenEnv = lowered.envAfter;
     }
     const elseBody: WorkflowStmtIR[] = [];
     let elseEnv = env;
     for (const s of stmt.elseBody ?? []) {
-      const lowered = lowerWorkflowStatement(s, elseEnv, aggsByName, reposByName, repoForAgg);
+      const lowered = lowerWorkflowStatement(
+        s,
+        elseEnv,
+        aggsByName,
+        reposByName,
+        repoForAgg,
+        saveResolver,
+      );
       elseBody.push(lowered.stmt);
       elseEnv = lowered.envAfter;
     }
-    const savesInThen = computeSaves(thenBody, repoForAgg, {
-      name: stmt.var,
-      aggName,
-      repoName: saveRepoName,
-    });
-    const savesInElse = computeSaves(elseBody, repoForAgg);
+    const savesInThen = computeSaves(
+      thenBody,
+      repoForAgg,
+      {
+        name: stmt.var,
+        aggName,
+        repoName: saveRepoName,
+      },
+      saveResolver,
+    );
+    const savesInElse = computeSaves(elseBody, repoForAgg, undefined, saveResolver);
     return {
       stmt: {
         kind: "if-let",

@@ -3,6 +3,7 @@ import { forCreateInput } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
+  ChannelIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -12,18 +13,26 @@ import type {
   RepositoryIR,
   SystemIR,
   TimerSourceIR,
+  TypeIR,
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  isMaterializedProjection,
+  isQueryTimeProjection,
+  workflowEmitsCommandRoute,
+} from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
 import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
+import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
   resolveContextSchema,
@@ -34,6 +43,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -57,6 +67,14 @@ import {
 } from "./emit/audit.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
+  AMQP_CLIENT_VERSION,
+  type ChannelConsumerHandler,
+  KAFKA_CLIENTS_VERSION,
+  LETTUCE_CORE_VERSION,
+  renderJavaChannelFiles,
+  renderJavaOutboxFiles,
+} from "./emit/channels.js";
+import {
   renderAggregateNotFoundException,
   renderAuditableInterface,
   renderDisallowedException,
@@ -65,7 +83,6 @@ import {
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
-  renderWireValidationException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderJavaDispatcher } from "./emit/dispatch.js";
@@ -77,12 +94,15 @@ import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaExternHook } from "./emit/extern.js";
-import { renderJavaId } from "./emit/ids.js";
+import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
+import { renderJavaContextIntegrationTest } from "./emit/integration-tests.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
+import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
   renderLifecycleCatalog,
+  renderLogbackConfig,
   renderMigrationCatalogCallback,
   renderRequestCatalogFilter,
 } from "./emit/observability.js";
@@ -118,6 +138,11 @@ import {
   renderProvLineageRecord,
 } from "./emit/provenance.js";
 import {
+  queryProjectionFindsFor,
+  renderJavaQueryProjections,
+} from "./emit/query-projection-reads.js";
+import { renderJavaRealtimeController } from "./emit/realtime.js";
+import {
   isPagedAutoAll,
   type JavaRepoCtx,
   renderJavaRepositoryImpl,
@@ -126,16 +151,29 @@ import {
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
 import { renderExecutionContextFilter, renderRequestContext } from "./emit/request-context.js";
-import { javaTimerSchedulerPath, renderJavaTimerScheduler } from "./emit/scheduler.js";
+import {
+  anyTimerUsesCron,
+  cronTimers,
+  javaTimerJobPath,
+  javaTimerSchedulerPath,
+  jobRunrConfigPath,
+  renderJavaTimerJob,
+  renderJavaTimerScheduler,
+  renderJobRunrConfig,
+} from "./emit/scheduler.js";
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
-import { renderJavaTestsFile } from "./emit/tests.js";
+import {
+  renderJavaServiceTestsFile,
+  renderJavaTestsFile,
+  renderJavaVoTestsFile,
+} from "./emit/tests.js";
 import {
   aggregateReturnUnions,
   renderJavaDomainUnionFiles,
   renderJavaUnionWireFiles,
 } from "./emit/unions.js";
-import { renderJavaValidators } from "./emit/validator.js";
+import { renderJavaCommandValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -287,6 +325,43 @@ function emitProjectFromContexts(
   for (const [name, content] of resourceEmission.files) {
     place(name, "resource-client", content);
   }
+  // Broker bindings (channels.md; M-T4.4 slice 6b): the redis-bound broadcast
+  // channelSources this deployable wires via `channels:`.  A wired-but-foreign
+  // channel joins the per-context dispatcher derivation as a stub with its
+  // REAL semantics knobs, so a hosted reactor routes off a channel declared in
+  // a non-hosted context (mirrors the Hono/Python/.NET orchestrators).  Every
+  // broker-carried event type is broker-routed: its dispatcher handlers drop
+  // the local @EventListener (design §4 delivery uniformity) and are invoked
+  // by the ChannelConsumerService on delivery instead.
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
+  const hasChannels = channelBindings.length > 0;
+  // Durable broker-bound events (M-T4.4 slice 7c): HOSTED durable events
+  // carried by a wired `queue`/`work` (or future `log`) channel — their
+  // producer path rides the outbox relay (design §5), never the inline tee.
+  // Hosted-only on purpose: the module-level migrations are what back the
+  // `__loom_outbox` table, and they can't see a foreign wiring; a foreign
+  // `queue`/`work` consumer relies on broker ack semantics + idempotent
+  // reactors (the slice-3 stance).
+  const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
+  const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
+  const wiredForeignChannels: ChannelIR[] = channelBindings
+    .filter((b) => !hostedChannelNames.has(b.channelName))
+    .map((b) => ({
+      name: b.channelName,
+      carries: b.events,
+      delivery: b.delivery,
+      retention: b.retention,
+    }));
+  const brokerEvents = new Set(channelBindings.flatMap((b) => b.events));
+  // Dispatcher handler methods for broker-routed events, collected across the
+  // per-context loop below — the ChannelConsumerService's dispatch table.
+  const consumerHandlers: ChannelConsumerHandler[] = [];
   // Fullstack mode (`ui:` on a java deployable): the SPA owns the
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
@@ -305,7 +380,6 @@ function emitProjectFromContexts(
     "domain-common",
     renderAggregateNotFoundException(basePkg),
   );
-  place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
@@ -338,6 +412,9 @@ function emitProjectFromContexts(
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));
   place("LifecycleCatalog.java", "config", renderLifecycleCatalog(basePkg));
   place("RequestCatalogFilter.java", "config", renderRequestCatalogFilter(basePkg));
+  // Prometheus HTTP metrics — catalog-driven Micrometer meters, served at
+  // /metrics (Actuator), recorded from RequestCatalogFilter's request_end seam.
+  place("HttpMetrics.java", "config", renderHttpMetrics(basePkg));
   // Ambient execution-context carrier (correlation_id / scope_id / actor_id in
   // MDC) — always-on, the cross-backend RequestContext (docs/architecture/
   // request-context.md).  The principal's actor_id is stamped by UserFilter.
@@ -439,6 +516,27 @@ function emitProjectFromContexts(
           idConstruct,
         );
       }
+      // `shape(embedded)` reference collections fold into a jsonb id-array
+      // column, mapped via a per-target `AttributeConverter` (domain.ids) so
+      // the FormatMapper serialises the bare id `value`s.  Emitted once per
+      // distinct target id type across the project (identical content dedups
+      // in `out`).
+      const aggShape = effectiveSavingShape(
+        agg,
+        system?.sys ? resolveDataSourceConfig(agg, ctx, system.sys) : undefined,
+      );
+      if (aggShape === "embedded" && agg.persistedAs !== "eventLog") {
+        for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
+          place(
+            `${assoc.targetAgg}IdJsonListConverter.java`,
+            "id",
+            renderJavaIdListConverter(assoc.targetAgg, assoc.valueType, basePkg),
+            undefined,
+            agg.origin,
+            idConstruct,
+          );
+        }
+      }
     }
     for (const e of ctx.enums) {
       // EnumIR carries no origin — never recorded.
@@ -477,6 +575,59 @@ function emitProjectFromContexts(
         routePrefix,
         sourcemap,
       );
+    }
+    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // JUnit classes colocated in each subject's test package; emitted only when
+    // the subject declares a `test`.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderJavaVoTestsFile(
+        vo,
+        ctx,
+        basePkg,
+        pkgFor("test-class", vo.name),
+        system?.sys?.user?.fields,
+      );
+      if (voTests)
+        place(
+          `${vo.name}Tests.java`,
+          "test-class",
+          voTests,
+          vo.name,
+          vo.origin,
+          `${ctx.name}.${vo.name}`,
+        );
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderJavaServiceTestsFile(
+        svc,
+        ctx,
+        basePkg,
+        pkgFor("test-class", svc.name),
+        system?.sys?.user?.fields,
+      );
+      if (svcTests)
+        place(
+          `${svc.name}Tests.java`,
+          "test-class",
+          svcTests,
+          svc.name,
+          undefined,
+          `${ctx.name}.${svc.name}`,
+        );
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3b) — a @SpringBootTest
+    // that autowires the JPA repositories, applies the Flyway migrations on boot
+    // (LOOM_PG_URL → spring.datasource.*), and persists→reads cross-aggregate.
+    // Placed at the base package so component scan finds the @SpringBootApplication.
+    const integrationTest = renderJavaContextIntegrationTest(
+      ctx,
+      basePkg,
+      (a) => pkgFor("entity", a),
+      (a) => pkgFor("repository-interface", a),
+      system?.sys?.user?.fields,
+    );
+    if (integrationTest) {
+      out.set(integrationTest.path, integrationTest.content);
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.
@@ -612,7 +763,7 @@ function emitProjectFromContexts(
     // Spring Data repository over it — the foundation the dispatcher fold and
     // the read routes build on (the saga-state analogue with the command side
     // removed).  Placed in the same packages as the saga state.
-    for (const proj of ctx.projections) {
+    for (const proj of ctx.projections.filter(isMaterializedProjection)) {
       const projConstruct = `${ctx.name}.${proj.name}`;
       place(
         `${projectionRowClass(proj)}.java`,
@@ -657,6 +808,8 @@ function emitProjectFromContexts(
         statePkg: pkgFor("infra-persistence"),
         stateRepoPkg: pkgFor("spring-data-repository"),
         contextSchema: ctxSchema,
+        extraChannels: hasChannels ? wiredForeignChannels : undefined,
+        brokerEvents: hasChannels ? brokerEvents : undefined,
       },
       dispatcherOpFragments,
     );
@@ -669,6 +822,16 @@ function emitProjectFromContexts(
         undefined,
         undefined,
         dispatcherOpFragments,
+      );
+      consumerHandlers.push(
+        ...dispatcher.handlers
+          .filter((h) => brokerEvents.has(h.event))
+          .map((h) => ({
+            dispatcherClass: `${ctx.name}Dispatcher`,
+            dispatcherPkg: pkgFor("workflow-service"),
+            method: h.method,
+            event: h.event,
+          })),
       );
     }
     // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
@@ -773,6 +936,35 @@ function emitProjectFromContexts(
         );
       }
     }
+    // Query-time projections (read-path-architecture.md rev.13): a live read
+    // (source find + join bulk-loads + select) with no folded read-model table —
+    // its own `<Ctx>QueryProjections` service + `GET /projections/<slug>`
+    // controller, sibling of the folded ProjectionsController above.
+    const queryProjectionFiles = renderJavaQueryProjections(ctx, {
+      basePkg,
+      pkg: pkgFor("view-service"),
+      routePrefix,
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+    });
+    if (queryProjectionFiles) {
+      const qpRowOrigin = new Map<string, ProjectionIR>(
+        ctx.projections
+          .filter(isQueryTimeProjection)
+          .map((p) => [`${upperFirst(p.name)}Row.java`, p]),
+      );
+      for (const [name, f] of queryProjectionFiles) {
+        const p = qpRowOrigin.get(name);
+        place(
+          name,
+          f.category,
+          f.content,
+          undefined,
+          p?.origin,
+          p ? `${ctx.name}.${p.name}` : undefined,
+        );
+      }
+    }
     // Reified criteria → Specification<T> factories (java consumes the
     // CriterionIR directly — the proposal's headline differentiator).
     const voLookupCtx = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
@@ -833,6 +1025,84 @@ function emitProjectFromContexts(
       },
     });
     if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
+  }
+
+  // Broker transport (M-T4.4 slice 6b) — channel-less projects stay
+  // byte-identical.  Foreign vocabulary first (Hono/Python/.NET parity): a
+  // consumed foreign event's record class + the id brands it (and correlating
+  // workflow state) reference join the deployable's domain packages.
+  if (hasChannels && system) {
+    const knownEventNames = new Set(contexts.flatMap((c) => c.events).map((e) => e.name));
+    const foreignConsumedEvents = [...new Set(consumerHandlers.map((h) => h.event))]
+      .filter((name) => !knownEventNames.has(name))
+      .flatMap((name) => {
+        for (const sub of system.sys.subdomains) {
+          for (const c of sub.contexts) {
+            const ev = c.events.find((e) => e.name === name);
+            if (ev) return [ev];
+          }
+        }
+        return [];
+      });
+    for (const ev of foreignConsumedEvents) {
+      place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
+    }
+    const hostedIdNames = new Set(
+      contexts.flatMap((c) =>
+        c.aggregates.flatMap((a) => [a.name, ...a.parts.map((pt) => pt.name)]),
+      ),
+    );
+    const foreignIdNames = [
+      ...new Set(
+        [
+          ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+          ...contexts
+            .flatMap((c) => c.workflows)
+            .flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
+        ]
+          .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
+          .map((t) => t.targetName)
+          .filter((n) => !hostedIdNames.has(n)),
+      ),
+    ];
+    for (const name of foreignIdNames) {
+      let idValueType = "uuid";
+      for (const sub of system.sys.subdomains) {
+        for (const c of sub.contexts) {
+          const agg = c.aggregates.find((a) => a.name === name);
+          if (agg) idValueType = agg.idValueType;
+        }
+      }
+      place(`${name}Id.java`, "id", renderJavaId(name, idValueType, basePkg));
+    }
+    const carriedEvents = [...contexts.flatMap((c) => c.events), ...foreignConsumedEvents];
+    for (const [name, content] of renderJavaChannelFiles(
+      basePkg,
+      channelBindings,
+      carriedEvents,
+      consumerHandlers,
+      system.sys,
+      {
+        durableBroker: durableBrokerEvents.size > 0,
+        outboxEntityPkg: pkgFor("infra-persistence"),
+        outboxRepoPkg: pkgFor("spring-data-repository"),
+      },
+    )) {
+      place(name, "config", content);
+    }
+    // Transactional-outbox tier (M-T4.4 slice 7c, design §5): the JPA entity
+    // over the MigrationsIR-owned __loom_outbox + its repository + the
+    // polling relay that publishes drained rows to the broker.  Only where
+    // HOSTED durable events ride a broker-bound channel.
+    if (durableBrokerEvents.size > 0) {
+      for (const f of renderJavaOutboxFiles(basePkg, {
+        configPkg: pkgFor("config"),
+        entityPkg: pkgFor("infra-persistence"),
+        repoPkg: pkgFor("spring-data-repository"),
+      })) {
+        place(f.name, f.category, f.content);
+      }
+    }
   }
 
   // Explicit transport bindings (unfoldable-api-derivation.md, A2): one
@@ -934,14 +1204,22 @@ function emitProjectFromContexts(
         return sub?.migrationsOwner === system.deployable.name;
       })
     : [];
+  const ownsCronTimer = anyTimerUsesCron(ownedTimers);
   if (ownedTimers.length > 0) {
     const eventByName = new Map<string, EventIR>(
       contexts.flatMap((c) => c.events).map((e) => [e.name, e]),
     );
-    out.set(
-      javaTimerSchedulerPath(basePkg),
-      renderJavaTimerScheduler(ownedTimers, eventByName, basePkg),
-    );
+    // `every:` timers → in-process @Scheduled in TimerScheduler.java (emitted
+    // only when there is at least one; the renderer returns "" otherwise).
+    const scheduler = renderJavaTimerScheduler(ownedTimers, eventByName, basePkg);
+    if (scheduler) out.set(javaTimerSchedulerPath(basePkg), scheduler);
+    // `cron:` timers → a durable JobRunr recurring job each, wired by JobRunrConfig.
+    for (const ts of cronTimers(ownedTimers)) {
+      out.set(javaTimerJobPath(basePkg, ts), renderJavaTimerJob(ts, eventByName, basePkg));
+    }
+    if (ownsCronTimer) {
+      out.set(jobRunrConfigPath(basePkg), renderJobRunrConfig(ownedTimers, basePkg));
+    }
   }
 
   // Project shell — stable from S1 on.
@@ -950,7 +1228,23 @@ function emitProjectFromContexts(
     renderGradleBuild({
       flyway: hasMigrations,
       oidc,
-      extraDeps: resourceEmission.deps,
+      // Durable cron timerSources (scheduling.md Phase 2) add the JobRunr core dep.
+      jobrunr: ownsCronTimer,
+      extraDeps: {
+        ...resourceEmission.deps,
+        // Broker channel drivers (M-T4.4 slices 6b + 7c) — per-transport
+        // wiring-gated so a channel-less (or single-transport)
+        // build.gradle.kts stays byte-identical.
+        ...(channelBindings.some((b) => b.transport === "redis")
+          ? { "io.lettuce:lettuce-core": LETTUCE_CORE_VERSION }
+          : {}),
+        ...(channelBindings.some((b) => b.transport === "rabbitmq")
+          ? { "com.rabbitmq:amqp-client": AMQP_CLIENT_VERSION }
+          : {}),
+        ...(channelBindings.some((b) => b.transport === "kafka")
+          ? { "org.apache.kafka:kafka-clients": KAFKA_CLIENTS_VERSION }
+          : {}),
+      },
       // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the
       // `.smap` sidecars themselves are rendered later, system-side, from
@@ -960,11 +1254,23 @@ function emitProjectFromContexts(
   );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
+  // logback.xml behind the observability catalog (CatalogLog logs through
+  // SLF4J; logstash-logback-encoder renders the JSON envelope).
+  out.set("src/main/resources/logback.xml", renderLogbackConfig());
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
   out.set(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /api/realtime/events.  The
+  // controller tees off the always-present ApplicationEventPublisher bus; a
+  // broadcast-free deployable emits nothing (byte-identical).  Derived over the
+  // union of hosted contexts so a channel declared in one is served here.
+  const realtimeController = renderJavaRealtimeController(mergeContexts(contexts), basePkg);
+  if (realtimeController) {
+    out.set(mainSourcePath(`${basePkg}.api`, "RealtimeController.java"), realtimeController);
+  }
   // springdoc OpenApiCustomizer — align the emitted /openapi.json with the
   // other backends' contract (success bodies under application/json + named
   // <Agg>ListResponse array wrappers; RFC 7807 ProblemDetails error responses
@@ -1195,7 +1501,12 @@ function emitAggregate(
     const crit = ctx.criteria.find((c) => c.name === r.criterionRef?.name);
     return !!crit && criterionEligible(crit, ctx)?.name === agg.name;
   };
-  const viewFinds = viewFindsFor(agg.name, ctx) as unknown as RepositoryIR["finds"];
+  // Views + query-time projections sourced from this aggregate both ride
+  // synthesized parameterless finds (the mergeViewsAsFinds analog).
+  const viewFinds = [
+    ...viewFindsFor(agg.name, ctx),
+    ...queryProjectionFindsFor(agg.name, ctx),
+  ] as unknown as RepositoryIR["finds"];
   const repoWithViews: RepositoryIR =
     viewFinds.length > 0
       ? repo
@@ -1282,9 +1593,10 @@ function emitAggregate(
   )) {
     place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }
-  const validators = renderJavaValidators(agg, applicationPkg, basePkg);
-  if (validators) {
-    place(`${agg.name}Validators.java`, "service", validators, agg.name, agg.origin, construct);
+  // Wire-boundary validators — one Spring Validator per command shape, run at
+  // the controller's `@Valid` seam (registered via @InitBinder in api.ts).
+  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg)) {
+    place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
   }
   place(
     `${agg.name}Service.java`,

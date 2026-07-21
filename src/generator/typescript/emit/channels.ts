@@ -1,5 +1,5 @@
 // Generated `http/channels.ts` — the broker transport module (M-T4.4
-// slices 2–3, design §4–5).  Emitted only when the deployable wires at
+// slices 2–4, design §4–5).  Emitted only when the deployable wires at
 // least one broker-bound channelSource via `channels:`; channel-less
 // projects stay byte-identical.
 //
@@ -9,8 +9,11 @@
 // ioredis pub/sub (`broadcast`/`ephemeral`), the RabbitMQ driver over
 // amqplib (`queue`/`ephemeral`+`work`: one durable queue per consuming
 // deployable — replicas compete; manual ack → bounded retry → DLX
-// `loom.dlx` → `loom.dlq.<address>` parking), the producer tee, and the
-// consumer loop.
+// `loom.dlx` → `loom.dlq.<address>` parking), the Kafka driver over
+// kafkajs (`broadcast/log`+`queue/work`: one topic per address, partition
+// key = `loomkey` ?? envelope id, one consumer group per deployable —
+// broadcast across deployables, competing within; dead-letter v1 parks
+// onto `<address>.dlq`), the producer tee, and the consumer loop.
 //
 // Producer path split (design §5): the delivery-uniformity tee publishes
 // EPHEMERAL broker-bound events inline; DURABLE (`work`) events pass
@@ -21,6 +24,25 @@
 
 import { lines } from "../../../util/code-builder.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
+
+/** The per-binding driver pick in `createChannelTransports` — a direct
+ *  call when one driver is wired, a transport-discriminated ternary chain
+ *  when several are (fixed kafka → rabbitmq → redis order; the last wired
+ *  driver is the fallback arm, so single- and two-driver outputs match the
+ *  pre-kafka emission byte for byte). */
+function transportFactoryLine(hasRedis: boolean, hasRabbit: boolean, hasKafka: boolean): string {
+  const drivers: [string, string][] = [];
+  if (hasKafka) drivers.push(["kafka", "createKafkaTransport"]);
+  if (hasRabbit) drivers.push(["rabbitmq", "createRabbitTransport"]);
+  if (hasRedis) drivers.push(["redis", "createRedisTransport"]);
+  const last = drivers[drivers.length - 1];
+  if (!last) throw new Error("renderChannelsModule called with no wired broker transport");
+  const arms = drivers
+    .slice(0, -1)
+    .map(([transport, fn]) => `b.transport === ${JSON.stringify(transport)} ? ${fn}(url) : `)
+    .join("");
+  return `      t = ${arms}${last[1]}(url);`;
+}
 
 /** envVar → address per binding, deduped (two bindings on one deployable
  *  may share a channelSource only via duplicate list entries). */
@@ -37,6 +59,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
   const unique = uniqueBindings(bindings);
   const hasRedis = unique.some((b) => b.transport === "redis");
   const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  const hasKafka = unique.some((b) => b.transport === "kafka");
   // event type -> address, split by durability: ephemeral events publish
   // inline in the tee; durable (`work`) events ride the outbox relay.
   // First-by-declaration within each tier, mirroring the in-process
@@ -58,6 +81,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "// dispatcher local reactors use.",
       hasRabbit ? 'import amqp from "amqplib";' : null,
       hasRedis ? 'import { Redis } from "ioredis";' : null,
+      hasKafka ? 'import { type Consumer, Kafka, logLevel, type Producer } from "kafkajs";' : null,
       'import type { DomainEvent, DomainEventDispatcher } from "../domain/events";',
       'import { baseLogger } from "../obs/log";',
       "",
@@ -73,6 +97,14 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "  time: string;",
       '  datacontenttype: "application/json";',
       "  loomchannel: string;",
+      ...(hasKafka
+        ? [
+            "  /** The channel's `key:` field value — kafka's partition key",
+            "   * (`loomkey` ?? `id`, design §4), so one aggregate's events keep",
+            "   * per-partition order. */",
+            "  loomkey?: string;",
+          ]
+        : []),
       "  data: Record<string, unknown>;",
       "}",
       "",
@@ -262,6 +294,120 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
             "}",
           ]
         : []),
+      ...(hasKafka
+        ? [
+            "",
+            "/** Kafka driver — kafkajs over the log (design §4 topology): one",
+            " * topic per channel address; per-partition ordering with partition",
+            " * key = `loomkey` ?? envelope id; consumption always rides a",
+            " * consumer GROUP — the deployable's group realises broadcast",
+            " * ACROSS deployables (each group replays the whole log) and",
+            " * competition WITHIN one (replicas share it).  Offsets commit",
+            " * after the handler resolves.  Dead-letter v1 (design §4): a",
+            " * failed or malformed record parks onto `<address>.dlq` and the",
+            " * offset advances — logged and kept, never a hot-loop. */",
+            "export function createKafkaTransport(url: string): ChannelTransport {",
+            "  const kafka = new Kafka({",
+            '    clientId: "loom-channels",',
+            '    brokers: [url.replace(/^kafka:\\/\\//, "")],',
+            "    logLevel: logLevel.NOTHING,",
+            "  });",
+            "  let producerPromise: Promise<Producer> | null = null;",
+            "  const producer = (): Promise<Producer> => {",
+            "    producerPromise ??= (async () => {",
+            "      const p = kafka.producer();",
+            "      await p.connect();",
+            "      return p;",
+            "    })();",
+            "    return producerPromise;",
+            "  };",
+            "  const consumers: Consumer[] = [];",
+            "  // Idempotent topic ensure — subscribing to a not-yet-produced topic",
+            "  // throws UNKNOWN_TOPIC_OR_PARTITION (consumers don't auto-create),",
+            "  // so the first subscriber creates it with the broker's defaults.",
+            "  const ensureTopic = async (topic: string): Promise<void> => {",
+            "    const admin = kafka.admin();",
+            "    await admin.connect();",
+            "    try {",
+            "      await admin.createTopics({ topics: [{ topic }], waitForLeaders: true });",
+            "    } finally {",
+            "      await admin.disconnect();",
+            "    }",
+            "  };",
+            "  const park = async (address: string, raw: string, key: string | null): Promise<void> => {",
+            "    const p = await producer();",
+            "    await p.send({ topic: `${address}.dlq`, messages: [{ key, value: raw }] });",
+            "  };",
+            "  return {",
+            "    async publish(address, envelope) {",
+            "      const p = await producer();",
+            "      await p.send({",
+            "        topic: address,",
+            "        messages: [{ key: envelope.loomkey ?? envelope.id, value: JSON.stringify(envelope) }],",
+            "      });",
+            "    },",
+            "    subscribe(address, group, handler) {",
+            "      const consumer = kafka.consumer({ groupId: group ?? address });",
+            "      consumers.push(consumer);",
+            "      void (async () => {",
+            "        await ensureTopic(address);",
+            "        await consumer.connect();",
+            "        await consumer.subscribe({ topic: address });",
+            "        await consumer.run({",
+            "          eachMessage: async ({ message }) => {",
+            '            const raw = message.value?.toString() ?? "";',
+            "            const key = message.key ? message.key.toString() : null;",
+            "            let envelope: LoomEventEnvelope;",
+            "            try {",
+            "              envelope = JSON.parse(raw) as LoomEventEnvelope;",
+            "            } catch {",
+            "              // Malformed record: no retry can fix it — park + advance.",
+            "              await park(address, raw, key);",
+            '              baseLogger.warn({ event: "channel_dead_lettered", address, error: "malformed envelope" });',
+            "              return;",
+            "            }",
+            "            try {",
+            "              await handler(envelope);",
+            "            } catch (err) {",
+            "              // v1 log + park: keep the partition moving (a raw retry",
+            "              // would stall every record behind the poisoned one).",
+            "              await park(address, raw, key);",
+            "              baseLogger.warn({",
+            '                event: "channel_dead_lettered",',
+            "                address,",
+            "                type: envelope.type,",
+            "                id: envelope.id,",
+            "                error: err instanceof Error ? err.message : String(err),",
+            "              });",
+            "            }",
+            "          },",
+            "        });",
+            "      })().catch((err) => {",
+            "        // A failed subscription must not crash the process — log it;",
+            "        // the deployable keeps serving and operators see the event.",
+            "        baseLogger.warn({",
+            '          event: "channel_consume_failed",',
+            "          address,",
+            "          error: err instanceof Error ? err.message : String(err),",
+            "        });",
+            "      });",
+            "      return () => {",
+            "        void consumer.stop();",
+            "      };",
+            "    },",
+            "    async close() {",
+            "      try {",
+            "        for (const c of consumers) await c.disconnect();",
+            "        const p = producerPromise ? await producerPromise : null;",
+            "        await p?.disconnect();",
+            "      } catch {",
+            "        // Already closed / never connected — shutdown is best-effort.",
+            "      }",
+            "    },",
+            "  };",
+            "}",
+          ]
+        : []),
       "",
       "// The deployable's wired bindings: broker address + consumer group per",
       "// channelSource, with the connection URL injected by compose/k8s as",
@@ -269,7 +415,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "export const CHANNEL_BINDINGS = [",
       ...unique.map(
         (b) =>
-          `  { csName: ${JSON.stringify(b.csName)}, address: ${JSON.stringify(b.address)}, envVar: ${JSON.stringify(b.envVar)}, context: ${JSON.stringify(b.contextName)}, transport: ${JSON.stringify(b.transport)}, group: ${JSON.stringify(b.group)}, queue: ${b.delivery === "queue"} },`,
+          `  { csName: ${JSON.stringify(b.csName)}, address: ${JSON.stringify(b.address)}, envVar: ${JSON.stringify(b.envVar)}, context: ${JSON.stringify(b.contextName)}, transport: ${JSON.stringify(b.transport)}, group: ${JSON.stringify(b.group)}, queue: ${b.delivery === "queue"}${hasKafka ? `, key: ${JSON.stringify(b.key ?? null)}` : ""} },`,
       ),
       "] as const;",
       "",
@@ -290,7 +436,16 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "    type: string;",
       "    __loomEventId?: string;",
       "  } & Record<string, unknown>;",
-      '  const context = CHANNEL_BINDINGS.find((b) => b.address === address)?.context ?? "";',
+      hasKafka
+        ? "  const binding = CHANNEL_BINDINGS.find((b) => b.address === address);"
+        : '  const context = CHANNEL_BINDINGS.find((b) => b.address === address)?.context ?? "";',
+      ...(hasKafka
+        ? [
+            '  const context = binding?.context ?? "";',
+            "  const keyField = binding?.key;",
+            "  const keyValue = keyField ? data[keyField] : undefined;",
+          ]
+        : []),
       "  counter += 1;",
       "  return {",
       '    specversion: "1.0",',
@@ -302,6 +457,11 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "    time: new Date().toISOString(),",
       '    datacontenttype: "application/json",',
       "    loomchannel: address,",
+      ...(hasKafka
+        ? [
+            "    ...(keyValue === undefined || keyValue === null ? {} : { loomkey: String(keyValue) }),",
+          ]
+        : []),
       "    data,",
       "  };",
       "}",
@@ -320,11 +480,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "    }",
       "    let t = byUrl.get(url);",
       "    if (!t) {",
-      hasRedis && hasRabbit
-        ? '      t = b.transport === "rabbitmq" ? createRabbitTransport(url) : createRedisTransport(url);'
-        : hasRabbit
-          ? "      t = createRabbitTransport(url);"
-          : "      t = createRedisTransport(url);",
+      transportFactoryLine(hasRedis, hasRabbit, hasKafka),
       "      byUrl.set(url, t);",
       "    }",
       "    byEnv.set(b.csName, t);",
@@ -397,7 +553,11 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "    const t = transports.get(b.csName);",
       "    if (!t) continue;",
       "    unsubs.push(",
-      "      t.subscribe(b.address, b.queue ? b.group : null, async (envelope) => {",
+      hasKafka
+        ? // Kafka consumption always rides the deployable's group (design
+          // §4: per-deployable groups realise broadcast across deployables).
+          '      t.subscribe(b.address, b.queue || b.transport === "kafka" ? b.group : null, async (envelope) => {'
+        : "      t.subscribe(b.address, b.queue ? b.group : null, async (envelope) => {",
       '        const bare = envelope.type.includes(".") ? envelope.type.slice(envelope.type.indexOf(".") + 1) : envelope.type;',
       "        const event = {",
       "          type: bare,",
@@ -410,6 +570,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "          address: b.address,",
       "          type: envelope.type,",
       "          id: envelope.id,",
+      ...(hasKafka ? ["          ...(envelope.loomkey ? { key: envelope.loomkey } : {}),"] : []),
       "        });",
       "      }),",
       "    );",

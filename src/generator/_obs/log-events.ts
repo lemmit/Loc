@@ -175,6 +175,9 @@ export const LogEvents = {
   timerSkippedOverlap: { event: "timer_skipped_overlap", level: "info", fields: ["timer"] },
   timerLockContended: { event: "timer_lock_contended", level: "debug", fields: ["timer"] },
   timerEmitFailed: { event: "timer_emit_failed", level: "error", fields: ["timer", "error"] },
+  // A boundary missed while every replica was down, replayed once on recovery
+  // (coalesce-once catch-up — the durable-driver missed-run path, M-T4.1 Phase 2).
+  timerCatchup: { event: "timer_catchup", level: "info", fields: ["timer", "boundary"] },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {

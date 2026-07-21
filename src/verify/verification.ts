@@ -42,16 +42,29 @@ function pushInto<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 /** Pick the result for one executable test.  Prefer an exact
- *  (suite, name) match; fall back to a unique name-only match when the
- *  result carries no suite.  Returns the chosen outcome, or undefined
- *  when nothing ran for it. */
-function outcomeFor(ref: ExecTestRef, byName: Map<string, TestOutcome[]>): TestOutcome | undefined {
+ *  (suite, name) match; fall back to a name-only match when the result
+ *  carries no suite AND the name is unique across the whole test set.
+ *  Returns the chosen outcome, or undefined when nothing ran for it.
+ *
+ *  `sharedNames` holds every test name claimed by more than one
+ *  `ExecTestRef`.  Without it, a single suiteless result
+ *  `{name:"create works"}` was attributed to EVERY same-named ref — so two
+ *  aggregates each declaring `test "create works"` (verifying different
+ *  requirements) both went VERIFIED off one run, over-attributing a false
+ *  green (and symmetrically over-attributing a FAIL). */
+function outcomeFor(
+  ref: ExecTestRef,
+  byName: Map<string, TestOutcome[]>,
+  sharedNames: ReadonlySet<string>,
+): TestOutcome | undefined {
   const named = byName.get(ref.name);
   if (!named || named.length === 0) return undefined;
   const exact = named.filter((r) => r.suite === ref.suite);
   if (exact.length > 0) return worst(exact);
-  // No suite-qualified match.  Only attribute a bare-name result when
-  // it can't be confused with another test of the same name.
+  // No suite-qualified match.  Only attribute a bare-name result when it
+  // can't be confused with another test of the same name — i.e. the name
+  // is owned by exactly one executable test.
+  if (sharedNames.has(ref.name)) return undefined;
   const suiteless = named.filter((r) => r.suite === undefined);
   if (suiteless.length > 0) return worst(suiteless);
   return undefined;
@@ -77,6 +90,18 @@ export function computeVerification(
     pushInto(byName, r.name, r);
   }
 
+  // Names claimed by more than one executable test.  A suiteless result can
+  // only be safely attributed to a bare name when that name is unique — two
+  // tests sharing a name make an unqualified result ambiguous.
+  const nameCounts = new Map<string, number>();
+  for (const ref of index.execTests) {
+    nameCounts.set(ref.name, (nameCounts.get(ref.name) ?? 0) + 1);
+  }
+  const sharedNames = new Set<string>();
+  for (const [name, count] of nameCounts) {
+    if (count > 1) sharedNames.add(name);
+  }
+
   // Group executable tests by the testCase they verify.  `testCaseId`
   // is a resolved cross-reference (the linker rejects a `verifies <TC>`
   // that doesn't exist — it lands as null), so every non-null id here
@@ -98,7 +123,7 @@ export function computeVerification(
     let anyNotPassed = false; // any non-pass: missing, skip, or fail
 
     for (const ref of refs) {
-      const outcome = outcomeFor(ref, byName);
+      const outcome = outcomeFor(ref, byName, sharedNames);
       if (outcome) consumed.add(outcome);
       const status = outcome ? outcome.status : "missing";
       if (status === "fail") anyFail = true;

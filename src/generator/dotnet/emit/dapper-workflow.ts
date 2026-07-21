@@ -482,7 +482,11 @@ export function dapperPortRegistrations(
 /** The outbox-recording dispatcher (Dapper): durable events INSERT into
  *  __loom_outbox (the relay delivers); everything else delegates to the
  *  in-process Mediator dispatcher. */
-export function renderDapperOutboxDispatcher(ns: string, durableTypes: readonly string[]): string {
+export function renderDapperOutboxDispatcher(
+  ns: string,
+  durableTypes: readonly string[],
+  inner = "InProcessDomainEventDispatcher",
+): string {
   const set = durableTypes.map((t) => `"${t}"`).join(", ");
   return `// Auto-generated.
 using System.Collections.Generic;
@@ -499,15 +503,15 @@ namespace ${ns}.Infrastructure.Events;
 /// <summary>Records durable events (channels with retention: log | work) in
 /// the __loom_outbox table instead of dispatching inline; the
 /// OutboxRelayService delivers them at-least-once.  Ephemeral events
-/// delegate to the in-process dispatcher unchanged.  Raw-Npgsql sibling of the
+/// delegate to the inner dispatcher unchanged.  Raw-Npgsql sibling of the
 /// EF OutboxDomainEventDispatcher (persistence: dapper).</summary>
 public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
 {
     private static readonly HashSet<string> DurableEventTypes = new() { ${set} };
     private readonly NpgsqlDataSource _db;
-    private readonly InProcessDomainEventDispatcher _inner;
+    private readonly ${inner} _inner;
 
-    public OutboxDomainEventDispatcher(NpgsqlDataSource db, InProcessDomainEventDispatcher inner)
+    public OutboxDomainEventDispatcher(NpgsqlDataSource db, ${inner} inner)
     {
         _db = db;
         _inner = inner;
@@ -532,11 +536,65 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
 
 /** The polling relay (Dapper): a BackgroundService draining undispatched
  *  outbox rows (ordered by occurred_at) through the in-process dispatcher;
- *  failures bump `attempts` and dead-letter (log only) after MaxAttempts. */
-export function renderDapperOutboxRelay(ns: string, durableTypes: readonly string[]): string {
+ *  failures bump `attempts` and dead-letter (log only) after MaxAttempts.
+ *
+ *  `durableBroker` (M-T4.4 slice 7b, design §5): drained rows whose channel
+ *  is broker-bound publish via `ChannelRelayPublisher` (envelope id = row
+ *  id) instead of redelivering locally.  `hasSubscriptions: false` is the
+ *  workflow-less durable-broker producer — no in-process dispatcher exists,
+ *  so unpublishable rows simply complete. */
+export function renderDapperOutboxRelay(
+  ns: string,
+  durableTypes: readonly string[],
+  opts: { durableBroker: boolean; hasSubscriptions: boolean } = {
+    durableBroker: false,
+    hasSubscriptions: true,
+  },
+): string {
   const arms = durableTypes
-    .map((t) => `            "${t}" => JsonSerializer.Deserialize<${t}>(payload),`)
+    .map((t) => `            "${t}" => (IDomainEvent?)JsonSerializer.Deserialize<${t}>(payload),`)
     .join("\n");
+  const channelsUsing = opts.durableBroker ? `using ${ns}.Infrastructure.Channels;\n` : "";
+  const transportsField = opts.durableBroker
+    ? "\n    private readonly ChannelTransports _transports;"
+    : "";
+  const ctorParams = opts.durableBroker
+    ? "IServiceScopeFactory scopes, NpgsqlDataSource db, ChannelTransports transports, ILogger<OutboxRelayService> log"
+    : "IServiceScopeFactory scopes, NpgsqlDataSource db, ILogger<OutboxRelayService> log";
+  const ctorAssign = opts.durableBroker ? "\n        _transports = transports;" : "";
+  const innerResolve = opts.hasSubscriptions
+    ? "\n            var inner = scope.ServiceProvider.GetRequiredService<InProcessDomainEventDispatcher>();"
+    : "";
+  const localDispatch = `// The row id rides on an AsyncLocal so saga handlers'
+                // idempotent-consumer markers can no-op on redelivery
+                // (dispatch-delivery-semantics.md §3).
+                OutboxDelivery.CurrentEventId = row.id.ToString();
+                try
+                {
+                    if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
+                }
+                finally
+                {
+                    OutboxDelivery.CurrentEventId = null;
+                }`;
+  const dispatchBlock = opts.durableBroker
+    ? opts.hasSubscriptions
+      ? `// Design §5: a broker-bound durable row publishes on drain (the
+                // envelope carries the row id — the consumer-side idempotency
+                // key); the rest redeliver through the local dispatcher.
+                if (ev is null || !await ChannelRelayPublisher.TryPublishAsync(_transports, ev, row.id.ToString(), _log))
+                {
+                    ${localDispatch.split("\n").join("\n    ")}
+                }`
+      : `// Design §5: broker-bound durable rows publish on drain (the
+                // envelope carries the row id — the consumer-side idempotency
+                // key).  A non-broker durable row has no subscriber in this
+                // shape; either way the row completes.
+                if (ev is not null)
+                {
+                    await ChannelRelayPublisher.TryPublishAsync(_transports, ev, row.id.ToString(), _log);
+                }`
+    : localDispatch;
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
@@ -550,7 +608,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Events;
-
+${channelsUsing}
 namespace ${ns}.Infrastructure.Events;
 
 /// <summary>Drains __loom_outbox through the in-process dispatcher
@@ -564,13 +622,13 @@ public sealed class OutboxRelayService : BackgroundService
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(500);
 
     private readonly IServiceScopeFactory _scopes;
-    private readonly NpgsqlDataSource _db;
+    private readonly NpgsqlDataSource _db;${transportsField}
     private readonly ILogger<OutboxRelayService> _log;
 
-    public OutboxRelayService(IServiceScopeFactory scopes, NpgsqlDataSource db, ILogger<OutboxRelayService> log)
+    public OutboxRelayService(${ctorParams})
     {
         _scopes = scopes;
-        _db = db;
+        _db = db;${ctorAssign}
         _log = log;
     }
 
@@ -609,23 +667,11 @@ public sealed class OutboxRelayService : BackgroundService
         }
         foreach (var row in rows)
         {
-            await using var scope = _scopes.CreateAsyncScope();
-            var inner = scope.ServiceProvider.GetRequiredService<InProcessDomainEventDispatcher>();
+            await using var scope = _scopes.CreateAsyncScope();${innerResolve}
             try
             {
                 var ev = Deserialize(row.type, row.payload);
-                // The row id rides on an AsyncLocal so saga handlers'
-                // idempotent-consumer markers can no-op on redelivery
-                // (dispatch-delivery-semantics.md §3).
-                OutboxDelivery.CurrentEventId = row.id.ToString();
-                try
-                {
-                    if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
-                }
-                finally
-                {
-                    OutboxDelivery.CurrentEventId = null;
-                }
+                ${dispatchBlock}
                 await using var mark = await _db.OpenConnectionAsync(cancellationToken);
                 await mark.ExecuteAsync(new CommandDefinition(
                     "UPDATE __loom_outbox SET dispatched_at = now() WHERE id = @id",

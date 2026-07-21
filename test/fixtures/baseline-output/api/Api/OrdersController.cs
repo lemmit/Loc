@@ -14,6 +14,7 @@ using Api.Application.Orders.Responses;
 using Api.Domain.Ids;
 using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
+using Api.Observability;
 
 namespace Api.Api;
 
@@ -38,6 +39,7 @@ public sealed class OrdersController : ControllerBase
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Order", id.Value);
+        HttpMetrics.RecordDomainOperation("Order", "create");
         return CreatedAtAction(nameof(GetOrderById), new { id = id.Value }, new CreateOrderResponse(id.Value));
     }
 
@@ -75,6 +77,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> AddLineOrder([FromRoute] Guid id, [FromBody] AddLineOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "addLine", id);
+        HttpMetrics.RecordDomainOperation("Order", "addLine");
         var cmd = new AddLineCommand(
             new OrderId(id),
             new ProductId(request.ProductId),
@@ -92,6 +95,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> ConfirmOrder([FromRoute] Guid id, [FromBody] ConfirmOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
+        HttpMetrics.RecordDomainOperation("Order", "confirm");
         var cmd = new ConfirmCommand(
             new OrderId(id)
         );
@@ -108,6 +112,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> UpdateOrder([FromRoute] Guid id, [FromBody] UpdateOrderRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "update", id);
+        HttpMetrics.RecordDomainOperation("Order", "update");
         var cmd = new UpdateCommand(
             new OrderId(id),
             request.CustomerId,

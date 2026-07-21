@@ -1,5 +1,6 @@
 import { deriveEventSubscriptions } from "../../ir/enrich/enrichments.js";
 import type {
+  ChannelIR,
   CreateIR,
   EnrichedBoundedContextIR,
   ExprIR,
@@ -18,6 +19,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { lineCount, type SourceMapRecorder } from "../_trace/sourcemap.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
+import type { ElixirChannelsCfg } from "./channels-emit.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
 import { lookupOp, opCallParamFields } from "./vanilla/workflow-execution-emit.js";
@@ -91,9 +93,16 @@ interface ProjectionSub {
  *  concrete reactor / event-create node.  Re-derives WITH projections so the
  *  derivation is shared, then keeps only the workflow (non-projection) subs;
  *  projection folds are resolved by `resolveProjectionSubs`. */
-function resolveSubscriptions(ctx: EnrichedBoundedContextIR): Subscription[] {
+function resolveSubscriptions(
+  ctx: EnrichedBoundedContextIR,
+  extraChannels: ChannelIR[] = [],
+): Subscription[] {
   const subs: Subscription[] = [];
-  for (const s of deriveEventSubscriptions(ctx.channels, ctx.workflows, ctx.projections)) {
+  for (const s of deriveEventSubscriptions(
+    [...ctx.channels, ...extraChannels],
+    ctx.workflows,
+    ctx.projections,
+  )) {
     if (s.projection) continue;
     const wf = ctx.workflows.find((w) => w.name === s.workflow);
     if (!wf) continue;
@@ -150,8 +159,13 @@ function resolveProjectionSubs(ctx: EnrichedBoundedContextIR): ProjectionSub[] {
  *  the aggregate emit path, which fans emitted events into the dispatcher) must
  *  guard the `<Ctx>.Dispatcher.dispatch/1` reference on this, since the module is
  *  only emitted when a subscriber exists (`emitDispatch` short-circuits otherwise). */
-export function contextHasDispatcher(ctx: EnrichedBoundedContextIR): boolean {
-  return resolveSubscriptions(ctx).length > 0 || resolveProjectionSubs(ctx).length > 0;
+export function contextHasDispatcher(
+  ctx: EnrichedBoundedContextIR,
+  extraChannels: ChannelIR[] = [],
+): boolean {
+  return (
+    resolveSubscriptions(ctx, extraChannels).length > 0 || resolveProjectionSubs(ctx).length > 0
+  );
 }
 
 /** The saga-state module name (`<App>.<Ctx>.Workflows.<Wf>State`). */
@@ -218,10 +232,15 @@ export function emitDispatch(
    *  region (like the command-workflow file) PLUS per-statement fragments —
    *  same contract as `emitVanillaWorkflowExecution`. */
   sourcemap?: SourceMapRecorder,
+  /** Broker channels (M-T4.4 slice 6c): presence widens the subscription
+   *  derivation with the wired-but-foreign channels and re-routes handler
+   *  re-emits through the `<App>.Channels` tee. */
+  channels?: ElixirChannelsCfg,
+  extraChannels: ChannelIR[] = [],
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
-  const subs = resolveSubscriptions(ctx);
+  const subs = resolveSubscriptions(ctx, extraChannels);
   const projSubs = resolveProjectionSubs(ctx);
   if (subs.length === 0 && projSubs.length === 0) return;
 
@@ -252,8 +271,8 @@ export function emitDispatch(
     // An event-sourced workflow's handler folds the stream on load and appends
     // its own emitted events (the saga analogue of the ES aggregate).
     const { content, regions }: HandlerResult = sub.workflow.eventSourced
-      ? renderEsWorkflowHandler(contextModule, sub)
-      : renderHandler(appModule, contextModule, ctx, sub, sys);
+      ? renderEsWorkflowHandler(contextModule, sub, channels)
+      : renderHandler(appModule, contextModule, ctx, sub, sys, channels);
     const path = `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`;
     out.set(path, content);
     const construct = `${ctx.name}.${sub.workflow.name}`;
@@ -282,7 +301,7 @@ export function emitDispatch(
   // --- Dispatcher — routes each event struct to its handler(s). ----------
   out.set(
     `lib/${appName}/${ctxSnake}/dispatcher.ex`,
-    renderDispatcher(contextModule, ctx, subs, projSubs),
+    renderDispatcher(contextModule, ctx, subs, projSubs, channels),
   );
 }
 
@@ -365,6 +384,7 @@ function renderDispatcher(
   ctx: EnrichedBoundedContextIR,
   subs: Subscription[],
   projSubs: ProjectionSub[] = [],
+  channels?: ElixirChannelsCfg,
 ): string {
   // Group handler-module calls by event type so one `dispatch(%Event{})` clause
   // invokes every subscriber — workflow reactor AND projection fold — of that
@@ -380,8 +400,11 @@ function renderDispatcher(
     push(ps.event, projectionHandlerModule(contextModule, ps.projection, ps.on));
   const clauses: string[] = [];
   for (const [event, calls] of byEvent) {
+    // A wired-but-foreign channel's event struct lives under its OWNING
+    // context's module (M-T4.4 slice 6c) — qualify the match accordingly.
+    const evModule = channels?.foreignEventModules.get(event) ?? contextModule;
     clauses.push(
-      `  def dispatch(%${contextModule}.Events.${upperFirst(event)}{} = event) do\n${calls.join("\n")}\n    :ok\n  end`,
+      `  def dispatch(%${evModule}.Events.${upperFirst(event)}{} = event) do\n${calls.join("\n")}\n    :ok\n  end`,
     );
   }
   return `# Auto-generated.
@@ -465,6 +488,7 @@ function renderHandler(
   ctx: EnrichedBoundedContextIR,
   sub: Subscription,
   sys?: SystemIR,
+  channels?: ElixirChannelsCfg,
 ): HandlerResult {
   const wf = sub.workflow;
   const persisted = !!wf.correlationField;
@@ -479,7 +503,13 @@ function renderHandler(
 
   // Body statements → ordered Elixir lines (0-indented), woven into a
   // `with`-chain plus the re-entrant dispatches the do-branch runs.
-  const { lines: body, regions } = renderBody(sub.statements, ctx, renderCtx, contextModule);
+  const { lines: body, regions } = renderBody(
+    sub.statements,
+    ctx,
+    renderCtx,
+    contextModule,
+    channels,
+  );
 
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
@@ -496,7 +526,7 @@ function renderHandler(
 defmodule ${handlerModule(contextModule, sub)} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)}."
 
-${requireLogger}  def handle(%${contextModule}.Events.${upperFirst(sub.event)}{} = event) do
+${requireLogger}  def handle(%${channels?.foreignEventModules.get(sub.event) ?? contextModule}.Events.${upperFirst(sub.event)}{} = event) do
     # A reactor is a per-dispatch boundary: run it in a child execution frame
     # (parent_id <- the dispatching request's scope) so its audit / provenance
     # rows record their call-structure position.
@@ -707,10 +737,11 @@ function renderBody(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
+  channels?: ElixirChannelsCfg,
 ): RenderBodyResult {
   const lines: BodyLine[] = [];
   for (const st of statements) {
-    for (const l of renderStmt(st, ctx, renderCtx, contextModule)) {
+    for (const l of renderStmt(st, ctx, renderCtx, contextModule, channels)) {
       lines.push({ ...l, origin: st.origin });
     }
   }
@@ -729,6 +760,22 @@ function renderBody(
     if (!d.rebindsState) continue;
     const laterReadsState = dispatches.slice(i + 1).some((l) => /\bstate\b/.test(l.text));
     if (!laterReadsState) d.text = d.text.replace(/^state = /, "");
+  }
+
+  // A `let` binding nothing later reads must render as `_name` — an unused
+  // plain bind fails `mix compile --warnings-as-errors`.  Checked in FULL
+  // source order (a with-clause bind can be read by a dispatch and vice
+  // versa), then mutated in place like the state-rebind drop above.
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]!;
+    if (!l.bindName) continue;
+    const word = new RegExp(`\\b${l.bindName}\\b`);
+    const laterReads = lines.slice(i + 1).some((later) => word.test(later.text));
+    if (laterReads) continue;
+    l.text =
+      l.kind === "with-clause"
+        ? l.text.replace(`{:ok, ${l.bindName}}`, `{:ok, _${l.bindName}}`)
+        : l.text.replace(new RegExp(`^${l.bindName} = `), `_${l.bindName} = `);
   }
 
   // M13 — capture the per-statement anchors AFTER the assign-prefix-drop
@@ -763,6 +810,7 @@ function renderStmt(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
+  channels?: ElixirChannelsCfg,
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -812,7 +860,13 @@ function renderStmt(
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
       const struct = `%${contextModule}.Events.${upperFirst(st.eventName)}{${fields}}`;
-      return [{ kind: "dispatch", text: `${contextModule}.Dispatcher.dispatch(${struct})` }];
+      // Broker tee (M-T4.4 slice 6c): a reactor re-emit goes through
+      // `<App>.Channels.dispatch` so choreography chains re-publish broker-
+      // routed events instead of short-circuiting locally (.NET/Java parity).
+      const dispatchText = channels
+        ? `${channels.appModule}.Channels.dispatch(${struct}, ${contextModule}.Dispatcher)`
+        : `${contextModule}.Dispatcher.dispatch(${struct})`;
+      return [{ kind: "dispatch", text: dispatchText }];
     }
     case "expr-let": {
       return [

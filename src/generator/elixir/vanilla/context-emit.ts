@@ -17,6 +17,7 @@ import {
 import type {
   AggregateIR,
   BoundedContextIR,
+  ChannelIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   OperationIR,
@@ -29,6 +30,7 @@ import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
+import type { ElixirChannelsCfg } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
@@ -93,6 +95,10 @@ export function emitVanillaContextModule(
   out: Map<string, string>,
   sys?: SystemIR,
   sourcemap?: SourceMapRecorder,
+  /** Broker channels (M-T4.4 slice 6c) — re-routes op-emit dispatch lines
+   *  through the `<App>.Channels` tee (see channels-emit.ts). */
+  channels?: ElixirChannelsCfg,
+  extraChannels: ChannelIR[] = [],
 ): void {
   const ctxSnake = snake(ctx.name);
   const ctxModule = upperFirst(ctx.name);
@@ -108,7 +114,15 @@ export function emitVanillaContextModule(
   // exact-text search against THIS file's own final content, independent of
   // any whole-file region.
   const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
-  const content = renderContextModule(appModule, ctxModule, ctx, sys, opFragments);
+  const content = renderContextModule(
+    appModule,
+    ctxModule,
+    ctx,
+    sys,
+    opFragments,
+    channels,
+    extraChannels,
+  );
   out.set(path, content);
   if (sourcemap && opFragments) {
     for (const frag of opFragments) {
@@ -123,6 +137,8 @@ function renderContextModule(
   ctx: BoundedContextIR,
   sys?: SystemIR,
   opFragments?: OpFragment[],
+  channels?: ElixirChannelsCfg,
+  extraChannels: ChannelIR[] = [],
 ): string {
   const facadeMod = `${appModule}.${ctxModule}`;
   const blocks = ctx.aggregates.map((agg) => {
@@ -205,6 +221,8 @@ function renderContextModule(
                 op,
                 relationalContainments,
                 opFragments,
+                channels,
+                extraChannels,
               )
             : renderNamedOpFunction(
                 facadeMod,
@@ -215,6 +233,8 @@ function renderContextModule(
                 op,
                 relationalContainments,
                 opFragments,
+                channels,
+                extraChannels,
               ),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
@@ -709,6 +729,9 @@ function renderNamedOpFunction(
   /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
+  /** Broker channels (M-T4.4 slice 6c) — see renderEmitDispatchLines. */
+  channels?: ElixirChannelsCfg,
+  extraChannels: ChannelIR[] = [],
 ): string {
   // An `extern` op has NO mutating body (only preconditions) — it delegates the
   // business decision to the user-owned `<Agg>ExternImpl` hook, then persists the
@@ -762,7 +785,7 @@ function renderNamedOpFunction(
   // (saga seam), not just the subscriber-less raw broadcast.  A named op always
   // persists, so the `{:ok, saved}` seam always exists.
   const emits = opEmitsEvent(op);
-  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
   const dispatchLines = emits
     ? renderEmitDispatchLines(
         op,
@@ -771,6 +794,7 @@ function renderNamedOpFunction(
         "        ",
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
+        channels,
       )
     : [];
 

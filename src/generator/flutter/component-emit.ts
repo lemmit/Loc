@@ -32,7 +32,7 @@ import { lines } from "../../util/code-builder.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
-import { flutterPack } from "./pack.js";
+import { flutterPack, usesIntl } from "./pack.js";
 import {
   buildStateFields,
   buildStateInits,
@@ -273,6 +273,7 @@ export function renderComponentsFile(
 
   const imports = ["import 'package:flutter/material.dart';"];
   if (needsModels(used)) imports.push("import 'models.dart';");
+  if (usesIntl(blocks.join("\n"))) imports.push("import 'package:intl/intl.dart';");
   return `${lines(
     "// User components — one widget per `component Foo(params) { body }` a ui",
     "// hosts (StatelessWidget, or StatefulWidget when it carries `state`).",

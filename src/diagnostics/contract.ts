@@ -19,16 +19,20 @@ export type JsonSeverity = "error" | "warning" | "info";
  * and the outline (`<keyword> <Context>.<Decl>[.<member>]`).
  *
  * - `add`     — `target` is a free-body container (context / aggregate / value
- *               object); `source` is appended as a new member.
+ *               object / deployable); `source` is appended as a new member.
  * - `replace` — `target` is the node to replace; `source` is its new text.
  * - `remove`  — `target` is the node to delete; `source` is ignored.
  * - `insert`  — position-aware insert of `source` relative to `target`
  *               (`position`): `before` / `after` a sibling node, or
  *               `header-end` (just before the target declaration's opening
  *               `{` — for header clauses, e.g. `inheritanceUsing(...)`).
+ * - `rename`  — `target` is the declaration to rename; `source` is the new
+ *               name.  The declaration AND every use site (computed by the
+ *               rename provider — cross-references included) are rewritten in
+ *               one patch, so `X id` refs and expression uses stay resolved.
  */
 export interface ModelPatch {
-  op: "add" | "replace" | "remove" | "insert";
+  op: "add" | "replace" | "remove" | "insert" | "rename";
   target: string;
   source?: string;
   /** Only for `op: "insert"`.  Defaults to `"after"`. */

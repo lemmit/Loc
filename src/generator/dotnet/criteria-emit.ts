@@ -193,6 +193,14 @@ function anyRef(e: ExprIR, pred: (r: RefNode) => boolean): boolean {
       );
     case "list":
       return e.elements.some((x) => anyRef(x, pred));
+    case "authz-filter":
+      // M-T9.9: the `scope` sentinel references the principal through its claim
+      // sub-expressions (deny is principal-free).  Recurse so `refsCurrentUser`
+      // stays true for a deep/global filter — matching the pre-M-T9.9
+      // `method-call` sentinel, whose args this arm walked.
+      return e.filter.kind === "scope"
+        ? anyRef(e.filter.anchorClaim, pred) || anyRef(e.filter.tenantClaim, pred)
+        : false;
     default:
       // literal | this | id — leaves with no sub-expressions.
       return false;

@@ -151,33 +151,51 @@ A system-scope `timerSource { for: <Event>, cron: "…" | every: <dur> }`
 (scheduling.md) fires a plain domain event on a wall-clock cadence; workflows
 react through the existing `on`/`create … by` triggers. When a deployable owns a
 timer (its subdomain is the for-event's `migrationsOwner`), the Hono backend
-emits `scheduler.ts` and wires it at boot:
+emits `scheduler.ts` and wires it at boot. **Phase 2** splits the two cadences by
+where durability matters:
 
-- **One job per timer.** `cron:` → `node-cron`; `every:` → a bare `setInterval`.
-- **Single-fire across replicas.** Each tick opens a transaction and takes a
-  `pg_try_advisory_xact_lock` keyed by an FNV-1a hash of the timer name; the
-  lock is held for the dispatch and released automatically when the tx commits
-  (a plain session `pg_advisory_lock` + a connection pool would leak the unlock
-  onto a different pooled connection). The loser of the race skips (logged). A
-  `running` guard skips (does not queue) an overlapping tick on the same replica.
+- **`cron:` timers → pg-boss** (a Postgres-backed durable job queue). pg-boss
+  owns single-fire across replicas natively (no advisory lock), persists each
+  run, and **retries a failed body with backoff** (`retryLimit: 3`,
+  `retryBackoff: true`). The schedule (`boss.schedule`) and worker (`boss.work`)
+  live in the app's own Postgres.
+- **Missed-window catch-up.** pg-boss does *not* back-fill a cron boundary that
+  elapsed while every replica was down (its `shouldSendIt` only sends when the
+  last boundary is < 60s old). A self-owned `loom_timer_runs` watermark (created
+  by the scheduler on boot, like pg-boss creates its own schema — *not* in the
+  domain MigrationsIR) drives a **coalesce-once catch-up**: on the *first* boot
+  it records a baseline without retro-firing (a fresh deploy must not replay
+  history); on a later boot, if the previous boundary is > 60s old and later than
+  the last recorded run, it replays that boundary **exactly once** (a 20-minute
+  outage over four 5-minute boundaries fires one catch-up, not four).
+- **`every:` (sub-minute) timers → in-process** `setInterval` + a
+  transaction-scoped `pg_try_advisory_xact_lock` (single-fire) with a `running`
+  no-overlap guard. Durability is meaningless for a high-frequency poll
+  (resume-at-next-tick is correct) and pg-boss cron is minute-granularity.
 - **Dispatch.** The tick event is constructed (id fields minted, `at` stamped)
   and dispatched through the same in-process dispatcher the sagas use, so an
   `on`/`create` reactor fires with no new machinery.
 - **Observability.** `timer_fired` / `timer_skipped_overlap` /
-  `timer_lock_contended` / `timer_emit_failed` on the catalog.
+  `timer_lock_contended` / `timer_emit_failed` / `timer_catchup` on the catalog.
 
-**Delivery semantics (multi-pod).** The advisory lock is a *mutex around the
-body*: while one replica is dispatching, a peer's concurrent tick fails the lock
-and skips — no concurrent double-fire. It is **at-least-once**, not
-exactly-once: if a replica commits before a peer's clock-skewed tick fires, the
-peer can also fire, so **tick reactors must be idempotent** (the same contract
-event reactors already carry). True exactly-once-per-instant (a durable claim
-keyed by the cadence bucket / competing-consumer queue) is not implemented — a
-Phase-3 durability item.
+**Delivery semantics (multi-pod).** Still **at-least-once**: pg-boss gives
+single-fire per boundary and durable retry, but a clock-skewed peer or a
+catch-up replay can re-deliver, so **tick reactors must be idempotent** (the
+same contract event reactors already carry). Exactly-once-per-instant is not a
+goal — at-least-once + idempotent reactors is the contract.
 
-A deployable owning no timer emits no `scheduler.ts`, no `node-cron` dep, and no
-boot wiring — byte-identical to before. (`.NET` and the other backends are
-in-progress; see M-T4.1.)
+A deployable owning no timer emits no `scheduler.ts`, no `pg-boss` dep, and no
+boot wiring — byte-identical to before.
+
+**Phase-2 durable drivers (M-T4.1).** The advisory-lock path above is the
+*in-process* tier — correct for `every:` (sub-minute) cadences but at-least-once.
+`cron:` timers additionally get a **durable, store-coordinated** driver per
+backend, so a boundary missed while every replica was down is replayed once on
+recovery (missed-run catch-up) and fires exactly once across replicas
+(single-fire), with retries. Each backend uses its ecosystem's Postgres-native
+job store: **node → pg-boss**, **.NET → Hangfire**, **Java → JobRunr**,
+**Python → procrastinate**, **Elixir → Oban**. The `every:` tier stays the
+in-process interval loop + `pg_try_advisory_xact_lock` on every backend.
 
 ### Per-aggregate detail
 
@@ -728,7 +746,7 @@ web_app/
 │   ├── App.vue             # app chrome + <router-view/> + onErrorCaptured boundary
 │   ├── router.ts           # createRouter(createWebHistory) route table + NotFound catch-all
 │   ├── theme.ts            # createVuetify tokens (vuetify) / `export {}` stub (shadcnVue — CSS vars)
-│   ├── lib/form.ts         # useLoomForm — reactive() values + zod parse + per-field error map
+│   ├── lib/form.ts         # useLoomForm — vee-validate useForm over the shared zod schema (local toTypedSchema) + per-field error map
 │   ├── lib/format.ts       # formatting FUNCTIONS (the React packs' format components, fn-style)
 │   ├── lib/toast.ts        # channels only: reactive pushToast() queue the app-shell host renders
 │   ├── api/realtime.ts     # channels only: EventSource client (broadcast wire → subscribeRealtime)
@@ -745,7 +763,9 @@ web_app/
 
 - vue-query handles hoist as `reactive(useX(...))` so nested refs
   (`.data`, `.isPending`) read uniformly in template + script.
-- Forms: `useLoomForm(schema, drafts)` — no third-party form dep;
+- Forms: `useLoomForm(schema, drafts)` — vee-validate's `useForm` over
+  the shared zod schema (adapted by a locally-emitted `toTypedSchema`,
+  since `@vee-validate/zod`'s peer pins zod 3 while the stack is zod 4);
   create forms, operation `v-dialog`s (the pack-owned `op-dialog`
   template), and workflow run-forms are wired.
 - Operation/find hook args, navigate, match-in-child-position, and
@@ -840,8 +860,17 @@ Known frontier (M-T1.16): modal open-state, typed in-flight form state, enum DU 
 The **mobile axis** — a new development branch outside the web-target matrix, not
 a sixth web SPA.  `src/generator/flutter/` emits a **Dart/Flutter (Material 3)
 app on Riverpod** per flutter deployable.  Like Feliz it is **self-hosting** (own
-SDK build — `flutter build web`, not the vite static pipeline) so it hosts only
-its own `framework: flutter` UI.  Structurally Flutter is a **Feliz clone**: a
+SDK build, not the vite static pipeline) so it hosts only its own
+`framework: flutter` UI.
+
+**One Dart source, three build surfaces.**  The emitted project's `Makefile`
+builds **web** (`make web` → `flutter build web`, the surface compose serves via
+the emitted nginx `Dockerfile`), **Android** (`make apk`), and **iOS**
+(`make ipa`) from the same UI — "web-vs-native is a build target, not a modelling
+mode."  The native `android/`/`ios/` folders are SDK-owned boilerplate and are
+**not** vendored; `make prepare` (`flutter create --platforms=…`) materialises
+them on demand.  Compose serves only the web surface (mobile artifacts aren't a
+compose concern), and **CI gates only the web build** — see the CI row.  Structurally Flutter is a **Feliz clone**: a
 non-JSX, function-call-tree target (`Column(children: [ … ])`) that rides the
 **same shared markup walker** (`walker-core.ts`) through `flutter-target.ts` +
 a Dart expression-leaf table, and — like Feliz — supplies its own `interChildSeparator`
@@ -854,7 +883,7 @@ seam because Dart list literals are comma-separated.
 | Data / reads | `QueryView` resolves to a Riverpod `FutureProvider` (`reads-emit.ts`) that `GET`s the collection (unwrapping the paged `{items}` envelope) or a `FutureProvider.family` for byId; the widget renders `AsyncValue.when(loading/error/data)` with `empty:` folded in.  `For` lowers to `.map(...).toList()`. |
 | Forms | `CreateForm`/`OperationForm`/`DestroyForm` render self-contained `StatefulWidget`s in `lib/forms.dart` (`forms-emit.ts`) — typed field widgets by wire type (`TextFormField`/`SwitchListTile`/`DropdownButtonFormField`/`showDatePicker`, value objects flattened), a foreign-key `X id` becomes a runtime-loaded dropdown (`initState` GETs `/<target-collection>`, options labelled by the target's derived `display`), `GlobalKey<FormState>` validation, `http` POST/PUT/DELETE via `apiUri`, pop-on-success. |
 | Design | The procedural **flutterMaterial** pack (`src/generator/flutter/pack.ts`, Feliz-`pack.ts` model — emits Material widget trees, no `.hbs`). |
-| CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). |
+| CI | `generated-flutter-build.yml` — real `flutter analyze` + `flutter build web` on an interactive showcase (state + reads + forms + routing). **Web only** — no gate compiles the native `apk`/`ipa` surface, so native-only regressions aren't caught per-PR (tracked in `docs/new-plan/T1-…` / the Flutter parity proposal). |
 
 `Modal { trigger: Button(…), OperationForm(of:, op:) }` renders as a trigger `ElevatedButton` whose `onPressed` opens an `AlertDialog` wrapping the op-form widget (`showDialog`); the op-form pops its own route on success, dismissing the dialog.  `WorkflowForm(runs: <wf>)` renders as a `StatefulWidget` (like `CreateForm`) that POSTs the workflow params to the command route `/workflows/<wf>`.
 
@@ -864,7 +893,9 @@ A scalar array form field (`tags: string[]` / `scores: int[]`) renders as a repe
 
 A user `component Foo(params) { body }` emits a Dart widget into `lib/components.dart` (`component-emit.ts`); an invocation `Foo(a: x)` renders as a widget constructor call and the page imports `../components.dart`.  A **stateless** component (value params, no own state) becomes a `StatelessWidget` (one final field per param, the walked body as `build`).  A **stateful** component (`state {}` + named `action`s) becomes a `StatefulWidget` whose `State` holds an immutable `<Comp>Model` (the same data-class shape a Riverpod page projects), built in `initState`, exposes each param as a `widget.<param>` getter, and wraps each action body in `setState` — reusing the page path's `renderNotifierStmt` (a write is `state = state.copyWith(field: value)`).  State is **per-instance** (each `Foo(...)` its own `State`), which a shared Riverpod provider would get wrong.  Only USED, no-read components are emitted; an `extern` component, a `derived` binding, an async-effect (`match await`) action, or a read-bearing / slot / children component falls back to the diagnostic comment.
 
-Known frontier: array-of-value-object form inputs (repeatable sub-forms), and the remaining user-component variants (extern / slot / children / derived / read-bearing / async-effect actions), are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier.  See `docs/old/plans/flutter-mobile-implementation.md`.
+An array-of-value-object form field (`lines: LineItem[]`) renders each row as a group of `TextFormField`s over the VO's scalar sub-fields (a `List<List<TextEditingController>>` in state), submitting a `{sub: value, …}` map per row — when every sub-field is text/numeric (a bool/enum/datetime/nested sub-field defers the whole array).
+
+Known frontier: VO-array fields with non-scalar sub-fields, and the remaining user-component variants (extern / slot / children / derived / read-bearing / async-effect actions), are deferred (fall back to a diagnostic comment — never broken Dart).  Inline `:=` state writes in render-tree lambdas are rejected upstream (`loom.effect-in-lambda`); named-action writes emit through the Riverpod Notifier — a nested target (`draft.address.zip := v`) folds into an immutable `copyWith` chain (`state.draft.copyWith(address: state.draft.address.copyWith(zip: v))`), so every wire model carries a `copyWith`.  (End-to-end record-typed page state additionally needs the `VO.create({…})` state initializer, a separate universal gap — see `docs/old/proposals/nested-state-writes-copywith-frontends.md`.)  See `docs/old/plans/flutter-mobile-implementation.md`.
 
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
@@ -961,6 +992,7 @@ PageIR maps onto LiveView:
 | `match { p => v; else => fallback }` | `cond do p -> v; true -> fallback end` (or `<%= cond do … end %>` in HEEx) |
 | `requires <pred>` (page) | full `handle_params/3` guard — when the predicate fails it `put_flash(:error, "forbidden")` + `push_navigate`s to `/` (the read-side UI analogue of an operation's `requires`; `liveview-emit.ts`) |
 | `navigate(<P>, {…})` | `push_navigate(socket, to: ~p"/route?…")` |
+| `on <channel>.<Event>(e) { toast(…) refetch(Agg) }` (ui-level realtime, channels.md Part I) | **native** — no SSE client. `mount/3` `if connected?(socket), do: Phoenix.PubSub.subscribe(<App>.PubSub, "events")` (the same topic every domain `emit` broadcasts on); one `handle_info(%<App>.<Ctx>.Events.<Event>{} = e, socket)` clause per subscribed event type → `toast(<expr>)` becomes `put_flash(:info, …)`, `refetch(Agg)` re-runs the page's `list_<agg>s` / `get_<agg>` load (no-op when the page doesn't display it), plus a `handle_info(_msg, socket)` catch-all. The reactor/saga path uses direct `Dispatcher.dispatch/1` calls (never this PubSub topic), so it is untouched. A ui with no `on` handlers emits byte-identical output (`liveview-emit.ts` + `realtime-liveview.ts`). |
 | Scaffolded body | `pack.render("page-list" \| "page-new" \| "page-detail", vm)` → HEEx inline in `render/1` |
 | Pack-emitted Playwright page object | `e2e/pages/<x>.ts` — same testid-keyed shape as React; HEEx HTML is selector-compatible |
 

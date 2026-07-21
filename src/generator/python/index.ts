@@ -10,12 +10,13 @@ import type {
   TimerSourceIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
-import { durableEventTypes } from "../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
@@ -27,7 +28,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
-import { redisChannelBindings } from "../_channels/bindings.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -48,6 +49,8 @@ import { errorsPy } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
+import { renderPyContextIntegrationTest } from "./emit/integration-tests.js";
+import { renderPythonMetricsFile } from "./emit/metrics.js";
 import {
   emitPythonAuditMigration,
   emitPythonMigrations,
@@ -58,12 +61,14 @@ import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
-import { renderPyTestsFile } from "./emit/tests.js";
+import { renderPyServiceTestsFile, renderPyTestsFile, renderPyVoTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-handlers-emit.js";
 import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
+import { buildPyQueryProjectionsFile } from "./query-projections-builder.js";
+import { buildPyRealtimeFile } from "./realtime-builder.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
@@ -76,7 +81,7 @@ import {
 } from "./repository-port-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
-import { renderPyTimerScheduler } from "./scheduler-builder.js";
+import { anyPyTimerUsesCron, renderPyTimerScheduler } from "./scheduler-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
 import {
   buildPyWorkflowsFile,
@@ -128,17 +133,22 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const mergedBase = mergeContexts(args.contexts);
   const sourcemap = args.sourcemap;
 
-  // Broker bindings (channels.md; M-T4.4 slice 2b): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4 slices 2b + 7a): the broker-bound
   // channelSources this deployable wires via `channels:`.  Computed up front
   // because they widen the merged vocabulary — a consumer deployable need not
   // HOST the channel's owning context to react to its events; the wired
   // binding carries the routing knowledge across deployables (mirrors the
   // Hono orchestrator).
-  const channelBindings = redisChannelBindings(args.deployable, args.sys);
+  const channelBindings = brokerChannelBindings(args.deployable, args.sys);
   const hostedChannelNames = new Set(args.contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   // Wired-but-foreign channels join the carrier set as minimal ChannelIR
-  // stubs (slice-2 scope pins their knobs), so the dispatch derivation routes
-  // a hosted reactor off a channel declared in a non-hosted context.
+  // stubs, so the dispatch derivation routes a hosted reactor off a channel
+  // declared in a non-hosted context.  The stub knobs stay PINNED to
+  // broadcast/ephemeral on purpose: `durableEventTypes(merged)` must only see
+  // HOSTED durable channels — the module-level migrations are what back the
+  // outbox table and the saga `last_event_id` column, and they can't see a
+  // foreign wiring.  A foreign `queue`/`work` consumer relies on broker ack
+  // semantics + idempotent reactors instead (the slice-3 stance).
   const wiredForeignChannels = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
     .map((b) => ({
@@ -154,10 +164,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Foreign events a hosted workflow consumes through a wired channel join
   // the deployable's event vocabulary: `app/domain/events.py` needs the
   // dataclass (the reactor handler constructs/matches it) and the
-  // DomainEvent union carries it.
+  // DomainEvent union carries it.  EVERY broker-carried event joins too,
+  // subscribed or not — the consumer's codec must decode a carried type it
+  // has no reactor for (the dispatch no-ops), or the broker driver would
+  // wrongly dead-letter it as unknown.
   const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
   const mergedSubscriptions = dispatchSubscriptionsOf(mergedPre);
-  const foreignConsumedEvents = [...new Set(mergedSubscriptions.map((s) => s.event))]
+  const carriedEventNames = channelBindings.flatMap((b) => b.events);
+  const foreignConsumedEvents = [
+    ...new Set([...mergedSubscriptions.map((s) => s.event), ...carriedEventNames]),
+  ]
     .filter((name) => !knownEventNames.has(name))
     .flatMap((name) => {
       for (const sub of args.sys.subdomains) {
@@ -176,6 +192,23 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Consumer side only when a hosted WORKFLOW reactor subscribes (slice-2
   // scope: projection folds stay on the in-process path).
   const hasChannelConsumers = hasChannels && mergedSubscriptions.some((s) => !s.projection);
+  // Durable broker-bound events (M-T4.4 slice 7a): carried by a wired
+  // `queue`/`work` (or future `log`) channel — the producer path for these
+  // rides the outbox relay (design §5), never the inline tee.  Intersected
+  // with the HOSTED durable set: only a producer that hosts the channel's
+  // context owns the outbox tier (see the stub-knob pin above).
+  const hostedDurable = durableEventTypes(merged);
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /realtime/events.  Gates the
+  // `app/realtime.py` module, the dispatcher's `RealtimeDispatcher` tee, and
+  // the main.py router mount; a broadcast-free deployable stays byte-identical.
+  const hasRealtime = realtimeEventTypes(merged).size > 0;
 
   // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
   // owner is DERIVED (no stamp): the deployable whose subdomain
@@ -188,6 +221,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return sub?.migrationsOwner === args.deployable.name;
   });
   const hasTimers = ownedTimers.length > 0;
+  // A durable (`cron:`) timer pulls the procrastinate job store; an every-only
+  // deployable stays on the in-process asyncio path with no extra dependency.
+  const hasDurableTimers = anyPyTimerUsesCron(ownedTimers);
 
   // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
   // React SPA — routers move under /api/*, main.py serves wwwroot/ with
@@ -202,22 +238,31 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
   // in pyproject only under an `auth { oidc }` block.
   const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
-  // APScheduler drives the owned timerSources (cron / interval jobs); added
-  // only when this deployable owns a timer, so a timer-free project stays
-  // byte-identical.  Pinned within major 3 (the AsyncIOScheduler /
-  // CronTrigger.from_crontab API the scheduler emits; 4.x is a rewrite).
-  const timerDeps = hasTimers ? ["apscheduler>=3.10,<4"] : [];
-  // Broker transport (M-T4.4 slice 2b) — redis-py (MIT, design §6a) speaks
-  // RESP to the compose-provisioned Valkey sidecar; wiring-gated so a
-  // channel-less pyproject stays byte-identical.
-  const channelDeps = hasChannels ? ["redis>=5.2,<7"] : [];
+  // Durable timer store: procrastinate drives the owned `cron:` timerSources
+  // (Postgres-native periodic tasks — store-coordinated single-fire + missed-run
+  // catch-up).  psycopg[binary] bundles libpq so the python:3.13-slim image needs
+  // no apt libpq (the domain layer's asyncpg driver doesn't ship one).  Both are
+  // added ONLY when this deployable owns a cron timer; an every-only (or
+  // timer-free) project stays byte-identical.
+  const timerDeps = hasDurableTimers ? ["procrastinate>=3,<4", "psycopg[binary]>=3.2,<4"] : [];
+  // Broker transports (M-T4.4 slices 2b + 7a + 8a) — redis-py (MIT, design
+  // §6a) speaks RESP to the compose-provisioned Valkey sidecar; aio-pika
+  // (Apache-2.0) speaks AMQP 0-9-1 to the rabbitmq sidecar; aiokafka
+  // (Apache-2.0, the asyncio-native kafka client) speaks to the
+  // apache/kafka sidecar.  Per-transport wiring-gated so a channel-less
+  // (or single-transport) pyproject stays byte-identical.
+  const channelDeps = [
+    ...(channelBindings.some((b) => b.transport === "redis") ? ["redis>=5.2,<7"] : []),
+    ...(channelBindings.some((b) => b.transport === "rabbitmq") ? ["aio-pika>=9.5,<10"] : []),
+    ...(channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka>=0.12,<0.13"] : []),
+  ];
   out.set(
     "pyproject.toml",
     renderPyproject(
       slug,
       [...resources.deps, ...oidcDeps, ...timerDeps, ...channelDeps],
       [...resources.devDeps],
-      hasTimers,
+      channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka"] : [],
     ),
   );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
@@ -231,6 +276,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/obs/__init__.py", "");
   out.set("app/obs/log.py", OBS_LOG_PY);
   out.set("app/obs/middleware.py", OBS_MIDDLEWARE_PY);
+  // app/obs/metrics.py — Prometheus registry (default process/GC collectors
+  // + the catalog's HTTP counter/histogram), served at GET /metrics and
+  // recorded from the observability middleware's request_end seam.
+  out.set("app/obs/metrics.py", renderPythonMetricsFile());
   const routedAggs = args.contexts.flatMap((c) =>
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
@@ -250,7 +299,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // observable, parity with Hono / .NET).
   const hasWorkflows =
     commandWorkflowsOf(merged).length > 0 || observableWorkflowsOf(merged).length > 0;
-  const hasProjections = merged.projections.length > 0;
+  // FOLDED projections drive projections_routes.py; query-time projections
+  // (read-path-architecture.md rev.13) get their own query_projections_routes.py.
+  const hasProjections = merged.projections.some(isMaterializedProjection);
+  const hasQueryProjections = merged.projections.some(isQueryTimeProjection);
   const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
     const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
     return owning
@@ -317,12 +369,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return agg ? resolveDs(agg)?.schema : undefined;
   });
   const hasSeeds = seedFile != null;
-  // Durable-channel outbox relay (dispatch-delivery-semantics.md): only
-  // when a durable channel carries a *subscribed* event does `app/dispatch.py`
-  // ship `start_outbox_relay`, which the lifespan kicks off as a background
-  // task.  No durable channel / no subscription → byte-identical boot.
+  // Durable-channel outbox relay (dispatch-delivery-semantics.md): when a
+  // durable channel carries a *subscribed* event, `app/dispatch.py` ships
+  // `start_outbox_relay`, which the lifespan kicks off as a background
+  // task.  M-T4.4 slice 7a adds the workflow-less durable-broker PRODUCER
+  // (design §5): no subscription, but the relay must still drain the outbox
+  // to publish.  No durable channel → byte-identical boot.
   const startsRelay =
-    durableEventTypes(merged).size > 0 && dispatchSubscriptionsOf(merged).length > 0;
+    durableEventTypes(merged).size > 0 &&
+    (dispatchSubscriptionsOf(merged).length > 0 || durableBrokerEvents.size > 0);
   // Explicit transport layer (unfoldable-api-derivation.md, A2): one APIRouter
   // per served api whose `route` list resolves to a hosted handler, dispatching
   // each route to its `app/application/<handler>.py` function.  Emitted before
@@ -344,6 +399,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasViews,
       hasWorkflows,
       hasProjections,
+      hasQueryProjections,
       authRequired ? args.sys.user : undefined,
       hasSeeds,
       hasEmbeddedSpa,
@@ -353,6 +409,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasTimers,
       hasChannels,
       hasChannelConsumers,
+      hasRealtime,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -449,17 +506,28 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     dispatchOpFragments,
     resolveStreamContext,
     hasChannels,
+    durableBrokerEvents,
+    hasRealtime,
   );
   const hasDispatch = dispatchFile != null;
-  // Broker transport module (M-T4.4 slice 2b): the redis.asyncio driver,
-  // CloudEvents envelope codec, publish half of the tee, and — where a
-  // hosted reactor subscribes — the consumer loop.  Channel-less projects
-  // stay byte-identical.
+  // Broker transport module (M-T4.4 slices 2b + 7a): the redis.asyncio /
+  // aio-pika drivers, CloudEvents envelope codec, publish half of the tee,
+  // and — where a hosted reactor subscribes — the consumer side.
+  // Channel-less projects stay byte-identical.
   if (hasChannels) {
     out.set(
       "app/channels.py",
-      buildPyChannelsFile(channelBindings, merged.events, hasChannelConsumers),
+      buildPyChannelsFile(
+        channelBindings,
+        merged.events,
+        hasChannelConsumers,
+        durableBrokerEvents.size > 0,
+      ),
     );
+  }
+  if (hasRealtime) {
+    const realtimeFile = buildPyRealtimeFile(merged);
+    if (realtimeFile) out.set("app/realtime.py", realtimeFile);
   }
   if (dispatchFile != null) {
     out.set("app/dispatch.py", dispatchFile);
@@ -498,6 +566,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
   const projectionsFile = buildPyProjectionsFile(merged);
   if (projectionsFile != null) out.set("app/http/projections_routes.py", projectionsFile);
+  const queryProjectionsFile = buildPyQueryProjectionsFile(merged, hasDispatch);
+  if (queryProjectionsFile != null)
+    out.set("app/http/query_projections_routes.py", queryProjectionsFile);
   // Only collected when a recorder is actually threaded in — a
   // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
   // `app/http/workflows_routes.py` pools every command workflow, so it
@@ -531,6 +602,27 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (serviceFiles.length > 0) {
     out.set("app/domain/services/__init__.py", "");
     for (const f of serviceFiles) out.set(f.path, f.content);
+  }
+
+  // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+  // colocated pytest modules under tests/, emitted off the merged context like
+  // the service modules above; only when the subject declares a `test`.
+  for (const vo of merged.valueObjects) {
+    const voTests = renderPyVoTestsFile(vo, merged);
+    if (voTests) out.set(`tests/test_${snake(vo.name)}.py`, voTests);
+  }
+  for (const svc of merged.domainServices) {
+    const svcTests = renderPyServiceTestsFile(svc, merged);
+    if (svcTests) out.set(`tests/test_${snake(svc.name)}.py`, svcTests);
+  }
+
+  // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+  // repository-backed cross-aggregate test module reading LOOM_PG_URL, no HTTP.
+  // Python merges the deployable's contexts into one app, so this is one
+  // combined module (`merged.tests` carries every context's integration tests).
+  const integrationTests = renderPyContextIntegrationTest(merged);
+  if (integrationTests) {
+    out.set(`tests/test_${snake(merged.name)}_integration.py`, integrationTests);
   }
 
   // Domain-side repository PORTS (audit S7) — the `<Agg>RepositoryPort`
@@ -633,11 +725,9 @@ function renderPyproject(
   slug: string,
   extraDeps: readonly string[] = [],
   extraDevDeps: readonly string[] = [],
-  /** scheduling.md, M-T4.1 — APScheduler ships no `py.typed` marker, so a
-   *  per-module override silences mypy's `import-untyped` under `--strict`.
-   *  Added only when the deployable owns a timer, keeping a timer-free
-   *  pyproject byte-identical. */
-  withTimers = false,
+  /** Untyped third-party modules to exempt from `mypy --strict`'s
+   *  import-untyped gate (e.g. aiokafka ships no py.typed marker). */
+  untypedModules: readonly string[] = [],
 ): string {
   const dep = (r: string) => `  "${r}",`;
   return lines(
@@ -676,12 +766,14 @@ function renderPyproject(
     `python_version = "3.13"`,
     "strict = true",
     "",
-    // APScheduler (timerSource driver) ships no py.typed marker; ignore the
-    // missing stubs for its modules so `--strict` doesn't flag import-untyped.
-    withTimers ? "[[tool.mypy.overrides]]" : null,
-    withTimers ? `module = "apscheduler.*"` : null,
-    withTimers ? "ignore_missing_imports = true" : null,
-    withTimers ? "" : null,
+    ...untypedModules.flatMap((m) => [
+      `# ${m} ships no py.typed marker — silence the import-untyped gate for`,
+      "# it alone; the generated call sites still typecheck strictly.",
+      "[[tool.mypy.overrides]]",
+      `module = "${m}.*"`,
+      "ignore_missing_imports = true",
+      "",
+    ]),
     "[tool.pytest.ini_options]",
     `asyncio_mode = "auto"`,
     `pythonpath = ["."]`,
@@ -803,6 +895,7 @@ function renderMain(
   hasViews = false,
   hasWorkflows = false,
   hasProjections = false,
+  hasQueryProjections = false,
   authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
   hasEmbeddedSpa = false,
@@ -812,6 +905,7 @@ function renderMain(
   hasTimers = false,
   hasChannels = false,
   hasChannelConsumers = false,
+  hasRealtime = false,
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -850,6 +944,7 @@ function renderMain(
     pyDevClaims ? "from typing import Any" : null,
     "",
     `from fastapi import FastAPI${authRequired && !oidc ? ", Request" : ""}`,
+    "from fastapi import Response",
     "from fastapi.middleware.cors import CORSMiddleware",
     hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
     "from sqlalchemy import text",
@@ -884,10 +979,15 @@ function renderMain(
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
+    hasQueryProjections
+      ? "from app.http.query_projections_routes import router as query_projections_router"
+      : null,
     ...explicitRouteApis.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
+    hasRealtime ? "from app.realtime import realtime_router" : null,
     "from app.obs.log import log",
+    "from app.obs.metrics import render_metrics",
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
     "",
@@ -964,11 +1064,13 @@ function renderMain(
     startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
     startsRelay ? '    log("info", "outbox_relay_started")' : null,
     // Timer sources (scheduling.md): infrastructure fires tick events on a
-    // wall-clock cadence, single-fire across replicas via a pg advisory lock.
-    hasTimers ? "    _timer_scheduler = start_timer_scheduler()" : null,
+    // wall-clock cadence.  `cron:` timers run as durable procrastinate periodic
+    // jobs (store-coordinated single-fire + missed-run catch-up); `every:` timers
+    // run in-process, single-fire across replicas via a pg advisory lock.
+    hasTimers ? "    _timer_scheduler = await start_timer_scheduler()" : null,
     '    log("info", "server_listening", port=_PORT)',
     "    yield",
-    hasTimers ? "    _timer_scheduler.shutdown(wait=False)" : null,
+    hasTimers ? "    await _timer_scheduler.stop()" : null,
     startsRelay ? "    _outbox_relay.cancel()" : null,
     hasChannelConsumers ? "    _channel_consumers.cancel()" : null,
     hasChannels ? "    await close_channel_transports()" : null,
@@ -1020,7 +1122,12 @@ function renderMain(
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
+    hasQueryProjections ? `app.include_router(query_projections_router${routerArgs})` : null,
     ...explicitRouteApis.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
+    // Realtime SSE wire (channels.md Part I): GET /api/realtime/events streams
+    // broadcast-channel events to connected browsers (mounted under the shared
+    // API base so `${API_BASE_URL}/realtime/events` lines up).
+    hasRealtime ? `app.include_router(realtime_router${routerArgs})` : null,
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
     // and the handshake redirect lands at `/api/auth/callback`.
@@ -1042,6 +1149,18 @@ function renderMain(
     "    async with engine.connect() as conn:",
     `        await conn.execute(text("SELECT 1"))`,
     `    return {"status": "ready"}`,
+    "",
+    "",
+    // include_in_schema=False: /metrics is an infra scrape target, not part of
+    // the API surface — keeping it out of the OpenAPI doc preserves the
+    // cross-backend parity contract (no other backend lists it).
+    `@app.get("/metrics", include_in_schema=False)`,
+    "async def metrics() -> Response:",
+    `    """Prometheus scrape target — the text exposition of the default`,
+    "    registry (process/GC collectors + the HTTP counter/histogram recorded",
+    '    by the observability middleware)."""',
+    "    body, content_type = render_metrics()",
+    "    return Response(content=body, media_type=content_type)",
     "",
     ...(hasEmbeddedSpa
       ? [
@@ -1236,10 +1355,12 @@ function renderProblemPy(
         sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
         if sqlstate == "23505":
             log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
+            record_domain_fault("disallowed")
             return problem(
                 request, ${uniquenessStatus}, "Conflict", "A resource with these values already exists."
             )
         log("warn", "disallowed", message=str(err), status=${uniquenessStatus})
+        record_domain_fault("disallowed")
         return problem(request, ${uniquenessStatus}, "Conflict", "The request conflicts with the current state.")
 
 `
@@ -1258,6 +1379,7 @@ function renderProblemPy(
         # competing write won the race.  Surface a friendly 409 so the client
         # reloads and retries instead of clobbering the newer state.
         log("warn", "conflict", message=str(err), status=${concurrencyStatus})
+        record_domain_fault("conflict")
         return problem(
             request, ${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry."
         )
@@ -1281,6 +1403,7 @@ ${versionedImport}    DisallowedError,
     ForbiddenError,
 )
 from app.obs.log import log
+from app.obs.metrics import record_domain_fault
 
 
 class ProblemDetails(BaseModel):
@@ -1386,21 +1509,25 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         log("warn", "forbidden", message=str(err), status=403)
+        record_domain_fault("forbidden")
         return problem(request, 403, "Forbidden", str(err))
 
     @app.exception_handler(DisallowedError)
     async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
         log("warn", "disallowed", message=str(err), status=${disallowedStatus})
+        record_domain_fault("disallowed")
         return problem(request, ${disallowedStatus}, "Conflict", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
         log("warn", "domain_error", message=str(err), status=400)
+        record_domain_fault("domain_error")
         return problem(request, 400, "Bad Request", str(err))
 
 ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
         log("warn", "not_found", message=str(err), status=404)
+        record_domain_fault("not_found")
         return problem(request, 404, "Not Found", str(err))
 
     @app.exception_handler(RequestValidationError)

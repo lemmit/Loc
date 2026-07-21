@@ -43,7 +43,6 @@ describe("React canonical-destroy → useDelete hook", () => {
     const mod = files.get("web/src/api/widget.ts");
     expect(mod, "widget.ts api module should be emitted").toBeDefined();
     expect(mod).toContain("export function useDeleteWidget()");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that contains `${id}` as a template-literal interpolation
     expect(mod).toContain("await api.delete(`/widgets/${id}`);");
   });
 

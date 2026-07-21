@@ -149,6 +149,54 @@ system Sys {
   });
 });
 
+// SMTP credentials ride the connection URL (smtp://user:pass@host) — never the
+// `.ddd` source — so every backend must authenticate when userinfo is present.
+// nodemailer parses the URL itself; the other four decode + authenticate.
+describe("mailer resource — smtp auth from the connection URL", () => {
+  it("python passes username/password from the parsed URL", async () => {
+    const mod = find(
+      generateSystems(await parseValid(src("python", "smtp"))).files,
+      /resources\/smtp\.py$/,
+    )!;
+    expect(mod).toMatch(/username=parsed\.username or None/);
+    expect(mod).toMatch(/password=parsed\.password or None/);
+    expect(mod).toMatch(/use_tls=parsed\.scheme == "smtps"/);
+  });
+
+  it("java installs an Authenticator + starttls/ssl when the URL carries credentials", async () => {
+    const mod = find(
+      generateSystems(await parseValid(src("java", "smtp"))).files,
+      /SmtpResources\.java$/,
+    )!;
+    expect(mod).toMatch(/uri\.getUserInfo\(\)/);
+    expect(mod).toMatch(/mail\.smtp\.auth/);
+    expect(mod).toMatch(/new Authenticator\(\)/);
+    expect(mod).toMatch(/mail\.smtp\.starttls\.enable/);
+  });
+
+  it("dotnet authenticates + picks SecureSocketOptions from the URL", async () => {
+    const mod = find(
+      generateSystems(await parseValid(src("dotnet", "smtp"))).files,
+      /Resources\/SmtpResources\.cs$/,
+    )!;
+    expect(mod).toMatch(/uri\.UserInfo/);
+    expect(mod).toMatch(/AuthenticateAsync/);
+    expect(mod).toMatch(/SecureSocketOptions\.StartTlsWhenAvailable/);
+    expect(mod).toMatch(/SecureSocketOptions\.SslOnConnect/);
+  });
+
+  it("phoenix passes username/password/auth/tls when the URL carries credentials", async () => {
+    const mod = find(
+      generateSystems(await parseValid(src("elixir", "smtp"))).files,
+      /resources\/smtp\.ex$/,
+    )!;
+    expect(mod).toMatch(/uri\.userinfo/);
+    expect(mod).toMatch(/username: user/);
+    expect(mod).toMatch(/auth: :always/);
+    expect(mod).toMatch(/tls: if\(uri\.scheme == "smtps"/);
+  });
+});
+
 describe("mailer resource — dev compose sidecar", () => {
   it("smtp storage emits a Mailpit sidecar; ses/sendgrid emit none", async () => {
     const smtp = generateSystems(await parseValid(src("node", "smtp"))).files.get(

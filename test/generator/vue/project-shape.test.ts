@@ -108,6 +108,10 @@ describe("vue generator — project shape", () => {
     expect(pkg.dependencies.vue).toBeTruthy();
     expect(pkg.dependencies["vue-router"]).toBeTruthy();
     expect(pkg.dependencies["@tanstack/vue-query"]).toBeTruthy();
+    // The form runtime (src/lib/form.ts) rides vee-validate's useForm.
+    expect(pkg.dependencies["vee-validate"]).toBeTruthy();
+    // …but NOT @vee-validate/zod (its peer pins zod 3; the stack is zod 4).
+    expect(pkg.dependencies["@vee-validate/zod"]).toBeUndefined();
     expect(pkg.dependencies.vuetify).toBeTruthy();
     expect(pkg.devDependencies["vue-tsc"]).toBeTruthy();
     expect(pkg.devDependencies["@vitejs/plugin-vue"]).toBeTruthy();

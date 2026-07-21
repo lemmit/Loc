@@ -16,7 +16,7 @@ import type {
   Store,
   Ui,
 } from "../../language/generated/ast.js";
-import { snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
 import type {
   ActionIR,
   ComponentIR,
@@ -29,6 +29,7 @@ import type {
   PageIR,
   PageLayoutIR,
   PageMetadataIR,
+  RefetchTargetIR,
   StateFieldIR,
   StmtIR,
   StoreIR,
@@ -257,19 +258,34 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
       // workflow's `create(e: Event)` param); each body statement is a
       // `toast(<expr>)` call (validator `loom.ui-handler-unsupported`
       // rejects everything else), so only the message expr lowers.
+      // Handler body admits `toast(<expr>)` (a message) and
+      // `refetch(<Aggregate>[, …])` (cache invalidation); the validator
+      // (`loom.ui-handler-unsupported`) rejects everything else, so the
+      // head bareword is one of those two.  `refetch` args are aggregate
+      // NameRefs — carry the resolved query-key tag so backends never
+      // re-derive it (mirrors the mutation-success `["<tag>"]` key).
       const eventName = m.event?.$refText ?? "";
       const env: Env = { locals: new Map(), user: undefined };
       const inner = withLocal(env, m.bind, "param", { kind: "entity", name: eventName });
       const toasts: ExprIR[] = [];
+      const refetches: RefetchTargetIR[] = [];
       for (const stmt of m.body) {
-        const arg = stmt.target?.args?.[0];
-        if (arg) toasts.push(lowerExpr(arg, inner));
+        if (stmt.target?.head === "refetch") {
+          for (const arg of stmt.target.args ?? []) {
+            const aggregate = arg.$type === "NameRef" ? arg.name : "";
+            if (aggregate) refetches.push({ aggregate, queryTag: snake(plural(aggregate)) });
+          }
+        } else {
+          const arg = stmt.target?.args?.[0];
+          if (arg) toasts.push(lowerExpr(arg, inner));
+        }
       }
       notifications.push({
         paramName: m.param?.$refText ?? "",
         eventType: eventName,
         bind: m.bind,
         toasts,
+        ...(refetches.length > 0 ? { refetches } : {}),
       });
     } else if (m.$type === "UiFunction") {
       const env: Env = { locals: new Map(), user: undefined };

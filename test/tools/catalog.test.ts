@@ -95,6 +95,22 @@ describe("agent-tool catalog", () => {
     expect(r.text).toContain("note: string");
   });
 
+  it("loom_apply_patch renames a declaration and its cross-references", async () => {
+    const withRef = `context Sales {
+  aggregate Order { customer: Customer id }
+  aggregate Customer { name: string }
+}
+`;
+    const r = (await callTool("loom_apply_patch", {
+      source: withRef,
+      patches: [{ op: "rename", target: "aggregate Sales.Customer", source: "Client" }],
+    })) as PatchResult;
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("aggregate Client");
+    expect(r.text).toContain("customer: Client id");
+    expect(r.text).not.toContain("Customer");
+  });
+
   it("the loop composes through the catalog: validate → fix → validate", async () => {
     const before = (await callTool("loom_validate", { source: BARE })) as ValidateReport;
     const patches = before.diagnostics

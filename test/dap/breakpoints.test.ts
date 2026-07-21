@@ -173,6 +173,30 @@ describe("translateBreakpoint", () => {
     ]);
   });
 
+  it("does NOT match a same-basename region from a different directory", () => {
+    // Two `.ddd` sources share the basename `main.ddd` in different dirs. A
+    // breakpoint requested on `orders/main.ddd` must NOT arm a region whose
+    // origin is `payments/main.ddd` — those are different files with different
+    // byte-offset coordinate systems. Pre-fix, `samePath` matched on the shared
+    // basename alone and the region was wrongly returned.
+    const map: SourceMap = {
+      version: 1,
+      sources: ["orders/main.ddd", "payments/main.ddd"],
+      files: {
+        "hono_api/domain/order.ts": [
+          {
+            target: [55, 55],
+            origin: { kind: "source", path: "payments/main.ddd", span: CONFIRM_SPAN },
+            construct: "Payments.Payment.confirm",
+          },
+        ],
+      },
+    };
+
+    const out = translateBreakpoint(map, "orders/main.ddd", CONFIRM_LINE, readSource);
+    expect(out).toEqual([]);
+  });
+
   it("de-dups identical {file,line} pairs reached via two regions, keeping the narrowest-span one", () => {
     const map: SourceMap = {
       version: 1,

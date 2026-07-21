@@ -103,8 +103,12 @@ jobs:
           --health-retries 10
       mailpit:
         image: axllent/mailpit:latest
+        # SMTP AUTH is REQUIRED (not accept-any): the harness injects
+        # smtp://loom:s3cr3t@… as MAIL_URL, so a backend that ignores the
+        # credentials fails to deliver and its cell goes red. Keep the
+        # credential in sync with MAILPIT_USER/MAILPIT_PASS in mailpit-harness.ts.
         env:
-          MP_SMTP_AUTH_ACCEPT_ANY: 1
+          MP_SMTP_AUTH: loom:s3cr3t
           MP_SMTP_AUTH_ALLOW_INSECURE: 1
         ports:
           - 1025:1025

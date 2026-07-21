@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { ProblemDetails, newApp } from "./problem-details";
+import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Customer } from "../domain/customer";
 import type { CustomerRepository } from "../db/repositories/customer-repository";
 import * as Ids from "../domain/ids";
@@ -66,6 +67,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const created = Customer.create({ username: body.username, email: body.email, age: body.age });
       await repo.save(created);
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "aggregate_created", aggregate: "Customer", id: created.id as string });
+      recordDomainOperation("Customer", "create");
       return c.json({ id: created.id as string }, 201);
     },
   );
@@ -160,6 +162,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
+      recordDomainOperation("Customer", "update");
       const aggregate = await repo.getById(Ids.CustomerId(id));
       const ifMatch = c.req.header("if-match");
       const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;
@@ -192,22 +195,27 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
+      recordDomainFault("forbidden");
       return problem(403, "Forbidden", err.message);
     }
     if (err instanceof DisallowedError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "disallowed", aggregate: "Customer", message: err.message, status: 409 });
+      recordDomainFault("disallowed");
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 400 });
+      recordDomainFault("domain_error");
       return problem(400, "Bad Request", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });
+      recordDomainFault("not_found");
       return problem(404, "Not Found", err.message);
     }
     if (err instanceof ConcurrencyError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "conflict", aggregate: "Customer", message: err.message, status: 409 });
+      recordDomainFault("conflict");
       return problem(409, "Conflict", err.message);
     }
     if (err instanceof ExternHandlerError) {

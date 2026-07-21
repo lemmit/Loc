@@ -849,5 +849,45 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
   });
 });
 
+describe("phoenix renderExpr — A1 int-division widening + divTrunc", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+
+  // `int / int` widens to `decimal` (Ecto `:decimal`).  Native `/` on Elixir
+  // yields a bare float, so in-memory op bodies fold through `Decimal.div/2`.
+  it("renders int/int→decimal division via Decimal.div (in-memory op body)", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "binary",
+          op: "/",
+          left: litInt("5"),
+          right: litInt("2"),
+          leftType: INT,
+          rightType: INT,
+          resultType: DECIMAL,
+        },
+        ctx,
+      ),
+    ).toBe("Decimal.div(5, 2)");
+  });
+
+  // `a.divTrunc(b)` — truncating integer division toward zero via `div/2`.
+  it("renders the `divTrunc` intrinsic as `div(recv, arg)`", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("a"),
+          member: "divTrunc",
+          args: [litInt("2")],
+          receiverType: INT,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe("div(record.a, 2)");
+  });
+});
+
 // Keep the type-import only used by the test helpers from being elided.
 void prim;

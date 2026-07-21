@@ -49,7 +49,7 @@ on:
       - 'package.json'
       - '.github/workflows/behavioral-ui-e2e.yml'
   workflow_dispatch:
-
+  merge_group:
 permissions:
   contents: read
 

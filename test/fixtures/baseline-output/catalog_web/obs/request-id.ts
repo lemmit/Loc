@@ -3,6 +3,7 @@ import { createMiddleware } from "hono/factory";
 import { randomUUID } from "node:crypto";
 import { type RequestContext, requestContextStore } from "./als";
 import { baseLogger, type RequestLogger } from "./log";
+import { recordHttpRequest } from "./metrics";
 
 export const CORRELATION_ID_HEADER = "X-Correlation-Id";
 export const REQUEST_ID_HEADER = "X-Request-Id";
@@ -67,13 +68,19 @@ export const requestIdMiddleware = createMiddleware<{
       } catch {
         /* best-effort: headers are read-only on some runtimes */
       }
+      const durationMs = Date.now() - startedAt;
       log.info({
         event: "request_end",
         method: c.req.method,
         path: url.pathname,
         status: c.res.status,
-        duration_ms: Date.now() - startedAt,
+        duration_ms: durationMs,
       });
+      // Record the same finished request against the Prometheus HTTP
+      // metrics — same seam as request_end.  `routePath` is the matched
+      // route TEMPLATE (`/api/carts/*`), keeping label cardinality bounded
+      // (raw `url.pathname` carries per-request ids).
+      recordHttpRequest(c.req.method, c.req.routePath, c.res.status, durationMs);
     }
   });
 });

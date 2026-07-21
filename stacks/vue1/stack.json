@@ -6,6 +6,7 @@
     "vue-router": "4 (createWebHistory SPA mode; explicit route table in src/router.ts)",
     "@vitejs/plugin-vue": "6 (the Vite-8 + Vue-3.5 line)",
     "@tanstack/vue-query": "5 (role-for-role analog of the react packs' react-query)",
+    "vee-validate": "4 (^4.15.0 — form validation/submit runtime, the Vue analog of the react packs' react-hook-form; the zod schema is adapted to vee-validate's TypedSchema by a locally-emitted toTypedSchema in src/lib/form.ts, NOT @vee-validate/zod, whose peer pins zod 3 while this stack is zod 4)",
     "vue-tsc": "3 (carries the .vue type surface — the SFC analogue of svelte-check)",
     "zod": "4 (^4.0.0 — same family as stack v3 so wire schemas match the react packs)",
     "typescript": "5.7 (vue-tsc 3 pairs with TS 5.x)",

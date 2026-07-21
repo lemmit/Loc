@@ -1,0 +1,73 @@
+name: Lint GitHub Actions workflows
+
+# Guards against the failure mode where a malformed workflow file merges to
+# main and then reports a permanent `startup_failure` on every push — a red
+# check nobody gates on, because the fast `tests-passed` rollup is the only
+# required check.  A single unquoted colon in a `name:` (e.g.
+# `name: … (persistence: dapper)`) makes the whole file unparseable and the
+# gate silently never runs.  This job runs on the PR, so that class is caught
+# before it ever reaches main.
+#
+# Two layers:
+#   1. Every `.github/workflows/*.yml` must be valid YAML (catches the
+#      startup_failure class directly — the workflow that regressed here).
+#   2. actionlint over the whole directory (expression syntax, shellcheck on
+#      run: steps, deprecated-runner hints, etc.).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every workflow file is valid YAML
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = []
+          for f in sorted(glob.glob(".github/workflows/*.yml") + glob.glob(".github/workflows/*.yaml")):
+              try:
+                  yaml.safe_load(open(f))
+              except yaml.YAMLError as e:
+                  bad.append((f, e))
+          for f, e in bad:
+              print(f"::error file={f}::invalid workflow YAML — {e}")
+          if bad:
+              sys.exit(1)
+          print("all workflow files parse")
+          PY
+
+      # actionlint's own checks (invalid triggers/expressions, bad `uses:`
+      # refs, matrix errors, deprecated syntax) PLUS shellcheck on `run:`
+      # steps at WARNING severity. Warning-level, not the default info: it
+      # catches real shell bugs (unquoted-that-word-splits, unused vars, ls
+      # pitfalls) while not enforcing the repo's cosmetic info/style debt
+      # (harmless unquoted $GITHUB_STEP_SUMMARY, `{ }`-grouping style,
+      # false-positive SC2016 on literal-markdown backticks / `node -e`
+      # programs) — enforcing those repo-wide would block every PR for no
+      # correctness gain. pyflakes stays off (separate concern). Official
+      # image — no third-party action version to rot.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:latest
+        env:
+          SHELLCHECK_OPTS: --severity=warning
+        with:
+          args: "-pyflakes= -color"

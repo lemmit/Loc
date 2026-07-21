@@ -2,7 +2,7 @@ import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
-  isDenyFilter,
+  deepScopeAnchorClaim,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -21,6 +21,7 @@ import {
   type BinaryExpr,
   type CallExpr,
   type ExprTarget,
+  isIntDivWidenedToDecimal,
   type MemberExpr,
   type MethodCallExpr,
   type NewExpr,
@@ -277,10 +278,27 @@ const ELIXIR_DOC_TARGET: ExprTarget<RenderCtx> = {
 };
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
-  // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
-  // query fragment; no row satisfies it.  Intercepted before the shared expr
-  // dispatcher, which has no arm for the sentinel method-call.
-  if (isDenyFilter(e)) return 'fragment("false")';
+  // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node,
+  // intercepted before the shared expr dispatcher (which throws on the
+  // `authz-filter` kind).  A missing arm is a `tsc` error here, not a silent
+  // authorization bypass.  (The vanilla capability-filter path intercepts the
+  // `scope` sentinel first — this arm keeps `renderExpr` total for it too.)
+  if (e.kind === "authz-filter") {
+    switch (e.filter.kind) {
+      // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
+      // query fragment; no row satisfies it.
+      case "deny":
+        return 'fragment("false")';
+      // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
+      // fail-closed materialized-path scope fragment.
+      case "scope":
+        return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e));
+      default: {
+        const _exhaustive: never = e.filter;
+        throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+      }
+    }
+  }
   // `filterArgs` renders inside an Ecto query filter, where money/decimal are
   // data-layer-native (the Postgres column) rather than `Decimal` structs.
   // `docMap` (DEBT-07 document shape) reads its fields out of the string-keyed
@@ -567,6 +585,9 @@ export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: str
     "long.abs": (recv) => `abs(${recv})`,
     "decimal.abs": (recv) => `Decimal.abs(${recv})`,
     "money.abs": (recv) => `Decimal.abs(${recv})`,
+    // Truncating integer division (toward zero) — Kernel.div/2.
+    "int.divTrunc": (recv, args) => `div(${recv}, ${args[0]})`,
+    "long.divTrunc": (recv, args) => `div(${recv}, ${args[0]})`,
     "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
     "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
     "decimal.min": (recv, args) => `Decimal.min(${recv}, ${args[0]})`,
@@ -1102,6 +1123,14 @@ function renderBinary(
   // only the native op-body path dispatches through `Decimal.*`.
   if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
     return renderDecimalBinary(e.op, l, r);
+  }
+  // Integer division widened to decimal (`int / int` → decimal): native Elixir
+  // `/` on integers yields a FLOAT, not the `Decimal` struct a decimal field
+  // maps to (Ecto `:decimal`).  `Decimal.div/2` coerces the integer operands
+  // and returns a `Decimal`.  In-memory op bodies only — inside an Ecto query
+  // the native path lowers to SQL division.
+  if (!inFilter && isIntDivWidenedToDecimal(e)) {
+    return `Decimal.div(${l}, ${r})`;
   }
   // A5 temporal — datetime ORDER comparisons dispatch through
   // `DateTime.compare/2` (mirroring the Decimal path above): native `<`/`>`

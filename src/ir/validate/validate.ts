@@ -56,7 +56,6 @@ import {
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
   validateInheritanceStorage,
-  validateJavaContainmentSupport,
   validateJavaFullstackSupport,
   validateJavaReadModelShapes,
   validateJavaStampSupport,
@@ -69,14 +68,20 @@ import {
   validatePythonStampSupport,
   validateQueryTimeProjectionBackend,
   validateReactIdReferences,
+  validateRealtimeTenantBroadcast,
+  validateRelayTargetNotSubscribed,
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
+  validateUiRealtimeSupport,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
-import { validateAggregateTestBodies } from "./checks/test-checks.js";
+import {
+  validateAggregateTestBodies,
+  validateContextIntegrationTests,
+} from "./checks/test-checks.js";
 import { validateTimerSources } from "./checks/timer-checks.js";
 import { validateUiBodies } from "./checks/ui-checks.js";
 import {
@@ -146,7 +151,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
-    validateJavaContainmentSupport(sys, diags);
     validateJavaFullstackSupport(sys, diags);
     validateJavaReadModelShapes(sys, diags);
     validateJavaStampSupport(sys, diags);
@@ -163,6 +167,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
+    validateUiRealtimeSupport(sys, diags);
+    validateRelayTargetNotSubscribed(sys, diags);
+    validateRealtimeTenantBroadcast(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
@@ -206,6 +213,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
+    validateContextIntegrationTests(c, diags);
     validateDomainServices(c, diags);
     validateFunctionBlockBodies(c, diags);
     validateExternOperations(c, diags);

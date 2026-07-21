@@ -12,7 +12,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
-import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
 import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
@@ -428,7 +428,7 @@ export function generateVueForContexts(
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
-  // The reactive()+zod form runtime (vue/ shared source) — the
+  // The vee-validate form runtime (vue/ shared source) — the
   // generated pages' field inputs and v-form handlers bind to it.
   out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));
 
@@ -440,10 +440,9 @@ export function generateVueForContexts(
   // handlers, emit the renderless RealtimeHandlers component + the toast
   // queue the app-shell mounts; the config module exports `API_BASE_URL`
   // on Vue (the SvelteKit symbol).
-  const realtimeTypes =
-    target?.platform === "node"
-      ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
-      : [];
+  const realtimeTypes = backendServesRealtime(target?.platform)
+    ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+    : [];
   if (realtimeTypes.length > 0) {
     out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
   }

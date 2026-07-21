@@ -1,7 +1,7 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../util/naming.js";
 import { collectLeaves } from "../_stmt/leaves.js";
-import { renderPyExpr } from "./render-expr.js";
+import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Statement renderer for the Python backend.  Flat per-kind dispatch,
@@ -131,7 +131,7 @@ function renderPyStatement(
     case "precondition": {
       const thrown = `raise DomainError(${JSON.stringify(s.message ? s.message.text : `Precondition failed: ${s.source}`)})`;
       if (!ctx.trace) {
-        return [`${i}if not (${renderPyExpr(s.expr)}):`, `${sub}${thrown}`].join("\n");
+        return [`${i}if ${renderPyNegatedGuard(s.expr)}:`, `${sub}${thrown}`].join("\n");
       }
       const ok = `__pre_${preIndex}_ok`;
       return [
@@ -149,7 +149,7 @@ function renderPyStatement(
       // Authorization gate — surfaces as 403 via the route-level
       // ForbiddenError handler (S16).
       return [
-        `${i}if not (${renderPyExpr(s.expr)}):`,
+        `${i}if ${renderPyNegatedGuard(s.expr)}:`,
         `${sub}raise ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)})`,
       ].join("\n");
     case "let":

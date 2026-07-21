@@ -124,6 +124,47 @@ describe("formatter primitives", () => {
     expect(tsx).toMatch(/import \{[^}]*\bIdValue\b[^}]*\} from "\.\.\/lib\/format"/);
   });
 
+  // A scaffolded `money` field renders through the Money formatter, NOT a bare
+  // Text cell: `money` deserialises client-side to a decimal.js `Decimal`
+  // instance (moneySchema z.output), which is not a ReactNode — a bare
+  // `<Text>{row.total}</Text>` is a tsc error + a runtime "Objects are not
+  // valid as a React child" crash.  Regression for the scaffold classifying
+  // `money` as the plain `numeric` (Text) column kind.
+  it("a scaffolded money field emits <MoneyValue>, not a bare Text child (list + detail)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain Core {
+          context Shop {
+            aggregate Invoice with crudish {
+              label: string
+              total: money
+              derived display: string = label
+            }
+            repository Invoices for Invoice { }
+          }
+        }
+        api ShopApi from Core
+        ui WebApp with scaffold(aggregates: [Invoice]) {
+          api Shop: ShopApi
+        }
+        deployable api { platform: node, contexts: [Shop], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const list = files.get("web/src/pages/invoices/list.tsx")!;
+    const detail = files.get("web/src/pages/invoices/detail.tsx")!;
+    expect(list, "list.tsx generated").toBeDefined();
+    expect(detail, "detail.tsx generated").toBeDefined();
+    // List cell renders the Decimal through MoneyValue, never a raw child.
+    expect(list).toMatch(/<MoneyValue value=\{ row\.total \}/);
+    expect(list).not.toMatch(/<Text>\{row\.total\}<\/Text>/);
+    // Detail row too.
+    expect(detail).toMatch(/<MoneyValue value=\{ invoiceById\.data\.total \}/);
+    expect(detail).not.toMatch(/<Text>\{invoiceById\.data\.total\}<\/Text>/);
+    // The MoneyValue helper is imported.
+    expect(list).toMatch(/import \{[^}]*\bMoneyValue\b[^}]*\} from "\.\.\/\.\.\/lib\/format"/);
+  });
+
   it("IdLink testid lands on the root <RouterLink>", async () => {
     const files = await buildAndGenerate(`
       system S {

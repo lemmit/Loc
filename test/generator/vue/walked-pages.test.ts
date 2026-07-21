@@ -132,7 +132,6 @@ describe("vue walker — scaffold pages", () => {
     // create-then-redirect body (success toast then redirect), single-
     // quoted handler attr.
     expect(newPage).toContain(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
       "@submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); pushToast(\"Customer created\"); navigate(`/customers/${out.id}`); })($event)'",
     );
     expect(newPage).toContain('v-model="form.values.name"');
@@ -143,13 +142,20 @@ describe("vue walker — scaffold pages", () => {
     expect(newPage).not.toContain("register(");
   });
 
-  it("the form runtime emits at src/lib/form.ts with the zod-parse submit shape", async () => {
+  it("the form runtime emits at src/lib/form.ts on the vee-validate submit shape", async () => {
     const files = await vueFiles();
     const form = files.get("src/lib/form.ts")!;
     expect(form).toContain("export function useLoomForm");
-    expect(form).toContain("schema.safeParse(values)");
+    // vee-validate's useForm drives validation/submit; the shared zod
+    // schema is adapted via the locally-emitted toTypedSchema.
+    expect(form).toContain('from "vee-validate"');
+    expect(form).toContain("const form = useForm(");
+    expect(form).toContain("schema.safeParseAsync(values)");
     expect(form).toContain("issue.path.join(");
     expect(form).toContain("__global");
+    // @vee-validate/zod's peer pins zod 3; the stack is zod 4, so the
+    // adapter is inlined instead of imported from that package.
+    expect(form).not.toContain('from "@vee-validate/zod"');
   });
 
   it("no JSX artifacts leak into any emitted .vue file", async () => {

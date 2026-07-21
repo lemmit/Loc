@@ -1,12 +1,16 @@
 import type {
   AggregateIR,
+  DomainServiceIR,
+  EnrichedAggregateIR,
   ExprIR,
   OperationIR,
   TestIR,
   TestStmtIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
+import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto/Phoenix) domain `test "..."` → runnable ExUnit, ported 1:1 from
@@ -33,16 +37,28 @@ import { opUsesCurrentUser } from "../domain/predicates.js";
 // an unexpected shape) is emitted as a documented `@tag :skip`, never broken Elixir.
 // ---------------------------------------------------------------------------
 
-interface Env {
-  agg: AggregateIR;
-  /** Fully-qualified module of the aggregate under test, e.g. `App.Ctx.Order`. */
-  aggMod: string;
+export interface Env {
+  /** The aggregate under test, or `null` for a value-object / domain-service
+   *  subject (test-placement.md, Phase 2) — those have no aggregate identity, so
+   *  the agg-op / create paths are inert. */
+  agg: AggregateIR | null;
+  /** Fully-qualified module of the aggregate under test, e.g. `App.Ctx.Order`;
+   *  `null` for a non-aggregate subject. */
+  aggMod: string | null;
   /** Bounded-context module prefix, e.g. `App.Ctx`. */
   ctxModule: string;
+  /** Application root module, e.g. `App` — used to address a `domainService`
+   *  module (`App.Domain.Services.<Name>`) from a service test. */
+  appModule: string;
   /** Value objects that have a validating constructor (`<VO>.new/1`, F5) — only
    *  these can lower a `expect(VO{bad}).toThrow()` to `assert {:error, _} =
    *  <VO>.new(…)`; a VO without invariants has no module, so such a test skips. */
   validatableVos: Set<string>;
+  /** Aggregate `derived` fields exposed as a pure-core accessor
+   *  (`Agg.<derived>(record)`) — B18.  A derived read routes to the accessor when
+   *  its name is here; a derived NOT here has no pure accessor (non-relational or
+   *  non-pure expression), so reading it degrades to `@tag :skip`. */
+  derivedAccessors: Set<string>;
 }
 
 const MATCHER_OP: Record<string, string> = {
@@ -102,18 +118,71 @@ function skipBody(reason: string): string[] {
 export function renderVanillaAggregateTestModule(
   agg: AggregateIR,
   contextModule: string,
+  appModule: string,
   validatableVos: Set<string>,
 ): string {
   const env: Env = {
     agg,
     aggMod: `${contextModule}.${upperFirst(agg.name)}`,
     ctxModule: contextModule,
+    appModule,
     validatableVos,
+    derivedAccessors: pureDerivedAccessorNames(contextModule, agg as EnrichedAggregateIR),
   };
-  const blocks = agg.tests.map((t) => renderTest(t, env));
+  return renderSubjectTestModule(agg.name, agg.tests, contextModule, env);
+}
+
+/** Value-object test module (test-placement.md, Phase 2) — no aggregate
+ *  identity; the invariant-throw path (`<VO>.new/1`) is what these exercise. */
+export function renderVanillaVoTestModule(
+  vo: ValueObjectIR,
+  contextModule: string,
+  appModule: string,
+  validatableVos: Set<string>,
+): string {
+  const env: Env = {
+    agg: null,
+    aggMod: null,
+    ctxModule: contextModule,
+    appModule,
+    validatableVos,
+    derivedAccessors: new Set(),
+  };
+  return renderSubjectTestModule(vo.name, vo.tests, contextModule, env);
+}
+
+/** Domain-service test module (test-placement.md, Phase 2) — exercises the
+ *  service's PURE ops via `App.Domain.Services.<Name>.<op>(…)`. */
+export function renderVanillaServiceTestModule(
+  svc: DomainServiceIR,
+  contextModule: string,
+  appModule: string,
+  validatableVos: Set<string>,
+): string {
+  const env: Env = {
+    agg: null,
+    aggMod: null,
+    ctxModule: contextModule,
+    appModule,
+    validatableVos,
+    derivedAccessors: new Set(),
+  };
+  return renderSubjectTestModule(svc.name, svc.tests, contextModule, env);
+}
+
+/** The shared ExUnit module shell for any subject — `defmodule
+ *  <Ctx>.<Name>Test`, one `test` per block (or a `@tag :skip` for a shape the
+ *  vanilla renderer can't lower). */
+function renderSubjectTestModule(
+  name: string,
+  tests: readonly TestIR[],
+  contextModule: string,
+  env: Env,
+): string {
+  const blocks = tests.map((t) => renderTest(t, env));
   const body = blocks.flatMap((block) => ["", ...block.map((l) => (l === "" ? "" : `  ${l}`))]);
   return `# Auto-generated.  Do not edit by hand.
-defmodule ${env.aggMod}Test do
+defmodule ${contextModule}.${upperFirst(name)}Test do
   use ExUnit.Case, async: true${body.length > 0 ? `\n${body.join("\n")}` : ""}
 end
 `;
@@ -164,7 +233,7 @@ function renderStmt(s: TestStmtIR, env: Env, used: Set<string>): string[] {
   }
 }
 
-function renderExpect(expr: ExprIR, env: Env): string {
+export function renderExpect(expr: ExprIR, env: Env): string {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) {
     throw new UnsupportedTestShapeError("expect requires a matcher");
   }
@@ -222,7 +291,7 @@ function renderThrows(expr: ExprIR, env: Env): string {
 /** Render a test-position expression to Elixir, with money/decimal literals
  *  coerced to `Decimal` and aggregate `create`/op calls routed to the pure
  *  domain core. */
-function vtExpr(e: ExprIR, env: Env): string {
+export function vtExpr(e: ExprIR, env: Env): string {
   switch (e.kind) {
     case "literal":
       return renderLiteral(e.lit, e.value);
@@ -244,6 +313,18 @@ function vtExpr(e: ExprIR, env: Env): string {
       ) {
         return `String.length(${recv})`;
       }
+      // A derived-field read has no struct field on elixir — route it to the
+      // pure-core accessor `Agg.<derived>(record)` (B18) when the receiver is the
+      // aggregate itself.  A derived without a pure accessor (non-pure expression)
+      // can't be read in a domain test → skip honestly.
+      if (e.receiver.kind === "ref" && env.agg?.derived.some((d) => d.name === e.member)) {
+        if (!env.derivedAccessors.has(e.member)) {
+          throw new UnsupportedTestShapeError(
+            `derived '${e.member}' has no pure accessor on vanilla (its expression isn't purely renderable)`,
+          );
+        }
+        return `${env.aggMod}.${snake(e.member)}(${recv})`;
+      }
       return `${recv}.${snake(e.member)}`;
     }
     case "method-call": {
@@ -264,6 +345,16 @@ function vtExpr(e: ExprIR, env: Env): string {
       }
       if (e.callKind === "free") {
         return `${snake(e.name)}(${e.args.map((a) => vtExpr(a, env)).join(", ")})`;
+      }
+      // A `domainService` op call — the pure module fn `App.Domain.Services.<Name>.<op>(…)`
+      // (parity with the main elixir render-expr's `domainServiceCall`).  Lets a
+      // service unit test exercise its PURE ops (reading ops have no standalone
+      // module fn — they skip like an unsupported shape).
+      if (e.callKind === "domain-service" && e.serviceRef) {
+        const ref = e.serviceRef;
+        return `${env.appModule}.Domain.Services.${upperFirst(ref.service)}.${snake(ref.op)}(${e.args
+          .map((a) => vtExpr(a, env))
+          .join(", ")})`;
       }
       throw new UnsupportedTestShapeError(
         `unsupported call kind '${e.callKind}' in vanilla test position`,
@@ -340,6 +431,9 @@ function renderCreate(e: ExprIR, env: Env): string {
 /** `Agg.<op>(recv, %{"param" => value, ...})` over the pure domain core. */
 function renderOp(e: ExprIR, env: Env): string {
   if (e.kind !== "method-call") throw new Error("renderOp: not a method-call");
+  // Only reached via `isAggOp` (which requires a resolved agg op), so `agg`/
+  // `aggMod` are non-null here — assert for the type checker.
+  if (!env.agg || !env.aggMod) throw new Error("renderOp: no aggregate in scope");
   const op = findOp(e.member, env);
   if (!op) throw new Error(`operation '${e.member}' not found on ${env.agg.name}`);
   const recv = vtExpr(e.receiver, env);
@@ -358,7 +452,7 @@ function renderOp(e: ExprIR, env: Env): string {
 // ---------------------------------------------------------------------------
 
 function findOp(member: string, env: Env): OperationIR | undefined {
-  return env.agg.operations.find((o) => o.name === member);
+  return env.agg?.operations.find((o) => o.name === member);
 }
 
 function isCreate(e: ExprIR): boolean {

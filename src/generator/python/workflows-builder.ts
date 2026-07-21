@@ -31,7 +31,12 @@ import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
 import { wireHelperImport } from "./py-type-imports.js";
-import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
+import {
+  type PyRenderContext,
+  renderPyExpr,
+  renderPyNegatedGuard,
+  renderPyType,
+} from "./render-expr.js";
 import { renderPyStatements } from "./render-stmt.js";
 import { resourceImportLines } from "./resource-clients.js";
 import {
@@ -763,11 +768,11 @@ export function pyWorkflowStmtTarget(
   return {
     indentUnit: "    ",
     precondition: (st, i) => [
-      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
+      `${i}if ${renderPyNegatedGuard(st.expr, rctx)}:`,
       `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
     ],
     requires: (st, i) => [
-      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
+      `${i}if ${renderPyNegatedGuard(st.expr, rctx)}:`,
       `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
     ],
     emit: (st, i) => {
@@ -792,9 +797,12 @@ export function pyWorkflowStmtTarget(
         ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset, rctx)}`] : []),
         ...(st.page?.limit ? [`limit=${renderPyExpr(st.page.limit, rctx)}`] : []),
       ].join(", ");
-      return [
-        `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
-      ];
+      const call = `await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`;
+      // A `run` retrieval is a read (no exit-save), so a binding never read is
+      // dead — keep the (still-awaited) call but drop the assignment, or ruff
+      // rejects the unused local (F841).  Mirrors the `exprLet` arm.
+      if (usedLets && !usedLets.has(st.name)) return [`${i}${call}`];
+      return [`${i}${snake(st.name)} = ${call}`];
     },
     exprLet: (st, i) => {
       const rendered = renderPyExpr(st.expr, rctx);

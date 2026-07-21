@@ -37,7 +37,6 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
   it("renders trim as SQL in the find where-clause and imports `sql`", async () => {
     const { model } = await parseString(SRC);
     const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates `${schema.products.name}` in the generated sql tag, not here
     expect(repo).toContain("eq(sql`trim(${schema.products.name})`, q)");
     expect(repo).toMatch(/import \{[^}]*\bsql\b[^}]*\} from "drizzle-orm";/);
   });
@@ -85,7 +84,6 @@ describe("typescript generator — A2 string intrinsics end-to-end", () => {
   it("renders toLower on BOTH sides of a where (column SQL + value JS)", async () => {
     const { model } = await parseString(SRC2);
     const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the schema column in the generated sql tag, not here
     expect(repo).toContain("eq(sql`lower(${schema.products.name})`, q.toLowerCase())");
   });
 });
@@ -129,13 +127,10 @@ describe("typescript generator — A3 math intrinsics end-to-end", () => {
   it("renders numeric intrinsics as SQL on the column side of a where", async () => {
     const { model } = await parseString(SRC3);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
     expect(repo).toContain("gt(sql`round(${schema.invoices.price}, ${2})`, m)");
     // Value-side abs (param receiver) stays host JS while the column side is SQL.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
     expect(repo).toContain("eq(sql`abs(${schema.invoices.qty})`, Math.abs(n))");
     // Column-side LEAST with a value arg.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
     expect(repo).toContain("eq(sql`least(${schema.invoices.amount}, ${a})`, a)");
   });
 });

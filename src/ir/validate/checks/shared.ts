@@ -6,7 +6,6 @@
 import { intrinsicFor } from "../../../util/intrinsics.js";
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
 import { durationCtorOperand, isDatetimeTypedIR } from "../../util/temporal.js";
-import { isDeepScopeFilter, isDenyFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep } from "../../util/walk.js";
 
 /** True when `name` is a stored field, containment, or derived property
@@ -264,18 +263,9 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
     case "method-call":
-      // The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) — a
-      // synthetic capability-filter node enrichment installs for a
-      // `policy { allow deep on <Agg> }` rule.  It is queryable by
-      // construction: every domain-logic backend's query translator renders it
-      // to its native materialized-path scope (see `DEEP_SCOPE_SEMANTICS`), so
-      // admit it here rather than have the tenant-owned floor rewrite trip the
-      // selectability gate.
-      if (isDeepScopeFilter(e)) return null;
-      // Likewise the DENY carve-out sentinel (authorization Phase 4 —
-      // `policy { deny [write] on <Agg> }`): every backend renders it to its
-      // native always-false query fragment, so it is queryable by construction.
-      if (isDenyFilter(e)) return null;
+      // (The `deep` / DENY authorization filter sentinels are no longer
+      // `method-call` nodes — they moved to the discriminated `authz-filter`
+      // kind in M-T9.9, admitted in its own arm below.)
       // Membership over a reference collection — `this.<refColl>.contains(x)`
       // — is the one collection op we admit: it lowers to an EXISTS-style
       // subquery against the field's join table.  Everything else
@@ -349,6 +339,15 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // A named-action reference is a UI-handler-arg form — never queryable
       // (it only appears in a page/component body, not a find/view `where`).
       return "action reference";
+    case "authz-filter":
+      // The authorization/tenancy filter sentinels (M-T9.9) — both the `deny`
+      // carve-out and the `scope` subtree predicate.  Every backend renders
+      // them to a native query fragment (see `DEEP_SCOPE_SEMANTICS` / the
+      // always-false fragments), so they are queryable by construction — admit
+      // them rather than have the tenant-floor rewrite trip the selectability
+      // gate.  (Formerly admitted in the `method-call` arm as the
+      // `__loomDeepScope__` / `__loomDeny__` markers.)
+      return null;
   }
 }
 

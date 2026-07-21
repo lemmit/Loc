@@ -70,6 +70,10 @@ export function renderProgram(
      *  outbox-wrapping dispatcher + the relay BackgroundService.  Implies
      *  hasSubscriptions. */
     hasOutbox?: boolean;
+    /** Realtime SSE wire (channels.md Part I): registers the RealtimeHub
+     *  singleton, wraps the registered dispatcher in the RealtimeDomainEvent
+     *  Dispatcher tee, and maps GET /api/realtime/events. */
+    hasRealtime?: boolean;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -98,13 +102,27 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a redis-bound
+    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
+    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+     *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
+     *  register the Noop concretely instead of the InProcess scoped line. */
+    outboxNoopInner?: boolean;
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
+    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+     *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
+     *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
+     *  jobs.  `every:`-only + timer-free deployables leave this false — no
+     *  Hangfire, byte-identical. */
+    hangfireCronTimers?: boolean;
+    /** The `AddScoped<…Job>()` DI lines for the Hangfire cron-job classes. */
+    hangfireJobDiRegistrations?: string[];
+    /** The `RecurringJob.AddOrUpdate<…>(…)` lines (run after `app.Build()`). */
+    hangfireRecurringRegistrations?: string[];
     /** Dapper persistence-port DI (M-T6.9): the CLOSED `AddScoped<…>` binding
      *  lines for the workflow / projection / event-store adapters.  Computed in
      *  index.ts (it holds the pre-merge context names the event stores key
@@ -123,35 +141,109 @@ export function renderProgram(
   // subscriptions, register the Mediator-notification dispatcher (Scoped — it
   // depends on the scoped IMediator) so emitted events reach their reactor /
   // starter handlers.  Otherwise the default no-op stands (byte-identical).
+  // Realtime SSE wire (channels.md Part I): the RealtimeDomainEventDispatcher
+  // tee wraps whichever core dispatcher is outermost, so every dispatched
+  // event also reaches GET /api/realtime/events.  The hub singleton is shared
+  // with the SSE endpoint.  With broker channels wired the chain is
+  // ChannelPublishTee → Realtime → [Outbox →] InProcess/Noop — the broker tee
+  // stays outermost, the realtime tee sees each event exactly once (an
+  // outbox-durable broadcast event streams at dispatch time; the relay
+  // redelivers only to handlers).
+  const hasRealtime = !!options?.hasRealtime;
+  const realtimeHubRegistration = hasRealtime
+    ? `\nbuilder.Services.AddSingleton<${ns}.Infrastructure.Realtime.RealtimeHub>();`
+    : "";
+  // The SSE endpoint — one long-lived text/event-stream per browser connection,
+  // with a 15s keep-alive ping.  Reads frames off the hub's per-client channel;
+  // `WhenAny` a 15s timer so an idle stream still pings.  v1 broadcast-to-all.
+  const realtimeEndpoint = hasRealtime
+    ? `// Realtime SSE wire (channels.md Part I): GET /api/realtime/events streams
+// broadcast-channel events to connected browsers (\${API_BASE_URL}/realtime/events).
+app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure.Realtime.RealtimeHub hub, CancellationToken cancellationToken) =>
+{
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    var (id, reader) = hub.Subscribe();
+    try
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var readTask = reader.ReadAsync(cancellationToken).AsTask();
+            var completed = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(15), cancellationToken));
+            if (completed == readTask)
+            {
+                await http.Response.WriteAsync(await readTask, cancellationToken);
+            }
+            else
+            {
+                await http.Response.WriteAsync("event: ping\\ndata: \\n\\n", cancellationToken);
+            }
+            await http.Response.Body.FlushAsync(cancellationToken);
+        }
+    }
+    catch (OperationCanceledException) { }
+    finally { hub.Unsubscribe(id); }
+}).ExcludeFromDescription();
+`
+    : "";
+  // Non-channel, non-realtime core registration (byte-identical to the
+  // pre-realtime output for systems using neither feature).
   const innerRegistration = options?.hasOutbox
-    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\n${
+        options?.outboxNoopInner
+          ? "builder.Services.AddSingleton<NoopDomainEventDispatcher>();"
+          : "builder.Services.AddScoped<InProcessDomainEventDispatcher>();"
+      }\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
       : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
+  // Realtime-teed core registration: the realtime tee is registered as the
+  // IDomainEventDispatcher over the concrete core (byte-identical to the
+  // realtime slice's output for channel-less systems).
+  const realtimeRegistration = options?.hasOutbox
+    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    : options?.hasSubscriptions
+      ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed to the realtime wire.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
+      : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<IDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
+  // Channels + realtime: every dispatcher registers as its CONCRETE type (the
+  // realtime tee via factory), and the ChannelPublishTeeDispatcher — whose
+  // typed inner is the realtime tee — is the sole IDomainEventDispatcher.
+  const realtimeConcreteRegistration = options?.hasOutbox
+    ? `// Domain event dispatch — durable events relay via the outbox; the realtime\n// tee wraps the outbox dispatcher; the broker tee (below) is outermost.\n${
+        options?.outboxNoopInner
+          ? "builder.Services.AddSingleton<NoopDomainEventDispatcher>();"
+          : "builder.Services.AddScoped<InProcessDomainEventDispatcher>();"
+      }\nbuilder.Services.AddScoped<OutboxDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    : options?.hasSubscriptions
+      ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
+      : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
+  const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+    options?.hasChannelConsumers
+      ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
+      : ""
+  }`;
   // Broker channels (M-T4.4): the publish tee becomes the outermost
   // IDomainEventDispatcher (its ctor takes the concrete inner), the shared
   // transports register once, and — where reactors live — the consumer loop
   // runs as a hosted service feeding the in-process dispatch.
   const dispatcherRegistration = options?.hasChannels
-    ? `${innerRegistration
-        .split("\n")
-        .map((l) =>
-          l.startsWith("builder.Services.AddScoped<IDomainEventDispatcher") ||
-          l.startsWith("builder.Services.AddSingleton<IDomainEventDispatcher")
-            ? l
-                .replace("AddScoped<IDomainEventDispatcher, ", "AddScoped<")
-                .replace("AddSingleton<IDomainEventDispatcher, ", "AddSingleton<")
-                .replace(">();", ">();")
-            : l,
-        )
-        .join(
-          "\n",
-        )}\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
-        options?.hasChannelConsumers
-          ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
-          : ""
-      }`
-    : innerRegistration;
+    ? hasRealtime
+      ? `${realtimeConcreteRegistration}${channelTeeSuffix}`
+      : `${innerRegistration
+          .split("\n")
+          .map((l) =>
+            l.startsWith("builder.Services.AddScoped<IDomainEventDispatcher") ||
+            l.startsWith("builder.Services.AddSingleton<IDomainEventDispatcher")
+              ? l
+                  .replace("AddScoped<IDomainEventDispatcher, ", "AddScoped<")
+                  .replace("AddSingleton<IDomainEventDispatcher, ", "AddSingleton<")
+                  .replace(">();", ">();")
+              : l,
+          )
+          .join("\n")}${channelTeeSuffix}`
+    : hasRealtime
+      ? realtimeRegistration
+      : innerRegistration;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
   // TimerSource scheduling (scheduling.md, M-T4.1): one hosted
@@ -161,10 +253,23 @@ export function renderProgram(
   const timerServices = options?.timerServices ?? [];
   const timerRegistrations =
     timerServices.length > 0
-      ? `\n// TimerSource schedulers (scheduling.md) — one hosted BackgroundService per\n// owned timer; each takes a transaction-scoped advisory lock (single-fire\n// across replicas) and dispatches its tick through the in-process dispatcher.\n${timerServices
+      ? `\n// TimerSource \`every:\` schedulers (scheduling.md) — one hosted BackgroundService\n// per sub-minute timer; each takes a transaction-scoped advisory lock (single-fire\n// across replicas) and dispatches its tick through the in-process dispatcher.\n${timerServices
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
+  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
+  // (single-fire across replicas), retries a failed job with backoff, and fires an
+  // overdue recurring job on server start (native missed-run replay).
+  const hangfireCronTimers = !!options?.hangfireCronTimers;
+  const hangfireJobDiRegistrations = options?.hangfireJobDiRegistrations ?? [];
+  const hangfireRecurringRegistrations = options?.hangfireRecurringRegistrations ?? [];
+  const hangfireDiBlock = hangfireCronTimers
+    ? `\n// Durable cron timers (scheduling.md Phase 2) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
+    : "";
+  const hangfireRecurringBlock = hangfireCronTimers
+    ? `\n// Register the durable cron timerSources as Hangfire recurring jobs (standard\n// 5-field cron).  Uses the service-based IRecurringJobManager (the static\n// RecurringJob API needs JobStorage.Current, unset on the DI path).  AddOrUpdate\n// is idempotent per stable id — re-registers on boot.\nusing (var hangfireScope = app.Services.CreateScope())\n{\n    var recurring = hangfireScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();\n${hangfireRecurringRegistrations.join("\n")}\n}\n`
+    : "";
   // Dapper resolves the singleton NpgsqlDataSource directly (no per-request
   // scope needed); the EF path scopes an AppDbContext.  The domain-`Create`
   // seed path resolves its repositories off the same provider either way.
@@ -366,10 +471,11 @@ using (var scope = app.Services.CreateScope())
   const authHandshake = oidc ? "app.MapAuthHandshake();\n" : "";
   return `// Auto-generated.
 using System.Text.Json;
-${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
+${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}${hangfireCronTimers ? "using Hangfire;\nusing Hangfire.PostgreSql;\n" : ""}using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${options?.hasChannels ? `\nusing ${ns}.Infrastructure.Channels;` : ""}${authUsing}
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -473,7 +579,7 @@ builder.Services.AddScoped(
 `
     : ""
 }
-${dispatcherRegistration}${timerRegistrations}
+${dispatcherRegistration}${realtimeHubRegistration}${timerRegistrations}${hangfireDiBlock}
 
 ${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
 ${authDi}
@@ -603,7 +709,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
-${
+${hangfireRecurringBlock}${
   usingDapper
     ? `
 // Dapper persistence: apply the self-contained schema (CREATE TABLE IF NOT
@@ -738,6 +844,11 @@ ${
     }
 });`
 }
+// Prometheus scrape target — prometheus-net's MapMetrics serves the default
+// registry (the .NET runtime + process metrics it auto-collects, plus the
+// http_requests_total / http_request_duration_seconds recorded by
+// RequestLoggingMiddleware) as the text exposition at /metrics.
+app.MapMetrics();
 // Ambient execution context — births the RequestContext (correlation id,
 // locale, start time, scope id) and opens the root frame.  Mounted FIRST so
 // the frame covers the entire pipeline: the request log below rides its
@@ -761,7 +872,7 @@ app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
 ${authMount}app.MapControllers();
-${authMe}${authHandshake}${
+${realtimeEndpoint}${authMe}${authHandshake}${
   hasEmbeddedSpa
     ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.
@@ -817,15 +928,26 @@ export function renderCsproj(
   usesSpecifications: boolean = false,
   oidc: boolean = false,
   withCronTimers: boolean = false,
-  withRedisChannels: boolean = false,
+  channelTransports: { redis: boolean; rabbit: boolean; kafka?: boolean } = {
+    redis: false,
+    rabbit: false,
+  },
 ): string {
   // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
   // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
   // block.
-  // Broker channel transport (M-T4.4 slice 6a) — StackExchange.Redis (MIT,
-  // design §6a) speaks RESP to the compose-provisioned Valkey sidecar.
-  const redisChannelRef = withRedisChannels
+  // Broker channel transports (M-T4.4 slices 6a + 7b) — StackExchange.Redis
+  // (MIT, design §6a) speaks RESP to the compose-provisioned Valkey sidecar;
+  // RabbitMQ.Client (Apache-2.0, §6a) speaks AMQP 0-9-1 to the rabbitmq
+  // sidecar.  Per-transport wiring-gated.
+  const redisChannelRef = channelTransports.redis
     ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    : "";
+  const kafkaChannelRef = channelTransports.kafka
+    ? `\n    <!-- Kafka channel transport (channels.md, M-T4.4; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
+    : "";
+  const rabbitChannelRef = channelTransports.rabbit
+    ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
     : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
@@ -876,11 +998,13 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Cronos — cron-expression parsing for `timerSource … cron:` BackgroundServices
-  // (scheduling.md, M-T4.1).  Ships only when an owned timer uses a real cron
-  // cadence (an `every:`-only deployable uses PeriodicTimer and needs no dep).
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
+  // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
+  // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1
+  // Hangfire pulls transitively (NU1903 under /warnaserror).
   const cronosRef = withCronTimers
-    ? `\n    <!-- Cronos — cron-expression parser for timerSource schedulers -->\n    <PackageReference Include="Cronos" Version="0.13.0" />`
+    ? `\n    <!-- Hangfire — durable cron timerSource scheduler (Postgres storage) -->\n    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.21" />\n    <PackageReference Include="Hangfire.PostgreSql" Version="1.20.12" />\n    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />`
     : "";
   // MailKit (smtp mailer, kind: mailer) and its transitive MimeKit carry a
   // moderate BouncyCastle advisory present on every published version; the
@@ -950,7 +1074,9 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="3.0.2" />
     <!-- OpenAPI spec emitted at /openapi.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <!-- Prometheus metrics at /metrics (prometheus-net) -->
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${kafkaChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;

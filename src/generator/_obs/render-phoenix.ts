@@ -55,3 +55,30 @@ export function renderPhoenixLogCall(eventKey: LogEventKey, fields: PhoenixField
   const meta = fieldMeta ? `${baseMeta}, ${fieldMeta}` : baseMeta;
   return `Logger.${method}("${e.event}", ${meta})`;
 }
+
+// ---------------------------------------------------------------------------
+// Domain-metric emission for Phoenix — the declarative sibling of the
+// manual-increment `recordDomainOperation`/`recordDomainFault` calls the
+// other four backends paste at their seams.  Phoenix counters are defined
+// declaratively in `<App>.Telemetry.metrics/0` and fed by `:telemetry`
+// events, so the SEAM just emits the event; the aggregation is wired in the
+// Telemetry supervisor (`telemetry-emit.ts`).  The event prefix is fixed so
+// the seam sites and the `counter(...)` defs agree without threading a name.
+// ---------------------------------------------------------------------------
+
+/** The telemetry event a domain-operation seam fires (aggregate + op). */
+export const PHOENIX_DOMAIN_OPERATION_EVENT = "[:loom, :domain, :operation]";
+/** The telemetry event a domain-fault seam fires (kind only). */
+export const PHOENIX_DOMAIN_FAULT_EVENT = "[:loom, :domain, :fault]";
+
+/** `:telemetry.execute(...)` at the operation_invoked / aggregate_created
+ *  seam — feeds the `domain_operations_total{aggregate,op}` counter. */
+export function renderPhoenixDomainOperation(aggregate: string, op: string): string {
+  return `:telemetry.execute(${PHOENIX_DOMAIN_OPERATION_EVENT}, %{count: 1}, %{aggregate: "${aggregate}", op: "${op}"})`;
+}
+
+/** `:telemetry.execute(...)` at a fault seam — feeds the
+ *  `domain_faults_total{kind}` counter. */
+export function renderPhoenixDomainFault(kind: string): string {
+  return `:telemetry.execute(${PHOENIX_DOMAIN_FAULT_EVENT}, %{count: 1}, %{kind: "${kind}"})`;
+}

@@ -374,7 +374,8 @@ export const angularTarget: WalkerTarget = {
   /** `@for (item of coll; track <key>) { body }` — Angular's built-in
    *  control-flow loop.  `track` is mandatory; the index alias
    *  (`let idx = $index`) is declared only when the body references it.
-   *  A bare-index key collapses to `track $index`. */
+   *  A bare-index key collapses to `track $index`.  The `empty:` arm maps to
+   *  Angular's native `@empty { … }` block; omitted → byte-identical to before. */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -382,16 +383,18 @@ export const angularTarget: WalkerTarget = {
     keyExpr: string,
     body: string,
     depth: number,
+    emptyBody?: string,
   ): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
     const trackExpr = keyExpr === indexVar ? "$index" : keyExpr;
     const usesIdxInBody = referencesIdent(body, indexVar);
     const ctxVar = usesIdxInBody ? `; let ${indexVar} = $index` : "";
+    const emptyBlock = emptyBody ? ` @empty {\n${inner}${emptyBody}\n${pad}}` : "";
     return [
       `@for (${itemVar} of ${coll}; track ${trackExpr}${ctxVar}) {`,
       `${inner}${body}`,
-      `${pad}}`,
+      `${pad}}${emptyBlock}`,
     ].join("\n");
   },
 

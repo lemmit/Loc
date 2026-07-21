@@ -41,12 +41,15 @@ import { emitMikroSeeds, emitTypescriptSeeds } from "../../../generator/typescri
 import {
   type OpFragment,
   renderAggregate,
+  renderContextIntegrationTest,
   renderEnumsAndValueObjects,
   renderEvents,
   renderHttpIndex,
   renderIds,
   renderSchema,
+  renderServiceTestsFile,
   renderTestsFile,
+  renderVoTestsFile,
 } from "../../../generator/typescript/emit.js";
 import { buildExternSubclassFile } from "../../../generator/typescript/extern-builder.js";
 import { rewriteRelativeImports } from "../../../generator/typescript/layout-imports.js";
@@ -566,6 +569,7 @@ export function generateTypeScriptForContexts(
       resourceSourceTypes,
       workflowOpFragments,
       resolveStreamContext,
+      usingMikro,
     );
     out.set("http/workflows.ts", workflowsContent);
     if (sourcemap && workflowOpFragments) {
@@ -822,6 +826,24 @@ export function generateTypeScriptForContexts(
         place("domain-test", agg.name, testsFile, agg.origin, construct);
       }
     }
+    // Value-object and domain-service unit tests (test-placement.md, Phase 2) —
+    // colocated `domain/<subject>.test.ts` files, picked up by the same
+    // behavioral-unit glob as aggregate tests.  Emitted only when the subject
+    // declares a `test`, so a test-free project stays byte-identical.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderVoTestsFile(vo, ctx);
+      if (voTests) place("domain-test", vo.name, voTests, vo.origin, `${ctx.name}.${vo.name}`);
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderServiceTestsFile(svc, ctx);
+      if (svcTests) place("domain-test", svc.name, svcTests, undefined, `${ctx.name}.${svc.name}`);
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3a) — an in-process,
+    // repository-backed cross-aggregate test file reading a PG_URL, no HTTP.
+    const integrationTests = renderContextIntegrationTest(ctx);
+    if (integrationTests) {
+      out.set(`test/${lowerFirst(ctx.name)}.integration.test.ts`, integrationTests);
+    }
     // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
     // table but has no per-concrete repo/routes.  Emit its polymorphic read
     // home — the `<Base>` discriminated union + a read-only `<Base>Repository`
@@ -1003,6 +1025,7 @@ export function generateTypeScriptForContexts(
       withCronTimers: hasTimers && anyTimerUsesCron(ownedTimers),
       withRedisChannels: hasChannels && channelBindings.some((b) => b.transport === "redis"),
       withRabbitChannels: hasChannels && channelBindings.some((b) => b.transport === "rabbitmq"),
+      withKafkaChannels: hasChannels && channelBindings.some((b) => b.transport === "kafka"),
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -1119,6 +1142,10 @@ function projectPackageJson(
     /** M-T4.4 slice 3 — the `amqplib` broker-client dep (+ its types), added
      *  only when the deployable wires a rabbitmq-bound channelSource. */
     withRabbitChannels?: boolean;
+    /** M-T4.4 slice 4 — the `kafkajs` broker-client dep (MIT, ships its own
+     *  types), added only when the deployable wires a kafka-bound
+     *  channelSource. */
+    withKafkaChannels?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -1155,9 +1182,8 @@ function projectPackageJson(
     : { ...pins.dependencies };
   const devDependencies = {
     ...(mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies }),
-    // Types for the node-cron scheduler dep (scheduling.md) — devDep so the
-    // generated project's `tsc --noEmit` resolves `import cron from "node-cron"`.
-    ...(opts.withCronTimers ? { "@types/node-cron": "^3.0.11" } : {}),
+    // pg-boss (the durable cron-timer store, scheduling.md Phase 2) ships its
+    // own types, so no @types devDep is needed for the timer path.
     // Types for the amqplib broker dep (M-T4.4 slice 3) — devDep so the
     // generated project's `tsc --noEmit` resolves `import amqp from "amqplib"`.
     ...(opts.withRabbitChannels ? { "@types/amqplib": "^0.10.5" } : {}),
@@ -1205,15 +1231,20 @@ function projectPackageJson(
           // OIDC token verification (D-AUTH-OIDC) — jose owns JWKS fetch +
           // signature/claims validation in the generated verifier.
           ...(opts.withOidc ? { jose: "^5.9.0" } : {}),
-          // Timer scheduler (scheduling.md) — node-cron parses real cron
-          // expressions; an `every:`-only deployable stays on setInterval.
-          ...(opts.withCronTimers ? { "node-cron": "^3.0.3" } : {}),
+          // Durable timer scheduler (scheduling.md Phase 2) — pg-boss runs
+          // cron: timers as Postgres-backed durable jobs (single-fire + retry);
+          // cron-parser computes the previous boundary for the coalesce-once
+          // catch-up.  An `every:`-only deployable needs neither (in-process).
+          ...(opts.withCronTimers ? { "pg-boss": "^12.26.1", "cron-parser": "^5.4.0" } : {}),
           // Broker transport (M-T4.4 slice 2) — ioredis (MIT, design §6a)
           // speaks RESP to the compose-provisioned Valkey sidecar.
           ...(opts.withRedisChannels ? { ioredis: "^5.4.0" } : {}),
           // Broker transport (M-T4.4 slice 3) — amqplib (MIT, design §6a)
           // speaks AMQP 0-9-1 to the compose-provisioned RabbitMQ sidecar.
           ...(opts.withRabbitChannels ? { amqplib: "^0.10.4" } : {}),
+          // Broker transport (M-T4.4 slice 4) — kafkajs (MIT, design §6a)
+          // only when a kafka-bound channelSource is wired.
+          ...(opts.withKafkaChannels ? { kafkajs: "^2.2.4" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,
@@ -1505,8 +1536,9 @@ const stopOutboxRelay = startOutboxRelay(db, channelPublishTee(channelTransports
 }${
   hasTimers
     ? `// Timer sources (scheduling.md): infrastructure fires tick events on a
-// wall-clock cadence, single-fire across replicas via a pg advisory lock.
-const stopTimers = startTimerScheduler(db, inProcessEvents);
+// wall-clock cadence.  cron: timers run on pg-boss (durable, retried,
+// single-fire across replicas); every: timers run in-process.
+const stopTimers = await startTimerScheduler(db, inProcessEvents);
 `
     : ""
 }`
@@ -1528,7 +1560,7 @@ async function shutdown(signal: string): Promise<void> {
   }${
     hasTimers
       ? `
-  stopTimers();`
+  await stopTimers();`
       : ""
   }${
     hasChannelConsumers

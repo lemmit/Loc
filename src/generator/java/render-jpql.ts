@@ -2,8 +2,6 @@ import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
-  isDeepScopeFilter,
-  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -109,30 +107,53 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       return `${e.op}${render(e.operand, ctx)}`;
     case "binary":
       return renderBinary(e, ctx);
-    case "method-call": {
-      // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false JPQL
-      // predicate; no row satisfies `1 = 0`.
-      if (isDenyFilter(e)) return "1 = 0";
-      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
-      // materialized-path scope with the NULL-dataKey fallback to the tenant
-      // floor (see `DEEP_SCOPE_SEMANTICS`).  The principal claims render as the
-      // same null-safe SpEL accessors the tenant floor uses (`render` on the
-      // `currentUser.<claim>` arg members).
-      if (isDeepScopeFilter(e)) {
-        const col = `${ctx.alias}.${TENANT_OWNED_DATA_KEY_FIELD}`;
-        const tenantCol = `${ctx.alias}.${TENANT_OWNED_TENANT_ID_FIELD}`;
-        const org = render(e.args[0]!, ctx);
-        const tenant = render(e.args[1]!, ctx);
-        const like = `${col} like concat(${org}, '${DATA_KEY_PATH_DELIMITER}%')`;
-        return (
-          `(${col} is not null and (${col} = ${org} or ${like})) ` +
-          `or (${col} is null and ${tenantCol} = ${tenant})`
-        );
+    case "authz-filter": {
+      // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node
+      // so a missing arm is a `tsc` error here, not a silent authorization
+      // bypass.
+      switch (e.filter.kind) {
+        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // JPQL predicate; no row satisfies `1 = 0`.
+        case "deny":
+          return "1 = 0";
+        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // descendant-or-self materialized-path scope with the NULL-dataKey
+        // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  The
+        // principal claims render as the same null-safe SpEL accessors the
+        // tenant floor uses (`render` on the `currentUser.<claim>` members).
+        case "scope": {
+          const col = `${ctx.alias}.${TENANT_OWNED_DATA_KEY_FIELD}`;
+          const tenantCol = `${ctx.alias}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+          const org = render(e.filter.anchorClaim, ctx);
+          const tenant = render(e.filter.tenantClaim, ctx);
+          const like = `${col} like concat(${org}, '${DATA_KEY_PATH_DELIMITER}%')`;
+          return (
+            `(${col} is not null and (${col} = ${org} or ${like})) ` +
+            `or (${col} is null and ${tenantCol} = ${tenant})`
+          );
+        }
+        default: {
+          const _exhaustive: never = e.filter;
+          throw unsupported(`authz-filter kind '${(_exhaustive as { kind: string }).kind}'`);
+        }
       }
-      // Reference-collection membership: `this.<refColl>.contains(x)` →
-      // `:x member of e.<refColl>`.
+    }
+    case "method-call": {
+      // (The `deep` / DENY authorization filter sentinels moved to the
+      // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
+      // above, no longer a `method-call` marker here.)
+      // Reference-collection membership: `this.<refColl>.contains(x)`.  The
+      // collection is an `@ElementCollection` of an embeddable id
+      // (`PokemonId(UUID value)`), so `:x member of e.<refColl>` throws at
+      // runtime on Hibernate 6 ("Unsupported tuple comparison" — the element is
+      // a tuple, the bind param is not).  Use a correlated existence subquery
+      // with an embeddable-equality predicate instead, which Hibernate
+      // decomposes per attribute (`p.value = :x.value`).
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
-        return `${render(e.args[0]!, ctx)} member of ${render(e.receiver, ctx)}`;
+        const coll = render(e.receiver, ctx);
+        const val = render(e.args[0]!, ctx);
+        const alias = `${coll.split(".").pop() ?? "elem"}_m`;
+        return `exists (select 1 from ${coll} ${alias} where ${alias} = ${val})`;
       }
       // Queryable scalar intrinsic (src/util/intrinsics.ts) — render the
       // receiver recursively and apply the JPQL snippet.  Serves both the

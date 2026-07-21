@@ -273,6 +273,11 @@ function emitSystem(
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
+  // Prometheus collector scrape config (M-T7.1) — mounted by the compose
+  // `prometheus` service; one job per backend deployable's /metrics.
+  if (metricsScrapeTargets(sys).length > 0) {
+    out.set("monitoring/prometheus.yml", renderPrometheusConfig(sys));
+  }
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
   // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
   // launch config per deployable whose platform implements `debugLaunch`,
@@ -548,6 +553,37 @@ function serviceSlug(name: string): string {
 // docker-compose.yml
 // ---------------------------------------------------------------------------
 
+/** The Prometheus scrape targets — every BACKEND deployable exposes
+ *  `GET /metrics` (M-T7.1); pure static frontends do not.  Each target is
+ *  the deployable's compose service name + the port it listens on inside
+ *  the compose network. */
+function metricsScrapeTargets(sys: SystemIR): Array<{ slug: string; port: number }> {
+  const targets: Array<{ slug: string; port: number }> = [];
+  for (const d of sys.deployables) {
+    const platform = platformFor(d.platform);
+    if (platform.isFrontend) continue;
+    const slug = serviceSlug(d.name);
+    const port = platform.composeService({ deployable: d, sys, slug }).internalPort;
+    targets.push({ slug, port });
+  }
+  return targets;
+}
+
+/** `monitoring/prometheus.yml` — the collector's scrape config, one job per
+ *  backend deployable, hitting its `/metrics` on the compose network.  Wired
+ *  into the `prometheus` service by `renderDockerCompose`. */
+function renderPrometheusConfig(sys: SystemIR): string {
+  const lines: string[] = ["# Auto-generated.", "global:", "  scrape_interval: 15s", ""];
+  lines.push("scrape_configs:");
+  for (const { slug, port } of metricsScrapeTargets(sys)) {
+    lines.push(`  - job_name: ${slug}`);
+    lines.push("    metrics_path: /metrics");
+    lines.push("    static_configs:");
+    lines.push(`      - targets: [${JSON.stringify(`${slug}:${port}`)}]`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 function renderDockerCompose(sys: SystemIR): string {
   const lines: string[] = [];
   lines.push("# Auto-generated.");
@@ -600,6 +636,19 @@ function renderDockerCompose(sys: SystemIR): string {
   const sidecars = renderStorageSidecars(sys);
   for (const svc of sidecars.services) {
     lines.push(...svc.map((l) => `  ${l}`));
+    lines.push("");
+  }
+  // Prometheus collector (M-T7.1): scrapes every backend's GET /metrics via
+  // the mounted scrape config (monitoring/prometheus.yml), so `docker compose
+  // up` gives a running monitoring surface out of the box (UI on :9090).
+  // No depends_on — Prometheus tolerates targets being down and retries.
+  if (metricsScrapeTargets(sys).length > 0) {
+    lines.push("  prometheus:");
+    lines.push("    image: prom/prometheus:v3.1.0");
+    lines.push("    volumes:");
+    lines.push("      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro");
+    lines.push("    ports:");
+    lines.push('      - "9090:9090"');
     lines.push("");
   }
   lines.push("volumes:");
@@ -809,6 +858,37 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
         `    timeout: 10s`,
         `    retries: 15`,
       ]);
+    } else if (s.type === "kafka" && transportStorages.has(s.name)) {
+      // Official apache/kafka image (Apache 2.0, single-node KRaft — design
+      // §6a: never bitnami, whose free tags are frozen/legacy).  The env
+      // block is the minimal combined broker+controller config with the
+      // in-network advertised listener (the default config advertises
+      // localhost, unreachable from sibling containers).
+      services.push([
+        `${slug}:`,
+        `  image: apache/kafka:4.1.0`,
+        `  environment:`,
+        `    KAFKA_NODE_ID: 1`,
+        `    KAFKA_PROCESS_ROLES: broker,controller`,
+        `    KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093`,
+        `    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${slug}:9092`,
+        `    KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER`,
+        `    KAFKA_CONTROLLER_QUORUM_VOTERS: 1@${slug}:9093`,
+        `    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"`,
+        `    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1`,
+        `    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1`,
+        `    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1`,
+        `    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0`,
+        // Auto-created topics get 3 partitions so a deployable's replicas
+        // actually share the group (1 partition would idle all but one) —
+        // per-key ordering rides the partition key, not the count.
+        `    KAFKA_NUM_PARTITIONS: 3`,
+        `  healthcheck:`,
+        `    test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]`,
+        `    interval: 5s`,
+        `    timeout: 10s`,
+        `    retries: 15`,
+      ]);
     } else if (s.type === "s3") {
       const volume = `${slug}-data`;
       volumes.push(volume);
@@ -903,7 +983,9 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     const url =
       b.transport === "rabbitmq"
         ? `amqp://guest:guest@${serviceSlug(b.storageName)}:5672`
-        : `redis://${serviceSlug(b.storageName)}:6379`;
+        : b.transport === "kafka"
+          ? `${serviceSlug(b.storageName)}:9092`
+          : `redis://${serviceSlug(b.storageName)}:6379`;
     lines.push(`    ${b.envVar}: ${JSON.stringify(url)}`);
   }
   // CORS allowlist for a backend that a separate-origin frontend may call:
@@ -960,5 +1042,13 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   lines.push(`    interval: 5s`);
   lines.push(`    timeout: 3s`);
   lines.push(`    retries: 10`);
+  // Elixir OIDC: the generated Phoenix app warms the issuer's JWKS synchronously
+  // BEFORE its Endpoint starts (so `/health` serves only once tokens can be
+  // verified — no cold-cache 401 window).  That blocks boot on the IdP's own
+  // boot/realm-import, so give the healthcheck extra startup grace under compose
+  // `--wait`; the fetch degrades gracefully (never crashes) if the budget runs out.
+  if (oidc && d.platform === "elixir") {
+    lines.push(`    start_period: 60s`);
+  }
   return lines;
 }

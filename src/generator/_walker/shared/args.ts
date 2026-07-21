@@ -6,6 +6,7 @@
 // walker context.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { escapeHtmlAttr } from "../a11y-emit.js";
 
 export function slugify(s: string): string {
   return s
@@ -84,12 +85,22 @@ export function actionHandlerName(actionName: string): string {
   return actionName;
 }
 
-/** Render a renderTextContent() result as a JSX
- *  attribute value.  Quoted strings stay quoted; JSX-expression
- *  values (already brace-wrapped) stay brace-wrapped. */
+/** Render a renderTextContent() result as an attribute value.  A
+ *  brace-wrapped expression stays brace-wrapped; a quoted string
+ *  literal (`JSON.stringify`'d) is re-emitted HTML-attribute-escaped
+ *  inside double quotes so an embedded `"` (or `& < >`) can't break out
+ *  of `attr="…"`.  A JS backslash-escaped quote does NOT work here —
+ *  JSX/HTML attribute values are not JS strings and don't process
+ *  backslash escapes, so `label="a\"b"` terminates at the inner quote.
+ *  HTML entities decode in attribute values on every frontend (JSX,
+ *  Vue, Svelte, Angular); for a value with no special chars the output
+ *  is byte-identical to the previous `JSON.stringify` form. */
 export function unwrapAsAttr(s: string): string {
   if (s.length >= 2 && s.startsWith("{") && s.endsWith("}")) return s;
-  return s; // already a quoted string literal — JSX accepts it
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    return `"${escapeHtmlAttr(JSON.parse(s) as string)}"`;
+  }
+  return s;
 }
 
 export function describeReceiver(expr: ExprIR): string {

@@ -14,6 +14,7 @@ import { upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import {
   collectJavaExprImports,
+  collectJavaTypeImports,
   javaValueTypeForId,
   renderJavaExpr,
   renderJavaType,
@@ -25,7 +26,6 @@ import {
   unionFindAsOptionalTwin,
 } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
-import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,6 @@ export function renderJavaService(
   const dispatches = true;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
-  const hasCreateValidator = aggHasCreateWireValidator(agg);
   const createInputs = forCreateInput(agg.fields);
   const eff = (t: TypeIR, optional: boolean): TypeIR =>
     optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
@@ -157,9 +156,6 @@ export function renderJavaService(
         `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
         createDefaultUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         ...createLets,
-        hasCreateValidator && !ctx.esCreateParams
-          ? `        ${agg.name}Validators.create(${createArgs});`
-          : null,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
         `        repository.save(aggregate);`,
         ...createAuditLines,
@@ -202,7 +198,11 @@ export function renderJavaService(
     .flatMap((f) => {
       const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
       const args = f.params.map((p) => p.name).join(", ");
-      for (const p of f.params) collectWireToDomainImports(p.type, imports);
+      // Finder params are DOMAIN-typed (`renderJavaType`) and passed straight
+      // through to the repository — collect the domain-type import (BigDecimal
+      // for decimal, UUID for a bare guid, …) to match the rendered signature,
+      // not the wire→domain collector (which only covers money/datetime).
+      for (const p of f.params) collectJavaTypeImports(p.type, imports);
       if (isPagedFind(f)) {
         const pagedParams = [params, "int page, int pageSize, String sort, String dir"]
           .filter(Boolean)
@@ -265,7 +265,7 @@ export function renderJavaService(
     imports.add("java.util.UUID");
   }
   if (anyLifecycleAudited) {
-    imports.add("com.fasterxml.jackson.databind.node.NullNode");
+    imports.add("tools.jackson.databind.node.NullNode");
   }
   // The audit-record actor reads `currentUserAccessor.user()` on an authed
   // system even when no operation otherwise uses the current user, so the
@@ -300,7 +300,6 @@ export function renderJavaService(
       const args = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
         ", ",
       );
-      const opHasValidator = opHasWireValidator(agg, op.name);
       if (op.extern) {
         // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
         // real aggregate method now — it runs its preconditions, delegates to the
@@ -338,9 +337,6 @@ export function renderJavaService(
         `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
-        opHasValidator
-          ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
-          : null,
         `        var aggregate = repository.getById(id);`,
         ifMatchGuard,
         whenGateLine(op),
@@ -513,13 +509,4 @@ function collectVoNames(t: TypeIR, into: Set<string>): void {
   if (t.kind === "valueobject") into.add(t.name);
   else if (t.kind === "array") collectVoNames(t.element, into);
   else if (t.kind === "optional") collectVoNames(t.inner, into);
-}
-
-/** True when the op's preconditions yield at least one wire rule —
- *  mirrors the validator emitter's method-omission logic. */
-function opHasWireValidator(agg: EnrichedAggregateIR, opName: string): boolean {
-  // Cheap re-derivation through the validator emitter: render once and
-  // check the method exists.  Validators are small; clarity wins.
-  const rendered = renderJavaValidators(agg, "p", "b");
-  return rendered?.includes(` ${opName}(`) ?? false;
 }

@@ -23,6 +23,7 @@ import {
 } from "../render-expr.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
+import { javaCommandValidatorNames } from "./validator.js";
 
 // ---------------------------------------------------------------------------
 // REST controllers + the shared exception advice.  Route shape mirrors
@@ -37,7 +38,7 @@ import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 //
 // Errors flow through ApiExceptionAdvice → RFC 7807 problem+json:
 // DomainException 400, ForbiddenException 403, AggregateNotFound 404,
-// WireValidationException 422 (+ `errors[]` extension), fallback 500.
+// MethodArgumentNotValidException 422 (+ `errors[]` extension), fallback 500.
 // ---------------------------------------------------------------------------
 
 export interface ControllerCtx {
@@ -177,9 +178,10 @@ export function renderJavaController(
         return [
           `    @PostMapping("/{id}/${snake(op.name)}")`,
           hasParams
-            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
           `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
             : `        var result = service.${op.name}(new ${idClass}(id)${ifMatchServiceArg});`,
@@ -195,9 +197,10 @@ export function renderJavaController(
         `    @PostMapping("/{id}/${snake(op.name)}")`,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
         hasParams
-          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
         `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+        `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
         hasParams
           ? `        service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
           : `        service.${op.name}(new ${idClass}(id)${ifMatchServiceArg});`,
@@ -317,9 +320,10 @@ export function renderJavaController(
   const createRoute = emitsRestCreate(agg)
     ? [
         `    @PostMapping`,
-        `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
+        `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@Valid @RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
         `        CatalogLog.event("aggregate_created", "info", "aggregate", "${agg.name}", "id", id.value());`,
+        `        httpMetrics.recordDomainOperation("${agg.name}", "create");`,
         `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
         `            .body(new Create${agg.name}Response(id.value()));`,
         `    }`,
@@ -381,22 +385,58 @@ export function renderJavaController(
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.config.CatalogLog;`,
+    `import ${ctx.basePkg}.config.HttpMetrics;`,
+    // `@Valid` triggers Bean Validation on the request DTOs (`@Size`/`@Pattern`/…)
+    // at the controller boundary; emitted only when the controller takes a body.
+    emitsRestCreate(agg) || agg.operations.some((o) => o.params.length > 0)
+      ? `import jakarta.validation.Valid;`
+      : null,
+    // WebDataBinder for the @InitBinder that registers this aggregate's command
+    // validators — only when at least one is emitted.
+    javaCommandValidatorNames(agg).length > 0
+      ? `import org.springframework.web.bind.WebDataBinder;`
+      : null,
     ``,
     `@RestController`,
     `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
     `public class ${plural(agg.name)}Controller {`,
     `    private final ${agg.name}Service service;`,
+    `    private final HttpMetrics httpMetrics;`,
     anyFindGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${plural(agg.name)}Controller(${agg.name}Service service${anyFindGateUsesUser ? ", CurrentUserAccessor currentUserAccessor" : ""}) {`,
+    `    public ${plural(agg.name)}Controller(${agg.name}Service service, HttpMetrics httpMetrics${anyFindGateUsesUser ? ", CurrentUserAccessor currentUserAccessor" : ""}) {`,
     `        this.service = service;`,
+    `        this.httpMetrics = httpMetrics;`,
     anyFindGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
+    ...initBinderLines(agg),
     ...body,
     `}`,
     ``,
   );
+}
+
+/** Register this aggregate's command validators on the controller's
+ *  WebDataBinder so `@Valid @RequestBody` runs them.  The per-request binder
+ *  targets ONE request DTO, and `addValidators` asserts every added validator
+ *  supports that target — so we add only the one matching `binder.getTarget()`.
+ *  The Spring seam analogous to .NET registering the FluentValidation pipeline
+ *  behavior.  Emitted only when a validator exists. */
+function initBinderLines(agg: EnrichedAggregateIR): (string | null)[] {
+  const validators = javaCommandValidatorNames(agg);
+  if (validators.length === 0) return [];
+  return [
+    `    @InitBinder`,
+    `    void initBinder(WebDataBinder binder) {`,
+    `        var target = binder.getTarget();`,
+    ...validators.map(
+      (v) =>
+        `        if (target instanceof ${v.requestType}) binder.addValidators(new ${v.className}());`,
+    ),
+    `    }`,
+    ``,
+  ];
 }
 
 /** RFC 7807 problem+json advice — the DomainExceptionFilter / Hono
@@ -435,6 +475,7 @@ export function renderApiExceptionAdvice(
     `import org.springframework.http.ProblemDetail;`,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.http.converter.HttpMessageNotReadableException;`,
+    `import org.springframework.web.bind.MethodArgumentNotValidException;`,
     `import org.springframework.web.bind.annotation.ExceptionHandler;`,
     `import org.springframework.web.bind.annotation.RestControllerAdvice;`,
     `import org.springframework.web.context.request.WebRequest;`,
@@ -443,24 +484,35 @@ export function renderApiExceptionAdvice(
     `import ${basePkg}.domain.common.DisallowedException;`,
     `import ${basePkg}.domain.common.DomainException;`,
     `import ${basePkg}.domain.common.ForbiddenException;`,
-    `import ${basePkg}.domain.common.WireValidationException;`,
     `import ${basePkg}.config.CatalogLog;`,
+    `import ${basePkg}.config.HttpMetrics;`,
     ``,
     `@RestControllerAdvice`,
     `public class ApiExceptionAdvice {`,
+    `    private final HttpMetrics httpMetrics;`,
     ``,
-    `    @ExceptionHandler(WireValidationException.class)`,
-    `    public ResponseEntity<ProblemDetail> onValidation(WireValidationException e, WebRequest request) {`,
+    `    public ApiExceptionAdvice(HttpMetrics httpMetrics) {`,
+    `        this.httpMetrics = httpMetrics;`,
+    `    }`,
+    ``,
+    // Wire-boundary validation (422): the per-command Spring Validators
+    // (registered via @InitBinder, run at `@Valid @RequestBody`) reject through
+    // `Errors.rejectValue(field, code, message)`, surfaced as
+    // MethodArgumentNotValidException.  Map each field error to the cross-backend
+    // `{pointer,message,code?}` envelope — `code` only when it's a `msg.` i18n
+    // key (a messaged rule); the message-less sentinel code is omitted.
+    `    @ExceptionHandler(MethodArgumentNotValidException.class)`,
+    `    public ResponseEntity<ProblemDetail> onValidation(MethodArgumentNotValidException e, WebRequest request) {`,
     `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
     `        var problem = problem(422, "Validation failed", "One or more fields are invalid.", request);`,
-    `        problem.setProperty("errors", e.errors().stream()`,
+    `        problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()`,
     `            .map(err -> {`,
     `                var entry = new java.util.LinkedHashMap<String, Object>();`,
-    `                entry.put("pointer", err.pointer());`,
-    `                entry.put("message", err.message());`,
-    `                // A messaged rule carries the stable content-hash wire code; a`,
-    `                // message-less rule's null code is omitted (byte-identical body).`,
-    `                if (err.code() != null) entry.put("code", err.code());`,
+    `                entry.put("pointer", "/" + err.getField());`,
+    `                entry.put("message", err.getDefaultMessage());`,
+    `                var code = err.getCode();`,
+    `                if (code != null && code.startsWith("msg.")) entry.put("code", code);`,
     `                return entry;`,
     `            })`,
     `            .collect(Collectors.toList()));`,
@@ -470,18 +522,21 @@ export function renderApiExceptionAdvice(
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
     `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", 403);`,
+    `        httpMetrics.recordDomainFault("forbidden");`,
     `        return respond(problem(403, "Forbidden", e.getMessage(), request), 403);`,
     `    }`,
     ``,
     `    @ExceptionHandler(DomainException.class)`,
     `    public ResponseEntity<ProblemDetail> onDomain(DomainException e, WebRequest request) {`,
     `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 400);`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
     `        return respond(problem(400, "Bad Request", e.getMessage(), request), 400);`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,
     `    public ResponseEntity<ProblemDetail> onDisallowed(DisallowedException e, WebRequest request) {`,
     `        CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", ${disallowedStatus});`,
+    `        httpMetrics.recordDomainFault("disallowed");`,
     `        return respond(problem(${disallowedStatus}, "Disallowed", e.getMessage(), request), ${disallowedStatus});`,
     `    }`,
     ``,
@@ -495,9 +550,11 @@ export function renderApiExceptionAdvice(
       `        // Either way return a friendly conflict instead of leaking a 500.`,
       `        if ("23503".equals(sqlState(e))) {`,
       `            CatalogLog.event("conflict", "warn", "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
+      `            httpMetrics.recordDomainFault("conflict");`,
       `            return respond(problem(${referencedInUseStatus}, "Conflict", "This resource is still referenced and cannot be deleted.", request), ${referencedInUseStatus});`,
       `        }`,
       `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
+      `        httpMetrics.recordDomainFault("disallowed");`,
       `        return respond(problem(${uniquenessStatus}, "Conflict", "A resource with these values already exists.", request), ${uniquenessStatus});`,
       `    }`,
       ``,
@@ -510,6 +567,7 @@ export function renderApiExceptionAdvice(
       `        // load→save window lost a race (Hibernate @Version write-time CAS).`,
       `        // Return a friendly 409 instead of leaking a 500.`,
       `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
+      `        httpMetrics.recordDomainFault("conflict");`,
       `        return respond(problem(${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", request), ${concurrencyStatus});`,
       `    }`,
       ``,
@@ -517,6 +575,7 @@ export function renderApiExceptionAdvice(
     `    @ExceptionHandler(AggregateNotFoundException.class)`,
     `    public ResponseEntity<ProblemDetail> onNotFound(AggregateNotFoundException e, WebRequest request) {`,
     `        CatalogLog.event("not_found", "warn", "status", 404);`,
+    `        httpMetrics.recordDomainFault("not_found");`,
     `        return respond(problem(404, "Not Found", e.getMessage(), request), 404);`,
     `    }`,
     ``,

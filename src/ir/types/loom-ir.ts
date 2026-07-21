@@ -772,6 +772,10 @@ export interface ValueObjectIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Unit tests anchored to this value object (nested `test` member, or a
+   *  hoisted `test … for <VO>`).  Same `TestIR` shape as `AggregateIR.tests`;
+   *  emitted as a colocated unit file (test-placement.md, Phase 2). */
+  tests: TestIR[];
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -929,6 +933,11 @@ export interface CriterionIR {
 export interface DomainServiceIR {
   name: string;
   operations: DomainServiceOperationIR[];
+  /** Unit tests anchored to this domain service (nested `test` member, or a
+   *  hoisted `test … for <Service>`).  Same `TestIR` shape as
+   *  `AggregateIR.tests`; emitted as a colocated unit file
+   *  (test-placement.md, Phase 2). */
+  tests: TestIR[];
 }
 
 /** One operation of a `domainService` (domain-services.md).  Mirrors the
@@ -1035,6 +1044,13 @@ export interface BoundedContextIR {
    *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
+  /** Context-scoped INTEGRATION tests (test-placement.md, Phase 3) — a `test`
+   *  nested in the `context` (no `for`) or hoisted with `for <Ctx>`.  Same
+   *  `TestIR` shape as the per-subject unit tests, but lowered under the context
+   *  env (every aggregate/service in scope) so it exercises cross-aggregate
+   *  behaviour.  Not yet emitted by any backend (gated `loom.context-test-unsupported`
+   *  until the Phase 3a integration renderer lands). */
+  tests: TestIR[];
   /** Per-error HTTP status overrides reaching this context, merged from the
    *  `httpStatus <Error> -> <Code>` clauses of every api over its subdomain
    *  (exception-less.md A1).  Populated by `enrichLoomModel`; the route
@@ -2570,10 +2586,28 @@ export interface UiChannelParamIR {
   channelName: string;
 }
 
-/** `on <param>.<Event>(e) { toast(…) }` — render a carried event as it
- *  arrives on the realtime wire.  v1's only action is `toast`; each
- *  handler statement lowers to one message expression with `bind` in
- *  scope as the event payload. */
+/** A `refetch(<Aggregate>)` action inside an `on` handler body — the
+ *  realtime analogue of a mutation's `onSuccess` cache invalidation.
+ *  Fully resolved: `queryTag` is the exact `["<tag>"]` query key the
+ *  frontend api modules register (`snake(plural(aggregate))`), so a
+ *  realtime invalidation and a mutation-success invalidation hit the
+ *  same cache entries.  Backends never re-derive the tag. */
+export interface RefetchTargetIR {
+  /** The aggregate whose queries are invalidated (resolved to a real
+   *  aggregate in the enclosing system by the validator). */
+  aggregate: string;
+  /** The query-key tag — `snake(plural(aggregate))`.  Frontends emit
+   *  `qc.invalidateQueries({ queryKey: ["<queryTag>"] })`, prefix-matching
+   *  the aggregate's list / detail / find queries. */
+  queryTag: string;
+}
+
+/** `on <param>.<Event>(e) { toast(…)  refetch(Agg) }` — render a carried
+ *  event as it arrives on the realtime wire.  A handler body admits two
+ *  actions: `toast(<expr>)` (a message notification) and
+ *  `refetch(<Aggregate>[, …])` (invalidate that aggregate's query cache);
+ *  the validator (`loom.ui-handler-unsupported`) rejects anything else.
+ *  Each lowers with `bind` in scope as the event payload. */
 export interface UiNotificationIR {
   /** The channel-param handle the handler subscribes through. */
   paramName: string;
@@ -2581,8 +2615,11 @@ export interface UiNotificationIR {
   eventType: string;
   /** Handler binding name (`e` in `on Orders.OrderShipped(e)`). */
   bind: string;
-  /** One toast message expression per handler statement. */
+  /** One toast message expression per `toast(<expr>)` handler statement. */
   toasts: ExprIR[];
+  /** One entry per aggregate named across the handler's `refetch(…)`
+   *  statements.  Omitted when the handler declares no refetch. */
+  refetches?: RefetchTargetIR[];
 }
 
 /** API declaration — first-class contract derived from a module's
@@ -3321,6 +3358,47 @@ export type BinOp =
   | "&&"
   | "||";
 
+/**
+ * The discriminated policy decision carried by an `authz-filter` `ExprIR`
+ * node (M-T9.9).  Each backend's filter translator switches over `kind` with
+ * TypeScript exhaustiveness, so adding a variant is a `tsc` error at every
+ * render site — the compile-time replacement for the pre-M-T9.9 chain of
+ * `isDenyFilter` / `isDeepScopeFilter` runtime probes on a `method-call`
+ * marker (where a forgotten arm was a SILENT authorization bypass, not a
+ * build break).
+ *
+ *  - `deny` — the always-false carve-out (`deny [write] on <Agg>`,
+ *    authorization Phase 4, deny-wins).  Principal-FREE: it routes to each
+ *    backend's STATIC filter path (no ambient-principal parameter), which is
+ *    what keeps a denied aggregate's read/write seam free of the unused-param
+ *    trap.  Every backend renders it to its native always-false fragment
+ *    (Drizzle `and(isNull, isNotNull)` / EF `false` / JPQL `1 = 0` /
+ *    `cb.disjunction()` / SQLAlchemy contradiction / Ecto `fragment("false")`).
+ *  - `scope` — the descendant-or-self materialized-path subtree scope
+ *    (`deep`/`global` read levels, multi-tenancy Phase 2).  PRINCIPAL-referencing
+ *    (carries `currentUser.<anchor>` + `currentUser.tenantId` as resolved
+ *    member sub-expressions), so it routes to the ambient-principal filter
+ *    path and `exprUsesCurrentUser` classifies it by walking those children.
+ *    Renders to the compound scope predicate with the NULL-dataKey fallback
+ *    to the tenant floor (`DEEP_SCOPE_SEMANTICS`).  `anchorClaim` is
+ *    `currentUser.orgPath` for `deep` (caller's node + descendants) or
+ *    `currentUser.rootOrg` for `global` (caller's ROOT subtree).
+ */
+export type AuthzFilterKind =
+  | { kind: "deny" }
+  | {
+      kind: "scope";
+      /** `currentUser.<anchor>` as a resolved `member` sub-expression — the
+       *  descendant-prefix anchor (`orgPath` for `deep`, `rootOrg` for
+       *  `global`).  Kept as ExprIR so a backend that renders the claim through
+       *  its own expression path (Java's null-safe SpEL accessor) reuses it
+       *  verbatim, and `exprUsesCurrentUser` sees the principal reference. */
+      anchorClaim: ExprIR;
+      /** `currentUser.tenantId` as a resolved `member` sub-expression — the
+       *  floor the NULL-dataKey fallback compares against. */
+      tenantClaim: ExprIR;
+    };
+
 export type ExprIR =
   | { kind: "literal"; lit: LiteralKind; value: string; origin?: OriginRef }
   | { kind: "this"; origin?: OriginRef }
@@ -3532,6 +3610,41 @@ export type ExprIR =
       elements: ExprIR[];
       origin?: OriginRef;
     }
+  /**
+   * Authorization / tenancy filter sentinel (M-T9.9).  A synthesized,
+   * never-parsed predicate that carries a DISCRIMINATED policy decision
+   * (`filter.kind`) instead of riding the IR as an ordinary `method-call`
+   * marker (the pre-M-T9.9 `__loomDeny__` / `__loomDeepScope__` encoding).
+   *
+   * The decision is made ONCE in enrichment (deep/global/deny — see
+   * `src/ir/enrich/enrichments.ts`) and every backend's query-filter
+   * translator only RENDERS the pre-built node to its native fragment
+   * (Drizzle contradiction, EF `false`, JPQL `1 = 0`, Ecto `fragment("false")`,
+   * …).  Making it a first-class `ExprIR.kind` — rather than a `method-call`
+   * every backend already handles — is the safety payoff: a backend that
+   * omits a filter arm can no longer fall through to the generic expression
+   * dispatcher and emit a silent authorization bypass.  Instead the shared
+   * dispatcher THROWS on it (like `action-ref`), the queryable-subset gate
+   * and child-walker force an explicit arm, and each backend switches on
+   * `filter.kind` with TypeScript exhaustiveness so a future `AuthzFilterKind`
+   * becomes a `tsc` error at every render site.
+   *
+   * Never reaches a domain-logic expression position — it lives ONLY in an
+   * aggregate's `contextFilters` / `writeScopeFilter`, special-cased by the
+   * filter translators BEFORE the generic dispatch.  Build/inspect it through
+   * `src/ir/util/tenant-stance.ts` (`buildDenyFilter` / `buildDeepScopeFilter`
+   * / `buildGlobalScopeFilter`, `isDenyFilter` / `isDeepScopeFilter`).
+   */
+  | {
+      kind: "authz-filter";
+      /** The discriminated policy decision this sentinel encodes. */
+      filter: AuthzFilterKind;
+      /** Name of the aggregate the filter guards (formerly the marker's
+       *  `receiverType.name`).  Backends key the row's table/alias off their
+       *  render context, not this — it is carried for provenance / debugging. */
+      aggregate: string;
+      origin?: OriginRef;
+    }
   | { kind: "paren"; inner: ExprIR; origin?: OriginRef }
   | { kind: "unary"; op: "-" | "!"; operand: ExprIR; origin?: OriginRef }
   | {
@@ -3548,6 +3661,12 @@ export type ExprIR =
        *  undefined; those paths only need operand-blind operator
        *  rendering. */
       leftType?: TypeIR;
+      /** Type of the RIGHT operand — same population policy as `leftType`.
+       *  Needed alongside `leftType` to distinguish an integer division that
+       *  widened to `decimal` (`int / int` — both operands integral, cast both)
+       *  from an already-fractional mixed division (`int / decimal` — the
+       *  decimal operand must NOT be re-wrapped). */
+      rightType?: TypeIR;
       /** Type of the binary expression as a whole — comparison/logical
        *  ops are `bool`; arithmetic ops follow the type-system's
        *  closed-money and numeric-widening rules.  Same population

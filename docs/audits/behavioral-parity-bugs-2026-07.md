@@ -62,6 +62,16 @@ now fixed; all corpus cases boot green on all five backends.
 
 ---
 
+## B18 ✅ elixir — a derived field has no domain-struct accessor (domain test can't read it)
+
+- **Where:** `src/generator/elixir/vanilla/` — the domain module (`domain-core-emit.ts`) emitted no accessor for a `derived` field, and the domain-test emitter (`tests-emit.ts`) rendered `o.<derived>` as a plain struct-field read.
+- **Repro:** `test/fixtures/corpus/core-domain.ddd` domain `test` with `expect(o.isDraft).toBe(true)` on elixir → the emitted `assert o.is_draft == true` failed: the Ecto schema has no `is_draft` field. Elixir computes the derived value **only inline at the wire boundary** (`order_controller.ex`: `"isDraft" => record.status == :Draft`), with no domain-level function or virtual struct field. node/java/dotnet/python all expose derived fields as a getter/property on the domain object, so `o.isDraft` works there.
+- **Impact:** a domain `test "…"` (unit tier) that reads a derived field was un-runnable on elixir only. The derived value's *wire* correctness is also covered by the api tier's read. Surfaced once the unit tier broadened past `sales` (which has no derived field).
+- **Fix:** the pure domain core now exposes each PURE derived as an accessor function on the aggregate schema module — `def is_draft(%__MODULE__{} = record), do: record.status == :Draft`, rendered via the same `renderExpr`/`ELIXIR_TARGET` path invariants + `inspect` use (`pureDerivedAccessorNames` / `derivedAccessorLines` in `domain-core-emit.ts`). A derived whose expression can't render as a pure struct function (e.g. it references a repository find) is omitted — no accessor, no codegen crash. The vanilla domain-test emitter (`tests-emit.ts`) routes a `o.<derived>` read on the aggregate to `Agg.<derived>(record)` when an accessor exists, and degrades honestly to `@tag :skip` for a derived with no pure accessor (rather than the old `KeyError`-raising struct read). `core-domain`'s domain test re-adds `expect(o.isDraft)` (both `true` before `place` and `false` after).
+- **Verification:** `run-elixir.mjs core-domain` green (unit `mix test` 1/1 + api 1/1) in docker `loom-elx:node22`; node tier 2/2 (getter path unchanged). Pinned by the derived-accessor case in `test/generator/elixir/exunit-tests-emit.test.ts`.
+
+---
+
 ## B17 ✅ elixir — pure `create` leaves a collection containment as `NotLoaded` (domain op crashes)
 
 - **Where:** `src/generator/elixir/vanilla/domain-core-emit.ts` (the pure-domain `create/1` core).

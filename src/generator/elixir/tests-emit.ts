@@ -1,7 +1,12 @@
 import type { EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { voHasConstraints } from "./vanilla/changeset-validators.js";
-import { renderVanillaAggregateTestModule } from "./vanilla/tests-emit.js";
+import { renderVanillaContextIntegrationTest } from "./vanilla/integration-tests-emit.js";
+import {
+  renderVanillaAggregateTestModule,
+  renderVanillaServiceTestModule,
+  renderVanillaVoTestModule,
+} from "./vanilla/tests-emit.js";
 
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → ExUnit test module (the vitest/xUnit/pytest/JUnit
@@ -34,8 +39,36 @@ export function emitAggregateTests(
     if (agg.tests.length === 0) continue;
     // Vanilla ports the full idiom onto the aggregate's pure domain core
     // (vanilla/tests-emit.ts + domain-core-emit.ts).
-    const content = renderVanillaAggregateTestModule(agg, contextModule, validatableVos);
+    const content = renderVanillaAggregateTestModule(agg, contextModule, appModule, validatableVos);
     out.set(`test/${snake(ctx.name)}/${snake(agg.name)}_test.exs`, content);
+    emitted = true;
+  }
+  // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+  // colocated ExUnit modules; a VO test exercises its `<VO>.new/1` invariant,
+  // a service test its pure ops.  Shapes the vanilla renderer can't lower
+  // degrade to a `@tag :skip`, never broken Elixir.
+  for (const vo of ctx.valueObjects) {
+    if (vo.tests.length === 0) continue;
+    out.set(
+      `test/${snake(ctx.name)}/${snake(vo.name)}_test.exs`,
+      renderVanillaVoTestModule(vo, contextModule, appModule, validatableVos),
+    );
+    emitted = true;
+  }
+  for (const svc of ctx.domainServices) {
+    if (svc.tests.length === 0) continue;
+    out.set(
+      `test/${snake(ctx.name)}/${snake(svc.name)}_test.exs`,
+      renderVanillaServiceTestModule(svc, contextModule, appModule, validatableVos),
+    );
+    emitted = true;
+  }
+  // Context INTEGRATION test (test-placement.md, Phase 3b) — an ExUnit module
+  // that persists→reads through the context module against the live Ecto repo
+  // (Sandbox-isolated).  Emitted only when the context declares integration tests.
+  const integration = renderVanillaContextIntegrationTest(ctx, appModule);
+  if (integration) {
+    out.set(`test/${snake(ctx.name)}_integration_test.exs`, integration);
     emitted = true;
   }
   return emitted;

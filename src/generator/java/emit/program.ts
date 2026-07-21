@@ -48,6 +48,14 @@ export const JMOLECULES_VERSION = "2.0.1";
  *  cross-backend conformance harness diffs. */
 export const SPRINGDOC_VERSION = "3.0.3";
 
+/** logstash-logback-encoder — the JSON encoder for the observability catalog
+ *  channel (`logback.xml`).  It serialises the SLF4J key/value pairs + MDC +
+ *  timestamp into the cross-backend `{ts,level,event,…}` envelope, so the JSON
+ *  writing and escaping are the logging stack's job (correct by construction)
+ *  rather than a hand-rolled StringBuilder writer.  NOT BOM-managed — pinned
+ *  here; requires logback 1.5+ (which Spring Boot 4.x brings). */
+export const LOGSTASH_ENCODER_VERSION = "8.1";
+
 /** Nimbus JOSE+JWT — the JWKS/JWT library the generated OIDC verifier uses
  *  (D-AUTH-OIDC).  Pinned explicitly: unlike Flyway / Spring Security, the
  *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
@@ -59,6 +67,13 @@ export const NIMBUS_JOSE_JWT_VERSION = "10.9.1";
  *  `Generators.timeBasedEpochGenerator()`; the JDK's `UUID` has no v7 factory
  *  through 25.  Used by the aggregate/part id factories (`XId.newId()`). */
 export const JAVA_UUID_GENERATOR_VERSION = "5.2.0";
+
+/** JobRunr — durable `timerSource … cron:` scheduling (scheduling.md Phase 2).
+ *  We pull the CORE (`org.jobrunr:jobrunr`), not the Spring-Boot starter: the
+ *  starter has no Spring-Boot-4 support yet (its autoconfig only partially
+ *  activates), so `JobRunrConfig` wires the core directly.  Shipped only when a
+ *  deployable owns a cron timer. */
+export const JOBRUNR_VERSION = "7.5.1";
 
 /** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
  *  uses to attach a `.smap` sidecar as a compiled class's
@@ -164,6 +179,9 @@ export function renderGradleBuild(
   options: {
     flyway?: boolean;
     oidc?: boolean;
+    /** Durable cron timerSources (scheduling.md Phase 2) pull the JobRunr core
+     *  dependency.  Off ⇒ byte-identical (no dep). */
+    jobrunr?: boolean;
     extraDeps?: Record<string, string>;
     /** `--sourcemap` — gated on the SourceMapRecorder's PRESENCE alone (the
      *  java generator never threads `sourceTexts` — see
@@ -198,10 +216,27 @@ export function renderGradleBuild(
     `dependencies {`,
     `    implementation("org.springframework.boot:spring-boot-starter-web")`,
     `    implementation("org.springframework.boot:spring-boot-starter-data-jpa")`,
+    // spring-boot-starter-validation — enables the `@Valid` controller seam +
+    // MethodArgumentNotValidException machinery that runs the per-command Spring
+    // Validators (the .NET FluentValidation analog: one validator, all rules).
+    `    implementation("org.springframework.boot:spring-boot-starter-validation")`,
     `    runtimeOnly("org.postgresql:postgresql")`,
     `    implementation("org.jmolecules:jmolecules-ddd:${JMOLECULES_VERSION}")`,
     `    implementation("org.jmolecules:jmolecules-events:${JMOLECULES_VERSION}")`,
     `    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${SPRINGDOC_VERSION}")`,
+    // Prometheus metrics at /metrics.  Actuator auto-binds the JVM/process
+    // meters + a PrometheusMeterRegistry; micrometer-registry-prometheus is
+    // the Prometheus exposition backend (both versions BOM-managed).  Only
+    // the `prometheus` endpoint is exposed, remapped to /metrics in
+    // application.yml — Actuator's own /health is NOT exposed, so it never
+    // collides with the hand-emitted HealthController.
+    `    implementation("org.springframework.boot:spring-boot-starter-actuator")`,
+    `    implementation("io.micrometer:micrometer-registry-prometheus")`,
+    // Structured-log JSON encoder for the observability catalog channel
+    // (config/logback.xml).  Renders the SLF4J key/value pairs + MDC carrier
+    // ids + timestamp into the cross-backend `{ts,level,event,…}` envelope, so
+    // CatalogLog logs through SLF4J instead of hand-serialising JSON.
+    `    implementation("net.logstash.logback:logstash-logback-encoder:${LOGSTASH_ENCODER_VERSION}")`,
     // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
     `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
@@ -221,6 +256,10 @@ export function renderGradleBuild(
     options.oidc
       ? `    implementation("com.nimbusds:nimbus-jose-jwt:${NIMBUS_JOSE_JWT_VERSION}")`
       : null,
+    // JobRunr core — durable cron timerSource scheduling (scheduling.md Phase 2).
+    // Core (not the Spring-Boot starter, which lacks Spring-Boot-4 support);
+    // JobRunrConfig wires it manually.  Shipped only when an owned timer is cron.
+    options.jobrunr ? `    implementation("org.jobrunr:jobrunr:${JOBRUNR_VERSION}")` : null,
     // Resource-client deps (objectStore / queue adapters) — empty for
     // deployables wiring no consumable resources.
     ...Object.entries(options.extraDeps ?? {})
@@ -277,6 +316,19 @@ export function renderApplicationYml(slug: string): string {
     `    hibernate:`,
     `      ddl-auto: none`,
     `    open-in-view: false`,
+    // Prometheus scrape target at /metrics (M-T7.1).  Actuator's base-path is
+    // moved to "/" and only the `prometheus` endpoint is exposed, remapped
+    // from its default id to `metrics` — so the exposition lands at exactly
+    // /metrics (parity with the other backends) and no other actuator
+    // endpoint (health/info/env) is web-reachable.
+    `management:`,
+    `  endpoints:`,
+    `    web:`,
+    `      base-path: /`,
+    `      exposure:`,
+    `        include: prometheus`,
+    `      path-mapping:`,
+    `        prometheus: metrics`,
     `springdoc:`,
     `  api-docs:`,
     `    path: /openapi.json`,
@@ -284,7 +336,6 @@ export function renderApplicationYml(slug: string): string {
     // Interactive Swagger UI (/swagger-ui.html) is gated OFF in production via
     // LOOM_OPENAPI_UI=false (the k8s chart sets it); the /openapi.json spec
     // (api-docs) stays available.  Default on for dev / compose / conformance.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Spring property placeholder emitted into application.yml, not a JS template literal
     "    enabled: ${LOOM_OPENAPI_UI:true}",
     ``,
   );

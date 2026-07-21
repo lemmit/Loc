@@ -6,6 +6,8 @@
 // by ./lower.ts (structural walk) and the workflow lowerer.
 // -------------------------------------------------------------------------
 
+import type { AstNode } from "langium";
+import { isInferredContainment } from "../../language/containment.js";
 import type {
   Aggregate,
   Apply,
@@ -27,6 +29,7 @@ import {
   isDerivedProp,
   isFunctionDecl,
   isInvariant,
+  isNamedType,
   isProperty,
 } from "../../language/generated/ast.js";
 // Re-exported so this leaf and its `lower-workflow` sibling share the one
@@ -83,13 +86,13 @@ export function lowerApply(a: Apply, env: Env): ApplyIR {
 
 export function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPartIR {
   const inner = inPart(outer, agg, part);
-  const props = part.members.filter(isProperty) as Property[];
+  const props = valueProperties(part.members);
   return {
     name: part.name,
     parentName: agg.name,
     parentIdValueType: "guid" as IdValueType,
     fields: props.map((p) => lowerField(p, inner)),
-    contains: part.members.filter(isContainment).map(lowerContainment),
+    contains: lowerContainments(part.members),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
       ...part.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
@@ -153,6 +156,41 @@ export function lowerContainment(c: Containment): ContainmentIR {
   };
   if (c.optional) ir.optional = true;
   return ir;
+}
+
+// A `contains`-less entity-typed field (`line: OrderLine[]`) lowers to the same
+// `ContainmentIR` as its explicit `contains line: OrderLine[]` twin — the
+// `[]`/`?` markers live on the field's `TypeRef`, not a `Containment` node.
+export function containmentFromProperty(p: Property): ContainmentIR {
+  const base = isNamedType(p.type?.base) ? p.type.base : undefined;
+  const ir: ContainmentIR = {
+    name: p.name,
+    partName: base?.target?.ref?.name ?? "Unknown",
+    collection: !!p.type?.array,
+  };
+  if (p.type?.optional) ir.optional = true;
+  return ir;
+}
+
+// The declaration-ordered containments of an aggregate / entity part — explicit
+// `contains` members and inferred (entity-typed) properties, interleaved in
+// source order so `wireShape`'s containment slice stays stable regardless of
+// which spelling the author used.
+export function lowerContainments(members: readonly AstNode[]): ContainmentIR[] {
+  const out: ContainmentIR[] = [];
+  for (const m of members) {
+    if (isContainment(m)) out.push(lowerContainment(m));
+    else if (isProperty(m) && isInferredContainment(m)) out.push(containmentFromProperty(m));
+  }
+  return out;
+}
+
+// The genuine value properties — declared `Property` members minus the ones that
+// are really inferred containments.  The twin of `lowerContainments`: together
+// they partition an aggregate / entity part's members exactly as the explicit
+// `Property`/`Containment` split did before `contains` became optional.
+export function valueProperties(members: readonly AstNode[]): Property[] {
+  return members.filter((m): m is Property => isProperty(m) && !isInferredContainment(m));
 }
 
 export function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
@@ -262,6 +300,31 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
   // belong to `from <Criterion>(args)`, not `when`); the validator reports
   // a param reference rather than letting it lower as a free name.
   if (op.when) ir.when = lowerExpr(op.when, env);
+  // `requires Expr` — the authorization gate (authorization.md §11.3).  A
+  // header `requires` is semantically a relocated first-body `requires`
+  // statement: a bool pre-check that denies with 403 (`ForbiddenError` /
+  // `ForbiddenException` / `:forbidden`) before the domain body runs.  It is
+  // therefore lowered as a synthetic `requires` StmtIR prepended to the body,
+  // reusing every backend's existing `requires`→403 rendering with no new
+  // emitter code (a POINT gate — proposal §"scopes" line: operation params +
+  // currentUser + resource).  Unlike `when`, params ARE in scope (an authz
+  // check is routinely arg-aware), and `this` resolves against the loaded
+  // aggregate (post-load evaluation, before mutations run).
+  if (op.gate) {
+    let gateEnv = env;
+    for (const p of op.params) {
+      gateEnv = withLocal(gateEnv, p.name, "param", lowerType(p.type, env));
+    }
+    ir.statements = [
+      {
+        kind: "requires",
+        expr: lowerExpr(op.gate, gateEnv),
+        source: cstText(op.gate),
+        origin: originFor(op),
+      },
+      ...ir.statements,
+    ];
+  }
   ir.origin = originFor(op);
   return ir;
 }

@@ -12,7 +12,7 @@ on:
       - 'langium-config.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
-
+  merge_group:
 permissions:
   contents: read
   pages: write
@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:

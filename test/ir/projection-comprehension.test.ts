@@ -169,11 +169,12 @@ async function sysErrorCodes(platform: string): Promise<string[]> {
 }
 
 describe("projection comprehension — validation gates", () => {
-  it("HONESTLY gates a query-time projection on a backend that hasn't ported the emit", async () => {
-    // node emits it (PR-C); the other backends are honestly gated until they do.
-    expect(await sysErrorCodes("node")).not.toContain("loom.projection-query-time-unsupported");
-    for (const platform of ["python", "java", "dotnet", "elixir"]) {
-      expect(await sysErrorCodes(platform)).toContain("loom.projection-query-time-unsupported");
+  it("emits a query-time projection on every backend (all five have ported it)", async () => {
+    // node (PR-C), python (PR-D), elixir (PR-E), java (PR-F), dotnet (PR-G) —
+    // the honest gate `loom.projection-query-time-unsupported` now fires for no
+    // backend (every backend-owning platform is in PROJECTION_QT_SUPPORTED).
+    for (const platform of ["node", "python", "elixir", "java", "dotnet"]) {
+      expect(await sysErrorCodes(platform)).not.toContain("loom.projection-query-time-unsupported");
     }
   });
 
@@ -222,5 +223,101 @@ describe("projection comprehension — Hono emission", () => {
     // The synthesised find lands on the Order repository.
     const repo = [...files.entries()].find(([p]) => p.endsWith("order-repository.ts"))?.[1];
     expect(repo).toContain("async ordersView(): Promise<Order[]>");
+  });
+
+  it("emits the Python twin — synthesised find + join map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("python"));
+    const qp = [...files.entries()].find(([p]) =>
+      p.endsWith("http/query_projections_routes.py"),
+    )?.[1];
+    expect(qp, "python query-projections file emitted").toBeDefined();
+    expect(qp).toContain('@router.get("/orders_view"');
+    expect(qp).toContain("rows = await repo.orders_view()");
+    expect(qp).toContain(
+      "customer_by_id = {str(a.id): a for a in await customer_repo.find_many_by_ids([r.customer_id for r in rows])}",
+    );
+    expect(qp).toContain('"customerName": customer_by_id[str(r.customer_id)].name');
+    const repo = [...files.entries()].find(([p]) => p.endsWith("order_repository.py"))?.[1];
+    expect(repo).toContain("async def orders_view(self) -> list[Order]:");
+  });
+
+  it("emits the Elixir twin — live source find + join bulk-load map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("elixir"));
+    const mod = [...files.entries()].find(([p]) =>
+      p.endsWith("query_projections/orders_view.ex"),
+    )?.[1];
+    expect(mod, "elixir query-projection module emitted").toBeDefined();
+    // Source find over the aggregate, with the `where IsConfirmed` predicate
+    // inlined (enum → dumped declared string under the Ecto query context).
+    expect(mod).toContain("from(record in D.Orders.Order,");
+    expect(mod).toContain("|> Repo.all()");
+    // `join Customer as c on o.customerId` → a batched id→struct map…
+    expect(mod).toContain("customer_by_id =");
+    expect(mod).toContain(
+      "from(row in D.Orders.Customer, where: row.id in ^Enum.map(rows, fn record -> record.customer_id end))",
+    );
+    expect(mod).toContain("|> Map.new(&{&1.id, &1})");
+    // …and the `select customerName = c.name` reads through the loaded map.
+    expect(mod).toContain("customerName: Map.get(customer_by_id, record.customer_id).name");
+    // `select orderId = o.id` / `lineCount = o.lineCount` render off `record`.
+    expect(mod).toContain("orderId: record.id");
+    expect(mod).toContain("lineCount: record.line_count");
+    // A project-wide controller exposes `GET /api/projections/orders_view`.
+    const ctrl = [...files.entries()].find(([p]) =>
+      p.endsWith("controllers/query_projections_controller.ex"),
+    )?.[1];
+    expect(ctrl).toContain("def orders_view(conn, _params) do");
+    expect(ctrl).toContain("D.Orders.QueryProjections.OrdersView.run(current_user)");
+  });
+
+  it("emits the Java twin — synthesised repo find + join bulk-load map + alias select", async () => {
+    const files = await generateSystemFiles(SYS("java"));
+    const svc = [...files.entries()].find(([p]) => p.endsWith("OrdersQueryProjections.java"))?.[1];
+    expect(svc, "java query-projection service emitted").toBeDefined();
+    // Source rows via the synthesised repo find (queryProjectionFindsFor).
+    expect(svc).toContain("ordersRepository.ordersView().stream()");
+    // `join Customer as c on o.customerId` → a bulk-load-by-id Map…
+    expect(svc).toContain("var customerById = customersRepository.findAll().stream()");
+    expect(svc).toContain(".collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));");
+    // …and `select customerName = c.name` reads through the loaded map.
+    expect(svc).toContain("customerById.get(a.customerId().value()).name()");
+    // The synthesised find lands on the Order repository with the inlined `where`.
+    const repo = [...files.entries()].find(([p]) => p.endsWith("OrderJpaRepository.java"))?.[1];
+    expect(repo).toContain("List<Order> ordersView();");
+    // Route under /projections; a query-time <Proj>Row record is emitted.
+    const ctrl = [...files.entries()].find(([p]) =>
+      p.endsWith("OrdersQueryProjectionsController.java"),
+    )?.[1];
+    expect(ctrl).toContain('@GetMapping("/orders_view")');
+    expect([...files.keys()].some((p) => p.endsWith("OrdersViewRow.java"))).toBe(true);
+  });
+
+  it("emits the .NET twin — synthesised repo find + join dictionary + alias select", async () => {
+    const files = await generateSystemFiles(SYS("dotnet"));
+    const handler = [...files.entries()].find(([p]) =>
+      p.endsWith("Application/Projections/OrdersViewQpHandler.cs"),
+    )?.[1];
+    expect(handler, "dotnet query-projection handler emitted").toBeDefined();
+    // Source rows via the synthesised repo find (mergeViewsAsFinds).
+    expect(handler).toContain("var domain = await _repo.OrdersView(cancellationToken);");
+    // `join Customer as c on o.customerId` → a bulk-load-by-id Dictionary…
+    expect(handler).toContain(
+      "var customerById = (await _customerRepo.FindManyByIdsAsync(domain.Select(d => d.CustomerId).ToList(), cancellationToken)).ToDictionary(__a => __a.Id);",
+    );
+    // …and `select customerName = c.name` reads through the loaded dictionary.
+    expect(handler).toContain("customerById[d.CustomerId].Name");
+    // The synthesised find lands on the Order repository impl with the inlined `where`.
+    const repo = [...files.entries()].find(([p]) =>
+      p.endsWith("Repositories/OrderRepository.cs"),
+    )?.[1];
+    expect(repo).toContain("public async Task<List<Order>> OrdersView(");
+    expect(repo).toContain("x.Status == OrderStatus.Confirmed");
+    // Route under /projections; no phantom folded <Proj>Row EF DbSet.
+    const ctrlCs = [...files.entries()].find(([p]) =>
+      p.endsWith("Api/OrdersQueryProjectionsController.cs"),
+    )?.[1];
+    expect(ctrlCs).toContain('[HttpGet("orders_view")]');
+    const db = [...files.entries()].find(([p]) => p.endsWith("AppDbContext.cs"))?.[1];
+    expect(db).not.toContain("OrdersViewRow");
   });
 });

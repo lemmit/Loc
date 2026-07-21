@@ -69,7 +69,10 @@ describe("named policy functions — per-backend requires enforcement", () => {
   it("Python/FastAPI: inlines the predicate into the 403 gate", async () => {
     const text = await allText("python");
     expect(text).toContain('"sales.approve" in current_user.permissions');
-    expect(text).toContain('"sales.manage" in current_user.permissions');
+    // `requires IsManager()` inlines a SIMPLE membership predicate whose 403
+    // gate negates it; the Python renderer emits the idiomatic `x not in y`
+    // (not `not (x in y)`), so the resolved permission surfaces in that form.
+    expect(text).toContain('"sales.manage" not in current_user.permissions');
     expect(text).toContain('Decimal("10000")');
   });
 

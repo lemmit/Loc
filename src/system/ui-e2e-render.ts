@@ -488,6 +488,11 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       // Named-action references are a UI-handler-arg form — not reached by
       // the UI e2e (page-object) renderer; keep the switch total.
       return `/* action:${e.actionName} */`;
+    case "authz-filter":
+      // Authorization/tenancy query-filter sentinel (M-T9.9) — a repository
+      // filter node, never reached by the UI e2e (page-object) renderer; keep
+      // the switch total.
+      return `/* authz-filter:${e.filter.kind} */`;
   }
 }
 

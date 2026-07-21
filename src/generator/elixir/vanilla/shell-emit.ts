@@ -27,6 +27,7 @@ import {
   renderRootLayout,
 } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
+import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
   appName: string,
@@ -50,10 +51,16 @@ export function emitVanillaShellFiles(
   // the byte-identical shell (no SPA static plug, no fallback).  Mutually
   // exclusive with LiveView (an embedded-SPA deployable emits no HEEx pages).
   hasEmbeddedSpa = false,
-  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer GenServer
-  // module names, appended to the supervision tree in `renderApplication`.
-  // Empty ⇒ byte-identical.
+  // timerSource scheduling (scheduling.md, M-T4.1): the owned-timer supervision
+  // children (Oban first when present, then the timer GenServer module names),
+  // appended to the supervision tree in `renderApplication`.  Empty ⇒
+  // byte-identical.
   schedulerChildren: string[] = [],
+  // Durable-timer (cron:) support: adds the Oban config block to config.exs.
+  usesOban = false,
+  // OIDC JWKS strategy child(ren) — started BEFORE the Endpoint so a
+  // `first_fetch_sync` fetch warms the signer cache before `/health` serves.
+  preEndpointChildren: string[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
@@ -77,7 +84,7 @@ export function emitVanillaShellFiles(
   // not lib/<app>_web/telemetry.ex).
   out.set(
     `lib/${appName}/application.ex`,
-    renderApplication(appName, appModule, schedulerChildren),
+    renderApplication(appName, appModule, schedulerChildren, preEndpointChildren),
   );
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON
@@ -130,7 +137,14 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
-  out.set("config/config.exs", renderVanillaConfig(appName, appModule, swooshSmtpOnly));
+  out.set(
+    `lib/${appName}_web/controllers/metrics_controller.ex`,
+    renderVanillaMetricsController(appModule),
+  );
+  out.set(
+    "config/config.exs",
+    renderVanillaConfig(appName, appModule, swooshSmtpOnly, usesOban, authEnabled && oidc),
+  );
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName, appModule));
   out.set("config/runtime.exs", renderVanillaRuntime(appName, appModule));
@@ -155,10 +169,14 @@ function renderVanillaMixExs(
     .sort()
     .map((k) => `,\n      {:${k}, ${extraHexDeps[k]}}`)
     .join("");
-  // The generated Auth plug verifies the Bearer JWT with JOSE and fetches the
-  // issuer's JWKS over the built-in `:httpc` (`:inets`/`:ssl`) — added only when
-  // an `auth { oidc }` block is present.
-  const oidcDep = oidc ? `,\n      {:jose, "~> 1.11"}` : "";
+  // The generated Auth plug verifies the Bearer JWT with the idiomatic `joken`
+  // + `joken_jwks` libraries (the Elixir analogue of jose createRemoteJWKSet /
+  // Nimbus / PyJWKClient / ConfigurationManager): joken_jwks owns the cached,
+  // periodically-refreshed JWKS keyed by `kid`.  The OIDC discovery + token
+  // exchange (the authorization-code handshake) still ride the built-in
+  // `:httpc` (`:inets`/`:ssl`).  Added only when an `auth { oidc }` block is
+  // present.
+  const oidcDep = oidc ? `,\n      {:joken, "~> 2.6"},\n      {:joken_jwks, "~> 1.6"}` : "";
   const oidcApps = oidc ? ", :inets, :ssl" : "";
   return `# Auto-generated.
 defmodule ${appModule}.MixProject do
@@ -196,7 +214,9 @@ defmodule ${appModule}.MixProject do
       {:jason, "~> 1.4"},
       {:uuidv7, "~> 1.0"},
       {:plug_cowboy, "~> 2.6"},
-      {:open_api_spex, "~> 3.0"}${liveViewDep}${extraBlock}${oidcDep}
+      {:open_api_spex, "~> 3.0"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_metrics_prometheus_core, "~> 1.1"}${liveViewDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -557,6 +577,10 @@ ${browserPipeline}${spaPipeline}
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
+
+  scope "/metrics" do
+    get "/", ${appModule}Web.MetricsController, :index
+  end
 ${rootApiScope}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
@@ -595,6 +619,28 @@ defmodule ${appModule}Web.HealthController do
         |> put_status(:service_unavailable)
         |> json(%{status: "not_ready"})
     end
+  end
+end
+`;
+}
+
+function renderVanillaMetricsController(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.MetricsController do
+  use ${appModule}Web, :controller
+
+  @moduledoc """
+  Prometheus scrape target — the text exposition of the
+  \`TelemetryMetricsPrometheus.Core\` aggregator started in
+  \`${appModule}.Telemetry\` (the HTTP counter/histogram fed by the Phoenix
+  endpoint telemetry event).  Parity with the other backends' GET /metrics.
+  """
+
+  @doc "GET /metrics — Prometheus text exposition."
+  def index(conn, _params) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, TelemetryMetricsPrometheus.Core.scrape())
   end
 end
 `;
@@ -644,13 +690,33 @@ end
 `;
 }
 
-function renderVanillaConfig(appName: string, appModule: string, swooshSmtpOnly = false): string {
+function renderVanillaConfig(
+  appName: string,
+  appModule: string,
+  swooshSmtpOnly = false,
+  usesOban = false,
+  oidc = false,
+): string {
+  // OIDC only: joken_jwks fetches the issuer's JWKS through Tesla, whose
+  // default adapter is Hackney (which we don't depend on) — left unset the
+  // fetch raises `Tesla.Adapter.Hackney.call/2 is undefined`, the signer cache
+  // never populates, and every token 401s.  Pin Tesla to OTP's built-in
+  // `:httpc` (the same client the OIDC handshake uses, backed by the declared
+  // `:inets`/`:ssl`); the ssl opts verify the peer against the system CA store
+  // for an https issuer and are ignored for a plain-http (dev) one.
+  const teslaConfig = oidc
+    ? `\nconfig :tesla,
+  adapter: {Tesla.Adapter.Httpc, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get()]]}\n`
+    : "";
   // gen_smtp-backed Swoosh (the smtp mailer) needs no HTTP API client; disable
   // the default so `:swoosh` boots without hackney.  Omitted entirely when no
   // smtp-only mailer is present, so a mailer-free app's config is unchanged.
   const swooshConfig = swooshSmtpOnly
     ? `\n# smtp mailer (Swoosh.Adapters.SMTP via gen_smtp) uses no HTTP API client.\nconfig :swoosh, :api_client, false\n`
     : "";
+  // Durable timerSource (cron:) support — the Oban instance the scheduler
+  // GenServers enqueue onto.  Omitted when no cron timer is owned.
+  const obanConfig = usesOban ? renderObanConfig(appName, appModule) : "";
   return `import Config
 
 config :${appName},
@@ -669,7 +735,7 @@ config :${appName}, ${appModule}Web.Endpoint,
   live_view: [signing_salt: "loom_dev"]
 
 config :phoenix, :json_library, Jason
-
+${teslaConfig}${obanConfig}
 # JSON Logger formatter — emits one structured JSON object per line so
 # the cross-backend observability catalog envelope (event, request_id,
 # method, path, status, duration_ms, …) is parseable upstream the same

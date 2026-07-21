@@ -1,9 +1,13 @@
-import type { AggregateIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  AuthzFilterKind,
+  ExprIR,
+  FieldIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { type DurationExprIR, durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
-  isDeepScopeFilter,
-  isDenyFilter,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -39,6 +43,27 @@ export function renderCriteriaPredicate(e: ExprIR, ctx: CriteriaCtx): string {
 /** Render `e` as a `jakarta.persistence.criteria.Predicate` expression. */
 function bool(e: ExprIR, ctx: CriteriaCtx): string {
   switch (e.kind) {
+    case "authz-filter":
+      // Authorization/tenancy filter sentinels (M-T9.9) — a discriminated node
+      // so a missing arm is a `tsc` error here, not a silent authorization
+      // bypass.
+      switch (e.filter.kind) {
+        // DENY carve-out (authorization Phase 4 — deny-wins).  `cb.disjunction()`
+        // is the JPA Criteria always-false predicate (an empty OR).
+        case "deny":
+          return "cb.disjunction()";
+        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // descendant-or-self materialized-path scope with the NULL-dataKey
+        // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA
+        // Criteria predicate over the `tenantScope(User currentUser)`
+        // Specification's null-safe principal.
+        case "scope":
+          return deepScopeCriteria(e.filter, ctx);
+        default: {
+          const _exhaustive: never = e.filter;
+          throw unsupported(`authz-filter kind '${(_exhaustive as { kind: string }).kind}'`);
+        }
+      }
     case "paren":
       return bool(e.inner, ctx);
     case "unary":
@@ -65,14 +90,9 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       if (e.lit === "bool") return e.value === "true" ? "cb.conjunction()" : "cb.disjunction()";
       throw unsupported(`literal '${e.lit}'`);
     case "method-call":
-      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
-      // materialized-path scope with the NULL-dataKey fallback to the tenant
-      // floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA Criteria predicate over the
-      // `tenantScope(User currentUser)` Specification's null-safe principal.
-      // DENY carve-out (authorization Phase 4 — deny-wins).  `cb.disjunction()`
-      // is the JPA Criteria always-false predicate (an empty OR).
-      if (isDenyFilter(e)) return "cb.disjunction()";
-      if (isDeepScopeFilter(e)) return deepScopeCriteria(e, ctx);
+      // (The `deep` / DENY authorization filter sentinels moved to the
+      // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
+      // above, no longer a `method-call` marker here.)
       // Reference-collection membership.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
         const segs = pathSegments(e.receiver);
@@ -321,13 +341,18 @@ function value(e: ExprIR, ctx: CriteriaCtx): string {
  *  against the `currentUser` the `tenantScope` factory is handed (no actor →
  *  null → matches no rows, fail-closed).  The descendant LIKE pattern is built
  *  in plain Java (`orgPath() + ".%"`) so `cb.like(path, String)` binds it. */
-function deepScopeCriteria(e: Extract<ExprIR, { kind: "method-call" }>, ctx: CriteriaCtx): string {
+function deepScopeCriteria(
+  f: Extract<AuthzFilterKind, { kind: "scope" }>,
+  ctx: CriteriaCtx,
+): string {
   const dataKeyPath = path([TENANT_OWNED_DATA_KEY_FIELD], ctx);
   const tenantIdPath = path([TENANT_OWNED_TENANT_ID_FIELD], ctx);
-  const orgVal = value(e.args[0]!, ctx);
-  const tenantVal = value(e.args[1]!, ctx);
+  const orgVal = value(f.anchorClaim, ctx);
+  const tenantVal = value(f.tenantClaim, ctx);
   const orgMember =
-    e.args[0]!.kind === "member" ? (e.args[0] as { member: string }).member : ORG_PATH_CLAIM_FIELD;
+    f.anchorClaim.kind === "member"
+      ? (f.anchorClaim as { member: string }).member
+      : ORG_PATH_CLAIM_FIELD;
   const orgPattern = `(currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}%")`;
   return (
     `cb.or(` +

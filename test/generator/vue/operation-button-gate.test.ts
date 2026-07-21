@@ -54,6 +54,11 @@ describe("vue operation action-button gate", () => {
     // cancel() ungated.
     expect(c).toContain(">Cancel</v-btn>");
     expect(c.match(/v-if='\(currentUser/g)?.length ?? 0).toBe(1);
+    // The gate's else arm is the render-nothing sentinel — it must NOT emit a
+    // `<template v-else>` (Vue would render the bare `null` token as literal
+    // text to users who fail the gate).
+    expect(c).not.toContain("v-else");
+    expect(c).not.toMatch(/>\s*null\s*</);
   });
 
   it("emits no gate / binding without auth: ui (byte-identical)", async () => {

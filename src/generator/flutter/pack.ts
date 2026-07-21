@@ -307,16 +307,41 @@ function primitiveIdLink(c: Ctx): string {
   return `TextButton(onPressed: () => Navigator.of(context).pushNamed('${dartStr(prefix)}' + ${idExpr}.toString()), child: Text(${idExpr}.toString()))`;
 }
 
-/** Money(value, currency?, decimals?) — a currency-prefixed amount. */
-function primitiveMoney(c: Ctx): string {
-  const amount = `${String(c.valueExpr ?? "0")}.toString()`;
-  const text = c.hasCurrency ? `'\${${String(c.currency)}} ' + ${amount}` : amount;
-  return `Text(${text}, style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))`;
+/** True when rendered Dart references an `intl` formatter (`NumberFormat` /
+ *  `DateFormat`), so a file emitter should add `import 'package:intl/intl.dart'`.
+ *  The on-demand-import twin of the `apiUri(` scan. */
+export function usesIntl(dart: string): boolean {
+  return dart.includes("NumberFormat") || dart.includes("DateFormat");
 }
 
+/** Money(value, currency?, decimals?) — a currency-prefixed amount, formatted
+ *  through `intl`'s `NumberFormat` (grouping separators + fixed fraction digits)
+ *  rather than a bare `double.toString()` — the Dart twin of the JS frontends'
+ *  `Intl.NumberFormat`.  The `intl` import is added on demand by the file
+ *  emitters (they scan the body for `NumberFormat`/`DateFormat`). */
+function primitiveMoney(c: Ctx): string {
+  const value = String(c.valueExpr ?? "0");
+  // `decimals` is only meaningful when explicitly given (`hasDecimals`); left off,
+  // NumberFormat.currency uses the currency's own fraction digits (2 for most),
+  // so an unspecified `decimals` must NOT collapse to `decimalDigits: 0`.
+  const dd = c.hasDecimals ? Number(c.decimals) : undefined;
+  let fmt: string;
+  if (c.hasCurrency) {
+    const ddArg = dd != null ? `decimalDigits: ${dd}, ` : "";
+    fmt = `NumberFormat.currency(${ddArg}symbol: '\${${String(c.currency)}} ')`;
+  } else if (dd != null) {
+    fmt = `(NumberFormat.decimalPattern()..minimumFractionDigits = ${dd}..maximumFractionDigits = ${dd})`;
+  } else {
+    fmt = `NumberFormat.decimalPattern()`;
+  }
+  return `Text(${fmt}.format(${value}), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))`;
+}
+
+/** DateDisplay(value) — a locale-formatted date via `intl`'s `DateFormat`
+ *  instead of `DateTime.toString()` (which prints the raw ISO-ish form). */
 function primitiveDateDisplay(c: Ctx): string {
-  const value = String(c.valueExpr ?? "''");
-  return `Text(${value}.toString(), style: Theme.of(context).textTheme.bodySmall)`;
+  const value = String(c.valueExpr ?? "DateTime.now()");
+  return `Text(DateFormat.yMMMd().format(${value}), style: Theme.of(context).textTheme.bodySmall)`;
 }
 
 function primitiveEnumBadge(c: Ctx): string {

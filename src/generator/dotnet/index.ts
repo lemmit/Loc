@@ -13,6 +13,7 @@ import type {
   TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
 import {
@@ -20,7 +21,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
-import { durableEventTypes } from "../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
@@ -37,7 +38,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { redisChannelBindings } from "../_channels/bindings.js";
+import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -90,6 +91,7 @@ import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
 import { renderExternHookImpl } from "./emit/extern.js";
 import { renderId } from "./emit/ids.js";
+import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -104,16 +106,24 @@ import {
   renderProvenanceRecordConfiguration,
   renderProvLineage,
 } from "./emit/provenance.js";
+import { realtimeTypesOf, renderRealtimeDispatcher, renderRealtimeHub } from "./emit/realtime.js";
 import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
-import { anyTimerUsesCron, renderTimerScheduler, timerServiceFqns } from "./emit/timer.js";
+import {
+  anyTimerUsesCron,
+  hangfireJobDiRegistrations,
+  hangfireRecurringRegistrations,
+  renderTimerScheduler,
+  timerServiceFqns,
+} from "./emit/timer.js";
 import {
   aggregateHasTableValueArray,
   joinEntityName,
   renderAbstractBaseEntity,
   renderConfiguration,
+  renderContextIntegrationTest,
   renderCsproj,
   renderDbContext,
   renderDockerfile,
@@ -137,9 +147,11 @@ import {
   renderRepositoryImpl,
   renderRepositoryInterface,
   renderRequiredFromCtorParamFilter,
+  renderServiceTestsFile,
   renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
+  renderVoTestsFile,
 } from "./emit.js";
 import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
 import {
@@ -151,6 +163,7 @@ import {
 import { rewriteNamespacesForLayout } from "./layout-namespaces.js";
 import { emitProjectionDispatch, emitProjectionReads } from "./projection-emit.js";
 import { emitProjectionRowPersistence } from "./projection-state-emit.js";
+import { emitQueryProjections } from "./query-projection-emit.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
@@ -289,12 +302,16 @@ function emitProjectFromContexts(
   // enricher-stored `eventSubscriptions`; OR them in so a projection-only context
   // still gets the Mediator dispatcher + IDomainEvent notification plumbing (the
   // fold handlers, discovered by assembly scan, otherwise never run).
-  // Broker bindings (channels.md; M-T4.4 slice 6a): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4 slices 6a + 7b): the broker-bound
   // channelSources this deployable wires via `channels:`.  A wired-but-foreign
   // channel joins the carrier set as a stub with its REAL semantics knobs, so
   // the subscription derivation routes a hosted reactor off a channel declared
-  // in a non-hosted context (mirrors the Hono/Python orchestrators).
-  const channelBindings = system ? redisChannelBindings(system.deployable, system.sys) : [];
+  // in a non-hosted context (mirrors the Hono/Python orchestrators).  The
+  // stubs feed ONLY the subscription derivation — the outbox/idempotency
+  // machinery keys off HOSTED durable channels, matching what the
+  // module-level migrations back; a foreign `queue`/`work` consumer relies on
+  // broker ack semantics + idempotent reactors (the slice-3 stance).
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   const hostedChannelNames = new Set(contexts.flatMap((c) => c.channels).map((ch) => ch.name));
   const wiredForeignChannels = channelBindings
     .filter((b) => !hostedChannelNames.has(b.channelName))
@@ -314,6 +331,21 @@ function emitProjectFromContexts(
   const hasSubscriptions =
     contexts.some((c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0) ||
     hasChannelConsumers;
+  // Durable broker-bound events (M-T4.4 slice 7b): HOSTED durable events
+  // carried by a wired `queue`/`work` (or future `log`) channel — their
+  // producer path rides the outbox relay (design §5), never the inline tee.
+  const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  const durableBrokerEvents = new Set(
+    channelBindings
+      .filter((b) => b.retention === "work" || b.retention === "log")
+      .flatMap((b) => b.events)
+      .filter((ev) => hostedDurable.has(ev)),
+  );
+  // The outbox tier now also boots for the workflow-less durable-broker
+  // PRODUCER (the Hono forceOutbox twin): no subscription, but the relay
+  // must still drain the outbox to publish.
+  const hasOutboxTier =
+    (hasSubscriptions || durableBrokerEvents.size > 0) && hostedDurable.size > 0;
   // Persistence-neutral `ConcurrencyConflictException` — only the Dapper
   // adapter needs it (its version-CAS `SaveAsync` throws it; the EF path keys
   // its 409 arm on `DbUpdateConcurrencyException` instead), so gate the emit on
@@ -375,6 +407,23 @@ function emitProjectFromContexts(
     // Domain services (domain-services.md) — stateless pure calculators, one
     // `public static class` per `domainService` + its `or`-union return records.
     emitDomainServices(ctx, ns, out);
+    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // colocated xUnit classes, emitted only when the subject declares a `test`.
+    for (const vo of ctx.valueObjects) {
+      const voTests = renderVoTestsFile(vo, ctx, ns);
+      if (voTests) out.set(`Tests/${ns}.Tests/ValueObjects/${vo.name}Tests.cs`, voTests);
+    }
+    for (const svc of ctx.domainServices) {
+      const svcTests = renderServiceTestsFile(svc, ctx, ns);
+      if (svcTests) out.set(`Tests/${ns}.Tests/Services/${svc.name}Tests.cs`, svcTests);
+    }
+    // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+    // EF-repository-backed cross-aggregate xUnit class reading LOOM_PG_URL,
+    // applying the EF migrations, wiring the repos, and persisting→reading.
+    const integrationTests = renderContextIntegrationTest(ctx, ns);
+    if (integrationTests) {
+      out.set(`Tests/${ns}.Tests/${upperFirst(ctx.name)}IntegrationTests.cs`, integrationTests);
+    }
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
     // Explicit application layer (unfoldable-api-derivation.md, A1): emit the
     // `commandHandler` / `queryHandler` Mediator records + handlers.  A no-op
@@ -392,6 +441,9 @@ function emitProjectFromContexts(
       sourcemap,
       usingDapper: system?.deployable.persistence === "dapper",
     });
+    // Query-time projections (read-path-architecture.md rev.13) — a live read
+    // (source find + join bulk-loads + select) with no folded read-model table.
+    emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A1): one
   // ControllerBase per served api whose `route` list is non-empty, dispatching
@@ -410,9 +462,18 @@ function emitProjectFromContexts(
   const mergedBase = mergeContexts(contexts);
   // Foreign events a hosted workflow consumes through a wired channel join
   // the deployable's event vocabulary (record class + DomainEvent routing).
+  // EVERY broker-carried event joins too, subscribed or not — the consumer's
+  // codec must decode a carried type it has no reactor for (the dispatch
+  // no-ops), or the broker driver would wrongly dead-letter it as unknown
+  // (the 8a python fix, applied here for parity).
   const knownEventNames = new Set(mergedBase.events.map((e) => e.name));
   const foreignConsumedEvents = system
-    ? [...new Set(mergedSubscriptions.map((sub) => sub.event))]
+    ? [
+        ...new Set([
+          ...mergedSubscriptions.map((sub) => sub.event),
+          ...channelBindings.flatMap((b) => b.events),
+        ]),
+      ]
         .filter((name) => !knownEventNames.has(name))
         .flatMap((name) => {
           for (const sub of system.sys.subdomains) {
@@ -465,6 +526,11 @@ function emitProjectFromContexts(
   }
   // Broker transport module (M-T4.4 slice 6a) — channel-less projects stay
   // byte-identical.
+  // Realtime SSE wire (channels.md Part I): computed before the broker
+  // channels emit because the channel tee's typed inner becomes the realtime
+  // dispatcher when both are wired (chain: ChannelTee → Realtime → core).
+  const realtimeTypes = realtimeTypesOf(merged);
+  const hasRealtime = realtimeTypes.length > 0;
   if (hasChannels && system) {
     out.set(
       "Infrastructure/Channels/ChannelTransport.cs",
@@ -474,11 +540,14 @@ function emitProjectFromContexts(
         merged.events,
         hasChannelConsumers,
         system.sys,
-        hasSubscriptions && durableEventTypes(merged).size > 0
-          ? "OutboxDomainEventDispatcher"
-          : hasSubscriptions
-            ? "InProcessDomainEventDispatcher"
-            : "NoopDomainEventDispatcher",
+        hasRealtime
+          ? "RealtimeDomainEventDispatcher"
+          : hasOutboxTier
+            ? "OutboxDomainEventDispatcher"
+            : hasSubscriptions
+              ? "InProcessDomainEventDispatcher"
+              : "NoopDomainEventDispatcher",
+        { hasOutbox: hasOutboxTier, durableBroker: durableBrokerEvents.size > 0 },
       ),
     );
   }
@@ -502,26 +571,45 @@ function emitProjectFromContexts(
   // registration lines are shared.
   const durableTypes = [...new Set(contexts.flatMap((c) => [...durableEventTypes(c)]))].sort();
   const outboxUsesDapper = system?.deployable.persistence === "dapper";
-  const hasOutbox = hasSubscriptions && durableTypes.length > 0;
+  const hasOutbox = hasOutboxTier;
   if (hasOutbox) {
+    // The workflow-less durable-broker producer wraps the Noop (no in-process
+    // dispatcher exists); the relay publishes broker-bound rows on drain
+    // (M-T4.4 slice 7b, design §5) instead of redelivering them locally.
+    const outboxInner = hasSubscriptions
+      ? "InProcessDomainEventDispatcher"
+      : "NoopDomainEventDispatcher";
+    const relayOpts = { durableBroker: durableBrokerEvents.size > 0, hasSubscriptions };
     out.set("Domain/Common/OutboxDelivery.cs", renderOutboxDelivery(ns));
     if (outboxUsesDapper) {
       out.set(
         "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
-        renderDapperOutboxDispatcher(ns, durableTypes),
+        renderDapperOutboxDispatcher(ns, durableTypes, outboxInner),
       );
       out.set(
         "Infrastructure/Events/OutboxRelayService.cs",
-        renderDapperOutboxRelay(ns, durableTypes),
+        renderDapperOutboxRelay(ns, durableTypes, relayOpts),
       );
     } else {
       out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
       out.set(
         "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
-        renderOutboxDispatcher(ns, durableTypes),
+        renderOutboxDispatcher(ns, durableTypes, outboxInner),
       );
-      out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+      out.set(
+        "Infrastructure/Events/OutboxRelayService.cs",
+        renderOutboxRelay(ns, durableTypes, relayOpts),
+      );
     }
+  }
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast` channel
+  // makes its carried events UI-observable at GET /api/realtime/events.  The
+  // hub + dispatcher decorator emit here; Program.cs registers the hub, wraps
+  // the dispatcher in the tee, and maps the SSE endpoint.  A broadcast-free
+  // deployable emits nothing (byte-identical).
+  if (hasRealtime) {
+    out.set("Infrastructure/Realtime/RealtimeHub.cs", renderRealtimeHub(ns, realtimeTypes));
+    out.set("Infrastructure/Events/RealtimeDomainEventDispatcher.cs", renderRealtimeDispatcher(ns));
   }
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
@@ -729,7 +817,12 @@ function emitProjectFromContexts(
           return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
         }
       : undefined;
-    emitProjectionRowPersistence(merged.projections, ns, out, resolveProjectionSchema);
+    emitProjectionRowPersistence(
+      merged.projections.filter(isMaterializedProjection),
+      ns,
+      out,
+      resolveProjectionSchema,
+    );
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
     // fold class.  Its stream shares the per-context `<ctx>_events` log (shared
     // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
@@ -821,7 +914,7 @@ function emitProjectFromContexts(
   // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
   // for-event's context (single-fire lock owner == DB owner).  Filter the
   // system's timers to the ones THIS deployable owns; a timer-free deployable
-  // stays byte-identical (no TimerScheduler.cs, no registration, no Cronos dep).
+  // stays byte-identical (no TimerScheduler.cs, no registration, no Hangfire dep).
   // EF-only — the tick's advisory lock rides `AppDbContext.Database`, which the
   // Dapper path (NpgsqlDataSource, no DbContext) doesn't have; a dapper timer
   // owner is a follow-up slice.
@@ -845,6 +938,12 @@ function emitProjectFromContexts(
     timers: hasTimers ? ownedTimers : [],
     hasChannels,
     hasChannelConsumers,
+    outboxNoopInner: hasOutbox && !hasSubscriptions,
+    channelTransports: {
+      redis: channelBindings.some((b) => b.transport === "redis"),
+      rabbit: channelBindings.some((b) => b.transport === "rabbitmq"),
+      kafka: channelBindings.some((b) => b.transport === "kafka"),
+    },
     authRequired,
     actorIdProp,
     usesValidators,
@@ -857,6 +956,7 @@ function emitProjectFromContexts(
     usingDapper,
     hasSubscriptions,
     hasOutbox,
+    hasRealtime,
     hasAudit,
     hasProvenance,
     // Dapper persistence-port DI (M-T6.9): closed bindings keyed off the
@@ -1004,6 +1104,7 @@ function emitContext(
     emitProjectionDispatch(ctx, ns, out);
   }
   emitViews(ctx, ns, out);
+  emitQueryProjections(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
   emitCriteria(ctx, ns, out);
@@ -1528,7 +1629,7 @@ function emitInfrastructure(
     );
   }
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
-  emitProjectionRowPersistence(ctx.projections, ns, out);
+  emitProjectionRowPersistence(ctx.projections.filter(isMaterializedProjection), ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));
   // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
   // single-context (`generate dotnet`) sibling of the system path's emission.
@@ -1568,9 +1669,21 @@ function emitProject(
     /** Broker channels (M-T4.4 slice 6a) — see renderProgram/renderCsproj. */
     hasChannels?: boolean;
     hasChannelConsumers?: boolean;
+    /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
+     *  the per-transport csproj package refs (StackExchange.Redis /
+     *  RabbitMQ.Client). */
+    channelTransports?: { redis: boolean; rabbit: boolean; kafka?: boolean };
+    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+     *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
+     *  instead of the InProcess scoped line. */
+    outboxNoopInner?: boolean;
     /** Transactional outbox (dispatch-delivery-semantics.md): registers the
      *  outbox-wrapping dispatcher + the relay BackgroundService. */
     hasOutbox?: boolean;
+    /** Realtime SSE wire (channels.md Part I): registers the RealtimeHub
+     *  singleton, wraps the dispatcher in the tee, and maps GET
+     *  /api/realtime/events. */
+    hasRealtime?: boolean;
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
@@ -1594,7 +1707,7 @@ function emitProject(
     /** TimerSource scheduling (scheduling.md, M-T4.1): the owned timers this
      *  deployable emits `<Pascal>TimerService` BackgroundServices for.  Drives
      *  the `AddHostedService<…>()` registrations (Program.cs) and — when any
-     *  uses `cron:` — the Cronos NuGet ref (csproj).  Empty ⇒ byte-identical. */
+     *  uses `cron:` — the Hangfire NuGet refs (csproj).  Empty ⇒ byte-identical. */
     timers?: TimerSourceIR[];
     /** Dapper persistence-port DI (M-T6.9): the closed `AddScoped<…>` binding
      *  lines for the workflow / projection / event-store adapters (empty on the
@@ -1633,11 +1746,16 @@ function emitProject(
       hasChannels: !!options?.hasChannels,
       hasChannelConsumers: !!options?.hasChannelConsumers,
       hasOutbox: !!options?.hasOutbox,
+      outboxNoopInner: !!options?.outboxNoopInner,
+      hasRealtime: !!options?.hasRealtime,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,
       timerServices: timerServiceFqns(timers, ns),
+      hangfireCronTimers: anyTimerUsesCron(timers),
+      hangfireJobDiRegistrations: hangfireJobDiRegistrations(timers, ns),
+      hangfireRecurringRegistrations: hangfireRecurringRegistrations(timers, ns),
       dapperPortRegistrations: options?.dapperPortRegistrations,
     }),
   );
@@ -1658,10 +1776,13 @@ function emitProject(
       usingDapper,
       usesSpecifications,
       !!options?.oidc,
-      // Cronos ships only when an owned timerSource uses a real `cron:`
+      // Hangfire packages ship only when an owned timerSource uses a real `cron:`
       // expression (an `every:`-only deployable uses PeriodicTimer, no dep).
       anyTimerUsesCron(timers),
-      !!options?.hasChannels,
+      options?.channelTransports ?? {
+        redis: !!options?.hasChannels,
+        rabbit: false,
+      },
     ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));
@@ -1670,6 +1791,9 @@ function emitProject(
   // Catalog-identity request log — always-on.  Cross-backend parity
   // with Phoenix's <App>.Telemetry and Hono's pino access log.
   out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
+  // Prometheus HTTP metrics — catalog-driven, served at /metrics (Program.cs
+  // MapMetrics), recorded from RequestLoggingMiddleware's request_end seam.
+  out.set("Observability/HttpMetrics.cs", renderHttpMetrics(ns));
   // Ambient execution context (docs/architecture/request-context.md) — the one
   // AsyncLocal carrier the principal slice (auth), the request-logger slice
   // (--trace), and the audit/provenance correlation stamps all ride.  ALWAYS
@@ -1716,9 +1840,14 @@ function emitProject(
 }
 
 function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
-  // Only emit a test csproj when at least one aggregate declares a `test`
-  // block — otherwise the project would have nothing to compile.
-  const anyTests = ctx.aggregates.some((a) => a.tests.length > 0);
+  // Only emit a test csproj when at least one subject (aggregate / value object
+  // / domain service) declares a `test` block — otherwise the project would
+  // have nothing to compile.
+  const anyTests =
+    ctx.aggregates.some((a) => a.tests.length > 0) ||
+    ctx.valueObjects.some((v) => v.tests.length > 0) ||
+    ctx.domainServices.some((s) => s.tests.length > 0) ||
+    ctx.tests.length > 0;
   if (!anyTests) return;
   out.set(`Tests/${ns}.Tests/${ns}.Tests.csproj`, renderTestCsproj(ns));
 }
@@ -1839,22 +1968,36 @@ function mergeViewsAsFinds(
   const matching = ctx.views.filter(
     (v) => v.source.kind === "aggregate" && v.source.name === agg.name,
   );
-  if (matching.length === 0) return repo;
+  // Query-time projections (read-path-architecture.md rev.13) sourced from this
+  // aggregate ride the SAME synthesized find as an aggregate full-form view —
+  // the source read is a parameterless find over the projection's `where`.
+  const matchingQp = (ctx.projections ?? []).filter(
+    (p) => isQueryTimeProjection(p) && p.query?.source === agg.name,
+  );
+  if (matching.length === 0 && matchingQp.length === 0) return repo;
   const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",
     element: { kind: "entity", name: agg.name },
   };
-  const synthesised = matching.map((v) => ({
-    name: v.name,
-    params: [],
-    returnType: arrayReturn,
-    filter: v.filter,
-    // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
-    // §11) onto the synthesized find so the shared find emitter renders the
-    // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
-    ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
-    ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
-  }));
+  const synthesised = [
+    ...matching.map((v) => ({
+      name: v.name,
+      params: [],
+      returnType: arrayReturn,
+      filter: v.filter,
+      // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
+      // §11) onto the synthesized find so the shared find emitter renders the
+      // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
+      ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
+      ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
+    })),
+    ...matchingQp.map((p) => ({
+      name: p.name,
+      params: [],
+      returnType: arrayReturn,
+      ...(p.query?.filter ? { filter: p.query.filter } : {}),
+    })),
+  ];
   if (!repo) {
     return {
       name: `${agg.name}Repository`,

@@ -225,7 +225,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = 
     form: TSX_FORM,
   },
   // Vue packs own forms + field inputs the way TSX packs do
-  // (hand-rolled reactive() + zod form helper), so the required
+  // (vee-validate `useLoomForm` helper over the shared zod schema), so the required
   // surface mirrors TSX exactly — the Vite+vue-router SPA shape needs
   // no shell template beyond the shared set (vite config / theme /
   // app shell are all covered by SHARED_SHELL names).
@@ -261,6 +261,12 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = 
       "tsconfig",
       "angular-json",
     ],
+    // The one-statement toast a `on <channel>.<Event>` live-event handler
+    // renders into RealtimeHandlersComponent (channels.md Part I).  Each
+    // Angular pack calls the generator-emitted `LoomToastService`; the
+    // sibling `realtime-toast-setup` (the `inject(...)` line) stays
+    // pack-private — only the call template is required.
+    form: ["realtime-toast"],
   },
   // Flutter (flutter-mobile-implementation.md Track C — WALKING SKELETON).
   // Flutter is a Feliz clone: a non-JSX widget-tree target rendered by a

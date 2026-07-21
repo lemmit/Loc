@@ -546,6 +546,11 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       // level lambdas, do not hoist to the host LiveView — a pre-existing
       // HEEx limitation tracked by the parity gate.)
       return snake(expr.actionName);
+    case "authz-filter":
+      // Authorization/tenancy filter sentinel (M-T9.9) — a query-filter node,
+      // never a page-body expression.  Reaching the HEEx page renderer means it
+      // leaked from a filter position; throw rather than emit invalid markup.
+      throw new Error("heex renderExpr: 'authz-filter' is not a page-body expression");
   }
 }
 

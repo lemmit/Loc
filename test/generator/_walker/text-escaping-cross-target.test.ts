@@ -289,3 +289,48 @@ describe("text-escaping end-to-end — hostile literal through every generator",
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Attribute-position escaping (companion of the text funnel above).  A string
+// literal in an ATTRIBUTE slot — an input `label:` (`unwrapAsAttr`) or any
+// primitive's `testid:` (`testidAttr`) — is emitted inside `attr="…"`.  A JS
+// backslash-escaped quote (`data-testid="a\"b"`) does NOT work: JSX/HTML
+// attribute values aren't JS strings, so the value terminates at the inner
+// `"`.  The value must be HTML-entity-escaped (`&quot;`), which decodes back
+// in attribute values on every frontend.  Regression for the audit F3 finding.
+// ---------------------------------------------------------------------------
+describe("attribute-escaping — quotes in testid / label attributes (F3)", () => {
+  // `.ddd` source fragment: a value with an embedded quote (`\"`), amp and `<`.
+  // The parsed value is `a " b & c < d`.
+  const ATTR_HOSTILE_SRC = 'a \\" b & c < d';
+  const attrSystem = (platform: string): string => `
+    system Demo {
+      subdomain S { context C { } }
+      ui Web {
+        page Landing {
+          route: "/"
+          state { draft: string = "" }
+          body: Stack {
+            Field { "${ATTR_HOSTILE_SRC}", bind: draft },
+            Button { "Go", testid: "${ATTR_HOSTILE_SRC}" }
+          }
+        }
+      }
+      deployable api { platform: node, contexts: [C], port: 3000 }
+      deployable web { platform: ${platform}, targets: api, ui: Web, port: 3001 }
+    }
+  `;
+  for (const platform of ["react", "vue"]) {
+    it(`${platform}: an embedded quote is entity-escaped, never breaking out of the attribute`, async () => {
+      const files = await generateSystemFiles(attrSystem(platform));
+      const out = renderedText(files);
+      // Escaping ran — the quote and amp became entities.
+      expect(out).toContain("&quot;");
+      expect(out).toContain("&amp;");
+      // The attribute-breaking JS-escaped quote must NEVER appear inside a
+      // testid or label attribute value (that is the pre-fix TS1382 defect).
+      expect(out).not.toMatch(/data-testid="[^"\n]*\\"/);
+      expect(out).not.toMatch(/label="[^"\n]*\\"/);
+    });
+  }
+});

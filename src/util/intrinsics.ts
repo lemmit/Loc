@@ -200,6 +200,23 @@ export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
       signature: `(other: ${receiver}): ${receiver}`,
     },
   ]),
+  // Truncating integer division — the deliberate counterpart to `/`, which
+  // widens `int / int` to `decimal` (fractional).  `a.divTrunc(b)` keeps an
+  // `int`/`long` result, truncating TOWARD ZERO (`(-5).divTrunc(2) == -2`,
+  // matching C#/Java integer division).  int/long receivers only.  NOT
+  // queryable in v1 — integer-division semantics vary across SQL dialects, so
+  // it is a domain-expression op (op bodies / derived / invariants), not a
+  // find-predicate op.
+  ...(["int", "long"] as const).flatMap((receiver): IntrinsicSignature[] => [
+    {
+      receiver,
+      name: "divTrunc",
+      params: [receiver],
+      returns: "receiver",
+      queryable: false,
+      signature: `(divisor: ${receiver}): ${receiver}`,
+    },
+  ]),
   ...(["decimal", "money"] as const).flatMap((receiver): IntrinsicSignature[] => [
     {
       receiver,

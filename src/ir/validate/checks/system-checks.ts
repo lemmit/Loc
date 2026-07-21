@@ -39,12 +39,14 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
+import { backendServesRealtime } from "../../util/channels.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { opHasProvSite } from "../../util/prov-id.js";
+import { realtimeRoomPlan } from "../../util/realtime-rooms.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -97,8 +99,9 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // A backend NOT in `PROJECTION_QT_SUPPORTED` has no emitter for it, so gate a
 // query-time projection hosted on such a deployable with an honest diagnostic
 // until its port lands — the same reviewed-gap discipline as the paged gate.
-// Node is the first (PR-C).
-const PROJECTION_QT_SUPPORTED = new Set(["node"]);
+// All five backends have ported it: node (PR-C), python (PR-D), elixir (PR-E),
+// java (PR-F), dotnet (PR-G).
+const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
 
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
@@ -154,6 +157,71 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
         severity: "error",
         code: "loom.auth-ui-unsupported-framework",
         message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        source: d.name,
+      });
+    }
+  }
+}
+
+// Frontends that CONSUME the realtime SSE wire (channels.md Part I) — each
+// subscribes to the backend's `GET /realtime/events` stream, so a live-event
+// handler is honored ONLY when the target backend serves that wire
+// (`backendServesRealtime`).  `static` hosts one of these framework bundles.
+const SSE_REALTIME_FRONTENDS = new Set<string>([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "static",
+]);
+// Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
+// own socket), so no separate SSE wire — a `on` handler is always honored.
+const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"]);
+
+/** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
+ *  Part I).  A handler on a ui whose serving frontend can't consume realtime
+ *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
+ *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
+ *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
+ *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *
+ *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
+ *  than hard-coding a frontend list, so a future frontend without the wire
+ *  warns until it grows realtime consumption. */
+export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const byName = new Map(sys.deployables.map((d) => [d.name, d]));
+  for (const d of sys.deployables) {
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui || (ui.notifications?.length ?? 0) === 0) continue;
+      // The serving framework: the ui's declared `framework:` wins (a `static`
+      // host or a Phoenix surface states it), else the deployable's platform.
+      const framework = ui.framework ?? d.uiFramework ?? d.platform;
+      if (NATIVE_REALTIME_FRONTENDS.has(framework)) continue;
+      if (SSE_REALTIME_FRONTENDS.has(framework)) {
+        // A self-hosting backend+ui mount (dotnet/phoenix) targets itself.
+        const target = d.targetName ? byName.get(d.targetName) : undefined;
+        const backendPlatform = target?.platform ?? d.platform;
+        if (backendServesRealtime(backendPlatform)) continue;
+        diags.push({
+          severity: "warning",
+          code: "loom.ui-realtime-unsupported",
+          message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
+            target
+              ? `target backend '${target.name}' (platform '${backendPlatform}')`
+              : `backend platform '${backendPlatform}'`
+          } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+          source: d.name,
+        });
+        continue;
+      }
+      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      diags.push({
+        severity: "warning",
+        code: "loom.ui-realtime-unsupported",
+        message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${framework}' has no realtime consumption, so the handlers are silently dropped.`,
         source: d.name,
       });
     }
@@ -623,6 +691,107 @@ export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): v
           `doesn't list the binding. Once traffic rides the broker this consumer would ` +
           `silently receive nothing. Add \`channels: [${csNames[0]}]\` to '${dep.name}'.`,
         source: `${sys.name}/${dep.name}`,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime relay obligation (channels.md — "the edge relay").  A browser
+// speaks SSE only to the backend its frontend `targets:`, so for that backend
+// to relay a channel to the UI it must itself SUBSCRIBE the channel — either
+// by hosting the channel's owning context (today's single-hop wire) or by
+// wiring a `channelSource` binding for it (the broker relay, M-T4.4 redis
+// bindings).  A UI whose target does neither can't legally be served the
+// events, so the `on <channel>.<Event>` handlers would silently receive
+// nothing — error rather than drop.
+//
+// This is the frontend-relay half `validateChannelWiring` explicitly defers
+// (its `loom.channel-consumer-unwired` skips frontends "consume via M-T1.10
+// realtime").
+export function validateRelayTargetNotSubscribed(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const byName = new Map(sys.deployables.map((d) => [d.name, d]));
+  // channel name -> owning context (channels are context members; bare names
+  // are system-unique per the channelSource resolution rule).
+  const channelOwner = new Map<string, string>();
+  for (const m of sys.subdomains)
+    for (const c of m.contexts)
+      for (const ch of c.channels ?? []) channelOwner.set(ch.name, c.name);
+  const csByName = new Map((sys.channelSources ?? []).map((cs) => [cs.name, cs]));
+
+  for (const d of sys.deployables) {
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui) continue;
+      // Only channels the ui actually consumes via an `on <chan>.<Event>`
+      // handler impose the relay obligation — a bare `channel` param that no
+      // handler reads routes nothing.
+      const consumed = new Set((ui.notifications ?? []).map((n) => n.paramName));
+      const subscribed = (ui.channelParams ?? []).filter((p) => consumed.has(p.name));
+      if (subscribed.length === 0) continue;
+      // The relay is the target backend (a `static` frontend), or the
+      // deployable itself when a backend hosts its own ui (dotnet/phoenix).
+      const relay = (d.targetName ? byName.get(d.targetName) : undefined) ?? d;
+      const relayHosts = new Set(relay.contextNames);
+      const relayBinds = new Set<string>();
+      for (const csName of relay.channelSourceNames ?? []) {
+        const cs = csByName.get(csName);
+        if (cs) relayBinds.add(cs.channelName);
+      }
+      for (const p of subscribed) {
+        const owner = channelOwner.get(p.channelName) ?? p.contextName;
+        if (relayHosts.has(owner) || relayBinds.has(p.channelName)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.relay-target-not-subscribed",
+          message:
+            `Deployable '${d.name}': ui '${uiName}' subscribes to channel ` +
+            `'${p.channelName}' (context '${owner}') via an 'on ${p.name}.<Event>' handler, ` +
+            `but its relay backend '${relay.name}' neither hosts '${owner}' nor binds the ` +
+            `channel — the SSE relay can't legally serve those events, so the handler receives ` +
+            `nothing. Host '${owner}' on '${relay.name}', or add a channelSource for ` +
+            `'${p.channelName}' to its 'channels:' clause.`,
+          source: d.name,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime tenant-broadcast honesty (channels.md — "rooms + policy-derived
+// routing v1").  The Hono/node backend scopes realtime delivery by the tenant
+// DataKey (per-tenant rooms); the other SSE backends (.NET / Java / Python)
+// still broadcast every carried event to every connected browser.  In a
+// tenant-owned context that means a tenant-scoped event's payload crosses the
+// tenant boundary on the wire — the authorized refetch remains the gate, but
+// the payload itself is over-delivered.  Warn so the per-backend rollout gap
+// is a reviewed decision, not a silent cross-tenant leak.  (Phoenix/LiveView
+// re-renders server-side through the authorized read, so it is not in this
+// set — `backendServesRealtime` already excludes it.)
+export function validateRealtimeTenantBroadcast(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const d of sys.deployables) {
+    if (!backendServesRealtime(d.platform) || d.platform === "node") continue;
+    for (const ctxName of d.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      const plan = realtimeRoomPlan(ctx);
+      if (!plan.tenantScoped) continue;
+      diags.push({
+        severity: "warning",
+        code: "loom.realtime-tenant-broadcast",
+        message:
+          `Deployable '${d.name}' (platform '${d.platform}') serves realtime for tenant-owned ` +
+          `context '${ctxName}', but its SSE wire broadcasts every carried event to every ` +
+          `connected browser — tenant-scoped event payloads (${[...plan.tenantEventTypes]
+            .sort()
+            .join(", ")}) cross the tenant boundary on the wire. Per-tenant rooms ship on the ` +
+          `node/Hono backend; on '${d.platform}' the authorized refetch remains the gate, but ` +
+          `the payload is over-delivered until rooms land there.`,
+        source: d.name,
       });
     }
   }
@@ -1297,48 +1466,14 @@ export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   validateStampSupport(sys, diags, STAMP_BACKENDS[4]);
 }
 
-export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  for (const dep of sys.deployables) {
-    if (platformFamily(dep.platform) !== "java") continue;
-    for (const ctxName of dep.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      // `shape(embedded)` reference collections: the jsonb id-array
-      // column would route through Hibernate's structured-JSON path for
-      // registered @Embeddable ids (not the Jackson FormatMapper), which
-      // mis-serialises the typed-id list.  Gate until a converter-based
-      // mapping lands; containments-as-json are supported.
-      for (const agg of ctx.aggregates) {
-        const enriched = agg as EnrichedAggregateIR;
-        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
-        if (shape !== "embedded" || enriched.persistedAs === "eventLog") continue;
-        for (const f of agg.fields) {
-          const t = f.type.kind === "optional" ? f.type.inner : f.type;
-          if (t.kind === "array" && t.element.kind === "id") {
-            diags.push({
-              severity: "error",
-              message:
-                `Deployable '${dep.name}' (platform java) hosts shape(embedded) aggregate ` +
-                `'${ctxName}.${agg.name}' with reference collection '${f.name}' — jsonb id-array ` +
-                `columns are not yet mapped on the java backend (Hibernate's structured-JSON ` +
-                `path bypasses the Jackson FormatMapper for @Embeddable ids). ` +
-                `Use shape(document), the relational shape, or host on a node / dotnet deployable.`,
-              source: `${sys.name}/${dep.name}`,
-              code: "loom.java-embedded-refcoll-unsupported",
-            });
-          }
-        }
-      }
-      // Nested part-in-part containments (single AND collection) now map on
-      // java: a part FKs to its DIRECT parent (`directParentOf`, shared with
-      // migrations-builder), so the `@OneToOne`/`@OneToMany` join column matches
-      // the Flyway DDL and a collection nested below the root keeps its
-      // hierarchy.  (Was: `loom.java-single-containment-unsupported`.)
-    }
-  }
-}
+// M-T6.19: `shape(embedded)` reference collections (`X id[]`) now map on
+// java.  The jsonb id-array column rides a per-target `AttributeConverter`
+// (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
+// `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
+// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce
+// — instead of the structured-JSON aggregate path that bypassed it.  (Was:
+// `loom.java-embedded-refcoll-unsupported`.)  Nested part-in-part
+// containments (single AND collection) likewise map (`directParentOf`).
 
 // ---------------------------------------------------------------------------
 // Java read-model backstop gates.  Cross-aggregate view `follows` and VO-typed
@@ -1896,13 +2031,6 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 // column (System.Text.Json list serialisation) — kept in lockstep with
 // `arrayElemCs` in `src/generator/dotnet/emit/dapper.ts` (ir/validate may not
 // import generator/, so the two lists are mirrored, not shared).
-const DAPPER_ARRAY_ELEM_KINDS: ReadonlySet<string> = new Set([
-  "primitive",
-  "enum",
-  "valueobject",
-  "id",
-]);
-
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -2020,34 +2148,14 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // A scalar / enum / value-object / id COLLECTION field on a part IS
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
-        // primitive-collection JSON mapping).  The ONLY element kind left gated
-        // is `entity`: a part FIELD (not a `contains`) typed as an array of a
-        // sibling ENTITY.  That is an impossible storage shape rather than a
-        // Dapper gap — an un-owned by-value entity collection has no persistence
-        // identity/ownership model (a domain entity has no scalar column form and
-        // no snapshot DTO on the relational shape, so it cannot ride a jsonb
-        // list).  efcore only APPEARS to accept it — it COMPILES `List<Entity>`
-        // mapped as a plain scalar `Property`, but EF has no relational mapping
-        // for a collection of an entity type without owned-type config, so it is
-        // not a real backing store there either.
-        // The intended model is `contains <name>: <Entity>[]` (ownership) or
-        // `<name>: <Entity> id[]` (a reference collection) — both supported.
-        const contains = a.contains ?? [];
-        if (contains.length > 0 && a.persistedAs !== "eventLog") {
-          for (const part of a.parts ?? []) {
-            for (const pf of part.fields) {
-              const pt = pf.type.kind === "optional" ? pf.type.inner : pf.type;
-              if (pt.kind === "array" && !DAPPER_ARRAY_ELEM_KINDS.has(pt.element.kind))
-                reject(
-                  where,
-                  `has a part ('${part.name}') with a by-value collection field of ENTITY element ` +
-                    `kind '${pt.element.kind}' — an un-owned entity collection has no relational ` +
-                    `storage shape. Use 'contains ${pf.name}: …[]' (ownership) or ` +
-                    `'${pf.name}: … id[]' (a reference collection) instead`,
-                );
-            }
-          }
-        }
+        // primitive-collection JSON mapping).  A part FIELD typed as an array of
+        // a sibling ENTITY used to be gated here as an "impossible storage
+        // shape", but since `contains` became optional (#2161) such a field
+        // lowers to a containment (its own grandchild table, part-in-part above),
+        // never a by-value column — and a cross-aggregate entity is a structural
+        // error — so no un-owned entity collection can reach this check.  The
+        // gate (and its `DAPPER_ARRAY_ELEM_KINDS` set) was therefore unreachable
+        // dead code and has been removed.
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
         // upsert SET), INCLUDING principal-referencing stamp values — the

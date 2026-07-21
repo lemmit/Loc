@@ -19,7 +19,14 @@ import type {
   UiMember,
   UiNotification,
 } from "../generated/ast.js";
-import { isActionDecl, isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import {
+  isActionDecl,
+  isAggregate,
+  isComponent,
+  isMemberSuffix,
+  isNameRef,
+  isPostfixChain,
+} from "../generated/ast.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   findAggregateInModule,
@@ -332,26 +339,66 @@ export function checkStore(store: Store, accept: ValidationAcceptor): void {
 }
 
 /** `on <param>.<Event>(e) { … }` live-event handler (channels.md Part I).
- *  v1 restricts the body to `toast(<one expr>)` statements — the toast
- *  is the only notification action the React generator renders; an
- *  assignment or any other call has nowhere to lower (there is no
- *  ui-level state).  Code `loom.ui-handler-unsupported`. */
+ *  A handler body admits two actions:
+ *
+ *   - `toast(<one message expression>)` — a message notification.
+ *   - `refetch(<Aggregate>[, <Aggregate>…])` — invalidate that
+ *     aggregate's query cache, the realtime twin of a mutation's
+ *     `onSuccess` invalidation.  Each target must name an aggregate
+ *     declared in the enclosing system (the frontend registers its
+ *     queries under `["<snake-plural>"]`).
+ *
+ *  Anything else (an assignment, `navigate(…)`, an unknown call) has
+ *  nowhere to lower and is rejected with `loom.ui-handler-unsupported`.
+ *  An unresolvable refetch target gets the distinct, more specific
+ *  `loom.ui-handler-refetch-target` code. */
 export function checkUiNotification(n: UiNotification, ui: Ui, accept: ValidationAcceptor): void {
-  void ui;
+  // Aggregate names declared anywhere in the enclosing model — the
+  // frontend api modules the ui mounts register their queries under
+  // `["<snake-plural-of-aggregate>"]`, so a refetch target must name a
+  // real aggregate for the invalidation to hit anything.
+  const aggregateNames = new Set<string>();
+  for (const node of AstUtils.streamAllContents(AstUtils.findRootNode(ui))) {
+    if (isAggregate(node)) aggregateNames.add(node.name);
+  }
+  const where = `'on ${n.param?.$refText}.${n.event?.$refText}' handler`;
   for (const stmt of n.body) {
-    const isBareToastCall =
-      !stmt.op &&
-      stmt.target.call === true &&
-      stmt.target.head === "toast" &&
-      stmt.target.tail.length === 0 &&
-      stmt.target.args.length === 1;
-    if (!isBareToastCall) {
-      accept(
-        "error",
-        `Unsupported statement in 'on ${n.param?.$refText}.${n.event?.$refText}' handler.  v1 supports only 'toast(<message expression>)' (one argument).`,
-        { node: stmt, code: "loom.ui-handler-unsupported" },
-      );
+    const isBareCall = !stmt.op && stmt.target.call === true && stmt.target.tail.length === 0;
+    const head = stmt.target.head;
+    if (isBareCall && head === "toast" && stmt.target.args.length === 1) {
+      continue; // toast(<message>)
     }
+    if (isBareCall && head === "refetch") {
+      if (stmt.target.args.length === 0) {
+        accept(
+          "error",
+          `'refetch(…)' in ${where} needs at least one aggregate to refetch, e.g. 'refetch(Order)'.`,
+          { node: stmt, code: "loom.ui-handler-refetch-target" },
+        );
+        continue;
+      }
+      for (const arg of stmt.target.args) {
+        if (!isNameRef(arg)) {
+          accept(
+            "error",
+            `'refetch(…)' arguments in ${where} must each name an aggregate (e.g. 'refetch(Order)').`,
+            { node: arg, code: "loom.ui-handler-refetch-target" },
+          );
+        } else if (!aggregateNames.has(arg.name)) {
+          accept(
+            "error",
+            `Unknown refetch target '${arg.name}' in ${where} — it must name an aggregate declared in this system.`,
+            { node: arg, code: "loom.ui-handler-refetch-target" },
+          );
+        }
+      }
+      continue;
+    }
+    accept(
+      "error",
+      `Unsupported statement in ${where}.  A handler body supports 'toast(<message expression>)' (one argument) and 'refetch(<Aggregate>[, …])'.`,
+      { node: stmt, code: "loom.ui-handler-unsupported" },
+    );
   }
 }
 

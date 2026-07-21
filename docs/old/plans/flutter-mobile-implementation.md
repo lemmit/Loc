@@ -1,6 +1,13 @@
 # Flutter mobile — implementation plan
 
-> Status: **PLAN (not started).** Turns
+> Status: **MOSTLY DONE (updated 2026-07-20).** The "not started" note is stale:
+> Phase 0, all five Phase-1 tracks (A wire-model, B target, C pack, D riverpod,
+> E composer), and Phase-2 steps 1–2 (`index.ts` wiring +
+> `generated-flutter-build.yml`) shipped. Genuinely still deferred: Phase-2
+> step 3 (`integration_test` / `test e2e` third arm) and the native (apk/ipa) CI
+> surface — both tracked in
+> [`../proposals/flutter-parity-and-native-gates.md`](../proposals/flutter-parity-and-native-gates.md).
+> Turns
 > [`../proposals/flutter-mobile-frontend.md`](../proposals/flutter-mobile-frontend.md)
 > into a slice-by-slice build with an **agent-swarm execution strategy**.
 > Grounded in a four-agent recon of the actual seams (Nov 2026): the

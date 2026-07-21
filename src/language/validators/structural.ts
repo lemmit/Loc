@@ -2,6 +2,7 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { isInferredContainment } from "../containment.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -11,6 +12,7 @@ import type {
   Destroy,
   EntityPart,
   Model,
+  Property,
   Unique,
   ValueObject,
   Workflow,
@@ -37,7 +39,9 @@ import {
   isUnique,
   isValueObject,
   isWorkflow,
+  isWorkflowCreateDecl,
 } from "../generated/ast.js";
+import { envForNode, typeOf, typeToString } from "../type-system.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
 import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
 import {
@@ -259,6 +263,23 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
     }
   }
   checkWorkflowEventSourcedDiscipline(wf, accept);
+
+  // `requires Expr` authorization gate (authorization.md §11.3) on a workflow
+  // `create` / `handle` trigger: a bool pre-check (403) over `currentUser` +
+  // the trigger's command params (a saga starter/handler has no aggregate
+  // `this`).  Types to bool exactly like the in-body `requires` it lowers to;
+  // `envForNode` resolves the enclosing create/handle params.
+  for (const m of wf.members) {
+    if (!isWorkflowCreateDecl(m) && !isHandleDecl(m)) continue;
+    if (!m.gate) continue;
+    const gt = typeOf(m.gate, envForNode(m.gate));
+    if (gt.kind !== "primitive" || gt.name !== "bool") {
+      accept("error", `'requires' must be of type 'bool', got '${typeToString(gt)}'.`, {
+        node: m,
+        property: "gate",
+      });
+    }
+  }
 
   // Workflow `function` members are the aggregate-parity pure helper — both the
   // expression form (`function f(...): T = expr`) and the pure block form
@@ -498,6 +519,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForAggregate(agg), accept);
     if (isUnique(m)) checkUnique(m, agg, accept);
+    if (isProperty(m)) checkInferredContainment(m, accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     // Parameter defaults on aggregate actions (`operation cancel(reason = "x")`,
@@ -690,6 +712,7 @@ export function checkEntityPart(
 ): void {
   for (const m of part.members) {
     if (isContainment(m)) checkContainment(m, agg, accept);
+    if (isProperty(m)) checkInferredContainment(m, accept);
     if (isInvariant(m)) checkInvariant(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForPart(agg, part), accept);
@@ -718,6 +741,43 @@ export function checkValueObject(vo: ValueObject, accept: ValidationAcceptor): v
         );
       }
     }
+  }
+}
+
+// A `contains`-less entity-typed field (`line: OrderLine`) is a containment, so
+// it may carry only what `contains` carries — a name, `[]`, and `?`.  The value
+// property modifiers (`provenanced` / access / `= default` / `sensitive(...)` /
+// inline `check`) are meaningless on a child entity; reject them with a pointer
+// to the explicit form rather than silently dropping them at lowering.  Also
+// mirrors `contains`' own `[]?` rejection (an empty collection encodes absence).
+export function checkInferredContainment(p: Property, accept: ValidationAcceptor): void {
+  if (!isInferredContainment(p)) return;
+  const part = p.type.base.$type === "NamedType" ? p.type.base.target?.ref?.name : undefined;
+  const label = part ?? "the entity";
+  const reject = (
+    property: "provenanced" | "access" | "default" | "sensitivity" | "check",
+    modifier: string,
+  ) =>
+    accept(
+      "error",
+      `Field '${p.name}' contains entity '${label}', so '${modifier}' does not apply — ` +
+        `it is only valid on value properties. Drop it (write 'contains ${p.name}: ${label}${
+          p.type.array ? "[]" : ""
+        }' if you want the keyword explicit).`,
+      { node: p, property, code: "loom.entity-field-modifier" },
+    );
+  if (p.provenanced) reject("provenanced", "provenanced");
+  if (p.access) reject("access", p.access);
+  if (p.default) reject("default", "= default");
+  if (p.sensitivity) reject("sensitivity", "sensitive(...)");
+  if (p.check) reject("check", "check");
+  if (p.type.array && p.type.optional) {
+    accept(
+      "error",
+      `Field '${p.name}' contains entity '${label}' as both a collection and optional — ` +
+        `an empty collection already encodes absence; drop the '?'.`,
+      { node: p, property: "type", code: "loom.entity-field-optional-collection" },
+    );
   }
 }
 

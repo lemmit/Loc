@@ -155,6 +155,100 @@ docker compose logs api | jq "select(.request_id == \"$RID\")"
 
 The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
+## Metrics (Prometheus)
+
+Alongside the log stream, **every** backend deployable — Hono, Python,
+.NET, Java, and Phoenix — exposes a Prometheus scrape target at **`GET
+/metrics`**, the standard "monitoring" surface a dashboard or alert rule
+consumes.
+
+Same design as the log catalog: one platform-neutral source of truth,
+`src/generator/_obs/metrics.ts`, pins every metric's stable name, type,
+help, label set, and (for histograms) bucket bounds. A per-backend
+renderer consumes it, so a PromQL query written once works everywhere.
+The client library differs per platform but the exposition matches: pino's
+backend uses [prom-client](https://github.com/siimon/prom-client) (Hono),
+[prometheus_client](https://github.com/prometheus/client_python) (Python),
+[prometheus-net](https://github.com/prometheus-net/prometheus-net) (.NET),
+Actuator + [Micrometer](https://micrometer.io/) (Java), and
+[telemetry_metrics_prometheus_core](https://hex.pm/packages/telemetry_metrics_prometheus_core)
+fed by the Phoenix endpoint `:telemetry` event (Phoenix).
+
+**What's exposed:**
+
+| Metric | Type | Labels | Notes |
+|---|---|---|---|
+| `http_requests_total` | counter | `method`, `route`, `status` | RED rate + errors |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status` | RED duration (quantiles via `histogram_quantile`) |
+| `domain_operations_total` | counter | `aggregate`, `op` | Business throughput — every domain operation invoked (constructor is `op="create"`) |
+| `domain_faults_total` | counter | `kind` | Recoverable domain faults (`domain_error`/`forbidden`/`not_found`/`conflict`/`disallowed`) — the business error rate |
+| `process_*`, `nodejs_*` | (default) | — | CPU, resident memory, event-loop lag, GC, open handles — from `collectDefaultMetrics()` |
+
+The two HTTP metrics are recorded at the **same request seam** as the
+`request_start`/`request_end` log lines (the request-id middleware's
+`finally` block). The `route` label is the matched route **template**
+(`/api/carts/:id`), never the raw path — labelling by raw path would
+explode cardinality on every id.
+
+The two **domain** counters are recorded at the domain seams: an operation
+increment at `operation_invoked` / `aggregate_created` (the constructor
+counts as `op="create"`), and a fault increment at the app-wide error
+handler alongside the matching fault log line. `domain_faults_total` is
+labelled by `kind` only (not `aggregate`) — several backends handle faults
+in a central seam where the aggregate isn't in scope, so an aggregate label
+wouldn't be uniform cross-backend; per-aggregate throughput lives on
+`domain_operations_total{aggregate,op}` instead. On the four manual-increment
+backends (Hono / .NET / Java / Python) a `record*` helper does the bump; on
+Phoenix the counters are declared in the Telemetry supervisor and fed by
+`[:loom, :domain, :*]` `:telemetry` events at the seams.
+
+```bash
+# Scrape once.
+curl -s localhost:3000/metrics
+
+# Request rate over 1m (PromQL).
+rate(http_requests_total[1m])
+
+# 5xx error ratio.
+sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+
+# p95 latency.
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+# Domain error rate — faults over operations (business RED).
+sum(rate(domain_faults_total[5m])) / sum(rate(domain_operations_total[5m]))
+
+# Busiest operations.
+topk(5, sum(rate(domain_operations_total[5m])) by (aggregate, op))
+```
+
+**Stability:** the metric catalog is a wire contract, same governance as
+the log catalog and `wireShape` — additive changes (new metrics, new
+optional labels) are safe; renaming a metric/label or changing a
+histogram's buckets breaks dashboards + recording rules and requires a
+consumer migration.
+## Metrics collector (Prometheus)
+
+Every generated **backend** also exposes a Prometheus scrape target at
+**`GET /metrics`** (M-T7.1). The system composer wires a collector so
+`docker compose up` gives a running monitoring surface with zero setup:
+
+- The compose file adds a `prometheus` service (UI on **`:9090`**) that
+  mounts **`monitoring/prometheus.yml`** — a scrape config with one job per
+  backend deployable, hitting its `/metrics` on the compose network. Pure
+  static frontends emit no metrics and get no job.
+- On **Kubernetes** (`generate system --k8s`, and the Helm chart), each
+  backend pod carries the standard scrape-discovery annotations, so a
+  cluster Prometheus finds them automatically:
+
+  ```yaml
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+  prometheus.io/path: /metrics
+  ```
+
+Both are additive — a frontend-only system emits no collector.
+
 ## Verification
 
 Five runtime end-to-end suites boot the generated server against a real
@@ -178,6 +272,12 @@ Each suite:
 5. Hits `/health`.
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
+
+All five obs-e2e suites additionally scrape `GET /metrics` and assert the
+Prometheus exposition carries the `http_requests_total` /
+`http_request_duration_seconds` series for the `/health` request
+(route-template + status labels), plus the default runtime metrics on the
+backends whose client library ships them (Hono/Python/.NET/Java).
 
 `.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,

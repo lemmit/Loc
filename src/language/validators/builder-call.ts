@@ -3,6 +3,7 @@
 // EntityParts.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { isInferredContainment } from "../containment.js";
 import type { DddServices } from "../ddd-module.js";
 import type {
   Aggregate,
@@ -292,7 +293,10 @@ export function recordFieldTypes(
 function requiredFieldNames(decl: ValueObject | EntityPart | PayloadDecl): Set<string> {
   const req = new Set<string>();
   const consider = (p: Property) => {
-    if (p.type?.optional || p.default || p.provenanced) return;
+    // A `contains`-less entity-typed field is a containment — it auto-defaults
+    // to empty at construction, exactly like an explicit `contains` member, so
+    // it is never a required constructor input.
+    if (p.type?.optional || p.default || p.provenanced || isInferredContainment(p)) return;
     req.add(p.name);
   };
   if (isPayloadDecl(decl)) {

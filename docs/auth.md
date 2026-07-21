@@ -219,6 +219,42 @@ declared `function`.  `requires` is admissible in workflow
 bodies too; the workflow handler / route handler maps it to 403
 the same way as the operation route does.
 
+#### Header `requires` clause (authorization.md §11.3)
+
+The gate can also ride the **declaration header** — the write-side twin of the
+find / view `requires` gate.  It relocates the authorization decision out of the
+body onto the signature, and is exactly equivalent to a first-body `requires`
+statement (same 403, same pre-body evaluation, same scope):
+
+```ddd
+// header form — reads as part of the signature
+operation cancel() requires currentUser.role == "manager" {
+  precondition status != "cancelled"
+  status := Cancelled
+}
+
+// workflow starter / command handler carry it too
+workflow Fulfil {
+  create open(ref: string) requires currentUser.role == "ops" { … }
+  handle retry(order: Order id) requires currentUser.role == "agent" { … }
+}
+```
+
+On an operation it sits after the return type and before `when`; it is evaluated
+**post-load** (against the loaded `this` instance), so it may reference the
+resource, the operation params, and `currentUser`.  Every backend emits the same
+guard a first-body `requires` produces:
+
+```ts
+// generated (Hono) — top of the operation body, before any mutation
+if (!(currentUser.role === "manager")) throw new ForbiddenError("Forbidden: currentUser.role == \"manager\"");
+```
+
+A workflow `create` gate scopes to `currentUser` + the starter's command params
+(a saga has no aggregate `this`) and renders identically.  (A workflow `handle`
+gate lowers the same way but is inert until `handle` command handlers are
+surfaced as HTTP routes.)
+
 Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 (see the note at the top).  Without it (`enforcement: opt`, the
 default) a deployable on `auth: required` still serves any

@@ -3,36 +3,39 @@
 //
 // The Elixir half of the timerSource feature — the sibling of the Hono
 // `scheduler-builder.ts`.  A `timerSource` fires a plain domain event on a
-// wall-clock cadence.  Each owned timer becomes ONE `GenServer` module under
-// `lib/<app>/scheduler/<timer>.ex`, added to the OTP supervision tree.  On each
-// tick the GenServer takes a TRANSACTION-SCOPED Postgres advisory lock
-// (single-fire across replicas), builds the tick event struct, and dispatches
-// it through the SAME in-process `<Ctx>.Dispatcher` the sagas already route
-// through — so an event-triggered `create(t: Tick) by …` reactor fires with no
-// new dispatch machinery.
+// wall-clock cadence.  The firing contract splits by cadence:
 //
-// Design (vs the recommended Quantum): a single GenServer-per-timer is cleaner
-// than adding Quantum here — one mechanism carries BOTH cadences (the advisory-
-// lock tick body lives in one place), and the BEAM's serialised message loop
-// gives the non-overlap guarantee for free (the property Hono's `running` flag
-// has to simulate), so there is no separate scheduler process + job registry to
-// wire.  `every:` uses a fixed `Process.send_after`; `cron:` computes the next
-// matching wall-clock minute via the small pure `crontab` lib (the same cron
-// engine Quantum itself wraps), added as a dep ONLY when an owned timer uses a
-// real `cron:` expression — mirroring Hono's conditional `node-cron` dep.
+//   * `cron:` timers are DURABLE (Phase 2) — driven by **Oban**, the Postgres-
+//     backed job queue.  A per-timer GenServer computes each wall-clock boundary
+//     (the same `crontab` next-minute logic the Phase-1 loop used) and enqueues
+//     a unique Oban job for it; Oban's `unique` constraint makes that job
+//     single-fire across every replica AND idempotent for a boundary already
+//     handled, and Oban runs the tick durably with retry (`max_attempts`).  A
+//     self-owned `loom_timer_runs` watermark drives coalesce-once missed-run
+//     catch-up: first boot records a baseline WITHOUT firing (a fresh deploy
+//     must not replay history); a later boot whose most-recent boundary is past
+//     the watermark enqueues exactly ONE catch-up job (the whole missed window
+//     collapses to a single replay, never a stampede).
+//   * `every:` (sub-minute) timers stay IN-PROCESS (Phase 1) — ONE `GenServer`
+//     that on each tick takes a TRANSACTION-SCOPED Postgres advisory lock
+//     (single-fire across replicas, the SAME `pg_try_advisory_xact_lock`
+//     primitive keyed by the SAME FNV-1a hash the other backends use), builds
+//     the tick event, and dispatches it.  Durability is meaningless for a 15s
+//     poll, and Oban's cron/queue granularity is per-minute.
 //
-// The single-fire lock is `pg_try_advisory_xact_lock` held INSIDE
-// `Repo.transaction` (on the tx's single pinned connection, auto-released on
-// commit) — NOT a session-level lock+unlock, so there is no manual unlock to
-// leak onto a different pooled connection.  Identical primitive + FNV-1a key
-// derivation to the Hono reference.
+// Both cadences build the tick event struct and dispatch it through the SAME
+// in-process `<Ctx>.Dispatcher` the sagas already route through — so an
+// event-triggered `create(t: Tick) by …` reactor fires with no new dispatch
+// machinery.
 //
 // Emitted ONLY when the deployable owns at least one timerSource; a timer-free
-// deployable is byte-identical (no scheduler module, no crontab dep, no
-// supervision child).
+// deployable is byte-identical (no scheduler module, no crontab/oban dep, no
+// migration, no supervision child).  A `cron:`-free (every-only) deployable
+// pulls neither Oban nor the timer migration — it rides the in-process path.
 // ---------------------------------------------------------------------------
 
 import type {
+  ChannelIR,
   DeployableIR,
   EnrichedBoundedContextIR,
   EventIR,
@@ -42,13 +45,14 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 
-/** The owner of a timer's single-fire lock is DERIVED (never stamped): the
- *  deployable whose subdomain `migrationsOwner` owns the for-event's context —
- *  the same deployable that owns that context's DB, so the advisory-lock owner
- *  is the DB owner.  Filters the system's timers to the ones THIS deployable
- *  owns.  Mirrors the Hono `ownedTimers` derivation byte-for-byte. */
+/** The owner of a timer is DERIVED (never stamped): the deployable whose
+ *  subdomain `migrationsOwner` owns the for-event's context — the same
+ *  deployable that owns that context's DB, so the durable-job/lock owner is the
+ *  DB owner.  Filters the system's timers to the ones THIS deployable owns.
+ *  Mirrors the Hono `ownedTimers` derivation byte-for-byte. */
 export function ownedElixirTimers(sys: SystemIR, deployable: DeployableIR): TimerSourceIR[] {
   return (sys.timerSources ?? []).filter((ts) => {
     const sub = sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
@@ -57,7 +61,8 @@ export function ownedElixirTimers(sys: SystemIR, deployable: DeployableIR): Time
 }
 
 /** Whether any owned timer uses a real cron expression (vs a bare-interval
- *  `every:`).  Gates the `crontab` hex dep. */
+ *  `every:`).  Gates the `crontab` + `oban` hex deps, the timer migration, the
+ *  Oban config block, and the Oban supervision child. */
 export function anyElixirTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
@@ -65,7 +70,8 @@ export function anyElixirTimerUsesCron(timers: readonly TimerSourceIR[]): boolea
 /** Stable per-timer advisory-lock key — an FNV-1a hash of the timerSource name
  *  into a signed 32-bit int, the SAME derivation the Hono backend computes at
  *  runtime, so two replicas (of any backend) contend on the SAME key.  Computed
- *  at codegen and inlined as an Elixir integer literal. */
+ *  at codegen and inlined as an Elixir integer literal.  (every: path only —
+ *  cron: single-fire is Oban-native.) */
 function timerLockKey(name: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < name.length; i++) {
@@ -118,16 +124,27 @@ function tickFieldValue(field: FieldIR): string {
   return "nil";
 }
 
-/** Render one `lib/<app>/scheduler/<timer>.ex` GenServer module for a timer. */
-function renderTimerSchedulerModule(
+/** The `%Ctx.Events.<Event>{field: val, …}` struct-build for a tick. */
+function tickEventStruct(contextModule: string, ts: TimerSourceIR, event: EventIR): string {
+  const fields = event.fields.map((f) => `${snake(f.name)}: ${tickFieldValue(f)}`).join(", ");
+  return `%${contextModule}.Events.${upperFirst(ts.event)}{${fields}}`;
+}
+
+// ── every: — the Phase-1 in-process GenServer (advisory lock) ───────────────
+
+/** Render one `lib/<app>/scheduler/<timer>.ex` GenServer for an `every:` timer
+ *  (unchanged Phase-1 design — advisory-lock single-fire, inline dispatch). */
+function renderEveryTimerModule(
   appModule: string,
   ts: TimerSourceIR,
   event: EventIR | undefined,
   hasDispatcher: boolean,
+  channels: ElixirChannelsCfg | undefined,
 ): string {
   const mod = `${appModule}.Scheduler.${upperFirst(ts.name)}`;
   const contextModule = `${appModule}.${upperFirst(ts.context)}`;
   const lockKey = timerLockKey(ts.name);
+  const everyMs = ts.cadence.kind === "every" ? ts.cadence.everyMs : 0;
 
   const fireLog = renderPhoenixLogCall("timerFired", [{ name: "timer", valueExpr: "@timer_name" }]);
   const contendedLog = renderPhoenixLogCall("timerLockContended", [
@@ -138,47 +155,18 @@ function renderTimerSchedulerModule(
     { name: "error", valueExpr: "Exception.message(e)" },
   ]);
 
-  // Locked branch: build + dispatch the tick event (when the for-event's
-  // context has an in-process Dispatcher — i.e. a reactor subscribes), then log
-  // timer_fired.  A timer whose event has no subscriber has nowhere to dispatch,
-  // so it just logs the fire (keeps the module compile-clean either way).
   const lockedBody =
-    hasDispatcher && event
+    event && (hasDispatcher || channels)
       ? [
-          `        event = %${contextModule}.Events.${upperFirst(ts.event)}{${event.fields
-            .map((f) => `${snake(f.name)}: ${tickFieldValue(f)}`)
-            .join(", ")}}`,
-          `        ${contextModule}.Dispatcher.dispatch(event)`,
+          `        event = ${tickEventStruct(contextModule, ts, event)}`,
+          `        ${elixirDispatchCall("event", contextModule, hasDispatcher, channels)}`,
           `        ${fireLog}`,
         ]
       : [`        ${fireLog}`];
 
-  // Cadence → next-delay computation.  cron: the next matching wall-clock minute
-  // via crontab; every: a fixed interval cron cannot express.
-  const scheduleFn =
-    ts.cadence.kind === "cron"
-      ? [
-          `  # cron: ${ts.cadence.cron} — the next matching wall-clock minute.`,
-          `  defp schedule_next do`,
-          `    cron = Crontab.CronExpression.Parser.parse!(${elixirString(ts.cadence.cron)})`,
-          `    now = NaiveDateTime.utc_now()`,
-          `    # One second past now so the just-fired minute is never re-matched`,
-          `    # (cron is minute-granular) without skipping the next occurrence.`,
-          `    next = Crontab.Scheduler.get_next_run_date!(cron, NaiveDateTime.add(now, 1, :second))`,
-          `    delay = max(1, NaiveDateTime.diff(next, now, :millisecond))`,
-          `    Process.send_after(self(), :tick, delay)`,
-          `  end`,
-        ]
-      : [
-          `  # every: ${ts.cadence.everyMs}ms — a fixed interval cron cannot express.`,
-          `  defp schedule_next do`,
-          `    Process.send_after(self(), :tick, ${ts.cadence.everyMs})`,
-          `  end`,
-        ];
-
-  return `# Auto-generated — emitted only when this deployable owns timerSources (scheduling.md).
+  return `# Auto-generated — every: timer (scheduling.md, M-T4.1); in-process, single-fire via advisory lock.
 defmodule ${mod} do
-  @moduledoc "timerSource ${ts.name} — fires ${upperFirst(ts.event)} on a wall-clock cadence."
+  @moduledoc "timerSource ${ts.name} — fires ${upperFirst(ts.event)} on a ${everyMs}ms cadence."
 
   use GenServer
   require Logger
@@ -210,7 +198,10 @@ defmodule ${mod} do
     {:noreply, state}
   end
 
-${scheduleFn.join("\n")}
+  # every: ${everyMs}ms — a fixed interval cron cannot express.
+  defp schedule_next do
+    Process.send_after(self(), :tick, ${everyMs})
+  end
 
   # One tick: a TRANSACTION-SCOPED advisory lock (single-fire across replicas) →
   # build the tick event → dispatch through the in-process Dispatcher the sagas
@@ -237,10 +228,252 @@ end
 `;
 }
 
-/** Emit the per-timer GenServer modules this deployable owns.  Returns the
- *  supervision-tree child module names (threaded into `renderApplication`) and
- *  whether a `crontab` dep is needed.  A timer-free deployable emits nothing and
- *  returns an empty result (byte-identical). */
+// ── cron: — the durable Oban worker + scheduler GenServer (Phase 2) ─────────
+
+/** Render one `lib/<app>/scheduler/<timer>_worker.ex` Oban worker for a `cron:`
+ *  timer — the DURABLE executor.  `unique` on the `boundary` arg makes a
+ *  boundary fire at most once ever (across replicas and across time until
+ *  pruned), so the scheduler's concurrent + catch-up enqueues coalesce to a
+ *  single fire.  `max_attempts` gives retry with Oban's default backoff. */
+function renderCronTimerWorker(
+  appModule: string,
+  ts: TimerSourceIR,
+  event: EventIR | undefined,
+  hasDispatcher: boolean,
+  channels: ElixirChannelsCfg | undefined,
+): string {
+  const mod = `${appModule}.Scheduler.${upperFirst(ts.name)}Worker`;
+  const contextModule = `${appModule}.${upperFirst(ts.context)}`;
+  const fireLog = renderPhoenixLogCall("timerFired", [{ name: "timer", valueExpr: "@timer_name" }]);
+  const failedLog = renderPhoenixLogCall("timerEmitFailed", [
+    { name: "timer", valueExpr: "@timer_name" },
+    { name: "error", valueExpr: "Exception.message(e)" },
+  ]);
+
+  const body =
+    event && (hasDispatcher || channels)
+      ? [
+          `    event = ${tickEventStruct(contextModule, ts, event)}`,
+          `    ${elixirDispatchCall("event", contextModule, hasDispatcher, channels)}`,
+          `    ${fireLog}`,
+          "    :ok",
+        ]
+      : [`    ${fireLog}`, "    :ok"];
+
+  return `# Auto-generated — cron: timer durable executor (scheduling.md, M-T4.1 Phase 2).
+defmodule ${mod} do
+  @moduledoc "Durable executor for timerSource ${ts.name}: builds ${upperFirst(ts.event)} and dispatches it. Enqueued single-fire per boundary by ${appModule}.Scheduler.${upperFirst(ts.name)}; retried by Oban."
+
+  # \`unique\` on the boundary arg is the single-fire ledger: two replicas
+  # enqueuing the same boundary (and the boot catch-up re-enqueuing one already
+  # run) collapse to ONE job.  \`:completed\` is in the state set so a boundary is
+  # never re-run.  max_attempts: 3 gives durable retry with Oban's backoff.
+  use Oban.Worker,
+    queue: :timers,
+    max_attempts: 3,
+    unique: [
+      keys: [:boundary],
+      period: :infinity,
+      # All states — a boundary is unique across its whole lifecycle, so it is
+      # never re-run (the boot catch-up re-enqueue of an already-run boundary
+      # no-ops).
+      states: [
+        :scheduled,
+        :available,
+        :executing,
+        :retryable,
+        :completed,
+        :cancelled,
+        :discarded,
+        :suspended
+      ]
+    ]
+
+  require Logger
+
+  @timer_name ${elixirString(ts.name)}
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"boundary" => _boundary}}) do
+${body.join("\n")}
+  rescue
+    e ->
+      ${failedLog}
+      reraise e, __STACKTRACE__
+  end
+end
+`;
+}
+
+/** Render one `lib/<app>/scheduler/<timer>.ex` scheduler GenServer for a `cron:`
+ *  timer — computes each wall-clock boundary and enqueues the durable Oban
+ *  worker for it, plus a coalesce-once boot catch-up over a `loom_timer_runs`
+ *  watermark. */
+function renderCronTimerScheduler(appModule: string, ts: TimerSourceIR): string {
+  const mod = `${appModule}.Scheduler.${upperFirst(ts.name)}`;
+  const worker = `${appModule}.Scheduler.${upperFirst(ts.name)}Worker`;
+  const cron = ts.cadence.kind === "cron" ? ts.cadence.cron : "";
+  const catchupLog = renderPhoenixLogCall("timerCatchup", [
+    { name: "timer", valueExpr: "@timer_name" },
+    { name: "boundary", valueExpr: "boundary" },
+  ]);
+
+  return `# Auto-generated — cron: timer scheduler (scheduling.md, M-T4.1 Phase 2).
+defmodule ${mod} do
+  @moduledoc "timerSource ${ts.name} — enqueues a durable ${worker} job at each cron boundary (single-fire across replicas via Oban), replaying one missed boundary on recovery."
+
+  use GenServer
+  require Logger
+
+  @timer_name ${elixirString(ts.name)}
+  @cron ${elixirString(cron)}
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+
+  @impl true
+  def init(_opts) do
+    {:ok, cron} = Crontab.CronExpression.Parser.parse(@cron)
+    catch_up(cron)
+    schedule_next(cron)
+    {:ok, %{cron: cron}}
+  end
+
+  @impl true
+  def handle_info(:tick, %{cron: cron} = state) do
+    enqueue(previous_boundary(cron))
+    schedule_next(cron)
+    {:noreply, state}
+  end
+
+  # cron: ${cron} — the next matching wall-clock minute.
+  defp schedule_next(cron) do
+    now = NaiveDateTime.utc_now()
+    # One second past now so the just-fired minute is never re-matched (cron is
+    # minute-granular) without skipping the next occurrence.
+    next = Crontab.Scheduler.get_next_run_date!(cron, NaiveDateTime.add(now, 1, :second))
+    delay = max(1, NaiveDateTime.diff(next, now, :millisecond))
+    Process.send_after(self(), :tick, delay)
+  end
+
+  # The most-recent past boundary (unix seconds) — the one that just elapsed.
+  defp previous_boundary(cron) do
+    now = NaiveDateTime.utc_now()
+    {:ok, prev} = Crontab.Scheduler.get_previous_run_date(cron, now)
+    prev |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix()
+  end
+
+  # Enqueue a durable Oban job for \`boundary\`; the worker's \`unique\` constraint
+  # makes it single-fire across replicas and idempotent for a boundary already
+  # enqueued/run.  The watermark advances so a later restart knows where we left
+  # off.
+  defp enqueue(boundary) do
+    %{boundary: boundary} |> ${worker}.new() |> Oban.insert()
+    record_watermark(boundary)
+  end
+
+  # Boot catch-up (coalesce-once): compare the most-recent past boundary against
+  # the persisted watermark.  First boot records a baseline WITHOUT firing (a
+  # fresh deploy must not replay history); a later boot whose boundary is past
+  # the watermark enqueues exactly ONE catch-up job (Oban dedups if a peer
+  # already handled it), collapsing the whole missed window to a single replay.
+  defp catch_up(cron) do
+    boundary = previous_boundary(cron)
+
+    case last_watermark() do
+      nil ->
+        record_watermark(boundary)
+
+      last when boundary > last ->
+        ${catchupLog}
+        enqueue(boundary)
+
+      _ ->
+        :ok
+    end
+  end
+
+  # A self-owned, timer-specific watermark (\`loom_timer_runs\`, created by the
+  # timer migration this feature emits — NOT part of the domain schema, so no
+  # other backend is touched).  One row per timer.
+  defp last_watermark do
+    %{rows: rows} =
+      Ecto.Adapters.SQL.query!(
+        ${appModule}.Repo,
+        "SELECT last_boundary FROM loom_timer_runs WHERE timer = $1",
+        [@timer_name]
+      )
+
+    case rows do
+      [[b]] -> b
+      _ -> nil
+    end
+  end
+
+  defp record_watermark(boundary) do
+    Ecto.Adapters.SQL.query!(
+      ${appModule}.Repo,
+      "INSERT INTO loom_timer_runs (timer, last_boundary) VALUES ($1, $2) " <>
+        "ON CONFLICT (timer) DO UPDATE SET last_boundary = " <>
+        "GREATEST(loom_timer_runs.last_boundary, EXCLUDED.last_boundary)",
+      [@timer_name, boundary]
+    )
+  end
+end
+`;
+}
+
+/** The Ecto migration that provisions the durable-timer infrastructure — Oban's
+ *  own tables plus the self-owned `loom_timer_runs` watermark.  Emitted only
+ *  when this deployable owns a `cron:` timer.  An early version prefix so it
+ *  runs before the domain migrations (independent tables — order is immaterial,
+ *  but a fixed early stamp keeps it deterministic and collision-free). */
+function renderTimerMigration(appModule: string): { path: string; content: string } {
+  const version = "20000101000000";
+  return {
+    path: `priv/repo/migrations/${version}_add_timer_infrastructure.exs`,
+    content: `defmodule ${appModule}.Repo.Migrations.AddTimerInfrastructure do
+  # Auto-generated — durable timerSource infrastructure (scheduling.md, M-T4.1 Phase 2).
+  use Ecto.Migration
+
+  def up do
+    Oban.Migration.up(version: 12)
+
+    # Watermark for coalesce-once missed-run catch-up (one row per timerSource).
+    create_if_not_exists table(:loom_timer_runs, primary_key: false) do
+      add :timer, :text, primary_key: true, null: false
+      add :last_boundary, :bigint, null: false
+    end
+  end
+
+  def down do
+    drop_if_exists table(:loom_timer_runs)
+    Oban.Migration.down(version: 1)
+  end
+end
+`,
+  };
+}
+
+/** The Oban config block spliced into `config/config.exs` when a `cron:` timer
+ *  is owned.  `timers` queue + a Pruner to bound the completed-job table (the
+ *  watermark — not job history — is the catch-up ledger, so pruning is safe). */
+export function renderObanConfig(appName: string, appModule: string): string {
+  return `
+# Durable timerSource jobs (scheduling.md, M-T4.1 Phase 2) — cron timers enqueue
+# ${appModule}.Scheduler.*Worker jobs onto Oban; the unique constraint gives
+# single-fire across replicas, max_attempts gives retry.  The Pruner bounds the
+# completed-job table (the loom_timer_runs watermark is the catch-up ledger).
+config :${appName}, Oban,
+  repo: ${appModule}.Repo,
+  queues: [timers: 10],
+  plugins: [{Oban.Plugins.Pruner, max_age: 3600}]
+`;
+}
+
+/** Emit the per-timer scheduler modules this deployable owns.  Returns the
+ *  supervision-tree children (Oban first, then the timer GenServers), whether a
+ *  `crontab` dep is needed (any cron timer), and whether Oban is needed (== any
+ *  cron timer).  A timer-free deployable emits nothing (byte-identical). */
 export function emitVanillaScheduler(
   appName: string,
   appModule: string,
@@ -248,21 +481,50 @@ export function emitVanillaScheduler(
   deployable: DeployableIR,
   sys: SystemIR,
   out: Map<string, string>,
-): { schedulerChildren: string[]; usesCron: boolean } {
+  /** Broker tee config (channels.md) — presence routes a tick's dispatch
+   *  through `<App>.Channels.dispatch/2` so broker-carried tick events
+   *  publish instead of fanning out locally. */
+  channels?: ElixirChannelsCfg,
+  /** Wired-but-foreign channels widening the dispatcher-existence check. */
+  wiredForeignChannels: ChannelIR[] = [],
+): { schedulerChildren: string[]; usesCron: boolean; usesOban: boolean } {
   const timers = ownedElixirTimers(sys, deployable);
-  if (timers.length === 0) return { schedulerChildren: [], usesCron: false };
+  if (timers.length === 0) return { schedulerChildren: [], usesCron: false, usesOban: false };
 
   const ctxByName = new Map(contexts.map((c) => [c.name, c] as const));
-  const schedulerChildren: string[] = [];
+  const usesOban = anyElixirTimerUsesCron(timers);
+  // Oban must start before the timer GenServers (they enqueue on boot), so it
+  // leads the supervision children.
+  const schedulerChildren: string[] = usesOban
+    ? [`{Oban, Application.fetch_env!(:${appName}, Oban)}`]
+    : [];
+
   for (const ts of timers) {
     const ctx = ctxByName.get(ts.context);
     const event = ctx?.events.find((e) => e.name === ts.event);
-    const hasDispatcher = ctx ? contextHasDispatcher(ctx) : false;
-    out.set(
-      `lib/${appName}/scheduler/${snake(ts.name)}.ex`,
-      renderTimerSchedulerModule(appModule, ts, event, hasDispatcher),
-    );
+    const hasDispatcher = ctx ? contextHasDispatcher(ctx, wiredForeignChannels) : false;
+    if (ts.cadence.kind === "cron") {
+      out.set(
+        `lib/${appName}/scheduler/${snake(ts.name)}_worker.ex`,
+        renderCronTimerWorker(appModule, ts, event, hasDispatcher, channels),
+      );
+      out.set(
+        `lib/${appName}/scheduler/${snake(ts.name)}.ex`,
+        renderCronTimerScheduler(appModule, ts),
+      );
+    } else {
+      out.set(
+        `lib/${appName}/scheduler/${snake(ts.name)}.ex`,
+        renderEveryTimerModule(appModule, ts, event, hasDispatcher, channels),
+      );
+    }
     schedulerChildren.push(`${appModule}.Scheduler.${upperFirst(ts.name)}`);
   }
-  return { schedulerChildren, usesCron: anyElixirTimerUsesCron(timers) };
+
+  if (usesOban) {
+    const migration = renderTimerMigration(appModule);
+    out.set(migration.path, migration.content);
+  }
+
+  return { schedulerChildren, usesCron: usesOban, usesOban };
 }

@@ -17,6 +17,7 @@ import { variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ChannelIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
@@ -27,9 +28,10 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
-import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { leafPath } from "../../_stmt/leaves.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
+import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -317,6 +319,9 @@ export function renderEmitDispatchLines(
   /** Source-map Milestone 13 collector (`--sourcemap`) — only allocated by
    *  the caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
+  /** Broker channels (M-T4.4 slice 6c) — presence re-routes the dispatch
+   *  line through the `<App>.Channels` tee (see channels-emit.ts). */
+  channels?: ElixirChannelsCfg,
 ): string[] {
   const appModule = rc.contextModule.split(".")[0]!;
   const lines: string[] = [];
@@ -334,8 +339,8 @@ export function renderEmitDispatchLines(
       ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
     ]);
     const emitLines = [`${baseIndent}${evVar} = ${struct}`, `${baseIndent}${logCall}`];
-    if (hasDispatcher)
-      emitLines.push(`${baseIndent}${rc.contextModule}.Dispatcher.dispatch(${evVar})`);
+    const dispatchCall = elixirDispatchCall(evVar, rc.contextModule, hasDispatcher, channels);
+    if (dispatchCall) emitLines.push(`${baseIndent}${dispatchCall}`);
     emitLines.push(
       `${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
     );
@@ -411,6 +416,9 @@ export function renderReturningOpFunction(
   /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
+  /** Broker channels (M-T4.4 slice 6c) — see renderEmitDispatchLines. */
+  channels?: ElixirChannelsCfg,
+  extraChannels: ChannelIR[] = [],
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -488,7 +496,7 @@ export function renderReturningOpFunction(
   // the context Dispatcher (saga seam).  A non-persisting emit (a rare emit-only
   // body ending in a non-committing return) keeps the legacy inline emit.
   const hoistEmits = opEmitsEvent(op) && persists;
-  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
   const dispatchLines = hoistEmits
     ? renderEmitDispatchLines(
         op,
@@ -497,6 +505,7 @@ export function renderReturningOpFunction(
         "        ",
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
+        channels,
       )
     : [];
   const lastIdx = op.statements.length - 1;
@@ -1115,6 +1124,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
     { name: "op", valueExpr: `"${op.name}"` },
     { name: "id", valueExpr: "id" },
   ])}
+    ${renderPhoenixDomainOperation(aggPascal, op.name)}
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
       ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}))

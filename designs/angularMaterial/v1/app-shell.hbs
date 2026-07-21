@@ -9,6 +9,7 @@ import { MatToolbarModule } from "@angular/material/toolbar";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
+{{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
 {{/if}}
 @Component({
   selector: "app-root",
@@ -21,10 +22,12 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     MatListModule,
     MatIconModule,
 {{#if authUi}}    AuthGateComponent,
+{{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
     <a href="#main-content" class="loom-skip-link">Skip to content</a>
-    <mat-toolbar color="primary">
+{{#if hasRealtimeHandlers}}    <app-realtime-handlers />
+{{/if}}    <mat-toolbar color="primary">
       <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
     </mat-toolbar>
     <mat-sidenav-container class="loom-shell">

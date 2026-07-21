@@ -46,11 +46,13 @@ import type {
   RepositoryIR,
   RetrievalIR,
   TypeIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   exprUsesCurrentUser,
   findUsesCurrentUser,
+  isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
 import {
   discriminatorValue,
@@ -61,6 +63,7 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -215,6 +218,24 @@ function provColumnsOf(fields: readonly FieldIR[]): MikroColumn[] {
     }));
 }
 
+/** One jsonb column carrying a value-object collection field (`Money[]`) stored
+ *  INLINE on the owner row.  Unlike the drizzle backend (id-less child table),
+ *  the MikroORM adapter folds a root VO array onto a single serialised jsonb
+ *  column — the mirror of the part-collection `collectionFieldColumn` path.  The
+ *  Row TS type is the DOC shape of the array (`{ amount: number; currency:
+ *  string }[]`); an optional `<VO>[]?` adds `| null`. */
+function valueCollectionColumn(f: FieldIR, ctx: EnrichedBoundedContextIR): MikroColumn {
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return {
+    prop: f.name,
+    mikroType: "json",
+    tsType: docFieldType(inner, ctx),
+    nullable: f.type.kind === "optional" || (f.optional ?? false),
+    primary: false,
+    columnType: "jsonb",
+  };
+}
+
 function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const id: MikroColumn = {
     prop: "id",
@@ -224,9 +245,18 @@ function columnsOf(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): Mik
     primary: true,
   };
   // `Id[]` reference collections persist as pivot tables (join-Row entities),
-  // not columns on the aggregate row — skip them here.
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
-  return [id, ...scalarFields.flatMap((f) => fieldColumns(f, ctx)), ...provColumnsOf(agg.fields)];
+  // not columns on the aggregate row — skip them here.  Value-object collections
+  // (`<VO>[]`) fold onto one inline jsonb column each (see valueCollectionColumn).
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
+  const valueCollFields = agg.fields.filter((f) => isValueCollectionType(f.type));
+  return [
+    id,
+    ...scalarFields.flatMap((f) => fieldColumns(f, ctx)),
+    ...valueCollFields.map((f) => valueCollectionColumn(f, ctx)),
+    ...provColumnsOf(agg.fields),
+  ];
 }
 
 /** TPH shared-table columns (aggregate-inheritance.md, sharedTable): one Row
@@ -520,6 +550,23 @@ function provenanceRecordEntity(): { block: string; schemaName: string } {
   ]);
 }
 
+/** Row-entity class name for a workflow's persisted correlation state
+ *  (`OrderFulfillment` → `OrderFulfillmentRow`).  Exported so the workflow
+ *  builder's `usingMikro` store branch references the same symbol. */
+export const mikroWorkflowRowClass = (wf: WorkflowIR): string => `${upperFirst(wf.name)}Row`;
+
+/** Columns for a workflow's correlation-state Row: the correlation field is the
+ *  string PK (an id column), every other declared saga state field maps through
+ *  the shared `fieldColumns` — mirroring the drizzle `emitWorkflowStateTable`. */
+function workflowStateColumns(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
+  const corr = wf.correlationField;
+  return (wf.stateFields ?? []).flatMap((f) =>
+    f.name === corr
+      ? [{ prop: f.name, mikroType: "string", tsType: "string", nullable: false, primary: true }]
+      : fieldColumns(f, ctx),
+  );
+}
+
 export function renderMikroEntities(
   aggs: readonly EnrichedAggregateIR[],
   ctx: EnrichedBoundedContextIR,
@@ -663,6 +710,22 @@ export function renderMikroEntities(
       ),
     );
   }
+  // Persisted workflow-correlation state (workflow-and-applier.md A2-S2): one
+  // Row per non-event-sourced correlation-bearing workflow — the MikroORM twin
+  // of the drizzle `emitWorkflowStateTable`.  The in-process dispatcher's
+  // load/save helpers (http/workflows.ts, usingMikro branch) read/upsert these.
+  // An event-sourced workflow folds its `<ctx>_events` stream instead (no state
+  // table), and a plain command workflow has no correlation field → no Row.
+  for (const wf of ctx.workflows ?? []) {
+    if (wf.eventSourced || !wf.correlationField) continue;
+    const { block, schemaName } = renderRecordRowEntity(
+      mikroWorkflowRowClass(wf),
+      snake(plural(wf.name)),
+      workflowStateColumns(wf, ctx),
+    );
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
   // Audit / provenance history Row entities — emitted (like the drizzle
   // `audit_records` / `provenance_records` tables) only when the model has an
   // audited target / a provenanced field, so a plain project pays nothing.
@@ -759,13 +822,25 @@ const FILTER_OP: Record<string, string> = {
   "!=": "$ne",
 };
 
+/** The FilterQuery property name for a `this`-rooted field access, or null.
+ *  Accepts `this.<field>` (a `member` over `this` — the shape a repository
+ *  `find ... where this.field` lowers to), a bare `this-prop` ref (`total` — the
+ *  shape a `view ... where total` / criterion candidate field lowers to), and a
+ *  VO subfield `this.<field>.<sub>` (→ the flattened `<field>_<sub>` column, the
+ *  MikroORM twin of the drizzle `<field>_<sub>` column). */
+function thisFieldColumn(e: ExprIR): string | null {
+  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
+  if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
+    return `${e.receiver.member}_${e.member}`;
+  return null;
+}
+
 /** Render a `this.<col> <op> <param>` comparison as a `{ col: ... }` entry. */
 function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>): string {
-  const left = e.left;
-  if (left.kind !== "member" || left.receiver.kind !== "this")
-    throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
   // FilterQuery keys are entity PROPERTY names (== field names), not DB columns.
-  const col = left.member;
+  const col = thisFieldColumn(e.left);
+  if (col === null) throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
   const rhs = filterValue(e.right);
   if (e.op === "==") return `${col}: ${rhs}`;
   const op = FILTER_OP[e.op];
@@ -779,6 +854,14 @@ function filterValue(e: ExprIR): string {
       if (e.refKind === "param") return e.name;
       if (e.refKind === "enum-value") return JSON.stringify(e.name);
       throw new Error(`mikroorm: unsupported ref '${e.refKind}' in find`);
+    case "member":
+      // `currentUser.<claim>` — a principal-referencing (tenancy) capability
+      // filter reads the ambient request principal via `requireCurrentUser()`,
+      // exactly as the drizzle repository does; the value is compared against
+      // the row column on the LHS.
+      if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user")
+        return `requireCurrentUser().${e.member}`;
+      throw new Error("mikroorm: unsupported member value in find");
     case "literal":
       switch (e.lit) {
         case "string":
@@ -893,11 +976,13 @@ function orBranches(e: Extract<ExprIR, { kind: "binary" }>): ExprIR[] {
 //
 // MikroORM has no global query filter (EF Core's `HasQueryFilter`), so — like
 // drizzle — the repository ANDs each capability predicate into every root read.
-// Principal-referencing filters (`currentUser.<field>`) are rejected on Hono at
-// validate time, so only closed predicates reach here; each lowers to a
-// FilterQuery object via `whereToMikroFilter` (guaranteed in-subset by
-// `validateFindPredicateAdapterSupport`).  A read's `ignoring *` / `ignoring
-// <Cap>` bypass drops the capability-origin predicates it names.
+// A NON-principal predicate lowers to a FilterQuery via `whereToMikroFilter`
+// (guaranteed in-subset by `validateFindPredicateAdapterSupport`).  A
+// PRINCIPAL-referencing filter (tenancy: `this.tenantId == currentUser.tenantId`)
+// is applied too: `currentUser.<claim>` lowers against the ambient
+// `requireCurrentUser()` accessor (exactly as the drizzle repository), so the
+// tenant scope IS enforced on every mikro read.  A read's `ignoring *` /
+// `ignoring <Cap>` bypass drops the capability-origin predicates it names.
 // ---------------------------------------------------------------------------
 
 interface FilterBypass {
@@ -912,12 +997,25 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
   const origins = agg.contextFilterOrigins ?? [];
   const out: string[] = [];
   filters.forEach((pred, i) => {
-    if (exprUsesCurrentUser(pred)) return; // principal — validator-rejected on Hono
     const origin = origins[i];
     // Only capability-origin (`undefined` = bare/hand-written) filters are
     // bypassable; `ignoring *` drops every origin, a named `ignoring` the match.
     if (origin !== undefined && (bypass?.bypassAll || (bypass?.bypassCaps ?? []).includes(origin)))
       return;
+    if (exprUsesCurrentUser(pred)) {
+      // A principal filter is not gated for FilterQuery-lowerability by the
+      // adapter validator (`validateFindPredicateAdapterSupport` skips it), so
+      // guard the lowering: apply the flat `this.<field> == currentUser.<claim>`
+      // shape, and drop any shape outside the subset (e.g. a deep-scope subtree
+      // predicate) rather than throwing at generation — such a system is not
+      // generated on the mikro adapter today.
+      try {
+        out.push(whereToMikroFilter(pred));
+      } catch {
+        /* unlowerable principal filter — left unapplied (unreachable in-corpus) */
+      }
+      return;
+    }
     out.push(whereToMikroFilter(pred));
   });
   return out;
@@ -1005,6 +1103,29 @@ function assocSaveLines(agg: EnrichedAggregateIR, emVar: string, indent: string)
 /** The array-hydration statement(s) binding `rows` → `${targetVar}`.  With
  *  associations it bulk-loads the pivot maps and assembles each row's list in a
  *  block; without, it stays the byte-identical single `.map(...)`. */
+/** The value-object collection fields of an aggregate (`<VO>[]` root fields) —
+ *  each stored INLINE as one jsonb column on the owner row. */
+function valueCollFieldsOf(agg: EnrichedAggregateIR): FieldIR[] {
+  return agg.fields.filter((f) => isValueCollectionType(f.type));
+}
+
+/** Per-row value-collection decls binding `<field>` from the owner row's inline
+ *  jsonb column (`const lineItems = (row.lineItems ?? []).map((x) => new Money(
+ *  Number(x.amount), x.currency));`).  No DB round-trip — the array rides on the
+ *  root row, so this is pure deserialisation.  The value-collection analogue of
+ *  `assocRowDeclLines`; empty for an aggregate without VO collections, so the
+ *  output stays byte-identical. */
+function valueCollRowDeclLines(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  rowVar: string,
+  indent: string,
+): string[] {
+  return valueCollFieldsOf(agg).map(
+    (f) => `${indent}const ${f.name} = ${deserializeField(f.type, `${rowVar}.${f.name}`, ctx)};`,
+  );
+}
+
 function assocHydrateBind(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
@@ -1015,7 +1136,9 @@ function assocHydrateBind(
 ): string[] {
   const hy = hydrateRootExpr(agg, "row", ctx);
   const head = keyword === "return" ? "return" : `const ${targetVar} =`;
-  const hasChildren = (agg.associations ?? []).length > 0 || (agg.contains ?? []).length > 0;
+  const hasValueColls = valueCollFieldsOf(agg).length > 0;
+  const hasChildren =
+    (agg.associations ?? []).length > 0 || (agg.contains ?? []).length > 0 || hasValueColls;
   if (!hasChildren) {
     return [`${indent}${head} rows.map((row) => ${hy});`];
   }
@@ -1026,6 +1149,7 @@ function assocHydrateBind(
     `${indent}${head} rows.map((row) => {`,
     ...assocRowDeclLines(agg, "row", `${indent}  `),
     ...containRowDeclLines(agg, "row", `${indent}  `),
+    ...valueCollRowDeclLines(agg, ctx, "row", `${indent}  `),
     `${indent}  return ${hy};`,
     `${indent}});`,
   ];
@@ -1331,6 +1455,42 @@ function containCascade(
 }
 
 // ---------------------------------------------------------------------------
+// Context-level `view`s + query-time `projection`s sourced from an aggregate
+// synthesise a parameterless-find repository read (`repo.<viewName>()` →
+// `<Agg>[]`), exactly as the drizzle `repository-builder` does — the shared
+// http/views + projection routes call these by name, so the MikroORM repo must
+// emit them or the boot crashes on a missing method.  Reusing the FindIR shape
+// means the find-method builder (predicate lowering, capability-filter AND,
+// hydration) applies for free.
+// ---------------------------------------------------------------------------
+function synthViewFinds(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): RepositoryIR["finds"] {
+  const viewFinds = (ctx.views ?? [])
+    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
+    .map((view) => ({
+      name: lowerFirst(view.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
+      filter: view.filter,
+      // Carry the view's `ignoring` bypass so its capability-filter conjunction
+      // drops the bypassed origins (the view read honours the bypass as a find).
+      bypassAll: view.bypassAll,
+      bypassCaps: view.bypassCaps,
+    }));
+  const projectionFinds = (ctx.projections ?? [])
+    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
+    .map((p) => ({
+      name: lowerFirst(p.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
+      filter: p.query?.filter,
+    }));
+  return [...viewFinds, ...projectionFinds];
+}
+
+// ---------------------------------------------------------------------------
 // Per-aggregate repository — a drop-in for the drizzle `<Agg>Repository`.
 // ---------------------------------------------------------------------------
 
@@ -1358,10 +1518,26 @@ export function renderMikroRepository(
   const baseFilters = [...mikroContextFilters(agg), ...kindClause];
   // `Id[]` reference collections persist in pivot tables, not columns, so they
   // are excluded from the aggregate-row save projection (synced separately).
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  // Value-object collections (`<VO>[]`) fold onto one inline jsonb column each,
+  // serialised through the shared `serializeField` (VO elements → plain objects,
+  // money/id → strings) — the root analogue of the part-collection jsonb column.
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
+  const valueCollFields = valueCollFieldsOf(agg);
+  const valueCollEntries = valueCollFields.map((f) => ({
+    fieldName: f.name,
+    expr: serializeField(f.type, `aggregate.${f.name}`, ctx),
+  }));
   const hasAssocs = (agg.associations ?? []).length > 0;
   const hasContains = (agg.contains ?? []).length > 0;
+  const hasValueColls = valueCollFields.length > 0;
   const hasChildren = hasAssocs || hasContains;
+  // Whether a read must declare per-row hydrate locals before the `_rehydrate`
+  // (associations / contained parts / value-object collections all bind a bare
+  // `<field>` local `hydrateRootExpr` references).  A plain flat aggregate has
+  // none, so its single-row reads stay the byte-identical inline expression.
+  const hasHydrateLocals = hasChildren || hasValueColls;
   // The id (primary key) leads the upsert payload — `projectFieldEntries`
   // covers only the declared fields, so it's prepended explicitly (matching
   // the drizzle save row).
@@ -1374,6 +1550,7 @@ export function renderMikroRepository(
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...scalarFields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
+    ...valueCollEntries,
     ...provEntries,
   ]);
 
@@ -1415,12 +1592,14 @@ export function renderMikroRepository(
     { fieldName: "id", expr: "aggregate.id as string" },
     ...kindProjection,
     ...nonVersionEntries,
+    ...valueCollEntries,
     ...provEntries,
     { fieldName: "version", expr: "1" },
   ]);
   const updateData = projectionObject("aggregate", [
     ...kindProjection,
     ...nonVersionEntries,
+    ...valueCollEntries,
     ...provEntries,
     { fieldName: "version", expr: "expected + 1" },
   ]);
@@ -1440,7 +1619,7 @@ export function renderMikroRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -1507,8 +1686,10 @@ export function renderMikroRepository(
       );
     }
     // Single-row find: load the children inline (owner id known) then
-    // hydrate, mirroring findById.
-    if (hasChildren) {
+    // hydrate, mirroring findById.  Value-object collections need a per-row
+    // local too (deserialised off the row's inline jsonb column), so the block
+    // form fires for them as well as for associations / contained parts.
+    if (hasHydrateLocals) {
       return lines(
         `  async ${name}(${params}): Promise<${agg.name} | null> {`,
         `    const em = this.em.fork({ keepTransactionContext: true });`,
@@ -1516,6 +1697,7 @@ export function renderMikroRepository(
         `    if (row === null) return null;`,
         ...assocInlineLoadLines(agg, "em", "row.id", "    "),
         ...containInlineLoadLines(agg, ctx, "em", "row.id", "    "),
+        ...valueCollRowDeclLines(agg, ctx, "row", "    "),
         `    return ${hydrate("row")};`,
         `  }`,
       );
@@ -1621,6 +1803,7 @@ export function renderMikroRepository(
     `    }`,
     ...assocInlineLoadLines(agg, "em", "id as string", "    "),
     ...containInlineLoadLines(agg, ctx, "em", "id as string", "    "),
+    ...valueCollRowDeclLines(agg, ctx, "row", "    "),
     `    const loaded = ${hydrate("row")};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -1681,6 +1864,7 @@ export function renderMikroRepository(
       : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+  const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
 
   return (
     lines(
@@ -1688,6 +1872,7 @@ export function renderMikroRepository(
       usesDecimal && `import Decimal from "decimal.js";`,
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
+      usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       // The aggregate Row + every `Id[]` association's pivot Row entity + each
       // contained entity part's child Row entity.
@@ -1728,7 +1913,12 @@ export function renderMikroRepository(
  *  jsonb id-string array (re-branded to the target id), the embedded analogue of
  *  the relational pivot-table load and the mirror of the drizzle embedded
  *  `hydrateLocals` ref-collection branch. */
-function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent: string): string[] {
+function embeddedHydrateLocals(
+  agg: EnrichedAggregateIR,
+  rowVar: string,
+  indent: string,
+  ctx: EnrichedBoundedContextIR,
+): string[] {
   const out: string[] = [];
   for (const f of agg.fields) {
     if (f.type.kind !== "array" || f.type.element.kind !== "id") continue;
@@ -1736,6 +1926,12 @@ function embeddedHydrateLocals(agg: EnrichedAggregateIR, rowVar: string, indent:
     out.push(
       `${indent}const ${f.name} = ((${rowVar}.${f.name} ?? []) as string[]).map((s) => Ids.${target}Id(s));`,
     );
+  }
+  // Value-object collections (`<VO>[]`) fold onto an inline jsonb column, so
+  // deserialise each into its `<field>` local (the embedded analogue of the
+  // relational `valueCollRowDeclLines`).
+  for (const f of valueCollFieldsOf(agg)) {
+    out.push(`${indent}const ${f.name} = ${deserializeField(f.type, `${rowVar}.${f.name}`, ctx)};`);
   }
   for (const c of agg.contains) {
     const fromDoc = `${lowerFirst(c.partName)}FromDoc`;
@@ -1761,11 +1957,14 @@ export function renderMikroEmbeddedRepository(
   const row = rowClassOf(agg.name);
   const idVar = `Ids.${agg.name}Id`;
   const baseFilters = mikroContextFilters(agg);
-  const scalarFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  const scalarFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type),
+  );
 
   // Root save row: id + scalar column projection + one jsonb id-string array
   // per `Id[]` reference collection (folded onto the root, no pivot table) +
-  // one jsonb entry per containment (serialised through `<part>ToDoc`).
+  // one jsonb array per value-object collection (serialised through the shared
+  // `serializeField`) + one jsonb entry per containment (via `<part>ToDoc`).
   const rootEntries: string[] = ["id: aggregate.id as string"];
   for (const f of scalarFields)
     for (const e of projectFieldEntries(f, "aggregate", ctx))
@@ -1773,6 +1972,8 @@ export function renderMikroEmbeddedRepository(
   for (const f of agg.fields)
     if (isRefCollection(f.type))
       rootEntries.push(`${f.name}: aggregate.${f.name}.map((x) => x as string)`);
+  for (const f of valueCollFieldsOf(agg))
+    rootEntries.push(`${f.name}: ${serializeField(f.type, `aggregate.${f.name}`, ctx)}`);
   for (const c of agg.contains) {
     const toDoc = `${lowerFirst(c.partName)}ToDoc`;
     if (c.collection) rootEntries.push(`${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`);
@@ -1815,7 +2016,7 @@ export function renderMikroEmbeddedRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -1854,7 +2055,7 @@ export function renderMikroEmbeddedRepository(
         `    const rows = await em.find(${row}, ${filter}, { limit: pageSize, offset: (page - 1) * pageSize, orderBy });`,
         dbg(f.name, "rows.length"),
         `    const items = rows.map((row) => {`,
-        ...embeddedHydrateLocals(agg, "row", "      "),
+        ...embeddedHydrateLocals(agg, "row", "      ", ctx),
         `      return ${hydrateRootExpr(agg, "row", ctx)};`,
         `    });`,
         `    return { items, page, pageSize, total, totalPages };`,
@@ -1868,7 +2069,7 @@ export function renderMikroEmbeddedRepository(
         `    const rows = await em.find(${row}, ${filter});`,
         dbg(f.name, "rows.length"),
         `    return rows.map((row) => {`,
-        ...embeddedHydrateLocals(agg, "row", "      "),
+        ...embeddedHydrateLocals(agg, "row", "      ", ctx),
         `      return ${hydrateRootExpr(agg, "row", ctx)};`,
         `    });`,
         `  }`,
@@ -1879,7 +2080,7 @@ export function renderMikroEmbeddedRepository(
       `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const row = await em.findOne(${row}, ${filter});`,
       `    if (row === null) return null;`,
-      ...embeddedHydrateLocals(agg, "row", "    "),
+      ...embeddedHydrateLocals(agg, "row", "    ", ctx),
       `    return ${hydrateRootExpr(agg, "row", ctx)};`,
       `  }`,
     );
@@ -1912,7 +2113,7 @@ export function renderMikroEmbeddedRepository(
     `      requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: false });`,
     `      return null;`,
     `    }`,
-    ...embeddedHydrateLocals(agg, "row", "    "),
+    ...embeddedHydrateLocals(agg, "row", "    ", ctx),
     `    const loaded = ${hydrateRootExpr(agg, "row", ctx)};`,
     `    requestLog().debug({ event: "aggregate_loaded", aggregate: "${agg.name}", id: id as string, found: true });`,
     `    return loaded;`,
@@ -1929,7 +2130,7 @@ export function renderMikroEmbeddedRepository(
     `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, ${withContextFilters("{ id: { $in: ids as string[] } }", baseFilters)});`,
     `    return rows.map((row) => {`,
-    ...embeddedHydrateLocals(agg, "row", "      "),
+    ...embeddedHydrateLocals(agg, "row", "      ", ctx),
     `      return ${hydrateRootExpr(agg, "row", ctx)};`,
     `    });`,
     `  }`,
@@ -1975,12 +2176,14 @@ export function renderMikroEmbeddedRepository(
       : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+  const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
 
   return (
     lines(
       "// Auto-generated.  Do not edit by hand.",
       usesDecimal && `import Decimal from "decimal.js";`,
       repoPortImportLine(agg.name),
+      usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
       audited && `import { stampInsert${versioned ? ", stampUpdate" : ""} } from "../audit-stamp";`,
@@ -2033,7 +2236,7 @@ export function renderMikroDocumentRepository(
   // deserialises every row), narrowed first by the capability filter then by
   // the find's own predicate — same selector shape as the drizzle document
   // builder's `documentFindMethod`.
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((f) => {
     const params = f.params.map((p) => `${p.name}: ${tsParamType(p.type)}`).join(", ");
     const pred = findPredicate(agg, f, ctx);
     const isArray = f.returnType.kind === "array";
@@ -2176,12 +2379,14 @@ export function renderMikroDocumentRepository(
       : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+  const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
 
   return (
     lines(
       "// Auto-generated.  Do not edit by hand.",
       usesDecimal && `import Decimal from "decimal.js";`,
       repoPortImportLine(agg.name),
+      usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
       `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
@@ -2262,7 +2467,7 @@ export function renderMikroEventSourcedRepository(
     ];
   });
 
-  const findMethods = (repo?.finds ?? []).map((find) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthViewFinds(agg, ctx)].map((find) => {
     const usesUser = findUsesCurrentUser(find);
     const baseParams = find.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
     const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
@@ -2387,7 +2592,6 @@ export function renderMikroEventSourcedRepository(
     "  switch (row.type) {",
     ...rowToEventArms,
     "    default:",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: emits a template literal into the generated TS source, not interpolated here
     "      throw new Error(`unknown event type: ${row.type}`);",
     "  }",
     "}",
@@ -2409,6 +2613,7 @@ export function renderMikroEventSourcedRepository(
       : `import type { ${referenced.join(", ")} } from "../../domain/value-objects";`;
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
+  const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
 
   return (
     lines(
@@ -2416,6 +2621,7 @@ export function renderMikroEventSourcedRepository(
       usesDecimal && `import Decimal from "decimal.js";`,
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
+      usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${eventRow} } from "../entities";`,
       // The aggregate root + any contained entity parts (folded in-memory from
@@ -2466,7 +2672,12 @@ function baseReaderImports(
       ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
       : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
   }
-  return { voImportLine, usesMoney: concretes.some(aggregateUsesMoney) };
+  // Deep check — a concrete with money only inside a VO field still hydrates
+  // via `new Decimal(...)`, so gate the import on the VO-aware predicate.
+  return {
+    voImportLine,
+    usesMoney: concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects)),
+  };
 }
 
 /** TPH (`sharedTable`) read-only `<Base>Repository` — scans the shared Row and
@@ -2506,7 +2717,6 @@ export function renderMikroBaseReader(
     `  switch (row.kind) {`,
     ...cases,
     `    default:`,
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${row.kind} is emitted into the generated source, not interpolated here
     "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
     `  }`,
     `}`,

@@ -151,9 +151,11 @@ export default defineConfig({
     },
     // The app's own entry chunk sits well under this; the limit is
     // raised only to mute the warning for the two intentional, lazily
-    // loaded vendor bundles — Monaco (~3.9 MB) and LikeC4 — both of
-    // which are cached after first use and never block initial paint.
-    chunkSizeWarningLimit: 4000,
+    // loaded vendor bundles — Monaco (~9.6 MB — the codingame editor-api
+    // plus the standard-language grammars the generated-file viewer needs
+    // for TS/C#/YAML/JSON/… highlighting) and LikeC4 — both of which are
+    // cached after first use and never block initial paint.
+    chunkSizeWarningLimit: 10000,
   },
   worker: {
     format: "es",

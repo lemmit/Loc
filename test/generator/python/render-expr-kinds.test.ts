@@ -467,6 +467,41 @@ describe("py renderPyExpr — operators / ternary / match / convert", () => {
   });
 });
 
+describe("py renderPyExpr — A1 int-division widening + divTrunc", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+
+  // `int / int` widens to `decimal`.  On Python `decimal` is `float` (already
+  // fractional — `/` is true division), so the division stays native `/`.
+  it("renders int/int→decimal division as native `/` (Python `/` is true division)", () => {
+    expect(
+      renderPyExpr({
+        kind: "binary",
+        op: "/",
+        left: litInt("5"),
+        right: litInt("2"),
+        leftType: INT,
+        rightType: INT,
+        resultType: DECIMAL,
+      }),
+    ).toBe("5 / 2");
+  });
+
+  // `a.divTrunc(b)` — truncating integer division toward zero via `int(...)`.
+  it("renders the `divTrunc` intrinsic as `int(recv / arg)`", () => {
+    expect(
+      renderPyExpr({
+        kind: "method-call",
+        receiver: thisProp("a"),
+        member: "divTrunc",
+        args: [litInt("2")],
+        receiverType: INT,
+        memberType: INT,
+        isCollectionOp: false,
+      }),
+    ).toBe("int(self._a / 2)");
+  });
+});
+
 describe("py renderPyType", () => {
   it("maps primitives", () => {
     expect(renderPyType(INT)).toBe("int");

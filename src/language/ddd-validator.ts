@@ -72,6 +72,7 @@ import {
   checkTemplateHoles,
   checkTenancyDecls,
   checkTernaryExprs,
+  checkTestPlacement,
   checkTheme,
   checkThemeContrast,
   checkTimers,
@@ -172,6 +173,9 @@ export class DddValidator {
     // Assertions are method-based: every `expect(...)` must end in a matcher
     // (no bare boolean), and `toThrow`'s optional status arg is e2e-only.
     guard("expect-matcher", model, () => checkExpectMatcher(model, accept));
+    // Unit-test placement: a hoisted `test` (context/root) must name its home
+    // aggregate with `for`; a nested one must not restate it (test-placement.md).
+    guard("test-placement", model, () => checkTestPlacement(model, accept));
     // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run

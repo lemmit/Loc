@@ -82,9 +82,10 @@ describe("python event dispatch (sagas)", () => {
     expect(dispatch).toContain(
       "await _order_fulfillment_on_shipment_requested(self._session, self, event)",
     );
-    expect(dispatch).toContain(
-      "def make_dispatcher(session: AsyncSession) -> InProcessDispatcher:",
-    );
+    // saga.ddd's `Lifecycle` channel is `delivery: broadcast`, so make_dispatcher
+    // wraps the in-process dispatcher in the realtime SSE tee (channels.md Part I).
+    expect(dispatch).toContain("def make_dispatcher(session: AsyncSession) -> RealtimeDispatcher:");
+    expect(dispatch).toContain("return RealtimeDispatcher(InProcessDispatcher(session))");
     // Handlers take the dispatcher so repo saves drain through it.
     expect(dispatch).toContain("shipments = ShipmentRepository(session, events)");
   });

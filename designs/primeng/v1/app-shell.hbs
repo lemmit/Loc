@@ -9,6 +9,7 @@ import { ToolbarModule } from "primeng/toolbar";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
+{{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
 {{/if}}
 @Component({
   selector: "app-root",
@@ -18,10 +19,12 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{#if hasNav}}    RouterLinkActive,
 {{/if}}    ToolbarModule,
 {{#if authUi}}    AuthGateComponent,
+{{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
     <a href="#main-content" class="loom-skip-link">Skip to content</a>
-    <p-toolbar styleClass="loom-toolbar">
+{{#if hasRealtimeHandlers}}    <app-realtime-handlers />
+{{/if}}    <p-toolbar styleClass="loom-toolbar">
       <ng-template pTemplate="start">
         <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
       </ng-template>

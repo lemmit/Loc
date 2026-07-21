@@ -87,9 +87,7 @@ describe("angular api-module — operation REST path is snake-cased", () => {
   it("posts to the snake-cased op path (matches the Hono route), not camelCase", async () => {
     const api = file(await files(), "api/order.ts");
     // The Hono route emitter registers `POST /{id}/add_line`; the client must match.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(api).toContain("`${API_BASE_URL}/orders/${id}/add_line`");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the template literal in the generated code, not here
     expect(api).not.toContain("/orders/${id}/addLine`");
     // The TS method keeps its camelCase name.
     expect(api).toContain("addLine(id: string, input: AddLineOrderRequest)");

@@ -52,6 +52,22 @@ export type BinaryExpr = Extract<ExprIR, { kind: "binary" }>;
 export type ConvertExpr = Extract<ExprIR, { kind: "convert" }>;
 export type DurationExpr = Extract<ExprIR, { kind: "duration" }>;
 
+/** True when a binary node is an integer division that widened to `decimal`
+ *  (`int / int`, `int / long`, `long / long`) — BOTH operands integral, result
+ *  `decimal`.  The type system widens `/` on integers to `decimal` (5 / 2 =
+ *  2.5), so backends whose integer `/` truncates (.NET, Java) or whose native
+ *  `/` yields a bare float rather than the decimal representation (Elixir) must
+ *  emit real decimal division here, casting/boxing the integral operands.
+ *  A mixed `int / decimal` is NOT matched (its decimal operand is already
+ *  fractional and must not be re-wrapped). */
+export function isIntDivWidenedToDecimal(e: BinaryExpr): boolean {
+  if (e.op !== "/") return false;
+  if (e.resultType?.kind !== "primitive" || e.resultType.name !== "decimal") return false;
+  const integral = (t: BinaryExpr["leftType"]): boolean =>
+    t?.kind === "primitive" && (t.name === "int" || t.name === "long");
+  return integral(e.leftType) && integral(e.rightType);
+}
+
 /** A `name: value` pair with `value` already rendered (object / new fields). */
 export interface RenderedField {
   name: string;
@@ -293,6 +309,17 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       // expression renderer — reaching it here means it leaked to a domain
       // position, which the IR validator should already have rejected.
       throw new Error("renderExprWith: 'action-ref' is not a domain expression");
+    case "authz-filter":
+      // An authorization/tenancy filter sentinel (M-T9.9).  It lives ONLY in an
+      // aggregate's context/write-scope filters and every backend's query-filter
+      // translator special-cases it (`isDenyFilter` / `isDeepScopeFilter`)
+      // BEFORE reaching this generic dispatch — so reaching it here means a
+      // backend's filter translator forgot the sentinel arms.  Throw LOUDLY
+      // (a codegen crash) rather than fall through to a wrong render: a silently
+      // mis-rendered auth filter is a cross-tenant leak / authorization bypass.
+      throw new Error(
+        "renderExprWith: 'authz-filter' must be handled by the backend's query-filter translator, not the generic expression dispatcher",
+      );
   }
 }
 
@@ -535,5 +562,11 @@ export function renderExprWithMarks<Ctx extends ExprCtxBase>(
     }
     case "action-ref":
       throw new Error("renderExprWithMarks: 'action-ref' is not a domain expression");
+    case "authz-filter":
+      // See `renderExprWith` — a filter sentinel must never reach the generic
+      // dispatcher; a backend's query-filter translator special-cases it first.
+      throw new Error(
+        "renderExprWithMarks: 'authz-filter' must be handled by the backend's query-filter translator, not the generic expression dispatcher",
+      );
   }
 }

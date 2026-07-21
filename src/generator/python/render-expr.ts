@@ -156,6 +156,20 @@ export function renderPyExpr(e: ExprIR, ctx: PyRenderContext = DEFAULT): string 
   return renderExprWith(e, PY_TARGET, ctx);
 }
 
+/** The condition for an `if <cond>:` that fires when `e` is FALSE — used by
+ *  precondition/requires guards. A `x.contains(y)` membership renders as
+ *  `(y in x)`; its negation is `y not in x`, so the guard emits `if y not in x:`
+ *  instead of `if not (y in x):` (ruff E713). Everything else falls back to
+ *  `not (<rendered>)`. */
+export function renderPyNegatedGuard(e: ExprIR, ctx: PyRenderContext = DEFAULT): string {
+  if (e.kind === "method-call" && e.isCollectionOp && e.member === "contains") {
+    const recv = renderPyExpr(e.receiver, ctx);
+    const arg = e.args[0] ? renderPyExpr(e.args[0], ctx) : "None";
+    return `${arg} not in ${recv}`;
+  }
+  return `not (${renderPyExpr(e, ctx)})`;
+}
+
 /**
  * Imports a rendered domain expression reaches for beyond builtins.
  * Pure mirror of the renderer's triggers (the C#
@@ -391,6 +405,10 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "long.abs": (recv) => `abs(${recv})`,
   "decimal.abs": (recv) => `abs(${recv})`,
   "money.abs": (recv) => `abs(${recv})`,
+  // Truncating integer division (toward zero) — `int(a / b)`, NOT `//` (which
+  // floors negatives); `int()` on the float quotient truncates toward zero.
+  "int.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
+  "long.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
   "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "decimal.min": (recv, args) => `min(${recv}, ${args[0]})`,

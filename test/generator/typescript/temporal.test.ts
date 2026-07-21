@@ -67,11 +67,9 @@ describe("typescript generator — A5 temporal", () => {
   it("lowers column-side datetime ± duration to sql`make_interval` and imports sql", async () => {
     const { model } = await parseString(SRC);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating in the generated sql tag, not here
     expect(repo).toContain("lt(sql`${schema.invoices.dueDate} + make_interval(days => ${30})`, q)");
     expect(repo).toContain(
       // param amount binds; `now()` renders as a bound Date value
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: emitted source
       "lt(sql`${schema.invoices.dueDate} - make_interval(hours => ${n})`, new Date())",
     );
     expect(repo).toMatch(/import \{[^}]*\bsql\b[^}]*\} from "drizzle-orm";/);
@@ -89,7 +87,6 @@ describe("typescript generator — A5 temporal", () => {
     const { model, errors } = await parseString(src);
     expect(errors).toEqual([]);
     const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: emitted source
     expect(repo).toContain("lt(schema.invoices.dueDate, sql`${q} + make_interval(days => ${2})`)");
   });
 
