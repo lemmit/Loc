@@ -22,7 +22,7 @@ only because one half of it was missing.
 | consumer | `workflow on(e)` | `commandHandler` (1 agg) / `workflow create(cmd)` (N aggs) |
 | failure model | each reactor's own retry | **retry → `onExhausted` on the owner** |
 | HTTP trigger | — | `api { route … -> handler }` |
-| clock trigger | — | `job { schedule -> handler }` |
+| clock trigger | `job { … emit E }` | `job { … -> handler }` (one system-scope construct) |
 
 ## What already exists (verified on `main`)
 
@@ -200,41 +200,67 @@ The net is a *smaller* surface despite adding `send`/`job`/`bff`:
 - **`spawn`** → it's `send` on the client.
 - **auto `POST /workflows/<name>`** → a scaffolded explicit `route`.
 - **the phantom dead-letter event** → never introduced.
+- **`timerSource` keyword** → folds into the one `job` scheduling construct (see
+  below); the scheduling *engine* is reused unchanged.
 
-(`timerSource` is *not* removed — see below; it and `job` are two sugars over one
-scheduling mechanism.)
+## Scheduling — one `job` construct (timerSource folds in)
 
-## timerSource + job — one scheduling mechanism, two intent sugars
+**Decision: one system-scope `job` construct; `timerSource` retires into it.**
 
-`timerSource`'s design was *"time as an event source… the clock twin of
-`channelSource`… zero new workflow grammar"* — it fires an **event** because, when
-it was built, there was **no command-dispatch surface** (`send` did not exist;
-commands were mediator-sync-only). Event-firing was the only way to trigger domain
-work from a clock.
+### Why timerSource was proposed (scheduling.md RFC)
+The problem: Loom could react to *events* but not to *time* — reaping/expiry,
+polling, digests, maintenance — and the only recourse was hand-written per-backend
+code in `.loomignore` files (the escape-hatch sprawl Loom exists to kill). The
+RFC's *first draft* was a `schedule every 5m { … }` trigger; it was **rejected**
+for three reasons, and they're a checklist any scheduling surface must pass:
 
-The clean resolution is **not** to retire it. A scheduled trigger is one
-mechanism — **a schedule + a target — and the target's kind picks the producer
-verb**, exactly like `emit`/`send`:
+1. **Trigger uniformity** — a cadence sublanguage reads as a foreign parallel
+   grammar among the `create`/`on`/`handle` workflow members.
+2. **No instance identity** — workflows are correlation-keyed saga entities; a
+   recurring tick has no correlation, so a schedule sits awkwardly as a member.
+3. **Infra-in-domain** — `every 5m` is an *operational* knob (dev-slow/prod-fast,
+   per-environment), not a domain fact.
 
-- target an **event** → scheduled `emit`, fan-out → the **`timerSource`** spelling
-  (`for: E`), unchanged, shipped (M-T4.1).
-- target a **command/create-workflow** → scheduled `send`, single owner → the
-  **`job`** spelling (`schedule -> Cmd`), the command-side that was missing.
+The RFC's fix: model a tick as an **event** (domain reacts via existing
+`on(e)`/`create(e) by`, cadence-blind) and put the cadence at **system scope** as
+a `channelSource`-twin binding (`timerSource`). It fired an *event* because, at the
+time, there was **no command-dispatch surface** (`send` didn't exist) — a tick
+event was the only cadence-blind way to reach domain logic.
 
-So `timerSource` and `job` are **two intent-revealing sugars over one scheduling
-engine** (durable cron/every, advisory locks, overlap — shipped), the clock-trigger
-twins of `emit`/`send`. Neither subsumes the other; the name is locked to its
-target kind by a validator (`timerSource` → event, `job` → command), so the
-spelling tells you what it fires at a glance. This matches Loom's existing house
-style — the `payload`/`command`/`query`/`response`/`error` keywords are one wire
-mechanism, five intent sugars.
+### Why `job` replaces it now
+With `send`/`job`, a clock can dispatch a command directly. A `job` block passes
+the RFC's three-point checklist **precisely because it's a separate system-scope
+trigger surface, not a workflow member**: (1) the cadence lives in a `job` block,
+not among workflow triggers; (2) `job` is stateless dispatch — instance identity
+comes from the target workflow; (3) **it must be system-scope** (beside `api` /
+`channelSource`), so cadence stays operational and env-swappable — the RFC's
+load-bearing constraint, now `job`'s hard placement rule.
 
-**No deprecation, no migration** — `timerSource` stays valid (the event role);
-`job` is added (the command role). A scheduled workflow that *also* wants fan-out
-still uses `timerSource → event → on(e)`/`create(e) by`; one that just runs work
-uses `job -> command/workflow`. `job` is therefore a **battery/surface over the
-scheduling engine** (like `api` over HTTP routing) — it composes schedule + `send`
-+ handler, zero new runtime.
+**`timerSource` with `->` is a category error** — `timerSource` is a `*Source`
+*binding* (the `channelSource`/`dataSource` family: `for:` / `use:` clauses), while
+`->` is the *dispatch* arrow (the `route`/`api` family). So the choice was never
+"add `->` to timerSource"; it was one construct or two. One wins: the
+`channelSource`-twin identity was a *mechanism* to keep cadence system-scope and
+reuse the reaction machinery — a system-scope `job` block delivers both without a
+second keyword, and "job" reads correctly for the dominant single-owner case
+(`timerSource` reads as "a source of events," wrong for a command).
+
+### The one construct
+`job` is system-scope; the **target verb reveals the kind** (the `->`/`emit`
+cardinality lens — `->` dispatches to one owner, `emit` fans out to N):
+
+```
+job Nightly {
+  cron "0 2 * * *" -> DailyClose      // -> command/create-workflow: dispatch, single owner
+  every 1h          emit DayRolled     // emit event: fan-out (was timerSource's whole job)
+}
+```
+
+`job` is a **battery/surface over the scheduling engine** (durable cron/every,
+advisory locks, overlap — shipped, reused unchanged), like `api` over HTTP routing.
+`timerSource`-the-keyword retires via a mechanical codemod
+(`timerSource { for: E, cron … }` → `job { cron … emit E }`) — five backends, the
+IR/engine identical.
 
 ## Symmetry summary
 
@@ -242,8 +268,8 @@ scheduling engine** (like `api` over HTTP routing) — it composes schedule + `s
               event (fan-out)            command (single owner)
 produce       emit E                     send C
 consume       workflow on(e)             commandHandler / workflow create(cmd)
-HTTP trigger  —                          api { route … -> handler }
-clock trigger timerSource { for: E }     job { schedule -> handler }
+HTTP trigger  —                          api  { route … -> handler }
+clock trigger job { … emit E }           job  { … -> handler }   (one system-scope construct)
 transport     channel (carries:)         derived queue; mediator in-deployable / broker across
 failure       per-reactor retry          retries + onExhausted on the owner
 ```
@@ -256,10 +282,13 @@ routing binding, orthogonal.
 1. **`send` vs `dispatch`** as the keyword (messaging convention: events are
    published/emitted, commands are *sent* → `send`).
 2. **`bff` marker name** — `bff` / `composition` / `portal` / `readModel`.
-3. **timerSource/job unification** — resolved to "one engine, two intent sugars"
-   (timerSource → event, job → command); confirm the validator locks each keyword
-   to its target kind, vs. allowing one target-polymorphic keyword.
-4. **`job` block scope** — system-level (beside `api`) vs context-level.
+3. **timerSource/job** — *resolved:* one system-scope `job` construct
+   (`-> Command` dispatch / `emit Event` fan-out); `timerSource` retires via
+   codemod. Remaining: confirm the codemod covers every shipped `timerSource`
+   form (cron/every/in/overlap).
+4. **`job` block scope** — *resolved: system-level* (beside `api`), forced by the
+   RFC's "cadence is operational, not domain" constraint — a context-scoped `job`
+   would re-leak infra into the domain.
 5. **Route target: command vs handler** — targeting the *command* (single owner ⇒
    handler derived) reads cleaner but can't point at a workflow `handle` or reuse
    one handler across routes; targeting the *handler* keeps today's flexibility.
