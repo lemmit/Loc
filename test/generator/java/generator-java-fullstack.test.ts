@@ -27,7 +27,7 @@ async function files(): Promise<Map<string, string>> {
 }
 
 describe("java generator — embedded-SPA fullstack mount", () => {
-  it("passes validation (the ui: gate is lifted; hosts: stays gated)", async () => {
+  it("passes validation (both the ui: and hosts: mounts are supported; M-T6.5)", async () => {
     const loom = await buildLoomModel(SRC);
     const errors = validateLoomModel(loom).filter(
       (d) => d.code === "loom.java-fullstack-unsupported",

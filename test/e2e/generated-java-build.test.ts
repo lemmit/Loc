@@ -98,6 +98,10 @@ const FIXTURES: Array<[string, string]> = [
   // Embedded-SPA fullstack mount: /api route prefix, SpaWebConfig
   // (resource handler + index.html fallback), ClientApp/ React project.
   ["test/e2e/fixtures/java-build/fullstack.ddd", "fs_app"],
+  // `hosts:` fullstack embed (M-T6.5): same Spring surface as `ui:`, but
+  // bound via the D-PHOENIX-SURFACE `hosts:` clause onto a framework-owning
+  // `ui { }` block — the dotnet `hosts:` twin.
+  ["test/e2e/fixtures/java-build/fullstack-hosts.ddd", "fsh_app"],
   // Union finds (`Order or NotFound` / `Order option`): optional-twin
   // repo/service, tagged 200 wire record, problem/bare-404 absence.
   ["test/e2e/fixtures/java-build/union-finds.ddd", "uf_api"],
