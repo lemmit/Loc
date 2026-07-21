@@ -28,6 +28,12 @@ export interface AngularFormControlSpec {
    *  `File` field uses `FileRef | null` so the uploaded ref + the `null` seed
    *  both assign (a `nonNullable` string control rejects the FileRef). */
   tsType?: string;
+  /** `Validators.*` calls derived from the aggregate's wire-translatable
+   *  invariants (`Validators.min(N)`, `Validators.pattern(/…/)`, …) — the
+   *  Angular twin of the zod native-chain the other frontends emit on
+   *  `Create<Agg>Request`.  Absent (undefined) when the field carries no
+   *  wire constraint, keeping the emitted `FormControl` byte-identical. */
+  validators?: string[];
 }
 
 /** A `useAll<X>()` query the page-shell hoists so an `X id` form field can

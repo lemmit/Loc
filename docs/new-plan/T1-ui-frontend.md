@@ -66,6 +66,7 @@ Sources: [channels](../old/proposals/channels.md) realtime sections, global-plan
 
 ## M-T1.11 — i18n — `open` · **XL** · P2
 Nothing exists. Phases 1–7 per the proposal pair: extraction skeleton → React runtime → `ddd i18n sync` (content-hash keys, D-I18N-KEY) → pack chrome catalogs → invariant `message:` keys → non-React backends → validator-message centralisation. Prereq: [i18n-strings](../old/proposals/i18n-strings.md) Phase 1 (template-literal → ICU lowering + `loom.user-visible-concat`).
+The **invariant `message:` phase has an extractable foundation slice** — the custom-validation-message authoring surface (`message` on `invariant`/`check`/`precondition`) + IR descriptor + wire per-error `code` + full cross-target fan-out of the literal text — that **ships ahead of the i18n epic** (literal English now, key/catalog swap additive later). Design: [M-T1.11 invariant-message design](./missions/M-T1.11-invariant-message-design.md).
 Sources: [i18n](../old/proposals/i18n.md), [i18n-strings](../old/proposals/i18n-strings.md).
 
 ## M-T1.12 — Accessibility: from contract to emission — `in-flight` · **L** · P2 ⚠ verify-first
@@ -87,7 +88,7 @@ Remove implicit sidebar derivation + per-page `menu {}` bag; every entry traces 
 Sources: [scaffolded-navigation](../old/proposals/scaffolded-navigation.md).
 
 ## M-T1.14 — Angular tails — `partial` · **S** · P2
-`X id` select/combobox is DONE (verified 2026-07-13: `angular/form-fields.ts:226-247` renders mat-select/p-select/native select via hoisted `useAll<X>()`). Remaining: page-`requires`/nav-link auth gating parity.
+`X id` select/combobox is DONE (verified 2026-07-13: `angular/form-fields.ts:226-247` renders mat-select/p-select/native select via hoisted `useAll<X>()`). **Client-side form validation DONE** (verified 2026-07-16 via `ng build`): the aggregate's wire-translatable `invariant`s fold into per-field `Validators.*` on each create-form `FormControl` (`angular/form-validators.ts`, via the shared `takeSingleFieldChain` gate — same classification as the zod `Create<Agg>Request`), with an inline per-field error revealed on `markAllAsTouched()` at a blocked submit. Covers **create + operation + modal** forms (the create-form uses `agg.invariants`; the op/modal forms use `[...agg.invariants, ...preconditionsAsInvariants(op)]` over the op params — the exact zod `<Op>Request` source). Workflow forms stay validator-free, matching the zod `<Wf>Request` (plain `z.object`, no refines — workflow guards are server-side). Closes the Angular leg of the frontend-validation parity gap (React/Vue/Svelte already emit the zod chain). Remaining: page-`requires`/nav-link auth gating parity.
 Sources: [angular-frontend](../old/proposals/angular-frontend.md) tail.
 
 ## M-T1.15 — Richer list filter inputs — `open` · **S** · P3
