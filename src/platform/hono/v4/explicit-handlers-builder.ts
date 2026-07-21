@@ -489,16 +489,18 @@ export function buildExplicitRoutesFile(
     }
     // A single aggregate/entity return (DSL-bodied, wire-projected) imports its
     // `<Entity>Response` from the aggregate routes file so the typed 200 resolves
-    // in-scope.  Extern returns aren't wire-projected → stay `z.unknown()`.
-    if (h.returnType && !h.extern) {
-      const info = wireTypeInfo(h.returnType, "response");
-      if (info.refKind === "entity" && !info.isCollection) {
-        const owning =
-          ctx.aggregates.find((a) => a.name === info.base) ??
-          ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
-        if (owning) {
-          responseImports.set(`${info.base}Response`, `./${lowerFirst(owning.name)}.routes`);
-        }
+    // in-scope.  Extern returns aren't wire-projected → stay `z.unknown()`.  Uses
+    // the same `returnEntity` the emission does (it normalises a declared
+    // `<Agg>Response` return back to the entity), so the import is emitted iff the
+    // typed-200 reference is — a raw `wireTypeInfo` here would miss the scaffolded
+    // form (return declared as the response record) and drop the import (TS2304).
+    // Skip paged returns exactly as the emission does (they dispatch to
+    // `emitPagedRunHandler`, keep a `z.unknown()` 200, and would make
+    // `returnEntity`'s `wireTypeInfo` throw on the paged generic carrier).
+    if (!h.extern && !(h.returnType && pagedReturn(h.returnType))) {
+      const ent = returnEntity(h, ctx);
+      if (ent && !ent.isCollection) {
+        responseImports.set(ent.respName, `./${lowerFirst(ent.agg)}.routes`);
       }
     }
     if (h.extern) externImplImports.set(externImplFn(h.name), externImplModule(h.name));
