@@ -18,7 +18,7 @@ roadmap.
 ## Layer 0 — scalar intrinsics
 
 Built-in operations on a scalar receiver.  A `queryable` op may appear in a
-`find … where` predicate (and view / criterion / capability filters); a
+`find … where` predicate (and criterion / capability filters); a
 non-queryable one in that position is rejected with `loom.intrinsic-not-queryable`
 rather than silently degrading.
 
