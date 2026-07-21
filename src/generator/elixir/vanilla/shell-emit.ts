@@ -232,9 +232,17 @@ end
 }
 
 function renderVanillaFormatterExs(): string {
+  // The generated OpenApiSpex contract layer (lib/<app>_web/api/**) is a
+  // machine-emitted nested-struct literal that `mix format` reflows by width; it
+  // is never hand-edited, so it is excluded from the format gate.  Every
+  // hand-extendable file (domain, controllers, workflows) IS formatted.
+  // `.formatter.exs` is evaluated, so `inputs` is computed and the `_web/api/`
+  // subtree rejected.
   return `[
   import_deps: [:ecto, :ecto_sql, :phoenix],
-  inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"]
+  inputs:
+    (["mix.exs", ".formatter.exs"] ++ Path.wildcard("{config,lib,test}/**/*.{ex,exs}"))
+    |> Enum.reject(&String.contains?(&1, "_web/api/"))
 ]
 `;
 }

@@ -52,6 +52,14 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     const paths = [...out.keys()];
     expect(paths).toContain("mix.exs");
     expect(paths).toContain(".formatter.exs");
+    // M-T6.3 — the .formatter.exs excludes the generated OpenApiSpex contract
+    // layer (lib/<app>_web/api/**), machine-emitted nested-struct data that
+    // `mix format` would reflow by width; every hand-extendable file stays
+    // formatted.  `inputs` is computed (rejecting `_web/api/`) so it stays
+    // correct for any app name.
+    const formatter = out.get(".formatter.exs")!;
+    expect(formatter).toContain("import_deps: [:ecto, :ecto_sql, :phoenix]");
+    expect(formatter).toContain('Enum.reject(&String.contains?(&1, "_web/api/"))');
     expect(paths).toContain("lib/api/application.ex");
     expect(paths).toContain("lib/api/repo.ex");
     expect(paths).toContain("lib/api_web.ex");
