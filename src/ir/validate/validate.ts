@@ -64,6 +64,7 @@ import {
   validateNodeStampSupport,
   validatePagedQueryHandlerBackend,
   validatePermissions,
+  validateProjectionSourceProjectionBackend,
   validateProvenancedStorage,
   validatePythonStampSupport,
   validateQueryTimeProjectionBackend,
@@ -173,6 +174,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
+    validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);

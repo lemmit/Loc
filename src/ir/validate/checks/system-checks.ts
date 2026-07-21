@@ -181,6 +181,37 @@ export function validateWorkflowSourceProjectionBackend(
   }
 }
 
+// A query-time projection sourced `from <OtherProjection>` reads that
+// projection's persisted `<Proj>Row` read-model table, not an aggregate
+// repository — a distinct per-backend emit path.  Backends in
+// `PROJECTION_PROJ_SOURCE_SUPPORTED` have ported it; others gate the read
+// HONESTLY until their port lands.  Mirrors `validateWorkflowSourceProjectionBackend`.
+const PROJECTION_PROJ_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+
+export function validateProjectionSourceProjectionBackend(
+  sys: SystemIR,
+  diags: LoomDiagnostic[],
+): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform) || PROJECTION_PROJ_SOURCE_SUPPORTED.has(d.platform))
+      continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (p.query?.sourceKind !== "projection") continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-source-unsupported-backend",
+          message: `projection '${p.name}' is sourced 'from ${p.query.source}' (another projection's read-model rows), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
+          source: `${c.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.auth?.ui) continue;

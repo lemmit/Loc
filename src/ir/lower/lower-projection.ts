@@ -21,7 +21,7 @@
 // `lower.ts` orchestrator.
 
 import type { Projection, ProjectionOn } from "../../language/generated/ast.js";
-import { isAggregate, isProperty, isWorkflow } from "../../language/generated/ast.js";
+import { isAggregate, isProjection, isProperty, isWorkflow } from "../../language/generated/ast.js";
 import type {
   FieldIR,
   ProjectionIR,
@@ -85,18 +85,28 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
   const sourceRef = p.source?.ref;
   const sourceName = sourceRef?.name ?? p.source?.$refText;
   const sourceIsWorkflow = !!sourceRef && isWorkflow(sourceRef);
+  // A `from <Projection>` source — reads a projection's read-model row.  Distinct
+  // from the no-`from` folded+join hybrid (which also binds via `inProjection` but
+  // has no `sourceRef`).  A self-source (`from <Self>`) is admitted here so the
+  // validator can reject the cycle (`loom.projection-source-self`).
+  const sourceIsProjection = !!sourceRef && isProjection(sourceRef);
 
   // Candidate scope: the `from` source.  An AGGREGATE binds `this`/alias to its
   // fields (`inAggregate`, aliased like `criterion … of T as o`); a WORKFLOW
-  // binds `this`/alias to its instance state fields (`inWorkflow`) — the same
-  // source-agnostic predicate machinery the removed workflow-source view used.
-  // No `from` ⇒ the projection row itself (folded+join hybrid).
+  // binds `this`/alias to its instance state fields (`inWorkflow`); another
+  // PROJECTION binds `this`/alias to its read-model row fields (`inProjection`
+  // over the SOURCE projection) — the same source-agnostic predicate machinery
+  // the removed workflow/projection-source view used.  No `from` ⇒ the current
+  // projection row itself (folded+join hybrid).
   let scope: Env = { ...env, locals: new Map() };
   if (sourceRef && isAggregate(sourceRef)) {
     scope = inAggregate(scope, sourceRef);
     if (p.sourceAlias) scope = { ...scope, candidateAlias: p.sourceAlias };
   } else if (sourceRef && isWorkflow(sourceRef)) {
     scope = inWorkflow(scope, sourceRef);
+    if (p.sourceAlias) scope = { ...scope, candidateAlias: p.sourceAlias };
+  } else if (sourceIsProjection) {
+    scope = inProjection(scope, sourceRef);
     if (p.sourceAlias) scope = { ...scope, candidateAlias: p.sourceAlias };
   } else {
     scope = inProjection(scope, p);
@@ -131,6 +141,7 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
 
   const query: ProjectionQueryIR = { joins, auxiliaries, ...resolveBypass(p) };
   if (sourceIsWorkflow) query.sourceKind = "workflow";
+  else if (sourceIsProjection) query.sourceKind = "projection";
   // The `requires` gate lowers in the BARE context env (not `scope`), so
   // `currentUser` resolves but the source row's fields do not — it decides
   // endpoint access before any row exists, so it may reference only the

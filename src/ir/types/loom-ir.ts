@@ -1445,11 +1445,13 @@ export interface ProjectionQueryIR {
    *  name.  Undefined for the folded+`join` hybrid (no `from`; `join`s resolve
    *  stored id columns instead). */
   source?: string;
-  /** Whether `source` names an AGGREGATE (read through its repository) or a
+  /** Whether `source` names an AGGREGATE (read through its repository), a
    *  WORKFLOW (read through its persisted instance / saga-state rows,
-   *  `instanceWireShape`).  Absent ⇒ aggregate (the default / folded-hybrid
-   *  case).  A workflow source is `select`-projection only (no `join`s). */
-  sourceKind?: "aggregate" | "workflow";
+   *  `instanceWireShape`), or another materialized PROJECTION (read through its
+   *  persisted `<Proj>Row` read-model table).  Absent ⇒ aggregate (the default /
+   *  folded-hybrid case).  A workflow / projection source is `select`-projection
+   *  only (no `join`s). */
+  sourceKind?: "aggregate" | "workflow" | "projection";
   /** The author's alias for the source candidate (`from Order as o`).  `this`
    *  / bare stays the default; the alias resolves identically (like
    *  `criterion … of T as o`). */

@@ -1475,10 +1475,12 @@ ProjectionMember:
 // than this surface-only slice warrants, and ordering is only observable once
 // the read is actually emitted (paged reads).
 // A query-time projection's `from` source — an AGGREGATE (read through its
-// repository) or a WORKFLOW (read through its persisted instance / saga-state
-// rows, `instanceWireShape`).  The validator restricts the workflow case
-// (`select`-projection only, no `join`s).
-type ProjectionSource = Aggregate | Workflow;
+// repository), a WORKFLOW (read through its persisted instance / saga-state
+// rows, `instanceWireShape`), or another materialized PROJECTION (read through
+// its persisted `<Proj>Row` read-model table).  The validator restricts the
+// workflow / projection cases (`select`-projection only, no `join`s; a
+// projection source must be materialized — a folded read model with a table).
+type ProjectionSource = Aggregate | Workflow | Projection;
 
 fragment ProjectionQueryClauses:
     ('from' source=[ProjectionSource:ID] ('as' sourceAlias=ID)?)?

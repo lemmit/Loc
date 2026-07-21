@@ -40,31 +40,38 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
 
   // Foreign aggregates touched: the query source (for its repo + Response) and
   // every `join` follow target (for its repo).  A WORKFLOW source reads the
-  // saga-state table directly (no repository), so it never contributes here.
+  // saga-state table directly, and a PROJECTION source reads the folded
+  // `<Proj>Row` read-model table directly — both without a repository, so
+  // neither contributes here.
   const sourceAggs = new Set<string>();
   const followAggs = new Set<string>();
+  const isRawTableSource = (kind?: string) => kind === "workflow" || kind === "projection";
   for (const p of projections) {
-    if (p.query?.source && p.query.sourceKind !== "workflow") sourceAggs.add(p.query.source);
+    if (p.query?.source && !isRawTableSource(p.query.sourceKind)) sourceAggs.add(p.query.source);
     for (const aux of p.query?.auxiliaries ?? []) followAggs.add(aux.aggName);
   }
-  // Pre-compute each workflow-sourced projection's saga-state read (table +
-  // Drizzle `where`), accumulating the Drizzle operators the filter needs so the
-  // import line below can list them.  `lowerToDrizzle` takes the BARE table name
-  // and prepends `schema.` on the column refs itself.
-  const wfDrizzleOps = new Set<string>();
-  const wfReads = new Map<string, { table: string; where?: string }>();
+  // Pre-compute each raw-table-sourced projection's read (table + Drizzle
+  // `where`) — a WORKFLOW source reads its persisted saga-state table, a
+  // PROJECTION source reads the SOURCE projection's folded `<Proj>Row` read-model
+  // table (named `schema.<lowerFirst(plural(source))>`, exactly as the folded
+  // projection emitter in projection-builder.ts creates it).  Accumulate the
+  // Drizzle operators the filter needs so the import line below can list them.
+  // `lowerToDrizzle` takes the BARE table name and prepends `schema.` on the
+  // column refs itself.
+  const rawDrizzleOps = new Set<string>();
+  const rawReads = new Map<string, { table: string; where?: string }>();
   for (const p of projections) {
-    if (p.query?.sourceKind !== "workflow" || !p.query.source) continue;
+    if (!isRawTableSource(p.query?.sourceKind) || !p.query?.source) continue;
     const tableBare = lowerFirst(plural(p.query.source));
     let where: string | undefined;
     if (p.query.filter) {
       const lowered = lowerToDrizzle(p.query.filter, tableBare, ctx);
       if (lowered) {
         where = lowered.expr;
-        for (const op of lowered.ops) wfDrizzleOps.add(op);
+        for (const op of lowered.ops) rawDrizzleOps.add(op);
       }
     }
-    wfReads.set(p.name, { table: `schema.${tableBare}`, where });
+    rawReads.set(p.name, { table: `schema.${tableBare}`, where });
   }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
   const usesEvents =
@@ -83,8 +90,8 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   lines.push(`import type * as schema from "../db/schema";`);
-  if (wfDrizzleOps.size > 0) {
-    lines.push(`import { ${[...wfDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
+  if (rawDrizzleOps.size > 0) {
+    lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   }
   if (needsIds) lines.push(`import * as Ids from "../domain/ids";`);
   for (const aggName of [...allAggs].sort()) {
@@ -121,7 +128,7 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push("");
 
   for (const p of projections) {
-    lines.push(...emitQueryProjectionRoute(p, wfReads.get(p.name)).map((l) => `  ${l}`));
+    lines.push(...emitQueryProjectionRoute(p, rawReads.get(p.name)).map((l) => `  ${l}`));
     lines.push("");
   }
 
@@ -160,7 +167,7 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
  *  projection's own row shape. */
 function emitQueryProjectionRoute(
   p: ProjectionIR,
-  wfRead?: { table: string; where?: string },
+  rawRead?: { table: string; where?: string },
 ): string[] {
   const T = upperFirst(p.name);
   const source = p.query!.source!;
@@ -195,13 +202,14 @@ function emitQueryProjectionRoute(
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
-  if (wfRead) {
-    // WORKFLOW source: read the saga-state table directly (no repository, no
+  if (rawRead) {
+    // RAW-TABLE source (WORKFLOW saga-state table or a folded PROJECTION's
+    // `<Proj>Row` read-model table): read the table directly (no repository, no
     // `join` follows — validator-gated), applying the `where` in SQL.  The
-    // `select` projection below reads instance fields off each row exactly like
-    // an aggregate candidate.
+    // `select` projection below reads the source row fields off each row exactly
+    // like an aggregate candidate.
     out.push(
-      `    const rows = await db.select().from(${wfRead.table})${wfRead.where ? `.where(${wfRead.where})` : ""};`,
+      `    const rows = await db.select().from(${rawRead.table})${rawRead.where ? `.where(${rawRead.where})` : ""};`,
     );
     const projectedFields = (p.query!.selects ?? [])
       .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)

@@ -8,6 +8,8 @@ import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/lo
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
+import { projectionRepoField } from "./projection-reads.js";
+import { projectionRowClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 import { workflowStateClass } from "./workflow-state.js";
 
@@ -68,8 +70,10 @@ export interface QueryProjectionCtx {
   routePrefix?: string;
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
-  /** Saga-state Spring Data repository package (infrastructure.repositories) —
-   *  where a `from <Workflow>`-sourced projection reads the `<Wf>StateRepository`. */
+  /** Saga-state / read-model Spring Data repository package
+   *  (infrastructure.repositories) — where a `from <Workflow>`-sourced
+   *  projection reads the `<Wf>StateRepository`, and a `from <Projection>`-sourced
+   *  projection reads the source folded projection's `<Src>RowRepository`. */
   stateRepoPkg: string;
 }
 
@@ -95,6 +99,10 @@ export function renderJavaQueryProjections(
   // projection reads (NON-event-sourced, observable — guaranteed by the IR
   // validator).  Injected alongside the aggregate repositories.
   const stateRepoWfs = new Set<WorkflowIR>();
+  // Source folded projections whose persisted read-model repository a
+  // `from <Projection>`-sourced projection reads (`<Src>RowRepository.findAll()`).
+  // Injected alongside the aggregate / saga-state repositories.
+  const sourceProjs = new Set<ProjectionIR>();
   const routes: string[] = [];
   // Authorization gates on query-time projections (D-AUTH-OIDC / default-deny) —
   // a `requires <expr>` clause runs in the controller action BEFORE delegating
@@ -147,6 +155,42 @@ export function renderJavaQueryProjections(
       if (!wf) throw new Error(`java query-projection: workflow source '${source}' not found`);
       stateRepoWfs.add(wf);
       const repo = stateRepoField(wf);
+      const args = shape.map((f) => {
+        const sel = selectByField.get(f.name);
+        if (!sel) return `null`;
+        collectJavaExprImports(sel.expr, imports);
+        return domainToWire(
+          f.type,
+          renderJavaExpr(sel.expr, { thisName: "x", accessorProps: true }),
+        );
+      });
+      const filter = proj.query!.filter;
+      const filterLine = filter
+        ? (() => {
+            collectJavaExprImports(filter, imports);
+            return `            .filter(x -> ${renderJavaExpr(filter, { thisName: "x", accessorProps: true })})`;
+          })()
+        : undefined;
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        `        return ${repo}.findAll().stream()`,
+        ...(filterLine ? [filterLine] : []),
+        `            .map(x -> new ${rowName}(${args.join(", ")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+    } else if (proj.query!.sourceKind === "projection") {
+      // `from <Projection>` — read the SOURCE folded projection's persisted
+      // read-model rows through its `<Src>RowRepository` (the fold-materialized
+      // `<Src>Row` table), apply the `where` filter in-memory, and project the
+      // `select` off each source row `x`.  The validator guarantees the source is
+      // a materialized projection, NO `join`, NO `ignoring` — findAll + filter +
+      // map, exactly like the workflow-source arm but keyed on a projection row.
+      const src = ctx.projections.find((p) => p.name === source);
+      if (!src) throw new Error(`java query-projection: projection source '${source}' not found`);
+      sourceProjs.add(src);
+      const repo = projectionRepoField(src);
       const args = shape.map((f) => {
         const sel = selectByField.get(f.name);
         if (!sel) return `null`;
@@ -264,11 +308,23 @@ export function renderJavaQueryProjections(
     if (qpctx.stateRepoPkg !== qpctx.pkg)
       explicitImports.add(`${qpctx.stateRepoPkg}.${workflowStateClass(wf)}Repository`);
   }
+  // Source folded projections read via their read-model `<Src>RowRepository`.
+  // The source row var (`x`) is `var`-inferred off `findAll()`, so only the
+  // repository type needs importing (not the `<Src>Row` entity).
+  const sourceProjList = [...sourceProjs].sort((a, b) => a.name.localeCompare(b.name));
+  for (const p of sourceProjList) {
+    if (qpctx.stateRepoPkg !== qpctx.pkg)
+      explicitImports.add(`${qpctx.stateRepoPkg}.${projectionRowClass(p)}Repository`);
+  }
   const injected: { type: string; field: string }[] = [
     ...repoFields.map((a) => ({ type: `${a}Repository`, field: repoField(a) })),
     ...stateWfList.map((wf) => ({
       type: `${workflowStateClass(wf)}Repository`,
       field: stateRepoField(wf),
+    })),
+    ...sourceProjList.map((p) => ({
+      type: `${projectionRowClass(p)}Repository`,
+      field: projectionRepoField(p),
     })),
   ];
 

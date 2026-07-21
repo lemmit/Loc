@@ -19,6 +19,7 @@
 // -------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
+import { isMaterializedProjection } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
@@ -30,6 +31,7 @@ export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic
     validateHandlers(ctx, proj, diags);
     validateQueryComprehension(ctx, proj, diags);
     validateWorkflowSource(ctx, proj, diags);
+    validateProjectionSource(ctx, proj, diags);
   }
 }
 
@@ -100,6 +102,76 @@ function validateWorkflowSource(
       message:
         `projection '${proj.name}': an 'ignoring' capability-filter bypass over a workflow source ` +
         "has no effect — a workflow instance read carries no capability query-filters. Remove the " +
+        "'ignoring' clause.",
+      source: at,
+    });
+  }
+}
+
+/** Projection-source query-time projection gates (the projection twin of the
+ *  removed projection-source view; projection.md v1.1).  A projection
+ *  `from <OtherProjection>` reads the source projection's persisted `<Proj>Row`
+ *  read-model table at query time, with `where`/`select` only.
+ *
+ *   - `loom.projection-source-not-materialized` — the source projection is
+ *     itself query-time (a live read with NO row table), so there is nothing to
+ *     read from. Source it from a folded (`on(e)`) projection, or from the
+ *     aggregate directly.
+ *   - `loom.projection-source-self` — a projection sourcing itself (`from` its
+ *     own name) is a cycle.
+ *   - `loom.projection-source-join-unsupported` — a `join` follow over a
+ *     projection source (by-id follows are aggregate-rooted).
+ *   - `loom.projection-source-ignoring-unsupported` — an `ignoring` bypass over
+ *     a projection source (a read-model row carries no capability query-filters). */
+function validateProjectionSource(
+  ctx: BoundedContextIR,
+  proj: ProjectionIR,
+  diags: LoomDiagnostic[],
+): void {
+  const q = proj.query;
+  if (q?.sourceKind !== "projection" || !q.source) return;
+  const at = `${ctx.name}/${proj.name}`;
+  if (q.source === proj.name) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-source-self",
+      message: `projection '${proj.name}': a projection cannot source itself ('from ${proj.name}').`,
+      source: at,
+    });
+    return;
+  }
+  const src = ctx.projections.find((p) => p.name === q.source);
+  if (!src) return; // an unresolved source is reported elsewhere.
+  if (!isMaterializedProjection(src)) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-source-not-materialized",
+      message:
+        `projection '${proj.name}': source projection '${src.name}' is query-time (a live read with ` +
+        "no persisted read-model table), so there is nothing to read `from`. Source it from a folded " +
+        "('on(e) { … }') projection, or from the underlying aggregate directly.",
+      source: at,
+    });
+    return;
+  }
+  if (q.joins.length > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-source-join-unsupported",
+      message:
+        `projection '${proj.name}': a 'join' follow over a projection source is not supported ` +
+        "(by-id joins resolve an aggregate's identity, not a read-model row). Read the source row's " +
+        "fields directly in 'select', or source the projection from an aggregate.",
+      source: at,
+    });
+  }
+  if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-source-ignoring-unsupported",
+      message:
+        `projection '${proj.name}': an 'ignoring' capability-filter bypass over a projection source ` +
+        "has no effect — a read-model row read carries no capability query-filters. Remove the " +
         "'ignoring' clause.",
       source: at,
     });

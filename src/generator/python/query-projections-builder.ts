@@ -3,13 +3,16 @@ import type {
   ExprIR,
   ProjectionIR,
   WireField,
-  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { isQueryTimeProjection, queryProjectionUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
-import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
+import {
+  lowerProjectionFilterToSqlAlchemy,
+  lowerWorkflowFilterToSqlAlchemy,
+  type PyPredicate,
+} from "./find-predicate.js";
 import { renderPyExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -43,20 +46,35 @@ export function buildPyQueryProjectionsFile(
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
   const isWorkflowSourced = (p: ProjectionIR): boolean =>
     p.query?.sourceKind === "workflow" && !!p.query.source && wfByName.has(p.query.source);
-  const wfLowered = new Map<string, PyPredicate | null>();
+  // A `from <Projection>` projection reads the SOURCE folded projection's
+  // persisted `<Proj>Row` read-model table directly — folded projections have
+  // no repository — applying the `where` in SQL and projecting the source row's
+  // fields via `select`.  The structural twin of the workflow-sourced route.
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
+  const isProjectionSourced = (p: ProjectionIR): boolean =>
+    p.query?.sourceKind === "projection" && !!p.query.source && projByName.has(p.query.source);
+  const rowLowered = new Map<string, PyPredicate | null>();
   for (const p of projections) {
-    if (!isWorkflowSourced(p)) continue;
-    const wf = wfByName.get(p.query!.source!)!;
-    wfLowered.set(
-      p.name,
-      p.query!.filter ? lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf) : null,
-    );
+    if (isWorkflowSourced(p)) {
+      const wf = wfByName.get(p.query!.source!)!;
+      rowLowered.set(
+        p.name,
+        p.query!.filter ? lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf) : null,
+      );
+    } else if (isProjectionSourced(p)) {
+      rowLowered.set(
+        p.name,
+        p.query!.filter
+          ? lowerProjectionFilterToSqlAlchemy(p.query!.filter, p.query!.source!)
+          : null,
+      );
+    }
   }
 
   const models = projections.map((p) => projectionRowModels(p, ctx)).join("");
   const routeBlocks = projections.map((p) =>
-    isWorkflowSourced(p)
-      ? workflowProjectionRoute(p, wfByName.get(p.query!.source!)!, wfLowered.get(p.name) ?? null)
+    isWorkflowSourced(p) || isProjectionSourced(p)
+      ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
       : projectionRoute(p, dispatcherExpr),
   );
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routeBlocks.join("\n\n\n")}`;
@@ -64,26 +82,31 @@ export function buildPyQueryProjectionsFile(
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
 
-  // Repos touched: the query source + every join follow target.  A WORKFLOW
-  // source reads its saga-state table directly (no repository), so it never
-  // contributes a repository import.
+  // Repos touched: the query source + every join follow target.  A WORKFLOW or
+  // PROJECTION source reads its persisted row table directly (no repository), so
+  // it never contributes a repository import.
   const repoAggs = [
     ...new Set(
       projections.flatMap((p) => [
-        ...(p.query?.source && !isWorkflowSourced(p) ? [p.query.source] : []),
+        ...(p.query?.source && !isWorkflowSourced(p) && !isProjectionSourced(p)
+          ? [p.query.source]
+          : []),
         ...(p.query?.auxiliaries ?? []).map((a) => a.aggName),
       ]),
     ),
   ].sort();
-  // Saga-state row classes read from `app.db.schema` (one per workflow source),
-  // plus the SQLAlchemy helpers a workflow-projection route calls: `select` for
-  // the saga read + any `and_`/`or_`/`not_`/`func` its lowered filter needs.
-  const wfProjections = projections.filter(isWorkflowSourced);
-  const schemaRows = [...new Set(wfProjections.map((p) => `${p.query!.source!}Row`))]
+  // Persisted row classes read from `app.db.schema` (one per workflow saga-state
+  // source and one per folded-projection read-model source), plus the SQLAlchemy
+  // helpers a row-sourced projection route calls: `select` for the row read + any
+  // `and_`/`or_`/`not_`/`func` its lowered filter needs.
+  const rowSourcedProjections = projections.filter(
+    (p) => isWorkflowSourced(p) || isProjectionSourced(p),
+  );
+  const schemaRows = [...new Set(rowSourcedProjections.map((p) => `${p.query!.source!}Row`))]
     .filter(refersTo)
     .sort();
-  const saOps = new Set<string>(wfProjections.length > 0 ? ["select"] : []);
-  for (const pred of wfLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
+  const saOps = new Set<string>(rowSourcedProjections.length > 0 ? ["select"] : []);
+  for (const pred of rowLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
   const saNames = [...saOps].filter(refersTo).sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
@@ -205,19 +228,19 @@ function projectionRoute(proj: ProjectionIR, dispatcherExpr: string): string {
   return out.join("\n");
 }
 
-/** `GET /projections/<name>` for a `from <Workflow>` projection: read the
- *  workflow's persisted saga-state table (`<Wf>Row`) directly — workflows have
- *  no repository — with the `where` pushed to SQL, then project each row's
- *  instance fields through `select` (the candidate alias `f` → the row var `r`).
- *  A validated workflow source carries no `join`/`ignoring`, so there is no
+/** `GET /projections/<name>` for a `from <Workflow>` / `from <Projection>`
+ *  projection: read the source's persisted row table (`<Wf>Row` saga-state, or a
+ *  folded projection's `<Proj>Row` read-model) directly — neither source has a
+ *  repository — with the `where` pushed to SQL, then project each row's fields
+ *  through `select` (the candidate alias → the row var `r`).  A validated
+ *  workflow/projection source carries no `join`/`ignoring`, so there is no
  *  bulk-load / alias-map step. */
-function workflowProjectionRoute(
+function rowSourcedProjectionRoute(
   proj: ProjectionIR,
-  wf: WorkflowIR,
+  row: string,
   pred: PyPredicate | null,
 ): string {
   const fn = snake(proj.name);
-  const row = `${wf.name}Row`;
   const where = pred ? `.where(${pred.expr})` : "";
   // A `requires` gate (default-deny) — or a currentUser-scoped select — binds the
   // request principal off the request scope; a failing gate raises ForbiddenError

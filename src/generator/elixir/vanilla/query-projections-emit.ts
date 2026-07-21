@@ -43,7 +43,7 @@ import {
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
-import { stateModule } from "../dispatch-emit.js";
+import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 
@@ -70,6 +70,7 @@ export function emitVanillaQueryProjectionModules(
   const typesModule = `${appModule}.Types`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfsByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const projsByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
   const refs: VanillaQueryProjectionRef[] = [];
   for (const proj of projs) {
     const path = `lib/${appName}/${ctxSnake}/query_projections/${snake(proj.name)}.ex`;
@@ -80,6 +81,7 @@ export function emitVanillaQueryProjectionModules(
       typesModule,
       aggsByName,
       wfsByName,
+      projsByName,
     );
     out.set(path, content);
     sourcemap?.file(path, content, proj.origin, `${ctx.name}.${proj.name}`);
@@ -98,6 +100,7 @@ function renderQueryProjectionModule(
   typesModule: string,
   aggsByName: Map<string, AggregateIR>,
   wfsByName: Map<string, WorkflowIR>,
+  projsByName: Map<string, ProjectionIR>,
 ): string {
   const query = proj.query!;
   const source = query.source!;
@@ -106,8 +109,16 @@ function renderQueryProjectionModule(
   // Ecto schema (`<Wf>State`) — NON-event-sourced by validation — not an
   // aggregate schema module; it has no aggregate capability filter to honour.
   const wf = query.sourceKind === "workflow" ? wfsByName.get(source) : undefined;
-  const sourceMod = wf ? stateModule(contextModule, wf) : `${contextModule}.${upperFirst(source)}`;
-  const sourceAgg = wf ? undefined : aggsByName.get(source);
+  // A projection-sourced projection reads the SOURCE folded projection's
+  // materialized read-model Ecto schema (`<Proj>Row`) — not an aggregate schema
+  // module; it has no aggregate capability filter to honour.
+  const srcProj = query.sourceKind === "projection" ? projsByName.get(source) : undefined;
+  const sourceMod = wf
+    ? stateModule(contextModule, wf)
+    : srcProj
+      ? projectionRowModule(contextModule, srcProj)
+      : `${contextModule}.${upperFirst(source)}`;
+  const sourceAgg = wf || srcProj ? undefined : aggsByName.get(source);
 
   // In-memory projection context (enum → declared atom); the `where` below uses
   // a `filterArgs` clone (enum → dumped declared string — Ecto won't cast an
@@ -184,7 +195,7 @@ defmodule ${moduleName} do
   @moduledoc """
   Query-time projection: ${upperFirst(proj.name)}
 
-  ${wf ? "Source workflow" : "Source aggregate"}: ${upperFirst(source)}${wf ? " (saga instance state)" : ""}
+  ${wf ? "Source workflow" : srcProj ? "Source projection" : "Source aggregate"}: ${upperFirst(source)}${wf ? " (saga instance state)" : srcProj ? " (read-model rows)" : ""}
   Form: query-time (live read — no folded read-model table)
   Foundation: vanilla (plain Ecto).
   """

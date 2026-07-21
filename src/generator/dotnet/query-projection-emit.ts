@@ -2,12 +2,15 @@ import type {
   BoundedContextIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  FieldIR,
   ProjectionIR,
+  TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectToResponse, wireType } from "./dto-mapping.js";
+import { projectionRowDbSet } from "./projection-state-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { workflowStateDbSet } from "./workflow-state-emit.js";
 
@@ -103,6 +106,14 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   // guarantees a non-event-sourced observable workflow with no `join`/`ignoring`.
   if (proj.query!.sourceKind === "workflow") {
     return renderWorkflowHandler(proj, ctx, ns);
+  }
+  // A projection-sourced projection (`from <OtherProjection>`) reads the SOURCE
+  // folded projection's persisted `<Proj>Row` read-model DbSet (a materialized
+  // projection has no aggregate repository), applies the `where` filter EF-side,
+  // and projects the source row fields via `select`.  Validation guarantees a
+  // materialized source with no `join`/`ignoring`.
+  if (proj.query!.sourceKind === "projection") {
+    return renderProjectionSourceHandler(proj, ctx, ns);
   }
   const source = proj.query!.source!;
   const rowName = `${upperFirst(proj.name)}Row`;
@@ -327,6 +338,167 @@ ${gate}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r =
     }
 }
 `;
+}
+
+/** Render the handler for a projection-sourced query-time projection.  Reads the
+ *  SOURCE folded projection's persisted read-model DbSet (`_db.<Proj>Row DbSet`)
+ *  through the injected `AppDbContext` — NOT an aggregate repository — applies
+ *  the `where` filter EF-side, and projects each source row through the `select`
+ *  expressions into `<Proj>Row`.  Structural twin of `renderWorkflowHandler`,
+ *  keyed on a folded projection's read-model row instead of a saga-state row.
+ *
+ *  The one shape difference: a folded projection's NON-KEY columns are nullable
+ *  (a partial upsert), so a `select` reading a non-key source field into a
+ *  non-optional target field is unwrapped (`.Value` for a value type, `!` for a
+ *  reference type) before the wire projection — the `where` filter already
+ *  excludes NULLs (`NULL > 100` is unknown → dropped).  The key column stays
+ *  non-nullable. */
+function renderProjectionSourceHandler(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const rowName = `${upperFirst(proj.name)}Row`;
+  const queryName = `${upperFirst(proj.name)}QpQuery`;
+  const handlerName = `${upperFirst(proj.name)}QpHandler`;
+  const source = proj.query!.source!;
+  const src = ctx.projections.find((p) => p.name === source);
+  if (!src) {
+    throw new Error(
+      `Query-time projection ${proj.name}: projection source '${source}' not found in context ${ctx.name}`,
+    );
+  }
+  const dbSet = projectionRowDbSet(src);
+
+  const usings = new Set<string>();
+  const filter = proj.query!.filter;
+  const where = filter ? renderCsExpr(filter, { thisName: "r", efQuery: true }) : undefined;
+  if (filter) collectCsExprUsings(filter, usings);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+
+  // Authorization gate (default-deny) — same shape as the aggregate/workflow handler.
+  const requires = proj.query!.requires;
+  const gateUsesUser = exprUsesCurrentUser(requires);
+  if (requires) {
+    collectCsExprUsings(requires, usings);
+    usings.add(`${ns}.Domain.Common`); // ForbiddenException
+    if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  }
+
+  // Project each source row through the `select` expressions, keyed by wire field.
+  // A source-row read (`t.total`) lowers to a member off the current row, so
+  // renderCsExpr with `thisName: "r"` yields `r.Total`.
+  const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
+  const args = (proj.wireShape ?? []).map((f) => {
+    const sel = selectByField.get(f.name);
+    if (!sel) return "default!";
+    return projectSourceRowArg(sel.expr, f.type, src, ctx);
+  });
+  const projection = `new ${rowName}(${args.join(", ")})`;
+
+  // Ctor injects AppDbContext (not an aggregate repo), plus the request principal
+  // when a `currentUser` gate is present.
+  const fields: string[] = [`    private readonly AppDbContext _db;`];
+  const ctorParams: string[] = [`AppDbContext db`];
+  const ctorAssigns: string[] = [`_db = db`];
+  if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
+  const ctor =
+    ctorParams.length === 1
+      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+
+  let gate = "";
+  if (requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: projection ${proj.name}`,
+    )});\n`;
+  }
+
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Projections;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${rowName}>>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gate}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
+        return rows.Select(r => ${projection}).ToList();
+    }
+}
+`;
+}
+
+/** Project one `select` expression off a source projection row `r` into the
+ *  target wire field.  A direct read of a NON-KEY source field reads a nullable
+ *  read-model column (`int?` / `string?` / `XId?`), so when the target field is
+ *  non-optional it is unwrapped to the non-null underlying before
+ *  `projectToResponse` (which then applies its own id/enum/datetime wire logic).
+ *  The key column and an optional target need no unwrap. */
+function projectSourceRowArg(
+  expr: ExprIR,
+  targetType: TypeIR,
+  src: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const raw = renderCsExpr(expr, { thisName: "r" });
+  const field = simpleSourceField(expr, src);
+  const isKey = !!field && field.name === src.correlationField;
+  if (field && !isKey && targetType.kind !== "optional") {
+    const unwrapped = csLeafIsValueType(field.type) ? `${raw}.Value` : `${raw}!`;
+    return projectToResponse(unwrapped, targetType, ctx);
+  }
+  return projectToResponse(raw, targetType, ctx);
+}
+
+/** The source projection field a `select` expression reads directly, or
+ *  undefined when the expression is not a bare source-row field read.  Both
+ *  lowered forms of a candidate field access are matched: a `this-prop` ref and
+ *  a member off `this`. */
+function simpleSourceField(expr: ExprIR, src: ProjectionIR): FieldIR | undefined {
+  let name: string | undefined;
+  if (expr.kind === "ref" && expr.refKind === "this-prop") name = expr.name;
+  else if (expr.kind === "member" && expr.receiver.kind === "this") name = expr.member;
+  if (!name) return undefined;
+  return src.stateFields.find((f) => f.name === name);
+}
+
+/** True when a domain `TypeIR` lowers to a C# value type — its nullable
+ *  read-model column (`T?`) is `Nullable<T>` and unwraps with `.Value`.  A
+ *  `string`/`File` leaf and any value-object / array / entity is a reference
+ *  type (unwraps with the null-forgiving `!`). */
+function csLeafIsValueType(t: TypeIR): boolean {
+  const leaf = t.kind === "optional" ? t.inner : t;
+  switch (leaf.kind) {
+    case "id":
+    case "enum":
+      return true;
+    case "primitive":
+      return leaf.name !== "string" && leaf.name !== "File";
+    default:
+      return false;
+  }
 }
 
 /** Render a `select` expression against the source row `d` and the join alias
