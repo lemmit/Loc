@@ -7,17 +7,25 @@
 // DESIGN: the generator is the single source of truth — this scans the EMITTED
 // Dart VFS for the diagnostic markers the emitters already produce, rather than
 // re-deriving the fallback conditions (which would rot the moment an emitter
-// grows a case).  Every Flutter fallback is a `/* … */` block comment
-// (`flutterTarget.renderComment`) or a `// TODO(flutter …)` line — a deferred
-// user component (`unknown layout component: <name>`), a mis-shaped
-// `Modal`/`Action`/`WorkflowForm`, an unsupported action statement, a
-// store-action call, etc.  Generated Dart otherwise uses only `//` line comments
-// for its file banners, so a `/* … */` in a `.dart` file is always a diagnostic.
+// grows a case).  A Flutter fallback is a `/* … */` block comment
+// (`flutterTarget.renderComment`), a `// TODO(flutter …)` line, or the pack's
+// `// flutter pack: no renderer for "X"` line — a deferred user component
+// (`unknown layout component: <name>`), a mis-shaped `Modal`/`Action`/
+// `WorkflowForm`, an unsupported action statement, a store-action call, a dropped
+// form field (M-A), or an unrendered standalone primitive (M-D).  Generated Dart
+// otherwise uses only `//` line comments for its file banners, so a `/* … */` in
+// a `.dart` file is always a diagnostic.
 //
-// LIMITATION: this catches the LOUD fallbacks (the ones that emit a marker).  A
-// small number of gaps drop content SILENTLY (a form field of an unsupported
-// kind is omitted with no marker) — those need an emitter-side marker before this
-// pass can see them, tracked as a follow-up in the proposal.
+// COVERAGE: this catches the LOUD fallbacks — three marker families:
+//   1. a `/* … */` block comment (`flutterTarget.renderComment` diagnostics),
+//   2. a `// TODO(flutter …): …` line (Notifier-projection deferrals AND, since
+//      M-A, every form-field drop `prepareFields` couldn't render), and
+//   3. the pack's `// flutter pack: no renderer for "X"` fallback (M-D) — the
+//      standalone input family (`Field`/`Toggle`/… → `primitive-field`, etc.)
+//      the walking-skeleton pack doesn't yet render.
+// After M-A + M-D the earlier "silently dropped form field" limitation is closed:
+// the drop sites now emit markers this pass reads, so `fullyRenders` no longer
+// reports `true` while content vanishes.
 
 /** One place the Flutter target fell back from a real widget to a diagnostic. */
 export interface FlutterParityFinding {
@@ -84,8 +92,13 @@ function lineAt(content: string, offset: number): number {
 // `/* TODO(flutter): … */` markers).  Non-greedy so adjacent comments stay
 // separate; `[\s\S]` so it spans lines.
 const BLOCK_COMMENT = /\/\*\s*([\s\S]*?)\s*\*\//g;
-// A `// TODO(flutter …): …` line marker (the Notifier-projection deferrals).
+// A `// TODO(flutter …): …` line marker (the Notifier-projection deferrals and
+// the M-A form-field drop markers).
 const TODO_LINE = /\/\/\s*(TODO\(flutter[^)]*\):[^\n]*)/g;
+// The pack's `// flutter pack: no renderer for "X"` fallback (pack.ts:524) — a
+// primitive the flutterMaterial pack has no renderer for (the standalone input
+// family, etc.).  Captures the primitive name so the finding can name it (M-D).
+const PACK_FALLBACK = /\/\/\s*flutter pack: no renderer for "([^"]+)"/g;
 
 /** Scan one emitted Dart file for fallback markers. */
 function scanFile(path: string, content: string): FlutterParityFinding[] {
@@ -108,6 +121,15 @@ function scanFile(path: string, content: string): FlutterParityFinding[] {
       line: lineAt(content, m.index),
       kind: "todo",
       message: m[1]!.trim(),
+      source,
+    });
+  }
+  for (const m of content.matchAll(PACK_FALLBACK)) {
+    out.push({
+      file: path,
+      line: lineAt(content, m.index),
+      kind: "diagnostic",
+      message: `flutter pack: no renderer for "${m[1]}"`,
       source,
     });
   }

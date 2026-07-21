@@ -49,6 +49,12 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "auth-oidc", title: "OIDC authentication — provider config + requires-guard", doc: "auth", backends: ALL },
   { id: "auth-simple", title: "dev-stub auth — user shape + requires-guard", doc: "auth", backends: ALL },
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
+  {
+    id: "channels-broker",
+    title: "broker-bound channel — channelSource binds `queue/work` to rabbitmq, real driver code emitted",
+    doc: "channels",
+    backends: ALL,
+  },
   { id: "tenancy-filter", title: "principal-referencing (tenancy) capability filter", doc: "capabilities", backends: ALL },
   { id: "tenancy-owned", title: "first-class tenancy — `tenancy by` + tenantOwned + crossTenant", doc: "tenancy", backends: ALL },
   { id: "tenancy-hierarchy", title: "tenancy hierarchy — `implements tenantRegistry` + `policy` deep/global/local read ladder", doc: "tenancy", backends: ALL },

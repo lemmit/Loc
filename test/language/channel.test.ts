@@ -106,6 +106,42 @@ describe("channel + channelSource — parse / validation", () => {
     expect(errors.some((e) => /can't realise it.*rabbitmq, kafka/.test(e))).toBe(true);
   });
 
+  // Compatible-but-not-yet-shipped gate (loom.channelsource-not-yet-shipped):
+  // redis is COMPATIBLE with queue/ephemeral (the compat matrix), but the
+  // shipped redis driver only provisions broadcast/ephemeral — the generator
+  // would silently skip the unshipped combo and fall back to in-process.
+  it("rejects queue/ephemeral on redis (compatible but not yet shipped)", async () => {
+    const src = `
+      system S {
+        subdomain M { context C {
+          event E { order: string }
+          channel Ch { carries: E  delivery: queue  retention: ephemeral }
+        }}
+        storage cache { type: redis }
+        channelSource b { for: Ch, use: cache }
+      }
+    `;
+    const { errors } = await parseString(src);
+    expect(errors.some((e) => /not yet provisioned by a shipped redis driver/.test(e))).toBe(true);
+    // It is NOT the incompatible diagnostic — redis IS compatible with the combo.
+    expect(errors.some((e) => /can't realise it/.test(e))).toBe(false);
+  });
+
+  it("accepts queue/ephemeral on rabbitmq (a shipped combo)", async () => {
+    const src = `
+      system S {
+        subdomain M { context C {
+          event E { order: string }
+          channel Ch { carries: E  delivery: queue  retention: ephemeral }
+        }}
+        storage mq { type: rabbitmq }
+        channelSource b { for: Ch, use: mq }
+      }
+    `;
+    const { errors } = await parseString(src);
+    expect(errors).toEqual([]);
+  });
+
   // M-T4.4 slice 1: the deployable `channels:` wiring clause.
   it("parses a deployable channels: clause referencing a channelSource", async () => {
     const src = `

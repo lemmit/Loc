@@ -33,7 +33,10 @@
 // value object's scalar sub-fields (a `List<List<TextEditingController>>` in
 // state), submitting a `{sub: value, …}` map per row.
 // DEFERRED: a VO-array whose sub-fields aren't all text/numeric (bool / enum /
-// datetime / nested), and enum/bool/datetime scalar element arrays, are dropped.
+// datetime / nested), and enum/bool/datetime scalar element arrays, are dropped —
+// but LOUDLY (M-A): each drop emits a `// TODO(flutter form-field): …` marker on
+// the widget class (`FlutterFormSpec.dropped`) so the omission is visible in the
+// Dart and counted by the parity lint, never silent.
 
 import { createInputFields, isConstructible } from "../../ir/enrich/wire-projection.js";
 import type {
@@ -147,9 +150,27 @@ export interface FlutterFormSpec {
   submitLabel: string;
   /** The prepared input fields (empty for a destroy form). */
   fields: FlutterFormField[];
+  /** LOUD form-field drop markers (M-A).  One `// TODO(flutter form-field): …`
+   *  comment line per input `prepareFields` could not render (nested-VO
+   *  sub-field, mixed value-object array, enum/bool/datetime/id element array,
+   *  unresolved value-object field).  Emitted into the widget class so the drop
+   *  is visible in the generated Dart AND counted by the parity lint's
+   *  `TODO_LINE` regex — the drop is no longer silent.  Empty for a fully
+   *  rendered form. */
+  dropped: string[];
   /** Whether this form styles its submit as a destructive (error-coloured)
    *  action (destroy forms). */
   destructive: boolean;
+}
+
+/** Build one LOUD form-field drop marker (M-A) — a Dart line comment shaped so
+ *  the parity lint's `TODO_LINE` regex (`/\/\/\s*(TODO\(flutter[^)]*\):[^\n]*)/`)
+ *  counts it.  The paren group stays colon-free (`flutter form-field`); the colon
+ *  comes right after it, and the human reason follows.  Naming the owning
+ *  follow-up mission (M-B) keeps the deferral a reviewed decision, not a silent
+ *  gap. */
+function droppedMarker(field: string, reason: string): string {
+  return `// TODO(flutter form-field): ${field} — ${reason} dropped (deferred, M-B)`;
 }
 
 /** Peel a single `optional` layer. */
@@ -220,14 +241,18 @@ function buildField(
 /** Prepare the form fields from a `{name, type, optional?}` input list.  A
  *  value-object field is FLATTENED into one field per scalar sub-field
  *  (`cost: Money` → `costAmount` / `costCurrency`); a scalar renders directly.
- *  Non-scalar / array / unresolvable-VO inputs are dropped (deferred). */
+ *  Non-scalar / array / unresolvable-VO inputs are dropped (deferred) — but no
+ *  longer SILENTLY: each drop pushes a LOUD `// TODO(flutter form-field): …`
+ *  marker (M-A) alongside the rendered fields, so the omission is visible in the
+ *  Dart and caught by the parity lint. */
 function prepareFields(
   inputs: readonly { name: string; type: TypeIR; optional?: boolean }[],
   enumsByName: ReadonlyMap<string, string[]>,
   vosByName: ReadonlyMap<string, readonly FieldIR[]>,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
-): FlutterFormField[] {
+): { fields: FlutterFormField[]; dropped: string[] } {
   const out: FlutterFormField[] = [];
+  const dropped: string[] = [];
   for (const f of inputs) {
     const base = peel(f.type);
     const fieldOptional = f.optional === true || f.type.kind === "optional";
@@ -235,7 +260,13 @@ function prepareFields(
     if (voFields) {
       for (const sub of voFields) {
         const subKind = scalarInputKind(sub.type, enumsByName, aggregatesByName);
-        if (!subKind) continue; // nested VO / array sub-field — skip (one level)
+        if (!subKind) {
+          // nested VO / array sub-field — one level of flattening only.
+          const subBase = peel(sub.type);
+          const label = subBase.kind === "array" ? "nested array" : "nested value-object";
+          dropped.push(droppedMarker(`${f.name}.${sub.name}`, `${label} sub-field`));
+          continue;
+        }
         const subOptional = fieldOptional || sub.optional === true || sub.type.kind === "optional";
         out.push(
           buildField(
@@ -282,6 +313,10 @@ function prepareFields(
             required: !fieldOptional,
             objectFields,
           });
+        } else {
+          // A value-object array whose sub-fields aren't all text/numeric
+          // (bool / enum / datetime / nested) — the whole array defers.
+          dropped.push(droppedMarker(f.name, "value-object array with a non-scalar sub-field"));
         }
         continue;
       }
@@ -297,14 +332,31 @@ function prepareFields(
           required: !fieldOptional,
           elementKind: elemKind,
         });
+      } else {
+        const eb = peel(base.element);
+        const elemLabel =
+          eb.kind === "enum"
+            ? "enum"
+            : eb.kind === "id"
+              ? "id"
+              : eb.kind === "primitive"
+                ? eb.name
+                : eb.kind;
+        dropped.push(droppedMarker(f.name, `${elemLabel} element array`));
       }
       continue;
     }
     const kind = scalarInputKind(f.type, enumsByName, aggregatesByName);
-    if (!kind) continue; // nested / unsupported — deferred
+    if (!kind) {
+      // nested / unresolved value-object / otherwise-unsupported scalar — deferred.
+      const b = peel(f.type);
+      const label = b.kind === "valueobject" ? `unresolved value-object ${b.name}` : b.kind;
+      dropped.push(droppedMarker(f.name, `${label} field`));
+      continue;
+    }
     out.push(buildField(f.name, f.name, f.type, fieldOptional, kind, enumsByName));
   }
-  return out;
+  return { fields: out, dropped };
 }
 
 /** Enum name → values from a bounded context. */
@@ -331,7 +383,7 @@ export function flutterCreateForm(
   bc: EnrichedBoundedContextIR | undefined,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormSpec {
-  const fields = prepareFields(
+  const { fields, dropped } = prepareFields(
     createInputFields(agg),
     enumsFromBc(bc),
     vosFromBc(bc),
@@ -345,6 +397,7 @@ export function flutterCreateForm(
     pathExpr: `/${snake(plural(agg.name))}`,
     submitLabel: `Create ${humanize(agg.name)}`,
     fields,
+    dropped,
     destructive: false,
   };
 }
@@ -356,7 +409,12 @@ export function flutterOperationForm(
   bc: EnrichedBoundedContextIR | undefined,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormSpec {
-  const fields = prepareFields(op.params, enumsFromBc(bc), vosFromBc(bc), aggregatesByName);
+  const { fields, dropped } = prepareFields(
+    op.params,
+    enumsFromBc(bc),
+    vosFromBc(bc),
+    aggregatesByName,
+  );
   const opPath = snake(op.routeSlug ?? op.name);
   return {
     widgetName: operationFormWidgetName(aggName, op.name),
@@ -366,6 +424,7 @@ export function flutterOperationForm(
     pathExpr: `/${snake(plural(aggName))}/\${widget.id}/${opPath}`,
     submitLabel: humanize(op.name),
     fields,
+    dropped,
     destructive: false,
   };
 }
@@ -380,6 +439,7 @@ export function flutterDestroyForm(aggName: string): FlutterFormSpec {
     pathExpr: `/${snake(plural(aggName))}/\${widget.id}`,
     submitLabel: `Delete ${humanize(aggName)}`,
     fields: [],
+    dropped: [],
     destructive: true,
   };
 }
@@ -394,7 +454,12 @@ export function flutterWorkflowForm(
   bc: EnrichedBoundedContextIR | undefined,
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
 ): FlutterFormSpec {
-  const fields = prepareFields(wf.params, enumsFromBc(bc), vosFromBc(bc), aggregatesByName);
+  const { fields, dropped } = prepareFields(
+    wf.params,
+    enumsFromBc(bc),
+    vosFromBc(bc),
+    aggregatesByName,
+  );
   return {
     widgetName: workflowFormWidgetName(wf.name),
     kind: "create",
@@ -403,6 +468,7 @@ export function flutterWorkflowForm(
     pathExpr: `/workflows/${snake(wf.name)}`,
     submitLabel: `Run ${humanize(wf.name)}`,
     fields,
+    dropped,
     destructive: false,
   };
 }
@@ -1004,6 +1070,10 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
   const submit = spec.kind === "destroy" ? destroySubmitMethod(spec) : submitMethod(spec);
 
   return lines(
+    // LOUD form-field drop markers (M-A) — Dart line comments, zero compile risk,
+    // parseable by the parity lint.  Precede the class so the omission is visible
+    // at the widget it belongs to.
+    ...spec.dropped,
     `class ${w} extends StatefulWidget {`,
     ...idField,
     `  const ${w}(${ctorArgs});`,
