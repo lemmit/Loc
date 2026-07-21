@@ -1,0 +1,50 @@
+// M-T6.21 — a workflow `let` binding that no later statement reads must lower to
+// an underscore-prefixed variable (`_label`), or `mix compile
+// --warnings-as-errors` rejects the unused variable.  `resolveUnused` binds
+// `label` and never reads it; `resolveUsed` reads it (the emit) and must keep
+// the bare name.  This fixture is the compile gate for that class.
+system Catalog {
+  subdomain Core {
+    context Shop {
+      error NotFound { resource: string }
+      event Resolved { label: string }
+      aggregate Order with crudish {
+        customerId: string
+      }
+      repository Orders for Order {
+        find locate(ref: string): Order or NotFound where this.customerId == ref
+      }
+
+      workflow resolveUnused {
+        create(ref: string) {
+          let outcome = Orders.locate(ref)
+          let label = match outcome {
+            Order o => o.customerId,
+            NotFound => "missing"
+          }
+        }
+      }
+
+      workflow resolveUsed {
+        create(ref: string) {
+          let outcome = Orders.locate(ref)
+          let label = match outcome {
+            Order o => o.customerId,
+            NotFound => "missing"
+          }
+          emit Resolved { label: label }
+        }
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
