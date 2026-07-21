@@ -22,19 +22,11 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/generated-angular-e2e.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'designs/**'
-      - 'api/**'
-      - 'docker/**'
-      - 'stacks/**'
-      - 'test/e2e/generated-angular-e2e.test.ts'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'langium-config.json'
-      - '.github/workflows/generated-angular-e2e.yml'
+  # Post-merge only.  This route-driven smoke (navigate every param-less
+  # page) has caught zero regressions per-PR in practice, while the
+  # per-PR generated-angular-build (ng build) already covers the Angular
+  # surface.  Run it on push:main as the regression net; force a
+  # pre-merge run with workflow_dispatch.
   workflow_dispatch:
 
 concurrency:
