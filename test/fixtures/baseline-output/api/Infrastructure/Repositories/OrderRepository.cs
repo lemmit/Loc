@@ -84,16 +84,4 @@ public sealed class OrderRepository : IOrderRepository
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "byCustomer", result.Count);
         return result;
     }
-    public async Task<List<Order>> ActiveOrders(CancellationToken cancellationToken = default)
-    {
-        var result = await _db.Orders.Where(x => x.Status == OrderStatus.Confirmed).ToListAsync(cancellationToken);
-        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "ActiveOrders", result.Count);
-        return result;
-    }
-    public async Task<List<Order>> OrderSummary(CancellationToken cancellationToken = default)
-    {
-        var result = await _db.Orders.Where(x => x.Status != OrderStatus.Cancelled).ToListAsync(cancellationToken);
-        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Order", "OrderSummary", result.Count);
-        return result;
-    }
 }

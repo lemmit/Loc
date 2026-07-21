@@ -58,7 +58,6 @@ const HONO_FIXTURE = `system AcmeHono {
         let order = Order.create({ customerId: customerId, status: Draft })
       }
     }
-      view ActiveOrders = Order where status == Confirmed
     }
   }
   api SalesApi from Sales

@@ -109,8 +109,6 @@ export default function AddPalette({ path, source, onChange }: Props): JSX.Eleme
           onClick={() => try_(onChange, addConstructSource(source, "workflow", { context: ctxName }))}>+ Workflow</Button>
         <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-repository"
           onClick={() => try_(onChange, addConstructSource(source, "repository", { context: ctxName }))}>+ Repository</Button>
-        <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-view"
-          onClick={() => try_(onChange, addConstructSource(source, "view", { context: ctxName }))}>+ View</Button>
       </Group>
     );
   }

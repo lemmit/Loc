@@ -666,6 +666,11 @@ to the projection path — the largest slice, and it *moves* code more than
 it deletes it, so it lands last, behind the primitive + `scaffoldPaged` +
 the projection-clause surface.
 
+> **Update (shipped).** The hard removal (slice 7) skipped this deprecation
+> window: no `loom.view-deprecated` warning and no `ddd migrate reads` codemod
+> shipped — `view` was hard-deleted outright, since Loom is a single repo with
+> no external consumers to migrate.
+
 ---
 
 ## Paging — call-site params, `Paged<T>` result, collections only
@@ -870,7 +875,7 @@ No flag day; each slice independent:
    (#1909–#1912) merge so the response emission reads the settled contract factory.
 6. **`find`→`run(criterion)` / `retrieval`** — deprecation warning + a
    `ddd migrate reads` codemod over in-repo examples.
-7. **`view` retirement (last, largest)** — `loom.view-deprecated` warning +
+7. **✅ DONE — `view` retirement (last, largest)** — `loom.view-deprecated` warning +
    `ddd migrate reads` rewrites the two shapes (shorthand → `scaffoldPaged`;
    full form → a query-time `projection`); then delete the 5-backend view
    emitters, the `/views` routers, the `loom.view-*` gates, and the view UI

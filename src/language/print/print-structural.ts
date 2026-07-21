@@ -12,7 +12,6 @@ import type {
   Api,
   AuthBlock,
   AuthConfigValue,
-  BindEntry,
   BoundedContext,
   Component,
   ComponentDecl,
@@ -56,7 +55,6 @@ import type {
   UiApiParam,
   UserBlock,
   ValueObject,
-  View,
   Workflow,
 } from "../generated/ast.js";
 import { printExpr } from "./print-expr.js";
@@ -207,8 +205,6 @@ export function printStructural(node: AstNode): string {
       return printWorkflow(node as Workflow);
     case "Projection":
       return printProjection(node as import("../generated/ast.js").Projection);
-    case "View":
-      return printView(node as View);
     case "Migration":
       return printMigration(node as import("../generated/ast.js").Migration);
     case "Requirement":
@@ -857,7 +853,7 @@ function printRepository(node: Repository): string {
 }
 
 /** ` ignoring *` / ` ignoring A, B` — the trailing filter-bypass clause shared
- *  by find / view / inline-read printing (named-filter-bypass.md §11).  Returns
+ *  by find / inline-read printing (named-filter-bypass.md §11).  Returns
  *  "" when the read bypasses nothing, so it spreads cleanly onto the tail. */
 export function printIgnoringClause(node: { bypassAll?: boolean; bypass?: string[] }): string {
   if (node.bypassAll) return " ignoring *";
@@ -1009,32 +1005,6 @@ function printProjectionOn(node: import("../generated/ast.js").ProjectionOn): st
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
   const head = `on(${node.param}: ${node.event.$refText})${by}`;
   return block(head, node.body.map(printStmt));
-}
-
-function printView(node: View): string {
-  // Optional `requires <expr>` authorization gate (D-AUTH-OIDC / default-deny),
-  // printed between the source and the `where` filter in both forms.
-  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
-  // Full form is the only one that carries `bind` entries (grammar requires
-  // ≥1), so a populated `binds` discriminates it from the shorthand.
-  const ignoring = printIgnoringClause(node);
-  if (node.binds.length > 0) {
-    const items: string[] = node.fields.map(printProperty);
-    items.push(`from ${node.source.$refText}`);
-    if (node.gate) items.push(`requires ${printExpr(node.gate)}`);
-    if (node.filter) items.push(`where ${printExpr(node.filter)}`);
-    // The `ignoring` clause prints on its own line in the block form (it sits
-    // between `where` and `bind` in the grammar); `.trimStart()` drops the
-    // leading space `printIgnoringClause` adds for the inline form.
-    if (ignoring) items.push(ignoring.trimStart());
-    items.push(`bind ${node.binds.map(printBindEntry).join(", ")}`);
-    return block(`view ${node.name}`, items);
-  }
-  return `view ${node.name} = ${node.source.$refText}${gate} where ${printExpr(node.filter!)}${ignoring}`;
-}
-
-function printBindEntry(node: BindEntry): string {
-  return `${node.name} = ${printExpr(node.expr)}`;
 }
 
 function printProperty(node: Property): string {

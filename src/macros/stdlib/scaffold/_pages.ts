@@ -1,12 +1,12 @@
 // Shared page-generation helpers for the scaffold macro family.
 //
 // Each `scaffold<X>` macro (scaffoldAggregate / scaffoldWorkflow /
-// scaffoldView / scaffold) reaches into these to emit canonical page
+// scaffold) reaches into these to emit canonical page
 // shapes.  Keeping them in one place means the per-archetype leaf
 // macros and the top-level composer share one source of truth.
 
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import type { Aggregate, Area, Page, Ui, View, Workflow } from "../../api/index.js";
+import type { Aggregate, Area, Page, Ui, Workflow } from "../../api/index.js";
 import { area, boolLit, callExpr, page, stringLit } from "../../api/index.js";
 import {
   filterFindsForAggregate,
@@ -17,8 +17,6 @@ import {
   scaffoldInstanceList,
   scaffoldList,
   scaffoldNewForm,
-  scaffoldViewList,
-  scaffoldViewsIndex,
   scaffoldWorkflowForm,
   scaffoldWorkflowsIndex,
   scalarColumnsForAggregate,
@@ -204,19 +202,7 @@ export function pageForWorkflow(wf: Workflow): Page {
   });
 }
 
-export function pageForView(v: View): Page {
-  return page({
-    name: `${v.name}View`,
-    route: `/views/${snake(v.name)}`,
-    body: scaffoldViewList(v),
-    menu: {
-      section: stringLit("Views"),
-      label: stringLit(humanize(v.name)),
-    },
-  });
-}
-
-export function homePage(counts: { aggregates: number; workflows: number; views: number }): Page {
+export function homePage(counts: { aggregates: number; workflows: number }): Page {
   return page({
     name: "Home",
     route: "/",
@@ -232,18 +218,6 @@ export function workflowsIndexPage(workflows: readonly Workflow[]): Page {
     body: scaffoldWorkflowsIndex(workflows),
     menu: {
       section: stringLit("Workflows"),
-      label: stringLit("Index"),
-    },
-  });
-}
-
-export function viewsIndexPage(views: readonly View[]): Page {
-  return page({
-    name: "ViewsIndex",
-    route: "/views",
-    body: scaffoldViewsIndex(views),
-    menu: {
-      section: stringLit("Views"),
       label: stringLit("Index"),
     },
   });

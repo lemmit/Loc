@@ -5,10 +5,10 @@ import { rebindReference } from "./rebind";
 // Repointing a graph edge by dragging its target endpoint onto another node.
 //
 // Only edges that map to a single, unambiguous cross-reference are drag-
-// rebindable: a repository's `for` aggregate, a `from` source (a view's
-// aggregate, an api's subdomain), and a deployable's `targets` deployable. The
-// first three go through `rebindReference` (single token rewrite, parse-
-// guarded); `targets` goes through `setDeployableTargets`, which reprints the
+// rebindable: a repository's `for` aggregate, an api's `from` subdomain, and a
+// deployable's `targets` deployable. The first two go through `rebindReference`
+// (single token rewrite, parse-guarded); `targets` goes through
+// `setDeployableTargets`, which reprints the
 // Deployable from its AST — the deployable's `targets:` slot is a single ref
 // that doesn't change the surrounding form. Multi-valued (deployable `contexts`
 // / `serves`) and derived (`emits`) edges stay inspector-only, as does the
@@ -16,11 +16,9 @@ import { rebindReference } from "./rebind";
 // sugar / compose / block forms and so isn't a no-op surgical rewrite.
 // ---------------------------------------------------------------------------
 
-// `${ownerKind}:${label}` → the node kind the new target must be. The owner
-// kind disambiguates the shared `from` label (view vs api).
+// `${ownerKind}:${label}` → the node kind the new target must be.
 const REBINDABLE: Record<string, "aggregate" | "subdomain" | "deployable"> = {
   "repository:for": "aggregate",
-  "view:from": "aggregate",
   "api:from": "subdomain",
   "deployable:targets": "deployable",
 };
@@ -55,6 +53,6 @@ export function rebindEdgeTarget(
     // without touching the surrounding `modules:` / `serves:` / `ui:` slots.
     return setDeployableTargets(source, owner.name, target.name);
   }
-  // owner.kind is "repository" | "view" | "api" — all RebindKind.
-  return rebindReference(source, owner.kind as "repository" | "view" | "api", owner.name, target.name);
+  // owner.kind is "repository" | "api" — all RebindKind.
+  return rebindReference(source, owner.kind as "repository" | "api", owner.name, target.name);
 }

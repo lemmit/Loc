@@ -2,7 +2,7 @@
 
 Identity and access for a Loom system: the system-scope `user` JWT claim shape, the `auth` OIDC config that fills the per-backend verifier seam, the per-subdomain `permissions` catalogue, the `requires` authorization gate (HTTP 403), the magic `currentUser` identifier, and `sensitive(...)` field tagging. Reach for this chapter when a command must check *who* the caller is — distinct from `precondition`, which checks *what state* the aggregate is in. Loom owns no auth runtime: declaring this surface generates the typed `User`, the middleware, and the verifier hook; you (or the generated OIDC verifier) supply the token decoding.
 
-> **Grammar:** `UserBlock`, `AuthBlock`, `OidcConfig`, `ClaimsMap`, `PermissionsBlock`, `RequiresStmt`, `RequiresProp`, `Sensitive` · **Validators:** `loom.auth-without-user`, `loom.duplicate-user-block`, `loom.user-duplicate-field`, `loom.duplicate-permission`, `loom.unknown-permission`, `loom.currentuser-not-in-request-scope`, `loom.default-deny-ungated`, `loom.view-gate-not-current-user`, `loom.workflow-currentuser-find`, `loom.auth-unknown-provider`, `loom.auth-missing-issuer`, `loom.auth-unknown-claim-field` · **Docs:** [`../auth.md`](../auth.md)
+> **Grammar:** `UserBlock`, `AuthBlock`, `OidcConfig`, `ClaimsMap`, `PermissionsBlock`, `RequiresStmt`, `RequiresProp`, `Sensitive` · **Validators:** `loom.auth-without-user`, `loom.duplicate-user-block`, `loom.user-duplicate-field`, `loom.duplicate-permission`, `loom.unknown-permission`, `loom.currentuser-not-in-request-scope`, `loom.default-deny-ungated`, `loom.workflow-currentuser-find`, `loom.auth-unknown-provider`, `loom.auth-missing-issuer`, `loom.auth-unknown-claim-field` · **Docs:** [`../auth.md`](../auth.md)
 
 All five backends emit auth files. The middleware, verifier seam, `requires`→403 mapping, and `permissions.<name>` lowering are structurally identical across them — the divergence is host-language syntax and, for Elixir, the topology (a plug/guard in the context boundary instead of an inline throw). The frontends consume only the session probe; their `auth: ui` page gate is covered in [UI pages](15-ui-pages-structure.md) and [`../auth.md`](../auth.md#ui-gate--page--requires-expr-).
 
@@ -41,8 +41,6 @@ system Helpdesk {
       repository Tickets for Ticket {
         find mine(): Ticket[] where assignee == currentUser.id
       }
-
-      view MyOpenTickets = Ticket where assignee == currentUser.id && status == Open
     }
   }
 
@@ -380,19 +378,18 @@ end
 ```
 ::: end
 
-`requires` is admissible in workflow bodies the same way. A `view` and a `page` accept a `requires` gate too (read-side analogue), but those are **`currentUser`-only** — referencing the source row is `loom.view-gate-not-current-user`. Default-deny enforcement (`auth { enforcement: denyByDefault }`) makes every client-reachable command without a `requires` gate a `loom.default-deny-ungated` error; `requires true` is the explicit "intentionally public" escape. The default (`opt`) leaves ungated commands open. See [Views](12-views.md) and [`../auth.md`](../auth.md#requires-clauses-slice-2) for the full enforcement story.
+`requires` is admissible in workflow bodies the same way. A repository `find` and a `page` accept a `requires` gate too (read-side analogue), but those are **`currentUser`-only**. Default-deny enforcement (`auth { enforcement: denyByDefault }`) makes every client-reachable command without a `requires` gate a `loom.default-deny-ungated` error; `requires true` is the explicit "intentionally public" escape. The default (`opt`) leaves ungated commands open. See [`../auth.md`](../auth.md#requires-clauses-slice-2) for the full enforcement story.
 
 ## `currentUser` — claim access in domain logic
 
-`currentUser` is a magic identifier resolving to the typed `User`, in scope wherever an expression evaluates **per request**. It is admissible in operation/workflow bodies, aggregate `test` bodies, view `bind` expressions, and — since slice 1C — repository `find` `where` clauses and view `where` clauses. It is a compile error (`loom.currentuser-not-in-request-scope`) in an invariant, derived property, or `function` body (those can run outside a request).
+`currentUser` is a magic identifier resolving to the typed `User`, in scope wherever an expression evaluates **per request**. It is admissible in operation/workflow bodies, aggregate `test` bodies, and — since slice 1C — repository `find` `where` clauses. It is a compile error (`loom.currentuser-not-in-request-scope`) in an invariant, derived property, or `function` body (those can run outside a request).
 
-In a `find`/`view`, the renderer threads the resolved user through the generated method as a closure-captured parameter; the caller reads it off the request context:
+In a `find`, the renderer threads the resolved user through the generated method as a closure-captured parameter; the caller reads it off the request context:
 
 ```ddd
 repository Tickets for Ticket {
   find mine(): Ticket[] where assignee == currentUser.id
 }
-view MyOpenTickets = Ticket where assignee == currentUser.id && status == Open
 ```
 
 ::: tabs backend
@@ -468,7 +465,6 @@ end
 | Two permissions same name in one subdomain | `loom.duplicate-permission` |
 | `permissions.X` undeclared (or used outside any subdomain) | `loom.unknown-permission` |
 | `currentUser` in an invariant / derived / function body | `loom.currentuser-not-in-request-scope` |
-| View / page gate referencing a source row | `loom.view-gate-not-current-user` |
 | Ungated client-reachable command under `denyByDefault` | `loom.default-deny-ungated` |
 | Workflow body calls a `currentUser`-bound find | `loom.workflow-currentuser-find` |
 | `auth { provider: ? }` unknown / `oidc` missing issuer / unknown `claims:` field | `loom.auth-unknown-provider` / `loom.auth-missing-issuer` / `loom.auth-unknown-claim-field` |

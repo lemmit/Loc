@@ -2,9 +2,8 @@
 // View-model preparer for App.tsx — the application shell that hosts
 // the sidebar navigation, header bar, error boundary, and React
 // Router routes.  Produces per-aggregate List/New/Detail page imports
-// + matching routes, per-workflow form-page imports + routes, per-view
-// table-page imports + routes, and sidebar entries grouped by
-// construct kind.
+// + matching routes, per-workflow form-page imports + routes, and
+// sidebar entries grouped by construct kind.
 //
 // The preparer's job is to flatten these decisions into typed
 // arrays the template iterates.  Layout (AppShell sizing, header
@@ -12,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
-import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
+import type { AggregateIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 
@@ -37,20 +36,19 @@ export interface ExtraPageRoute {
 export function prepareAppShellVM(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
-  views: ViewIR[],
   systemName: string,
   /** When the deployable's `ui:` block declares an explicit
    *  `menu { … }`, the caller derives `navSections` from that block
    *  (via `deriveSidebarFromUi`) and passes them here.  When
-   *  undefined the default hardcoded grouping (Aggregates / Workflows /
-   *  Views) is used. */
+   *  undefined the default hardcoded grouping (Aggregates / Workflows)
+   *  is used. */
   sidebarOverride?: NavSectionVM[],
   /** Explicit pages with non-conventional names emit
    *  at `src/pages/<name-snake>.tsx`.  The caller hands their
    *  import + route shape so App.tsx can import & route them
-   *  alongside the conventional aggregate/workflow/view set.
-   *  Routes are appended after the per-aggregate / -workflow /
-   *  -view block so React Router matches conventional first. */
+   *  alongside the conventional aggregate/workflow set.
+   *  Routes are appended after the per-aggregate / -workflow
+   *  block so React Router matches conventional first. */
   extraRoutes?: ExtraPageRoute[],
   /** Whether the ui's scaffold expander produced a synthesised
    *  `Home` page.  When false the import is skipped to avoid a
@@ -89,20 +87,18 @@ export function prepareAppShellVM(
    *  (`/workflows/<slug>/instances/:id`).  Distinct from `workflows` (the
    *  form set): an event-triggered-only saga appears here but not there. */
   observableWorkflows: WorkflowIR[] = [],
-  /** Whether a scaffold-synthesised `ViewsIndex` page (origin
-   *  `views-index`) exists.  When false — an explicit view page with no
-   *  scaffold — the `/views` index import+route is skipped to avoid a
-   *  dangling `./pages/views/index` reference; the per-view pages still
-   *  mount.  Mirrors `hasScaffoldHome`.  Default true is the safe
-   *  assumption for callers without a ui. */
-  hasViewsIndex: boolean = true,
-  /** Same, for the `WorkflowsIndex` page (origin `workflows-index`). */
+  /** Whether a scaffold-synthesised `WorkflowsIndex` page (origin
+   *  `workflows-index`) exists.  When false — an explicit workflow page
+   *  with no scaffold — the `/workflows` index import+route is skipped to
+   *  avoid a dangling `./pages/workflows/index` reference; the per-workflow
+   *  pages still mount.  Mirrors `hasScaffoldHome`.  Default true is the
+   *  safe assumption for callers without a ui. */
   hasWorkflowsIndex: boolean = true,
   /** Whether the deployable is `auth: ui` — the verified session user is
    *  available client-side.  Surfaced verbatim on the VM as `authUi` so the
    *  App-shell template can bind `currentUser = useSession().user` and wrap
    *  menu links that carry a `requiresJs` gate.  The default hardcoded sidebar
-   *  entries (aggregates/workflows/views) are scaffold pages with no
+   *  entries (aggregates/workflows) are scaffold pages with no
    *  `requires`, so they never carry `requiresJs` and stay ungated; only the
    *  `sidebarOverride` (menu-derived) entries can be gated. */
   authUi: boolean = false,
@@ -171,21 +167,6 @@ export function prepareAppShellVM(
       path: `/workflows/${slug}/instances/:id`,
       elementJsx: `<${cap}InstanceDetail />`,
     });
-  }
-
-  // Per-view pages — index (only when the scaffold synthesised one)
-  // + per-view table.
-  if (views.length > 0) {
-    if (hasViewsIndex) {
-      imports.push({ specifier: "ViewsIndex", from: "./pages/views/index" });
-      routes.push({ path: "/views", elementJsx: "<ViewsIndex />" });
-    }
-    for (const view of views) {
-      const slug = snake(view.name);
-      const cap = `${upperFirst(view.name)}ViewPage`;
-      imports.push({ specifier: cap, from: `./pages/views/${slug}` });
-      routes.push({ path: `/views/${slug}`, elementJsx: `<${cap} />` });
-    }
   }
 
   // Explicit pages with non-conventional names.
@@ -261,26 +242,6 @@ export function prepareAppShellVM(
       });
     }
     navSections.push({ label: "Workflows", entries });
-  }
-
-  if (views.length > 0) {
-    const entries: NavEntryVM[] = [];
-    entries.push({
-      to: "/views",
-      label: "All views",
-      testId: "nav-views",
-      activeArgs: `"/views", { exact: true }`,
-    });
-    for (const view of views) {
-      const slug = snake(view.name);
-      entries.push({
-        to: `/views/${slug}`,
-        label: humanize(view.name),
-        testId: `nav-view-${slug}`,
-        activeArgs: JSON.stringify(`/views/${slug}`),
-      });
-    }
-    navSections.push({ label: "Views", entries });
   }
 
   // Phase 8 step 2 — flatten the pre-walked named-layout VMs into

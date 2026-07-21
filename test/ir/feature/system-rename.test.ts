@@ -50,17 +50,13 @@ describe("System builder — rename with reference updates", () => {
 
 describe("System builder — field (member) rename", () => {
   it("renames a field and every usage by type, not text", async () => {
-    // Order.status is used in an invariant guard, a function body, an
-    // assignment target (`status := Confirmed`), and view filters/binds.
+    // Order.status is used in an invariant guard, a function body, and an
+    // assignment target (`status := Confirmed`).
     const out = (await renameMember(sales, "aggregate", "Order", "status", "orderStatus"))!;
     expect(out).toMatch(/orderStatus: OrderStatus/); // declaration
     expect(out).toMatch(/when orderStatus == Confirmed/); // invariant guard (this-member)
     expect(out).toMatch(/= orderStatus == Draft/); // function body
     expect(out).toMatch(/orderStatus := Confirmed/); // assignment target (LValue)
-    expect(out).toMatch(/where orderStatus == Confirmed/); // view filter
-    // The view *output* field and bind name are NOT this-member usages — only
-    // the bind value is. So `status = orderStatus` keeps its left side.
-    expect(out).toMatch(/status = orderStatus/);
   });
 
   it("renames a derived prop used through X id follow paths", async () => {

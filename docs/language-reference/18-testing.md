@@ -167,7 +167,7 @@ test("place and confirm an order through the UI", async ({ page }) => {
 });
 ```
 
-`ui.workflows.<name>(…)` and `ui.views.<name>()` resolve through the generated workflow / view page objects (`new PlaceOrderWorkflowPage(page).run(…)`, `new ActiveOrdersViewPage(page).rows()`). The page objects (`web_app/e2e/pages/<agg>.ts`) are emitted from the same UI shape under [`src/generator/_frontend/`](../../src/generator/_frontend/) and shared across the JSX/markup frontends.
+`ui.workflows.<name>(…)` resolves through the generated workflow page object (`new PlaceOrderWorkflowPage(page).run(…)`). The page objects (`web_app/e2e/pages/<agg>.ts`) are emitted from the same UI shape under [`src/generator/_frontend/`](../../src/generator/_frontend/) and shared across the JSX/markup frontends.
 
 ## Automatic api-vs-ui dispatch
 

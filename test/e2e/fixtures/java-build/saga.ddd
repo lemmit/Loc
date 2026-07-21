@@ -52,12 +52,6 @@ system FulfillmentSys {
           ship.markTracked()
         }
       }
-
-      // Workflow-sourced view (Java saga slice 4): a curated read over the
-      // persisted saga-state row with an in-memory filter — exercises the
-      // <View>Row record + <Ctx>Views service state-repo injection on the
-      // gradle gate.
-      view TrackedFulfillments = OrderFulfillment where status == Tracked
     }
   }
 

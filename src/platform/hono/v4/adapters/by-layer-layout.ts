@@ -54,7 +54,6 @@ export type HonoArtifactCategory =
   // http/
   | "http-index" // http/index.ts (Hono app shell)
   | "http-routes" // per-aggregate http/<lowerFirst>.routes.ts
-  | "http-views" // top-level http/views.ts
   | "http-workflows" // top-level http/workflows.ts
   // auth/
   | "auth-user-types" // auth/user-types.ts
@@ -129,8 +128,6 @@ function pathForCategory(artifact: HonoArtifact): string {
     case "http-routes":
       if (!agg) throw new Error(`byLayer.pathFor: 'http-routes' missing aggregateName`);
       return `http/${slug(agg)}.routes.ts`;
-    case "http-views":
-      return `http/views.ts`;
     case "http-workflows":
       return `http/workflows.ts`;
     // auth/

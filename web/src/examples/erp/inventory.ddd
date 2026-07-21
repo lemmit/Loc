@@ -122,8 +122,6 @@ subdomain Inventory {
       find byProduct(productId: Product id): StockMovement[] where this.productId == productId
     }
 
-    view ActiveProducts = Product where active == true
-
     // Non-transactional cycle-count sweep: page a warehouse's stock and
     // stamp each row's count time (per-iteration save commits as it goes).
     workflow recountWarehouse {

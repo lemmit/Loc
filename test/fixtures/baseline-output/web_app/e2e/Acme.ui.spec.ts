@@ -3,7 +3,6 @@ import { test, expect } from "./fixtures";
 import { ProductListPage } from "./pages/product";
 import { OrderListPage, OrderDetailPage } from "./pages/order";
 import { PlaceOrderWorkflowPage } from "./pages/workflows/place_order";
-import { ActiveOrdersViewPage } from "./pages/views/active_orders";
 
 test("create then confirm an order via UI", async ({ page }) => {
   const prod = await (async () => {   const __list = await new ProductListPage(page).goto();   const __new = await __list.create();   await __new.fill(({ sku: "WIDGET-UI-1", price: ({ amount: 5.0, currency: "USD" }) }));   const __detail = await __new.submit();   return { id: __detail.id }; })();
@@ -18,10 +17,5 @@ test("create then confirm an order via UI", async ({ page }) => {
 test("place an order via the workflow UI", async ({ page }) => {
   const prod = await (async () => {   const __list = await new ProductListPage(page).goto();   const __new = await __list.create();   await __new.fill(({ sku: "WIDGET-UI-2", price: ({ amount: 7.5, currency: "USD" }) }));   const __detail = await __new.submit();   return { id: __detail.id }; })();
   await new PlaceOrderWorkflowPage(page).run(({ customerId: "cust-wf", productId: prod.id, quantity: 2 }));
-});
-
-test("active orders view renders the rendered rows", async ({ page }) => {
-  const rows = await (async () => {   const __view = await new ActiveOrdersViewPage(page).goto();   return await __view.rows(); })();
-  expect(rows.length).toBeGreaterThanOrEqual(0);
 });
 

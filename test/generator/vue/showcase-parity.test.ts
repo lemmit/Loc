@@ -8,7 +8,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // Vue showcase parity pins (vue-frontend-plan.md Slice 5) — the fast-
 // suite mirror of the LOOM_VUE_BUILD showcase case.  Generates
 // `examples/vue-showcase.ddd` (acme with the frontend on
-// `platform: vue`) and pins the views / workflows surface that the
+// `platform: vue`) and pins the workflows surface that the
 // scaffold-only tests can't reach.
 // ---------------------------------------------------------------------------
 
@@ -24,20 +24,13 @@ async function vueFiles(): Promise<Map<string, string>> {
   return out;
 }
 
-describe("vue showcase — views + workflows parity", () => {
+describe("vue showcase — workflows parity", () => {
   it("emits the shared workflows api module with vue-query", async () => {
     const files = await vueFiles();
     const wf = files.get("src/api/workflows.ts")!;
     expect(wf).toContain(`from "@tanstack/vue-query"`);
     expect(wf).toContain("export function usePlaceOrderWorkflow()");
     expect(wf).toContain("export const PlaceOrderRequest");
-  });
-
-  it("emits the shared views api module with vue-query", async () => {
-    const files = await vueFiles();
-    const views = files.get("src/api/views.ts")!;
-    expect(views).toContain(`from "@tanstack/vue-query"`);
-    expect(views).toContain("export function useActiveOrdersView()");
   });
 
   it("workflow page wires run handle + LoomForm + id-select lookup hook", async () => {
@@ -53,13 +46,6 @@ describe("vue showcase — views + workflows parity", () => {
     // `X id` workflow param renders as a select fed by the
     // idTargetHookVar-named useAll lookup.
     expect(page).toMatch(/const __\w+ = reactive\(useAll\w+\(\)\);/);
-  });
-
-  it("view page hoists the view composable through reactive()", async () => {
-    const files = await vueFiles();
-    const page = files.get("src/pages/views/active_orders.vue")!;
-    expect(page).toContain("const activeOrdersView = reactive(useActiveOrdersView());");
-    expect(page).toContain('<template v-if="activeOrdersView.isLoading">');
   });
 
   it("money-free project stays lean: no schemas helper, no decimal.js", async () => {

@@ -39,7 +39,6 @@ import {
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
 import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
-import { buildViewPageObject } from "../_frontend/view-page-object.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
 import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -249,15 +248,13 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
 }
 
 /** Nav-entry data for the app-shell template — the default grouped
- *  sidebar (Aggregates / Workflows / Views) mirroring the react
+ *  sidebar (Aggregates / Workflows) mirroring the react
  *  shell's hardcoded grouping, overridden by an explicit `ui.menu`
  *  via the shared `deriveSidebarFromUi`. */
 export function defaultNavSections(
   scaffoldedAggregates: readonly AggregateIR[],
   scaffoldedWorkflows: readonly WorkflowIR[],
-  scaffoldedViewNames: readonly string[],
   hasWorkflowsIndex: boolean,
-  hasViewsIndex: boolean,
 ): Array<{ label: string; entries: Array<{ to: string; label: string; testId: string }> }> {
   const sections: Array<{
     label: string;
@@ -284,32 +281,22 @@ export function defaultNavSections(
     });
   }
   if (wfEntries.length > 0) sections.push({ label: "Workflows", entries: wfEntries });
-  const viewEntries: Array<{ to: string; label: string; testId: string }> = [];
-  if (hasViewsIndex) {
-    viewEntries.push({ to: "/views", label: "All views", testId: "nav-views" });
-  }
-  for (const v of scaffoldedViewNames) {
-    viewEntries.push({ to: `/views/${snake(v)}`, label: v, testId: `nav-view-${snake(v)}` });
-  }
-  if (viewEntries.length > 0) sections.push({ label: "Views", entries: viewEntries });
   return sections;
 }
 
 /** Playwright page-object emission — same dispatch rules as the
  *  react pages-emitter (scaffold-origin pages route to the shared
- *  per-aggregate / per-workflow / per-view builders; custom walker
+ *  per-aggregate / per-workflow builders; custom walker
  *  pages get a per-page class from their collected testids).  Only
  *  the api-module import root differs (`src/lib/api` in SvelteKit
  *  projects). */
 /** Served decl names for `classifyPage` (slice 3c — replaces stamped `origin`). */
 function sveltePageNameCtx(ctx: SveltePageEmitContext): PageNameCtx {
   const workflowNames: string[] = [];
-  const viewNames: string[] = [];
   for (const bc of ctx.contextsByName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);
-    for (const v of bc.views) viewNames.push(v.name);
   }
-  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames, viewNames };
+  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames };
 }
 
 export function emitSveltePageObjectsForUi(
@@ -320,7 +307,6 @@ export function emitSveltePageObjectsForUi(
   const pageCtx = sveltePageNameCtx(ctx);
   const seenAggregates = new Set<string>();
   const seenWorkflows = new Set<string>();
-  const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
     const origin = classifyPage(page, pageCtx);
@@ -370,27 +356,7 @@ export function emitSveltePageObjectsForUi(
         );
         break;
       }
-      case "view-list": {
-        if (seenViews.has(origin.viewName)) break;
-        seenViews.add(origin.viewName);
-        let ctxIR = ctx.contextsByName.get(origin.contextName);
-        let view = ctxIR?.views.find((v) => v.name === origin.viewName);
-        if (!view) {
-          for (const c of ctx.contextsByName.values()) {
-            const found = c.views.find((v) => v.name === origin.viewName);
-            if (found) {
-              ctxIR = c;
-              view = found;
-              break;
-            }
-          }
-        }
-        if (!ctxIR || !view) break;
-        out.set(`e2e/pages/views/${snake(view.name)}.ts`, buildViewPageObject(view, ctxIR));
-        break;
-      }
       case "workflows-index":
-      case "views-index":
       case "home":
         break;
     }

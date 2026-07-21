@@ -27,14 +27,12 @@ import {
   isModel,
   isPage,
   isPayloadDecl,
-  isProjection,
   isSystem,
   isTargetable,
   isUi,
   isUiChannelParam,
   isUserBlock,
   isValueObject,
-  isWorkflow,
   type Model,
   type PayloadDecl,
   type Ui,
@@ -291,26 +289,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
           exports.push(this.descriptions.createDescription(node, name, document));
         }
       }
-      // Workflows get a bare-name export too (in addition to the qualified
-      // `Targetable` export below) so a `view X = <Workflow> where …` source
-      // ref (`[ViewSource:ID]`) resolves by bare name, exactly as an aggregate
-      // source does (workflow-instance-views.md).
-      if (isWorkflow(node)) {
-        const name = this.nameProvider.getName(node);
-        if (name) {
-          exports.push(this.descriptions.createDescription(node, name, document));
-        }
-      }
-      // Projections get the same bare-name export as workflows so a
-      // `view X = <Projection> where …` / `from <Projection>` source ref
-      // (`[ViewSource:ID]`) resolves by bare name (projection.md v1.1).
-      if (isProjection(node)) {
-        const name = this.nameProvider.getName(node);
-        if (name) {
-          exports.push(this.descriptions.createDescription(node, name, document));
-        }
-      }
-      // Domain services get a bare-name export too, the same way workflows do,
+      // Domain services get a bare-name export so
       // so a member call `Pricing.quote(...)` from an operation / workflow /
       // api body resolves its receiver to the `domainService` declaration
       // (lowered to a Call with `callKind: "domain-service"`).
@@ -368,7 +347,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
       }
       // Traceability code references: every `Targetable`
       // (module / context / aggregate / operation / value-object /
-      // event / repository / workflow / view / deployable / api) is
+      // event / repository / workflow / deployable / api) is
       // exported under its qualified dotted name so a Solution's
       // `entitles [...]` / TestCase's `covers [...]` cross-references
       // resolve through Langium's standard machinery.  Most of these

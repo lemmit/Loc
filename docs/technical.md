@@ -163,7 +163,7 @@ shared IR vocabulary are exempt), and
 - `src/macros/registry.ts` — process-global macro registry.
 - `src/macros/api/` — the `defineMacro(...)` authoring API.
 - `src/macros/stdlib/` — stdlib macros: `scaffold` (+ `scaffoldModule`
-  / `scaffoldContext` / `scaffoldAggregate` / `scaffoldView` /
+  / `scaffoldContext` / `scaffoldAggregate` /
   `scaffoldWorkflow`), `audit` (+ `auditable` / `auditedByDefault`),
   `softDelete` (+ `softDeletable` / `softDeleteByDefault`), `crudish`.
 - Wired by `bootMacros(shared)` in `src/language/ddd-module.ts`, which
@@ -326,7 +326,7 @@ it imports (the graph is acyclic — leaves never import `lower.ts`):
 `lower-capabilities.ts` (filter/stamp/implements collection),
 `lower-members.ts` (shared `lowerField` / `lowerDerived` / `lowerInvariant` /
 `lowerFunction` / `lowerContainment` + `lowerOperation` / `lowerCreate` /
-`lowerDestroy` / `lowerApply` action bodies), `lower-view.ts`,
+`lowerDestroy` / `lowerApply` action bodies),
 `lower-deployment.ts`, `lower-ui.ts`, `lower-workflow.ts`. The public exports
 (`lowerModel` / `lowerProject` / `mergeLoomModels`) stay in `lower.ts`.
 
@@ -407,8 +407,8 @@ the same import direction.
 **File**: `src/ir/lower/lower.ts` (tail of `lowerSystem(...)`).
 
 There is **no inline-primitive expansion sub-pass** any more. Every scaffold
-page — the per-aggregate list/new/detail, the workflow/view pages, *and* the
-`Home` / `WorkflowsIndex` / `ViewsIndex` dashboards — carries its full
+page — the per-aggregate list/new/detail, the workflow pages, *and* the
+`Home` / `WorkflowsIndex` dashboards — carries its full
 walker-stdlib body directly from the `with scaffold(...)` macro
 (`src/macros/stdlib/scaffold/_body-builders.ts`), so the LoomModel returned by
 `lowerModel(...)` already has complete page bodies and no sentinels.
@@ -422,7 +422,7 @@ role-scoped `name` + `area` via `classifyPage` (`src/ir/util/page-kind.ts`),
   the `id` route param on aggregate-/instance-detail pages.
 
 `src/ir/lower/walker-primitive-expander.ts` is now just `buildExpandContext` —
-the per-UI index of served aggregates / workflows / views these passes (and the
+the per-UI index of served aggregates / workflows these passes (and the
 generators) classify against.
 
 ---
@@ -628,7 +628,7 @@ catches things that need that context:
   derived field ordering, association metadata).
 - Workspace-wide uniqueness (root VOs, enums, systems, contexts),
   find-name collisions across aggregates in a context, react ID
-  references, queryable `where` filters, workflow / view / auth
+  references, queryable `where` filters, workflow / auth
   / current-user / permission consistency.
 
 **Non-responsibilities**
@@ -710,7 +710,6 @@ files are therefore the active shell for both versions.
 | `platform/hono/v4/emit.ts` | Project shell + per-context orchestration: package.json, tsconfig, Dockerfile, certs/ dir, route mount, calls into the shared emitters below. |
 | `platform/hono/v4/pins.ts` | Dependency version pins owned by this Hono major (hono / zod / drizzle / pg / pino + dev deps). |
 | `platform/hono/v4/routes-builder.ts` | OpenAPIHono router per aggregate — full Zod schemas via wire-shape, routes for create / get-by-id / find-all / per-op / per-find, domain-error handler. |
-| `platform/hono/v4/view-routes-builder.ts` | OpenAPIHono router per declared view. |
 | `platform/hono/v4/workflow-builder.ts` | OpenAPIHono router + handler per declared workflow. |
 | `platform/hono/v4/auth-emit.ts` | JWT verifier hook + middleware when any deployable declares `auth: required`. |
 | `platform/hono/v4/observability-builder.ts` | Wires the `_obs/render-hono` instrumentation into the per-aggregate routes. |
@@ -751,7 +750,6 @@ files are therefore the active shell for both versions.
 | `find-emit.ts` | Repository find-method bodies (LINQ predicate from convention or from a `where` filter). |
 | `auth-emit.ts` | JWT bearer auth + `[Authorize]` filter wiring when any deployable declares `auth: required`. |
 | `validator-emit.ts` | `AbstractValidator<TRequest>` FluentValidation rules from wire-translatable invariants. |
-| `view-emit.ts` | Controller + handler per declared view. |
 | `workflow-emit.ts` | Controller + handler per declared workflow. |
 | `emit.ts` | Top-level barrel that `index.ts` invokes per context. |
 | `render-expr.ts` / `render-stmt.ts` | IR → idiomatic C#, with a `thisName` context (e.g., `x` for find filters' `.Where(x => …)`). |
@@ -768,7 +766,6 @@ files are therefore the active shell for both versions.
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
 | `layouts-emitter.ts` | Per-layout shell (`<Outlet/>` wrappers, header/footer, sidebar slots). |
 | `menu-emitter.ts` | Sidebar / nav menu from `menu:` declarations + scaffold defaults. |
-| `view-builder.ts` | Per-view page module. |
 | `workflow-builder.ts` | Per-workflow page module. |
 | `walker/tsx-target.ts` | `WalkerTarget` implementation for TSX — state read/write, navigation, API call lowering, `match` rendering.  Imported by `body-walker.ts`. |
 | `walker/api-hooks.ts` / `context.ts` / `icons.ts` / `import-lines.ts` / `page-shell.ts` | Walker helpers — TanStack Query hook import collection, walk-context plumbing, design-pack icon resolution, deduped import lines, page-shell wrapping. |
@@ -805,14 +802,14 @@ ui { scaffold modules: Sales }
         │
         ▼  phase ② macro expansion            src/macros/stdlib/scaffold/
    The `scaffold` macro (and its sub-macros scaffoldModule /
-   scaffoldContext / scaffoldAggregate / scaffoldView /
+   scaffoldContext / scaffoldAggregate /
    scaffoldWorkflow) synthesise `Page` AST nodes (name, route, menu)
    whose body is the FULL walker-stdlib tree, built directly as Langium
    AST by the scaffolders in
    `src/macros/stdlib/scaffold/_body-builders.ts` (Stack / Breadcrumbs /
-   QueryView / Table / CreateForm …).  This includes the three per-UI
-   dashboards — `scaffoldHome` / `scaffoldWorkflowsIndex` /
-   `scaffoldViewsIndex` build `Stack { Heading, Card per … }` from the
+   QueryView / Table / CreateForm …).  This includes the per-UI
+   dashboards — `scaffoldHome` / `scaffoldWorkflowsIndex`
+   build `Stack { Heading, Card per … }` from the
    gathered inventory, so EVERY scaffold page body is unfoldable real
    `.ddd` source.  There is no sentinel and no later expansion pass.
         │
@@ -829,8 +826,7 @@ contains*.  Per page kind (`classifyPage`):
 | `aggregate-new` | `Stack { Breadcrumbs, Heading, Card { CreateForm { of: Agg } } }` |
 | `aggregate-detail` | `Stack { Breadcrumbs, Heading, QueryView { of: api.Agg.byId(id), single: true, data:` → `Card { Stack { KeyValueRow per scalar field } }` **+ one `Modal { trigger: Button, OperationForm { data.<op> } }` per public operation + one `Card { Heading, Table }` per `contains` collection (related-entity list)** ` } }` |
 | `workflow-form` | `Stack { Breadcrumbs, Heading, Card { WorkflowForm { runs: wf } } }` |
-| `view-list` | `Stack { Heading, QueryView { of: Views.<name>, data: Paper { Table } } }` |
-| `home` / `workflows-index` / `views-index` | `Stack { Heading, Stack { Card per aggregate/workflow/view } }` |
+| `home` / `workflows-index` | `Stack { Heading, Stack { Card per aggregate/workflow } }` |
 
 Because the output is plain walker stdlib, every scaffolded feature
 is reachable from an explicit `page <Name> { body: … }` —

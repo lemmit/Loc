@@ -135,23 +135,13 @@ export const svelteTarget: WalkerTarget = {
   // --- API binding seam ---------------------------------------------------
 
   /** Identical naming to the TSX target — the svelte api modules
-   *  export the same `useAll<Plural>` / `useCreate<Single>` /
-   *  `use<X>View` factories (svelte-query v6's createQuery returns a
+   *  export the same `useAll<Plural>` / `useCreate<Single>`
+   *  factories (svelte-query v6's createQuery returns a
    *  reactive object with the React-Query property surface), so the
    *  page-level wiring is name-compatible.  Only the import root
    *  differs: SvelteKit's `$lib/api/*` alias instead of relative
    *  `../api/*`. */
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
-    if (detected.kind === "view") {
-      const viewName = detected.aggregateName;
-      const viewPascal = upperFirstName(viewName);
-      return {
-        varName: `${lowerFirstName(viewName)}View`,
-        hookName: `use${viewPascal}View`,
-        importFrom: "$lib/api/views",
-        argsRendered: [],
-      };
-    }
     if (detected.kind === "workflow-instance") {
       const wf = upperFirstName(detected.aggregateName);
       const isAll = detected.operation === "all";

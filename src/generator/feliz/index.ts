@@ -505,7 +505,6 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregateNames],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
   const seen = new Set<string>();
   const out: FelizRead[] = [];
@@ -772,7 +771,6 @@ function renderAppFs(
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregatesByName.keys()],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
   // One-click actions (`Action { instance.op }`) — the fieldless operation
   // buttons; their trigger/done Msg + POST Cmd + refetch wire like a mutation.
@@ -1441,7 +1439,6 @@ export function generateFelizForContexts(
   const e2ePageNameCtx: PageNameCtx = {
     aggregateNames: [...e2eAggregatesByName.keys()],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
   out.set("e2e/smoke.spec.ts", smokeSpec(ui, e2ePageNameCtx));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);

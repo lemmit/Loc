@@ -44,7 +44,6 @@ system Shop {
         find byCode(code: string): Order? where this.code == code
         find active(): Order[] where this.status == confirmed
       }
-      view confirmed_orders = Order where status == confirmed
       workflow placeOrder {
         create(code: string) {
           requires currentUser.permissions.length > 0
@@ -78,7 +77,7 @@ async function customizer(): Promise<string> {
   return c;
 }
 
-describe("java OpenApiCustomizer — list/view array wrappers", () => {
+describe("java OpenApiCustomizer — list array wrappers", () => {
   it("registers the named <Agg>ListResponse array wrapper", async () => {
     const c = await customizer();
     expect(c).toContain('new Wrapper("OrderListResponse", "OrderResponse")');
@@ -97,14 +96,10 @@ describe("java OpenApiCustomizer — list/view array wrappers", () => {
     );
   });
 
-  it("retargets a `T[]` find + a shorthand view to the list wrapper", async () => {
+  it("retargets a `T[]` find to the list wrapper", async () => {
     const c = await customizer();
     expect(c).toContain(
       'new Route("get", "/api/orders/active", "OrderListResponse", new int[] {}, null)',
-    );
-    // The view route also carries a `View`-suffixed operationId.
-    expect(c).toContain(
-      'new Route("get", "/api/views/confirmed_orders", "OrderListResponse", new int[] {}, "confirmed_ordersView")',
     );
   });
 
@@ -231,12 +226,6 @@ describe("java OpenApiCustomizer — operationId overrides", () => {
     expect(c).toContain('"placeOrderWorkflow"');
     expect(c).toContain("if (route.operationId() != null) op.setOperationId(route.operationId());");
   });
-
-  it("suffixes a view operationId with `View`", async () => {
-    const c = await customizer();
-    expect(c).toContain('"confirmed_ordersView"');
-  });
-
   it("leaves aggregate-op routes with a null operationId (springdoc default matches node)", async () => {
     const c = await customizer();
     // The rename/confirm aggregate ops carry no operationId override.

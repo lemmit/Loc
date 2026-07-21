@@ -73,7 +73,7 @@
     },
     "declaration-keywords": {
       "name": "keyword.declaration.ddd",
-      "match": "\\b(system|subdomain|module|context|aggregate|entity|valueobject|enum|event|repository|workflow|view|deployable|ui|api|storage|resource|theme|user|auth|permission|requirement|solution|testCase|criterion|channel|channelSource|component|page|menu|layout|state|payload|command|query|response|error|seed|foundation|document|operation|function)\\b"
+      "match": "\\b(system|subdomain|module|context|aggregate|entity|valueobject|enum|event|repository|workflow|deployable|ui|api|storage|resource|theme|user|auth|permission|requirement|solution|testCase|criterion|channel|channelSource|component|page|menu|layout|state|payload|command|query|response|error|seed|foundation|document|operation|function)\\b"
     },
     "member-keywords": {
       "name": "keyword.other.member.ddd",
@@ -81,7 +81,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ddd",
-      "match": "\\b(let|emit|match|when|where|else|if|for|in|new|from|against|return|on|by|with|of|use|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|sort|loads|asc|desc|or|paged|envelope|option|modules|aggregates|contexts|events|views|workflows|carries|hosts)\\b"
+      "match": "\\b(let|emit|match|when|where|else|if|for|in|new|from|against|return|on|by|with|of|use|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|sort|loads|asc|desc|or|paged|envelope|option|modules|aggregates|contexts|events|workflows|carries|hosts)\\b"
     },
     "modifiers": {
       "name": "storage.modifier.ddd",

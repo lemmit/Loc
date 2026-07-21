@@ -15,7 +15,6 @@ import type {
   Storage,
   Ui,
   ValueObject,
-  View,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
 
@@ -23,8 +22,8 @@ import type {
 // AST → graph model for the System / Model Builder.
 //
 // Maps the structural model to nodes (one per construct) and edges (the clear
-// cross-references: repository→aggregate, api→module, deployable→module/ui/api,
-// view→aggregate).  The pane lays these out and renders them with React Flow;
+// cross-references: repository→aggregate, api→module, deployable→module/ui/api).
+// The pane lays these out and renders them with React Flow;
 // edits splice the backing AST node's CST range via the structural printer.
 //
 // Node positions are layout, not model — they're derived deterministically here
@@ -38,7 +37,6 @@ export type NodeKind =
   | "valueobject"
   | "event"
   | "repository"
-  | "view"
   | "workflow"
   | "deployable"
   | "api"
@@ -91,7 +89,6 @@ const COLUMN_ORDER: NodeKind[] = [
   "valueobject",
   "event",
   "repository",
-  "view",
   "workflow",
   "api",
   "ui",
@@ -125,7 +122,6 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
       case "ValueObject": addNode("valueobject", (node as ValueObject).name, node); break;
       case "EventDecl": addNode("event", (node as EventDecl).name, node); break;
       case "Repository": addNode("repository", (node as Repository).name, node); break;
-      case "View": addNode("view", (node as View).name, node); break;
       case "Workflow": addNode("workflow", (node as Workflow).name, node); break;
       case "Deployable": addNode("deployable", (node as Deployable).name, node); break;
       case "Api": addNode("api", (node as Api).name, node); break;
@@ -149,11 +145,6 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
       case "Repository": {
         const r = node as Repository;
         addEdge(nodeId("repository", r.name), nodeId("aggregate", r.aggregate.$refText), "for");
-        break;
-      }
-      case "View": {
-        const v = node as View;
-        if (v.source) addEdge(nodeId("view", v.name), nodeId("aggregate", v.source.$refText), "from");
         break;
       }
       case "Api": {
@@ -288,7 +279,6 @@ const NODE_KIND_TO_REF: Partial<Record<NodeKind, string>> = {
   valueobject: "valueobject",
   event: "event",
   repository: "repository",
-  view: "view",
   workflow: "workflow",
   deployable: "deployable",
   api: "api",

@@ -79,11 +79,6 @@ import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
 import { emitVanillaValueCollectionSchemas } from "./value-collection-schema-emit.js";
 import { emitVanillaValueObjects } from "./valueobject-emit.js";
-import {
-  emitVanillaViewModules,
-  emitVanillaViewsController,
-  type VanillaViewRef,
-} from "./view-emit.js";
 import { emitVanillaEsWorkflowFiles } from "./workflow-eventsourced-emit.js";
 import {
   emitVanillaWorkflowExecution,
@@ -216,7 +211,6 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
-  const allViews: VanillaViewRef[] = [];
   const allProjections: VanillaProjectionRef[] = [];
   const allQueryProjections: VanillaQueryProjectionRef[] = [];
   const workflowGroups: WorkflowControllerGroup[] = [];
@@ -274,10 +268,6 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitVanillaEventModules(appModule, ctx, out);
     const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out, sys, sourcemap);
     apiRoutes.push(...routes);
-    // Views — per-context Ecto query modules; controller + routes collected
-    // project-wide (one `ViewsController` for all views).
-    emitVanillaViewModules(appName, appModule, ctx, out, sys, sourcemap);
-    for (const view of ctx.views) allViews.push({ ctx, view });
     // Retrievals — per-context Ecto query modules at
     // `lib/<app>/<ctx>/retrievals/<name>.ex` plus a matching
     // `defdelegate run_<ret>_<agg>` on the context facade (emitted by
@@ -356,7 +346,6 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
   }
   if (hasDomainTests) emitTestHelper(out);
-  apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
   // One deployable-level ProjectionsController over every hosted context's
   // projections (the per-context schema emit above intentionally does NOT write
   // the controller — sibling of ViewsController).
@@ -382,7 +371,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
 
   // --- OpenAPI spec ----------------------------------------------------------
-  // Emits the <Api>Spec module, per-aggregate/workflow/view schema modules, and
+  // Emits the <Api>Spec module, per-aggregate/workflow schema modules, and
   // the OpenapiController, plus a `!root:/openapi.json` route entry spliced into
   // the router ROOT (not under /api) so the spec sits at /openapi.json on every
   // backend — joining the 5-backend conformance-parity diff.  The generated
@@ -468,7 +457,6 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       const nameCtx: PageNameCtx = {
         aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
         workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-        viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
       };
       out.set(
         `lib/${appName}_web/components/sidebar.ex`,

@@ -130,7 +130,7 @@ export function memberDeclAt(cstNode: CstNode): AstNode | undefined {
 /** Resolve a bare `NameRef` to the member declaration it names, if any. Uses
  *  the same `envForNode` the type system uses, so it sees members reachable in
  *  every expression position — aggregate/VO bodies, and the source aggregate of
- *  view filters/binds and repository find filters (where the aggregate comes
+ *  repository find filters (where the aggregate comes
  *  through a cross-reference, not containment) — and a closer param / let /
  *  lambda binding correctly shadows the member (env precedence). */
 function nameRefDecl(nr: NameRef): AstNode | undefined {

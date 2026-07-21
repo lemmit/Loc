@@ -23,7 +23,6 @@
 //   operation→ [<op>, <Agg>]
 //   find     → [<find>, <Agg>]
 //   workflow → [<wf>, workflow]
-//   view     → [<view>, view]
 
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
@@ -75,11 +74,6 @@ export function opWorkflowInstances(wfName: string): OpIdTokens {
  *  correlation id. */
 export function opWorkflowInstanceById(wfName: string): OpIdTokens {
   return ["get", wfName, "instance", "byId"];
-}
-
-/** `GET /views/<view>` — query a read-model view. */
-export function opView(viewName: string): OpIdTokens {
-  return [viewName, "view"];
 }
 
 /** Render tokens as camelCase (`getProjectById`) — Hono / .NET idiom. */

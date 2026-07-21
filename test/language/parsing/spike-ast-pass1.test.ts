@@ -105,14 +105,14 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     const ui = uiOf(model, "WebApp");
     const pageNames = allPageNames(ui).sort();
     // The full architectural fix synthesises `Home` for any ui
-    // that scaffolds at least one aggregate / workflow / view —
+    // that scaffolds at least one aggregate / workflow —
     // matches the legacy generator's behaviour.
     // Aggregate pages are role-named (`List`/`New`/`Detail`) and scoped to
     // their per-aggregate area, so the names repeat across Order + Customer.
     expect(pageNames).toEqual(["Detail", "Detail", "Home", "List", "List", "New", "New"]);
   });
 
-  it("synthesises pages for workflows + views", async () => {
+  it("synthesises pages for workflows", async () => {
     const { model } = await parseFresh(`
       system S {
         subdomain M {
@@ -122,10 +122,9 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             workflow placeOrder {
       create() { let o = Order.create({ }) }
     }
-            view ActiveOrders = Order where x > 0
           }
         }
-        ui WebApp with scaffold(workflows: [placeOrder], views: [ActiveOrders]) {
+        ui WebApp with scaffold(workflows: [placeOrder]) {
         }
       }
     `);
@@ -134,7 +133,6 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       .filter((m): m is Page => m.$type === "Page")
       .map((p) => p.name);
     expect(pageNames).toContain("PlaceOrderWorkflow");
-    expect(pageNames).toContain("ActiveOrdersView");
   });
 
   it("override-by-name is scope-local: an explicit area page suppresses the scaffolded one", async () => {

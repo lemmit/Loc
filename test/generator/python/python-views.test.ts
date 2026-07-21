@@ -6,12 +6,11 @@ import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Python backend — criteria / retrievals / views (plan S11).  Criteria
+// Python backend — criteria / retrievals (plan S11).  Criteria
 // inline into find/retrieval predicates (the IR contract explicitly
 // supports non-reifying backends); retrievals emit run_<name> with
-// sort + call-site offset/limit; views emit GET /views/<snake> routes
-// (shorthand → to_wire list; full form → bind projection over
-// hydrated rows).  Verified live against Postgres during the slice.
+// sort + call-site offset/limit.  Verified live against Postgres
+// during the slice.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,43 +37,5 @@ describe("python retrievals", () => {
     );
     expect(repo).toContain("query = query.offset(offset)");
     expect(repo).toContain("query = query.limit(limit)");
-  });
-
-  it("emits find_many_by_ids (the views bulk loader)", async () => {
-    const files = await build();
-    const repo = files.get("api/app/db/repositories/order_repository.py")!;
-    expect(repo).toContain("async def find_many_by_ids(self, ids: list[OrderId]) -> list[Order]:");
-  });
-});
-
-describe("python views", () => {
-  it("shorthand views project the source wire shape through to_wire", async () => {
-    const files = await build();
-    const views = files.get("api/app/http/views_routes.py")!;
-    expect(views).toContain(
-      '@router.get("/draft_orders", response_model=OrderListResponse, operation_id="draftOrdersView")',
-    );
-    expect(views).toContain("return [repo.to_wire(r) for r in await repo.draft_orders()]");
-    // The repo gains the synthesised view find with the lowered filter.
-    const repo = files.get("api/app/db/repositories/order_repository.py")!;
-    expect(repo).toContain("async def draft_orders(self) -> list[Order]:");
-    expect(repo).toContain("select(OrderRow).where((OrderRow.status == OrderStatus.Draft))");
-  });
-
-  it("full-form views project binds over hydrated rows (money as string)", async () => {
-    const files = await build();
-    const views = files.get("api/app/http/views_routes.py")!;
-    expect(views).toContain("class OrderSummariesRow(BaseModel):");
-    expect(views).toContain("    orderId: str");
-    expect(views).toContain("    budget: str");
-    expect(views).toContain('"orderId": r.id,');
-    // Money rides the wire as a precise-decimal string via `money_str`
-    // (parity with node/java/dotnet/elixir; never bare `str()` — no exponent).
-    expect(views).toContain('"budget": money_str(r.unit_budget),');
-    expect(views).toContain("from app.db.wire import money_str");
-    expect(views).toContain('"lineCount": len(r.lines),');
-    const main = files.get("api/app/main.py")!;
-    expect(main).toContain("from app.http.views_routes import router as views_router");
-    expect(main).toContain('app.include_router(views_router, prefix="/api")');
   });
 });

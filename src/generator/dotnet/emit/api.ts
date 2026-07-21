@@ -937,7 +937,7 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
 
 /** Swashbuckle document filter — promotes inline `array<XResponse>` list
  *  responses to named component schemas (`XResponse` → `XListResponse`;
- *  full-form views: `XRow` → `XResponse`), matching the Hono / Phoenix
+ *  query-time projections: `XRow` → `XResponse`), matching the Hono / Phoenix
  *  backends which name the wrapper.  Swashbuckle inlines any IEnumerable
  *  type, so the only reliable way to get a named array component is to
  *  add it + retarget the responses here.  The element→wrapper map is baked

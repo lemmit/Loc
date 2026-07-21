@@ -92,7 +92,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, enumPickerCandidates, exprHints, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
+import { editExprSlot, enumPickerCandidates, exprHints, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, workflowSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -108,7 +108,6 @@ const KIND_COLOR: Record<NodeKind, string> = {
   valueobject: "var(--mantine-color-cyan-8)",
   event: "var(--mantine-color-grape-7)",
   repository: "var(--mantine-color-indigo-7)",
-  view: "var(--mantine-color-lime-8)",
   workflow: "var(--mantine-color-orange-8)",
   deployable: "var(--mantine-color-red-8)",
   api: "var(--mantine-color-pink-7)",
@@ -869,7 +868,6 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Button size="compact-xs" variant="light" data-testid="c4system-add-event" onClick={() => addConstruct("event")}>+ Event</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-workflow" onClick={() => addConstruct("workflow")}>+ Workflow</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-repository" disabled={!hasAggregate} onClick={() => addConstruct("repository")}>+ Repository</Button>
-          <Button size="compact-xs" variant="light" data-testid="c4system-add-view" disabled={!hasAggregate} onClick={() => addConstruct("view")}>+ View</Button>
           <Button size="compact-xs" variant="default" data-testid="c4system-add-storage" onClick={() => addConstruct("storage")}>+ Storage</Button>
           <Button size="compact-xs" variant="default" data-testid="c4system-add-ui" onClick={() => addConstruct("ui")}>+ UI</Button>
           <Button size="compact-xs" variant="default" data-testid="c4system-add-deployable" onClick={() => addConstruct("deployable")}>+ Deployable</Button>
@@ -913,7 +911,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             {isRebindKind(selected.kind) && (
               <Select
                 size="xs"
-                label={targetKindOf(selected.kind) === "subdomain" ? "Source subdomain" : selected.kind === "view" ? "Source aggregate" : "Target aggregate"}
+                label={targetKindOf(selected.kind) === "subdomain" ? "Source subdomain" : "Target aggregate"}
                 searchable
                 data={rebindTargets(parsed.ast, selected.kind)}
                 value={currentTarget(selected.ast, selected.kind)}
@@ -1190,15 +1188,13 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             )}
             {(() => {
                 const options =
-                  selected.kind === "view"
-                    ? viewSlotOptions(selected.ast)
-                    : selected.kind === "repository"
-                      ? repoSlotOptions(selected.ast)
-                      : selected.kind === "workflow"
-                        ? workflowSlotOptions(selected.ast)
-                        : selected.kind === "aggregate" || selected.kind === "valueobject"
-                          ? exprSlotOptions(selected.ast)
-                          : [];
+                  selected.kind === "repository"
+                    ? repoSlotOptions(selected.ast)
+                    : selected.kind === "workflow"
+                      ? workflowSlotOptions(selected.ast)
+                      : selected.kind === "aggregate" || selected.kind === "valueobject"
+                        ? exprSlotOptions(selected.ast)
+                        : [];
                 if (options.length === 0) return null;
                 const slot = options.find((o) => o.value === slotKey)?.slot;
                 const expr = slot ? slotExpr(parsed.ast, slot) : null;
@@ -1316,7 +1312,6 @@ const KIND_TO_TYPE: Record<NodeKind, string> = {
   valueobject: "ValueObject",
   event: "EventDecl",
   repository: "Repository",
-  view: "View",
   workflow: "Workflow",
   deployable: "Deployable",
   api: "Api",

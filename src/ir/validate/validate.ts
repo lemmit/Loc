@@ -12,7 +12,6 @@ import {
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
-  validateViewGates,
 } from "./checks/query-checks.js";
 import { validateStores } from "./checks/store-checks.js";
 import {
@@ -87,7 +86,6 @@ import { validateUiBodies } from "./checks/ui-checks.js";
 import {
   validateEventChannelAmbiguous,
   validateEventConsumersCarried,
-  validateViews,
   validateWorkflows,
 } from "./checks/workflow-checks.js";
 
@@ -207,7 +205,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
-    validateViewGates(c, diags);
     validateFindGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
@@ -228,7 +225,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // Explicit application-layer handlers (unfoldable-api-derivation.md, Layer 3):
     // queryHandler-read-only + commandHandler-single-aggregate layering contracts.
     validateApplicationHandlers(c, diags);
-    validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
     validateGenericInstancesUnimplemented(

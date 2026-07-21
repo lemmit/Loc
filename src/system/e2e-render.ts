@@ -48,7 +48,7 @@ interface RenderCtx {
   usedLetNames: Set<string>;
   /**
    * URL path prefix for API calls.  Phoenix routes everything under
-   * `scope "/api"`, so aggregate / workflow / view calls must be
+   * `scope "/api"`, so aggregate / workflow calls must be
    * prefixed with "/api".  Hono and dotnet serve at the root ("").
    */
   apiBasePath: string;
@@ -487,26 +487,6 @@ function matchApiCall(e: ExprIR): ApiCallShape | null {
 }
 
 function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
-  // Context-level views are served under `${apiBasePath}/views/<view_snake>` as
-  // parameterless GET routes (see the `viewsRoutes` emitter).  `api.views.<name>()`
-  // reads one — matched by `lowerFirst` (the synthesised find name) or `snake`
-  // (the route path), mirroring the validator's `views` branch in test-checks.ts.
-  if (call.aggregateSlug === "views") {
-    const view = ctx.contexts
-      .flatMap((c) => c.views)
-      .find((v) => lowerFirst(v.name) === call.method || snake(v.name) === call.method);
-    if (!view) {
-      const known = ctx.contexts
-        .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
-        .sort()
-        .join(", ");
-      throw new Error(
-        `e2e: unknown view 'api.views.${call.method}' on this deployable. ` +
-          `Available views: ${known || "(none)"}.`,
-      );
-    }
-    return `await __get(\`\${base}${ctx.apiBasePath}/views/${snake(view.name)}\`)`;
-  }
   const agg = findAggregateBySlug(call.aggregateSlug, ctx.contexts);
   if (!agg) {
     const known = ctx.contexts

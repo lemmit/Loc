@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Java backend — workflows, views, auth, extern (slice S6 of
+// Java backend — workflows, auth, extern (slice S6 of
 // docs/old/plans/java-backend-implementation.md).  The same surface boots and
 // behaves against Postgres (manually verified; LOOM_JAVA_BUILD compiles
 // examples/showcase.ddd's java deployable); these unit tests pin the
@@ -40,15 +40,6 @@ system Hub {
           let proj = Project.create({ name: name, visibility: visibility, active: true })
           proj.rename(name)
         }
-      }
-
-      view ActiveProjects = Project where active == true
-      view ProjectSummary {
-        projectId: Project id
-        name: string
-        from Project where visibility != Private
-        bind projectId = id,
-             name = name
       }
     }
   }
@@ -158,29 +149,5 @@ describe("java generator — workflows (S6)", () => {
     expect(svc).toContain("proj.rename(name, currentUser);");
     // at-exit save for the dirty let.
     expect(svc).toContain("projectsRepository.save(proj);");
-  });
-});
-
-describe("java generator — views (S6)", () => {
-  it("shorthand views reuse the aggregate response; full-form views get Row records", async () => {
-    const f = await files();
-    const ctrl = f.get(`${ROOT}/api/CatalogViewsController.java`)!;
-    expect(ctrl).toContain('@RequestMapping("/api/views")');
-    expect(ctrl).toContain('@GetMapping("/active_projects")');
-    expect(ctrl).toContain('@GetMapping("/project_summary")');
-    const svc = f.get(`${ROOT}/application/views/CatalogViews.java`)!;
-    expect(svc).toContain(
-      "return projectsRepository.activeProjects().stream().map(ProjectResponse::from).toList();",
-    );
-    // Bind exprs render through accessors (cross-package) + wire conversion.
-    expect(svc).toContain(".map(a -> new ProjectSummaryRow(a.id().value(), a.name()))");
-    const row = f.get(`${ROOT}/application/views/ProjectSummaryRow.java`)!;
-    expect(row).toContain("public record ProjectSummaryRow(UUID projectId, String name) {");
-  });
-
-  it("view reads ride synthesized repository finds (JPQL)", async () => {
-    const jpa = (await files()).get(`${ROOT}/features/projects/ProjectJpaRepository.java`)!;
-    expect(jpa).toContain('@Query("select e from Project e where e.active = true")');
-    expect(jpa).toContain("List<Project> activeProjects();");
   });
 });

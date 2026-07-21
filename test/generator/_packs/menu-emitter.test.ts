@@ -33,7 +33,6 @@ function nameCtxOf(loom: LoomModel) {
     workflowNames: sys.subdomains.flatMap((m) =>
       m.contexts.flatMap((c) => c.workflows.map((w) => w.name)),
     ),
-    viewNames: sys.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.views.map((v) => v.name))),
   };
 }
 
@@ -161,7 +160,6 @@ describe("menu emitter", () => {
             workflow placeOrder {
       create() { let o = Order.create({ }) }
     }
-            view ActiveOrders = Order where x > 0
           }
         }
         ui WebApp with scaffold(subdomains: [Sales]) {
@@ -169,9 +167,7 @@ describe("menu emitter", () => {
             section "Mixed" {
               link List,
               link PlaceOrderWorkflow,
-              link ActiveOrdersView,
-              link WorkflowsIndex,
-              link ViewsIndex
+              link WorkflowsIndex
             }
           }
         }
@@ -181,16 +177,12 @@ describe("menu emitter", () => {
     expect(entries.map((e) => e.testId)).toEqual([
       "nav-orders",
       "nav-workflow-place_order",
-      "nav-view-active_orders",
       "nav-workflows",
-      "nav-views",
     ]);
     expect(entries.map((e) => e.activeArgs)).toEqual([
       `"/orders"`,
       `"/workflows/place_order"`,
-      `"/views/active_orders"`,
       `"/workflows", { exact: true }`,
-      `"/views", { exact: true }`,
     ]);
   });
 

@@ -20,7 +20,6 @@ const SRC = `
         find allRows(): Order[] ignoring *
         find normal(): Order[] where this.total > 0
       }
-      view ActiveOrders = Order where this.total > 0 ignoring softDeletable
     }}
     storage primary { type: postgres }
     resource cState { for: C, kind: state, use: primary }
@@ -75,13 +74,6 @@ describe("node/Drizzle ignoring filter-bypass emission", () => {
     expect(whereClause(r, "normal")).toBe(
       "and(gt(schema.orders.total, 0), eq(schema.orders.isDeleted, false))",
     );
-  });
-
-  it("the view's `ignoring` rides the synthesized find and drops the conjunct", async () => {
-    const r = await repo();
-    const w = whereClause(r, "activeOrders");
-    expect(w).toBe("gt(schema.orders.total, 0)");
-    expect(w).not.toContain("isDeleted");
   });
 
   it("CRUD reads (findById / findManyByIds) keep the capability filter", async () => {

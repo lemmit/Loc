@@ -23,7 +23,6 @@ system Catalog {
         find latest(): Order?
       }
       retrieval BigOrders(min: int) of Order { where: total >= min  sort: [total desc] }
-      view ActiveOrders = Order where total > 0
     }
   }
   api CatalogApi from Core

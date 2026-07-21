@@ -15,7 +15,7 @@ import { renderPyExpr } from "./render-expr.js";
 // mounted at `/projections` (read-path-architecture.md rev.13).
 //
 // A QUERY-TIME projection (`from <Agg> where … join … select …`, no folds) is
-// the always-current read model that was a `view`'s full form.  It reads the
+// the always-current read model of the query-time projection read.  It reads the
 // SAME way: the source aggregate's repository synthesises a parameterless
 // `repo.<projName>()` find from the `where` (repository-builder.ts), the route
 // bulk-loads every `join` follow (`query.auxiliaries`) via that aggregate's

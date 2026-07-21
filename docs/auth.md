@@ -4,7 +4,7 @@ Loom systems can declare a strongly-typed JWT claim shape at system
 scope and opt deployables in to JWT-decode middleware per request.
 Modules can declare a typed permission catalogue used to gate
 command entry from inside operation / workflow bodies.  Repository
-finds and view filters can reference `currentUser` to scope query
+finds can reference `currentUser` to scope query
 results to the requester.
 
 Shipped over four slices:
@@ -15,8 +15,8 @@ Shipped over four slices:
   `permissions.<name>` magic identifier resolving to a stable
   `<subdomain>.<name>` runtime string + the `.contains(x)` collection
   op for ergonomic claim membership checks.
-- **Slice 1C** — `currentUser` admissible inside repository find /
-  view `where` filters; the renderer threads the resolved user
+- **Slice 1C** — `currentUser` admissible inside repository find
+  `where` filters; the renderer threads the resolved user
   through as a closure-captured parameter on the generated method.
 - **Slice 2**  — `requires <expr>` statement: a declarative
   authorization gate that maps to HTTP 403, distinct from
@@ -37,8 +37,6 @@ escape — else `loom.default-deny-ungated` fires.  Covered:
 - **workflows** — every command-triggered `create … {}` starter and named
   `handle …(){}` continuation (event-triggered creates and `on(...)`
   reactors are not client-reachable, so they are excluded);
-- **`view`s** — the optional gate before the query (see
-  [View gates](#view-requires-gates) below);
 - **repository `find`s** — the same optional `requires` gate (see
   [Find gates](#find-requires-gates) below).  The auto-injected `find all`
   list route is the one exception: it is compiler-synthesized with no author
@@ -162,7 +160,7 @@ needs.
 
 ### Row-level visibility (slice 1C)
 
-`currentUser` is admissible inside repository find and view
+`currentUser` is admissible inside repository find
 `where` clauses; the renderer threads the resolved User through
 the generated method as a closure-captured parameter:
 
@@ -170,8 +168,6 @@ the generated method as a closure-captured parameter:
 repository Orders for Order {
   find mine(): Order[] where customerId == currentUser.customerId
 }
-
-view MyOrders = Order where customerId == currentUser.customerId
 ```
 
 What gets emitted:
@@ -222,7 +218,7 @@ the same way as the operation route does.
 #### Header `requires` clause (authorization.md §11.3)
 
 The gate can also ride the **declaration header** — the write-side twin of the
-find / view `requires` gate.  It relocates the authorization decision out of the
+find `requires` gate.  It relocates the authorization decision out of the
 body onto the signature, and is exactly equivalent to a first-body `requires`
 statement (same 403, same pre-body evaluation, same scope):
 
@@ -386,38 +382,13 @@ by default, so a carve-out with no prior grant is meaningful.
 
 **Not yet shipped (Phase 4.x follow-ups):** field-level masking (`field f { mask
 unless … }` / `deny read`), `data {}` row-attribute clauses, and per-operation /
-`View` / `Workflow` point gates — the larger slices the aggregate-level deny-wins
+`Workflow` point gates — the larger slices the aggregate-level deny-wins
 primitive lays the plumbing for.
-
-### View `requires` gates
-
-A `view` accepts an optional `requires <expr>` clause **before**
-its `where` filter — the read-side analogue of an operation gate:
-
-```ddd
-view OpenTickets = Ticket requires currentUser.role == "agent" where open == true
-```
-
-The gate emits an in-handler **403** at the top of the view's
-route, evaluated against the request's `currentUser` before the
-query runs.  Because it runs *before* any row is fetched, a view
-gate is **`currentUser`-only** (plus constants): referencing the
-source row (`requires open == true`) is a compile error
-(`loom.view-gate-not-current-user`).  This keeps the gate decidable
-without the data — use `where` to scope *which rows* come back, and
-`requires` to decide *who* may run the view.  `requires true` is the
-intentionally-public escape that also satisfies default-deny.
-
-The 403 emission lands on **every backend** (Hono, .NET, Java, Python,
-Phoenix LiveView); the validation (currentUser-only, default-deny) is
-platform-neutral.  See
-[Views → Authorization](views.md#authorization--the-requires-gate)
-for the full surface.
 
 ### Find `requires` gates
 
 A repository `find` accepts the same optional `requires <expr>` clause,
-**before** its `where` filter — the read-side twin of the view gate:
+**before** its `where` filter — the read-side analogue of an operation gate:
 
 ```ddd
 repository Tickets for Ticket {
@@ -427,8 +398,8 @@ repository Tickets for Ticket {
 ```
 
 The gate emits an in-handler **403** at the top of the find's route, evaluated
-against the request's `currentUser` before the query runs.  Like the view
-gate it is **`currentUser`-only** (plus constants) — no source row exists yet,
+against the request's `currentUser` before the query runs.  It is
+**`currentUser`-only** (plus constants) — no source row exists yet,
 so referencing an aggregate field is a compile error
 (`loom.find-gate-not-current-user`).  Use `where` to scope *which rows* come
 back, `requires` to decide *who* may run the find.  `requires true` is the
@@ -467,7 +438,7 @@ if (!(currentUser.role === "agent")) {
 }
 ```
 
-Like the view gate it is **`currentUser`-only** (it has no row to scope), so it
+It is **`currentUser`-only** (it has no row to scope), so it
 and the backend stay decidable from the same claims.  The gate guard lands after
 every hook (keeping rules-of-hooks intact).  A page without `auth: ui`, or
 without a gate, is byte-identical to before.  The page `requires` gate ships on
@@ -484,9 +455,7 @@ request**:
 | Operation body (preconditions, assignments, calls, emits) | ✅ |
 | Workflow body | ✅ |
 | Aggregate-level `test` body | ✅ |
-| View `bind` expressions (full-form views) | ✅ |
 | Repository `find` `where` clause | ✅ (slice 1C) |
-| View shorthand / full-form `where` clause | ✅ (slice 1C) |
 | Aggregate / part / value-object invariant | ❌ |
 | Derived property | ❌ |
 | `function` body | ❌ |

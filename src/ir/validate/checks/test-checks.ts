@@ -208,12 +208,11 @@ function checkMagicCall(
   if (r.receiver.kind !== "ref" || r.receiver.name !== magicId) return;
   const aggregateSlug = r.member;
   const method = e.member;
-  // Reserved slugs route to system-level orchestration (workflows)
-  // or saved queries (views).  `<magicId>.workflows.<name>(...)`
-  // resolves to a workflow; `<magicId>.views.<name>(...)` to a view.
-  // The React UI generator wires `ui` invocations; the same reserved
-  // slugs validate against `api` for symmetry so backend-side
-  // dispatchers see a consistent IR shape.
+  // The reserved `workflows` slug routes to system-level orchestration:
+  // `<magicId>.workflows.<name>(...)` resolves to a workflow.
+  // The React UI generator wires `ui` invocations; the reserved slug
+  // validates against `api` for symmetry so backend-side dispatchers see a
+  // consistent IR shape.
   if (aggregateSlug === "workflows") {
     const wf = contexts
       .flatMap((c) => c.workflows)
@@ -229,26 +228,6 @@ function checkMagicCall(
         message:
           `e2e: unknown workflow '${magicId}.workflows.${method}' on this deployable. ` +
           `Available workflows: ${known || "(none)"}.`,
-        source,
-      });
-    }
-    return;
-  }
-  if (aggregateSlug === "views") {
-    const view = contexts
-      .flatMap((c) => c.views)
-      .find((v) => lowerFirst(v.name) === method || snake(v.name) === method);
-    if (!view) {
-      const known = contexts
-        .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
-        .sort()
-        .join(", ");
-      diags.push({
-        severity: "error",
-        code: "loom.e2e-unknown-view",
-        message:
-          `e2e: unknown view '${magicId}.views.${method}' on this deployable. ` +
-          `Available views: ${known || "(none)"}.`,
         source,
       });
     }

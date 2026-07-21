@@ -166,7 +166,6 @@ import { emitProjectionRowPersistence } from "./projection-state-emit.js";
 import { emitQueryProjections } from "./query-projection-emit.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
-import { emitViews } from "./view-emit.js";
 import { emitDispatchHandlers, emitWorkflowInstanceReads, emitWorkflows } from "./workflow-emit.js";
 import { emitEventSourcedWorkflowFiles, type OwnerOf } from "./workflow-eventsourced-emit.js";
 import { emitWorkflowStatePersistence } from "./workflow-state-emit.js";
@@ -436,11 +435,6 @@ function emitProjectFromContexts(
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
     // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
     emitProjectionReads(ctx, ns, out, { routePrefix });
-    emitViews(ctx, ns, out, {
-      routePrefix,
-      sourcemap,
-      usingDapper: system?.deployable.persistence === "dapper",
-    });
     // Query-time projections (read-path-architecture.md rev.13) — a live read
     // (source find + join bulk-loads + select) with no folded read-model table.
     emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
@@ -1015,8 +1009,7 @@ function emitProjectFromContexts(
 
 /** Element-schema → named-wrapper pairs for the list-response document
  *  filter.  Mirrors Hono/Phoenix naming: every aggregate's `<Agg>Response`
- *  → `<Agg>ListResponse` (also covers shorthand views, which reuse it), and
- *  each full-form view's `<View>Row` → `<View>Response`. */
+ *  → `<Agg>ListResponse`. */
 function listWrapperPairs(
   contexts: readonly EnrichedBoundedContextIR[],
 ): Array<{ element: string; wrapper: string }> {
@@ -1038,14 +1031,6 @@ function listWrapperPairs(
         element: `${upperFirst(wf.name)}InstanceResponse`,
         wrapper: `${upperFirst(wf.name)}InstanceListResponse`,
       });
-    }
-    for (const view of ctx.views) {
-      if (view.output) {
-        pairs.push({
-          element: `${upperFirst(view.name)}Row`,
-          wrapper: `${upperFirst(view.name)}Response`,
-        });
-      }
     }
     // Observable workflows expose a named instance-list wrapper
     // (`<Wf>InstanceResponse` → `<Wf>InstanceListResponse`), matching Hono's
@@ -1103,7 +1088,6 @@ function emitContext(
     emitDispatchHandlers(ctx, ns, out, undefined, ownerOf);
     emitProjectionDispatch(ctx, ns, out);
   }
-  emitViews(ctx, ns, out);
   emitQueryProjections(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
@@ -1957,40 +1941,26 @@ function embeddedAggNames(contexts: EnrichedBoundedContextIR[], sys?: SystemIR):
 }
 
 /** Synthesise a repository that includes the user-declared finds
- *  PLUS one parameterless filtered find per matching view.  Lets
- *  every downstream emitter (interface, implementation, find-emit,
- *  CQRS) treat views uniformly with declared finds. */
+ *  PLUS one parameterless filtered find per query-time projection sourced
+ *  from this aggregate.  Lets every downstream emitter (interface,
+ *  implementation, find-emit, CQRS) treat those reads uniformly with
+ *  declared finds. */
 function mergeViewsAsFinds(
   agg: import("../../ir/types/loom-ir.js").AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): RepositoryIR | undefined {
-  const matching = ctx.views.filter(
-    (v) => v.source.kind === "aggregate" && v.source.name === agg.name,
-  );
   // Query-time projections (read-path-architecture.md rev.13) sourced from this
-  // aggregate ride the SAME synthesized find as an aggregate full-form view —
-  // the source read is a parameterless find over the projection's `where`.
+  // aggregate ride a synthesized parameterless find over the projection's `where`.
   const matchingQp = (ctx.projections ?? []).filter(
     (p) => isQueryTimeProjection(p) && p.query?.source === agg.name,
   );
-  if (matching.length === 0 && matchingQp.length === 0) return repo;
+  if (matchingQp.length === 0) return repo;
   const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",
     element: { kind: "entity", name: agg.name },
   };
   const synthesised = [
-    ...matching.map((v) => ({
-      name: v.name,
-      params: [],
-      returnType: arrayReturn,
-      filter: v.filter,
-      // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
-      // §11) onto the synthesized find so the shared find emitter renders the
-      // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
-      ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
-      ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
-    })),
     ...matchingQp.map((p) => ({
       name: p.name,
       params: [],

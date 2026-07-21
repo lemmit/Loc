@@ -19,7 +19,6 @@ const wrapWith = (uiArgs: string) => `
         workflow placeOrder {
       create() { let x = 1 }
     }
-        view ActiveOrders = Order where subject == "x"
         repository Orders for Order { }
         repository Customers for Customer { }
       }
@@ -114,7 +113,7 @@ describe("scaffold macro: aggregate selector", () => {
   });
 });
 
-describe("scaffold macro: workflow / view / module selectors", () => {
+describe("scaffold macro: workflow / module selectors", () => {
   it("workflows produce one Form page each", async () => {
     const { model, errors } = await parseString(wrapWith("workflows: [placeOrder]"));
     expect(errors).toEqual([]);
@@ -125,17 +124,10 @@ describe("scaffold macro: workflow / view / module selectors", () => {
     expect(pageNames(model)).toContain("WorkflowsIndex");
   });
 
-  it("views produce one List page each", async () => {
-    const { model, errors } = await parseString(wrapWith("views: [ActiveOrders]"));
-    expect(errors).toEqual([]);
-    expect(pageNames(model)).toContain("ActiveOrdersView");
-    expect(pageNames(model)).toContain("ViewsIndex");
-  });
-
-  it("modules fan out into aggregate + workflow + view pages", async () => {
+  it("modules fan out into aggregate + workflow pages", async () => {
     const { model, errors } = await parseString(wrapWith("subdomains: [Sales]"));
     expect(errors).toEqual([]);
-    // Sales contains Order, Customer, placeOrder, ActiveOrders.
+    // Sales contains Order, Customer, placeOrder.
     const names = pageNames(model);
     expect(names).toEqual(
       expect.arrayContaining([
@@ -144,10 +136,8 @@ describe("scaffold macro: workflow / view / module selectors", () => {
         "New",
         "Detail",
         "PlaceOrderWorkflow",
-        "ActiveOrdersView",
         "Home",
         "WorkflowsIndex",
-        "ViewsIndex",
       ]),
     );
   });

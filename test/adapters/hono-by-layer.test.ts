@@ -65,12 +65,11 @@ describe("byLayer LayoutAdapter — hono (real)", () => {
     );
   });
 
-  it("routes http/ files for index + per-aggregate routes + views/workflows", () => {
+  it("routes http/ files for index + per-aggregate routes + workflows", () => {
     expect(p({ name: "x", category: "http-index" })).toBe("http/index.ts");
     expect(p({ name: "x", category: "http-routes", aggregateName: "Order" })).toBe(
       "http/order.routes.ts",
     );
-    expect(p({ name: "x", category: "http-views" })).toBe("http/views.ts");
     expect(p({ name: "x", category: "http-workflows" })).toBe("http/workflows.ts");
   });
 

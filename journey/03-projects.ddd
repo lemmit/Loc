@@ -108,9 +108,6 @@ system Todo {
         sort:  [priority desc, createdAt asc]
       }
 
-      // Saved parameterless view.
-      view UnfinishedTasks = Task where status != Done
-
       // Cross-aggregate orchestration: archiving a project completes every
       // one of its still-open tasks, then archives the project itself.
       workflow closeProject {

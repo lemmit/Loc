@@ -183,16 +183,6 @@ export const vueTarget: WalkerTarget = {
    *  module surface name-identical across the two SPA frontends
    *  keeps the api-builder shareable. */
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
-    if (detected.kind === "view") {
-      const viewName = detected.aggregateName;
-      const viewPascal = upperFirstName(viewName);
-      return {
-        varName: `${lowerFirstName(viewName)}View`,
-        hookName: `use${viewPascal}View`,
-        importFrom: "../api/views",
-        argsRendered: [],
-      };
-    }
     if (detected.kind === "workflow-instance") {
       const wf = upperFirstName(detected.aggregateName);
       const isAll = detected.operation === "all";

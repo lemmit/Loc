@@ -184,7 +184,7 @@ export interface ParamIR {
 
 /** Resolved access role for a stored field.  Controls the field's
  * presence in create/update inputs, the update wire envelope, and
- * view/API read exposure.  See `src/ir/enrich/enrichments.ts` for resolution
+ * API read exposure.  See `src/ir/enrich/enrichments.ts` for resolution
  * rules.
  *
  *   editable  — default; client may read and write freely
@@ -854,7 +854,7 @@ export interface FindIR {
    *  bare context scope (currentUser only, no aggregate row / params), so it
    *  can reference `currentUser` + constants but not the source row's fields.
    *  `requires true` is the explicit intentionally-public escape (the
-   *  read-side twin of the view / operation gate). */
+   *  read-side twin of the operation gate). */
   requires?: ExprIR;
   /** Optional `where ...` filter expression in IR form. */
   filter?: ExprIR;
@@ -898,7 +898,7 @@ export interface RepositoryIR {
  *  docs/criterion.md.
  *
  *  A criterion is *inlined* wherever it is referenced from a boolean
- *  expression position (`view ... where`, repository `find ... where`,
+ *  expression position (repository `find ... where`,
  *  an `invariant`, an operation guard): the use-site re-lowers the
  *  predicate body with its parameters substituted and the candidate
  *  rebound to the host receiver, so no backend consumes `CriterionIR`
@@ -1025,7 +1025,6 @@ export interface BoundedContextIR {
   /** Top-level `queryHandler` application-layer members
    *  (unfoldable-api-derivation.md, Layer 3). */
   queryHandlers?: QueryHandlerIR[];
-  views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
   /** Stateless pure-calculator domain services declared in this context
@@ -1175,79 +1174,6 @@ export interface SeedRowIR {
   aggregate: string;
   /** Field initialisers, fully-resolved to `ExprIR`. */
   fields: { name: string; value: ExprIR }[];
-}
-
-/** A saved, strongly-typed query over one source aggregate.  Two
- *  forms share one IR shape:
- *
- *   - **Shorthand** (`view X = Y where ...`): `output` is undefined;
- *     result is the source aggregate's enriched wire shape (an
- *     array thereof).
- *   - **Full form** (`view X { fields ... from Y where? ... bind ... }`):
- *     `output` is populated with the declared field set and a
- *     bind expression per field.  The view's response shape is a
- *     fresh record matching `output.fields`; the bind expressions
- *     project from the hydrated source aggregate to the row.
- *
- *  Compiles to a per-view method on the source aggregate's
- *  repository plus a `GET /views/<snake_name>` route on each
- *  backend.  Joined sources and per-view parameters are not yet
- *  supported. */
-/** A view's source — an aggregate (read through its repository), a
- *  workflow (read through its persisted instance / saga-state row;
- *  workflow-instance-views.md), or a projection (read through its persisted
- *  `<Proj>Row` read-model row; projection.md v1.1).  Must live in the same
- *  context as the view. */
-export interface ViewSourceIR {
-  kind: "aggregate" | "workflow" | "projection";
-  name: string;
-}
-
-export interface ViewIR {
-  name: string;
-  /** Source aggregate or workflow.  Must live in the same context as the
-   *  view declaration. */
-  source: ViewSourceIR;
-  /** Authorization gate (D-AUTH-OIDC / default-deny).  An optional
-   *  `requires <expr>` clause — a boolean evaluated against `currentUser`
-   *  *before* the query runs; failure → 403.  Distinct from `filter`: the
-   *  filter scopes which rows come back (queryable, pushed to SQL), the gate
-   *  decides whether the caller may hit the endpoint at all.  Lowered in the
-   *  bare context scope (currentUser only, no source row), so it can reference
-   *  `currentUser` + constants but not aggregate fields.  `requires true` is
-   *  the explicit intentionally-public escape. */
-  requires?: ExprIR;
-  /** Queryable predicate.  Required by the shorthand grammar;
-   *  optional in the full form.  Subject to the same restrictions
-   *  as repository find filters. */
-  filter?: ExprIR;
-  /** `ignoring *` — bypass EVERY capability query-filter on the source
-   *  aggregate for this view read (named-filter-bypass.md §11).  Mutually
-   *  exclusive with `bypassCaps`.  See `FindIR.bypassAll`. */
-  bypassAll?: boolean;
-  /** `ignoring A, B` — resolved capability names whose filters this view read
-   *  bypasses (named-filter-bypass.md §11).  See `FindIR.bypassCaps`. */
-  bypassCaps?: string[];
-  /** Custom output shape.  Undefined for the shorthand form. */
-  output?: {
-    fields: FieldIR[];
-    binds: { name: string; expr: ExprIR; type: TypeIR }[];
-    /** Foreign aggregates referenced by bind expressions via
-     *  `X id` follow.  Multi-hop supported: `path` is the chain of
-     *  Id-typed field accesses from the source aggregate outward —
-     *  `["customerId"]` for `customerId.name`,
-     *  `["customerId", "regionId"]` for
-     *  `customerId.regionId.name`.  Each unique path produces one
-     *  bulk-load + map at view-emission time.  Auxiliaries are
-     *  ordered by path length (shortest first) so each load's
-     *  prerequisites are already in scope.  Empty when the view has
-     *  no follows. */
-    auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
-  };
-  /** Provenance chain back to the `.ddd` source — see
-   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
-   * derived nodes. */
-  origin?: OriginRef;
 }
 
 /** SQL-92 isolation levels — optional on `transactional` workflows.
@@ -1533,15 +1459,15 @@ export interface ProjectionQueryIR {
   /** `join <Aggregate> as <c> on <idRef>` clauses — by-id follows.  Each is
    *  one batched load through the aggregate's own repository (boundary-safe).
    *  Also surfaced pre-planned as `auxiliaries` (path + mapVar) below, reusing
-   *  the machinery relocated from `lower-view`. */
+   *  the id-follow bulk-load planning machinery. */
   joins: ProjectionJoinIR[];
   /** `select <field> = <expr>, …` — fills the declared row fields from the
    *  source (`this`/alias) and join aliases.  Undefined ⇒ the projection
    *  exposes the source's own shape (shorthand, deferred). */
   selects?: { field: string; expr: ExprIR; type: TypeIR }[];
   /** Bulk-load plan derived from the `join` clauses — the `auxiliaries` shape
-   *  `lower-view` builds for view follows, now populated by reading the
-   *  DECLARED `join`s rather than walking binds for id-dots. */
+   *  built for by-id follows, populated by reading the
+   *  DECLARED `join`s. */
   auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
 }
 
@@ -2091,7 +2017,6 @@ export type CodeRefKind =
   | "event"
   | "repository"
   | "workflow"
-  | "view"
   | "deployable"
   | "api";
 
@@ -2254,7 +2179,7 @@ export interface SystemIR {
   uis: UiIR[];
   /** API declarations at system scope.  Each is a contract derived
    *  from a module's domain — its aggregates, repositories,
-   *  workflows, views become the api's exposed operations.  UIs
+   *  workflows become the api's exposed operations.  UIs
    *  reference apis via their `api X: ApiName` parameters; backend
    *  deployables `serves:` a named api; frontend deployables
    *  `consumes:` an api from a named target. */
@@ -3720,7 +3645,7 @@ export type ExprIR =
    * `cond` evaluates to `true` returns its `value`; if no arm
    * matches, `otherwise` (when present) is the fallthrough.  Lives
    * in the expression engine so it can appear anywhere an expression
-   * is allowed (page bodies, `derived` properties, view binds,
+   * is allowed (page bodies, `derived` properties,
    * filter lambdas, function bodies).  Validator may warn
    * on non-exhaustive matches that lack `otherwise`.
    */
@@ -3817,7 +3742,7 @@ export function allAggregates(loom: LoomModel): AggregateIR[] {
 // `currentUser` reference detection.
 //
 // Every per-platform emitter needs to know "does this operation /
-// workflow / view body actually reference the `currentUser` magic
+// workflow body actually reference the `currentUser` magic
 // identifier?" so it can:
 //   - thread a `User` parameter into the generated method signature,
 //   - inject the request-scoped user accessor into the Mediator
@@ -3917,24 +3842,13 @@ export function findUsesCurrentUser(find: FindIR): boolean {
 
 /** True when the find's `requires` authorization gate references
  *  `currentUser`.  The route handler must then read the request principal
- *  into scope before evaluating the gate (the read-side analogue of a view's
- *  gate needing `currentUser`). */
+ *  into scope before evaluating the gate. */
 export function findGateUsesCurrentUser(find: FindIR): boolean {
   return exprUsesCurrentUser(find.requires);
 }
 
-/** True when the view's where filter or any bind expression
- *  references `currentUser`. */
-export function viewUsesCurrentUser(view: ViewIR): boolean {
-  if (exprUsesCurrentUser(view.filter)) return true;
-  for (const b of view.output?.binds ?? []) {
-    if (exprUsesCurrentUser(b.expr)) return true;
-  }
-  return false;
-}
-
 /** True when a query-time projection's `where` filter or `select` expressions
- *  reference `currentUser` — the projection analogue of `viewUsesCurrentUser`.
+ *  reference `currentUser`.
  *  Drives threading the request principal into the synthesised repo read. */
 export function queryProjectionUsesCurrentUser(proj: ProjectionIR): boolean {
   if (exprUsesCurrentUser(proj.query?.filter)) return true;

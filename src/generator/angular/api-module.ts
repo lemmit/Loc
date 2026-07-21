@@ -40,7 +40,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 // enum, and containment-part fields are typed precisely too — VO fields as
 // `<VO>Response`, enum fields as a `<Enum>` string union, containment parts as
 // `<Part>Response` (all emitted as nested interfaces alongside) — so a
-// detail/view that dereferences `x.price.amount`, narrows an enum, or walks
+// detail page that dereferences `x.price.amount`, narrows an enum, or walks
 // `order.lines[i].quantity` compiles under `ng build` (previously `unknown` →
 // TS2571).  REQUEST-side value-object / enum fields stay `unknown` (the reactive
 // form holds a VO field as a nested `FormGroup` and an enum as a `""` control,
@@ -82,8 +82,8 @@ function wireTsType(t: TypeIR, precise = false): string {
       if (precise && t.kind === "valueobject") return `${t.name}Response`;
       if (precise && t.kind === "enum") return t.name;
       // Containment parts peel to `entity { name }` — type them as the part's
-      // own `<Part>Response` interface (emitted from `agg.parts`) so a detail /
-      // view that walks `order.lines[i].quantity` compiles.  Request-side
+      // own `<Part>Response` interface (emitted from `agg.parts`) so a detail
+      // page that walks `order.lines[i].quantity` compiles.  Request-side
       // (`precise` off) stays `unknown`.
       if (precise && t.kind === "entity") return `${t.name}Response`;
       return "unknown";
@@ -407,7 +407,7 @@ export function buildAngularApiModule(
     'import { API_BASE_URL } from "./config";',
     "",
     // Response-side value objects + enums, typed by name (nested interfaces /
-    // enum unions) so a detail/view dereference compiles.
+    // enum unions) so a detail-page dereference compiles.
     ...responseEnums.map(emitEnumType).flatMap((l) => [l, ""]),
     ...responseVos.flatMap(emitVoResponseInterface),
     // Containment-part response interfaces (children-first) — the precise types

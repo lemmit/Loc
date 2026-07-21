@@ -20,7 +20,6 @@ describe("errorStatuses — shared error matrix", () => {
     expect(errorStatuses("workflow")).toEqual([400, 422]);
     expect(errorStatuses("findOptional")).toEqual([404]);
     expect(errorStatuses("list")).toEqual([]);
-    expect(errorStatuses("view")).toEqual([]);
   });
 
   it("inserts 403 for a guarded operation / workflow", () => {

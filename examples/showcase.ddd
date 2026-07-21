@@ -97,7 +97,11 @@ system DevPlatform {
 
         permissions { manageProjects, viewReports }
 
-        context Catalog {
+        // `scaffoldPaged(of: <criterion>)` — the ergonomic paged, criterion-
+        // filtered list read (read-path-architecture.md).  Exercises a scalar
+        // `ref` macro arg (MacroArgRef) and is the surviving replacement for the
+        // shorthand `view` a paged list read used to spell.
+        context Catalog with scaffoldPaged(of: ActiveNamed) {
 
             enum Visibility { Private, Internal, Public }
 
@@ -341,21 +345,6 @@ system DevPlatform {
             seed default {
                 Project { name: "Seeded Alpha", visibility: Public, active: true, sequence: 0, budget: 0.0, createdAt: "2024-01-01T00:00:00Z" }
                 Project { name: "Seeded Beta",  visibility: Internal, active: false, sequence: 1, budget: 10.0, createdAt: "2024-01-02T00:00:00Z" }
-            }
-
-            // View — shorthand form.
-            view ActiveProjects = Project where active == true
-
-            // View — full form with bind expressions.
-            view ProjectSummary {
-                projectId: Project id
-                name: string
-                pipelines: int
-
-                from Project where visibility != Private
-                bind projectId = id,
-                     name = name,
-                     pipelines = pipelines.count
             }
         }
     }
@@ -653,17 +642,13 @@ system DevPlatform {
             body: Stack { Badge { label }, Slot { "extra" } }
         }
 
-        // Active-projects view page — the inlined view-list body (the tree the
-        // scaffold view-list builder emits) gives the "browse projects via the
-        // console UI" e2e a
-        // real route + view-list page-object to drive.  Route/testids line up
-        // with the generated `ActiveProjectsViewPage.goto()` (`/views/<snake>`,
-        // `view-active_projects`), so the UI spec resolves its import and the
-        // Playwright navigation lands on a rendered page rather than a 404.
-        page ActiveProjectsView {
-            route: "/views/active_projects"
-            title: "Active projects"
-            body: Stack { Heading { "Active Projects", level: 2 }, QueryView { of: Views.ActiveProjects, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load active projects" }, empty: Empty { "No rows." }, data: rows => Paper { Table { Column { "Name", o => Text { o.name } }, Column { "Description", o => Text { o.description } }, Column { "Visibility", o => EnumBadge { o.visibility } }, Column { "Active", o => Text { o.active ? "Yes" : "No" } }, Column { "Sequence", o => Text { o.sequence } }, Column { "External Id", o => Text { o.externalId } }, Column { "Budget", o => Text { o.budget } }, Column { "Created At", o => DateDisplay { o.createdAt } }, rows: rows, striped: true, highlight: true, sticky: true, keyExpr: "idx" } } }, testid: "view-active_projects" }
+        // Projects browse page — a hand-written `QueryView` over the aggregate's
+        // `all` read gives the "browse projects via the console UI" e2e a real
+        // route + page-object to drive.
+        page ProjectsBrowse {
+            route: "/projects/browse"
+            title: "Browse projects"
+            body: Stack { Heading { "Projects", level: 2 }, QueryView { of: Projects.Project.all, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load projects" }, empty: Empty { "No rows." }, data: rows => Paper { Table { Column { "Name", o => Text { o.name } }, Column { "Description", o => Text { o.description } }, Column { "Visibility", o => EnumBadge { o.visibility } }, Column { "Active", o => Text { o.active ? "Yes" : "No" } }, Column { "Sequence", o => Text { o.sequence } }, Column { "External Id", o => Text { o.externalId } }, Column { "Budget", o => Text { o.budget } }, Column { "Created At", o => DateDisplay { o.createdAt } }, rows: rows, striped: true, highlight: true, sticky: true, keyExpr: "idx" } } }, testid: "projects-browse" }
         }
 
         // Kitchen-sink page — the remaining walker primitives + the page
@@ -731,9 +716,7 @@ system DevPlatform {
     }
 
     // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
-    // `scaffoldView(of: …)` adds a single-ref macro arg (MacroArgRef) alongside
-    // the refList `scaffold(subdomains:)`.
-    ui Admin with scaffold(subdomains: [Accounts]), scaffoldView(of: ActiveProjects) {
+    ui Admin with scaffold(subdomains: [Accounts]) {
     }
 
     // ----- DataSources: per-(context, kind) bindings to physical storages -----
@@ -840,11 +823,6 @@ system DevPlatform {
         let b = api.builds.create({ commitSha: "abc1234", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })
         let read = api.builds.getById(b)
         expect(read.commitSha).toBe("abc1234")
-    }
-
-    test e2e "browse projects via the console UI" against consoleWeb {
-        let rows = ui.views.activeProjects()
-        expect(rows.length).toBeGreaterThanOrEqual(0)
     }
 
     // ----- Behavioural coverage: operations + finds (cross-backend) -----

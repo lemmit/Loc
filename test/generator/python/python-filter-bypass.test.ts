@@ -111,38 +111,6 @@ describe("python filter-bypass (ignoring <Cap> / *)", () => {
     expect(method(repo, "find_many_by_ids")).toContain("is_deleted");
   });
 
-  it("a view's `ignoring` clause omits the capability predicate on the view read", async () => {
-    const repo = (
-      await build(`
-system Sys {
-  capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
-  subdomain Sales {
-    context Docs {
-      aggregate Doc with softDeletable { subject: string  total: int }
-      repository Docs for Doc {}
-      view ActiveDocs = Doc where this.total > 0 ignoring softDeletable
-    }
-  }
-  api DocsApi from Sales
-  storage primary { type: postgres }
-  resource docsState { for: Docs, kind: state, use: primary }
-  deployable api {
-    platform: python
-    contexts: [Docs]
-    dataSources: [docsState]
-    serves: DocsApi
-    port: 8081
-  }
-}
-`)
-    ).get(REPO)!;
-    const view = method(repo, "active_docs");
-    expect(view).not.toContain("is_deleted");
-    expect(view).toContain("DocRow.total >");
-    // The default all() still carries it (not bypassed).
-    expect(method(repo, "all")).toContain("is_deleted");
-  });
-
   it("a bare (non-capability) filter is NEVER dropped, even by `ignoring *`", async () => {
     const repo = (
       await build(sys(`find allRows(): Doc[] ignoring *`, `filter this.total > 0`))

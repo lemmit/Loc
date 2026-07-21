@@ -81,11 +81,10 @@ describe("default-deny enforcement", () => {
 
   // --- Creates + workflows (the command surface beyond operations/destroys) ---
 
-  /** A system with an aggregate `create`, a command-triggered `workflow`, a
-   *  read `find`, and a `view` — commands gated by `gate`, the view by
-   *  `viewGate`, the find by `findGate` (each a `requires …` clause, or "" for
-   *  ungated). */
-  function commandSys(gate: string, viewGate: string, findGate = ""): string {
+  /** A system with an aggregate `create`, a command-triggered `workflow`, and a
+   *  read `find` — commands gated by `gate`, the find by `findGate` (each a
+   *  `requires …` clause, or "" for ungated). */
+  function commandSys(gate: string, findGate = ""): string {
     return `
 system Helpdesk {
   user { id: string role: string }
@@ -103,7 +102,6 @@ system Helpdesk {
       workflow openTicket {
         create(s: string) { ${gate}let t = Ticket.register(s) }
       }
-      view ActiveTickets = Ticket ${viewGate}where open == true
     }
   }
   storage primary { type: postgres }
@@ -115,41 +113,30 @@ system Helpdesk {
   }
 
   const OP_GATE = 'requires currentUser.role == "agent"\n        ';
-  const VIEW_GATE = 'requires currentUser.role == "agent" ';
   const FIND_GATE = 'requires currentUser.role == "agent" ';
 
   it("rejects an ungated public create under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys("", ""));
+    const errs = await denyErrors(commandSys(""));
     expect(errs.some((m) => m.includes("Ticket.register"))).toBe(true);
   });
 
   it("rejects an ungated command-triggered workflow under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys("", ""));
+    const errs = await denyErrors(commandSys(""));
     expect(errs.some((m) => m.includes("workflow 'openTicket'"))).toBe(true);
   });
 
-  it("rejects an ungated view under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys("", ""));
-    expect(errs.some((m) => m.includes("view 'ActiveTickets'"))).toBe(true);
-  });
-
   it("rejects an ungated repository find under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys("", ""));
+    const errs = await denyErrors(commandSys(""));
     expect(errs.some((m) => m.includes("find 'Tickets.openOnes'"))).toBe(true);
   });
 
-  it("accepts gated creates + workflows + views + finds (requires on every reachable endpoint)", async () => {
-    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE, FIND_GATE));
-    expect(errs).toEqual([]);
-  });
-
-  it("accepts `requires true` on a view as the intentionally-public escape", async () => {
-    const errs = await denyErrors(commandSys(OP_GATE, "requires true ", FIND_GATE));
+  it("accepts gated creates + workflows + finds (requires on every reachable endpoint)", async () => {
+    const errs = await denyErrors(commandSys(OP_GATE, FIND_GATE));
     expect(errs).toEqual([]);
   });
 
   it("accepts `requires true` on a find as the intentionally-public escape", async () => {
-    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE, "requires true "));
+    const errs = await denyErrors(commandSys(OP_GATE, "requires true "));
     expect(errs).toEqual([]);
   });
 

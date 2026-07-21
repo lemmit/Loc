@@ -119,7 +119,7 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
     if (node.$type !== "NamedType") continue;
     // Only fire on storage/wire-data positions — Property fields,
     // event/storage UserFields, and operation/function/page Parameters.
-    // Find/Function return types and Derived/View/State projections may
+    // Find/Function return types and Derived/State projections may
     // legitimately reference an aggregate as a domain object.
     const typeRef = node.$container;
     const holder = typeRef?.$container;

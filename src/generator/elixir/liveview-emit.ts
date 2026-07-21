@@ -187,7 +187,6 @@ export function emitLiveViewPages(args: {
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregatesByName.keys()],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one

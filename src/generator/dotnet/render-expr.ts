@@ -53,7 +53,7 @@ export interface CsRenderContext {
    * `where` clauses, so other emission contexts (derived, invariant)
    * shouldn't reach it. */
   agg?: EnrichedAggregateIR;
-  /** EF-translated expression position (find/view `Where`, `HasQueryFilter`,
+  /** EF-translated expression position (find `Where`, `HasQueryFilter`,
    *  criteria Specifications): scalar intrinsics render their EF-translatable
    *  spelling (see CS_INTRINSIC_QUERY_RENDERERS) instead of the domain form. */
   efQuery?: boolean;
@@ -236,7 +236,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   // native TimeSpan operators and `datetime ± duration` to the native
   // `DateTime ± TimeSpan` operators in `renderCsBinary`.
   //
-  // EF-translated positions (`ctx.efQuery` — find/view `Where`,
+  // EF-translated positions (`ctx.efQuery` — find `Where`,
   // `HasQueryFilter`, criteria Specifications) render the bare count for
   // EVERY unit: the queryable gate admits ONLY the direct constructor
   // operand of a `datetime ± duration` shift there, and the EF binary arm
@@ -256,7 +256,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   },
   match(arms, otherwise) {
     // Lower a match expression to a chained C# ternary so it can appear
-    // inside `derived` bodies, view binds, and other C#-rendered expression
+    // inside `derived` bodies and other C#-rendered expression
     // positions.  Same right-fold semantics as the TS renderer.
     let out = otherwise ?? "null";
     for (const arm of [...arms].reverse()) {
@@ -310,7 +310,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   list: (elements) => `new[] { ${elements.join(", ")} }`,
 };
 
-/** EF-translated-position twin of `CS_TARGET` (find/view `Where`,
+/** EF-translated-position twin of `CS_TARGET` (find `Where`,
  *  `HasQueryFilter`, criteria Specifications — `ctx.efQuery`).  The `binary`
  *  leaf has no ctx parameter on the `ExprTarget` contract, so the efQuery
  *  flag rides on the target table instead: `renderCsExpr` picks this table
@@ -597,8 +597,8 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       return `${e.enumName}.${e.name}`;
     case "current-user":
       // Magic identifier for the system's `user { ... }` shape.  The
-      // emitter for each per-request context (operation, workflow,
-      // view bind) materialises a local / parameter named
+      // emitter for each per-request context (operation, workflow)
+      // materialises a local / parameter named
       // `currentUser` typed as `User`; this rendering keeps member
       // access (`currentUser.role`) idiomatic on both backends.  In a
       // static EF query-filter lambda no such local exists — `ctx.currentUserExpr`
@@ -783,7 +783,7 @@ function renderMethodCall(
   }
   if (e.receiverType.kind === "primitive") {
     const key = intrinsicKey(e.receiverType.name, e.member);
-    // EF-translated positions (find/view Where, HasQueryFilter, criteria
+    // EF-translated positions (find Where, HasQueryFilter, criteria
     // Specifications) may need a different C# spelling than domain bodies —
     // the sparse query table wins there, falling back to the main table.
     const intrinsic =

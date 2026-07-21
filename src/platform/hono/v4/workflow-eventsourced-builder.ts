@@ -122,9 +122,9 @@ function renderApplierStmt(s: StmtIR, indent: string): string {
  *  Reads the `<wf>_events` Drizzle table the schema emitter produces.
  *
  *  `opts.readOnly` emits only the READ-side helpers (state type, apply, fold,
- *  loadAll) — the subset a workflow-sourced VIEW needs.  The write-side
+ *  loadAll) — the subset a workflow-sourced read model needs.  The write-side
  *  (`load<T>Events`, `append<T>Events`, `<T>_FOLDED_EVENTS`) is omitted so the
- *  views file stays free of dead declarations under Biome's noUnusedVariables;
+ *  read-model file stays free of dead declarations under Biome's noUnusedVariables;
  *  the dispatcher (which appends own-events) leaves it unset to get the full
  *  set.  loadAll only reaches `rowToEvent`, so a read-only consumer can pass
  *  `{ readOnly: true }` to `emitWorkflowStreamSerializers` too. */
@@ -186,8 +186,8 @@ export function emitWorkflowFoldHelpers(
   out.push(`}`);
 
   // load<T>Events — read + deserialise the per-correlation stream in order.  A
-  // read-only (view) consumer never loads a single correlation stream, so skip
-  // it to keep the views file free of dead declarations.
+  // read-only consumer never loads a single correlation stream, so skip
+  // it to keep the read-model file free of dead declarations.
   if (!opts.readOnly) {
     out.push(`async function load${T}Events(`);
     out.push(`  db: NodePgDatabase<typeof schema>,`);
@@ -225,7 +225,7 @@ export function emitWorkflowFoldHelpers(
   out.push(`}`);
 
   if (opts.readOnly) {
-    // A view consumer never appends own-events or inspects the folded-event set.
+    // A read-only consumer never appends own-events or inspects the folded-event set.
     return out;
   }
 
@@ -275,8 +275,8 @@ export function emitWorkflowStreamSerializers(
   for (const wf of eventSourcedWorkflows(ctx)) for (const n of foldedEventNames(wf)) folded.add(n);
   if (folded.size === 0) return [];
   const events: EventIR[] = ctx.events.filter((e) => folded.has(e.name));
-  // A read-only (view) consumer only group-folds the stream → only `rowToEvent`
-  // is reached; omit `eventToData` (write-side) so the views file carries no
+  // A read-only consumer only group-folds the stream → only `rowToEvent`
+  // is reached; omit `eventToData` (write-side) so the read-model file carries no
   // dead declaration.
   if (opts.readOnly) return [rowToEventFn(events, ctx)];
   return [eventToDataFn(events, ctx), "", rowToEventFn(events, ctx)];

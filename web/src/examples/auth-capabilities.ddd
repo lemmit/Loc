@@ -93,8 +93,6 @@ system Helpdesk {
         find openInTenant(): Ticket[]
           where tenantId == currentUser.tenantId && status == Open
       }
-
-      view MyOpenTickets = Ticket where assignee == currentUser.id && status == Open
     }
   }
 

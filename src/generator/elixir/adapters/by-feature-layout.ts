@@ -36,7 +36,6 @@ export type PhoenixArtifactCategory =
   | "event-module" // lib/<app>/<ctx>/events/<event>.ex
   | "value-object-module" // lib/<app>/<ctx>/<vo>.ex
   | "enum-module" // lib/<app>/<ctx>/<enum>.ex
-  | "view-module" // lib/<app>/<ctx>/views/<view>.ex
   | "workflow-module" // lib/<app>/<ctx>/workflows/<workflow>.ex
   // lib/<app>_web/ — web shell
   | "web-shell" // lib/<app>_web.ex
@@ -136,9 +135,6 @@ function pathForCategory(artifact: PhoenixArtifact, ctx: EmitCtx): string {
     case "enum-module":
       if (!ctxSnake) throw new Error(`byFeature.pathFor: 'enum-module' missing contextSnake`);
       return libPath(app, `${ctxSnake}/${name}`);
-    case "view-module":
-      if (!ctxSnake) throw new Error(`byFeature.pathFor: 'view-module' missing contextSnake`);
-      return libPath(app, `${ctxSnake}/views/${name}`);
     case "workflow-module":
       if (!ctxSnake) throw new Error(`byFeature.pathFor: 'workflow-module' missing contextSnake`);
       return libPath(app, `${ctxSnake}/workflows/${name}`);

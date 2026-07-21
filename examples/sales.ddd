@@ -140,46 +140,4 @@ context Sales {
       })
     }
   }
-
-  // Saved query — strongly-typed, parameterless, filter-only.
-  // Lowers to a per-aggregate repository method on both backends
-  // and a `GET /views/active_orders` route.  Filter follows the
-  // queryable subset (no collection lambdas, no chained traversal).
-  // See docs/views.md for the full surface.
-  view ActiveOrders = Order where status == Confirmed
-
-  // Full-form view: declared output shape + bind expressions.
-  // Slice 2 — the row type is a fresh record (`OrderSummaryRow`
-  // on .NET, `OrderSummaryRow` Zod object on Hono); each bind
-  // expression projects from the hydrated source aggregate after
-  // the where-clause SQL filter runs.
-  view OrderSummary {
-    orderId: Order id
-    status: OrderStatus
-    lineCount: int
-
-    from Order where status != Cancelled
-    bind orderId = id,
-         status = status,
-         lineCount = lines.count
-  }
-
-  // Snowflake-style view: bind expressions follow `X id` typed
-  // refs into other aggregates.  `customerId.name` and
-  // `customerId.email` resolve via the type system (Customer is
-  // the target of `customerId: Customer id`); the route handler
-  // bulk-loads matching Customers via `findManyByIds` and
-  // dictionary-rewrites the projection.  Slice 3.
-  view CustomerOrders {
-    orderId: Order id
-    customerName: string
-    customerEmail: string
-    status: OrderStatus
-
-    from Order where status == Confirmed
-    bind orderId = id,
-         customerName = customerId.name,
-         customerEmail = customerId.email,
-         status = status
-  }
 }

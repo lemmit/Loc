@@ -52,7 +52,6 @@ describe("byFeature LayoutAdapter — hono/node (real, Phase 5b)", () => {
       { category: "domain-errors" },
       { category: "drizzle-schema" },
       { category: "http-index" },
-      { category: "http-views" },
       { category: "obs-log" },
       { category: "project-index" },
     ] as const) {

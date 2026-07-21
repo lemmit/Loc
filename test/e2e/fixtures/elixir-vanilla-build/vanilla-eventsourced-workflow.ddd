@@ -46,9 +46,6 @@ system FulfillmentSys {
         apply(pr: PaymentRegistered) { paid := paid + pr.amount }
         apply(fc: FulfillmentCancelled) { cancelled := true }
       }
-
-      view CancelledFulfillments = OrderFulfillment where this.cancelled == true
-      view PaidFulfillments = OrderFulfillment where this.paid > 0
     }
   }
   api FulfillmentApi from Fulfillment

@@ -97,8 +97,8 @@ export function renderJavaController(
 
   // Authorization gates on finds (default-deny) — a `requires <expr>` runs in
   // the controller action before delegating to the service, throwing
-  // ForbiddenException (→ 403 via ApiExceptionAdvice), the read-side twin of a
-  // view gate.  When the gate reads the principal the controller injects a
+  // ForbiddenException (→ 403 via ApiExceptionAdvice).  When the gate reads the
+  // principal the controller injects a
   // `CurrentUserAccessor`; `requires true` needs neither.
   const gatedFinds = declaredFinds(repo).filter((f) => !f.synthesized && f.requires);
   const anyFindGate = gatedFinds.length > 0;

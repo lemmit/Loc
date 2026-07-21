@@ -46,7 +46,6 @@ import {
   opGetById,
   opList,
   opOperation,
-  opView,
   opWorkflow,
   opWorkflowInstanceById,
   opWorkflowInstances,
@@ -129,15 +128,11 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
 
   const webModule = `${appModule}Web`;
 
-  // Collect all aggregates, workflows, views across all contexts.
+  // Collect all aggregates, workflows across all contexts.
   const allAggregates: Array<{ ctx: EnrichedBoundedContextIR; agg: EnrichedAggregateIR }> = [];
   const allWorkflows: Array<{
     ctx: EnrichedBoundedContextIR;
     wf: import("../../../ir/types/loom-ir.js").WorkflowIR;
-  }> = [];
-  const allViews: Array<{
-    ctx: EnrichedBoundedContextIR;
-    view: import("../../../ir/types/loom-ir.js").ViewIR;
   }> = [];
 
   // Observable workflows (instanceWireShape) expose the two read-only
@@ -152,12 +147,6 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute))
       allWorkflows.push({ ctx, wf });
     for (const wf of ctx.workflows) if (wf.instanceWireShape) observableWorkflows.push(wf);
-    // Workflow-sourced (workflow-instance-views.md) and projection-sourced
-    // (projection.md v1.1) views are served at runtime by the ViewsController but
-    // not yet described in this OpenAPI surface (a later slice); gathering only
-    // aggregate sources keeps the aggregate-view spec byte-identical.
-    for (const view of ctx.views)
-      if (view.source.kind === "aggregate") allViews.push({ ctx, view });
   }
 
   // --- Per-Api spec module ---------------------------------------------------
@@ -177,14 +166,13 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
       apiPascal,
       allAggregates,
       allWorkflows,
-      allViews,
       observableWorkflows,
     ),
   );
 
   // --- Schema modules -------------------------------------------------------
   // Collect schemas: value objects, aggregate parts, aggregate response/request,
-  // workflow request, view response.
+  // workflow request.
   const schemaDir = `lib/${appName}_web/api/schemas`;
 
   // Value objects (referenced in multiple contexts — deduplicate by name)
@@ -321,20 +309,6 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     );
   }
 
-  // View response schemas: full-form views get a named element row
-  // (`<View>Row`) + the `<View>Response` wrapper.  Shorthand views reuse the
-  // source aggregate's `<Agg>ListResponse` (emitted with the aggregate
-  // above) — matching Hono/.NET — so they emit no per-view schema.
-  for (const { ctx, view } of allViews) {
-    if (view.output) {
-      files.set(`${schemaDir}/${snake(view.name)}_row.ex`, renderViewRowSchema(view, webModule));
-      files.set(
-        `${schemaDir}/${snake(view.name)}_response.ex`,
-        renderViewResponseSchema(view, ctx, webModule),
-      );
-    }
-  }
-
   // --- OpenAPI controller ---------------------------------------------------
   const controllerPath = `lib/${appName}_web/controllers/openapi_controller.ex`;
   files.set(controllerPath, renderOpenapiController(appModule, webModule, apiPascal));
@@ -398,10 +372,6 @@ function renderApiSpec(
   allWorkflows: Array<{
     ctx: EnrichedBoundedContextIR;
     wf: import("../../../ir/types/loom-ir.js").WorkflowIR;
-  }>,
-  allViews: Array<{
-    ctx: EnrichedBoundedContextIR;
-    view: import("../../../ir/types/loom-ir.js").ViewIR;
   }>,
   observableWorkflows: Array<import("../../../ir/types/loom-ir.js").WorkflowIR>,
 ): string {
@@ -483,29 +453,6 @@ function renderApiSpec(
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${T}InstanceResponse}}
             }${errorResponseEntries("getById", schemasModule)}
-          }
-        }
-      }`);
-  }
-
-  // View paths: GET /views/<slug>
-  for (const { view } of allViews) {
-    const slug = snake(view.name);
-    // Shorthand views reuse the aggregate's `<Agg>ListResponse`; full-form
-    // views project to their own `<View>Response`.  Matches Hono/.NET.
-    const respMod = view.output
-      ? `${schemasModule}.${upperFirst(view.name)}Response`
-      : `${schemasModule}.${view.source.name}ListResponse`;
-    pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
-        get: %OpenApiSpex.Operation{
-          summary: "Query ${view.name} view",
-          operationId: "${camelId(opView(view.name))}",
-          tags: ["views"],
-          responses: %{
-            200 => %OpenApiSpex.Response{
-              description: "Success",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            }
           }
         }
       }`);
@@ -1403,67 +1350,6 @@ defmodule ${schemasModule}.${schemaName} do
     title: "${schemaName}",
     type: :array,
     items: ${schemasModule}.${upperFirst(wf.name)}InstanceResponse
-  })
-end
-`;
-}
-
-/** The schema module for one element of a view's result list.  Full-form
- *  views (with declared `output`) get a dedicated `<View>Row`; shorthand
- *  views reuse the source aggregate's `<Agg>Response`. */
-function viewItemModule(
-  view: import("../../../ir/types/loom-ir.js").ViewIR,
-  schemasModule: string,
-): string {
-  return view.output
-    ? `${schemasModule}.${upperFirst(view.name)}Row`
-    : `${schemasModule}.${view.source.name}Response`;
-}
-
-/** Full-form view row schema — the named element type (`<View>Row`)
- *  referenced by the view's list-response wrapper.  Emitted only for
- *  views with a declared `output`. */
-function renderViewRowSchema(
-  view: import("../../../ir/types/loom-ir.js").ViewIR,
-  webModule: string,
-): string {
-  const schemasModule = `${webModule}.Api.Schemas`;
-  const rowName = `${upperFirst(view.name)}Row`;
-  const fields = (view.output?.fields ?? []).map((f: FieldIR) => ({
-    name: f.name,
-    type: f.type,
-    optional: f.optional,
-  }));
-  return renderSchemaModule(`${schemasModule}.${rowName}`, rowName, fields, schemasModule);
-}
-
-/** View list-response wrapper — a bare `array` whose `items` reference the
- *  element schema MODULE (so OpenApiSpex registers it and rewrites to a
- *  `$ref`).  This makes the wrapper a structural list-wrapper that the
- *  conformance harness resolves to `array<element>`, matching Hono/.NET's
- *  inline array — instead of the old inline-object form that read as a
- *  Phoenix-only named schema. */
-function renderViewResponseSchema(
-  view: import("../../../ir/types/loom-ir.js").ViewIR,
-  ctx: EnrichedBoundedContextIR,
-  webModule: string,
-): string {
-  void ctx;
-  const schemasModule = `${webModule}.Api.Schemas`;
-  const schemaName = `${upperFirst(view.name)}Response`;
-  const moduleName = `${schemasModule}.${schemaName}`;
-  const itemModule = viewItemModule(view, schemasModule);
-
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  @moduledoc "OpenApiSpex schema for #{__MODULE__}."
-
-  require OpenApiSpex
-
-  OpenApiSpex.schema(%{
-    title: "${schemaName}",
-    type: :array,
-    items: ${itemModule}
   })
 end
 `;

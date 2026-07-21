@@ -40,7 +40,6 @@ system Shop {
                     })
                 }
             }
-            view ActiveOrders = Order where status == Confirmed
         }
     }
     api SalesApi from Sales
@@ -112,13 +111,10 @@ describe("svelte generator — project shape", () => {
     expect(order).toContain("export function useConfirmOrder(id: () => string) {");
   });
 
-  it("emits workflows + views api modules", async () => {
+  it("emits workflows api module", async () => {
     const out = await files();
     expect(out.get("web/src/lib/api/workflows.ts")).toContain(
       "export function usePlaceOrderWorkflow() {",
-    );
-    expect(out.get("web/src/lib/api/views.ts")).toContain(
-      "export function useActiveOrdersView() {",
     );
   });
 
@@ -129,7 +125,6 @@ describe("svelte generator — project shape", () => {
     expect(out.has("web/src/routes/(app)/customers/new/+page.svelte")).toBe(true);
     expect(out.has("web/src/routes/(app)/customers/[id]/+page.svelte")).toBe(true);
     expect(out.has("web/src/routes/(app)/workflows/place_order/+page.svelte")).toBe(true);
-    expect(out.has("web/src/routes/(app)/views/active_orders/+page.svelte")).toBe(true);
   });
 
   it("walks page bodies through the shared walker with the svelte target", async () => {

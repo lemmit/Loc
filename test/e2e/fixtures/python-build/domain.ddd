@@ -115,23 +115,6 @@ system PySales {
           c.rename(newName)
         }
       }
-
-      // Shorthand view — filtered list of the source wire shape.
-      view DraftOrders = Order where this.status == Draft
-
-      // Full-form view — custom row shape bound per hydrated row.
-      view OrderSummaries {
-        orderId: Order id
-        status: OrderStatus
-        budget: money
-        lineCount: int
-
-        from Order
-        bind orderId = id,
-             status = status,
-             budget = unitBudget,
-             lineCount = lines.count
-      }
     }
   }
 

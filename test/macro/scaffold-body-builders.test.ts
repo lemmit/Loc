@@ -10,7 +10,6 @@ import {
   scaffoldList,
   scaffoldNewForm,
   scaffoldOperations,
-  scaffoldViewList,
   scaffoldWorkflowForm,
   scalarColumnsForAggregate,
 } from "../../src/macros/stdlib/scaffold/_body-builders.js";
@@ -361,34 +360,6 @@ describe("scaffold instance builders — observable workflow pages", () => {
     );
     expect(src).toContain('Heading("Fulfillment instance", level: 2)');
     expect(src).toContain('color: "yellow"');
-    expect(
-      parseRawResult(inPage(src))
-        .parserErrors.map((e) => e.message)
-        .join("\n"),
-    ).toBe("");
-  });
-});
-
-describe("scaffoldViewList — view read page body", () => {
-  it("scaffolds Heading + QueryView over Views.<View> with the source's columns", async () => {
-    const { model, errors } = await parseString(`
-      system S {
-        context C {
-          aggregate Order { reference: string  status: string }
-          repository Orders for Order { }
-          view ActiveOrders = Order where status == "open"
-        }
-      }
-    `);
-    expect(errors).toEqual([]);
-    const view = findNode(model, "View", "ActiveOrders");
-    const src = printExpr(scaffoldViewList(view));
-    expect(src).toContain('Heading("Active Orders", level: 2)');
-    expect(src).toContain("QueryView(of: Views.ActiveOrders");
-    expect(src).toContain('Column("Reference", o => Text(o.reference))');
-    expect(src).toContain('Column("Status", o => Text(o.status))');
-    expect(src).toContain('keyExpr: "idx"');
-    expect(src).toContain('testid: "view-active_orders"');
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)

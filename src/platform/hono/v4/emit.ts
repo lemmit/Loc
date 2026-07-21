@@ -3,7 +3,7 @@
 // hono@v4 *package* and drives the shared neutral emitter library
 // under `src/generator/typescript/` by ordinary import (package →
 // shared).  Over time the remaining Hono-framework builders
-// (routes/workflow/view/auth/observability) move in here too, leaving
+// (routes/workflow/auth/observability) move in here too, leaving
 // only the framework-neutral helpers (render-expr/stmt, templates,
 // zod-refine) in core.
 
@@ -120,7 +120,6 @@ import { buildQueryProjectionsFile } from "./projection-query-routes-builder.js"
 import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { anyTimerUsesCron, renderTimerScheduler } from "./scheduler-builder.js";
-import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
 
 /** `emitConcurrency` is true when some aggregate in scope declares the
@@ -195,7 +194,7 @@ export class ConcurrencyError extends Error {
  *  docs/old/proposals/validation-error-extension.md.
  *
  *  Emitted once per project at `http/problem-details.ts`; the three router
- *  files (`http/<agg>.ts`, `http/workflows.ts`, `http/views.ts`) import the
+ *  files (`http/<agg>.ts`, `http/workflows.ts`) import the
  *  `ProblemDetails` Zod schema (for OpenAPI declarations) and the
  *  `defaultHook` (passed to `new OpenAPIHono({ defaultHook })` so Zod parse
  *  failures translate to 422 ProblemDetails with per-field `errors[]`
@@ -368,7 +367,7 @@ export function generateTypeScriptForContexts(
   // .NET path already merges this way via a synthetic `merged`
   // context; we mirror that here so `domain/ids.ts`,
   // `domain/value-objects.ts`, `domain/events.ts`, `db/schema.ts`,
-  // `http/workflows.ts`, `http/views.ts`, and `http/index.ts` all
+  // `http/workflows.ts` and `http/index.ts` all
   // reflect the FULL aggregate / VO / enum / event set.
   // Union the hosted contexts into one synthetic context (ambient enums / VOs
   // deduped by name — see src/ir/util/merge-contexts.ts) so the shared domain /
@@ -583,15 +582,11 @@ export function generateTypeScriptForContexts(
       }
     }
   }
-  if (merged.views.length > 0) {
-    const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName, resolveStreamContext));
-  }
   if (merged.projections.some(isMaterializedProjection) && !usingMikro) {
     out.set("http/projections.ts", buildProjectionsFile(merged));
   }
   // Query-time projections (read-path-architecture.md rev.13) — the always-
-  // current read model that was a `view`'s full form.  Emitted to a distinct
+  // current read model of the query-time projection read.  Emitted to a distinct
   // file (`http/query-projections.ts`, mounted under `/projections`) since the
   // folded read model owns `http/projections.ts` with a different signature.
   if (merged.projections.some(isQueryTimeProjection) && !usingMikro) {

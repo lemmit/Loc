@@ -874,7 +874,6 @@
   "user": [],
   "valueobject": [],
   "verifies": [],
-  "view": [],
   "views": [
     "lValue",
     "memberAccess",

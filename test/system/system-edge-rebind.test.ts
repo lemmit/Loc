@@ -8,7 +8,6 @@ const CTX = `context Sales {
   }
   repository Orders for Order {
   }
-  view ActiveOrders = Order where true
 }`;
 
 const SYS = `system S {
@@ -42,7 +41,6 @@ const DEPLOY = `system S {
 describe("edge drag-rebind", () => {
   it("flags only the single cross-ref edges as rebindable", () => {
     expect(isRebindableEdge("repository", "for")).toBe(true);
-    expect(isRebindableEdge("view", "from")).toBe(true);
     expect(isRebindableEdge("api", "from")).toBe(true);
     expect(isRebindableEdge("deployable", "targets")).toBe(true);
     expect(isRebindableEdge("deployable", "module")).toBe(false);
@@ -54,11 +52,6 @@ describe("edge drag-rebind", () => {
   it("repoints a repository's `for` aggregate", () => {
     const next = rebindEdgeTarget(CTX, "for", "repository:Orders", "aggregate:Cart")!;
     expect(next).toContain("repository Orders for Cart");
-  });
-
-  it("repoints a view's `from` aggregate", () => {
-    const next = rebindEdgeTarget(CTX, "from", "view:ActiveOrders", "aggregate:Cart")!;
-    expect(next).toContain("view ActiveOrders = Cart where true");
   });
 
   it("repoints an api's `from` subdomain", () => {

@@ -345,7 +345,7 @@ A `layout Name { main; <slot> { … } }` block defines named layout slots (`main
 
 ## `with scaffold(...)`
 
-`ui WebApp with scaffold(aggregates: [Order]) { … }` is the one built-in macro: compile-time sugar that synthesises full pages from the domain. It's hierarchical — `subdomains:` → contexts → `{ aggregates:, workflows:, views: }`. Per aggregate it emits three pages with **walker-stdlib bodies identical to hand-written ones** (`unfold` on a scaffolded page ejects real `.ddd`):
+`ui WebApp with scaffold(aggregates: [Order]) { … }` is the one built-in macro: compile-time sugar that synthesises full pages from the domain. It's hierarchical — `subdomains:` → contexts → `{ aggregates:, workflows: }`. Per aggregate it emits three pages with **walker-stdlib bodies identical to hand-written ones** (`unfold` on a scaffolded page ejects real `.ddd`):
 
 | Page | Body |
 |---|---|
@@ -422,4 +422,4 @@ template: `
 ```
 ::: end
 
-**Override by name:** declare an explicit `page <Name>` matching a scaffolded page's name and it replaces exactly that one — the three layered scales (whole context / whole aggregate / single page) are the same mechanism. Stacked `scaffold` directives may not double-scaffold the same construct, and may not produce two pages with the same generated name. The macro stdlib (`scaffold` / `scaffoldContext` / `scaffoldAggregate` / `scaffoldWorkflow` / `scaffoldView`) is documented in [`../scaffold-macros.md`](../scaffold-macros.md).
+**Override by name:** declare an explicit `page <Name>` matching a scaffolded page's name and it replaces exactly that one — the three layered scales (whole context / whole aggregate / single page) are the same mechanism. Stacked `scaffold` directives may not double-scaffold the same construct, and may not produce two pages with the same generated name. The macro stdlib (`scaffold` / `scaffoldContext` / `scaffoldAggregate` / `scaffoldWorkflow`) is documented in [`../scaffold-macros.md`](../scaffold-macros.md).

@@ -41,7 +41,7 @@ import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.j
 //   - `InProcessDispatcher` isinstance-fans each event out to its
 //     handlers, passing itself so a handler's own emits re-enter
 //     (choreography chains run).
-//   - `make_dispatcher(session)` is what routes/workflows/views
+//   - `make_dispatcher(session)` is what routes/workflows
 //     construct repositories with instead of the Noop.
 //
 // Durable channels (`retention: log | work`) add the transactional-outbox

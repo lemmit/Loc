@@ -939,7 +939,7 @@ export function validateEventSourcedDiscipline(
 // expander.ts` (the file's documented contract is that downstream phases
 // — enrichment, validation, every backend — "never see the un-expanded
 // form"; the early-exit branches at lines 104, 117, 127 violate that
-// contract silently when the target aggregate/workflow/view can't be
+// contract silently when the target aggregate/workflow can't be
 // resolved).  Backends have no handler for an un-expanded scaffold
 // primitive, so they either crash or emit something nonsensical; this
 // pass turns the failure into a clear validator error pointing at the
@@ -1125,15 +1125,6 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
         else for (const st of fn.body.stmts) walkExprsInStmt(st, visit);
       }
     }
-    // Views — filter + custom output binds.
-    for (const v of c.views) {
-      const source = `${c.name}/${v.name}`;
-      const visit = visitor(source);
-      walkExpr(v.filter, visit);
-      if (v.output) {
-        for (const b of v.output.binds) walkExpr(b.expr, visit);
-      }
-    }
   }
 }
 
@@ -1245,11 +1236,6 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
         else for (const st of fn.body.stmts) walkExprsInStmt(st, v);
       }
     }
-    for (const v of c.views) {
-      const vis = visit(`${c.name}/${v.name}`);
-      walkExpr(v.filter, vis);
-      if (v.output) for (const b of v.output.binds) walkExpr(b.expr, vis);
-    }
   }
 }
 
@@ -1285,7 +1271,7 @@ function flagFunctionBody(
 // pure expression), so its inlinability is unaffected.  A block-body function
 // is also NOT queryable — but because a function CALL already lowers to a
 // `call` ExprIR that `firstNonQueryableNode` rejects in any `where` /
-// `criterion` / view-filter position (`loom.find-where-not-queryable` etc.),
+// `criterion` position (`loom.find-where-not-queryable` etc.),
 // the block form inherits non-queryability with no extra gate; only the
 // purity contract is new here.
 // ---------------------------------------------------------------------------
@@ -1368,7 +1354,7 @@ export function validateFunctionBlockBodies(ctx: BoundedContextIR, diags: LoomDi
 }
 
 /** Walk every expression inside an entity's invariants, derived
- *  properties, function bodies, view filters, and repository find
+ *  properties, function bodies, and repository find
  *  filters; flag any `current-user` ref found there.  Uses the
  *  existing `walkExpr` helper. */
 export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
@@ -1380,7 +1366,7 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
           severity: "error",
           code: "loom.currentuser-not-in-request-scope",
           message:
-            `currentUser is only available in per-request handlers (operations, workflows, view bind expressions, repository find / view where filters). ` +
+            `currentUser is only available in per-request handlers (operations, workflows, repository find where filters). ` +
             `Found in ${location}; remove the reference or move the logic into a per-request body.`,
           source: `${ctx.name}/${location}`,
         });
@@ -1406,10 +1392,10 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
     for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
   }
-  // Repository find filters and view filters DO get to use currentUser
+  // Repository find filters DO get to use currentUser
   // (row-level visibility); the renderer threads the user through as a
-  // closure-captured parameter.  Workflow / operation / test /
-  // view-bind bodies were never in this rejection set.
+  // closure-captured parameter.  Workflow / operation / test
+  // bodies were never in this rejection set.
 }
 
 // ---------------------------------------------------------------------------
@@ -1420,7 +1406,7 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
 //   1. Per-module: each `permissions { }` block declares typed
 //      identifiers; names must be unique within the module.
 //
-//   2. Per-context: every expression in operation / workflow / view /
+//   2. Per-context: every expression in operation / workflow /
 //      derived / invariant / find / function / test bodies is walked
 //      for the `__unknown_permission__:<name>` sentinel produced by
 //      lowering when `permissions.X` references an undeclared name
@@ -1491,12 +1477,6 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) {
       flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
-    }
-  }
-  for (const view of ctx.views) {
-    flag(`view[${view.name}].filter`, view.filter);
-    for (const b of view.output?.binds ?? []) {
-      flag(`view[${view.name}].bind[${b.name}]`, b.expr);
     }
   }
   for (const wf of ctx.workflows) {

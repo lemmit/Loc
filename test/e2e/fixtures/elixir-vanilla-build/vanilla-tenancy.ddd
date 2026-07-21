@@ -40,9 +40,6 @@ system TenancyShop {
 
       // A retrieval (workflow-internal; fail-closed when no actor is threaded).
       retrieval RichAccounts(min: int) of Account { where: balance >= min  sort: [balance desc] }
-
-      // A view sourced from the tenancy aggregate — exercises the view read path.
-      view BigAccounts = Account where balance >= 1000
     }
   }
 

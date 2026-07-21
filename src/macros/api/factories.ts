@@ -235,7 +235,7 @@ export function namedType(
  * object, etc.  Lives inside the aggregate body once the expander
  * splices it in.
  *
- * `opts.access` sets the field's role for input-shaping and view/API
+ * `opts.access` sets the field's role for input-shaping and API
  * exposure (see `FieldAccess` in `src/language/ddd.langium` and the
  * resolution rules in `src/ir/enrich/enrichments.ts`).  Trait macros that
  * contribute server-owned fields should set this — e.g. `auditable`
@@ -928,21 +928,6 @@ export function workflowsIn(
     );
   }
   return (parent.members ?? []).filter((m) => m.$type === "Workflow") as W[];
-}
-
-/** Views declared inside a Subdomain / BoundedContext. */
-export function viewsIn(
-  parent:
-    | import("../../language/generated/ast.js").Subdomain
-    | import("../../language/generated/ast.js").BoundedContext,
-): readonly import("../../language/generated/ast.js").View[] {
-  type V = import("../../language/generated/ast.js").View;
-  if (isSubdomain(parent)) {
-    return (parent.contexts ?? []).flatMap(
-      (c) => (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
-    );
-  }
-  return (parent.members ?? []).filter((m) => m.$type === "View") as V[];
 }
 
 // ---------------------------------------------------------------------------

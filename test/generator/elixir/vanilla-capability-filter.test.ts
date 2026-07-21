@@ -7,8 +7,8 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // The Ash foundation installs a `filter <expr>` capability once via the
 // resource `base_filter`; plain Ecto has no global query filter, so the
 // generated vanilla modules must AND the predicate into EVERY root read of the
-// aggregate — `list/0`, `find_by_id/1`, each custom find, every retrieval, and
-// every view.  (Before this, a vanilla capability filter was silently dropped,
+// aggregate — `list/0`, `find_by_id/1`, each custom find, and every retrieval.
+// (Before this, a vanilla capability filter was silently dropped,
 // so reads returned soft-deleted / out-of-scope rows.)
 //
 // Predicates render under the `record` Ecto binding (`!this.archived` →
@@ -30,7 +30,6 @@ system Catalog {
         find byCustomer(customerId: string): Order[] where this.customerId == customerId
       }
       retrieval BigOrders(min: int) of Order { where: total >= min  sort: [total desc] }
-      view ActiveOrders = Order where total > 0
     }
   }
   api CatalogApi from Core
@@ -74,7 +73,7 @@ describe("vanilla capability filter — AND-ed into every read", () => {
     expect(repo).toContain("where: (record.customer_id == ^customer_id) and (not record.archived)");
   });
 
-  it("conjoins the filter into a retrieval and a view", async () => {
+  it("conjoins the filter into a retrieval", async () => {
     const files = await gen();
     const ret = file(files, "/shop/retrievals/big_orders.ex");
     // A retrieval applies the capability filter as a SEPARATE `where` pipe
@@ -83,8 +82,6 @@ describe("vanilla capability filter — AND-ed into every read", () => {
     // `filter` (origin undefined) is unconditional — no `ignore_*` gate.
     expect(ret).toContain("query = from(record in Api.Shop.Order, where: record.total >= ^min)");
     expect(ret).toContain("query = where(query, [record], not record.archived)");
-    const view = file(files, "/shop/views/active_orders.ex");
-    expect(view).toContain("where: (record.total > 0) and (not record.archived)");
   });
 
   it("leaves a filter-free aggregate's reads unscoped (byte-identical)", async () => {

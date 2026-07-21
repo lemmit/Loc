@@ -27,7 +27,7 @@ import { lines } from "../util/code-builder.js";
 //                          their attributes + operations, plus the
 //                          relationships between them (containment,
 //                          X id references, value-object use,
-//                          repository/view backing).
+//                          repository backing).
 //
 //   .loom/workflows.mmd  — a flowchart per workflow built from its call
 //                          sequence (factory creates, repository loads,
@@ -154,10 +154,6 @@ export function buildDomainDiagram(sys: SystemIR): string {
         );
         classes.push(...classBlock(r.name, "repository", finds));
         rel(`  ${r.name} ..> ${r.aggregateName} : manages`);
-      }
-      for (const v of c.views) {
-        classes.push(...classBlock(v.name, "view", []));
-        rel(`  ${v.name} ..> ${v.source.name} : reads`);
       }
     }
   }

@@ -95,7 +95,7 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 
 // query-time projection (read-path-architecture.md rev.13): the always-current
 // read model (`projection X { from … where … join … select … }`, no folds) is
-// emitted by each backend whose emitter has ported the `view` full-form read.
+// emitted by each backend whose emitter has ported the query-time read.
 // A backend NOT in `PROJECTION_QT_SUPPORTED` has no emitter for it, so gate a
 // query-time projection hosted on such a deployable with an honest diagnostic
 // until its port lands — the same reviewed-gap discipline as the paged gate.
@@ -141,7 +141,7 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
         diags.push({
           severity: "error",
           code: "loom.projection-query-time-unsupported",
-          message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which is currently only emitted on the node (Hono) backend; deployable '${d.name}' (platform '${d.platform}') can't generate it yet. Express the read as a 'view' or a folded 'projection', or host it on a node deployable.`,
+          message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Express the read as a folded 'projection', or host it on a supported deployable.`,
           source: `${c.name}/${p.name}`,
         });
       }
@@ -295,20 +295,6 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
               source: `${wf.name}/${entry.key}`,
             });
           }
-        }
-      }
-      // Views: each is a GET endpoint.  A `view … requires <expr>` gate is the
-      // read-side analogue of an operation's `requires` (in-handler 403); an
-      // ungated view under denyByDefault serves to any caller.  `requires true`
-      // (a literal gate) is the explicit intentionally-public escape.
-      for (const view of c.views) {
-        if (!view.requires) {
-          diags.push({
-            severity: "error",
-            code: "loom.default-deny-ungated",
-            message: `denyByDefault: view '${view.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
-            source: `view/${view.name}`,
-          });
         }
       }
       // Repository finds: each author-declared named find is its own GET route
@@ -1476,9 +1462,9 @@ export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[
 // containments (single AND collection) likewise map (`directParentOf`).
 
 // ---------------------------------------------------------------------------
-// Java read-model backstop gates.  Cross-aggregate view `follows` and VO-typed
-// read-model fields (workflow-instance / projection / view) are now emitted
-// (java/emit/view.ts + the read-model VO records in java/emit/dto.ts).  What
+// Java read-model backstop gates.  Cross-aggregate `follows` and VO-typed
+// read-model fields (workflow-instance / projection) are now emitted
+// (the read-model VO records in java/emit/dto.ts).  What
 // remains here is a defensive gate for an ENTITY (containment-part) read-model
 // field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
 // part type never resolves in workflow / projection scope, so the gate is an
@@ -1509,7 +1495,7 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
 
-      // (1) Entity-typed saga instance-view field.  VO-typed fields now emit
+      // (1) Entity-typed saga instance read-model field.  VO-typed fields now emit
       // (their `<Vo>Response` is co-located in application.workflows); an entity
       // (containment part) field would need a `<Part>Response` DTO — but a part
       // type never resolves in workflow scope, so this is a defensive backstop
@@ -1658,7 +1644,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir (plain
   // Ecto) AND-s the predicate into each read as `^(current_user &&
   // current_user.f)`.  **java** AND-s a SpEL-principal JPQL clause
-  // (`:#{@currentUserAccessor.user()?.f()}`) into every find/retrieval/view +
+  // (`:#{@currentUserAccessor.user()?.f()}`) into every find/retrieval +
   // the scoped `findAll`/`findById` overrides (the static `@SQLRestriction`
   // still carries the non-principal filters).
   const supportsPrincipalFilter = (family: string): boolean => {
@@ -1824,7 +1810,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 // ---------------------------------------------------------------------------
 // `ignoring` filter-bypass support gate (named-filter-bypass.md §11).
 //
-// A read (repository `find`, `view`, or inline `Repo.findAll(...)`/`Repo.run`)
+// A read (repository `find`, or inline `Repo.findAll(...)`/`Repo.run`)
 // may carry an `ignoring *` / `ignoring <Cap>, …` clause that bypasses a
 // capability's query-filter(s).  Three fail-fast gates run over the FULLY-
 // RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`,
@@ -1844,7 +1830,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       bypassed `where:`), java (§11.6 @SQLRestriction→bypassable @Filter triage,
 //       disabled per-read via the Hibernate Session), and python (SQLAlchemy
 //       has no global filter, so each read AND-s its predicates explicitly —
-//       a bypassing find/view/inline-run simply OMITS the named conjunct).
+//       a bypassing find/inline-run simply OMITS the named conjunct).
 //       Every honoring family is now in the set; the diagnostic only fires for
 //       a backend with no DB read path (which never carries `ignoring`).
 // ---------------------------------------------------------------------------
@@ -1858,7 +1844,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
  *  principal filters omit the JPQL conjunct; document repos re-apply promoted
  *  caps per-find), and `python` (SQLAlchemy has no global filter, so each read
  *  AND-s its capability predicates explicitly via `contextFilterPredicate`; a
- *  bypassing find/view omits the named conjunct statically, and a shared
+ *  bypassing find omits the named conjunct statically, and a shared
  *  `run_<retrieval>` omits the union of its inline call-sites' bypasses) all
  *  honor it. */
 const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
@@ -1924,16 +1910,6 @@ function bypassReadsInContext(ctx: BoundedContextIR): BypassRead[] {
       }
     }
   }
-  for (const v of ctx.views) {
-    if ((v.bypassAll || (v.bypassCaps?.length ?? 0) > 0) && v.source.kind === "aggregate") {
-      out.push({
-        bypassAll: v.bypassAll,
-        bypassCaps: v.bypassCaps,
-        aggName: v.source.name,
-        site: `view '${v.name}'`,
-      });
-    }
-  }
   for (const wf of ctx.workflows) {
     for (const c of wf.creates) collectBypassRepoRuns(c.statements, wf.name, out);
     for (const h of wf.handlers ?? []) collectBypassRepoRuns(h.statements, wf.name, out);
@@ -1954,7 +1930,7 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
     // Only backend deployables serve reads; a frontend (react/static/vue/…)
-    // owns no repository/view read path, so it can't bypass a filter.
+    // owns no repository read path, so it can't bypass a filter.
     if (!fam || !platformOwnsBackend(dep.platform)) continue;
     const supported = bypassSupported(dep);
     for (const ctxName of dep.contextNames) {
@@ -2339,7 +2315,7 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
 // ---------------------------------------------------------------------------
 // Per-persistence-adapter find-predicate capability gate (Bucket V / P0).
 //
-// Every relational adapter lowers a `find` / `filter` / retrieval / view
+// Every relational adapter lowers a `find` / `filter` / retrieval
 // predicate to SQL, but each lowers a DIFFERENT subset of the queryable
 // expression sublanguage.  A predicate that passes the general queryable
 // check (`firstNonQueryableNode`) can still fall outside the SELECTED
@@ -2389,9 +2365,6 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
       }
       for (const r of ctx.retrievals) {
         check(r.where, `retrieval '${r.name}'`);
-      }
-      for (const v of ctx.views) {
-        check(v.filter, `view '${v.name}'`);
       }
       // Capability `filter` predicates also lower into every SELECT.  The
       // Dapper / MikroORM capability gates already handle principal-
@@ -2990,8 +2963,8 @@ export function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnos
 //   2. `currentUser` scope: the magic identifier resolves to a typed
 //      ref via `lower-expr.ts:resolveNameRef` whenever the system
 //      declares a user block.  Bodies may USE `currentUser` in
-//      operations / workflows / view binds / aggregate test bodies,
-//      plus repository find / view where filters; everywhere else
+//      operations / workflows / aggregate test bodies,
+//      plus repository find where filters; everywhere else
 //      (invariants, derived properties, function bodies) the reference
 //      is rejected with a friendly message pointing at where it is
 //      allowed.

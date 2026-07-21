@@ -26,16 +26,6 @@ test("PlaceOrderWorkflow loads", async ({ page }) => {
   await expect(page).toHaveURL(new RegExp("/workflows/place_order$"));
 });
 
-test("ActiveOrdersView loads", async ({ page }) => {
-  await page.goto("/views/active_orders");
-  await expect(page).toHaveURL(new RegExp("/views/active_orders$"));
-});
-
-test("OrderSummaryView loads", async ({ page }) => {
-  await page.goto("/views/order_summary");
-  await expect(page).toHaveURL(new RegExp("/views/order_summary$"));
-});
-
 test("CustomerList loads", async ({ page }) => {
   await page.goto("/customers");
   await expect(page).toHaveURL(new RegExp("/customers$"));
@@ -54,9 +44,4 @@ test("Home loads", async ({ page }) => {
 test("WorkflowsIndex loads", async ({ page }) => {
   await page.goto("/workflows");
   await expect(page).toHaveURL(new RegExp("/workflows$"));
-});
-
-test("ViewsIndex loads", async ({ page }) => {
-  await page.goto("/views");
-  await expect(page).toHaveURL(new RegExp("/views$"));
 });

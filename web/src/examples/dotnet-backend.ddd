@@ -98,8 +98,6 @@ system SalesBackend {
           order.confirm()
         }
       }
-
-      view ActiveOrders = Order where status == Confirmed
     }
   }
 

@@ -999,156 +999,6 @@ describe(".NET generator", () => {
     expect(commitIdx).toBeGreaterThan(trySaveIdx);
   });
 
-  it("emits a Mediator query/handler + ViewsController + repo method per view", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-        }
-        repository Orders for Order { }
-        view ActiveOrders = Order where status == Confirmed
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateDotnet(doc.parseResult.value as Model);
-
-    // 1. Query record (parameterless, returns IReadOnlyList<OrderResponse>).
-    const query = files.get("Application/Views/ActiveOrdersQuery.cs")!;
-    expect(query).toMatch(
-      /public sealed record ActiveOrdersQuery\(\) : IQuery<IReadOnlyList<OrderResponse>>/,
-    );
-
-    // 2. Handler injects IOrderRepository, calls _repo.ActiveOrders(cancellationToken),
-    //    projects each domain row to OrderResponse via the canonical
-    //    projection helper.
-    const handler = files.get("Application/Views/ActiveOrdersHandler.cs")!;
-    expect(handler).toMatch(/private readonly IOrderRepository _repo;/);
-    expect(handler).toMatch(/await _repo\.ActiveOrders\(cancellationToken\);/);
-    expect(handler).toMatch(/domain\.Select\(d => new OrderResponse\(/);
-
-    // 3. The .NET repository interface + impl gained the view method
-    //    (via the mergeViewsAsFinds synthesis).
-    const iface = files.get("Domain/Orders/IOrderRepository.cs")!;
-    expect(iface).toMatch(/Task<List<Order>> ActiveOrders\(/);
-    const impl = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
-    expect(impl).toMatch(/public async Task<List<Order>> ActiveOrders\(/);
-    expect(impl).toMatch(
-      /_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(cancellationToken\)/,
-    );
-
-    // 4. Controller exposes GET /views/active_orders.
-    const ctrl = files.get("Api/SalesViewsController.cs")!;
-    expect(ctrl).toMatch(/\[Route\("views"\)\]/);
-    expect(ctrl).toMatch(/\[HttpGet\("active_orders"\)\]/);
-    expect(ctrl).toMatch(/await _mediator\.Send\(new ActiveOrdersQuery\(\)\)/);
-  });
-
-  it("emits a custom-shape view with per-row projection (full form)", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Order {
-          customerId: string
-          status: OrderStatus
-          contains lines: OrderLine[]
-          entity OrderLine { quantity: int, invariant quantity > 0 }
-        }
-        repository Orders for Order { }
-        view OrderSummary {
-          orderId: Order id
-          status: OrderStatus
-          lineCount: int
-          from Order where status == Confirmed
-          bind orderId = id, status = status, lineCount = lines.count
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateDotnet(doc.parseResult.value as Model);
-
-    // Wire-typed Row record (Order id → Guid, enum → enum TYPE, int → int).
-    // The enum crosses the wire as `OrderStatus` (string-on-wire via the
-    // global JsonStringEnumConverter) so Swashbuckle names the enum schema.
-    const row = files.get("Application/Views/OrderSummaryRow.cs")!;
-    expect(row).toMatch(
-      /public sealed record OrderSummaryRow\(\[property: Required\] Guid OrderId, \[property: Required\] OrderStatus Status, \[property: Required\] int LineCount\);/,
-    );
-
-    // Query returns IReadOnlyList<OrderSummaryRow>, not <Agg>Response.
-    const query = files.get("Application/Views/OrderSummaryQuery.cs")!;
-    expect(query).toMatch(/IQuery<IReadOnlyList<OrderSummaryRow>>/);
-
-    // Handler projects through projectToResponse (Id.Value, enum passed
-    // through as the enum type, collection .Count via the bind renderer).
-    const handler = files.get("Application/Views/OrderSummaryHandler.cs")!;
-    expect(handler).toMatch(
-      /domain\.Select\(d => new OrderSummaryRow\(d\.Id\.Value, d\.Status, d\.Lines\.Count\)\)\.ToList\(\)/,
-    );
-  });
-
-  it("rewrites X id follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Customer { name: string, email: string  derived display: string = name }
-        aggregate Order {
-          customerId: Customer id
-          status: OrderStatus
-        }
-        repository Customers for Customer { }
-        repository Orders for Order { }
-        view CustomerOrders {
-          orderId: Order id
-          customerName: string
-          customerEmail: string
-          status: OrderStatus
-          from Order where status == Confirmed
-          bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const files = generateDotnet(doc.parseResult.value as Model);
-
-    // Handler injects both repos.
-    const handler = files.get("Application/Views/CustomerOrdersHandler.cs")!;
-    expect(handler).toMatch(/private readonly IOrderRepository _repo;/);
-    expect(handler).toMatch(/private readonly ICustomerRepository _customerRepo;/);
-    // Bulk load + ToDictionary keyed by Id.
-    expect(handler).toMatch(
-      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\)/,
-    );
-    // Projection rewrites the Id-follow refs to dictionary lookups.
-    expect(handler).toMatch(
-      /new CustomerOrdersRow\(d\.Id\.Value, customerById\[d\.CustomerId\]\.Name, customerById\[d\.CustomerId\]\.Email, d\.Status\)/,
-    );
-
-    // Repo interface + impl gained FindManyByIdsAsync.
-    const iface = files.get("Domain/Customers/ICustomerRepository.cs")!;
-    expect(iface).toMatch(/Task<IReadOnlyList<Customer>> FindManyByIdsAsync/);
-    const impl = files.get("Infrastructure/Repositories/CustomerRepository.cs")!;
-    expect(impl).toMatch(
-      /_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(cancellationToken\)/,
-    );
-  });
-
   it("workflow op-call to a parameterless extern calls the aggregate method directly", async () => {
     // extern (b) Phase 2: an extern op is an ordinary aggregate method (it runs
     // preconditions, calls its `<Op>Core` hook, re-asserts invariants), so a
@@ -1269,50 +1119,6 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/order\.Deduct\(command\.Amount\);/);
     expect(handler).not.toMatch(/HandleAsync/);
     expect(handler).not.toMatch(/DeductOrderRequest/);
-  });
-
-  it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
-    const { parseHelper } = await import("langium/test");
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(
-      `
-      context Sales {
-        enum OrderStatus { Draft, Confirmed }
-        aggregate Region { name: string, countryCode: string  derived display: string = name }
-        aggregate Customer { name: string, regionId: Region id  derived display: string = name }
-        aggregate Order { customerId: Customer id, status: OrderStatus }
-        repository Regions for Region { }
-        repository Customers for Customer { }
-        repository Orders for Order { }
-        view OrdersWithRegion {
-          orderId: Order id
-          regionName: string
-          from Order where status == Confirmed
-          bind orderId = id,
-               regionName = customerId.regionId.name
-        }
-      }
-    `,
-      { validation: true },
-    );
-    const handler = generateDotnet(doc.parseResult.value as Model).get(
-      "Application/Views/OrdersWithRegionHandler.cs",
-    )!;
-
-    // Both repos injected.
-    expect(handler).toMatch(/private readonly ICustomerRepository _customerRepo;/);
-    expect(handler).toMatch(/private readonly IRegionRepository _regionRepo;/);
-    // Customer loaded first (depends on rows); Region loaded after,
-    // sourced from Customer values.
-    expect(handler).toMatch(
-      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\);/,
-    );
-    expect(handler).toMatch(
-      /var regionByCustomerId = \(await _regionRepo\.FindManyByIdsAsync\(customerById\.Values\.Select\(__a => __a\.RegionId\)\.ToList\(\), cancellationToken\)\)\.ToDictionary\(__a => __a\.Id\);/,
-    );
-    // Projection walks the chain.
-    expect(handler).toMatch(/regionByCustomerId\[customerById\[d\.CustomerId\]\.RegionId\]\.Name/);
   });
 
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
@@ -1765,7 +1571,7 @@ describe(".NET generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // currentUser inside find / view filters
+    // currentUser inside find filters
     // -----------------------------------------------------------------------
 
     const SRC_FILTER_AUTH = `
@@ -1783,7 +1589,6 @@ describe(".NET generator", () => {
             repository Orders for Order {
               find mine(): Order[] where customerId == currentUser.customerId
             }
-            view MyOrders = Order where customerId == currentUser.customerId
           }
         }
         deployable api {
@@ -1815,13 +1620,6 @@ describe(".NET generator", () => {
       const handler = files.get("Application/Orders/Queries/MineHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
       expect(handler).toMatch(/_repo\.Mine\(_currentUser\.User, cancellationToken\)/);
-    });
-
-    it("view handler injects ICurrentUserAccessor when the view filter uses currentUser", async () => {
-      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
-      const handler = files.get("Application/Views/MyOrdersHandler.cs")!;
-      expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
-      expect(handler).toMatch(/_repo\.MyOrders\(_currentUser\.User, cancellationToken\)/);
     });
 
     // -----------------------------------------------------------------------

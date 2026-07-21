@@ -46,8 +46,6 @@ system SvelteShop {
                 }
             }
 
-            view ActiveOrders = Order where status == Confirmed
-
             event OrderConfirmed { order: Order id, at: datetime }
 
             channel Lifecycle {

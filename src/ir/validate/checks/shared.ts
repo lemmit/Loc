@@ -38,8 +38,8 @@ export function firstUnknownColumnRef(
      *  always AGGREGATE-rooted, where `id` is a real stored column on every
      *  backend — the derived tenancy registry self-scope (`this.id ==
      *  currentUser.<claim>`, Phase 1b) is the motivating shape.  Find /
-     *  view / retrieval `where`s keep the strict field-list check (a
-     *  workflow-instance view source has no `id` column, so admitting it
+     *  retrieval `where`s keep the strict field-list check (a
+     *  workflow-instance read-model source has no `id` column, so admitting it
      *  there would emit SQL against a missing column). */
     allowSelfId?: boolean;
   },
@@ -186,7 +186,7 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // not its parent VO field, so it cannot form the flattened
       // column — `lowerToDrizzle` returns null for it.  (It is only
       // produced inside a value-object's own body, never in an
-      // aggregate find/view/retrieval `where`, so this rejects an
+      // aggregate find/retrieval `where`, so this rejects an
       // unreachable shape rather than a real one — but admitting it
       // would let an internal-error throw replace a clean diagnostic
       // if it ever became reachable.)
@@ -337,7 +337,7 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       return "list literal";
     case "action-ref":
       // A named-action reference is a UI-handler-arg form — never queryable
-      // (it only appears in a page/component body, not a find/view `where`).
+      // (it only appears in a page/component body, not a find `where`).
       return "action reference";
     case "authz-filter":
       // The authorization/tenancy filter sentinels (M-T9.9) — both the `deny`

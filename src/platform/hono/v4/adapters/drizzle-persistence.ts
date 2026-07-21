@@ -28,7 +28,7 @@ function _findRepoFor(ctx: EmitCtx, aggName: string) {
 }
 
 /** The owning bounded context for an aggregate — `buildRepositoryFile`
- *  needs the context to look up view filters that share the table. */
+ *  needs the context to look up capability filters that share the table. */
 function _contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
   return ctx.contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
 }
@@ -131,7 +131,6 @@ export function emitDrizzleSchema(
     aggregates: ctx.contexts.flatMap((c) => c.aggregates),
     repositories: ctx.contexts.flatMap((c) => c.repositories),
     workflows: ctx.contexts.flatMap((c) => c.workflows),
-    views: ctx.contexts.flatMap((c) => c.views),
     criteria: ctx.contexts.flatMap((c) => c.criteria),
     domainServices: ctx.contexts.flatMap((c) => c.domainServices ?? []),
     channels: ctx.contexts.flatMap((c) => c.channels),

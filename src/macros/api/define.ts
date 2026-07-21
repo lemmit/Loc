@@ -76,7 +76,6 @@ export type NamedDeclKind =
   | "Subdomain"
   | "BoundedContext"
   | "Workflow"
-  | "View"
   | "ValueObject"
   | "EnumDecl"
   | "Criterion";

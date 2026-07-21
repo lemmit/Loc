@@ -31,7 +31,6 @@ import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
-import { hasAnyView } from "../_frontend/views-module.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -48,7 +47,6 @@ import {
 } from "./realtime-handlers-builder.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
-import { buildAngularViewsModule } from "./views-module.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
   pageComponentName,
@@ -211,7 +209,6 @@ export function generateAngularForContexts(
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
-    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
   };
 
   const routeDescs: AngularRouteDesc[] = [];
@@ -404,13 +401,10 @@ export function generateAngularForContexts(
       buildAngularApiModule(agg, repoByAggregate.get(agg.name), bcByAggregate.get(agg.name)),
     );
   }
-  // Views / workflows API modules — the Angular-native sibling of the
+  // Workflows API module — the Angular-native sibling of the
   // React/Vue zod modules: TanStack `injectQuery` / `injectMutation` off an
   // `@Injectable` service.  Emitted only when the served contexts declare any
-  // view / workflow, so a plain project's tree is unchanged.
-  if (hasAnyView(contexts)) {
-    out.set("src/api/views.ts", buildAngularViewsModule(contexts));
-  }
+  // workflow, so a plain project's tree is unchanged.
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }

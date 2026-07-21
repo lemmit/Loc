@@ -76,10 +76,7 @@ describe("byFeature LayoutAdapter — phoenixLiveView (real)", () => {
     ).toBe("lib/web_app/storefront/order_status.ex");
   });
 
-  it("places views + workflows under per-context subfolders", () => {
-    expect(
-      p({ name: "confirmed_orders.ex", category: "view-module", contextSnake: "storefront" }),
-    ).toBe("lib/web_app/storefront/views/confirmed_orders.ex");
+  it("places workflows under per-context subfolders", () => {
     expect(
       p({ name: "checkout.ex", category: "workflow-module", contextSnake: "storefront" }),
     ).toBe("lib/web_app/storefront/workflows/checkout.ex");

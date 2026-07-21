@@ -180,7 +180,6 @@ lambda with the loaded entity bound as `data`.
 | `<Agg>New` | `header`, `beforeForm`, `afterForm`, `footer` | — |
 | `<Agg>Detail` | `header`, `footer` | `beforeRecord`, `afterRecord`, `afterOperations` |
 | `<Wf>Workflow` | `header`, `beforeForm`, `afterForm`, `footer` | — |
-| `<View>View` | `header`, `footer` | — |
 
 The set is pinned by a `slot-set.test.ts` freeze test mirroring
 `test/generator/elixir/heex-parity.test.ts`: a slot added to the TSX

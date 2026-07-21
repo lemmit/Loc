@@ -82,7 +82,6 @@ import {
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { anyPyTimerUsesCron, renderPyTimerScheduler } from "./scheduler-builder.js";
-import { buildPyViewsFile } from "./views-builder.js";
 import {
   buildPyWorkflowsFile,
   commandWorkflowsOf,
@@ -283,16 +282,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const routedAggs = args.contexts.flatMap((c) =>
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
-  // A workflow-sourced view is observable only when its source workflow has an
-  // `instanceWireShape` (correlation-bearing, state-table-backed).
-  const wfHasInstanceShape = new Map(merged.workflows.map((w) => [w.name, w.instanceWireShape]));
-  const projHasShape = new Map(merged.projections.map((p) => [p.name, p.wireShape]));
-  const hasViews = merged.views.some(
-    (v) =>
-      v.source.kind === "aggregate" ||
-      (v.source.kind === "workflow" && wfHasInstanceShape.get(v.source.name) != null) ||
-      (v.source.kind === "projection" && projHasShape.get(v.source.name) != null),
-  );
   // A command workflow gets a POST route; an observable (correlation-bearing)
   // workflow gets read-only instance endpoints — either means `workflows_routes`
   // exists and `main` mounts it (an event-triggered-only saga is still
@@ -396,7 +385,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     renderMain(
       args.sys.name,
       routedAggs,
-      hasViews,
       hasWorkflows,
       hasProjections,
       hasQueryProjections,
@@ -492,7 +480,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
 
   // In-process event dispatch (channels.md): only when a channel routes
   // a subscribed event does `app/dispatch.py` exist — and then every
-  // repository constructed by routes/views/workflows takes the live
+  // repository constructed by routes/workflows takes the live
   // dispatcher instead of the Noop (mirrors Hono's createApp default).
   // Only collected when a recorder is actually threaded in — a
   // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
@@ -562,8 +550,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     ),
   );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
-  const viewsFile = buildPyViewsFile(merged, hasDispatch);
-  if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
   const projectionsFile = buildPyProjectionsFile(merged);
   if (projectionsFile != null) out.set("app/http/projections_routes.py", projectionsFile);
   const queryProjectionsFile = buildPyQueryProjectionsFile(merged, hasDispatch);
@@ -892,7 +878,6 @@ class TransactionMiddleware:
 function renderMain(
   systemName: string,
   routerAggs: string[],
-  hasViews = false,
   hasWorkflows = false,
   hasProjections = false,
   hasQueryProjections = false,
@@ -976,7 +961,6 @@ function renderMain(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
     "from app.http.problem import install_error_handlers, install_openapi",
-    hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
     hasQueryProjections
@@ -1119,7 +1103,6 @@ function renderMain(
     "# every request is bracketed, including 401s from the auth middleware.",
     "app.add_middleware(ObservabilityMiddleware)",
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
-    hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
     hasQueryProjections ? `app.include_router(query_projections_router${routerArgs})` : null,

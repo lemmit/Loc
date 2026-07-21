@@ -68,8 +68,6 @@ system ByFeatureNet {
       repository Tags for Tag { }
       repository Profiles for Profile { }
       repository Ledgers for Ledger { }
-
-      view ActiveVendors = Vendor where rating > 0
     }
   }
 

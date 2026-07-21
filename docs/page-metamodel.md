@@ -22,7 +22,7 @@ Three rules:
 1. **Closed and minimal.** Six declaration keywords. No user-extensible
    macros. The standard component library is closed in v0.
 2. **Reuse the existing IR for typing.** Data sources resolve to repository
-   finds, views, operations, workflows, external APIs — every name typed
+   finds, operations, workflows, external APIs — every name typed
    via the existing signature. No parallel type system.
 3. **Declarative, expression-driven.** Each property is a fact; structural
    variation lives in the expression engine (`match`), not in dedicated
@@ -166,7 +166,7 @@ the full Breadcrumbs · Toolbar · QueryView · Table tree.
 |---|---|
 | `route:` | Path-with-`:params`. Path params bind to typed parameters. |
 | `title:` | String expression, may interpolate page data. |
-| `requires` | Auth predicate — same syntax as on operations. On a React frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against `useSession().user`) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md#view-requires-gates)). |
+| `requires` | Auth predicate — same syntax as on operations. On a React frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against `useSession().user`) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md)). |
 | `state { … }` | Reactive local fields (see §6). At most one, multiples merge. |
 | `body:` | Single expression. May be a `match`, a ternary, a component invocation, anything. |
 | `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden`). |
@@ -301,16 +301,6 @@ derived display: string = match {
   status == Shipped   => "In transit"
   else                => "Closed"
 }
-
-view OrderSummary {
-  riskLevel: string
-  from Order
-  bind riskLevel = match {
-    total.amount > 10000 => "high"
-    total.amount > 1000  => "medium"
-    else                 => "low"
-  }
-}
 ```
 
 Validator may warn on non-exhaustive matches that lack `else`.
@@ -366,7 +356,7 @@ State-mutation lowering across the frontends (inside an `action` body):
 A lambda is also admissible in plain **expression** position — as the
 callback of a higher-order collection op on a list value. This lets a page
 shape a collection inline instead of pushing every variant back into a
-backend `view`/`find` `where`-clause:
+backend `find` `where`-clause:
 
 ```ddd
 body: Stack {
@@ -384,7 +374,7 @@ Two boundaries to know:
   …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible. A
   single-arg key-sort (`sortBy(o => o.key)`) has no native array method or
   runtime helper yet on any frontend, so pre-shape ordering in a backend
-  `view`/`find` for now.
+  `find` for now.
 - **All frontends.** React, Vue, Svelte, and Angular share the `emitExpr` engine; Feliz supplies its own F# leaves (`src/generator/feliz/fs-expr.ts`) through the same dispatcher;
   Phoenix/HEEx runs a parallel engine that mirrors the same ops to Elixir
   idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
@@ -516,12 +506,10 @@ Single fixed pre-codegen pass. Not user-extensible. Hierarchical:
 scaffold subdomains: A, B, …    →  ∪  scaffold contexts:   <each context in each subdomain>
 scaffold contexts:   X, Y, …    →  ∪ {
                                        scaffold aggregates: <each aggregate in X>,
-                                       scaffold workflows:  <each workflow in X>,
-                                       scaffold views:      <each view in X>
+                                       scaffold workflows:  <each workflow in X>
                                      }
 scaffold aggregates: Order, …   →  page <Order>List + <Order>New + <Order>Detail
 scaffold workflows:  placeOrder, … → page PlaceOrderWorkflow  (+ shared WorkflowsIndex)
-scaffold views:      ActiveOrders, … → page ActiveOrdersView  (+ shared ViewsIndex)
 ```
 
 ### What each scaffolded page contains
@@ -536,7 +524,6 @@ identical to one the user could hand-write. The contract per page:
 | `<Agg>New` | Breadcrumbs · heading · `Card { CreateForm { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. A field's declared default (`field: T = <expr>`) seeds that input when it is client-evaluable (constant / enum member); otherwise the input starts at the type-zero placeholder. |
 | `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `OperationForm { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `CreateForm { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
 | `<Workflow>Workflow` | Breadcrumbs · heading · `Card { WorkflowForm { runs: <wf> } }`. |
-| `<View>View` | Heading · `QueryView { of: Views.<name> }` → `Table`. |
 
 The Detail page's operations + related-entity lists are the
 platform-completeness proof for the modal/disclosure and nested-table
@@ -586,7 +573,7 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 
 ```
 1. Run scaffold → pages, each with default `menu { section, label }`
-   (defaults: aggregates → "Aggregates", workflows → "Workflows", views → "Views")
+   (defaults: aggregates → "Aggregates", workflows → "Workflows")
 2. Apply explicit `page X` overrides (by name)
 3. If `ui` has a `menu { … }` block:
        sidebar = that block, resolved against the page registry
@@ -600,7 +587,6 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 menu {
   section "Sales"   { link Orders.List, link OrderConsole, link Orders.New }
   section "Lookup"  { link Customers.List, link Products.List }
-  section "Reports" { link ActiveOrdersView, link OrderSummaryView }
   section "External" {
     link "Docs" -> "https://docs.acme.com"
   }
@@ -611,7 +597,7 @@ A scaffold names an aggregate's pages by **role** (`List` / `New` / `Detail`)
 inside its per-aggregate `area` (`area Orders`), so a bare `link List` is
 ambiguous across aggregates.  Disambiguate with the **area-qualified** form
 `link Orders.List` / `link Orders.New`.  Pages with a unique name — custom pages
-(`OrderConsole`), views (`ActiveOrdersView`), and the singleton dashboards
+(`OrderConsole`) and the singleton dashboards
 (`Home`) — link by bare name.
 
 `scaffold` doesn't *return* anything — it contributes pages-with-menu-metadata
@@ -714,7 +700,7 @@ present tense here is historical; current reality is below):
   Page bodies — both hand-written and scaffolded — now route through
   `src/generator/react/body-walker.ts`, which dispatches every
   walker-stdlib primitive into the active design pack.
-- `view-builder.ts` and `workflow-builder.ts` still exist for
+- `workflow-builder.ts` still exists for
   per-aggregate plumbing the walker calls into.
 - `pages-emitter.ts` is the shell emitter that wraps the walker's
   body output with `useForm` / mutation hook / `useParams` / imports.
@@ -825,7 +811,7 @@ StateField:
 // The macro expands to the same set of Page nodes the old grammar rule
 // produced.  See docs/scaffold-macros.md for the full surface
 // (scaffold / scaffoldModule / scaffoldContext / scaffoldAggregate /
-// scaffoldWorkflow / scaffoldView) and the `with` syntax in
+// scaffoldWorkflow) and the `with` syntax in
 // docs/language.md.
 
 // 8. Menu

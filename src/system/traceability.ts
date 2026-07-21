@@ -324,7 +324,6 @@ const KIND_SHAPE: Record<CodeRefKind, [string, string]> = {
   valueobject: ["[", "]"],
   event: [">", "]"],
   repository: ["[(", ")]"],
-  view: ["[/", "/]"],
   workflow: ["{{", "}}"],
   deployable: ["[/", "/]"],
   api: ["{{", "}}"],

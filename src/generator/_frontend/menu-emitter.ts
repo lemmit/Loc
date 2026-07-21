@@ -240,22 +240,10 @@ function testIdAndActive(
         activeArgs: JSON.stringify(`/workflows/${slug}`),
       };
     }
-    case "view-list": {
-      const slug = snake(kind.viewName);
-      return {
-        testId: `nav-view-${slug}`,
-        activeArgs: JSON.stringify(`/views/${slug}`),
-      };
-    }
     case "workflows-index":
       return {
         testId: "nav-workflows",
         activeArgs: `"/workflows", { exact: true }`,
-      };
-    case "views-index":
-      return {
-        testId: "nav-views",
-        activeArgs: `"/views", { exact: true }`,
       };
     case "home":
       return { testId: "nav-home", activeArgs: `"/", { exact: true }` };

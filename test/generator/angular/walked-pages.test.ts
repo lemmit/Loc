@@ -1002,11 +1002,9 @@ describe("angular generator — Modal operation-dialog form", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Parameterised find + view + workflow reads (gap-closure: the api-service
+// Parameterised find + workflow reads (gap-closure: the api-service
 // layer).  A `QueryView(of: <api>.<Agg>.<find>(arg))` un-stubs and hoists the
-// `use<Find><Agg>(query)` factory; a `QueryView(of: Views.<View>)` hoists
-// `use<View>View()` from `../api/views`; both the per-aggregate module's find
-// factory and the views/workflows modules are emitted Angular-native (TanStack
+// `use<Find><Agg>(query)` factory, emitted Angular-native (TanStack
 // injectQuery off an @Injectable service).  (ng build-verified separately.)
 // ---------------------------------------------------------------------------
 
@@ -1018,7 +1016,6 @@ const FIND_SOURCE = `
         enum OrderStatus { Draft, Confirmed, Shipped }
         aggregate Order with crudish { customerId: string  status: OrderStatus }
         repository Orders for Order { find byStatus(status: OrderStatus): Order[] }
-        view RecentOrders from Order
       }
     }
     ui WebApp {
@@ -1032,16 +1029,6 @@ const FIND_SOURCE = `
           error: Alert { "err" },
           empty: Empty { "none" },
           data: rows => Stack { For { each: rows, o => Text { o.customerId } } }
-        }
-      }
-      page Recent {
-        route: "/recent"
-        body: QueryView {
-          of: Views.RecentOrders,
-          loading: Loader {},
-          error: Alert { "err" },
-          empty: Empty { "none" },
-          data: rows => Stack { For { each: rows, o => Text { o.id } } }
         }
       }
     }
@@ -1059,7 +1046,7 @@ async function findFiles(): Promise<Map<string, string>> {
   return out;
 }
 
-describe("angular generator — parameterised find + view reads", () => {
+describe("angular generator — parameterised find reads", () => {
   it("un-stubs the find page and hoists the find factory with a REACTIVE getter", async () => {
     const page = (await findFiles()).get("src/app/pages/by-status.component.ts")!;
     expect(page).not.toContain("body needs api/forms support");
@@ -1082,19 +1069,6 @@ describe("angular generator — parameterised find + view reads", () => {
     expect(api).toContain("export function useByStatusOrder(query: () => ByStatusOrderQuery) {");
     expect(api).toContain(`queryKey: ["orders", "find", "by_status", query()] as const,`);
     expect(api).toContain("queryFn: () => firstValueFrom(service.byStatus(query())),");
-  });
-
-  it("un-stubs the view page and emits the Angular-native views module", async () => {
-    const files = await findFiles();
-    const page = files.get("src/app/pages/recent.component.ts")!;
-    expect(page).not.toContain("body needs api/forms support");
-    expect(page).toContain('import { useRecentOrdersView } from "../../api/views";');
-    expect(page).toContain("readonly recentOrdersView = useRecentOrdersView();");
-    const views = files.get("src/api/views.ts")!;
-    expect(views).toContain('import { injectQuery } from "@tanstack/angular-query-experimental";');
-    expect(views).toContain("export class ViewsService {");
-    expect(views).toContain("export function useRecentOrdersView() {");
-    expect(views).toContain(`queryKey: ["views", "recent_orders"] as const,`);
   });
 });
 

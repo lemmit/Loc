@@ -130,7 +130,6 @@ describe("byFeature LayoutAdapter — dotnet (real, Phase 5a)", () => {
       { name: "OrderPlaced.cs", category: "event" },
       { name: "AppDbContext.cs", category: "dbcontext" },
       { name: "NoopDomainEventDispatcher.cs", category: "event-dispatcher" },
-      { name: "ActiveOrdersQuery.cs", category: "view-query" },
       { name: "PlaceOrderHandler.cs", category: "workflow-handler" },
       { name: "ValidationBehavior.cs", category: "validation-behavior" },
       { name: "Program.cs", category: "program" },

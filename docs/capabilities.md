@@ -131,7 +131,7 @@ and elixir has no `document` shape at all.  See *Deferred cases* below.
   entity for the non-principal predicate (`src/generator/java/emit/entity.ts`);
   a **principal** predicate instead AND-s a SpEL-principal JPQL clause
   (`:#{@currentUserAccessor.user()?.tenantId()}`) into the scoped
-  `findAll`/`findById` overrides + finds/retrievals/views.  A
+  `findAll`/`findById` overrides + finds/retrievals.  A
   **non-relational** aggregate filters in-app via `findAll().stream()`
   for `document`, or rides the same `@SQLRestriction` for an `embedded`
   root.

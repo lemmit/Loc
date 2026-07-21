@@ -39,12 +39,10 @@ function containsScaffoldCall(expr: ExprIR | undefined): boolean {
     "scaffoldOperations",
     "scaffoldNewForm",
     "scaffoldWorkflowForm",
-    "scaffoldViewList",
     "scaffoldInstanceList",
     "scaffoldInstanceDetails",
     "Home",
     "WorkflowsIndex",
-    "ViewsIndex",
   ]);
   switch (expr.kind) {
     case "call":
@@ -132,34 +130,6 @@ const SCAFFOLD_WORKFLOW_DDD = `
     }
     api SalesApi from Sales
     ui App with scaffold(workflows: [placeOrder]) {
-      api Sales: SalesApi
-    }
-    deployable api {
-      platform: node
-      contexts: [Orders]
-      serves: SalesApi
-      port: 3000
-    }
-    deployable web {
-      platform: static
-      targets: api
-      ui: App { Sales: api }
-      port: 3001
-    }
-  }
-`;
-
-const SCAFFOLD_VIEW_DDD = `
-  system Demo {
-    subdomain Sales {
-      context Orders {
-        aggregate Order { subject: string  derived display: string = subject }
-        view ActiveOrders = Order where subject == "x"
-        repository Orders for Order {}
-      }
-    }
-    api SalesApi from Sales
-    ui App with scaffold(views: [ActiveOrders]) {
       api Sales: SalesApi
     }
     deployable api {
@@ -269,24 +239,6 @@ describe("scaffolded workflow pages — full body trees", () => {
   it("WorkflowsIndex page body is a full Stack tree (no `WorkflowsIndex()` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_WORKFLOW_DDD);
     const page = findPage(uiPages(loom, "App"), "WorkflowsIndex");
-    expect(topCallee(page.body)).toBe("Stack");
-    expect(containsScaffoldCall(page.body)).toBe(false);
-  });
-});
-
-describe("scaffolded view pages — full body trees", () => {
-  it("view list page body is a Stack landing on a QueryView", async () => {
-    const loom = await buildLoomModel(SCAFFOLD_VIEW_DDD);
-    const page = findPage(uiPages(loom, "App"), "ActiveOrdersView");
-    expect(topCallee(page.body)).toBe("Stack");
-    expect(containsScaffoldCall(page.body)).toBe(false);
-    const stack = page.body as Extract<ExprIR, { kind: "call" }>;
-    expect(stack.args.some((a) => topCallee(a) === "QueryView")).toBe(true);
-  });
-
-  it("ViewsIndex page body is a full Stack tree (no `ViewsIndex()` call remains)", async () => {
-    const loom = await buildLoomModel(SCAFFOLD_VIEW_DDD);
-    const page = findPage(uiPages(loom, "App"), "ViewsIndex");
     expect(topCallee(page.body)).toBe("Stack");
     expect(containsScaffoldCall(page.body)).toBe(false);
   });

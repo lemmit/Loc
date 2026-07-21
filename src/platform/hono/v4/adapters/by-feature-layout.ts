@@ -11,7 +11,7 @@
 // optional extern-handler + test files, and the TPH/TPC base union + reader.
 // CROSS-CUTTING artifacts stay layered (delegated to `byLayer`): the pooled
 // domain files (ids, value-objects, events, errors, provenance), `db/schema.ts`,
-// `http/index.ts`, per-context views / workflows, obs / auth / lib, and the
+// `http/index.ts`, per-context workflows, obs / auth / lib, and the
 // project root.
 //
 // RELATIVE IMPORTS: unlike .NET, relocating TS files breaks their relative

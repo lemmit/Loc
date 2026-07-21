@@ -22,7 +22,7 @@
 //   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404, 422
 //   find (optional return)            → 404
 //   workflow (POST /workflows/<wf>)   → 400, [403 if guarded], 422
-//   list / view / non-optional find   → (none beyond the universal 500)
+//   list / non-optional find          → (none beyond the universal 500)
 //
 // 422 (Unprocessable Entity) is the validation-failure code declared per
 // docs/old/proposals/validation-error-extension.md — Phase D.  Body carries the
@@ -47,8 +47,7 @@ export type OpErrorKind =
   | "findOptional"
   | "findList"
   | "findSingle"
-  | "list"
-  | "view";
+  | "list";
 
 /** The HTTP error statuses a given operation kind declares, ascending.
  *  `guarded` (an op/workflow with a `requires` guard) inserts 403 — the
@@ -85,7 +84,6 @@ export function errorStatuses(
     case "findList":
     case "findSingle":
     case "list":
-    case "view":
       return [];
   }
 }

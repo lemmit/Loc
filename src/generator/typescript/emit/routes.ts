@@ -27,7 +27,7 @@ export function renderHttpIndex(
     authRequired?: boolean;
     persistence?: string;
     /** Explicit `route <M> <p> -> <Ctx>.<Handler>` routers (A2) — mounted after
-     *  the aggregate/workflow/view routers, before `/openapi.json`.  Empty /
+     *  the aggregate/workflow routers, before `/openapi.json`.  Empty /
      *  absent → byte-identical to the pre-A2 output. */
     explicitRouters?: readonly ExplicitRouterMount[];
     /** File upload/download wiring (M-T1.2).  Present iff the deployable hosts
@@ -159,11 +159,6 @@ export function renderHttpIndex(
   const workflowMount = hasWorkflows
     ? `  app.route("${API_BASE_PATH}/workflows", workflowsRoutes(db, events));`
     : null;
-  const hasViews = ctx.views.length > 0;
-  const viewImport = hasViews ? `import { viewsRoutes } from "./views";` : null;
-  const viewMount = hasViews
-    ? `  app.route("${API_BASE_PATH}/views", viewsRoutes(db, events));`
-    : null;
   const projectionImport = hasProjections
     ? `import { projectionsRoutes, projectionTee } from "./projections";`
     : null;
@@ -256,7 +251,6 @@ export function renderHttpIndex(
       workflowImport,
       outboxImport,
       realtimeImport,
-      viewImport,
       projectionImport,
       queryProjectionImport,
       ...explicitRouterImports,
@@ -355,7 +349,6 @@ export function renderHttpIndex(
       ...aggregateRoutes,
       workflowMount,
       realtimeMount,
-      viewMount,
       projectionMount,
       queryProjectionMount,
       ...explicitRouterMounts,

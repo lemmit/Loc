@@ -27,7 +27,7 @@ describe("java generator — `ignoring` filter bypass (§11.6 triage)", () => {
     const entity = files.get(`${ROOT}/Product.java`)!;
     // The bare `filter this.price > 0` is never bypassable → @SQLRestriction.
     expect(entity).toContain('@SQLRestriction("price > 0")');
-    // softDeletable is bypassed by `recent`/`allRows`/the view → it does NOT
+    // softDeletable is bypassed by `recent`/`allRows` → it does NOT
     // appear in @SQLRestriction.
     expect(entity).not.toMatch(/@SQLRestriction\([^)]*is_deleted/);
   });
@@ -70,14 +70,6 @@ describe("java generator — `ignoring` filter bypass (§11.6 triage)", () => {
     // return), no Session unwrap.
     expect(impl).toMatch(
       /public List<Product> normal\(\) \{\s*var result = jpa\.normal\(\);\s*CatalogLog\.event\("find_executed"[\s\S]*?return result;\s*\}/,
-    );
-  });
-
-  it("a view's `ignoring` rides its synthesized find — wraps with disableFilter", async () => {
-    const files = await generateSystemFiles(SRC);
-    const impl = files.get(`${ROOT}/ProductRepositoryImpl.java`)!;
-    expect(impl).toMatch(
-      /public List<Product> activeProducts\(\) \{[\s\S]*disableFilter\("softDeletable"\)[\s\S]*enableFilter\("softDeletable"\)/,
     );
   });
 });

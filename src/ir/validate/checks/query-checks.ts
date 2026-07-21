@@ -89,7 +89,7 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
   // `agg.contextFilters`) are a SELECTION position too: every backend
   // installs them at the query layer (.NET `HasQueryFilter`, Drizzle
   // read-site conjunction, Ecto base-query helper), so they must lower
-  // to the same queryable subset as a `find`/`view` `where`.  Until now
+  // to the same queryable subset as a `find` `where`.  Until now
   // they bypassed this check — an unselectable capability filter would
   // silently emit nothing (Drizzle/Ecto) or fail at C# render (.NET).
   // `currentUser.<scalar>` is admitted here exactly as in find filters:
@@ -286,11 +286,11 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
 }
 
 // ---------------------------------------------------------------------------
-// View `requires` gate (D-AUTH-OIDC / default-deny).  A view's optional
-// `requires <expr>` is an authorization gate evaluated against `currentUser`
-// *before* the query runs — failure → 403.  Because no row exists at gate
-// time, the gate may reference only `currentUser` (+ constants), never the
-// source row.  Reject row-state references (this-prop / this-vo-prop /
+// Read `requires` gate (D-AUTH-OIDC / default-deny).  A repository find's
+// optional `requires <expr>` is an authorization gate evaluated against
+// `currentUser` *before* the query runs — failure → 403.  Because no row exists
+// at gate time, the gate may reference only `currentUser` (+ constants), never
+// the source row.  Reject row-state references (this-prop / this-vo-prop /
 // this-derived) with a message steering the author to `where` for row scoping.
 // ---------------------------------------------------------------------------
 
@@ -306,27 +306,8 @@ const GATE_ALLOWED_REFS: ReadonlySet<RefKind> = new Set<RefKind>([
   "helper-fn",
 ]);
 
-export function validateViewGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
-  for (const view of ctx.views) {
-    if (!view.requires) continue;
-    const offending = firstNonGateRef(view.requires, GATE_ALLOWED_REFS);
-    if (offending !== null) {
-      diags.push({
-        severity: "error",
-        code: "loom.view-gate-not-current-user",
-        message:
-          `view '${view.name}': a \`requires\` gate runs before the query (no row exists yet), ` +
-          `so it may only reference \`currentUser\` (and constants) — \`${offending}\` is not ` +
-          "available here. Use `where` to scope which rows return; use `requires` to allow / " +
-          "deny the caller.",
-        source: `view/${view.name}`,
-      });
-    }
-  }
-}
-
-// Find `requires` gate (D-AUTH-OIDC / default-deny) — the read-side twin of
-// the view gate.  A repository find's optional `requires <expr>` runs before
+// Find `requires` gate (D-AUTH-OIDC / default-deny).
+// A repository find's optional `requires <expr>` runs before
 // the query; because no row exists yet it may reference only `currentUser`
 // (+ constants), never the source row.  Reject any source-row reference (which
 // lowers to an `unknown` ref in the bare gate env).

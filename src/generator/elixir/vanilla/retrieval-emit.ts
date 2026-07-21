@@ -24,7 +24,7 @@
 // so a declared retrieval param renders as Ecto's `^name` pin form, and an
 // `enum-value` is the stored string column (`"confirmed"`), not an atom
 // (`:confirmed`).
-// Mirrors the established vanilla `view-emit.ts` shape.
+// Mirrors the established vanilla repository-emit.ts shape.
 // ---------------------------------------------------------------------------
 
 import type { BoundedContextIR, RetrievalIR, SortTermIR } from "../../../ir/types/loom-ir.js";

@@ -6,6 +6,7 @@ import {
   type EnrichedAggregateIR,
   type EnrichedBoundedContextIR,
   type EnrichedEntityPartIR,
+  type ExprIR,
   exprUsesCurrentUser,
   type FieldIR,
   type FindIR,
@@ -14,9 +15,21 @@ import {
   type RepositoryIR,
   type RetrievalIR,
   type TypeIR,
-  type ViewIR,
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+
+/** The minimal read shape the query-time projection reuse feeds
+ *  `viewFindMethod` — a name, an aggregate source, an optional filter and
+ *  capability bypass.  The synthesised `repo.<projName>()` read is emitted
+ *  from this. */
+interface AggregateReadShape {
+  name: string;
+  source: { kind: "aggregate"; name: string };
+  filter?: ExprIR;
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
 import {
@@ -247,7 +260,6 @@ export function buildPyRepositoryFile(
       filterPred,
     )})).scalars().all()`,
     `        return ${hydrateListExpr(agg)}`,
-    ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
     ...queryProjectionViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
     ...aggregateRetrievals(agg, ctx).flatMap((r) => [
       "",
@@ -503,7 +515,7 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicat
   return { expr: `and_(${clauses.join(", ")})`, ops: new Set(["and_"]) };
 }
 
-/** Conjoin the predicate terms that scope a root read: an optional find/view/
+/** Conjoin the predicate terms that scope a root read: an optional find/
  *  retrieval predicate, the TPH `kind` discriminator, and the (non-principal)
  *  capability-`filter` predicate (W1a).  Returns the `.where(...)` suffix, or
  *  empty when no term applies.  When more than one term is present they're
@@ -524,21 +536,16 @@ export function rootWhere(
   return `.where(and_(${terms.join(", ")}))`;
 }
 
-// --- views + retrievals --------------------------------------------------------
-
-/** Aggregate-sourced views over this aggregate (workflow views: S15). */
-export function aggregateViews(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): ViewIR[] {
-  return ctx.views.filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name);
-}
+// --- query-time projection reads + retrievals ----------------------------------
 
 /** Query-time projections (read-path-architecture.md rev.13) sourced from this
- *  aggregate, adapted to the `ViewIR` shape `viewFindMethod` consumes so the
- *  synthesised `repo.<projName>()` read is byte-identical to a full-form view's
- *  find — the projection route then follows (`join`) + projects (`select`). */
+ *  aggregate, adapted to the read shape `viewFindMethod` consumes so the
+ *  synthesised `repo.<projName>()` read follows (`join`) + projects (`select`)
+ *  from a plain filtered aggregate read. */
 export function queryProjectionViews(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
-): ViewIR[] {
+): AggregateReadShape[] {
   return (ctx.projections ?? [])
     .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
     .map((p) => ({
@@ -600,19 +607,19 @@ function inlineRunBypassesByRetrieval(
   return out;
 }
 
-/** Per-view repository find — the lowered filter over the source
- *  aggregate (no filter → all).  The views router calls this. */
+/** Per-query-projection repository find — the lowered filter over the source
+ *  aggregate (no filter → all).  The query-projection router calls this. */
 function viewFindMethod(
   agg: EnrichedAggregateIR,
-  view: ViewIR,
+  view: AggregateReadShape,
   ctx: EnrichedBoundedContextIR,
   filterPred: PyPredicate | null = null,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
-  // A `view … ignoring <Cap>`/`ignoring *` OMITS the named capability
-  // predicate(s) for this view read only (baked in statically).
+  // A read `… ignoring <Cap>`/`ignoring *` OMITS the named capability
+  // predicate(s) for this read only (baked in statically).
   const methodFilterPred =
     view.bypassAll || (view.bypassCaps?.length ?? 0) > 0
       ? contextFilterPredicate(agg, ctx, {

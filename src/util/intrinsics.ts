@@ -52,7 +52,7 @@ export interface IntrinsicSignature {
   params: ReadonlyArray<IntrinsicParam>;
   returns: IntrinsicReturn;
   /** May this intrinsic appear in a queryable position (`find ... where`,
-   *  view filter, criterion, capability filter)?  Non-queryable intrinsics
+   *  criterion, capability filter)?  Non-queryable intrinsics
    *  in a where-position fail IR validation with
    *  `loom.intrinsic-not-queryable` rather than silently degrading. */
   queryable: boolean;

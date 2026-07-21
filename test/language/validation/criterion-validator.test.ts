@@ -95,7 +95,7 @@ describe("validator — criterion", () => {
     const { errors } = await parseString(
       ctx(`
         criterion InRegion(r: string) of Customer = region == r
-        view Bad = Customer where InRegion
+        criterion Bad of Customer = InRegion
       `),
     );
     expect(errors.join("\n")).toMatch(/InRegion' expects 1 argument; reference it as/);

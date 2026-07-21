@@ -331,7 +331,7 @@ function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
 interface BodyCheckCtx {
   aggByName: Map<string, AggregateIR>;
-  /** Receiver-root names the walker resolves to an api / view / workflow-
+  /** Receiver-root names the walker resolves to an api / workflow-
    *  instance hook (`tryDetectApiHook`) or a declared handle — a valid
    *  method-call receiver root even though it lowers to an `unknown` ref. */
   handles: ReadonlySet<string>;
@@ -793,7 +793,7 @@ function checkMethodCallReceiver(
   const root = rootRef(call.receiver);
   // The receiver root is well-resolved unless it's an `unknown` ref.
   if (root?.refKind !== "unknown") return;
-  // `unknown` is fine when the root is a resolvable handle (api / view /
+  // `unknown` is fine when the root is a resolvable handle (api /
   // aggregate / workflow — `Sales.Customer.create(…)`, `Customer.byId(…)`,
   // `Views.x`) or an in-scope lambda param / form shell-local.
   if (ctx.handles.has(root.name) || ctx.scope.has(root.name)) return;

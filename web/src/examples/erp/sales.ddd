@@ -162,10 +162,6 @@ subdomain Sales {
       find byCustomer(customerId: Customer id): Quote[] where this.customerId == customerId
     }
 
-    // ── View — a saved typed query (shorthand form: result shape is the
-    // source aggregate's wire shape).
-    view ConfirmedOrders = SalesOrder where status == Confirmed
-
     // ── Transactional workflow: create + confirm an order atomically.
     // If `confirm`'s precondition throws, the whole creation rolls back.
     workflow placeOrder transactional {

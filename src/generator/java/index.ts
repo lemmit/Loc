@@ -14,7 +14,6 @@ import type {
   SystemIR,
   TimerSourceIR,
   TypeIR,
-  ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import {
@@ -174,7 +173,6 @@ import {
   renderJavaUnionWireFiles,
 } from "./emit/unions.js";
 import { renderJavaCommandValidators } from "./emit/validator.js";
-import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
 import {
@@ -630,7 +628,7 @@ function emitProjectFromContexts(
       out.set(integrationTest.path, integrationTest.content);
     }
     // Workflows + views — per-context controllers under /workflows and
-    // /views, services in the shared application packages.
+    // query-projection reads, services in the shared application packages.
     //
     // VO → application-package map: a `<Vo>Request` record is emitted into
     // the service package of every aggregate that references the VO (see
@@ -898,43 +896,6 @@ function emitProjectFromContexts(
     // `workflow-service` category so the file path matches that package.
     for (const dto of renderReadModelVoResponseDtos(ctx, pkgFor("workflow-service"), basePkg)) {
       place(dto.name, "workflow-service", dto.content);
-    }
-    const viewFiles = renderJavaViews(ctx, {
-      basePkg,
-      pkg: pkgFor("view-service"),
-      routePrefix,
-      applicationPkgOf: (a) => pkgFor("service", a),
-      entityPkgOf: (a) => pkgFor("entity", a),
-      repoPkgOf: (a) => pkgFor("repository-interface", a),
-      stateRepoPkg: pkgFor("spring-data-repository"),
-      workflowPkg: pkgFor("workflow-service"),
-      contextSchema: ctxSchema,
-    });
-    if (viewFiles) {
-      // Per-view Row DTOs are individually attributable; the combined
-      // `<Ctx>Views` service + `<Ctx>ViewsController` merge every view's
-      // method/route, so those stay unmapped.
-      const viewRowOrigin = new Map<string, ViewIR>(
-        ctx.views
-          .filter(
-            (v) =>
-              v.source.kind === "workflow" ||
-              v.source.kind === "projection" ||
-              (v.source.kind === "aggregate" && v.output),
-          )
-          .map((v) => [`${upperFirst(v.name)}Row.java`, v]),
-      );
-      for (const [name, f] of viewFiles) {
-        const v = viewRowOrigin.get(name);
-        place(
-          name,
-          f.category,
-          f.content,
-          undefined,
-          v?.origin,
-          v ? `${ctx.name}.${v.name}` : undefined,
-        );
-      }
     }
     // Query-time projections (read-path-architecture.md rev.13): a live read
     // (source find + join bulk-loads + select) with no folded read-model table —
@@ -1503,10 +1464,7 @@ function emitAggregate(
   };
   // Views + query-time projections sourced from this aggregate both ride
   // synthesized parameterless finds (the mergeViewsAsFinds analog).
-  const viewFinds = [
-    ...viewFindsFor(agg.name, ctx),
-    ...queryProjectionFindsFor(agg.name, ctx),
-  ] as unknown as RepositoryIR["finds"];
+  const viewFinds = [...queryProjectionFindsFor(agg.name, ctx)] as unknown as RepositoryIR["finds"];
   const repoWithViews: RepositoryIR =
     viewFinds.length > 0
       ? repo

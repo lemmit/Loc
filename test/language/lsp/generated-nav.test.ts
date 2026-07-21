@@ -6,7 +6,7 @@ import { parseString } from "../../_helpers/index.js";
 // ---------------------------------------------------------------------------
 // Unit coverage for the pure half of "go to generated code" — the provider
 // e2e test (lsp-implementation.test.ts) exercises operation/aggregate ids
-// against a real generated tree, but the workflow/view arms of
+// against a real generated tree, but the workflow arms of
 // `constructIdAt` and `regionsForConstruct`'s selection rules (op-over-agg
 // non-mixing, dedup, foreign-source filtering, macro chains) are only
 // pinned here.
@@ -33,8 +33,6 @@ context Sales {
       let customer = Customers.getById(customerId)
     }
   }
-
-  view ActiveOrders = Order where status == "Confirmed"
 }
 `;
 
@@ -94,10 +92,6 @@ describe("constructIdAt", () => {
 
   it("maps a workflow body to Ctx.Wf", async () => {
     expect(await idsAt("Customers.getById")).toEqual(["Sales.placeOrder"]);
-  });
-
-  it("maps a view declaration to Ctx.View", async () => {
-    expect(await idsAt("ActiveOrders")).toEqual(["Sales.ActiveOrders"]);
   });
 
   it("returns undefined on an event (no construct regions recorded for events)", async () => {

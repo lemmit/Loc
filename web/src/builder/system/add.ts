@@ -17,7 +17,6 @@ const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
   valueobject: "ValueObject",
   event: "Event",
   repository: "Repository",
-  view: "View",
   workflow: "Workflow",
   api: "Api",
   storage: "Storage",
@@ -82,8 +81,8 @@ function firstAggregateIn(ctx: BoundedContext): string | undefined {
   return undefined;
 }
 
-// Minimal-but-valid source for a freshly added construct. repository / view
-// reference an aggregate in their own context; `api` references a subdomain —
+// Minimal-but-valid source for a freshly added construct. repository
+// references an aggregate in its own context; `api` references a subdomain —
 // returning null (so the add is skipped) when no such target exists.
 function constructTemplate(
   kind: NodeKind,
@@ -104,10 +103,6 @@ function constructTemplate(
     case "repository": {
       const agg = firstAggregateIn(container as BoundedContext);
       return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
-    }
-    case "view": {
-      const agg = firstAggregateIn(container as BoundedContext);
-      return agg ? `\n    view ${name} = ${agg} where true\n` : null;
     }
     case "storage":
       return `\n  storage ${name} {\n    type: postgres\n  }\n`;

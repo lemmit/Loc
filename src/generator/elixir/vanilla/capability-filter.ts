@@ -3,7 +3,7 @@
 //
 // A `filter <expr>` capability (`contextFilters` on the aggregate) must be
 // AND-ed into EVERY root read of the aggregate.  Plain Ecto has no global
-// query filter, so the generated repository / retrieval / view modules must
+// query filter, so the generated repository / retrieval modules must
 // conjoin each predicate into every `from(record in <Agg>, where: …)` read site —
 // exactly the Hono/Drizzle situation (half-applying a soft-delete filter would
 // be a correctness hole).
@@ -38,7 +38,7 @@ function pinPrincipal(rendered: string): string {
 }
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
- *  carried by capability NAME on `FindIR` / `ViewIR` / the repo-run stmt.
+ *  carried by capability NAME on `FindIR` / the repo-run stmt.
  *  Named caps match `AggregateIR.contextFilterOrigins`; a filter with an
  *  `undefined` origin (bare/hand-written) is never bypassable. */
 export interface FilterBypass {

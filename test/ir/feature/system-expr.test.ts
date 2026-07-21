@@ -7,7 +7,6 @@ import type {
   Model,
   Repository,
   ValueObject,
-  View,
   Workflow,
 } from "../../../src/language/generated/ast.js";
 import { emitExpr, seedExpr } from "../../../web/src/builder/system/expr-model.js";
@@ -22,7 +21,6 @@ import {
   repoSlotOptions,
   slotCandidates,
   slotExpr,
-  viewSlotOptions,
   workflowSlotOptions,
 } from "../../../web/src/builder/system/expr-slots.js";
 import { parseRaw as parse } from "../../_helpers/index.js";
@@ -250,38 +248,6 @@ describe("structured expression editor — slot edits", () => {
   });
 });
 
-describe("structured expression editor — view slots", () => {
-  it("exposes a view's where filter and bind expressions", () => {
-    const opts = viewSlotOptions(owner<View>(parse(sales), "View", "OrderSummary"));
-    expect(opts.map((o) => o.value)).toEqual([
-      "filter",
-      "bind:orderId",
-      "bind:status",
-      "bind:lineCount",
-    ]);
-  });
-
-  it("edits a view's where filter", () => {
-    const out = editExprSlot(
-      sales,
-      { kind: "viewFilter", owner: "ActiveOrders" },
-      "status != Confirmed",
-    )!;
-    expect(out).toMatch(/view ActiveOrders = Order where status != Confirmed/);
-  });
-
-  it("edits a view bind expression", () => {
-    const out = editExprSlot(
-      sales,
-      { kind: "viewBind", owner: "OrderSummary", name: "lineCount" },
-      "lines.count + 1",
-    )!;
-    expect(out).toMatch(/lineCount = lines\.count \+ 1/);
-    // Sibling binds untouched.
-    expect(out).toMatch(/orderId = id/);
-  });
-});
-
 describe("structured expression editor — operation statement slots", () => {
   it("lists precondition / requires / let expressions across operations", () => {
     const opts = exprSlotOptions(owner<Aggregate>(parse(sales), "Aggregate", "Order")).filter((o) =>
@@ -471,11 +437,6 @@ describe("structured expression editor — scope-aware name candidates", () => {
   it("offers aggregate properties, derived props, helpers and enum values", () => {
     const c = names({ kind: "function", owner: "Order", name: "isMutable" });
     expect(c).toEqual(expect.arrayContaining(["status", "lines", "total", "isMutable", "Draft"]));
-  });
-
-  it("offers the view source aggregate's names", () => {
-    const c = names({ kind: "viewFilter", owner: "ActiveOrders" });
-    expect(c).toEqual(expect.arrayContaining(["status", "Confirmed"]));
   });
 
   it("offers find params alongside the aggregate's names", () => {

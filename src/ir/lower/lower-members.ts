@@ -130,7 +130,7 @@ export function lowerField(p: Property, env?: Env): FieldIR {
     provenanced: !!p.provenanced,
     ...(sensitivity ? { sensitivity } : {}),
     // `access` lives on the field, not the type — it's a field role
-    // (input-shaping, view exposure) rather than a type property.
+    // (input-shaping, read exposure) rather than a type property.
     // Enrichment fills in the default / inferred-from-type cases.
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
     ...(defaultExpr ? { default: defaultExpr } : {}),

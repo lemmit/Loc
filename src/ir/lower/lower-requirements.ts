@@ -130,8 +130,6 @@ function codeRefKindOf(node: Targetable): CodeRefKind {
       return "repository";
     case "Workflow":
       return "workflow";
-    case "View":
-      return "view";
     case "Deployable":
       return "deployable";
     case "Api":

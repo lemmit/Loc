@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import * as pageObjectsBuilder from "../../../src/generator/_frontend/page-objects-builder.js";
-import * as viewPageObject from "../../../src/generator/_frontend/view-page-object.js";
 import * as walkerPageObjects from "../../../src/generator/_frontend/walker-page-objects.js";
 import * as workflowPageObject from "../../../src/generator/_frontend/workflow-page-object.js";
 
@@ -13,7 +12,7 @@ import * as workflowPageObject from "../../../src/generator/_frontend/workflow-p
 // buildViewPageObject / buildWalkerPageObject) — change one, every SPA picks it
 // up.  Phoenix/HEEx does NOT consume them: `elixir/page-objects-emit.ts` runs a
 // PARALLEL reimplementation (its own buildAggregate{List,New,Detail}PageObject,
-// buildWorkflowFormPageObject, buildViewListPageObject, …), reusing only the
+// buildWorkflowFormPageObject, …), reusing only the
 // `fillBlock` helper, because LiveView's page-object topology diverges from the
 // `@loom/ui-test-driver` shape the SPAs emit.
 //
@@ -42,7 +41,6 @@ const SHARED_PAGE_OBJECT_BUILDERS: Record<string, string> = {
     "builders (buildAggregateListPageObject / buildAggregateNewPageObject / " +
     "buildAggregateDetailPageObject), dispatched off classifyPage.",
   buildWorkflowPageObject: "Phoenix: buildWorkflowFormPageObject (workflow-form archetype).",
-  buildViewPageObject: "Phoenix: buildViewListPageObject (view-list archetype).",
   buildWalkerPageObject:
     "Phoenix: buildGenericPageObject (custom/walker pages) + buildFallback (when " +
     "the aggregate/context can't be resolved).",
@@ -51,7 +49,7 @@ const SHARED_PAGE_OBJECT_BUILDERS: Record<string, string> = {
 /** Reflectively collect the `build*` function exports across the shared
  *  `_frontend/` page-object modules — the surface the SPAs depend on. */
 function sharedBuilderNames(): string[] {
-  const modules = [pageObjectsBuilder, viewPageObject, walkerPageObjects, workflowPageObject];
+  const modules = [pageObjectsBuilder, walkerPageObjects, workflowPageObject];
   const names = new Set<string>();
   for (const mod of modules) {
     for (const [name, value] of Object.entries(mod)) {

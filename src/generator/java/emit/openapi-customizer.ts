@@ -44,9 +44,9 @@ import { returnUnionSpec } from "./unions.js";
 //      parity normalizer — which reads `content["application/json"]` — sees no
 //      schema and classifies the response as `object`.  We rewrite every 2xx
 //      success body onto `application/json`.
-//   2. List / view GETs are inline `{ type: array, items: $ref }`; the other
-//      backends name the wrapper (`<Agg>ListResponse`, full-form-view
-//      `<View>Response`).  We register the named array component and retarget
+//   2. List GETs are inline `{ type: array, items: $ref }`; the other
+//      backends name the wrapper (`<Agg>ListResponse`).  We register the
+//      named array component and retarget
 //      the response `$ref` to it (mirrors .NET's ListResponseWrapperFilter).
 //   3. No RFC 7807 error responses are declared at all.  We add the per-op
 //      `application/problem+json` → `ProblemDetails` responses, with the exact
@@ -71,7 +71,7 @@ interface RouteContract {
   /** Full path as it appears in the spec (route prefix included). */
   path: string;
   /** Named array-wrapper component the 2xx body should `$ref`, when this is a
-   *  list/view GET; otherwise undefined (the 2xx body keeps its inferred
+   *  list GET; otherwise undefined (the 2xx body keeps its inferred
    *  component, only its media type is normalized to application/json). */
   listWrapper?: string;
   /** Named scalar component the 2xx body should `$ref` — used when springdoc
@@ -84,7 +84,7 @@ interface RouteContract {
   errors: RouteError[];
   /** operationId override — the canonical id the other backends emit, when
    *  springdoc's controller-derived default diverges (workflow command routes
-   *  carry a `Workflow` suffix, view routes a `View` suffix).  Undefined for
+   *  carry a `Workflow` suffix).  Undefined for
    *  aggregate-op routes, whose springdoc default already matches node. */
   operationId?: string;
 }
@@ -143,7 +143,7 @@ interface Contract {
 }
 
 /** Build the per-route OpenAPI contract from the IR, walking the same route
- *  shapes the controllers (api.ts / view.ts / workflow.ts) emit. */
+ *  shapes the controllers (api.ts / workflow.ts) emit. */
 export function buildJavaOpenApiContract(
   contexts: readonly EnrichedBoundedContextIR[],
   routePrefix: string,
@@ -348,7 +348,10 @@ export function buildJavaOpenApiContract(
           continue;
         }
         if (f.returnType.kind === "array") {
-          // List find → reuse the aggregate's list wrapper.
+          // List find → reuse the aggregate's list wrapper, registering it (a
+          // paged auto-findAll leaves it unregistered, so the route can't rely
+          // on that).  `wrappers.set` is idempotent for the non-paged case.
+          wrappers.set(listWrapper, `${agg.name}Response`);
           routes.push({ method: "get", path: findPath, listWrapper, errors: [] });
         } else {
           // Single optional find → 404.
@@ -359,43 +362,6 @@ export function buildJavaOpenApiContract(
           });
         }
       }
-    }
-
-    // Views — GET /views/<snake(name)>.  Shorthand reuses the source
-    // aggregate's list wrapper; a full-form view names `<View>Response`.
-    for (const view of ctx.views) {
-      const viewPath = `${routePrefix}/views/${snake(view.name)}`;
-      let wrapper: string;
-      if (view.output) {
-        wrapper = `${upperFirst(view.name)}Response`;
-        const rowName = `${upperFirst(view.name)}Row`;
-        wrappers.set(wrapper, rowName);
-        // Full-form view Row — required = the non-optional declared fields.
-        for (const f of view.output.fields) noteEnumRefs(f.type, f.name);
-        setRequired(
-          rowName,
-          view.output.fields.filter((f) => !isOptionalType(f.type)).map((f) => f.name),
-        );
-      } else if (view.source.kind === "aggregate") {
-        const aggName = view.source.name;
-        wrapper = `${aggName}ListResponse`;
-        wrappers.set(wrapper, `${aggName}Response`);
-      } else {
-        // Workflow- or projection-sourced shorthand view → `<View>Row` element
-        // wrapper (both emit a dedicated row record, unlike an aggregate
-        // shorthand which reuses `<Agg>Response`).
-        wrapper = `${upperFirst(view.name)}Response`;
-        wrappers.set(wrapper, `${upperFirst(view.name)}Row`);
-      }
-      // View route operationId carries a `View` suffix on the other backends
-      // (`activeProjectsView`); springdoc derives the bare method name.
-      routes.push({
-        method: "get",
-        path: viewPath,
-        listWrapper: wrapper,
-        errors: [],
-        operationId: `${lowerFirst(view.name)}View`,
-      });
     }
 
     // Workflows — POST /workflows/<snake(name)>.

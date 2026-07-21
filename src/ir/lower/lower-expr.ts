@@ -383,7 +383,7 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     // parameterless criterion to its boolean body, so if we lowered the head
     // first (line below) the trailing `()` suffix would be applied to that
     // already-inlined `binary` body and collapse into a spurious free `call`
-    // — reported as non-queryable in a retrieval/find/view `where`.  Inline
+    // — reported as non-queryable in a retrieval/find `where`.  Inline
     // here instead so `where: StillOpen()` lowers identically to `where:
     // StillOpen`.  Parameterised criteria keep their existing `ref` + suffix
     // path (they aren't eagerly inlined); `Repo.run(...)` reads never reach
@@ -2236,7 +2236,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "id") {
     // `X id.member` — follow the typed reference into X's schema.
     // Mirrors the same case in `stepInto`; both `inferExprType` and
-    // `lowerExpr` need it for view bind expressions to multi-hop.
+    // `lowerExpr` need it for projection read expressions to multi-hop.
     const target = findEntityByName(env, t.targetName);
     if (target) return memberOnEntity(target, name);
   }
@@ -2435,7 +2435,7 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "id") {
     // `customerId.name` where `customerId: Customer id` — follow the
     // typed reference into the target aggregate's schema.  Used by
-    // view bind expressions to project across `X id` references
+    // projection read expressions to project across `X id` references
     // without an explicit join clause.  Single-hop only; the
     // resulting member type comes from the target aggregate's
     // declared shape (property / containment / derived).

@@ -163,22 +163,6 @@ system AcmeVue {
                   order.addLine(productId, quantity)
               }
             }
-
-            // View surfacing — exercises the React generator's view
-            // UI (slice 18.B).  Two shapes: shorthand reuses Order's
-            // wire response; full-form declares a custom row.
-            view ActiveOrders = Order where status == Confirmed
-
-            view OrderSummary {
-                orderId: Order id
-                status: OrderStatus
-                lineCount: int
-
-                from Order where status != Cancelled
-                bind orderId = id,
-                     status = status,
-                     lineCount = lines.count
-            }
         }
     }
 
@@ -439,16 +423,10 @@ system AcmeVue {
     }
 
     // Slice 18.C — `ui.workflows.<name>(...)` lowers via the
-    // generated workflow page object; `ui.views.<name>()` reads the
-    // rendered table back as typed strings.
+    // generated workflow page object.
     test e2e "place an order via the workflow UI" against webApp {
         let prod = ui.products.create({ sku: "WIDGET-UI-2", price: { amount: 7.5, currency: "USD" } })
         ui.workflows.placeOrder({ customerId: "cust-wf", productId: prod.id, quantity: 2 })
-    }
-
-    test e2e "active orders view renders the rendered rows" against webApp {
-        let rows = ui.views.activeOrders()
-        expect(rows.length).toBeGreaterThanOrEqual(0)
     }
 }
 

@@ -54,11 +54,6 @@ system FulfillmentSys {
           ship.markTracked()
         }
       }
-
-      // Workflow-sourced view (workflow-instance-views.md): a curated saga
-      // projection over the persisted correlation state — exercises the
-      // workflow-view read path on the python build gate.
-      view BusyFulfillments = OrderFulfillment where attempts > 0
     }
   }
 

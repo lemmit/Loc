@@ -1128,7 +1128,7 @@ function findRoute(
   const usesUser = findUsesCurrentUser(find);
   // A `requires` authorization gate (default-deny) runs before the query and
   // raises ForbiddenError (→ 403) when the predicate fails — the read-side twin
-  // of a view gate.  It needs the principal bound when it reads currentUser.
+  // of a read `requires` gate.  It needs the principal bound when it reads currentUser.
   const gateUsesUser = !!find.requires && exprUsesCurrentUser(find.requires);
   const needsUser = usesUser || gateUsesUser;
   const userBind = needsUser ? "    current_user: User = request.state.current_user" : null;

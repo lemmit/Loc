@@ -3,8 +3,8 @@
 // A `criterion` is a named, parameterised, pure boolean predicate over a
 // candidate type — the Specification Pattern (see docs/criterion.md).  It
 // is inlined wherever it is referenced from a boolean-expression position
-// (`view ... where`, repository `find ... where`, an `invariant`, an
-// operation guard), so these checks keep the construct honest before
+// (repository `find ... where`, an `invariant`, an operation guard), so
+// these checks keep the construct honest before
 // lowering ever inlines it:
 //
 //   - loom.criterion-unsupported-target — v1 supports `of <Aggregate>`
@@ -33,7 +33,6 @@ import {
   isPostfixChain,
   isPrimitiveType,
   isRepository,
-  isView,
   type Model,
   type NameRef,
 } from "../generated/ast.js";
@@ -169,19 +168,14 @@ function participatesInCycle(start: Criterion, byName: Map<string, Criterion>): 
 }
 
 /** The candidate aggregate of the *use site* enclosing `node`: a
- *  repository find's aggregate, a view's source, or the enclosing
- *  aggregate (invariant / operation / derived / function body).  Used to
- *  check criterion candidate compatibility. */
+ *  repository find's aggregate, or the enclosing aggregate (invariant /
+ *  operation / derived / function body).  Used to check criterion candidate
+ *  compatibility. */
 function hostAggregate(node: AstNode): Aggregate | undefined {
   const find = AstUtils.getContainerOfType(node, isFindDecl);
   if (find) {
     const repo = AstUtils.getContainerOfType(find, isRepository);
     const agg = repo?.aggregate?.ref;
-    if (agg && isAggregate(agg)) return agg;
-  }
-  const view = AstUtils.getContainerOfType(node, isView);
-  if (view) {
-    const agg = view.source?.ref;
     if (agg && isAggregate(agg)) return agg;
   }
   return AstUtils.getContainerOfType(node, isAggregate);

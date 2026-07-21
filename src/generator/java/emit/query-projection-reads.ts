@@ -9,11 +9,10 @@ import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 // Query-time projections (read-path-architecture.md rev.13) — the Java port.
 //
 // A query-time projection (`projection X { from <Agg> [as a] where … join …
-// select … }`, no `on(e)` folds) is the always-current read model that was a
-// `view`'s full form.  It reads live, exactly the way an aggregate full-form
-// view does on this backend (view.ts): the source find rides a synthesized
-// parameterless repository find (`queryProjectionFindsFor`, the `viewFindsFor`
-// analogue), each `join <Agg> as a on <idRef>` bulk-loads the followed
+// select … }`, no `on(e)` folds) is the always-current read model of the
+// query-time projection read.  It reads live: the source find rides a synthesized
+// parameterless repository find (`queryProjectionFindsFor`),
+// each `join <Agg> as a on <idRef>` bulk-loads the followed
 // aggregate through its own (tenancy-scoped) `findAll()` into a
 // `Map<idValue, Agg>` keyed by `.id().value()` (Java has no lazy JPA assoc for
 // an `X id` FK, so the follow is an explicit map load — the analogue of Hono
@@ -53,7 +52,7 @@ export function queryProjectionFindsFor(
 
 export interface QueryProjectionCtx {
   basePkg: string;
-  /** Shared views package (`<base>.application.views`) — co-located with views. */
+  /** Shared reads package (`<base>.application.views`) — the query-projection reads. */
   pkg: string;
   /** Route prefix ("/api" in fullstack mode). */
   routePrefix?: string;

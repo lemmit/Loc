@@ -149,8 +149,6 @@ system StorefrontDotnet {
           wallet.debit(unitPrice)
         }
       }
-
-      view ConfirmedOrders = Order where status == Confirmed
     }
   }
 

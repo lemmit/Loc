@@ -156,16 +156,6 @@ export const angularTarget: WalkerTarget = {
    *  Angular the `use*` factory returns a toSignal-backed read handle
    *  (or calls a service mutation), hoisted in the component class. */
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
-    if (detected.kind === "view") {
-      const viewName = detected.aggregateName;
-      const viewPascal = upperFirstName(viewName);
-      return {
-        varName: `${lowerFirstName(viewName)}View`,
-        hookName: `use${viewPascal}View`,
-        importFrom: "../api/views",
-        argsRendered: [],
-      };
-    }
     if (detected.kind === "workflow-instance") {
       const wf = upperFirstName(detected.aggregateName);
       const isAll = detected.operation === "all";

@@ -4,8 +4,6 @@ import {
   type EnrichedBoundedContextIR,
   type ExprIR,
   exprUsesCurrentUser,
-  type ProjectionIR,
-  type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
@@ -102,28 +100,6 @@ export function lowerToSqlAlchemy(
     agg.associations ?? [],
     opts?.principalAccessor ?? "current_user",
   );
-}
-
-/** Lower a workflow-sourced view's shorthand filter (workflow-instance-views.md)
- *  to a predicate over the saga-state `<Wf>Row`.  `this.<stateField>` refs bind
- *  to the row's columns exactly as an aggregate filter binds to its row; saga
- *  rows carry no reference collections, so the join-table `contains` arm never
- *  fires here. */
-export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPredicate | null {
-  return lowerOver(e, rowClassName(wf.name), [], "current_user");
-}
-
-/** Lower a projection-sourced view's filter (projection.md v1.1) to a predicate
- *  over the `<Proj>Row` read-model table — the SAME SQL-pushed path as a
- *  state-based workflow view, since a projection is always a physical row table
- *  (no event-sourced variant).  `this.<stateField>` refs bind to the row's
- *  columns; projection rows carry no reference collections, so the join-table
- *  `contains` arm never fires here. */
-export function lowerProjectionFilterToSqlAlchemy(
-  e: ExprIR,
-  proj: ProjectionIR,
-): PyPredicate | null {
-  return lowerOver(e, rowClassName(proj.name), [], "current_user");
 }
 
 function lowerOver(
@@ -388,8 +364,8 @@ function isColumnRooted(e: ExprIR): boolean {
 //
 // SQLAlchemy has no global query filter (the EF Core `HasQueryFilter`
 // analogue), so the generated repository must AND each predicate into every
-// root-table read site (find_by_id / find_many_by_ids / all / find* / view
-// finds / retrievals).  Both shapes of relational filter are wired: the
+// root-table read site (find_by_id / find_many_by_ids / all / find* /
+// retrievals).  Both shapes of relational filter are wired: the
 // NON-principal case (e.g. `filter !this.isDeleted`) AND the PRINCIPAL case
 // (`filter this.tenantId == currentUser.tenantId`, DEBT-02), the latter
 // rendering `current_user.<claim>` against the ambient `require_current_user()`
@@ -399,7 +375,7 @@ function isColumnRooted(e: ExprIR): boolean {
 // ---------------------------------------------------------------------------
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
- *  carried index-by-name on `FindIR` / `ViewIR` / the repo-run stmt.  Named
+ *  carried index-by-name on `FindIR` / the repo-run stmt.  Named
  *  capabilities are matched against `AggregateIR.contextFilterOrigins`; a
  *  filter whose origin is `undefined` (hand-written/bare) is never bypassable
  *  — only capability-contributed filters can be `ignoring`-dropped.  Mirrors

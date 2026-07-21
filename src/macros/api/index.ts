@@ -19,7 +19,6 @@ export type {
   TypeRef,
   Ui,
   UiMember,
-  View,
   Workflow,
 } from "../../language/generated/ast.js";
 // Typed AST-node builders.  Most macro authors don't need these —
@@ -90,7 +89,6 @@ export {
   selfRef,
   targetFields,
   thisRef,
-  viewsIn,
   workflowsIn,
   writableCreateFields,
   writableUpdateFields,

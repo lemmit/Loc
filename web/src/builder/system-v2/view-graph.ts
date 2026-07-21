@@ -50,7 +50,6 @@ export type ViewKind =
   // leaves (still no drill below)
   | "valueobject"
   | "event"
-  | "view"
   | "function"
   | "field"
   | "containment"
@@ -199,7 +198,6 @@ const PIVOT_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
 const NO_CONTAINS_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "event",
   "repository",
-  "view",
   "valueobject",
 ]);
 
@@ -393,7 +391,7 @@ const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
 };
 
 /** ViewKinds rendered as side support columns instead of a tier of the main
- *  tree. The LEFT column holds infrastructure (repositories / views) that
+ *  tree. The LEFT column holds infrastructure (repositories) that
  *  feeds the domain. The RIGHT column holds auxiliary domain types
  *  (value objects) — they tend to be widely re-used by aggregates, so
  *  inlining them into the tree would spray edges everywhere; parking them
@@ -402,7 +400,6 @@ const CONTEXT_TIER: Partial<Record<ViewKind, number>> = {
  *  which aggregate. */
 const LEFT_SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "repository",
-  "view",
 ]);
 const RIGHT_SIDEBAR_KINDS: ReadonlySet<ViewKind> = new Set<ViewKind>([
   "valueobject",
@@ -417,7 +414,6 @@ const CONTEXT_KIND: Partial<Record<string, ViewKind>> = {
   ValueObject: "valueobject",
   EventDecl: "event",
   Repository: "repository",
-  View: "view",
   Workflow: "workflow",
 };
 
@@ -432,7 +428,7 @@ function contextLayout(
   items: { id: string; kind: ViewKind; name: string; anchors?: string[]; unused?: boolean }[],
 ): VNode[] {
   // Split the children into the main tree vs the left-side support column.
-  // Sidebar items (repositories / views) sit OUTSIDE the tree at a fixed X
+  // Sidebar items (repositories) sit OUTSIDE the tree at a fixed X
   // offset; the tier layout below only runs over tree items, so workflows
   // and aggregates aren't pulled left by anchors pointing into the sidebar.
   const treeItems = items.filter((i) => !SIDEBAR_KINDS.has(i.kind));
@@ -571,8 +567,8 @@ function contextView(ast: Model, name: string): ViewGraph {
   if (!ctx) return { title: name, nodes: [], edges: [] };
   const rel = computeContextRelations(ctx);
   // Build the raw item list with optional `anchors` (multi-valued) so non-
-  // aggregate nodes can centre over the aggregate(s) they reference: repos /
-  // views to their single source aggregate, workflows to every aggregate they
+  // aggregate nodes can centre over the aggregate(s) they reference: repos
+  // to their single source aggregate, workflows to every aggregate they
   // touch, events to every aggregate that emits them.
   // Set of every event name reached by an `emits` edge — either from an
   // aggregate operation or from a workflow body. Anything declared but absent
@@ -590,9 +586,6 @@ function contextView(ast: Model, name: string): ViewGraph {
     let unused: boolean | undefined;
     if (kind === "repository") {
       const a = rel.repoFor.get(childName);
-      if (a) anchors = [a];
-    } else if (kind === "view") {
-      const a = rel.viewSource.get(childName);
       if (a) anchors = [a];
     } else if (kind === "workflow") {
       // Anchor a workflow over the aggregates it touches — directly via
@@ -629,15 +622,6 @@ function contextView(ast: Model, name: string): ViewGraph {
       target: nid("aggregate", agg),
       kind: "reads",
       label: "for",
-    });
-  }
-  for (const [view, agg] of rel.viewSource) {
-    edges.push({
-      id: `view-src:${view}->${agg}`,
-      source: nid("view", view),
-      target: nid("aggregate", agg),
-      kind: "reads",
-      label: "of",
     });
   }
   for (const [agg, set] of rel.emits) {
@@ -1213,7 +1197,7 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
     case "repository":
       return repositoryView(ast, last.name);
     default:
-      // Other leaves (value object / event / repository / view / function / …)
+      // Other leaves (value object / event / repository / function / …)
       // still have no children to show — opt-in node-detail comes later.
       return { title: `${last.kind} ${last.name}`, nodes: [], edges: [] };
   }

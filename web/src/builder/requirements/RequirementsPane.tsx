@@ -1100,7 +1100,6 @@ const KIND_BADGE_COLOR: Record<string, string> = {
   EventDecl: "orange",
   Repository: "grape",
   Workflow: "indigo",
-  View: "lime",
   Deployable: "pink",
   Api: "yellow",
 };

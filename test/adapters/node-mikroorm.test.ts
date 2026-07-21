@@ -1527,40 +1527,6 @@ system M {
   });
 });
 
-describe("mikroorm — context-level `view`s → synthesised repository reads", () => {
-  const VIEW_SRC = `
-system M {
-  api A from S
-  subdomain S {
-    context O {
-      aggregate Order with crudish {
-        code: string
-        total: int
-      }
-      repository Orders for Order { }
-      view BigOrders = Order where total >= 1000
-      view SmallOrders = Order where total < 100
-    }
-  }
-  storage pg { type: postgres }
-  resource s { for: O, kind: state, use: pg }
-  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
-}`;
-
-  it("emits a parameterless <view>() query method per context view", async () => {
-    const { files, errors } = await emit(VIEW_SRC);
-    expect(errors).toEqual([]);
-    const repo = files.get("api/db/repositories/order-repository.ts")!;
-    expect(repo).toContain("async bigOrders(): Promise<Order[]> {");
-    expect(repo).toContain("async smallOrders(): Promise<Order[]> {");
-    // The bare-field view `where total >= 1000` (a `this-prop` ref, not
-    // `this.total`) lowers to a real FilterQuery, not a runtime-throwing stub.
-    expect(repo).toContain("await em.find(OrderRow, { total: { $gte: 1000 } });");
-    expect(repo).toContain("await em.find(OrderRow, { total: { $lt: 100 } });");
-    expect(repo).not.toContain("this find's predicate is not yet supported");
-  });
-});
-
 describe("mikroorm — workflow (saga) correlation store is persistence-neutral", () => {
   const SAGA_SRC = `system M {
   api A from S

@@ -1,4 +1,4 @@
-// Context-level relations: repository→aggregate, view→aggregate, aggregate→
+// Context-level relations: repository→aggregate, aggregate→
 // event (lifted from per-aggregate emits), workflow→aggregate/event.
 
 import { describe, expect, it } from "vitest";
@@ -33,17 +33,6 @@ describe("v2 — context-edges", () => {
 }`);
     const rel = computeContextRelations(findContext(ast, "Sales"));
     expect(rel.repoFor.get("Orders")).toBe("Order");
-  });
-
-  it("view.source resolves to its aggregate", () => {
-    const ast = parse(`context Sales {
-  aggregate Order {
-    sku: string
-  }
-  view OrderList = Order where true
-}`);
-    const rel = computeContextRelations(findContext(ast, "Sales"));
-    expect(rel.viewSource.get("OrderList")).toBe("Order");
   });
 
   it("aggregate→event lifts the emits set from each aggregate's operations", () => {

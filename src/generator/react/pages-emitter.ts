@@ -1,7 +1,7 @@
 // Page emitter.
 //
 // Walks `ui.pages` (after scaffold expansion: explicit pages + scaffold
-// rewrites + shared Home / WorkflowsIndex / ViewsIndex) and emits one
+// rewrites + shared Home / WorkflowsIndex) and emits one
 // TSX file per page, dispatching by `archetype.kind` to the
 // per-archetype builders.  Single entry point for page emission from
 // the React index orchestrator.
@@ -9,13 +9,12 @@
 // What this emitter does:
 // - Page emission via one call to `emitPagesForUi`.
 // - Dispatches to `renderListPage`, `buildNewPage`, `buildDetailPage`,
-//   `buildWorkflowFormPage`, `buildViewTablePage`,
-//   `buildWorkflowsIndexPage`, `buildViewsIndexPage`, `homeTsx`.
+//   `buildWorkflowFormPage`, `buildWorkflowsIndexPage`, `homeTsx`.
 //
 // What this emitter intentionally doesn't touch:
 // - Per-aggregate api modules (`src/api/<agg>.ts`) — emitted by
 //   `index.ts` via the aggregate iteration.
-// - Per-aggregate / per-workflow / per-view Playwright page objects
+// - Per-aggregate / per-workflow Playwright page objects
 //   under `e2e/pages/` — emitted alongside, not from here.
 // - Project shell (App.tsx, main.tsx, vite.config.ts, package.json,
 //   theme, smoke spec) — orthogonal to the page metamodel.
@@ -39,7 +38,6 @@ import {
   pageEmitName,
 } from "../../ir/util/page-kind.js";
 import { lowerFirst, snake } from "../../util/naming.js";
-import { buildViewPageObject } from "../_frontend/views-module.js";
 import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -99,7 +97,7 @@ export interface PageEmitContext {
  *
  *    src/pages/x.tsx                 → "../"
  *    src/pages/orders/list.tsx       → "../../"
- *    src/pages/views/active_orders/x → "../../../"
+ *    src/pages/workflows/fulfill_order/x → "../../../"
  *
  *  Strips a leading `src/` segment before counting, since some call
  *  sites pass paths rooted at the project root rather than `src/`. */
@@ -118,16 +116,14 @@ function computeSrcImportPrefix(emitPath: string): string {
  *  walker can resolve enum / value-object types declared alongside
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
  *  so the walker doesn't repeatedly scan all contexts. */
-/** The served aggregate / workflow / view names `classifyPage` matches a
+/** The served aggregate / workflow names `classifyPage` matches a
  *  page's role-scoped name against (slice 3c — replaces stamped `origin`). */
 function pageNameCtx(ctx: PageEmitContext): PageNameCtx {
   const workflowNames: string[] = [];
-  const viewNames: string[] = [];
   for (const bc of ctx.contextsByName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);
-    for (const v of bc.views) viewNames.push(v.name);
   }
-  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames, viewNames };
+  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames };
 }
 
 function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR> {
@@ -176,7 +172,7 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
 export function deriveExtraRoutesFromUi(
   ui: UiIR,
   topLevelComponents: readonly ComponentIR[] = [],
-  nameCtx: PageNameCtx = { aggregateNames: [], workflowNames: [], viewNames: [] },
+  nameCtx: PageNameCtx = { aggregateNames: [], workflowNames: [] },
 ): {
   inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
   outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
@@ -455,13 +451,10 @@ function stmtUsesCodeBlock(stmt: import("../../ir/types/loom-ir.js").StmtIR): bo
 //       (covers all three classes ListPage / NewPage / DetailPage)
 //   workflow-form
 //     → `e2e/pages/workflows/<snake-name>.ts` per workflow
-//   view-list
-//     → `e2e/pages/views/<snake-name>.ts` per view
 //
-// Iteration is driven by page IR; per-aggregate / per-workflow /
-// per-view builders (`buildPageObjectModule` /
-// `buildWorkflowPageObject` / `buildViewPageObject`) produce the
-// actual file content.
+// Iteration is driven by page IR; per-aggregate / per-workflow
+// builders (`buildPageObjectModule` / `buildWorkflowPageObject`)
+// produce the actual file content.
 // ---------------------------------------------------------------------------
 
 export function emitPageObjectsForUi(
@@ -488,11 +481,10 @@ export function emitPageObjectsForUi(
   const pageCtx = pageNameCtx(ctx);
   const seenAggregates = new Set<string>();
   const seenWorkflows = new Set<string>();
-  const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
-    // Only scaffold pages dispatch to the per-aggregate / per-workflow /
-    // per-view page-object builders.  Custom (user-written) pages get the
+    // Only scaffold pages dispatch to the per-aggregate / per-workflow
+    // page-object builders.  Custom (user-written) pages get the
     // walker-side per-page page-object emitted separately.
     const origin = classifyPage(page, pageCtx);
     if (origin.kind === "custom") continue;
@@ -545,30 +537,10 @@ export function emitPageObjectsForUi(
         );
         break;
       }
-      case "view-list": {
-        if (seenViews.has(origin.viewName)) break;
-        seenViews.add(origin.viewName);
-        let ctxIR = ctx.contextsByName.get(origin.contextName);
-        let view = ctxIR?.views.find((v) => v.name === origin.viewName);
-        if (!view) {
-          for (const c of ctx.contextsByName.values()) {
-            const found = c.views.find((v) => v.name === origin.viewName);
-            if (found) {
-              ctxIR = c;
-              view = found;
-              break;
-            }
-          }
-        }
-        if (!ctxIR || !view) break;
-        out.set(`e2e/pages/views/${snake(view.name)}.ts`, buildViewPageObject(view, ctxIR));
-        break;
-      }
       // Index pages and Home don't produce page objects (no
       // testable form / table; the index pages are tested via
       // their child links, the home page via its summary cards).
       case "workflows-index":
-      case "views-index":
       case "home":
         break;
     }
