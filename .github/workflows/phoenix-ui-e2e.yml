@@ -1,0 +1,110 @@
+name: Phoenix / LiveView UI smoke (runtime e2e)
+
+# The LiveView sibling of generated-{vue,svelte,angular,react}-e2e.yml.  The
+# four SPA frontends run their emitted route-driven Playwright smoke against a
+# `vite preview` of the built bundle; LiveView is server-rendered, so its smoke
+# needs the real Phoenix server + a database booted.  Its e2e test
+# (test/e2e/phoenix-ui-smoke-e2e.test.ts, `npm run test:phoenix-ui-e2e`)
+# existed but no workflow ran it.
+#
+# Boots the generated Phoenix app (mix deps.get + ecto.create/migrate +
+# phx.server) against a postgres sidecar, then runs the SPA's own emitted
+# Playwright smoke (every param-less LiveView route navigates + asserts its
+# URL).  Proves the routes the generator wired actually mount and render — the
+# runtime regression class the `mix compile` gate (generated-elixir-vanilla-
+# build) is blind to.  Shares the elixir-vanilla-obs-e2e.yml provisioning
+# (postgres service + erlef/setup-beam); the test self-installs chromium.
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR (heavy: hex deps +
+# Phoenix compile + postgres + a Playwright chromium download, ~5-8min cold).
+# Apply the `run-e2e` label to a PR to run it against that branch pre-merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/elixir/**'
+      - 'src/platform/elixir.ts'
+      - 'src/generator/_frontend/**'
+      - 'test/e2e/phoenix-ui-smoke-e2e.test.ts'
+      - 'web/src/examples/storefront-elixir.ddd'
+      - 'package.json'
+      - '.github/workflows/phoenix-ui-e2e.yml'
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phoenix-ui-e2e:
+    runs-on: ubuntu-latest
+    # Skip the labeled trigger unless it's specifically `run-e2e`; push and
+    # manual (`workflow_dispatch`) runs always proceed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-e2e'
+    # Cold path: hex deps + Phoenix compile + postgres + chromium download is
+    # ~5-8min.  15min is comfortable.
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: api
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # erlef/setup-beam — pinned so the dep set resolves deterministically
+      # (matches elixir-vanilla-obs-e2e.yml).
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Cache hex deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+          key: hex-mix-vanilla-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts') }}
+          restore-keys: |
+            hex-mix-vanilla-
+
+      - name: Run Phoenix/LiveView UI smoke runtime e2e
+        env:
+          LOOM_PHOENIX_UI_E2E: '1'
+          # The test reads LOOM_OBS_PG_URL and skips its in-test
+          # `docker run postgres` step when the URL is supplied.
+          LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
+          LOOM_OBS_PG_DB: 'api'
+        run: npx vitest run test/e2e/phoenix-ui-smoke-e2e.test.ts --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Phoenix/LiveView UI smoke runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the runtime-e2e step above for the captured server stdout + Playwright output.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated Phoenix app against postgres, then runs the emitted Playwright smoke (every param-less LiveView route navigates + asserts its URL).' >> $GITHUB_STEP_SUMMARY

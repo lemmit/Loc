@@ -1,0 +1,73 @@
+name: OIDC auth — Elixir/Phoenix (full-compose runtime e2e)
+
+# The Phoenix sibling of auth-oidc-compose-e2e.yml (Hono) and the native
+# {hono,dotnet,java,python}-oidc-e2e jobs.  Elixir was the one backend whose
+# OIDC code flow had NO runtime CI gate — its e2e test
+# (test/e2e/auth-oidc-elixir-compose-e2e.test.ts, `npm run test:auth-e2e-phoenix`)
+# existed but no workflow ran it.
+#
+# Boots the GENERATED `docker-compose.yml` as-is — the containerized Phoenix
+# release (runs migrations then serves) + the bundled dev Keycloak + postgres —
+# gets a real token for the seeded `demo` user via the password grant, and
+# asserts the generated joken + joken_jwks verifier validates it against the
+# issuer's JWKS (over host.docker.internal) and maps the claims onto the user.
+# This is the RUNTIME proof the `mix compile` / Dialyzer gates can't give.
+#
+# Fully containerized (the release Dockerfile owns all boot/config/migration
+# wiring), so it needs only docker + the compose plugin — no native BEAM setup.
+# Can't run in the dev sandbox (the inner image build needs hex egress), so it
+# lives here as a CI gate.
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR (sibling to the
+# other *-oidc-e2e jobs: regression net, and a release image build + Keycloak
+# boot is heavier than a unit suite).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/elixir/**'
+      - 'src/platform/elixir.ts'
+      - 'src/system/index.ts'
+      - 'test/e2e/auth-oidc-elixir-compose-e2e.test.ts'
+      - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-auth-oidc.ddd'
+      - 'package.json'
+      - '.github/workflows/elixir-oidc-e2e.yml'
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  elixir-oidc-compose-e2e:
+    runs-on: ubuntu-latest
+    # The Phoenix release image build (cold hex deps + compile ~6-10min) +
+    # Keycloak boot dominate.  20min cap (heavier than the node sibling's 15).
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run Elixir full-compose OIDC runtime e2e
+        env:
+          LOOM_AUTH_E2E_PHOENIX: '1'
+        run: npm run test:auth-e2e-phoenix -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Elixir full-compose OIDC runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the runtime-e2e step above for the captured `docker compose logs`.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated Phoenix docker-compose stack (containerized release + bundled dev Keycloak + postgres), gets a token for the seeded `demo` user, and asserts the joken/joken_jwks verifier validates it over host.docker.internal and maps the claims onto the user.' >> $GITHUB_STEP_SUMMARY
