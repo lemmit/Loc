@@ -2,6 +2,8 @@
 
 *Guarantee: every doc that lived in `docs/proposals/` and `docs/plans/` (now under [`../old/`](../old/)) is listed here. `shipped` / `done` / `superseded` / `historical` = no open work (the doc remains the design record). Anything with open work names the mission(s) that carry it. Classified 2026-07-13; a mission's first step is always re-verification against fresh `main`.*
 
+*Reconciled 2026-07-21 — added the 13 proposals/plans authored after the 2026-07-13 classification that the table had never picked up (the flutter set, read-path-architecture, test-placement/test-authoring, email-resource-kind, connection-secret-wiring, model-context-pack, loom-verify-tool, unit-tier-domain-test-coverage, playground-flutter-web-preview, nested-state-writes-copywith-frontends), so the guarantee holds again. Rows added this pass are tagged `(added 2026-07-21)`. Four of them describe features with no dedicated mission yet — see the enlarged "Known unmapped items" section.*
+
 ## Proposals (`docs/old/proposals/`)
 
 | Doc | Status | Open work → missions |
@@ -21,6 +23,7 @@
 | bounded-context-model.md | shipped (core) | deferred futures noted in-doc; no live mission |
 | capability-emission-dedup.md | partial (`ignoring` shipped) | M-T5.12 |
 | channels.md | partial | M-T1.10 (realtime), M-T4.4 (brokers), M-T4.9 (caching) |
+| connection-secret-wiring.md | proposed (draft 2026-07-19) *(added 2026-07-21)* | **no mission yet** — resource/config family (M-T2.9, M-T4.8); see Known unmapped items |
 | contract-typed-resources.md | proposed | M-T4.8 |
 | criterion-everywhere.md | superseded (by reified-criteria) | residue → M-T5.4 |
 | criterion.md | partial | M-T5.4 |
@@ -36,6 +39,7 @@
 | dotnet-tph-emission.md | shipped | id-threading follow-on → M-T5.7 |
 | elixir-ecto-and-api-only-backends.md | historical (Ash removal made it the reality) | API-only residue → verify in M-T6.1 |
 | elixir-platform-rename.md | shipped | — |
+| email-resource-kind.md | partial (foundation + all-5-backend emission landed) *(added 2026-07-21)* | vendor drivers → M-T4.6 (batteries), M-T4.8 (resource kinds) |
 | embedded-frontend-composition.md | partial (core shipped) | M-T7.8; `targets:` deletion → M-T7.3 slice 0 |
 | encrypted-at-rest.md | deferred stub | M-T2.11 |
 | error-handling-and-failure-sink.md | proposed | M-T1.8 (frontend), M-T5.2 (backend) |
@@ -47,6 +51,8 @@
 | extern-function-hook-escape-hatch.md | partial | M-T1.4 |
 | fable-elmish-frontend.md | superseded by execution (feliz shipping) | polish → M-T1.16 |
 | failure-taxonomy.md | proposed (reframe) | M-T5.1, M-T5.2 |
+| flutter-mobile-frontend.md | largely shipped (2026-07-20) *(added 2026-07-21)* | residue → M-T1.18 |
+| flutter-parity-and-native-gates.md | audit + plan (2026-07-20) — the M-T1.18 source doc *(added 2026-07-21)* | M-T1.18 |
 | frontend-acl.md | partial (1–2 shipped) | M-T1.6 |
 | frontend-state-management.md | shipped (lifetime gate retired) | demand-pulled residue noted in M-T1.9 |
 | global-implementation-plan.md | **superseded by this plan** | — |
@@ -63,10 +69,13 @@
 | lifecycle-url-style.md | shipped (D-URLSTYLE) | — |
 | load-specifications.md | partial | M-T5.4(e) |
 | loom-forms.md | partial | M-T1.6 |
+| loom-verify-tool.md | proposed (blocked on prereq; core `src/verify/` shipped) *(added 2026-07-21)* | M-T8.5 (verify/diagnostics family) |
+| model-context-pack.md | proposed (seed `buildSystemPrompt` exists) *(added 2026-07-21)* | M-T8.3, M-T8.4 |
 | multi-target-proxy.md | approved, unbuilt | M-T7.3 |
 | multi-tenancy-design-note.md | largely shipped (design record) | tail → M-T3.7 |
 | mutation-testing.md | proposed (parked) | M-T8.8 |
 | named-actions-and-stores.md | partial (stages 1+5 shipped) | M-T1.7, M-T1.9 |
+| nested-state-writes-copywith-frontends.md | shipped (write emission 2026-07, #2118) *(added 2026-07-21)* | residue → M-T1.16 (feliz), M-T1.18 (flutter) |
 | nestjs-backend.md | proposed | M-T10.3 (frozen; needs re-derivation) |
 | nextjs-frontend.md | proposed | M-T10.6 (frozen) |
 | observability.md | partial (logs shipped) | metrics/traces → M-T7.1 |
@@ -82,6 +91,7 @@
 | platform-directory-layout.md | mostly superseded (D-BACKEND-PKG) | React stacks consolidation → M-T9.5 |
 | platform-parity-debt.md | **superseded by this plan** (register absorbed) | rows → M-T6.6, M-T6.9, M-T1.9, M-T6.11 |
 | platform-realization-axes.md | superseded (two-axis pruning) | `resolvePersistence` wiring → M-T6.10 |
+| playground-flutter-web-preview.md | partial (Tier A parity lint shipped) *(added 2026-07-21)* | M-T8.10 (playground preview), M-T1.18 |
 | playground-git-vfs.md | shipped | — |
 | policies-supplementary-note.md | reference | asks honored in M-T3.2 |
 | production-readiness.md | reference roadmap | §3.3→M-T4.4, §3.4→M-T4.9, §3.5→M-T4.2, §3.6→M-T3.12, §3.9→M-T7.7, §3.10→M-T4.10 |
@@ -89,6 +99,7 @@
 | provenance.md | shipped (all 5) | deferred accessors noted in-doc; wire pair → M-T6.12 |
 | provenanced-wire-pair.md | proposed | M-T6.12 |
 | quickstart-and-day-one-batteries.md | partial | M-T7.5 (dev/deploy), M-T4.6 (batteries), M-T3.12 (saas/identity), M-T3.1 (default-deny) |
+| read-path-architecture.md | partial ⚠ header says "no code yet" but paged read-path + query-time projection emit have shipped — stale, flag *(added 2026-07-21)* | M-T4.2 (projection), M-T1.1/M-T2.6 (paging), M-T5.4 (retrieval), M-T5.10 (contract records) |
 | reference-collection-set-semantics.md | shipped (#1590) | — |
 | reified-criteria.md | partial | M-T5.4(d) |
 | render-expr-target-unification.md | shipped | — |
@@ -109,13 +120,16 @@
 | surface-redundancy-cuts.md | shipped (#1795) | — |
 | tenancy-authorization-final-surface.md | proposed (synthesis) | M-T3.6 |
 | terraform-iac-target.md | proposed | M-T7.6 |
+| test-authoring-language.md | proposed / on paper (2026-07-18) *(added 2026-07-21)* | **no mission yet** — test-DSL family (relates to test-placement); see Known unmapped items |
 | test-layout-and-macro-consolidation.md | shipped | — |
+| test-placement.md | partial (Phase 1+2 shipped: `for` target + hoisting, context-integration renderers — #2163/#2179/#2188) *(added 2026-07-21)* | **no mission yet** — actively landing; see Known unmapped items |
 | type-system-overview.md | reference (orientation) | — |
 | typed-capabilities.md | shipped (#1388) | OQ#1 tail → M-T5.12 |
 | unfoldable-api-derivation-coordination-note.md | reference | M-T5.10 |
 | unfoldable-api-derivation.md | partial | M-T5.10 |
 | unfoldable-page-scaffolding.md | shipped (no sentinel layer left — verified 2026-07-13) | — |
 | uniqueness-and-indexes.md | partial (slice 1) | M-T2.8 |
+| unit-tier-domain-test-coverage.md | in progress (2026-07-20; infra ships, cross-backend drain #2196/#2191/#2165) *(added 2026-07-21)* | M-T9.3 |
 | validation-error-extension.md | shipped | — |
 | vanilla-phoenix-foundation.md | partial (slices 0–6) | residue → M-T6.2, M-T6.10 |
 | with-implements-split.md | proposed | M-T5.9(b) |
@@ -149,6 +163,7 @@
 | debt-prioritized-backlog.md | **superseded by this plan** | open rows → M-T6.5 (14), M-T6.9 (17/18), M-T5.4 (24), M-T4.7 (26 residue), M-T6.11 (27), M-T2.6/M-T5.4 (28), M-T5.15 (29/30), M-T6.14 (8/12) |
 | elixir-eventsourcing-vanilla-plan.md | done (tail verify) | — |
 | feliz-frontend-build.md | in-progress | M-T1.16 |
+| flutter-mobile-implementation.md | mostly done (2026-07-20; "not started" note stale) *(added 2026-07-21)* | residue → M-T1.18 |
 | frontend-acl-implementation.md | phases 1–2 done | M-T1.6 |
 | full-review-remediation.md | mostly landed | residue → M-T9.4 |
 | global-test-coverage-plan.md | phases 0–1 partial | M-T9.3 |
@@ -217,6 +232,8 @@
 
 ## Known unmapped items (deliberate)
 
+- **Test-placement DSL** (`test-placement.md` + `test-authoring-language.md`) — the `test … for <aggregate>` target + hoisting + context-integration renderers. **Phases 1–2 have already landed** (#2163/#2179/#2188) with no mission tracking them. This is a real gap, not a deliberate one: whoever next touches it should open a mission under T5 (language core) or T9 (test tooling) and back-fill the shipped slices. Noted here so the coverage guarantee holds meanwhile.
+- **`connection-secret-wiring`** (draft 2026-07-19) — resource connection/secret provisioning; depends on the resource model. No mission yet; closest homes are M-T2.9 (storage/platform config) and M-T4.8 (resource kinds). Whoever picks it up scopes the mission.
 - **API versioning** (completeness audit) — no proposal exists; whoever picks it up writes one and adds a mission under T5.
 - **`infrastructure-port`** — explicitly usage-pulled; no mission until a concrete case.
 - **Brownfield adoption** (M-T2.5) is a proposal-writing mission, reflecting that no design exists yet.
