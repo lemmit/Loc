@@ -36,8 +36,14 @@
 // loaded).  A collection return maps each element; id / scalar returns serialise
 // as-is (`<expr> as unknown`).  A scaffolded read now DECLARES a `<Agg>Response`
 // return, which `normalizeHandlerReturn` maps back to the entity for projection.
-// The 200 body schema stays `z.unknown()` (the wire object is plain JSON);
-// tightening it to `<Agg>Response` is the separate #1917 Hono-200 tail.
+//
+// 200-body typing (M-T5.10): a handler that returns a SINGLE aggregate/entity
+// types its 200 as that entity's `<Agg>Response`, imported from the aggregate's
+// own routes file (the same schema `http/views.ts` imports; single-registered
+// there so the spec keeps one `$ref`).  Its `repo.toWire(...)` body yields
+// exactly that shape, so schema and value agree under strict tsc.  Collection /
+// id / scalar / enum / VO returns keep `z.unknown()` — their `<expr> as unknown`
+// body cast is deliberately loose and a typed schema would reject it.
 // ---------------------------------------------------------------------------
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
@@ -125,7 +131,7 @@ function pathParamZod(t: TypeIR): string {
 function returnEntity(
   h: Handler,
   ctx: EnrichedBoundedContextIR,
-): { agg: string; isCollection: boolean } | undefined {
+): { agg: string; isCollection: boolean; respName: string } | undefined {
   const norm = normalizeHandlerReturn(h.returnType, ctx);
   if (!norm) return undefined;
   const info = wireTypeInfo(norm, "response");
@@ -133,7 +139,9 @@ function returnEntity(
   const owning =
     ctx.aggregates.find((a) => a.name === info.base) ??
     ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
-  return owning ? { agg: owning.name, isCollection: info.isCollection } : undefined;
+  return owning
+    ? { agg: owning.name, isCollection: info.isCollection, respName: `${info.base}Response` }
+    : undefined;
 }
 
 /** Emit the `app.openapi(...)` block for a paged-run queryHandler (`queryHandler
@@ -297,6 +305,13 @@ function emitRouteHandler(
   // returnValue — the body is bodyless); a DSL-bodied handler returns iff its
   // body ends in a `return` (`returnValue`).
   const hasReturn = h.extern ? !!h.returnType : !!h.returnValue;
+  // The aggregate a DSL-bodied handler's entity return wire-projects through
+  // (`repo.toWire(...)`); undefined for extern or a non-entity return.
+  const ret = h.extern ? undefined : returnEntity(h, ctx);
+  // Type the 200 only for a SINGLE aggregate/entity return that wire-projects —
+  // the `repo.toWire(...) as z.infer<typeof <Agg>Response>` body then agrees with
+  // the schema under strict tsc (the scaffolded aggregate GET route's contract).
+  const typedResponseName = hasReturn && ret && !ret.isCollection ? ret.respName : undefined;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -323,7 +338,7 @@ function emitRouteHandler(
   out.push(`    responses: {`);
   if (hasReturn) {
     out.push(
-      `      200: { description: "OK", content: { "application/json": { schema: z.unknown() } } },`,
+      `      200: { description: "OK", content: { "application/json": { schema: ${typedResponseName ?? "z.unknown()"} } } },`,
     );
   } else {
     out.push(`      204: { description: "No content" },`);
@@ -387,7 +402,6 @@ function emitRouteHandler(
   // use), so the route serialises the contract — not the raw domain entity.
   // Reuse the repo the body already built for that aggregate; construct one when
   // the return aggregate was never loaded (e.g. a freshly created entity).
-  const ret = returnEntity(h, ctx);
   let retRepoVar: string | undefined;
   if (ret) {
     retRepoVar = repoVarByAgg.get(ret.agg);
@@ -410,12 +424,17 @@ function emitRouteHandler(
   if (hasReturn) {
     const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this");
     // A domain entity/part return projects to its wire shape via the owning
-    // repo's `toWire(...)`; a collection maps each element.  Id / scalar returns
-    // serialise as-is.
+    // repo's `toWire(...)`; a collection maps each element.  A single-entity
+    // return additionally casts to the typed 200's inferred schema (the
+    // scaffolded aggregate route's `... as z.infer<typeof <Agg>Response>`
+    // pattern) so the value satisfies the declared response under strict tsc.
+    // Id / scalar returns serialise as-is.
     const payload = ret
       ? ret.isCollection
         ? `${retExpr}.map((__e) => ${retRepoVar}.toWire(__e))`
-        : `${retRepoVar}.toWire(${retExpr})`
+        : typedResponseName
+          ? `${retRepoVar}.toWire(${retExpr}) as z.infer<typeof ${typedResponseName}>`
+          : `${retRepoVar}.toWire(${retExpr})`
       : `${retExpr} as unknown`;
     out.push(`    return httpCtx.json(${payload}, 200);`);
   } else {
@@ -445,6 +464,10 @@ export function buildExplicitRoutesFile(
   // Extern handlers routed by this api → the scaffold-once impl modules the
   // router imports (`<camelName>Impl` from `../application/<kebab>-handler-impl`).
   const externImplImports = new Map<string, string>();
+  // Entity-return response schemas (`<Entity>Response`) → the aggregate routes
+  // file that exports them (the same import `http/views.ts` uses), so the typed
+  // 200 body resolves in-scope without re-declaring the composite schema.
+  const responseImports = new Map<string, string>();
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -462,6 +485,22 @@ export function buildExplicitRoutesFile(
         for (const f of rec.fields) if (!pathNames.has(f.name)) bodySchemaSeeds.push(f.type);
       } else if (!pathNames.has(p.name)) {
         bodySchemaSeeds.push(p.type);
+      }
+    }
+    // A single aggregate/entity return (DSL-bodied, wire-projected) imports its
+    // `<Entity>Response` from the aggregate routes file so the typed 200 resolves
+    // in-scope.  Extern returns aren't wire-projected → stay `z.unknown()`.  Uses
+    // the same `returnEntity` the emission does (it normalises a declared
+    // `<Agg>Response` return back to the entity), so the import is emitted iff the
+    // typed-200 reference is — a raw `wireTypeInfo` here would miss the scaffolded
+    // form (return declared as the response record) and drop the import (TS2304).
+    // Skip paged returns exactly as the emission does (they dispatch to
+    // `emitPagedRunHandler`, keep a `z.unknown()` 200, and would make
+    // `returnEntity`'s `wireTypeInfo` throw on the paged generic carrier).
+    if (!h.extern && !(h.returnType && pagedReturn(h.returnType))) {
+      const ent = returnEntity(h, ctx);
+      if (ent && !ent.isCollection) {
+        responseImports.set(ent.respName, `./${lowerFirst(ent.agg)}.routes`);
       }
     }
     if (h.extern) externImplImports.set(externImplFn(h.name), externImplModule(h.name));
@@ -597,6 +636,12 @@ export function buildExplicitRoutesFile(
   // Scaffold-once extern impl modules (one per extern handler routed here).
   for (const [fn, module] of [...externImplImports].sort()) {
     imports.push(`import { ${fn} } from "${module}";`);
+  }
+  // Typed-200 response schemas, imported from their aggregate routes file (the
+  // `http/views.ts` pattern).  Guarded by an actual reference so the generated
+  // dead-import gate stays clean.
+  for (const [name, module] of [...responseImports].sort()) {
+    if (hasRef(name)) imports.push(`import { ${name} } from "${module}";`);
   }
   for (const aggName of [...new Set(aggsReferenced)]) {
     imports.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
