@@ -199,32 +199,42 @@ The net is a *smaller* surface despite adding `send`/`job`/`bff`:
 - **`async` keyword** → derived ("contains a send/await").
 - **`spawn`** → it's `send` on the client.
 - **auto `POST /workflows/<name>`** → a scaffolded explicit `route`.
-- **`timerSource` as a distinct construct** → subsumed by `job` (see below).
 - **the phantom dead-letter event** → never introduced.
 
-## timerSource — vision, and why `job` subsumes it
+(`timerSource` is *not* removed — see below; it and `job` are two sugars over one
+scheduling mechanism.)
+
+## timerSource + job — one scheduling mechanism, two intent sugars
 
 `timerSource`'s design was *"time as an event source… the clock twin of
 `channelSource`… zero new workflow grammar"* — it fires an **event** because, when
 it was built, there was **no command-dispatch surface** (`send` did not exist;
 commands were mediator-sync-only). Event-firing was the only way to trigger domain
-work from a clock without new grammar.
+work from a clock.
 
-With `send`/`job`, that indirection is no longer forced:
-- **Keep** the scheduling *engine* — durable cron/every, advisory locks, overlap
-  (shipped, M-T4.1). It's the shared mechanism.
-- **`job` is the surface** over it — `schedule -> command/create-workflow`, the
-  common "run work on a cadence" case, direct (no event hop, no "which workflow
-  reacts to the tick?" indirection).
-- **Scheduled fan-out** (timerSource's rare real use) = a `job` whose
-  command/workflow `emit`s an event. One surface.
+The clean resolution is **not** to retire it. A scheduled trigger is one
+mechanism — **a schedule + a target — and the target's kind picks the producer
+verb**, exactly like `emit`/`send`:
 
-`job` is therefore a **battery/surface over the scheduling engine** (like `api`
-over HTTP routing), not mere sugar and not new runtime — it composes schedule +
-`send` + handler. `timerSource`-the-keyword is deprecated in favour of `job`, with
-a codemod (`timerSource { for: E … }` → `job { <schedule> -> <a command/workflow
-that emits E> }`). **Cost to flag:** timerSource ships on all five backends, so
-this is a real deprecation + migration, not a free rename.
+- target an **event** → scheduled `emit`, fan-out → the **`timerSource`** spelling
+  (`for: E`), unchanged, shipped (M-T4.1).
+- target a **command/create-workflow** → scheduled `send`, single owner → the
+  **`job`** spelling (`schedule -> Cmd`), the command-side that was missing.
+
+So `timerSource` and `job` are **two intent-revealing sugars over one scheduling
+engine** (durable cron/every, advisory locks, overlap — shipped), the clock-trigger
+twins of `emit`/`send`. Neither subsumes the other; the name is locked to its
+target kind by a validator (`timerSource` → event, `job` → command), so the
+spelling tells you what it fires at a glance. This matches Loom's existing house
+style — the `payload`/`command`/`query`/`response`/`error` keywords are one wire
+mechanism, five intent sugars.
+
+**No deprecation, no migration** — `timerSource` stays valid (the event role);
+`job` is added (the command role). A scheduled workflow that *also* wants fan-out
+still uses `timerSource → event → on(e)`/`create(e) by`; one that just runs work
+uses `job -> command/workflow`. `job` is therefore a **battery/surface over the
+scheduling engine** (like `api` over HTTP routing) — it composes schedule + `send`
++ handler, zero new runtime.
 
 ## Symmetry summary
 
@@ -233,7 +243,7 @@ this is a real deprecation + migration, not a free rename.
 produce       emit E                     send C
 consume       workflow on(e)             commandHandler / workflow create(cmd)
 HTTP trigger  —                          api { route … -> handler }
-clock trigger (job's target emits)       job { schedule -> handler }
+clock trigger timerSource { for: E }     job { schedule -> handler }
 transport     channel (carries:)         derived queue; mediator in-deployable / broker across
 failure       per-reactor retry          retries + onExhausted on the owner
 ```
@@ -246,8 +256,9 @@ routing binding, orthogonal.
 1. **`send` vs `dispatch`** as the keyword (messaging convention: events are
    published/emitted, commands are *sent* → `send`).
 2. **`bff` marker name** — `bff` / `composition` / `portal` / `readModel`.
-3. **timerSource deprecation timing** — deprecate-then-remove vs keep as a thin
-   alias that lowers to `job` + emit.
+3. **timerSource/job unification** — resolved to "one engine, two intent sugars"
+   (timerSource → event, job → command); confirm the validator locks each keyword
+   to its target kind, vs. allowing one target-polymorphic keyword.
 4. **`job` block scope** — system-level (beside `api`) vs context-level.
 5. **Route target: command vs handler** — targeting the *command* (single owner ⇒
    handler derived) reads cleaner but can't point at a workflow `handle` or reuse
