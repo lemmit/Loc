@@ -65,7 +65,7 @@ export function lowerProjection(p: Projection, env: Env): ProjectionIR {
 
 /** Whether the projection declares any query-time comprehension clause. */
 function hasQueryClauses(p: Projection): boolean {
-  return !!p.source || !!p.filter || p.joins.length > 0 || p.selects.length > 0;
+  return !!p.source || !!p.gate || !!p.filter || p.joins.length > 0 || p.selects.length > 0;
 }
 
 /** Lower the query-time comprehension (`from`/`where`/`join`/`select`).
@@ -116,6 +116,12 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
   }));
 
   const query: ProjectionQueryIR = { joins, auxiliaries, ...resolveBypass(p) };
+  // The `requires` gate lowers in the BARE context env (not `scope`), so
+  // `currentUser` resolves but the source row's fields do not — it decides
+  // endpoint access before any row exists, so it may reference only the
+  // principal (+ constants).  A source-field ref is then an unknown ref the
+  // validator rejects (the projection twin of the find gate).
+  if (p.gate) query.requires = lowerExpr(p.gate, env);
   if (sourceName) query.source = sourceName;
   if (p.sourceAlias) query.sourceAlias = p.sourceAlias;
   if (p.filter) {

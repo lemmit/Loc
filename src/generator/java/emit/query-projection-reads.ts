@@ -1,5 +1,5 @@
 import type { EnrichedBoundedContextIR, ExprIR, ProjectionIR } from "../../../ir/types/loom-ir.js";
-import { isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
@@ -83,6 +83,15 @@ export function renderJavaQueryProjections(
   const methods: string[] = [];
   const repoAggs = new Set<string>();
   const routes: string[] = [];
+  // Authorization gates on query-time projections (D-AUTH-OIDC / default-deny) —
+  // a `requires <expr>` clause runs in the controller action BEFORE delegating
+  // to the read service, throwing ForbiddenException (→ 403 via
+  // ApiExceptionAdvice).  The `currentUser`-only gate binds the principal from a
+  // `CurrentUserAccessor` before evaluating.  Exact twin of the repository find
+  // gate in `api.ts`.
+  const controllerGateImports = new Set<string>();
+  let anyGate = false;
+  let anyGateUsesUser = false;
 
   for (const proj of projections) {
     const source = proj.query!.source!;
@@ -158,9 +167,27 @@ export function renderJavaQueryProjections(
       `    }`,
       ``,
     );
+    // The `requires` gate: bind the principal (when the predicate reads it) then
+    // a 403 on failure, BEFORE the read — mirroring the find gate in api.ts.
+    const gate = proj.query!.requires;
+    const gateLines: string[] = [];
+    if (gate) {
+      anyGate = true;
+      collectJavaExprImports(gate, controllerGateImports);
+      if (exprUsesCurrentUser(gate)) {
+        anyGateUsesUser = true;
+        gateLines.push(`        var currentUser = currentUserAccessor.user();`);
+      }
+      gateLines.push(
+        `        if (!(${renderJavaExpr(gate, { thisName: "this" })})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: projection ${proj.name}`,
+        )});`,
+      );
+    }
     routes.push(
       `    @GetMapping("/${snake(proj.name)}")`,
       `    public List<${rowName}> ${findName}() {`,
+      ...gateLines,
       `        return queryProjections.${findName}();`,
       `    }`,
       ``,
@@ -218,15 +245,22 @@ export function renderJavaQueryProjections(
       ``,
       `import org.springframework.web.bind.annotation.*;`,
       ``,
+      ...[...controllerGateImports].sort().map((i) => `import ${i};`),
+      anyGate ? `import ${qpctx.basePkg}.domain.common.ForbiddenException;` : null,
+      anyGateUsesUser ? `import ${qpctx.basePkg}.auth.CurrentUserAccessor;` : null,
+      anyGate ? `import ${qpctx.basePkg}.domain.enums.*;` : null,
+      anyGate ? `import ${qpctx.basePkg}.domain.ids.*;` : null,
       `import ${qpctx.pkg}.*;`,
       ``,
       `@RestController`,
       `@RequestMapping("${qpctx.routePrefix ?? ""}/projections")`,
       `public class ${ctx.name}QueryProjectionsController {`,
       `    private final ${serviceName} queryProjections;`,
+      anyGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
-      `    public ${ctx.name}QueryProjectionsController(${serviceName} queryProjections) {`,
+      `    public ${ctx.name}QueryProjectionsController(${serviceName} queryProjections${anyGateUsesUser ? ", CurrentUserAccessor currentUserAccessor" : ""}) {`,
       `        this.queryProjections = queryProjections;`,
+      anyGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
       `    }`,
       ``,
       ...routes,

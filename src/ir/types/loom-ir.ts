@@ -1469,6 +1469,15 @@ export interface ProjectionQueryIR {
    *  built for by-id follows, populated by reading the
    *  DECLARED `join`s. */
   auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
+  /** Authorization gate (D-AUTH-OIDC / default-deny) — an optional
+   *  `requires <expr>` clause evaluated against `currentUser` *before* the query
+   *  runs; failure → 403.  Distinct from `filter`: the filter scopes which rows
+   *  return (queryable, pushed to SQL), the gate decides whether the caller may
+   *  hit the endpoint at all.  Lowered in the bare context scope (currentUser
+   *  only, no source row), so it may reference `currentUser` + constants but not
+   *  aggregate fields — the projection twin of `FindIR.requires`.  Emitted as a
+   *  403-before-query check in each backend's query-projection route. */
+  requires?: ExprIR;
   /** `ignoring *` — bypass EVERY capability query-filter on the source
    *  aggregate for this query-time read (named-filter-bypass.md §11).  Mutually
    *  exclusive with `bypassCaps`.  Threaded into the synthesised source

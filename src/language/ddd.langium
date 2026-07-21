@@ -1476,6 +1476,7 @@ ProjectionMember:
 // the read is actually emitted (paged reads).
 fragment ProjectionQueryClauses:
     ('from' source=[Aggregate:ID] ('as' sourceAlias=ID)?)?
+    ('requires' gate=Expression)?
     ('where' filter=Expression)?
     IgnoringClause?
     (joins+=ProjectionJoin)*

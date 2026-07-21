@@ -2787,6 +2787,7 @@ export interface Projection extends langium.AstNode {
     bypass: Array<string>;
     bypassAll: boolean;
     filter?: Expression;
+    gate?: Expression;
     joins: Array<ProjectionJoin>;
     key?: LooseName;
     members: Array<ProjectionMember>;
@@ -2802,6 +2803,7 @@ export const Projection = {
     bypass: 'bypass',
     bypassAll: 'bypassAll',
     filter: 'filter',
+    gate: 'gate',
     joins: 'joins',
     key: 'key',
     members: 'members',
@@ -6444,6 +6446,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 filter: {
                     name: Projection.filter,
+                    optional: true
+                },
+                gate: {
+                    name: Projection.gate,
                     optional: true
                 },
                 joins: {

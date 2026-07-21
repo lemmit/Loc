@@ -42,6 +42,12 @@ escape — else `loom.default-deny-ungated` fires.  Covered:
   list route is the one exception: it is compiler-synthesized with no author
   source line, so it is out of default-deny scope (declare an explicit
   `find all(): T[] requires <expr>` to gate that route).
+- **query-time `projection`s** — the same optional `requires` gate on the
+  `from <Agg> requires <expr>` clause, evaluated against `currentUser` before
+  the read; failure → 403.  It is the projection twin of the find gate,
+  currentUser-only (a source-row reference is rejected by
+  `loom.projection-gate-not-current-user`), and emits a 403-before-query check
+  on all five backends.
 
 What's intentionally **not** here yet:
 

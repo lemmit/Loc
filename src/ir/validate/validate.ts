@@ -9,6 +9,7 @@ import { validateMigrationDataSteps } from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
   validateFindGates,
+  validateProjectionGates,
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
@@ -206,6 +207,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
     validateFindGates(c, diags);
+    validateProjectionGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);

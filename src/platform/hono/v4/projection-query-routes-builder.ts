@@ -152,11 +152,18 @@ function emitQueryProjectionRoute(p: ProjectionIR): string[] {
   );
   out.push(`    },`);
   out.push(`  }),`);
+  const gate = p.query!.requires;
   out.push(`  async (httpCtx) => {`);
-  if (usesUser) {
+  // The `requires` gate (and any currentUser-scoped filter) needs the request
+  // principal in scope; a failing gate denies with 403 (ForbiddenError → 403)
+  // BEFORE the query runs.
+  if (usesUser || gate) {
     out.push(
       `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
+  }
+  if (gate) {
+    out.push(`    if (!(${renderTsExpr(gate)})) throw new ForbiddenError("Forbidden");`);
   }
   out.push(`    const repo = new ${source}Repository(db, events);`);
   out.push(`    const rows = await repo.${lowerFirst(p.name)}(${usesUser ? "currentUser" : ""});`);

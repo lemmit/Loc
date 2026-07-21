@@ -89,6 +89,30 @@ describe("parsing — projection comprehension", () => {
     expect(purged.bypass).toEqual([]);
   });
 
+  it("parses + round-trips a projection `requires` gate through the structural printer", async () => {
+    const src = wrap(`
+      projection AdminOrders {
+        status: OrderStatus
+        from Order as o requires currentUser.region == "eu"
+        select status = o.status
+      }
+    `);
+    const { model, errors } = await parseString(src);
+    expect(errors).toEqual([]);
+    const proj = model.members
+      .find(isBoundedContext)!
+      .members.filter(isProjection)
+      .find((p) => p.name === "AdminOrders")!;
+    expect(proj.gate).toBeDefined();
+    const printed = printStructural(proj);
+    expect(printed).toContain('requires currentUser.region == "eu"');
+    // grammar order: `from` before `requires` before `select`.
+    expect(printed.indexOf("from Order")).toBeLessThan(printed.indexOf("requires "));
+    expect(printed.indexOf("requires ")).toBeLessThan(printed.indexOf("select "));
+    const { errors: reErrors } = await parseString(wrap(printed));
+    expect(reErrors).toEqual([]);
+  });
+
   it("round-trips a projection `ignoring` clause through the structural printer", async () => {
     const src = wrap(`
       projection AllOrders {

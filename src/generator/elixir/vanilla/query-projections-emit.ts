@@ -259,6 +259,33 @@ function renderQueryProjectionAction(
   const slug = snake(proj.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const projModule = `${contextModule}.QueryProjections.${upperFirst(proj.name)}`;
+  const webModule = `${appModule}Web`;
+  // Read-side `requires` authorization gate (default-deny): a 403 returned
+  // before the query runs when the `currentUser`-only predicate fails — the
+  // read-side analogue of a repository `find … requires <gate>` (mirrors
+  // `renderFindActions`).  Ungated projections stay byte-identical.
+  const gate = proj.query?.requires
+    ? renderExpr(proj.query.requires, {
+        thisName: "record",
+        contextModule,
+        foundation: "vanilla",
+      })
+    : null;
+  if (gate) {
+    return `  @doc "GET /api/projections/${slug}"
+  def ${slug}(conn, _params) do
+    current_user = Map.get(conn.assigns, :current_user)
+
+    if not (${gate}) do
+      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: projection ${proj.name}`,
+      )})
+    else
+      data = ${projModule}.run(current_user)
+      json(conn, data)
+    end
+  end`;
+  }
   return `  @doc "GET /api/projections/${slug}"
   def ${slug}(conn, _params) do
     current_user = Map.get(conn.assigns, :current_user)

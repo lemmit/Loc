@@ -4,7 +4,7 @@ import type {
   ExprIR,
   ProjectionIR,
 } from "../../ir/types/loom-ir.js";
-import { isQueryTimeProjection } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectToResponse, wireType } from "./dto-mapping.js";
@@ -105,6 +105,18 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   const usings = new Set<string>();
   for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
 
+  // Authorization gate (default-deny) — the projection twin of a repository
+  // `find … requires <gate>`: a `currentUser`-only predicate evaluated BEFORE
+  // the read; failure throws `ForbiddenException` (→ 403 via the
+  // DomainExceptionFilter).  Mirrors the .NET find gate (cqrs/queries.ts).
+  const requires = proj.query!.requires;
+  const gateUsesUser = exprUsesCurrentUser(requires);
+  if (requires) {
+    collectCsExprUsings(requires, usings);
+    usings.add(`${ns}.Domain.Common`); // ForbiddenException
+    if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  }
+
   // Repo fields + ctor — source repo, then one foreign repo per distinct join agg.
   const fields: string[] = [`    private readonly I${source}Repository _repo;`];
   const ctorParams: string[] = [`I${source}Repository repo`];
@@ -117,6 +129,13 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
     fields.push(`    private readonly I${join.aggregate}Repository ${fieldName};`);
     ctorParams.push(`I${join.aggregate}Repository ${fieldName.replace(/^_/, "")}`);
     ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
+  }
+  // A `currentUser`-referencing gate needs the request principal injected — the
+  // find gate's `ICurrentUserAccessor` dependency (cqrs/queries.ts).
+  if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
   }
   const ctor =
     ctorParams.length === 1
@@ -150,6 +169,17 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   });
   const projection = `new ${rowName}(${args.join(", ")})`;
 
+  // Emit the 403-before-read gate.  `var currentUser = _currentUser.User;` binds
+  // the local the rendered predicate references (renderCsExpr → bare
+  // `currentUser`), exactly as the find gate does.
+  let gate = "";
+  if (requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: projection ${proj.name}`,
+    )});\n`;
+  }
+
   // The source aggregate's Domain namespace is emitted explicitly below; drop it
   // from the join usings so a self-referential join can't duplicate it (CS0105
   // under /warnaserror).
@@ -182,7 +212,7 @@ ${ctor}
 
     public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-        var domain = await _repo.${upperFirst(proj.name)}(cancellationToken);
+${gate}        var domain = await _repo.${upperFirst(proj.name)}(cancellationToken);
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
     }
 }

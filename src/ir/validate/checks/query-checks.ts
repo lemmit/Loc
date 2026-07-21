@@ -332,6 +332,42 @@ export function validateFindGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]
   }
 }
 
+// Query-time projection `requires` gate — the projection twin of the find gate.
+// A query-time projection's optional `requires <expr>` runs before the query;
+// because no row exists yet it may reference only `currentUser` (+ constants),
+// never the source row.  A gate on a projection with no query source has nothing
+// to protect (the folded read model is keyed, not query-time), so reject that too.
+export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const proj of ctx.projections) {
+    const gate = proj.query?.requires;
+    if (!gate) continue;
+    if (!proj.query?.source) {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-gate-without-source",
+        message:
+          `projection '${proj.name}': a \`requires\` gate guards a query-time read, but this ` +
+          "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
+        source: `projection/${proj.name}`,
+      });
+      continue;
+    }
+    const offending = firstNonGateRef(gate, GATE_ALLOWED_REFS);
+    if (offending !== null) {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-gate-not-current-user",
+        message:
+          `projection '${proj.name}': a \`requires\` gate runs before the query (no row exists ` +
+          `yet), so it may only reference \`currentUser\` (and constants) — \`${offending}\` is not ` +
+          "available here. Use `where` to scope which rows return; use `requires` to allow / deny " +
+          "the caller.",
+        source: `projection/${proj.name}`,
+      });
+    }
+  }
+}
+
 /** The name of the first reference in an expression tree that isn't in the
  *  gate's `allowed` refKind set, or null when the expression touches only
  *  allowed refs / constants / operators. */

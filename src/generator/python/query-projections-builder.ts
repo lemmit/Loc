@@ -4,7 +4,7 @@ import type {
   ProjectionIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
-import { isQueryTimeProjection } from "../../ir/types/loom-ir.js";
+import { isQueryTimeProjection, queryProjectionUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
@@ -57,13 +57,18 @@ export function buildPyQueryProjectionsFile(
   return lines(
     `"""Query-time projection routes.  Auto-generated."""`,
     "",
-    "from fastapi import APIRouter, Depends",
+    `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null].filter(Boolean).join(", ")}`,
     "from pydantic import BaseModel, RootModel",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    // A `requires` auth gate (or a currentUser-scoped where/select) binds the
+    // request principal — `current_user: User` off the request scope — and a
+    // failing gate raises `ForbiddenError` (→ 403) before the query runs.
+    refersTo("User") ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
+    refersTo("ForbiddenError") ? "from app.domain.errors import ForbiddenError" : null,
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     !hasDispatch && refersTo("NoopDomainEventDispatcher")
       ? "from app.domain.events import NoopDomainEventDispatcher"
@@ -106,12 +111,26 @@ function projectionRowModels(proj: ProjectionIR, ctx: EnrichedBoundedContextIR):
 function projectionRoute(proj: ProjectionIR, dispatcherExpr: string): string {
   const source = proj.query!.source!;
   const fn = snake(proj.name);
+  // A `requires` gate (default-deny) — or a currentUser-scoped where/select —
+  // binds the request principal off the request scope; a failing gate raises
+  // ForbiddenError (→ 403) BEFORE the query runs, the read-side twin of a find
+  // `requires` gate.
+  const gate = proj.query!.requires;
+  const needsUser = queryProjectionUsesCurrentUser(proj) || !!gate;
+  const sig = [...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(", ");
   const out: string[] = [
     `@router.get("/${fn}", response_model=${proj.name}Response, operation_id="projection${proj.name}")`,
-    `async def ${fn}_projection(session: SessionDep) -> list[dict[str, object]]:`,
+    `async def ${fn}_projection(${sig}) -> list[dict[str, object]]:`,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...(gate
+      ? [
+          `    if not (${renderPyExpr(gate)}):`,
+          `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
+        ]
+      : []),
     `    repo = ${source}Repository(session, ${dispatcherExpr})`,
     `    rows = await repo.${fn}()`,
-  ];
+  ].filter((l): l is string => l != null);
   // join alias → { mapVar, idRow } and the bulk-load lines (dependency order).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
   const joins = proj.query!.joins;
