@@ -623,7 +623,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // the Ecto schema drops the bundled `timestamps()` macro (it would collide),
   // so the migration must too.
   emitMigrations(appName, args.migrations ?? [], appModule, out);
-  out.set("Dockerfile", renderDockerfile(appName, embedReact && !!deployable.uiName, spaOutDir));
+  out.set(
+    "Dockerfile",
+    renderDockerfile(
+      appName,
+      embedReact && !!deployable.uiName,
+      spaOutDir,
+      channelBindings.some((b) => b.transport === "kafka"),
+    ),
+  );
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   out.set("rel/env.sh.eex", renderRelEnv(appName));
