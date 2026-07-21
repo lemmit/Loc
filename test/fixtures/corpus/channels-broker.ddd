@@ -1,0 +1,43 @@
+// Broker-bound channel (channels.md): a `channelSource` binds `Lifecycle` to
+// a `rabbitmq` storage with a SHIPPED delivery/retention combo (`queue`/
+// `work` — see SHIPPED_COMBOS in src/generator/_channels/bindings.ts), so the
+// emitted project carries real broker DRIVER code (amqplib/aio-pika/
+// RabbitMQ.Client/amqp-client/hex-amqp producer tee + outbox relay publish),
+// not just the postgres outbox relay `outbox.ddd` already exercises. The
+// deployable hosts `Orders` (the channel's owning context), so it counts as
+// a producer and draws no `loom.deployable-channel-unrelated` warning.
+system ChannelsBrokerSys {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      event OrderPlaced { order: Order id, at: datetime }
+      channel Lifecycle {
+        carries: OrderPlaced
+        delivery: queue
+        retention: work
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  storage bus { type: rabbitmq }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  channelSource lifecycleBus { for: Lifecycle, use: bus }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    channels: [lifecycleBus]
+    serves: OrdersApi
+    port: 4000
+  }
+}
