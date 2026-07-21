@@ -19,6 +19,7 @@ import {
   clickWorkspaceCreate,
   dumpPreviewDiagnostics,
   fatalConsoleErrors,
+  waitForBundle,
   waitForPlaygroundReady,
 } from "./_helpers";
 
@@ -71,9 +72,7 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Bundle the React frontend.  The in-browser npm install fetches the
   // React 19 runtime and Mantine 9 — ~140 modules; first cold run ~30 s.
   await page.getByTestId("btn-bundle").click();
-  await expect(
-    page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/),
-  ).toBeVisible({ timeout: 600_000 });
+  await waitForBundle(page);
 
   // Boot the Hono backend — PGlite WASM + .data come from jsdelivr.  The boot
   // button lives on the dock's Runtime tab (not the default Output tab), so

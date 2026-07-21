@@ -309,7 +309,20 @@ test("surfaces body LSP diagnostics on the canvas", async ({ page }) => {
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("c4builder-diagnostics")).toBeVisible();
   await expect(page.getByTestId("c4builder-diagnostics")).toContainText("else");
-  // The offending node (the match) is also outlined in place.
+
+  // Per-node outlines are baked into the canvas at *mount* (craft's `<Frame
+  // data>` only honours its initial value; see BuilderPane's `initialNodes`
+  // snapshot).  On a slow LSP round-trip the diagnostics can land *after* the
+  // first mount — the live problems bar above updates (its prop is live) but
+  // the already-mounted canvas keeps the pre-diagnostic seed, so the per-node
+  // outline lags.  The supported path that re-bakes the annotated seed is a
+  // re-seed via Apply (bumps `rev` → PageBuilder remounts with the current
+  // diagnostics).  Doing it here makes the outline assertion deterministic
+  // instead of racing the LSP; the bar assertion above already proves the
+  // diagnostic itself reached the builder.
+  await page.getByTestId("c4builder-apply").click();
+
+  // The offending node (the match) is now outlined in place.
   await expect(page.locator('[data-testid="c4node-Match"][data-diag="1"]')).toBeVisible();
 });
 
