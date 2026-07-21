@@ -58,6 +58,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { isShorthandProjection } from "../types/loom-ir.js";
 import {
   buildDeepScopeFilter,
   buildDenyFilter,
@@ -757,7 +758,7 @@ export function enrichContext(
     ctx.queryHandlers,
     ctx.commandHandlers,
   );
-  const projections = ctx.projections.map(enrichProjection);
+  const projections = ctx.projections.map((p) => enrichProjection(p, aggregates));
   return {
     ...ctx,
     valueObjects,
@@ -1018,8 +1019,21 @@ function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
 /** Derive a projection's canonical wire shape (projection.md) — the correlation
  *  field as the id token, then the remaining state fields as properties.
  *  Structurally identical to a workflow instance's `instanceWireShape`, so the
- *  read endpoint + query-time projection read reuse the same DTO machinery. */
-function enrichProjection(proj: ProjectionIR): ProjectionIR {
+ *  read endpoint + query-time projection read reuse the same DTO machinery.
+ *
+ *  SHORTHAND (`view X = A where P` replacement): a query-time projection with a
+ *  `from <Aggregate>` source and no declared fields / no `select` exposes the
+ *  SOURCE aggregate's own wire shape — so its `wireShape` is copied from the
+ *  source aggregate (the `<Proj>Row` then equals `<Agg>Response`, and each
+ *  backend returns the filtered source rows via the aggregate's `toWire`). */
+function enrichProjection(proj: ProjectionIR, aggregates: EnrichedAggregateIR[]): ProjectionIR {
+  if (isShorthandProjection(proj)) {
+    const src = aggregates.find((a) => a.name === proj.query?.source);
+    if (src) return { ...proj, wireShape: wireFieldsForAggregate(src) };
+    // A non-aggregate shorthand source (workflow / projection) is validator-
+    // gated (`loom.projection-shorthand-nonaggregate`); fall through to the
+    // empty-shape default, which never reaches emission.
+  }
   const fields = proj.stateFields;
   const corr = proj.correlationField;
   const corrField = fields.find((f) => f.name === corr);

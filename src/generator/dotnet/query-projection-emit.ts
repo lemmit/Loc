@@ -9,7 +9,7 @@ import type {
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { dtoParam, projectToResponse, wireType } from "./dto-mapping.js";
+import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
 import { projectionRowDbSet } from "./projection-state-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { workflowStateDbSet } from "./workflow-state-emit.js";
@@ -180,13 +180,25 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   }
 
   // Project each row through the `select` expressions, keyed by wire field.
-  const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
-  const args = (proj.wireShape ?? []).map((f) => {
-    const sel = selectByField.get(f.name);
-    if (!sel) return "default!";
-    return projectToResponse(renderSelect(sel.expr, aliasMap), f.type, ctx);
-  });
-  const projection = `new ${rowName}(${args.join(", ")})`;
+  // Shorthand form (`projection X { from <Agg> [as a] where … }`, no declared
+  // fields / no `select`): the row shape is enriched to the source aggregate's
+  // full wire shape, so project each domain row exactly like the aggregate's
+  // own `<Agg>Response(...)` — reusing `projectEntityArgs` (wireShape-order
+  // positional args off `d`) instead of the per-select map.
+  const isShorthand = (proj.query!.selects?.length ?? 0) === 0;
+  const sourceAgg = ctx.aggregates.find((a) => a.name === source);
+  let projection: string;
+  if (isShorthand && sourceAgg) {
+    projection = `new ${rowName}(${projectEntityArgs("d", sourceAgg, ctx)})`;
+  } else {
+    const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
+    const args = (proj.wireShape ?? []).map((f) => {
+      const sel = selectByField.get(f.name);
+      if (!sel) return "default!";
+      return projectToResponse(renderSelect(sel.expr, aliasMap), f.type, ctx);
+    });
+    projection = `new ${rowName}(${args.join(", ")})`;
+  }
 
   // Emit the 403-before-read gate.  `var currentUser = _currentUser.User;` binds
   // the local the rendered predicate references (renderCsExpr → bare

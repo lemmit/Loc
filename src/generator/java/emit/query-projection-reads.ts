@@ -1,7 +1,10 @@
+import { forApiRead, wireFieldsFor } from "../../../ir/enrich/wire-projection.js";
 import type {
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   ProjectionIR,
+  TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
@@ -246,12 +249,24 @@ export function renderJavaQueryProjections(
       }
 
       // Project each row through the `select` expressions, keyed by wire field.
-      const args = shape.map((f) => {
-        const sel = selectByField.get(f.name);
-        if (!sel) return `null`;
-        collectJavaExprImports(sel.expr, imports);
-        return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
-      });
+      // Shorthand form (`projection X { from <Agg> [as a] where … }`, no declared
+      // fields / no `select`): the row shape is enriched to the source
+      // aggregate's full wire shape, so project each domain row `a` exactly like
+      // the aggregate's own `<Agg>Response.from(a)` — reusing the aggregate's
+      // domain→wire arg builder (`forApiRead(wireFieldsFor)` order + provenance
+      // trailers) instead of the per-select map, which would emit `null` for
+      // every field.
+      const isShorthand = (proj.query!.selects?.length ?? 0) === 0;
+      const sourceAgg = ctx.aggregates.find((x) => x.name === source);
+      const args =
+        isShorthand && sourceAgg
+          ? aggregateWireArgs(sourceAgg, "a")
+          : shape.map((f) => {
+              const sel = selectByField.get(f.name);
+              if (!sel) return `null`;
+              collectJavaExprImports(sel.expr, imports);
+              return domainToWire(f.type, renderSelect(sel.expr, aliasMap));
+            });
 
       methods.push(
         `    public List<${rowName}> ${findName}() {`,
@@ -408,6 +423,32 @@ function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
 
 function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
+}
+
+/** Normalise the optional flag into the type, matching `dto.ts`'s `eff` so a
+ *  shorthand projection's domain→wire args are byte-identical to the aggregate's
+ *  own `<Agg>Response.from(...)` mapper. */
+function effOptional(t: TypeIR, optional: boolean): TypeIR {
+  return optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
+}
+
+/** Positional `new <Proj>Row(...)` args for a SHORTHAND projection sourced from
+ *  `agg` — the exact domain→wire projection the aggregate's own `<Agg>Response`
+ *  DTO uses (`dto.ts`'s non-declared `wireRecord` path): `forApiRead`-filtered
+ *  wire fields in wireShape order (`domainToWire` over each field, the id row
+ *  carrying its bare value type) plus one trailing `<field>Provenance` arg per
+ *  provenanced field.  `<Proj>Row`'s components ≡ these wire fields (same
+ *  names/order/types), so the row is populated, not `null`-filled. */
+function aggregateWireArgs(agg: EnrichedAggregateIR, domainVar: string): string[] {
+  const args: string[] = [];
+  for (const w of forApiRead(wireFieldsFor(agg))) {
+    const t = w.source === "id" ? w.type : effOptional(w.type, w.optional);
+    args.push(domainToWire(t, `${domainVar}.${w.name}()`));
+  }
+  for (const f of agg.fields.filter((pf) => pf.provenanced)) {
+    args.push(`${domainVar}.${f.name}Provenance()`);
+  }
+  return args;
 }
 
 /** The saga-state repository field for a `from <Workflow>` projection

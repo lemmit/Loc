@@ -1525,6 +1525,17 @@ export function isQueryTimeProjection(p: ProjectionIR): boolean {
   return p.query?.source !== undefined && p.handlers.length === 0;
 }
 
+/** True when the projection is the SHORTHAND form (the `view X = A where P`
+ *  replacement): a query-time projection with a `from` source but NO declared
+ *  row fields and NO `select` — its row shape IS the source's own wire shape,
+ *  and the read returns the (filtered) source rows directly.  Derived from
+ *  clause absence — never stamped. */
+export function isShorthandProjection(p: ProjectionIR): boolean {
+  return (
+    isQueryTimeProjection(p) && p.stateFields.length === 0 && (p.query?.selects?.length ?? 0) === 0
+  );
+}
+
 /** One `on(e: Event) [by <expr>] { … }` pure fold on a projection.  Shares the
  *  reactor SUBSCRIPTION surface with `OnIR` (foreign event + param + optional
  *  key-extraction expr) but the body is an apply-style PURE fold — `StmtIR`,

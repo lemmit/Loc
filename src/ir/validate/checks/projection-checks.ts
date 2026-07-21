@@ -19,7 +19,11 @@
 // -------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
-import { isMaterializedProjection } from "../../types/loom-ir.js";
+import {
+  isMaterializedProjection,
+  isQueryTimeProjection,
+  isShorthandProjection,
+} from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
@@ -212,6 +216,41 @@ function validateQueryComprehension(
         `projection ('from … select …') OR a folded one ('on(e) { … }'), not both.`,
       source: `${ctx.name}/${proj.name}`,
     });
+  }
+  // Row-fill discipline for a query-time projection (read-path-architecture.md
+  // rev.13).  A `select` fills the declared row; its absence has two legal /
+  // illegal shapes:
+  //   - SHORTHAND (no declared fields + no `select`): the row IS the source's
+  //     own wire shape — supported for an AGGREGATE source only (the `view X = A
+  //     where P` replacement).  A workflow / projection shorthand source is
+  //     gated: its wire shape is served by the native instance / read-model read
+  //     already, so require an explicit `select`.
+  //   - DECLARED FIELDS but no `select`: the fields would never be filled (an
+  //     empty row).  Rejected — add a `select` (or drop the fields for shorthand).
+  if (isQueryTimeProjection(proj) && (q.selects?.length ?? 0) === 0) {
+    if (isShorthandProjection(proj)) {
+      if (q.sourceKind === "workflow" || q.sourceKind === "projection") {
+        diags.push({
+          severity: "error",
+          code: "loom.projection-shorthand-nonaggregate",
+          message:
+            `projection '${proj.name}': the shorthand (select-less) form is supported for an ` +
+            `AGGREGATE source only; source '${q.source}' is a ${q.sourceKind}. Add an explicit ` +
+            `'select' (its rows are already served directly by the ${q.sourceKind}'s own read).`,
+          source: `${ctx.name}/${proj.name}`,
+        });
+      }
+    } else {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-fields-without-select",
+        message:
+          `projection '${proj.name}' declares row fields but no 'select' to fill them, so every ` +
+          `row would be empty. Add a 'select <field> = <expr>, …', or drop the fields for the ` +
+          `shorthand form (the row then mirrors the '${q.source}' source's wire shape).`,
+        source: `${ctx.name}/${proj.name}`,
+      });
+    }
   }
   // The HONEST "not yet emitted on this backend" gate
   // (`loom.projection-query-time-unsupported`) is a SYSTEM-level check
