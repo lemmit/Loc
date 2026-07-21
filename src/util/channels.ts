@@ -32,6 +32,26 @@ export const CHANNEL_COMPATIBILITY: Record<string, ReadonlySet<string>> = {
   "queue/work": new Set(["rabbitmq", "kafka"]),
 };
 
+/** delivery/retention combos each SHIPPED broker driver actually realises,
+ *  keyed by broker transport → set of `"<delivery>/<retention>"`.  Narrower
+ *  than `CHANNEL_COMPATIBILITY` on purpose: the matrix says what a storage type
+ *  COULD realise; this says what the shipped drivers DO realise (redis streams
+ *  for `queue/ephemeral`-on-redis and the extra kafka combos are later slices).
+ *
+ *  Lives here (not in `src/generator/_channels/`) so the language validator can
+ *  gate a compatible-but-not-yet-shipped binding
+ *  (`loom.channelsource-not-yet-shipped`) without importing downward into the
+ *  generator layer.  The generator's binding resolver imports it too, so the
+ *  validator's gate and the emitter's silent-skip stay driven by ONE list. */
+export const SHIPPED_COMBOS: Record<string, ReadonlySet<string>> = {
+  redis: new Set(["broadcast/ephemeral"]),
+  rabbitmq: new Set(["queue/ephemeral", "queue/work"]),
+  // Kafka (slice 4): the log — per-partition ordering keyed by `loomkey` ??
+  // envelope id; one consumer group per deployable (a `broadcast` deployable's
+  // group sees every record, `queue` replicas compete within their group).
+  kafka: new Set(["broadcast/log", "queue/work"]),
+};
+
 /** The broker address of a channel — dot-hierarchical, deliberately leaving
  *  suffix room for the realtime room segments (M-T1.10):
  *  `loom.<context>.<channel>`. */

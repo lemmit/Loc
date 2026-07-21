@@ -12,13 +12,23 @@
 //   - `loom.channelsource-incompatible` — the storage type is a transport,
 //     but can't realise the channel's `delivery` x `retention` profile (the
 //     transport compatibility matrix).
+//   - `loom.channelsource-not-yet-shipped` — the storage type is a COMPATIBLE
+//     transport, but no shipped broker driver provisions this delivery x
+//     retention combo yet (`SHIPPED_COMBOS` is narrower than the compat matrix,
+//     e.g. redis ships broadcast/ephemeral but not queue/ephemeral). Without
+//     this gate the generator silently skips the unshipped combo and falls back
+//     to the in-process dispatcher, breaking the delivery guarantee.
 //
 // All are AST-level checks (no IR needed) — the references resolve at parse
 // time, so the diagnostics land on a fresh `.ddd` edit.  The cross-file
 // deployable-wiring checks live in `ir/validate/checks/system-checks.ts`.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import { CHANNEL_COMPATIBILITY, CHANNEL_TRANSPORT_TYPES } from "../../util/channels.js";
+import {
+  CHANNEL_COMPATIBILITY,
+  CHANNEL_TRANSPORT_TYPES,
+  SHIPPED_COMBOS,
+} from "../../util/channels.js";
 import { type Channel, isChannel, isChannelSource, type Model } from "../generated/ast.js";
 
 export function checkChannels(model: Model, accept: ValidationAcceptor): void {
@@ -63,6 +73,28 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
         "error",
         `channelSource '${cs.name}' binds channel '${ch.name}' (${delivery}/${retention}) to storage '${cs.use?.ref?.name}' of type '${storageType}', which can't realise it. Compatible: ${[...ok].join(", ")}.`,
         { node: cs, property: "use", code: "loom.channelsource-incompatible" },
+      );
+    } else if (
+      // The type-level compatibility check above passed, but the SHIPPED broker
+      // drivers realise a NARROWER set of combos than the compat matrix allows
+      // (e.g. redis is compatible with queue/ephemeral but only ships
+      // broadcast/ephemeral).  Without this gate a compatible-but-unshipped
+      // binding parses clean, then the generator silently `continue`s on the
+      // unshipped combo (`SHIPPED_COMBOS` in `bindings.ts`) → no driver → silent
+      // fallback to the in-process dispatcher, breaking the delivery guarantee.
+      // `inMemory` is the in-process transport (no broker driver / SHIPPED_COMBOS
+      // key), so it is exempt.
+      storageType !== "inMemory" &&
+      !SHIPPED_COMBOS[storageType]?.has(`${delivery}/${retention}`)
+    ) {
+      const shipped = [...(SHIPPED_COMBOS[storageType] ?? [])];
+      const alternatives = Object.entries(SHIPPED_COMBOS)
+        .filter(([t, combos]) => t !== storageType && combos.has(`${delivery}/${retention}`))
+        .map(([t]) => t);
+      accept(
+        "error",
+        `channelSource '${cs.name}' binds channel '${ch.name}' (${delivery}/${retention}) to storage '${cs.use?.ref?.name}' of type '${storageType}'. That combination is compatible but not yet provisioned by a shipped ${storageType} driver.${alternatives.length ? ` Use ${alternatives.join(" or ")} instead,` : ""} or pick a combo ${storageType} does ship (${shipped.length ? shipped.join(", ") : "none"}).`,
+        { node: cs, property: "use", code: "loom.channelsource-not-yet-shipped" },
       );
     }
   }

@@ -11,7 +11,12 @@
 // layer may import downward from `generator/` (the `sql-pg.ts` precedent).
 
 import type { DeployableIR, SystemIR } from "../../ir/types/loom-ir.js";
-import { channelAddress, channelSourceEnvVar, consumerGroup } from "../../util/channels.js";
+import {
+  channelAddress,
+  channelSourceEnvVar,
+  consumerGroup,
+  SHIPPED_COMBOS,
+} from "../../util/channels.js";
 
 /** The transports a shipped slice provisions. */
 export type BrokerTransport = "redis" | "rabbitmq" | "kafka";
@@ -48,20 +53,10 @@ export interface BrokerBinding {
   key?: string;
 }
 
-/** delivery/retention combos each shipped transport realises.  Narrower than
- *  the language-level compat matrix (`src/util/channels.ts`) on purpose: the
- *  matrix says what a storage type COULD realise; this says what the shipped
- *  drivers DO realise (redis streams for `queue/ephemeral`-on-redis and the
- *  kafka combos are later slices). */
-const SHIPPED_COMBOS: Record<BrokerTransport, ReadonlySet<string>> = {
-  redis: new Set(["broadcast/ephemeral"]),
-  rabbitmq: new Set(["queue/ephemeral", "queue/work"]),
-  // Kafka (slice 4): the log — per-partition ordering keyed by
-  // `loomkey` ?? envelope id; one consumer group per deployable (a
-  // `broadcast` deployable's group sees every record, `queue` replicas
-  // compete within their group — design §4).
-  kafka: new Set(["broadcast/log", "queue/work"]),
-};
+// The delivery/retention combos each shipped transport realises now live in
+// `src/util/channels.ts` (`SHIPPED_COMBOS`) so the language validator can gate a
+// compatible-but-not-yet-shipped binding without importing downward into the
+// generator layer.  This resolver imports it from there.
 
 /** The deployable's broker-bound channel wirings across every shipped
  *  transport.  Unresolved names, non-broker storages, and not-yet-shipped

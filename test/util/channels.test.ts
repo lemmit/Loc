@@ -13,6 +13,7 @@ import {
   consumerGroup,
   LOOM_ENVELOPE_OPTIONAL,
   LOOM_ENVELOPE_REQUIRED,
+  SHIPPED_COMBOS,
 } from "../../src/util/channels.js";
 
 describe("channel transport vocabulary", () => {
@@ -34,6 +35,24 @@ describe("channel transport vocabulary", () => {
   it("every matrix entry names only known transports", () => {
     for (const types of Object.values(CHANNEL_COMPATIBILITY)) {
       for (const t of types) expect(CHANNEL_TRANSPORT_TYPES.has(t)).toBe(true);
+    }
+  });
+
+  it("pins the shipped delivery/retention combos per broker driver", () => {
+    expect(
+      Object.fromEntries(Object.entries(SHIPPED_COMBOS).map(([k, v]) => [k, [...v].sort()])),
+    ).toEqual({
+      redis: ["broadcast/ephemeral"],
+      rabbitmq: ["queue/ephemeral", "queue/work"],
+      kafka: ["broadcast/log", "queue/work"],
+    });
+  });
+
+  it("SHIPPED_COMBOS is a subset of the compatibility matrix (never ships an incompatible combo)", () => {
+    for (const [transport, combos] of Object.entries(SHIPPED_COMBOS)) {
+      for (const combo of combos) {
+        expect(CHANNEL_COMPATIBILITY[combo]?.has(transport)).toBe(true);
+      }
     }
   });
 
