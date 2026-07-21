@@ -23,6 +23,33 @@ export function registerStatementPrinter(fn: (stmt: unknown) => string): void {
   printStatement = fn;
 }
 
+// A scaffolded page `body:` is a deeply nested tree of `BuilderCall`/call
+// arguments (widgets calling widgets) — printed flat, it collapses onto one
+// illegibly long line. Past `LINE_WIDTH`, `wrapArgList` breaks the argument
+// list onto its own indented, comma-joined lines (mirroring
+// `print-structural.ts`'s `block`/`indent`, duplicated here rather than
+// imported to avoid an import cycle with that module).
+const LINE_WIDTH = 100;
+const INDENT = "  ";
+
+function indent(s: string): string {
+  return s
+    .split("\n")
+    .map((l) => (l.length > 0 ? INDENT + l : l))
+    .join("\n");
+}
+
+/** `<prefix><open><items, comma-joined><close>`, wrapped onto indented lines
+ *  once the one-line form would exceed `LINE_WIDTH` or an item already spans
+ *  multiple lines (an inner call already wrapped). `<prefix><open><close>`
+ *  when there are no items. */
+function wrapArgList(prefix: string, open: string, close: string, items: string[]): string {
+  if (items.length === 0) return `${prefix}${open}${close}`;
+  const oneLine = `${prefix}${open}${items.join(", ")}${close}`;
+  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
+  return `${prefix}${open}\n${indent(items.join(",\n"))}\n${close}`;
+}
+
 export function printExpr(node: Expression): string {
   switch (node.$type) {
     case "StringLit":
@@ -72,7 +99,7 @@ export function printExpr(node: Expression): string {
     case "Lambda":
       return printLambda(node);
     case "BuilderCall":
-      return `${node.type} {${printBuilderEntries(node.entries)}}`;
+      return printBuilderCall(node.type, node.entries);
     case "ObjectLit":
       return `{${printObjectFields(node.fields)}}`;
     case "ListLit": {
@@ -159,18 +186,17 @@ function printPostfixChain(node: PostfixChain): string {
 function appendSuffix(base: string, s: PostfixSuffix): string {
   if (isMemberSuffix(s)) {
     const head = `${base}.${s.member}`;
-    return s.call ? `${head}(${printArgs(s.args)})` : head;
+    return s.call ? printCall(head, s.args) : head;
   }
   if (isCallSuffix(s)) {
-    return `${base}(${printArgs(s.args)})`;
+    return printCall(base, s.args);
   }
   return base;
 }
 
-function printArgs(args: CallArg[]): string {
-  return args
-    .map((a) => (a.name ? `${a.name}: ${printExpr(a.value)}` : printExpr(a.value)))
-    .join(", ");
+function printCall(prefix: string, args: CallArg[]): string {
+  const items = args.map((a) => (a.name ? `${a.name}: ${printExpr(a.value)}` : printExpr(a.value)));
+  return wrapArgList(prefix, "(", ")", items);
 }
 
 function printObjectFields(fields: { name: string; value: Expression }[]): string {
@@ -179,12 +205,14 @@ function printObjectFields(fields: { name: string; value: Expression }[]): strin
   return ` ${inner} `;
 }
 
-function printBuilderEntries(entries: { name?: string; value: Expression }[]): string {
-  if (entries.length === 0) return "";
-  const inner = entries
-    .map((e) => (e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value)))
-    .join(", ");
-  return ` ${inner} `;
+function printBuilderCall(type: string, entries: { name?: string; value: Expression }[]): string {
+  const items = entries.map((e) =>
+    e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value),
+  );
+  if (items.length === 0) return `${type} {}`;
+  const oneLine = `${type} { ${items.join(", ")} }`;
+  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
+  return `${type} {\n${indent(items.join(",\n"))}\n}`;
 }
 
 function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {

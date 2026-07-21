@@ -59,12 +59,17 @@ describe("scaffold body-builders — AST → printable source", () => {
     expect(src).toContain('Heading("Orders", level: 2)');
     expect(src).toContain('Button("New order", to: "/orders/new", testid: "orders-list-create")');
     // QueryView over the server-paged <Agg>.all (M-T2.6): the find takes the
-    // page window + sort controls and the view carries `paged: true`.
-    expect(src).toContain("QueryView(of: Order.all(pageNum, 10, sortKey, sortDir), paged: true");
+    // page window + sort controls and the view carries `paged: true`. The
+    // whole tree is deep enough to wrap onto indented, one-entry-per-line
+    // form (print-expr.ts's `wrapArgList`/`printBuilderCall`).
+    expect(src).toContain("QueryView(");
+    expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
+    expect(src).toContain("paged: true,");
     expect(src).toContain("loading: Skeleton(count: 5)");
     expect(src).toContain('error: Alert("Couldn\'t load orders")');
     expect(src).toContain('empty: Empty("No orders yet.")');
-    expect(src).toContain("data: rows => Paper(Table(");
+    expect(src).toContain("data: rows => Paper(");
+    expect(src).toContain("Table(");
     // ID column links to detail; one column per scalar field, each cell
     // dispatched through its type renderer (plain text here → `Text(...)`).
     // Every column is `sortable:` with an explicit `field:` (M-T1.1).
@@ -77,13 +82,21 @@ describe("scaffold body-builders — AST → printable source", () => {
     expect(src).toContain('Column("Status", o => Text(o.status), sortable: true, field: "status")');
     // Server-paged rows (M-T2.6): the Table consumes the `Paged<T>` envelope's
     // `.items` + `.totalPages` (no client-side `pageSize` slice) and flags
-    // `serverPaged: true`, then the style props.
-    expect(src).toContain(
-      "rows: rows.items, sortKey: sortKey, sortDir: sortDir, page: pageNum, serverPaged: true, totalPages: rows.totalPages, striped: true, highlight: true, sticky: true",
-    );
+    // `serverPaged: true`, then the style props — one per line.
+    expect(src).toContain("rows: rows.items,");
+    expect(src).toContain("sortKey: sortKey,");
+    expect(src).toContain("sortDir: sortDir,");
+    expect(src).toContain("page: pageNum,");
+    expect(src).toContain("serverPaged: true,");
+    expect(src).toContain("totalPages: rows.totalPages,");
+    expect(src).toContain("striped: true,");
+    expect(src).toContain("highlight: true,");
+    expect(src).toContain("sticky: true,");
     // per-row testid accessor (anchors e2e row selectors)
     expect(src).toContain('rowTestid: r => "orders-row-" + r.id');
     expect(src).toContain('testid: "orders-list"');
+    // formatted: one arg per indented line, not collapsed onto one long line
+    expect(src.split("\n").length).toBeGreaterThan(10);
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)
@@ -128,7 +141,7 @@ describe("scaffold body-builders — AST → printable source", () => {
 
   it("routes the list query through the api handle when the aggregate is served over one", () => {
     const src = printExpr(scaffoldList("Order", [text("reference")], { apiHandle: "api" }));
-    expect(src).toContain("QueryView(of: api.Order.all");
+    expect(src).toContain("of: api.Order.all(pageNum, 10, sortKey, sortDir),");
   });
 
   it("uses the aggregate's own pluralisation/casing", () => {
@@ -198,8 +211,10 @@ describe("scaffoldOperations — per-operation modals", () => {
     expect(errors).toEqual([]);
     const order = findNode(model, "Aggregate", "Order");
     const src = printExpr(scaffoldOperations(order));
+    expect(src).toContain('OperationForm(of: Order, op: approve, testid: "orders-op-approve"),');
+    expect(src).toContain('title: "Approve",');
     expect(src).toContain(
-      'Modal(OperationForm(of: Order, op: approve, testid: "orders-op-approve"), title: "Approve", trigger: Button("Approve", emphasis: "primary", testid: "orders-op-approve"))',
+      'trigger: Button("Approve", emphasis: "primary", testid: "orders-op-approve")',
     );
     expect(src).toContain('emphasis: "secondary", testid: "orders-op-cancel"');
     expect(
@@ -291,7 +306,8 @@ describe("scaffoldDetails — aggregate read view + related cards", () => {
       'Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))',
     );
     expect(src).toContain('Heading("Order detail", level: 2)');
-    expect(src).toContain("QueryView(of: Order.byId(id), single: true");
+    expect(src).toContain("of: Order.byId(id),");
+    expect(src).toContain("single: true,");
     expect(src).toContain('Alert("No order matches that id.", color: "yellow")');
     // field card: scalar row carries a testid; value-object flattens to labelled leaves
     expect(src).toContain(
@@ -338,7 +354,7 @@ describe("scaffold instance builders — observable workflow pages", () => {
     );
     expect(src).toContain('Column("Status", i => EnumBadge(i.status))');
     expect(src).toContain('rowTestid: r => "fulfillment-instances-row-" + r.orderId');
-    expect(src).toContain("QueryView(of: Fulfillment.instances.all");
+    expect(src).toContain("of: Fulfillment.instances.all,");
     expect(src).toContain('Heading("Fulfillment instances", level: 2)');
     expect(src).toContain('testid: "fulfillment-instances-list"');
     expect(
@@ -354,7 +370,8 @@ describe("scaffold instance builders — observable workflow pages", () => {
     const src = printExpr(scaffoldInstanceDetails(wf));
     expect(src).toContain('KeyValueRow("Order Id", IdLink(data.orderId, of: Order))');
     expect(src).toContain('KeyValueRow("Status", EnumBadge(data.status))');
-    expect(src).toContain("QueryView(of: Fulfillment.instances.byId(id), single: true");
+    expect(src).toContain("of: Fulfillment.instances.byId(id),");
+    expect(src).toContain("single: true,");
     expect(src).toContain(
       'Anchor("Fulfillment instances", to: "/workflows/fulfillment/instances")',
     );
@@ -380,8 +397,10 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
       'Group(Field("Status", bind: byStatusStatus, testid: "orders-filter-by_status_status"))',
     );
     // a match: when the input is non-empty, query the find; else fall back to all
-    expect(src).toContain('byStatusStatus != "" => QueryView(of: Order.byStatus(byStatusStatus)');
-    expect(src).toContain("else => QueryView(of: Order.all");
+    expect(src).toContain('byStatusStatus != "" => QueryView(');
+    expect(src).toContain("of: Order.byStatus(byStatusStatus),");
+    expect(src).toContain("else => QueryView(");
+    expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)
@@ -397,9 +416,8 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     );
     expect(src).toContain('Field("Name", bind: searchName');
     expect(src).toContain('Field("City", bind: searchCity');
-    expect(src).toContain(
-      'searchName != "" && searchCity != "" => QueryView(of: Order.search(searchName, searchCity)',
-    );
+    expect(src).toContain('searchName != "" && searchCity != "" => QueryView(');
+    expect(src).toContain("of: Order.search(searchName, searchCity),");
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)
@@ -411,7 +429,7 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     const src = printExpr(scaffoldList("Order", [text("status")]));
     expect(src).not.toContain("Group(");
     expect(src).not.toContain("match {");
-    expect(src).toContain("QueryView(of: Order.all");
+    expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
   });
 
   it("filterStateFields names one string field per find param", () => {
