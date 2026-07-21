@@ -44,7 +44,8 @@ async function allFiles(platform: string): Promise<string> {
 const CASES: { platform: string; sagaRead: RegExp }[] = [
   {
     platform: "node",
-    sagaRead: /db\.select\(\)\.from\(schema\.fulfils\)\.where\(gt\(schema\.fulfils\.attempts, 0\)\)/,
+    sagaRead:
+      /db\.select\(\)\.from\(schema\.fulfils\)\.where\(gt\(schema\.fulfils\.attempts, 0\)\)/,
   },
   { platform: "python", sagaRead: /select\(FulfilRow\)\.where\(\(FulfilRow\.attempts > 0\)\)/ },
   { platform: "java", sagaRead: /fulfilStateRepository\.findAll\(\)\.stream\(\)/ },
