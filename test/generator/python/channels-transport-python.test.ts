@@ -107,7 +107,7 @@ describe("redis broker transport — python leg (M-T4.4 slice 2b)", () => {
     const files = await generateSystemFiles(FIXTURE);
     const compose = files.get("docker-compose.yml") ?? "";
     expect(compose).toContain("image: valkey/valkey:8-alpine");
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "redis://bus:6379"');
+    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "redis://:loom-dev-bus@bus:6379"');
   });
 
   it("keeps a channel-less python system free of transport artifacts", async () => {

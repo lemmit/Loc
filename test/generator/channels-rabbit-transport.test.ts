@@ -125,7 +125,9 @@ describe("rabbitmq queue transport (M-T4.4 slice 3)", () => {
     const compose = files.get("docker-compose.yml") ?? "";
     expect(compose).toContain("image: rabbitmq:4-management-alpine");
     expect(compose).toContain('test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]');
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "amqp://guest:guest@bus:5672"');
+    expect(compose).toContain(
+      'LOOM_CHANNEL_LIFECYCLE_BUS_URL: "amqp://sales_api:loom-dev-bus-sales_api@bus:5672/loom"',
+    );
     expect(compose.split("bus:\n        condition: service_healthy").length - 1).toBe(2);
   });
 

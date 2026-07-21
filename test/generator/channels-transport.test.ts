@@ -105,10 +105,11 @@ describe("redis broker transport (M-T4.4 slice 2)", () => {
     const compose = files.get("docker-compose.yml") ?? "";
     expect(compose).toContain("image: valkey/valkey:8-alpine");
     expect(compose).not.toContain("image: redis:");
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "redis://bus:6379"');
+    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "redis://:loom-dev-bus@bus:6379"');
     // Both deployables order startup after the sidecar's healthcheck.
     expect(compose.split("bus:\n        condition: service_healthy").length - 1).toBe(2);
-    expect(compose).toContain('test: ["CMD", "valkey-cli", "ping"]');
+    expect(compose).toContain('command: ["valkey-server", "--requirepass", "loom-dev-bus"]');
+    expect(compose).toContain('test: ["CMD", "valkey-cli", "-a", "loom-dev-bus", "ping"]');
   });
 
   it("keeps a channel-less system free of transport artifacts", async () => {

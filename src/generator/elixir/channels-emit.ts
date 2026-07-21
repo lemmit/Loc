@@ -411,9 +411,12 @@ defmodule ${appModule}.KafkaBroker do
 
   @impl true
   def init({url, name}) do
+    {endpoints, conn_config} = parse(url)
+
     {:ok,
      %{
-       endpoints: endpoints(url),
+       endpoints: endpoints,
+       conn_config: conn_config,
        client: :"#{name}_client",
        started: false,
        ensured: MapSet.new()
@@ -429,7 +432,13 @@ defmodule ${appModule}.KafkaBroker do
   end
 
   defp ensure_client(%{started: false} = state) do
-    :ok = :brod.start_client(state.endpoints, state.client, auto_start_producers: true)
+    :ok =
+      :brod.start_client(
+        state.endpoints,
+        state.client,
+        [auto_start_producers: true] ++ state.conn_config
+      )
+
     %{state | started: true}
   end
 
@@ -445,21 +454,45 @@ defmodule ${appModule}.KafkaBroker do
         :brod.create_topics(
           state.endpoints,
           [%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}],
-          %{timeout: 15_000}
+          %{timeout: 15_000},
+          state.conn_config
         )
 
       %{state | ensured: MapSet.put(state.ensured, address)}
     end
   end
 
-  def endpoints(url) do
-    url
-    |> String.replace_prefix("kafka://", "")
-    |> String.split(",")
-    |> Enum.map(fn hostport ->
-      [host, port] = String.split(hostport, ":")
-      {String.to_charlist(host), String.to_integer(port)}
-    end)
+  @doc """
+  kafka://user:pass@host:port[,host2] -> {endpoints, conn_config}.
+
+  Userinfo (when present) becomes SASL/PLAIN (M-T4.4 \u00a77); a
+  credential-less URL keeps the empty config -- plain PLAINTEXT, the
+  pre-auth contract.
+  """
+  def parse(url) do
+    bare = String.replace_prefix(url, "kafka://", "")
+
+    {creds, hosts} =
+      case String.split(bare, "@", parts: 2) do
+        [c, h] -> {c, h}
+        [h] -> {nil, h}
+      end
+
+    endpoints =
+      hosts
+      |> String.split(",")
+      |> Enum.map(fn hostport ->
+        [host, port] = String.split(hostport, ":")
+        {String.to_charlist(host), String.to_integer(port)}
+      end)
+
+    conn_config =
+      case creds && String.split(creds, ":", parts: 2) do
+        [user, pass] -> [sasl: {:plain, URI.decode(user), URI.decode(pass)}]
+        _ -> []
+      end
+
+    {endpoints, conn_config}
   end
 end
 `,
@@ -915,8 +948,8 @@ defmodule ${appModule}.KafkaConsumer do
   )
 
   def start(env_var, client, address, group) do
-    endpoints = ${appModule}.KafkaBroker.endpoints(System.fetch_env!(env_var))
-    :ok = :brod.start_client(endpoints, client, auto_start_producers: true)
+    {endpoints, conn_config} = ${appModule}.KafkaBroker.parse(System.fetch_env!(env_var))
+    :ok = :brod.start_client(endpoints, client, [auto_start_producers: true] ++ conn_config)
 
     # Idempotent topic ensure — joining a group on a not-yet-produced topic
     # stalls; tolerant of :topic_already_exists.
@@ -924,7 +957,8 @@ defmodule ${appModule}.KafkaConsumer do
       :brod.create_topics(
         endpoints,
         [%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}],
-        %{timeout: 15_000}
+        %{timeout: 15_000},
+        conn_config
       )
 
     :brod.start_link_group_subscriber_v2(%{
@@ -932,7 +966,7 @@ defmodule ${appModule}.KafkaConsumer do
       group_id: group,
       topics: [address],
       cb_module: __MODULE__,
-      init_data: %{address: address, client: client, endpoints: endpoints},
+      init_data: %{address: address, client: client, endpoints: endpoints, conn_config: conn_config},
       # Single-message delivery: the default message_set shape would hand
       # handle_message/2 a batch record instead of a kafka_message.
       message_type: :message,
@@ -950,7 +984,7 @@ defmodule ${appModule}.KafkaConsumer do
   def init(_group_id, init_data), do: {:ok, init_data}
 
   @impl :brod_group_subscriber_v2
-  def handle_message(msg, %{address: address, client: client, endpoints: endpoints} = state) do
+  def handle_message(msg, %{address: address, client: client} = state) do
     raw = kafka_message(msg, :value)
     key = kafka_message(msg, :key)
 
@@ -963,12 +997,12 @@ defmodule ${appModule}.KafkaConsumer do
           error ->
             # v1 log + park: keep the partition moving (a raw retry would
             # stall every record behind the poisoned one).
-            park(client, endpoints, address, key, raw)
+            park(client, state, key, raw)
             ${kafkaParkedLog}
         end
 
       :malformed ->
-        park(client, endpoints, address, key, raw)
+        park(client, state, key, raw)
         ${kafkaMalformedLog}
     end
 
@@ -986,7 +1020,7 @@ defmodule ${appModule}.KafkaConsumer do
     end
   end
 
-  defp park(client, endpoints, address, key, raw) do
+  defp park(client, %{address: address, endpoints: endpoints, conn_config: conn_config}, key, raw) do
     case :brod.produce_sync(client, address <> ".dlq", :hash, key || "", raw) do
       :ok ->
         :ok
@@ -1006,7 +1040,8 @@ defmodule ${appModule}.KafkaConsumer do
                 configs: []
               }
             ],
-            %{timeout: 15_000}
+            %{timeout: 15_000},
+            conn_config
           )
 
         # Topic creation is visible to producers only after a metadata

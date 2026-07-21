@@ -128,9 +128,15 @@ describe("kafka log transport (M-T4.4 slice 4)", () => {
     const compose = files.get("docker-compose.yml") ?? "";
     expect(compose).toContain("image: apache/kafka:4.1.0");
     expect(compose).not.toContain("bitnami");
-    expect(compose).toContain("KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://bus:9092");
+    expect(compose).toContain("KAFKA_ADVERTISED_LISTENERS: CLIENT://bus:9092,PLAINTEXT://bus:9094");
+    expect(compose).toContain("CLIENT:SASL_PLAINTEXT");
+    expect(compose).toContain(
+      'KAFKA_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.plain.PlainLoginModule required user_sales_api=\\"loom-dev-bus-sales_api\\" user_ship_api=\\"loom-dev-bus-ship_api\\";"',
+    );
     expect(compose).toContain("KAFKA_NUM_PARTITIONS: 3");
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "bus:9092"');
+    expect(compose).toContain(
+      'LOOM_CHANNEL_LIFECYCLE_BUS_URL: "kafka://sales_api:loom-dev-bus-sales_api@bus:9092"',
+    );
   });
 
   it("keeps the redis and rabbit shapes byte-stable — no kafka artifacts leak", async () => {

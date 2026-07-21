@@ -147,7 +147,9 @@ describe("rabbitmq queue transport — java leg (M-T4.4 slice 7c)", () => {
     const files = await javaFiles(FIXTURE);
     const compose = files.get("docker-compose.yml") ?? "";
     expect(compose).toContain("image: rabbitmq:4-management-alpine");
-    expect(compose).toContain('LOOM_CHANNEL_LIFECYCLE_BUS_URL: "amqp://guest:guest@bus:5672"');
+    expect(compose).toContain(
+      'LOOM_CHANNEL_LIFECYCLE_BUS_URL: "amqp://sales_api:loom-dev-bus-sales_api@bus:5672/loom"',
+    );
   });
 
   it("keeps the redis (slice 6b) shape intact — no rabbit artifacts, no outbox", async () => {

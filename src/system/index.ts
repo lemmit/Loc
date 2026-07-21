@@ -1,4 +1,10 @@
 import {
+  brokerUrl,
+  devPassword,
+  kafkaJaasConfig,
+  renderRabbitDefinitions,
+} from "../generator/_channels/auth.js";
+import {
   brokerChannelBindings,
   channelTransportStorageNames,
 } from "../generator/_channels/bindings.js";
@@ -279,6 +285,19 @@ function emitSystem(
     out.set("monitoring/prometheus.yml", renderPrometheusConfig(sys));
   }
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
+  // Broker auth provisioning (M-T4.4 slice 5, §7): each wired rabbitmq
+  // storage mounts a definitions file (vhost + per-deployable users +
+  // scoped permissions) plus the one-line conf that loads it.
+  for (const storageName of channelTransportStorageNames(sys)) {
+    const s = sys.storages.find((st) => st.name === storageName);
+    if (s?.type !== "rabbitmq") continue;
+    const slug = serviceSlug(storageName);
+    out.set(
+      `broker-init/${slug}.conf`,
+      "# Auto-generated.\nload_definitions = /etc/rabbitmq/loom-definitions.json\n",
+    );
+    out.set(`broker-init/${slug}-definitions.json`, renderRabbitDefinitions(sys, storageName));
+  }
   // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
   // launch config per deployable whose platform implements `debugLaunch`,
   // sibling of docker-compose.yml, `--sourcemap`-gated.  Each surface owns
@@ -837,11 +856,16 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
   for (const s of sys.storages) {
     const slug = serviceSlug(s.name);
     if (s.type === "redis" && transportStorages.has(s.name)) {
+      // Broker auth (M-T4.4 slice 5, design §7): `requirepass` locks the
+      // sidecar to the single v1 credential the wired deployables carry in
+      // their `redis://:<pass>@…` URL (ACL-per-service deferred).
+      const pass = devPassword(s.name);
       services.push([
         `${slug}:`,
         `  image: valkey/valkey:8-alpine`,
+        `  command: ["valkey-server", "--requirepass", ${JSON.stringify(pass)}]`,
         `  healthcheck:`,
-        `    test: ["CMD", "valkey-cli", "ping"]`,
+        `    test: ["CMD", "valkey-cli", "-a", ${JSON.stringify(pass)}, "ping"]`,
         `    interval: 5s`,
         `    timeout: 5s`,
         `    retries: 10`,
@@ -849,9 +873,16 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
     } else if (s.type === "rabbitmq" && transportStorages.has(s.name)) {
       // Official rabbitmq image (MPL 2.0 — design §6a); the management
       // variant so operators (and the e2e DLQ probe) get rabbitmqadmin.
+      // Broker auth (§7): the mounted `load_definitions` file provisions
+      // the `loom` vhost + one user per deployable with permissions scoped
+      // to its compiler-known exchanges/queues — and loading definitions
+      // also suppresses the image's default open `guest` account.
       services.push([
         `${slug}:`,
         `  image: rabbitmq:4-management-alpine`,
+        `  volumes:`,
+        `    - ./broker-init/${slug}.conf:/etc/rabbitmq/conf.d/10-loom.conf:ro`,
+        `    - ./broker-init/${slug}-definitions.json:/etc/rabbitmq/loom-definitions.json:ro`,
         `  healthcheck:`,
         `    test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]`,
         `    interval: 5s`,
@@ -864,17 +895,28 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
       // block is the minimal combined broker+controller config with the
       // in-network advertised listener (the default config advertises
       // localhost, unreachable from sibling containers).
+      //
+      // Broker auth (M-T4.4 slice 5, design §7): the CLIENT listener the
+      // deployables connect to runs SASL/PLAIN (one `user_<name>` per wired
+      // deployable in the JAAS line, matching the `kafka://user:pass@…`
+      // URLs); inter-broker + healthcheck stay on the loopback-reachable
+      // PLAINTEXT listener, the controller on its own.  Topic ACLs are
+      // deferred (no authorizer — authenticated principals share the
+      // broker), same rationale as redis's single credential.
       services.push([
         `${slug}:`,
         `  image: apache/kafka:4.1.0`,
         `  environment:`,
         `    KAFKA_NODE_ID: 1`,
         `    KAFKA_PROCESS_ROLES: broker,controller`,
-        `    KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093`,
-        `    KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${slug}:9092`,
+        `    KAFKA_LISTENERS: CLIENT://:9092,PLAINTEXT://:9094,CONTROLLER://:9093`,
+        `    KAFKA_ADVERTISED_LISTENERS: CLIENT://${slug}:9092,PLAINTEXT://${slug}:9094`,
         `    KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER`,
         `    KAFKA_CONTROLLER_QUORUM_VOTERS: 1@${slug}:9093`,
-        `    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"`,
+        `    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,CLIENT:SASL_PLAINTEXT"`,
+        `    KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT`,
+        `    KAFKA_LISTENER_NAME_CLIENT_SASL_ENABLED_MECHANISMS: PLAIN`,
+        `    KAFKA_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG: ${JSON.stringify(kafkaJaasConfig(sys, s.name))}`,
         `    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1`,
         `    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1`,
         `    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1`,
@@ -884,7 +926,7 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
         // per-key ordering rides the partition key, not the count.
         `    KAFKA_NUM_PARTITIONS: 3`,
         `  healthcheck:`,
-        `    test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]`,
+        `    test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9094"]`,
         `    interval: 5s`,
         `    timeout: 10s`,
         `    retries: 15`,
@@ -980,13 +1022,12 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   for (const b of brokerBindings) {
-    const url =
-      b.transport === "rabbitmq"
-        ? `amqp://guest:guest@${serviceSlug(b.storageName)}:5672`
-        : b.transport === "kafka"
-          ? `${serviceSlug(b.storageName)}:9092`
-          : `redis://${serviceSlug(b.storageName)}:6379`;
-    lines.push(`    ${b.envVar}: ${JSON.stringify(url)}`);
+    // Credentialed URL (M-T4.4 slice 5, §7): the deployable's own broker
+    // identity rides the URL — the one seam every driver already consumes,
+    // and the value the k8s chart classifies as a secret.
+    lines.push(
+      `    ${b.envVar}: ${JSON.stringify(brokerUrl(b, d.name, serviceSlug(b.storageName)))}`,
+    );
   }
   // CORS allowlist for a backend that a separate-origin frontend may call:
   // pin it to the frontend origins the topology declares (the generator knows
