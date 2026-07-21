@@ -138,6 +138,7 @@ export function emitElixirChannelFiles(
   const unique = uniqueBindings(bindings);
   const hasRedis = unique.some((b) => b.transport === "redis");
   const hasRabbit = unique.some((b) => b.transport === "rabbitmq");
+  const hasKafka = unique.some((b) => b.transport === "kafka");
   // event type -> binding, split by durability (design §5): ephemeral events
   // publish inline in the tee; durable (`work`) events ride the outbox relay.
   const routing = new Map<string, BrokerBinding>();
@@ -160,7 +161,7 @@ export function emitElixirChannelFiles(
   }
 
   const tupleFor = (b: BrokerBinding): string =>
-    `{${JSON.stringify(b.address)}, ${JSON.stringify(b.contextName)}, ${connByEnv.get(b.envVar)}, :${b.transport === "rabbitmq" ? "rabbitmq" : "redis"}}`;
+    `{${JSON.stringify(b.address)}, ${JSON.stringify(b.contextName)}, ${connByEnv.get(b.envVar)}, :${b.transport === "rabbitmq" ? "rabbitmq" : b.transport === "kafka" ? "kafka" : "redis"}}`;
   const routingMap = (entries: Map<string, BrokerBinding>): string =>
     entries.size === 0
       ? "%{}"
@@ -188,6 +189,24 @@ export function emitElixirChannelFiles(
     { name: "id", valueExpr: "id" },
   ]);
 
+  // Kafka (slice 8d): the channel's `key:` field per address — the envelope
+  // stamps its value as `loomkey`, kafka's partition key (design §4).  A
+  // separate map so the routing tuples keep their 4-tuple shape.
+  const keyedBindings = unique.filter((b) => b.key !== undefined);
+  const channelKeysMap =
+    keyedBindings.length === 0
+      ? "%{}"
+      : `%{\n${[...new Map(keyedBindings.map((b) => [b.address, b.key] as const)).entries()]
+          .map(([addr, key]) => `    ${JSON.stringify(addr)} => ${JSON.stringify(key)}`)
+          .join(",\n")}\n  }`;
+  // With kafka wired, `transmit` gains a key argument (redis/rabbit ignore
+  // it) and the publish sites thread `loomkey` ?? envelope id through; a
+  // kafka-less project keeps the 4-arity output byte-identical.
+  const transmitCall = (idVar: string): string =>
+    hasKafka
+      ? `transmit(transport, conn, address, Map.get(envelope, "loomkey", ${idVar}), Jason.encode!(envelope))`
+      : "transmit(transport, conn, address, Jason.encode!(envelope))";
+
   const files = new Map<string, string>();
   files.set(
     `lib/${appName}/channels.ex`,
@@ -207,6 +226,14 @@ ${
   opts.durableBroker
     ? `
   @durable_routing ${routingMap(durableRouting)}
+`
+    : ""
+}${
+  hasKafka
+    ? `
+  # The channel's \`key:\` field per address — its value rides the envelope
+  # as \`loomkey\`, kafka's partition key (design §4).
+  @channel_keys ${channelKeysMap}
 `
     : ""
 }
@@ -260,7 +287,7 @@ ${
     case Map.fetch(@durable_routing, type) do
       {:ok, {address, context, conn, transport}} ->
         envelope = envelope_for(address, context, type, event_id, data)
-        transmit(transport, conn, address, Jason.encode!(envelope))
+        ${transmitCall("event_id")}
         id = event_id
         ${publishedLog}
         :ok
@@ -278,13 +305,13 @@ ${
         "-" <> Integer.to_string(:erlang.unique_integer([:positive]), 16)
 
     envelope = envelope_for(address, context, type, id, encode_data(ev))
-    transmit(transport, conn, address, Jason.encode!(envelope))
+    ${transmitCall("id")}
     ${publishedLog}
     :ok
   end
 
   defp envelope_for(address, context, type, id, data) do
-    %{
+    ${hasKafka ? "envelope = " : ""}%{
       "specversion" => "1.0",
       "id" => id,
       "type" => context <> "." <> type,
@@ -293,11 +320,30 @@ ${
       "datacontenttype" => "application/json",
       "loomchannel" => address,
       "data" => data
+    }${
+      hasKafka
+        ? `
+
+    key_field = Map.get(@channel_keys, address)
+    key_value = if key_field, do: data[key_field]
+
+    if key_value != nil do
+      Map.put(envelope, "loomkey", to_string(key_value))
+    else
+      envelope
+    end`
+        : ""
     }
   end
 ${
   hasRedis
-    ? `
+    ? hasKafka
+      ? `
+  defp transmit(:redis, conn, address, _key, json) do
+    Redix.command!(conn, ["PUBLISH", address, json])
+  end
+`
+      : `
   defp transmit(:redis, conn, address, json) do
     Redix.command!(conn, ["PUBLISH", address, json])
   end
@@ -305,9 +351,23 @@ ${
     : ""
 }${
   hasRabbit
-    ? `
+    ? hasKafka
+      ? `
+  defp transmit(:rabbitmq, conn, address, _key, json) do
+    GenServer.call(conn, {:publish, address, json})
+  end
+`
+      : `
   defp transmit(:rabbitmq, conn, address, json) do
     GenServer.call(conn, {:publish, address, json})
+  end
+`
+    : ""
+}${
+  hasKafka
+    ? `
+  defp transmit(:kafka, conn, address, key, json) do
+    GenServer.call(conn, {:publish, address, key, json}, 30_000)
   end
 `
     : ""
@@ -324,8 +384,87 @@ end
   const children = [...connByEnv.entries()].map(([envVar, conn]) =>
     transportByEnv.get(envVar) === "rabbitmq"
       ? `      Supervisor.child_spec({${appModule}.ChannelBroker, [env_var: ${JSON.stringify(envVar)}, name: ${conn}]}, id: ${conn})`
-      : `      Supervisor.child_spec({Redix, {System.fetch_env!(${JSON.stringify(envVar)}), [name: ${conn}]}}, id: ${conn})`,
+      : transportByEnv.get(envVar) === "kafka"
+        ? `      Supervisor.child_spec({${appModule}.KafkaBroker, [env_var: ${JSON.stringify(envVar)}, name: ${conn}]}, id: ${conn})`
+        : `      Supervisor.child_spec({Redix, {System.fetch_env!(${JSON.stringify(envVar)}), [name: ${conn}]}}, id: ${conn})`,
   );
+
+  if (hasKafka) {
+    files.set(
+      `lib/${appName}/kafka_broker.ex`,
+      `# Auto-generated.  Kafka publisher process (channels.md; M-T4.4
+# design §4) — holds one :brod client per broker URL, idempotently
+# creates each topic before the first publish (3 partitions / rf 1, the
+# compose sidecar's defaults; an existing topic keeps its own shape), and
+# publishes with the partition key (\`loomkey\` ?? envelope id) through
+# brod's :hash partitioner so one aggregate's events keep order.  brod
+# (Apache 2.0) is Klarna's plain Erlang kafka client — the Redix/amqp
+# plain-driver choice.
+defmodule ${appModule}.KafkaBroker do
+  use GenServer
+
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, {System.fetch_env!(opts[:env_var]), opts[:name]},
+      name: opts[:name]
+    )
+  end
+
+  @impl true
+  def init({url, name}) do
+    {:ok,
+     %{
+       endpoints: endpoints(url),
+       client: :"#{name}_client",
+       started: false,
+       ensured: MapSet.new()
+     }}
+  end
+
+  @impl true
+  def handle_call({:publish, address, key, json}, _from, state) do
+    state = ensure_client(state)
+    state = ensure_topic(state, address)
+    :ok = :brod.produce_sync(state.client, address, :hash, key, json)
+    {:reply, :ok, state}
+  end
+
+  defp ensure_client(%{started: false} = state) do
+    :ok = :brod.start_client(state.endpoints, state.client, auto_start_producers: true)
+    %{state | started: true}
+  end
+
+  defp ensure_client(state), do: state
+
+  defp ensure_topic(state, address) do
+    if MapSet.member?(state.ensured, address) do
+      state
+    else
+      # Tolerant create: :topic_already_exists (or any transient error the
+      # subsequent produce would surface anyway) leaves the topic as-is.
+      _ =
+        :brod.create_topics(
+          state.endpoints,
+          [%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}],
+          %{timeout: 15_000}
+        )
+
+      %{state | ensured: MapSet.put(state.ensured, address)}
+    end
+  end
+
+  def endpoints(url) do
+    url
+    |> String.replace_prefix("kafka://", "")
+    |> String.split(",")
+    |> Enum.map(fn hostport ->
+      [host, port] = String.split(hostport, ":")
+      {String.to_charlist(host), String.to_integer(port)}
+    end)
+  end
+end
+`,
+    );
+  }
 
   if (hasRabbit) {
     files.set(
@@ -522,19 +661,46 @@ end
         ),
       ];
     });
+    // Kafka: one brod group subscriber per wired binding — the group id
+    // realises broadcast ACROSS deployables and competition WITHIN one
+    // (design §4); each gets its own subscriber-side brod client.
+    const kafkaEnvBindings = new Map<string, { address: string; group: string }[]>();
+    for (const b of unique) {
+      if (b.transport !== "kafka") continue;
+      const list = kafkaEnvBindings.get(b.envVar) ?? [];
+      if (!list.some((x) => x.group === b.group)) list.push({ address: b.address, group: b.group });
+      kafkaEnvBindings.set(b.envVar, list);
+    }
+    let kafkaSub = 0;
+    const kafkaConsumeLines = [...kafkaEnvBindings.entries()].flatMap(([envVar, bs]) =>
+      bs.map(
+        (x) =>
+          `    {:ok, _} = ${appModule}.KafkaConsumer.start(${JSON.stringify(envVar)}, :loom_kafka_sub_${kafkaSub++}, ${JSON.stringify(x.address)}, ${JSON.stringify(x.group)})`,
+      ),
+    );
     const hasRabbitConsumer = rabbitEnvBindings.size > 0;
     const hasRedisConsumer = redisEnvSubs.size > 0;
+    const hasKafkaConsumer = kafkaEnvBindings.size > 0;
     const initBody = hasRabbitConsumer
-      ? ["    state = %{}", ...redisSubscribeLines, ...rabbitConsumeLines, "    {:ok, state}"].join(
-          "\n",
-        )
-      : [...redisSubscribeLines, "    {:ok, %{}}"].join("\n");
+      ? [
+          "    state = %{}",
+          ...redisSubscribeLines,
+          ...rabbitConsumeLines,
+          ...kafkaConsumeLines,
+          "    {:ok, state}",
+        ].join("\n")
+      : [...redisSubscribeLines, ...kafkaConsumeLines, "    {:ok, %{}}"].join("\n");
     const headerDesc = hasRabbitConsumer
       ? `# Subscribes every wired address (Redix.PubSub for redis broadcast;
 # a durable competing queue over the hex \`amqp\` client for rabbitmq —
 # design §4: manual ack, bounded \`x-loom-attempts\` retry, DLX \`loom.dlx\`
 # → \`loom.dlq.<address>\` parking) and feeds decoded`
-      : `# Subscribes every wired address over Redix.PubSub and feeds decoded`;
+      : hasKafkaConsumer
+        ? `# Subscribes every wired address (a brod group subscriber per kafka
+# binding — the deployable's group competes within and broadcasts across
+# deployables; design §4 dead-letter v1 parks onto \`<address>.dlq\`) and
+# feeds decoded`
+        : `# Subscribes every wired address over Redix.PubSub and feeds decoded`;
 
     const redisClauses = hasRedisConsumer
       ? `  def handle_info({:redix_pubsub, _pid, _ref, :subscribed, _meta}, state), do: {:noreply, state}
@@ -697,14 +863,187 @@ ${hasRabbitConsumer ? "\n  @max_attempts 5\n" : ""}
 ${initBody}
   end
 
-  @impl true
-${redisClauses}${redisClauses && rabbitClauses ? "\n" : ""}${rabbitClauses}
-${routeClauses.join("\n\n")}
+${redisClauses || rabbitClauses ? `  @impl true\n${redisClauses}${redisClauses && rabbitClauses ? "\n" : ""}${rabbitClauses}\n` : ""}${routeClauses.join("\n\n")}
   defp route(_ev), do: :ok
-${rabbitHelpers}end
+${
+  hasKafkaConsumer
+    ? `
+  @doc false
+  def route_decoded(ev), do: route(ev)
+`
+    : ""
+}${rabbitHelpers}end
 `,
     );
     children.push(`      ${appModule}.ChannelConsumer`);
+
+    if (hasKafkaConsumer) {
+      const kafkaConsumedLog = renderPhoenixLogCall("channelConsumed", [
+        { name: "address", valueExpr: "address" },
+        { name: "type", valueExpr: `envelope["type"]` },
+        { name: "id", valueExpr: `envelope["id"]` },
+        { name: "key", valueExpr: `Map.get(envelope, "loomkey")` },
+      ]);
+      const kafkaParkedLog = renderPhoenixLogCall("channelDeadLettered", [
+        { name: "address", valueExpr: "address" },
+        { name: "type", valueExpr: `envelope["type"]` },
+        { name: "id", valueExpr: `envelope["id"]` },
+        { name: "error", valueExpr: "inspect(error)" },
+      ]);
+      const kafkaMalformedLog = renderPhoenixLogCall("channelDeadLettered", [
+        { name: "address", valueExpr: "address" },
+        { name: "error", valueExpr: `"malformed envelope"` },
+      ]);
+      files.set(
+        `lib/${appName}/kafka_consumer.ex`,
+        `# Auto-generated.  Kafka group subscriber (channels.md; M-T4.4 design
+# §4) — one brod group subscriber per wired kafka binding.  The group id
+# (\`<address>.<deployable>\`) realises broadcast ACROSS deployables (each
+# group replays the whole log) and competition WITHIN one (replicas share
+# it).  Offsets commit after the handler resolves.  Dead-letter v1: a
+# failed or malformed record parks onto \`<address>.dlq\` and the offset
+# advances — logged and kept, never a hot-loop.
+defmodule ${appModule}.KafkaConsumer do
+  @behaviour :brod_group_subscriber_v2
+
+  require Logger
+  require Record
+
+  Record.defrecord(
+    :kafka_message,
+    Record.extract(:kafka_message, from_lib: "brod/include/brod.hrl")
+  )
+
+  def start(env_var, client, address, group) do
+    endpoints = ${appModule}.KafkaBroker.endpoints(System.fetch_env!(env_var))
+    :ok = :brod.start_client(endpoints, client, auto_start_producers: true)
+
+    # Idempotent topic ensure — joining a group on a not-yet-produced topic
+    # stalls; tolerant of :topic_already_exists.
+    _ =
+      :brod.create_topics(
+        endpoints,
+        [%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}],
+        %{timeout: 15_000}
+      )
+
+    :brod.start_link_group_subscriber_v2(%{
+      client: client,
+      group_id: group,
+      topics: [address],
+      cb_module: __MODULE__,
+      init_data: %{address: address, client: client, endpoints: endpoints},
+      # Single-message delivery: the default message_set shape would hand
+      # handle_message/2 a batch record instead of a kafka_message.
+      message_type: :message,
+      consumer_config: [begin_offset: :latest],
+      # Dynamic membership (broker-assigned member ids), matching every
+      # other backend's driver.  brod's default derives a STATIC
+      # group_instance_id from node()/pid — un-named nodes
+      # (nonode@nohost) collide across replicas and fence each other out
+      # of the group in a rejoin ping-pong.
+      group_config: [offset_commit_policy: :commit_to_kafka_v2, group_instance_id: :null]
+    })
+  end
+
+  @impl :brod_group_subscriber_v2
+  def init(_group_id, init_data), do: {:ok, init_data}
+
+  @impl :brod_group_subscriber_v2
+  def handle_message(msg, %{address: address, client: client, endpoints: endpoints} = state) do
+    raw = kafka_message(msg, :value)
+    key = kafka_message(msg, :key)
+
+    case decode_payload(raw) do
+      {:ok, envelope, ev} ->
+        try do
+          ${appModule}.ChannelConsumer.route_decoded(ev)
+          ${kafkaConsumedLog}
+        rescue
+          error ->
+            # v1 log + park: keep the partition moving (a raw retry would
+            # stall every record behind the poisoned one).
+            park(client, endpoints, address, key, raw)
+            ${kafkaParkedLog}
+        end
+
+      :malformed ->
+        park(client, endpoints, address, key, raw)
+        ${kafkaMalformedLog}
+    end
+
+    {:ok, :commit, state}
+  end
+
+  defp decode_payload(raw) do
+    with {:ok, envelope} <- Jason.decode(raw),
+         type when is_binary(type) <- envelope["type"],
+         bare = type |> String.split(".") |> List.last(),
+         ev when not is_nil(ev) <- ${appModule}.Channels.decode(bare, envelope["data"] || %{}) do
+      {:ok, envelope, ev}
+    else
+      _ -> :malformed
+    end
+  end
+
+  defp park(client, endpoints, address, key, raw) do
+    case :brod.produce_sync(client, address <> ".dlq", :hash, key || "", raw) do
+      :ok ->
+        :ok
+
+      {:error, _} ->
+        # First park on a fresh dlq topic can race its creation — ensure
+        # it idempotently and retry once.
+        _ =
+          :brod.create_topics(
+            endpoints,
+            [
+              %{
+                name: address <> ".dlq",
+                num_partitions: 3,
+                replication_factor: 1,
+                assignments: [],
+                configs: []
+              }
+            ],
+            %{timeout: 15_000}
+          )
+
+        # Topic creation is visible to producers only after a metadata
+        # refresh — settle briefly and retry a bounded number of times.
+        retry_park(client, address, key, raw, 5)
+    end
+  rescue
+    error ->
+      Logger.warning("channel_consume_failed",
+        event: "channel_consume_failed",
+        address: address,
+        error: "dlq park failed: " <> inspect(error)
+      )
+  end
+
+  defp retry_park(client, address, key, raw, attempts_left) do
+    Process.sleep(1_000)
+
+    case :brod.produce_sync(client, address <> ".dlq", :hash, key || "", raw) do
+      :ok ->
+        :ok
+
+      {:error, _} when attempts_left > 1 ->
+        retry_park(client, address, key, raw, attempts_left - 1)
+
+      {:error, reason} ->
+        Logger.warning("channel_consume_failed",
+          event: "channel_consume_failed",
+          address: address,
+          error: "dlq park failed: " <> inspect(reason)
+        )
+    end
+  end
+end
+`,
+      );
+    }
   }
 
   return { files, children };

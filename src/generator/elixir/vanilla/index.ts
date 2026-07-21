@@ -587,6 +587,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   if (channelBindings.some((b) => b.transport === "rabbitmq")) {
     (hexDeps as Record<string, string>).amqp = '"~> 4.0"';
   }
+  if (channelBindings.some((b) => b.transport === "kafka")) {
+    // brod (Apache 2.0 — Klarna's Erlang kafka client, the plain-driver
+    // choice matching Redix/amqp).
+    (hexDeps as Record<string, string>).brod = '"~> 4.4"';
+  }
 
   // JWKS strategy (OIDC only): the joken_jwks GenServer that fetches, caches,
   // and periodically refreshes the issuer's signing keys for the Auth.Token
@@ -641,7 +646,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // the Ecto schema drops the bundled `timestamps()` macro (it would collide),
   // so the migration must too.
   emitMigrations(appName, args.migrations ?? [], appModule, out);
-  out.set("Dockerfile", renderDockerfile(appName, embedReact && !!deployable.uiName, spaOutDir));
+  out.set(
+    "Dockerfile",
+    renderDockerfile(
+      appName,
+      embedReact && !!deployable.uiName,
+      spaOutDir,
+      channelBindings.some((b) => b.transport === "kafka"),
+    ),
+  );
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   out.set("rel/env.sh.eex", renderRelEnv(appName));

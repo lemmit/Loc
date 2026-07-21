@@ -5,7 +5,14 @@
 // `vanilla/shell-emit.ts`.
 // ---------------------------------------------------------------------------
 
-export function renderDockerfile(appName: string, embedReact = false, spaOutDir = "dist"): string {
+export function renderDockerfile(
+  appName: string,
+  embedReact = false,
+  spaOutDir = "dist",
+  /** kafka-wired projects pull brod, whose crc32cer NIF builds via cmake
+   *  (M-T4.4 slice 8d) — absent otherwise so the image stays lean. */
+  needsCmake = false,
+): string {
   // Embedded-React mode: a first `spa-build` stage runs the SPA's own
   // Vite build (the React project the orchestrator emitted under
   // `assets/`), then the builder stage copies its `dist/` into
@@ -39,7 +46,7 @@ ARG BUILDER_IMAGE="hexpm/elixir:\${ELIXIR_VERSION}-erlang-\${OTP_VERSION}-debian
 ARG RUNNER_IMAGE="debian:\${DEBIAN_VERSION}"
 
 ${spaBuildStage}FROM \${BUILDER_IMAGE} AS build
-RUN apt-get update -y && apt-get install -y build-essential git ca-certificates \\
+RUN apt-get update -y && apt-get install -y build-essential${needsCmake ? " cmake" : ""} git ca-certificates \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 WORKDIR /app
 # Optional proxy CAs — drop *.crt files into ./certs/ to make hex
