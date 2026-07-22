@@ -30,6 +30,38 @@ function modelUriFor(activePath: string): monaco.Uri {
   return monaco.Uri.parse(`inmemory:///${activePath.replace(/^\/+/, "")}`);
 }
 
+/** After a workspace edit lands in the model (e.g. applying an "Unfold
+ *  macro" code action), scroll the edited range into view if it's outside
+ *  the viewport. A code action can splice new content anywhere in the
+ *  document — `crudish`'s materialized operations always land just before
+ *  the aggregate's closing `}`, which for a non-trivial aggregate is often
+ *  many lines below the cursor the user invoked the action from — and
+ *  nothing else in the editor pipeline reveals it, so applying the action
+ *  looked like a no-op. `rangeOffset`/`rangeLength`/`text` are given against
+ *  the pre-edit document for every change in one batch (Monaco's contract
+ *  for `IModelContentChange`), so `delta` re-derives the target's *post*-edit
+ *  offset by summing the length change of every other edit that landed
+ *  before it. For ordinary typing (one change, no others) this resolves to
+ *  the position the cursor is already at, which is already in view, so the
+ *  reveal is a no-op there. */
+function revealLatestEdit(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  model: monaco.editor.ITextModel,
+  changes: readonly monaco.editor.IModelContentChange[],
+): void {
+  if (changes.length === 0) return;
+  const target = changes.reduce((a, b) => (b.rangeOffset > a.rangeOffset ? b : a));
+  const delta = changes
+    .filter((c) => c !== target)
+    .reduce((sum, c) => sum + (c.text.length - c.rangeLength), 0);
+  const newOffset = Math.min(target.rangeOffset + delta + target.text.length, model.getValueLength());
+  const pos = model.getPositionAt(newOffset);
+  editor.revealRangeInCenterIfOutsideViewport(
+    new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
+    monaco.editor.ScrollType.Smooth,
+  );
+}
+
 function markersToDiagnostics(markers: monaco.editor.IMarker[]): Diagnostic[] {
   return markers.map((m) => ({
     range: {
@@ -140,8 +172,10 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     });
 
     let suppressDispatch = false;
-    const changeSub = model.onDidChangeContent(() => {
-      if (!suppressDispatch) onChangeRef.current?.(model.getValue());
+    const changeSub = model.onDidChangeContent((e) => {
+      if (suppressDispatch) return;
+      onChangeRef.current?.(model.getValue());
+      revealLatestEdit(editor, model, e.changes);
     });
 
     if (handleRef.current) {

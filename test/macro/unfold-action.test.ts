@@ -177,6 +177,15 @@ system Demo {
     expect(result).toMatch(/page List/);
     expect(result).toMatch(/page New/);
     expect(result).toMatch(/page Detail/);
+    // Regression: the page bodies are a deeply nested widget-call tree
+    // (Stack/Toolbar/QueryView/Table/Column/...); a bare `printExpr` with no
+    // wrapping used to collapse the whole tree onto one illegibly long line
+    // (print-expr.ts had no line-wrapping, unlike print-structural.ts's
+    // `block`/`indent`). It must come out multi-line and indented instead.
+    const listBody = result.slice(result.indexOf("page List"), result.indexOf("page New"));
+    expect(listBody.split("\n").length).toBeGreaterThan(5);
+    expect(listBody).toMatch(/\n\s+Column\(/);
+    for (const line of listBody.split("\n")) expect(line.length).toBeLessThanOrEqual(120);
     // And the source re-parses cleanly:
     const reparse = await validate(result);
     expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);

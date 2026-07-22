@@ -1,5 +1,11 @@
 import type { LValue, Statement } from "../generated/ast.js";
-import { printExpr, printTypeAtomLite, registerStatementPrinter } from "./print-expr.js";
+import {
+  printExpr,
+  printTypeAtomLite,
+  registerStatementPrinter,
+  wrapArgList,
+  wrapBraced,
+} from "./print-expr.js";
 
 // ---------------------------------------------------------------------------
 // AST → `.ddd` source printer for statements (lambda block bodies;
@@ -16,8 +22,8 @@ export function printStmt(node: Statement): string {
     case "LetStmt":
       return `let ${node.name} = ${printExpr(node.expr)}`;
     case "EmitStmt": {
-      const fields = node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`).join(", ");
-      return `emit ${node.event.$refText} {${fields.length > 0 ? ` ${fields} ` : ""}}`;
+      const fields = node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`);
+      return wrapBraced(`emit ${node.event.$refText} `, fields);
     }
     case "AssignOrCallStmt": {
       const target = printLValue(node.target);
@@ -59,7 +65,7 @@ export function printStmt(node: Statement): string {
 
 function printLValue(lv: LValue): string {
   const path = [lv.head, ...lv.tail].join(".");
-  return lv.call ? `${path}(${lv.args.map(printExpr).join(", ")})` : path;
+  return lv.call ? wrapArgList(path, "(", ")", lv.args.map(printExpr)) : path;
 }
 
 // Break the expr↔stmt cycle: print-expr calls back here for lambda blocks.
