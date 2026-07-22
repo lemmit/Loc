@@ -42,12 +42,24 @@ function indent(s: string): string {
 /** `<prefix><open><items, comma-joined><close>`, wrapped onto indented lines
  *  once the one-line form would exceed `LINE_WIDTH` or an item already spans
  *  multiple lines (an inner call already wrapped). `<prefix><open><close>`
- *  when there are no items. */
-function wrapArgList(prefix: string, open: string, close: string, items: string[]): string {
+ *  when there are no items. Exported so `print-stmt.ts` can wrap `LValue`
+ *  call args / `emit` fields the same way — the flat single-line join is
+ *  the same bug for any argument list, not just expression call chains. */
+export function wrapArgList(prefix: string, open: string, close: string, items: string[]): string {
   if (items.length === 0) return `${prefix}${open}${close}`;
   const oneLine = `${prefix}${open}${items.join(", ")}${close}`;
   if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
   return `${prefix}${open}\n${indent(items.join(",\n"))}\n${close}`;
+}
+
+/** `<prefix>{ <items, comma-joined> }`, spaced-brace form (builder calls,
+ *  object literals, `emit` field lists) — wrapped onto indented lines under
+ *  the same rule as `wrapArgList`. `<prefix>{}` when there are no items. */
+export function wrapBraced(prefix: string, items: string[]): string {
+  if (items.length === 0) return `${prefix}{}`;
+  const oneLine = `${prefix}{ ${items.join(", ")} }`;
+  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
+  return `${prefix}{\n${indent(items.join(",\n"))}\n}`;
 }
 
 export function printExpr(node: Expression): string {
@@ -101,7 +113,10 @@ export function printExpr(node: Expression): string {
     case "BuilderCall":
       return printBuilderCall(node.type, node.entries);
     case "ObjectLit":
-      return `{${printObjectFields(node.fields)}}`;
+      return wrapBraced(
+        "",
+        node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`),
+      );
     case "ListLit": {
       // An empty list prints as `[ ]` (spaced) — the bare `[]` token is lexed
       // as the array-type marker, so an adjacent form wouldn't re-parse.
@@ -199,20 +214,11 @@ function printCall(prefix: string, args: CallArg[]): string {
   return wrapArgList(prefix, "(", ")", items);
 }
 
-function printObjectFields(fields: { name: string; value: Expression }[]): string {
-  if (fields.length === 0) return "";
-  const inner = fields.map((f) => `${f.name}: ${printExpr(f.value)}`).join(", ");
-  return ` ${inner} `;
-}
-
 function printBuilderCall(type: string, entries: { name?: string; value: Expression }[]): string {
   const items = entries.map((e) =>
     e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value),
   );
-  if (items.length === 0) return `${type} {}`;
-  const oneLine = `${type} { ${items.join(", ")} }`;
-  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
-  return `${type} {\n${indent(items.join(",\n"))}\n}`;
+  return wrapBraced(`${type} `, items);
 }
 
 function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
