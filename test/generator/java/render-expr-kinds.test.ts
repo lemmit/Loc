@@ -403,6 +403,13 @@ describe("java renderJavaExpr — binary leaf divergences", () => {
     );
   });
 
+  it("decimal modulo dispatches through BigDecimal.remainder (BigDecimal has no % operator)", () => {
+    const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+    expect(renderJavaExpr(bin("%", thisProp("a"), thisProp("b"), DECIMAL))).toBe(
+      "this.a.remainder(this.b)",
+    );
+  });
+
   it("datetime ordering renders isBefore / isAfter (negated for <= / >=)", () => {
     expect(renderJavaExpr(bin("<", thisProp("a"), thisProp("b"), DATETIME))).toBe(
       "this.a.isBefore(this.b)",
