@@ -71,6 +71,7 @@ import {
   checkSelfType,
   checkSlotMemberAccess,
   checkSlotTypePosition,
+  checkStoreActionCallArgs,
   checkTemplateHoles,
   checkTenancyDecls,
   checkTernaryExprs,
@@ -207,6 +208,10 @@ export class DddValidator {
     // `where`/`requires`, retrieval `where:`, criterion / policy-fn bodies, and
     // operation `requires`/`when` gates.  (Predicate arity is already model-wide.)
     guard("predicate-slot-args", model, () => checkPredicateSlotArgs(model, accept));
+    // Store-action calls (`Cart.add(42)`) in page/component/store action bodies —
+    // never walked by the aggregate statement checker, so arity + arg types went
+    // unchecked. Resolve `<store>.<action>` and check both invocation forms.
+    guard("store-action-args", model, () => checkStoreActionCallArgs(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));

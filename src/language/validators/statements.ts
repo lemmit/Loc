@@ -5,6 +5,7 @@
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
+  ActionDecl,
   Aggregate,
   AssignOrCallStmt,
   BuilderCall,
@@ -22,8 +23,10 @@ import type {
   PolicyDecl,
   Retrieval,
   Statement,
+  Store,
 } from "../generated/ast.js";
 import {
+  isActionDecl,
   isAssignOrCallStmt,
   isCallSuffix,
   isCriterion,
@@ -42,7 +45,9 @@ import {
   isRequiresStmt,
   isRetrieval,
   isRetrievalLiteral,
+  isStore,
   isThisRef,
+  isUi,
 } from "../generated/ast.js";
 import {
   type DddType,
@@ -499,6 +504,85 @@ export function checkPredicateSlotArgs(model: Model, accept: ValidationAcceptor)
       visit((node as Operation).gate);
       visit((node as Operation).when);
     }
+  }
+}
+
+/** Resolve a store-action call `<store>.<action>(args)` to its `ActionDecl`, or
+ *  `undefined` when `head` names no store / `action` no action on it.  A store is
+ *  a `ui` member referenced by bare name; the enclosing `ui` wins, else any store
+ *  of that name in the model (matching the lowering's store index). */
+function resolveStoreAction(
+  head: string,
+  action: string,
+  node: AstNode,
+  model: Model,
+): ActionDecl | undefined {
+  const findIn = (store: Store): ActionDecl | undefined =>
+    store.decls.find((d): d is ActionDecl => isActionDecl(d) && d.name === action);
+  const ui = AstUtils.getContainerOfType(node, isUi);
+  if (ui) {
+    for (const m of ui.members) {
+      if (isStore(m) && m.name === head) {
+        const a = findIn(m);
+        if (a) return a;
+      }
+    }
+  }
+  for (const n of AstUtils.streamAllContents(model)) {
+    if (isStore(n) && n.name === head) {
+      const a = findIn(n);
+      if (a) return a;
+    }
+  }
+  return undefined;
+}
+
+/** M-T6.18 gap #3 — arity + per-argument type check for a store-action call
+ *  (`Cart.add(42)`).  Page / component / store `action` bodies are never fed to
+ *  the statement walk (that fires only for aggregate operations), so a
+ *  store-action call had NEITHER its arity NOR its argument types checked — a
+ *  wrong count or a `string` into an `int` action param compiled the .ddd and
+ *  only failed the emitted frontend.  Both invocation forms are covered: the bare
+ *  call STATEMENT (`Cart.add(42)` — an `AssignOrCallStmt` LValue) and the
+ *  expression form (a single-suffix `PostfixChain`, e.g. `x := Cart.add(42)`).
+ *  Reuses the shared `checkCallArgs` (arity + positional type, `unknown`
+ *  suppression, numeric-literal promotion) under the call site's lexical env. */
+export function checkStoreActionCallArgs(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    let head: string | undefined;
+    let action: string | undefined;
+    let args: Expression[] | undefined;
+    let argNode: AstNode = node;
+    if (isAssignOrCallStmt(node)) {
+      const lv = node.target;
+      if (!lv.call || lv.tail.length !== 1) continue;
+      head = lv.head;
+      action = lv.tail[0];
+      args = lv.args;
+      argNode = lv;
+    } else if (isPostfixChain(node)) {
+      const h = node.head;
+      const s = node.suffixes[0];
+      if (!isNameRef(h) || node.suffixes.length !== 1 || !s || !isMemberSuffix(s) || !s.call)
+        continue;
+      head = h.name;
+      action = s.member;
+      args = s.args.map((a) => a.value);
+      argNode = s;
+    } else {
+      continue;
+    }
+    if (head === undefined || action === undefined || args === undefined) continue;
+    const decl = resolveStoreAction(head, action, node, model);
+    if (!decl) continue; // head names no store / action — not this check's concern
+    checkCallArgs(
+      decl.params,
+      args,
+      envForNode(argNode),
+      `Store action '${head}.${action}'`,
+      argNode,
+      accept,
+    );
   }
 }
 

@@ -51,6 +51,7 @@ export {
   checkPredicateSlotArgs,
   checkRetrievalLiteral,
   checkStatement,
+  checkStoreActionCallArgs,
 } from "./statements.js";
 export {
   checkActionTypePosition,
