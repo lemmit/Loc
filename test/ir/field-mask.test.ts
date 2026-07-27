@@ -45,8 +45,19 @@ describe("field mask — IR gates", () => {
     expect(salary.maskUnless!.kind).toBe("method-call");
   });
 
-  it("gates the feature until per-backend redaction lands (unsupported on every backend)", async () => {
-    const codes = await diags("mask unless currentUser.permissions.contains(permissions.unmask)");
+  it("node emits read redaction — no unsupported gate", async () => {
+    const codes = await diags(
+      "mask unless currentUser.permissions.contains(permissions.unmask)",
+      "node",
+    );
+    expect(codes).not.toContain("loom.field-mask-unsupported");
+  });
+
+  it("still gates the backends whose redaction hasn't landed (dotnet)", async () => {
+    const codes = await diags(
+      "mask unless currentUser.permissions.contains(permissions.unmask)",
+      "dotnet",
+    );
     expect(codes).toContain("loom.field-mask-unsupported");
   });
 
@@ -59,5 +70,30 @@ describe("field mask — IR gates", () => {
     const codes = await diags("");
     expect(codes).not.toContain("loom.field-mask-unsupported");
     expect(codes).not.toContain("loom.field-mask-not-current-user");
+  });
+
+  it("rejects a masked aggregate as a query-time projection source (would leak)", async () => {
+    const src = `system S {
+  user { id: string  role: string  permissions: string[] }
+  subdomain M {
+    permissions { unmask }
+    context C {
+      aggregate P with crudish {
+        name: string
+        salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)
+      }
+      projection Earners {
+        from P
+        select name
+      }
+    }
+  }
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  deployable api { platform: node  contexts: [C]  dataSources: [st]  port: 8080  auth: required }
+}`;
+    const { model } = await parseString(src, { validate: false });
+    const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
+    expect(codes).toContain("loom.field-mask-projection-source");
   });
 });
