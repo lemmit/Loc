@@ -313,7 +313,7 @@ Inside an aggregate or an `entity` part:
 
 | Form | Notes |
 | --- | --- |
-| `name: TypeRef [provenanced] [sensitive(tags)] [access] [check Expr]` | Property, with optional modifiers (in this order). `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `access` is one of `immutable / managed / token / internal / secret` (default: `editable` — see [Field access modifiers](#field-access-modifiers) below); `check Expr` is a per-field validation predicate. |
+| `name: TypeRef [provenanced] [sensitive(tags)] [access] [= default] [check Expr]` | Property, with optional modifiers. `provenanced`, `sensitive(...)`, and `access` parse in **any order** relative to each other; `= default` and `check Expr` must come **after** all three (an unconsumed flag keyword after an in-progress default risks the expression greedily swallowing it — `access`'s keywords double as valid identifiers). `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `access` is one of `immutable / managed / token / internal / secret` (default: `editable` — see [Field access modifiers](#field-access-modifiers) below); `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single (required). |
 | `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
@@ -455,6 +455,10 @@ read exposure.  The grammar form is
 ```
 name: TypeRef [provenanced] [sensitive(...)] [immutable|managed|token|internal|secret]
 ```
+
+`provenanced` and `sensitive(...)` may appear in any order around the
+access modifier — `name: TypeRef managed provenanced sensitive(pii)`
+parses the same as the canonical order above.
 
 The default — no keyword — is `editable`.  The five keywords (and
 the implicit `editable`) form this matrix:

@@ -1678,14 +1678,32 @@ Property:
         // Property-only (soft here but not in every value position):
         | 'await')
     ':' type=TypeRef
-    (provenanced?='provenanced')?
-    sensitivity=SensitivityClause?
-    (access=FieldAccess)?
-    // Default value — `field: T = <expr>`.  Placed after the access
-    // modifier so the expression can't greedily swallow a trailing
-    // modifier keyword.  Enables synthesising a create when no explicit
-    // one is declared; for now it lowers onto the FieldIR and downstream
-    // phases may consume it.
+    // `provenanced` / `sensitive(...)` / the access modifier are pure
+    // flag-like keywords carrying no expression content, so they parse in
+    // ANY order relative to each other — e.g. `sensitive(pii) provenanced`
+    // and `provenanced sensitive(pii)` both parse.  Marking an *existing*
+    // sensitive/access field `provenanced` by appending the keyword used to
+    // be a parse error; it no longer is.  (A true Langium unordered group —
+    // `&` — can't express this: it rejects optional-cardinality elements
+    // ["Optional elements in Unordered groups are currently not
+    // supported"], and every element here is individually optional. A
+    // repeating alternation is the standard workaround: each iteration picks
+    // whichever of the three is next, distinguishable by its leading token,
+    // so order falls out for free. Repeating the same modifier twice is a
+    // nonsensical (last-write-wins) input the grammar doesn't need to
+    // forbid.)
+    ( provenanced?='provenanced'
+      | sensitivity=SensitivityClause
+      | access=FieldAccess
+    )*
+    // Default value — `field: T = <expr>`.  Stays AFTER the flag group above
+    // (not folded into the unordered set) rather than being freely
+    // reorderable too: `Expression` can end in a bare identifier, and the
+    // access-modifier names double as valid identifiers (NameRefIdent) —
+    // e.g. `secret` — so an unconsumed access/provenanced keyword after an
+    // in-progress default risks the expression greedily swallowing it.
+    // Enables synthesising a create when no explicit one is declared; for
+    // now it lowers onto the FieldIR and downstream phases may consume it.
     ('=' default=Expression)?
     // `check <expr>` is a per-field validation predicate; an optional trailing
     // `message "..."` (nested so it only parses with a check) gives it the same

@@ -81,16 +81,19 @@ describe("provenanced — grammar", () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  // The property grammar admits its modifiers in ONE fixed order —
-  // `type (provenanced)? (sensitive(...))? (access)? (= default)? (check ...)?`
-  // (docs/language.md's property-grammar row, `ddd.langium`'s `Property` rule).
-  // `provenanced` slots right after the type, so appending it to a field that
-  // already has a later modifier — the natural instinct when marking an
-  // *existing* `sensitive(...)` / access / defaulted field provenanced — is a
-  // parse error, not a validation warning. This is the "parsing/grammar
-  // error" surprise: the fix is always to move `provenanced` immediately
-  // after the type, never to append it at the end.
-  describe("provenanced — fixed modifier order (gotcha)", () => {
+  // `provenanced` / `sensitive(...)` / the access modifier parse in ANY
+  // order relative to each other (`ddd.langium`'s `Property` rule — a
+  // repeating alternation, since Langium's true unordered-group operator
+  // rejects optional-cardinality elements). This used to be a fixed-order
+  // footgun: appending `provenanced` to a field that already had a later
+  // modifier — the natural instinct when marking an *existing*
+  // `sensitive(...)` / access field provenanced — was a parse error, not a
+  // validation warning. `= default` / `check ...` still must come LAST
+  // (kept out of the reorderable set deliberately — `Expression` can end in
+  // a bare identifier, and the access-modifier names double as valid
+  // identifiers, so an unconsumed flag keyword after an in-progress default
+  // risks the expression greedily swallowing it).
+  describe("provenanced — flag-modifier order", () => {
     const aggWith = (fieldLine: string) => `
 system S { subdomain M { context C {
   aggregate Cart { ${fieldLine}
@@ -106,20 +109,37 @@ system S { subdomain M { context C {
       expect(errors).toEqual([]);
     });
 
-    it("is a PARSE error (not a validation warning) when written after `sensitive(...)`", async () => {
+    it("parses when `provenanced` is written after `sensitive(...)` (regression)", async () => {
       const src = aggWith("total: int sensitive(pii) provenanced");
-      const { errors } = await parseModel(src);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors.some((e) => /Expecting token/.test(e))).toBe(true);
+      const { model, errors } = await parseModel(src);
+      expect(errors).toEqual([]);
+      const prop = findProperty(model, "Cart", "total");
+      expect(prop.provenanced).toBe(true);
+      expect(prop.sensitivity?.tags).toEqual(["pii"]);
     });
 
-    it("is a PARSE error when written after an access modifier", async () => {
+    it("parses when `provenanced` is written after an access modifier (regression)", async () => {
       const src = aggWith("total: int managed provenanced");
-      const { errors } = await parseModel(src);
-      expect(errors.length).toBeGreaterThan(0);
+      const { model, errors } = await parseModel(src);
+      expect(errors).toEqual([]);
+      const prop = findProperty(model, "Cart", "total");
+      expect(prop.provenanced).toBe(true);
+      expect(prop.access).toBe("managed");
     });
 
-    it("is a PARSE error when written after a `= default`", async () => {
+    it("parses with all three flags in a third order (access, provenanced, sensitivity)", async () => {
+      const src = aggWith("total: int managed provenanced sensitive(pii, phi)");
+      const { model, errors } = await parseModel(src);
+      expect(errors).toEqual([]);
+      const prop = findProperty(model, "Cart", "total");
+      expect(prop.provenanced).toBe(true);
+      expect(prop.access).toBe("managed");
+      expect(prop.sensitivity?.tags).toEqual(["pii", "phi"]);
+    });
+
+    it("is still a PARSE error when written after a `= default`", async () => {
+      // `default` / `check` stay fixed-last — not part of the reorderable
+      // flag set (see the block comment above).
       const src = aggWith("total: int = 0 provenanced");
       const { errors } = await parseModel(src);
       expect(errors.length).toBeGreaterThan(0);

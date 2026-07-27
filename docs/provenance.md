@@ -39,21 +39,27 @@ The grammar admits `provenanced` on any stored property; the
 validator rejects it on `derived` properties (their value is
 recomputed, not assigned).
 
-**Modifier order is fixed, and `provenanced` goes first.** A property's
-optional modifiers parse in exactly one order: `type (provenanced)?
-(sensitive(...))? (access)? (= default)? (check ...)?` (see
-[`language.md`](language.md)'s property-grammar row). Marking an
-*existing* field provenanced by appending the keyword at the end —
-after `sensitive(...)`, an access modifier like `managed`, or a `=
-default` — is a **parse error**, not a validator warning:
+**`provenanced` / `sensitive(...)` / the access modifier parse in any
+order.** Marking an *existing* `sensitive(...)` or access-modified field
+provenanced by appending the keyword at the end just works:
 
 ```ddd
-total: int sensitive(pii) provenanced   // ✗ parse error: Expecting token of type '}'
-total: int provenanced sensitive(pii)   // ✓ provenanced goes right after the type
+total: int sensitive(pii) provenanced   // ✓
+total: int provenanced sensitive(pii)   // ✓ — same meaning, either order
+total: int managed provenanced          // ✓
 ```
 
-The fix is always to move `provenanced` immediately after the type,
-never to append it.
+`= default` and `check ...` still must come **after** all three flags
+(see [`language.md`](language.md)'s property-grammar row) — `default`'s
+expression can end in a bare identifier, and the access-modifier names
+(`managed`, `secret`, …) double as valid identifiers, so a flag keyword
+left unconsumed after an in-progress default risks the expression
+greedily swallowing it:
+
+```ddd
+total: int = 0 provenanced   // ✗ parse error — provenanced can't follow a default
+total: int provenanced = 0   // ✓
+```
 
 ## Rule snapshots
 
