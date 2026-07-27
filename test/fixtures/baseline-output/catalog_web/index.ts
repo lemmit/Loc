@@ -6,6 +6,7 @@ import * as schema from "./db/schema";
 import { createApp } from "./http/index";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { baseLogger } from "./obs/log";
+import { shutdownTracing } from "./obs/tracing";
 
 // Persistence connection — owned by the drizzle PersistenceAdapter
 // (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).
@@ -60,6 +61,9 @@ async function shutdown(signal: string): Promise<void> {
   baseLogger.info({ event: "server_shutdown", signal });
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });
+  // Flush buffered OTel spans to the collector before exit (no-op when no
+  // OTLP endpoint is configured).
+  await shutdownTracing();
   await pool.end();
   process.exit(0);
 }

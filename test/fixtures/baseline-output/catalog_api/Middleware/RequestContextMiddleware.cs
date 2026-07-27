@@ -1,6 +1,7 @@
 // Auto-generated.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -52,11 +53,21 @@ public sealed class RequestContextMiddleware
         {
             rootFrame.ExpectedVersion = __expectedVersion;
         }
+        // Project the frame onto the request's OTel SERVER span (M-T7.1): the
+        // AspNetCore instrumentation started Activity.Current before this
+        // middleware, so stamp the loom.* ids onto it, and thread its
+        // trace_id/span_id onto the log scope so every request-scoped line
+        // joins to its trace (log<->trace correlation).
+        var activity = Activity.Current;
+        activity?.SetTag("loom.correlation_id", correlationId);
+        activity?.SetTag("loom.scope_id", rootFrame.ScopeId);
         using (RequestContext.Enter(rootFrame))
         using (log.BeginScope(new Dictionary<string, object?>
         {
             ["correlationId"] = correlationId,
             ["scopeId"] = rootFrame.ScopeId,
+            ["traceId"] = activity?.TraceId.ToString(),
+            ["spanId"] = activity?.SpanId.ToString(),
         }))
         {
             await _next(ctx);

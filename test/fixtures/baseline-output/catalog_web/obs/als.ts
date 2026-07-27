@@ -31,6 +31,11 @@ export interface RequestContext {
   scopeId: string;
   /** Parent frame id — null at the root frame. */
   parentId: string | null;
+  /** The request's OTel trace id (hex) — the log↔trace join key stamped onto
+   *  every request-scoped line beside scope_id.  Constant for the request. */
+  traceId: string;
+  /** The request SERVER span's id (hex).  Constant for the request. */
+  spanId: string;
   /** The per-request child logger (the logger slice). */
   log: RequestLogger;
 }

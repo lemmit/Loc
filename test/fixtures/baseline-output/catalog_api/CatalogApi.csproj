@@ -72,6 +72,13 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+    <!-- OpenTelemetry tracing (M-T7.1): AspNetCore instrumentation gives a
+         SERVER span per request; exported via OTLP/HTTP only when a collector
+         endpoint is set (Program.cs).  1.17.x clears the NU1902 advisories on
+         the older 1.10/1.12 lines. -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
     <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
