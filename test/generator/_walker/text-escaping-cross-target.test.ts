@@ -180,6 +180,8 @@ const NON_TEXT_PRIMITIVES: Record<string, string> = {
   Action: "action primitive — no body text literal",
   IdLink: "renders a ref link, not a text literal",
   FileLink: "renders a FileRef value (url/key), not a caller text literal",
+  ProvenanceInfo:
+    "renders a lineage disclosure over `<field>_provenance`, not a caller text literal",
   QueryView: "query-driven region — no caller text literal",
   For: "list comprehension — item text via bindings",
   CreateForm: "form shell — no body text literal",

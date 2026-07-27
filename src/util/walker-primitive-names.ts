@@ -75,6 +75,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "EnumBadge",
   "IdLink",
   "FileLink",
+  "ProvenanceInfo",
   "Skeleton",
   "Alert",
   "QueryView",

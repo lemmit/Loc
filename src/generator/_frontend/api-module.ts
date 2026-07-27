@@ -57,6 +57,23 @@ export interface ApiModuleOptions {
    *  `"@tanstack/react-query"` (default, byte-identical to the
    *  pre-extraction React output) or `"@tanstack/vue-query"`. */
   queryPackage?: string;
+  /** Whether a provenanced field's co-located `<field>_provenance` lineage
+   *  sibling rides the `<Agg>Response` schema (the frontend twin of the Hono
+   *  `toWire` append — docs/provenance.md).  React-first: only the React
+   *  generator sets this, so the other frontends stay byte-identical (their
+   *  `ProvenanceInfo` primitive falls through to a comment).  Requires the
+   *  shared lib to export `provLineageSchema` (`../lib/schemas`). */
+  carryProvenance?: boolean;
+}
+
+/** True iff the aggregate (root or a part) declares a `provenanced` field —
+ *  the gate for surfacing the lineage sibling on the wire + importing
+ *  `provLineageSchema`. */
+function aggregateHasProvenanced(agg: EnrichedAggregateIR): boolean {
+  return (
+    agg.fields.some((f) => f.provenanced) ||
+    agg.parts.some((p) => p.fields.some((f) => f.provenanced))
+  );
 }
 
 export function buildApiModule(
@@ -66,6 +83,9 @@ export function buildApiModule(
   options: ApiModuleOptions = {},
 ): string {
   const queryPackage = options.queryPackage ?? "@tanstack/react-query";
+  // Provenance lineage rides the response schema only when the caller opts in
+  // (React) AND this aggregate actually has a provenanced field.
+  const carryProv = (options.carryProvenance ?? false) && aggregateHasProvenanced(agg);
   // Vue's reactivity is pull-based: a parameterised `find` query takes a
   // `MaybeRefOrGetter` so a bound filter input live-refetches (React
   // re-renders and passes fresh args every render — no wrapper needed).
@@ -91,6 +111,11 @@ export function buildApiModule(
     // route reference this helper rather than redeclaring the
     // string-to-Decimal transform per field.
     lines.push(`import { moneySchema } from "../lib/schemas";`);
+  }
+  if (carryProv) {
+    // Shared provenance-lineage schema — the nullable `provLineageSchema`
+    // co-located sibling every provenanced response field references.
+    lines.push(`import { provLineageSchema } from "../lib/schemas";`);
   }
   lines.push("");
 
@@ -213,9 +238,9 @@ export function buildApiModule(
   // before the root references them — and a nested part before the sibling
   // that references it (`z.array(LabelResponse)`), hence children-first.
   for (const part of partsChildrenFirst(agg.parts)) {
-    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
+    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false, carryProv));
   }
-  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
+  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true, carryProv));
   lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
   lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
   // Paged response DTOs (P3b) — one per distinct `<carrier> paged` find return.
@@ -619,6 +644,7 @@ function emitResponseSchema(
   ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
+  carryProvenance = false,
 ): string[] {
   const lines: string[] = [];
   const name = `${ent.name}Response`;
@@ -637,6 +663,16 @@ function emitResponseSchema(
       lines.push(`  ${wf.name}: z.string(),`);
     } else {
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
+    }
+  }
+  // Co-located provenance lineage rides the wire DTO after the regular fields —
+  // mirrors the Hono `toWire` append (repository-wire-builder.ts) and the .NET
+  // `<Field>Provenance` DTO key, so the frontend type carries the lineage a
+  // `ProvenanceInfo` disclosure reads.  Nullish: absent on backends that don't
+  // capture lineage (Python/Java) and on the create side.
+  if (carryProvenance) {
+    for (const f of ent.fields.filter((f) => f.provenanced)) {
+      lines.push(`  ${f.name}_provenance: provLineageSchema.nullish(),`);
     }
   }
   lines.push(`});`);

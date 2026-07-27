@@ -149,6 +149,7 @@ import {
   emitTabs,
   emitToolbar,
 } from "./primitives/layout.js";
+import { emitProvenanceInfo } from "./primitives/provenance-info.js";
 import { emitTable } from "./primitives/table.js";
 import {
   emitAnchor,
@@ -542,6 +543,19 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     tsx: emitFileLink,
     heex: renderFileLinkHeex,
     a11y: { needsName: true },
+  },
+  // A "?" disclosure over a `provenanced` field's lineage — a native
+  // `<details>`/`<summary>` (no design-pack component, no client state) that
+  // expands to the rule id + computed value + the input list that produced the
+  // value.  React-first: the TSX renderer emits the disclosure for the react
+  // target and falls through to a visible comment on the other JSX frontends;
+  // HEEx is intentionally absent (pinned in heex-parity's KNOWN_HEEX_GAPS).
+  // Native disclosure carries its own semantics — no ARIA obligation.
+  ProvenanceInfo: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitProvenanceInfo,
+    a11y: "presentational",
   },
   // Loading placeholder — content hidden from AT (aria-busy) while pending.
   Skeleton: {

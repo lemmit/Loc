@@ -175,10 +175,15 @@ function invokedNames(model: Model): Set<string> {
  *  until it's backfilled across the other frontends and can join the shared
  *  fixture.
  *
- *  EMPTY — `FileUpload` now renders on every frontend (the four JSX packs plus
- *  the LiveView-native HEEx `allow_upload` flow), so it's exercised in
- *  `showcase.ddd` like every other primitive. */
-const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set([]);
+ *  `ProvenanceInfo` — the provenance "?" disclosure — is React-only today
+ *  (native `<details>` over `<field>_provenance`; the other frontends render a
+ *  comment). Putting a `provenanced` field in `showcase.ddd` would also add the
+ *  provenance runtime to all five cross-backend deployables (changing every
+ *  conformance dimension, like `TenancyDecl`/`Projection`), and it's covered by
+ *  `examples/provenance.ddd` + `web/src/examples/provenance-system.ddd`. The
+ *  cross-frontend backfill is tracked by M-T1.19 (docs/new-plan/T1-ui-frontend.md);
+ *  drop this entry when it lands. */
+const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set(["ProvenanceInfo"]);
 
 describe("conformance: showcase.ddd completeness", () => {
   it(`parses and validates ${SHOWCASE} with no errors`, async () => {

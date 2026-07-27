@@ -624,6 +624,15 @@ export interface WalkerTarget {
    *  guard.  Phoenix/HEEx renders through its own parallel walker, not this. */
   renderFileLink?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for `ProvenanceInfo(of: <record>,
+   *  field: <name>)`.  The shared `emitProvenanceInfo` delegates here first; a
+   *  non-null return is used verbatim.  React renders a native `<details>`
+   *  disclosure inline (no override); the other JSX frontends omit it and fall
+   *  through to a visible comment (the value still renders, only the "?" is
+   *  absent — React-first).  A future Feliz port would fork here to emit the
+   *  F# disclosure the way `renderFileLink` forks `Html.a`. */
+  renderProvenanceInfo?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
    *  shared `emitDestroyForm` delegates here first; a non-null return is used
    *  verbatim and the shared path (which records an `actionMutations` sink +

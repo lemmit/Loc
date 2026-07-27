@@ -12,6 +12,7 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -32,7 +33,9 @@ import {
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
   REACT_LIB_APPLY_SERVER_ERRORS_TS,
+  REACT_LIB_PROV_LINEAGE_BLOCK,
   REACT_LIB_SCHEMAS_MONEY_TS,
+  REACT_LIB_SCHEMAS_PROV_TS,
   REACT_LIB_STRICT_FIELD_MAP_TS,
 } from "./emit-templates.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
@@ -169,7 +172,10 @@ export function generateReactForContexts(
   // `ui.pages` for both pages and page-objects (single source).
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
+    out.set(
+      `src/api/${lowerFirst(agg.name)}.ts`,
+      buildApiModule(agg, repo, ctx, { carryProvenance: true }),
+    );
   }
 
   const workflows = allWorkflows(contexts);
@@ -390,13 +396,23 @@ export function generateReactForContexts(
   // pulled in when at least one served context uses a money field /
   // expression.  Mirrors the Hono backend's conditional dep gate.
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
-  // Shared `moneySchema` helper — single home for the precise-
-  // decimal wire shape; every api/workflow module references
-  // it rather than redeclaring the string-to-Decimal transform per
-  // field.  Surfaces parse failures as typed Zod issues.  Emitted
-  // only when something in the project uses money.
-  if (usesMoney) {
-    out.set("src/lib/schemas.ts", REACT_LIB_SCHEMAS_MONEY_TS);
+  // Provenance surfaces the co-located lineage sibling on the wire (a
+  // `provLineageSchema` field on the provenanced aggregate's response), so the
+  // scaffold's `ProvenanceInfo` "?" disclosure has a typed lineage to read.
+  const usesProvenance = contextsHaveProvenancedField(contexts);
+  // Shared `src/lib/schemas.ts` — the precise-decimal `moneySchema` and/or the
+  // `provLineageSchema` lineage carrier.  A money-only project stays
+  // byte-identical (money template verbatim); provenance appends its export
+  // block (money already imports `z`) or, money-free, ships the standalone
+  // provenance file.  Emitted only when something in the project uses either.
+  if (usesMoney || usesProvenance) {
+    let schemas = usesMoney ? REACT_LIB_SCHEMAS_MONEY_TS : "";
+    if (usesProvenance) {
+      schemas = usesMoney
+        ? `${schemas}\n${REACT_LIB_PROV_LINEAGE_BLOCK}`
+        : REACT_LIB_SCHEMAS_PROV_TS;
+    }
+    out.set("src/lib/schemas.ts", schemas);
   }
   out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
