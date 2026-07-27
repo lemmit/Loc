@@ -1,0 +1,65 @@
+// Folded projection: a materialized read model folded from an
+// aggregate's own domain events.  `place()` emits OrderPlaced and `ship()`
+// emits OrderShipped; the `OrderBoard` projection subscribes to both and folds
+// them into a per-order read-model row (Ecto/EF/JPA/SQLAlchemy/Drizzle table +
+// pure fold handlers + a `GET /projections/OrderBoard` read controller).
+//
+// Exercises the cross-backend folded-projection emit that landed on all five
+// backends (per-backend tests under test/generator/*/*projection*): the
+// keyed read-model row schema (enum + datetime + id PK), the pure `on(e) { … }`
+// fold handlers, and the in-process dispatch that fans each emitted event to
+// the fold.  This is the compile-tier coverage the `projection` grammar family
+// previously lacked (no corpus row) — the reason `Projection`/`ProjectionOn`
+// are allowlisted out of the shared showcase fixture (test/conformance/
+// showcase-completeness.test.ts) rather than left un-gated.
+system ProjectionSys {
+  subdomain Orders {
+    context Orders {
+      enum BoardStatus { Placed Shipped }
+
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+        operation ship() {
+          precondition status == "Placed"
+          status := "Shipped"
+          emit OrderShipped { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced  { order: Order id, at: datetime }
+      event OrderShipped { order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, OrderShipped
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      // The folded read model — one row per order, updated as each event lands.
+      projection OrderBoard keyed by order {
+        order: Order id
+        status: BoardStatus
+        at: datetime
+        on(e: OrderPlaced)  { order := e.order  status := Placed   at := e.at }
+        on(e: OrderShipped) { status := Shipped  at := e.at }
+      }
+    }
+  }
+  api OrdersApi from Orders
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}
