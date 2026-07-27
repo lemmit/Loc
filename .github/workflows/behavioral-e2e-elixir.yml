@@ -46,7 +46,16 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # false, not true: GitHub always auto-cancels a QUEUED-but-not-started run in
+  # this group the moment a newer one lands, so this can't build a backlog —
+  # it only protects an already-RUNNING job from being killed mid-flight by
+  # the next push. With `true`, main's push cadence (a new commit roughly
+  # every 15-60 min) kept cancelling this job before the Erlang/OTP setup +
+  # `mix deps.get` + compile + boot sequence (15-20 min) ever finished, so it
+  # went ~2 days without a single non-cancelled run. Matches the pattern
+  # tenancy-e2e.yml / hono-oidc-e2e.yml already use to stay green under the
+  # same cadence.
+  cancel-in-progress: false
 
 jobs:
   behavioral-elixir:
