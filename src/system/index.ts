@@ -8,6 +8,12 @@ import {
   brokerChannelBindings,
   channelTransportStorageNames,
 } from "../generator/_channels/bindings.js";
+import {
+  collectorEndpoint,
+  OTEL_ENDPOINT_ENV,
+  OTEL_SERVICE_NAME_ENV,
+  TRACE_COLLECTOR,
+} from "../generator/_obs/tracing.js";
 import { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import { E2E_FIXTURES_TS } from "../generator/react/emit-templates.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
@@ -669,6 +675,16 @@ function renderDockerCompose(sys: SystemIR): string {
     lines.push("    ports:");
     lines.push('      - "9090:9090"');
     lines.push("");
+    // OTel trace collector (M-T7.1): jaeger all-in-one accepts OTLP directly
+    // and ships a query UI, so `docker compose up` gives a running trace
+    // surface out of the box (the trace twin of the Prometheus UI on :9090).
+    // Every backend's OTEL_EXPORTER_OTLP_ENDPOINT points here.  No depends_on —
+    // the OTLP batch exporter retries, so backends tolerate it being down.
+    lines.push(`  ${TRACE_COLLECTOR.service}:`);
+    lines.push(`    image: ${TRACE_COLLECTOR.image}`);
+    lines.push("    ports:");
+    lines.push(`      - "${TRACE_COLLECTOR.uiPort}:${TRACE_COLLECTOR.uiPort}"`);
+    lines.push("");
   }
   lines.push("volumes:");
   lines.push("  pgdata: {}");
@@ -1040,6 +1056,13 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     if (origins.length > 0) {
       lines.push(`    CORS_ORIGIN: ${JSON.stringify(origins.join(","))}`);
     }
+    // OpenTelemetry export (M-T7.1): point every backend at the bundled
+    // jaeger collector so `docker compose up` gives a running trace surface
+    // out of the box.  `OTEL_SERVICE_NAME` groups the deployable's spans in
+    // the trace UI.  Backends create spans regardless; setting the endpoint
+    // is what turns EXPORT on.
+    lines.push(`    ${OTEL_ENDPOINT_ENV}: ${JSON.stringify(collectorEndpoint())}`);
+    lines.push(`    ${OTEL_SERVICE_NAME_ENV}: ${JSON.stringify(slug)}`);
   }
   // Same-origin proxy target for a vite-served frontend.  Its bundle fetches
   // `/api` relative, and `vite preview` proxies that to the backend — but
