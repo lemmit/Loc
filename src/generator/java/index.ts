@@ -30,6 +30,7 @@ import {
 } from "../../ir/util/aggregate-flags.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
+import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
@@ -55,7 +56,7 @@ import type {
   JavaArtifactCategory,
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
-import { emitJavaResourceFiles } from "./adapters/resource-clients.js";
+import { emitJavaResourceFiles, javaResourceClassName } from "./adapters/resource-clients.js";
 import { inlineRunBypassesByRetrieval, promotedCapabilities } from "./capability-filter.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import {
@@ -79,6 +80,7 @@ import {
   renderDisallowedException,
   renderDomainEventInterface,
   renderDomainException,
+  renderFileRefRecord,
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
@@ -114,6 +116,7 @@ import {
   renderApplicationYml,
   renderDockerfile,
   renderDockerignore,
+  renderFilesController,
   renderGradleBuild,
   renderGradleSettings,
   renderHealthController,
@@ -379,6 +382,26 @@ function emitProjectFromContexts(
     renderAggregateNotFoundException(basePkg),
   );
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
+  // File upload/download (M-T1.2): a hosted File field ⇒ emit the shared FileRef
+  // record; the bound objectStore ⇒ mount root POST /files / GET /files/{key}
+  // over its raw-bytes adapter.  The IR validator guarantees the objectStore
+  // binding.  File-free ⇒ nothing here fires (byte-identical).
+  if (contexts.some((c) => c.aggregates.some((a) => aggregateHasFileField(a)))) {
+    place("FileRef.java", "domain-common", renderFileRefRecord(basePkg));
+    const wired = new Set(system?.deployable.dataSourceNames ?? []);
+    const storeType = new Map((system?.sys.storages ?? []).map((s) => [s.name, s.type] as const));
+    const objStore = system?.sys.dataSources.find(
+      (r) => wired.has(r.name) && r.kind === "objectStore",
+    );
+    const st = objStore ? storeType.get(objStore.storageName) : undefined;
+    if (objStore && st) {
+      place(
+        "FilesController.java",
+        "controller",
+        renderFilesController(basePkg, javaResourceClassName(st), objStore.name),
+      );
+    }
+  }
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
   place("_Namespace.java", "valueobject", renderPackageMarker(pkgFor("valueobject")));

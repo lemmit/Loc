@@ -84,6 +84,23 @@ export function renderPagedRecord(basePkg: string): string {
   );
 }
 
+/** The shared `FileRef` wire/jsonb shape a `File` field round-trips
+ *  ({url, key, contentType, size}) — the object-store reference an upload
+ *  returns (M-T1.2).  Jackson serializes the record components by name, so the
+ *  wire JSON matches the Hono / other backends.  Emitted only when a hosted
+ *  aggregate declares a File field. */
+export function renderFileRefRecord(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `/** The {url, key, contentType, size} an object-store upload returns for a`,
+    ` *  \`File\` field (M-T1.2). */`,
+    `public record FileRef(String url, String key, String contentType, long size) {`,
+    `}`,
+    ``,
+  );
+}
+
 /** Pure marker interface for aggregates carrying lifecycle-stamp audit
  *  columns (`with auditable` / a context `stamp`).  Zero members — runtime
  *  type identity only; the JPA auditing wiring keys off the field annotations

@@ -87,6 +87,25 @@ const s3JavaAdapter: JavaResourceAdapter = {
         `        ${n}Client.deleteObject(DeleteObjectRequest.builder().bucket(${n}Bucket).key(key).build());`,
         `    }`,
         ``,
+        // Raw-bytes verbs — the File upload/download endpoints' storage seam
+        // (M-T1.2).  Unlike Put/Get (JSON strings), these store the exact bytes
+        // with their contentType so a download streams back byte-identical.
+        `    public static void ${n}PutBytes(String key, byte[] body, String contentType) {`,
+        `        ${n}Client.putObject(`,
+        `            PutObjectRequest.builder().bucket(${n}Bucket).key(key).contentType(contentType).build(),`,
+        `            RequestBody.fromBytes(body));`,
+        `    }`,
+        ``,
+        `    public static ObjectBytes ${n}GetBytes(String key) {`,
+        `        try {`,
+        `            var res = ${n}Client.getObjectAsBytes(GetObjectRequest.builder().bucket(${n}Bucket).key(key).build());`,
+        `            var ct = res.response().contentType();`,
+        `            return new ObjectBytes(res.asByteArray(), ct != null ? ct : "application/octet-stream");`,
+        `        } catch (NoSuchKeyException e) {`,
+        `            return null;`,
+        `        }`,
+        `    }`,
+        ``,
       ];
     });
     while (blocks[blocks.length - 1] === "") blocks.pop();
@@ -109,6 +128,10 @@ const s3JavaAdapter: JavaResourceAdapter = {
       ``,
       `public final class S3Resources {`,
       `    private S3Resources() {`,
+      `    }`,
+      ``,
+      `    /** Raw object bytes + their stored content-type (M-T1.2). */`,
+      `    public record ObjectBytes(byte[] bytes, String contentType) {`,
       `    }`,
       ``,
       ...blocks,
@@ -437,8 +460,118 @@ const sendgridJavaAdapter: JavaResourceAdapter = {
   },
 };
 
+/** localDisk — a dependency-free local-directory object store (M-T1.2), the
+ *  Java twin of Hono's / Python's / .NET's localDisk adapter.  Stores each
+ *  object's raw bytes under a data dir keyed by `key`, plus a `<key>.meta`
+ *  sidecar carrying the contentType so a download round-trips its metadata.
+ *  Backs the File upload/download endpoints with no cloud SDK (`java.nio`). */
+const localDiskJavaAdapter: JavaResourceAdapter = {
+  name: "localDisk",
+  gradleDeps: () => ({}),
+  emitClientClass(resources, _stores, pkg): string {
+    const blocks = resources.flatMap((r) => {
+      const n = r.name;
+      return [
+        `    private static final Path ${n}Dir =`,
+        `        Path.of(System.getenv().getOrDefault("${envVar(n).replace(/_URL$/, "")}_DIR", "data/${n}"));`,
+        ``,
+        // Guard against path traversal: minted keys are UUIDs, but a
+        // GET /files/{key} param is caller-supplied, so keep it inside the dir.
+        `    private static Path ${n}Path(String key) {`,
+        `        return ${n}Dir.resolve(key.replaceAll("[^A-Za-z0-9._-]", "_"));`,
+        `    }`,
+        ``,
+        // Raw-bytes verbs — the File endpoints' storage seam.
+        `    public static void ${n}PutBytes(String key, byte[] body, String contentType) {`,
+        `        try {`,
+        `            Files.createDirectories(${n}Dir);`,
+        `            var path = ${n}Path(key);`,
+        `            Files.write(path, body);`,
+        `            Files.writeString(Path.of(path + ".meta"), contentType);`,
+        `        } catch (IOException e) {`,
+        `            throw new UncheckedIOException(e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    public static ObjectBytes ${n}GetBytes(String key) {`,
+        `        try {`,
+        `            var path = ${n}Path(key);`,
+        `            if (!Files.exists(path)) {`,
+        `                return null;`,
+        `            }`,
+        `            var meta = Path.of(path + ".meta");`,
+        `            var contentType = Files.exists(meta) ? Files.readString(meta) : "application/octet-stream";`,
+        `            return new ObjectBytes(Files.readAllBytes(path), contentType);`,
+        `        } catch (IOException e) {`,
+        `            throw new UncheckedIOException(e);`,
+        `        }`,
+        `    }`,
+        ``,
+        // Vendor-neutral JSON verbs (parity with s3's Put/Get/List/Delete) so
+        // workflow bodies reaching the store keep working against localDisk.
+        `    public static void ${n}Put(String key, String body) {`,
+        `        ${n}PutBytes(key, body.getBytes(StandardCharsets.UTF_8), "application/json");`,
+        `    }`,
+        ``,
+        `    public static String ${n}Get(String key) {`,
+        `        var obj = ${n}GetBytes(key);`,
+        `        return obj == null ? null : new String(obj.bytes(), StandardCharsets.UTF_8);`,
+        `    }`,
+        ``,
+        `    public static List<String> ${n}List(String prefix) {`,
+        `        if (!Files.isDirectory(${n}Dir)) {`,
+        `            return List.of();`,
+        `        }`,
+        `        try (var stream = Files.list(${n}Dir)) {`,
+        `            return stream.map(p -> p.getFileName().toString())`,
+        `                .filter(name -> !name.endsWith(".meta") && name.startsWith(prefix))`,
+        `                .toList();`,
+        `        } catch (IOException e) {`,
+        `            throw new UncheckedIOException(e);`,
+        `        }`,
+        `    }`,
+        ``,
+        `    public static void ${n}Delete(String key) {`,
+        `        try {`,
+        `            var path = ${n}Path(key);`,
+        `            Files.deleteIfExists(path);`,
+        `            Files.deleteIfExists(Path.of(path + ".meta"));`,
+        `        } catch (IOException e) {`,
+        `            throw new UncheckedIOException(e);`,
+        `        }`,
+        `    }`,
+        ``,
+      ];
+    });
+    while (blocks[blocks.length - 1] === "") blocks.pop();
+    return lines(
+      `package ${pkg};`,
+      ``,
+      `import java.io.IOException;`,
+      `import java.io.UncheckedIOException;`,
+      `import java.nio.charset.StandardCharsets;`,
+      `import java.nio.file.Files;`,
+      `import java.nio.file.Path;`,
+      `import java.util.List;`,
+      ``,
+      `public final class LocalDiskResources {`,
+      `    private LocalDiskResources() {`,
+      `    }`,
+      ``,
+      `    /** Raw object bytes + their stored content-type (M-T1.2). */`,
+      `    public record ObjectBytes(byte[] bytes, String contentType) {`,
+      `    }`,
+      ``,
+      ...blocks,
+      `}`,
+      ``,
+    );
+  },
+};
+
 const ADAPTERS: readonly JavaResourceAdapter[] = [
   s3JavaAdapter,
+  localDiskJavaAdapter,
   rabbitmqJavaAdapter,
   restApiJavaAdapter,
   smtpJavaAdapter,

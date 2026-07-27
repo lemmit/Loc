@@ -40,6 +40,10 @@ export function wireJavaType(t: TypeIR, dir: WireDir, boxed = false): string {
           return "UUID";
         case "json":
           return "JsonNode";
+        case "File":
+          // Passive wire-only leaf — the shared FileRef record is both the
+          // domain and the wire shape, so no conversion (M-T1.2).
+          return "FileRef";
       }
       return "Object";
     case "id":

@@ -1,0 +1,34 @@
+// File upload/download on Java/Spring (M-T1.2 slice 2c).  A `File` field stores
+// its FileRef ({url,key,contentType,size}) in a jsonb column (@JdbcTypeCode);
+// the deployable serves app-level POST /files / GET /files/{key} over the bound
+// localDisk objectStore's raw-bytes adapter.  Compiling this proves File is real
+// on Java end-to-end (FileRef record + jsonb column + upload controller) —
+// the domain/JPA/DTO never compiled with a File field before (FileRef undefined,
+// the wire mapper fell through to Object).
+system FileUploadSys {
+  subdomain Docs {
+    context Docs {
+      aggregate Doc {
+        title: string
+        attachment: File
+      }
+      repository Docs for Doc { }
+    }
+  }
+
+  api DocsApi from Docs
+
+  storage pg   { type: postgres }
+  storage disk { type: localDisk }
+
+  resource docState { for: Docs, kind: state,       use: pg }
+  resource docFiles { for: Docs, kind: objectStore, use: disk }
+
+  deployable fuApi {
+    platform: java
+    contexts: [Docs]
+    dataSources: [docState, docFiles]
+    serves: DocsApi
+    port: 8080
+  }
+}
