@@ -97,44 +97,55 @@ const ALLOWLIST = new Set<string>([
   // Tenancy-izing the showcase is a deliberate follow-up, not a drive-by
   // (docs/old/plans/multi-tenancy-implementation.md).
   "TenancyDecl",
-  // Projections are MID-FLIGHT (v1 slice 2 landed the Hono runtime only —
-  // #1732); the other four backends don't consume them yet, and showcase.ddd
-  // feeds every cross-backend matrix, so exercising `projection` here would
-  // trip the unsupported-platform paths rather than add a conformance
-  // dimension. The projection work owns removing these two entries when the
-  // feature is showcase-ready (this allowlisting unbroke main after the
-  // grammar kinds landed without showcase coverage — a cross-PR semantic
-  // conflict this HARD_GATE is designed to surface).
+  // Folded projections (materialized read models folded from events) now emit
+  // on ALL FIVE backends — read-model row schema, migration, pure `on(e){…}`
+  // fold handlers, and the `GET /projections/<name>` read controller (verified
+  // by generation; per-backend tests under test/generator/*/*projection*).
+  // They stay OUT of the shared showcase fixture, not because any backend
+  // can't emit them, but because showcase feeds the STRICT cross-backend
+  // OpenAPI-parity gate (conformance-parity, LOOM_E2E_STRICT_PARITY) plus every
+  // frontend/backend build matrix: adding a projection's read-model + read
+  // route to the ONE shared system would perturb every conformance dimension
+  // (and risk parity drift on the new endpoints) rather than add one honestly.
+  // Dedicated compile-tier coverage lives in test/fixtures/corpus/projection.ddd
+  // (backends: ALL), the same isolation reason `TenancyDecl` uses above.
   "Projection",
   "ProjectionOn",
   // The query-time projection comprehension (read-path-architecture.md rev.13,
   // § "projection generalises") — `join <Agg> as <c> on <idRef>` follows and
-  // `select <field> = <expr>` projections.  Surface + IR + validation only:
-  // a query-time / `join` projection is HONESTLY rejected
-  // (`loom.projection-query-time-unsupported`) until a backend ports the emit,
-  // so putting one in showcase.ddd (which feeds every cross-backend matrix)
-  // would trip that gate rather than add a conformance dimension.  The
-  // query-time emit slice owns removing these two entries when it lands (same
-  // cross-PR pattern as `Projection` above).
+  // `select <field> = <expr>` projections.  The query-time emit has since
+  // landed on all five backends (node/python/elixir/java/dotnet); the
+  // `loom.projection-query-time-unsupported` gate now only fires for a
+  // hypothetical future backend that hasn't ported it (belt-and-suspenders,
+  // not a live gap).  Excluded from the shared showcase for the same
+  // parity/blast-radius reason as folded `Projection` above.
   "ProjectionJoin",
   "ProjectionSelect",
   // `policy {}` (+ its `PolicyReadRule` rows) is the tenant read-reachability
-  // ladder (multi-tenancy Phase 2 P2.4): it only validates on a `tenancy by`
-  // system with `tenantOwned` aggregates (`deep`/`global` also need an
-  // `implements tenantRegistry` hierarchy).  Adding it to showcase.ddd would
+  // ladder (multi-tenancy Phase 2 P2.4).  It is NOT grammar-only — enrichment
+  // (`applyPolicyReadLevels`/`applyPolicyWriteLevels`/`applyPolicyDenies`)
+  // rewrites each aggregate's `tenantOwned` scope stance from the ladder, which
+  // every backend then emits into its generated tenant filters; the rows are
+  // validated by the `loom.policy-*` gates.  It only validates on a `tenancy
+  // by` system with `tenantOwned` aggregates (`deep`/`global` also need an
+  // `implements tenantRegistry` hierarchy), so adding it to showcase.ddd would
   // require tenancy-izing the whole fixture — the same reason `TenancyDecl` is
-  // excluded above.  Covered by test/ir/policy-read-levels.test.ts +
-  // test/generator/policy-deep-scope.test.ts instead.
+  // excluded above.  Covered end-to-end across all five backends by
+  // test/fixtures/corpus/tenancy-hierarchy.ddd (the `policy` deep/global/local
+  // read ladder), plus test/ir/policy-read-levels.test.ts +
+  // test/generator/policy-deep-scope.test.ts.
   "PolicyDecl",
   "PolicyReadRule",
   // The explicit application/transport layer (unfoldable-api-derivation.md) —
   // `commandHandler`/`queryHandler` context members and `route <M> <P> ->
-  // Context.Handler` api bindings. This is the GRAMMAR+IR slice only: the nodes
-  // ride alongside `ApiIR`/`BoundedContextIR` and no backend reads them yet, so
-  // exercising them in showcase.ddd would add zero conformance dimension while
-  // the `scaffoldApi(...)` scaffold + per-backend route/handler emission are
-  // still unbuilt. The codegen slice owns removing these four entries when the
-  // feature is showcase-ready (same cross-PR pattern as `Projection` above).
+  // Context.Handler` api bindings.  These now EMIT on all five backends: each
+  // `src/generator/<backend>/explicit-handlers-emit.ts` renders the dispatch +
+  // the `route` binding into per-backend HTTP routes, and an `extern` handler
+  // scaffolds a user-owned impl once.  They stay out of the shared showcase for
+  // the SAME strict-OpenAPI-parity / build-matrix blast-radius reason as
+  // `Projection` above (a `route` adds a parity-checked endpoint to the one
+  // shared system).  Dedicated compile-tier coverage on all five backends is
+  // test/fixtures/corpus/extern-handlers.ddd (backends: ALL).
   "CommandHandler",
   "QueryHandler",
   "Route",

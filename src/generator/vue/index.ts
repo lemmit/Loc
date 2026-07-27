@@ -603,16 +603,23 @@ function pageComponentName(page: PageIR): string {
     .join("");
 }
 
+/** A routed page that declares NO `body:` — an intentionally-empty page
+ *  (route + title, no content).  Vue's router imports a component for every
+ *  routed page, so this shell keeps the import resolvable; the pages WITH a
+ *  body walk through the shared markup walker above (`walkBody`), same as every
+ *  other frontend.  (React/Svelte instead drop a bodyless page from both the
+ *  route table and the file set; Vue keeps the route so its behaviour is
+ *  visible rather than silently missing.)  No corpus/example page is bodyless,
+ *  so this shell is a defensive fallback, not a walker gap. */
 function renderPageStub(page: PageIR): string {
   const title = staticTitleOf(page) ?? humanize(page.name);
   const slug = snake(page.name).replace(/_/g, "-");
-  return `<!-- Auto-generated. -->
+  return `<!-- Auto-generated: routed page with no \`body:\` — empty by declaration. -->
 <script setup lang="ts"></script>
 
 <template>
   <div data-testid="page-${slug}">
     <h2 class="text-h5">${escapeHtml(title)}</h2>
-    <!-- TODO(vue-walker): page body renders through the shared markup walker in the next slice -->
   </div>
 </template>
 `;
