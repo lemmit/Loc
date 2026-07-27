@@ -138,14 +138,39 @@ describe("ProvenanceInfo — Angular renders an `@if (…; as prov)` disclosure"
   });
 });
 
+describe("ProvenanceInfo — Feliz renders an F# `Html.details` disclosure", () => {
+  it("carries the lineage as an F# ProvLineage record + Thoth decoder", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("feliz")));
+    expect(out).toContain("type ProvLineage =");
+    expect(out).toContain("let provLineageDecoder : Decoder<ProvLineage> =");
+    // The Order record field + its optional decode.
+    expect(out).toContain("total_provenance: ProvLineage option");
+    expect(out).toContain(
+      'total_provenance = get.Optional.Field "total_provenance" provLineageDecoder',
+    );
+  });
+
+  it("renders the disclosure (Some/None match over the lineage option)", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("feliz")));
+    expect(out).toMatch(/match [\w.]+\.total_provenance with Some __p -> Html\.details/);
+    expect(out).toContain('Html.details [ prop.className "loom-provenance"');
+    expect(out).toContain("for __i in __p.inputs");
+    // The scaffold's Group wrapper is paren-wrapped (the walker fix that
+    // unblocked Feliz) — otherwise Fable rejects the nested container.
+    expect(out).toContain(
+      'prop.children [ (Html.div [ prop.className "flex flex-row flex-wrap items-center gap-2"',
+    );
+  });
+});
+
 describe("ProvenanceInfo — not-yet-ported frontends degrade honestly (value only)", () => {
-  for (const frontend of ["feliz"]) {
+  for (const frontend of ["flutter"]) {
     it(`${frontend}: the "?" falls through to a comment and the lineage is not carried`, async () => {
       const out = allFiles(await generateSystemFiles(provScaffoldSystem(frontend)));
       // The primitive comments itself out — the value still renders.
       expect(out).toContain(`provenance disclosure not yet supported on ${frontend}`);
       // No lineage carrier on the FRONTEND: `provLineageSchema` is unique to the
-      // ported JSX frontends — the backend's own lineage column/DTO
+      // ported zod frontends — the backend's own lineage column/DTO
       // (`total_provenance`, `ProvLineage`) is emitted regardless of frontend, so
       // it's the camelCase schema name that must be absent here.
       expect(out).not.toContain("provLineageSchema");

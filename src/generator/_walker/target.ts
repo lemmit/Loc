@@ -629,11 +629,9 @@ export interface WalkerTarget {
    *  non-null return is used verbatim.  The JSX family (React/Vue/Svelte/Angular)
    *  renders the disclosure directly from `emitProvenanceInfo`'s per-framework
    *  branch (no override); everything else falls through to a visible comment.
-   *
-   *  TODO(M-T1.19): this seam currently has ZERO implementers — it was added as
-   *  the Feliz fork point (the way `renderFileLink` forks `Html.a`), but that
-   *  port was reverted.  Remove it (and the `ctx.target.renderProvenanceInfo?.`
-   *  probe in `emitProvenanceInfo`) unless the Feliz/HEEx port lands and uses it. */
+   *  `felizTarget` forks here to emit the F# `Html.details` disclosure (a
+   *  `Some`/`None` match over the `ProvLineage option`), the way `renderFileLink`
+   *  forks `Html.a`. */
   renderProvenanceInfo?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
