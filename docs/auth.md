@@ -147,6 +147,52 @@ slice 1B — referencing a permission declared in another subdomain
 shows up as the same "no permission named 'X'" diagnostic as a
 typo.
 
+#### `implies` — permission grant hierarchy (authorization.md §6)
+
+A permission may declare that holding it transitively **grants** one or more
+others.  Single target omits the brackets; multiple targets require them:
+
+```ddd
+permissions {
+  read,
+  edit   implies read,        // holding `edit` grants `read`
+  approve implies edit,       // … and `approve` grants `edit` (so also `read`)
+  admin  implies [read, edit] // fan-out
+}
+```
+
+The transitive closure is **precomputed at lowering**; the runtime check stays a
+flat membership test.  A gate `currentUser.permissions.contains(permissions.read)`
+expands to an OR over `read` plus every permission that (transitively) implies
+it, so a caller holding `approve` or `edit` satisfies the `read` gate without the
+token carrying `read`:
+
+```ts
+// generated (Hono) — `read` gate on the `edit implies read`, `approve implies edit` catalogue
+if (!((currentUser.permissions).includes("m.read")
+   || (currentUser.permissions).includes("m.approve")
+   || (currentUser.permissions).includes("m.edit"))) throw new ForbiddenError("Forbidden: …");
+```
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.permission-implies-unknown` | an `implies` target names no permission declared in the subdomain |
+| `loom.permission-implies-self` | a permission `implies` itself (a no-op) |
+
+A mutual-implication cycle (`a implies b`, `b implies a`) is **allowed** — the
+two simply grant each other; the closure computation is cycle-safe.
+
+#### Policy decision-id (audit seam)
+
+Every authorization gate has a stable, deterministic **decision-id**
+(`policyDecisionId(qualifiedTarget, gateSource)` → `pd_<8-hex>`), derived purely
+from the gate's identity so an audit entry can reference *which* decision
+authorised an action and still resolve after a regeneration.  Gates are already
+IR-inspectable (each `requires` lowers to a `requires` StmtIR carrying its
+`source`), so the id is **derived on demand**, not stamped.  Its consumer — the
+strict-tier `AuditRecord.policyDecisionId` — lands with the audit-promotion
+mission; the stable formula is the seam that mission plugs into.
+
 ### `.contains(x)` on arrays
 
 Slice 1B introduces `.contains(x)` as a collection op (joining

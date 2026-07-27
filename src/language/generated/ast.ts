@@ -174,6 +174,7 @@ export type DddKeywordNames =
     | "ignoring"
     | "immutable"
     | "implements"
+    | "implies"
     | "import"
     | "in"
     | "inMemory"
@@ -2620,11 +2621,13 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
 export interface PermissionDecl extends langium.AstNode {
     readonly $container: PermissionsBlock;
     readonly $type: 'PermissionDecl';
+    implies: Array<string>;
     name: string;
 }
 
 export const PermissionDecl = {
     $type: 'PermissionDecl',
+    implies: 'implies',
     name: 'name'
 } as const;
 
@@ -6316,6 +6319,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         PermissionDecl: {
             name: PermissionDecl.$type,
             properties: {
+                implies: {
+                    name: PermissionDecl.implies,
+                    defaultValue: [],
+                    optional: true
+                },
                 name: {
                     name: PermissionDecl.name
                 }

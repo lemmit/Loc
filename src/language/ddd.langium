@@ -251,8 +251,17 @@ PermissionsBlock:
         (decls+=PermissionDecl (','? decls+=PermissionDecl)* ','?)?
     '}';
 
+// `edit implies read` / `admin implies [read, write]` — a permission may
+// declare that holding it transitively grants one or more OTHER permissions.
+// The implied targets are bare `ID`s resolved by name against the sibling
+// catalogue in IR validation (`loom.permission-implies-*`), like the `policy`
+// target precedent — no Langium cross-reference / scope-provider change.  The
+// single form omits the brackets (`implies read`); the multi form requires
+// them (`implies [read, write]`) so the optional-comma outer separator stays
+// unambiguous.  The transitive closure is precomputed at lowering; the runtime
+// authorization check stays a flat membership test (an OR of the closure).
 PermissionDecl:
-    name=ID;
+    name=ID ('implies' ('[' implies+=ID (',' implies+=ID)* ']' | implies+=ID))?;
 
 Deployable:
     'deployable' name=LooseName '{'
