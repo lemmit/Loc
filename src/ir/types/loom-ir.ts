@@ -531,6 +531,12 @@ export interface WireField {
    * and `"derived"` it is `"editable"` until a real case demands
    * otherwise. */
   access: FieldAccess;
+  /** Read-mask predicate (`field: T mask unless <expr>`, authorization.md §5)
+   * carried through from the originating `FieldIR.maskUnless` for `source:
+   * "property"` fields.  A `currentUser`-only boolean: when it evaluates false
+   * for the caller, the field is REDACTED (null) on the wire.  Absent = the
+   * field is always visible.  Every wire consumer that redacts reads this. */
+  maskUnless?: ExprIR;
 }
 
 export interface AggregateIR {

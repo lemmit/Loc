@@ -466,17 +466,35 @@ The predicate is a **bool** and, like a `requires` gate, references only
 `currentUser` (+ constants) — it is evaluated at read projection as a param-free
 caller check, never against the row.
 
-**Status — foundation slice (M-T3.2 item 6).** The surface (grammar + IR +
-`mask`/`unless` printing), the validation, and the wire contract landed first;
-the per-backend DTO **read redaction** is the stacked follow-on. Until a backend
-emits the redaction, a `mask unless` field is a **compile error** on that backend
-(`loom.field-mask-unsupported`) rather than an unenforced no-op — a sensitive
-value never ships in the clear because the mask was declared but not yet emitted.
+**node** emits the redaction at the **response boundary**: every read route
+(GET `/:id`, each `find` shape) and explicit query-handler routes a masked
+aggregate through a `toWireMasked(root, currentUser)` serializer that redacts
+each masked field to `null` unless the caller satisfies its predicate —
+**fail-closed** (an unauthenticated request always redacts). The masked field is
+`.nullable()` in the response schema. Internal audit/provenance snapshots stay
+unmasked (they record the real value). A mask-free aggregate is byte-identical.
+
+```ts
+// generated (Hono) — the aggregate's read serializer
+toWireMasked(root: Person, currentUser: User | null): unknown {
+  const wire = this.toWire(root) as Record<string, unknown>;
+  if (!(currentUser !== null && ((currentUser.permissions).includes("hr.salaryUnmask")))) wire.salary = null;
+  return wire;
+}
+```
+
+**Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
+plus **node** read redaction, have shipped. The other four backends (.NET / Java
+/ Python / Elixir) still **compile-error** on a `mask unless` field
+(`loom.field-mask-unsupported`) rather than silently ship the value — a declared
+mask never leaks. The write-side (`write(...)` / `readonly when`) is the next
+slice.
 
 | Diagnostic | When |
 | --- | --- |
 | `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
-| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (all but node) |
+| `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
 | *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates

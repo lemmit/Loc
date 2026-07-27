@@ -6,13 +6,16 @@
 
 import { forApiRead, wireFieldsFor } from "../../ir/enrich/wire-projection.js";
 import type {
+  AggregateIR,
   BoundedContextIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   TypeIR,
+  WireField,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { renderTsExpr } from "./render-expr.js";
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
@@ -20,6 +23,42 @@ export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedConte
     `    return ${wireProjectionEntity(agg, "root", ctx)};`,
     `  }`,
   );
+}
+
+/** The read-masked wire fields of an aggregate (`field: T mask unless <expr>`,
+ *  authorization.md §5) — the API-read wire fields whose `maskUnless` predicate
+ *  is set.  Empty when the aggregate declares no field mask. */
+export function maskedWireFields(agg: AggregateIR): WireField[] {
+  return forApiRead(wireFieldsFor(agg)).filter((wf) => wf.maskUnless !== undefined);
+}
+
+/** True iff `agg` declares at least one `mask unless` field — the gate for
+ *  emitting `toWireMasked` and routing responses through it. */
+export function aggHasFieldMask(agg: AggregateIR): boolean {
+  return maskedWireFields(agg).length > 0;
+}
+
+/** `toWireMasked(root, currentUser)` — the response serializer for an aggregate
+ *  with `mask unless` fields.  Projects the full wire DTO via `toWire`, then
+ *  REDACTS each masked field to `null` unless the caller's `currentUser`
+ *  satisfies the field's predicate (an unauthenticated `currentUser === null`
+ *  always redacts — fail-closed).  Internal (non-response) `toWire` uses are
+ *  left unmasked; only response boundaries route through this.  Emitted only
+ *  when `aggHasFieldMask(agg)` — a mask-free aggregate stays byte-identical. */
+export function toWireMaskedMethod(agg: AggregateIR): string {
+  const masked = maskedWireFields(agg);
+  const body: string[] = [
+    `  toWireMasked(root: ${agg.name}, currentUser: User | null): unknown {`,
+    `    const wire = this.toWire(root) as Record<string, unknown>;`,
+  ];
+  for (const wf of masked) {
+    // `maskUnless` is a `currentUser`-only predicate; render it with the bare
+    // `currentUser` param in scope.  Guard the null caller before evaluating.
+    const pred = renderTsExpr(wf.maskUnless!, { thisName: "this", principalExpr: "currentUser" });
+    body.push(`    if (!(currentUser !== null && (${pred}))) wire.${wf.name} = null;`);
+  }
+  body.push(`    return wire;`, `  }`);
+  return lines(...body);
 }
 
 function wireProjectionEntity(

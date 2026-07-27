@@ -33,7 +33,7 @@ import { writeScopePredicate } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
-import { toWireMethod } from "./repository-wire-builder.js";
+import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
@@ -136,7 +136,9 @@ export function buildRepositoryFile(
   // the closure-captured Drizzle predicate reads.  Pull the User
   // type in as a type-only import so the file compiles even when
   // the verifier hook isn't wired yet.
-  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // A find that threads `currentUser`, OR a `mask unless` field (whose
+  // `toWireMasked` takes a `currentUser: User` param), needs the `User` import.
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
   // A principal-referencing capability `filter` (`filter this.tenantId ==
   // currentUser.tenantId`) reads the ambient principal via `requireCurrentUser()`
   // inside every root read's predicate — so the repo imports that accessor
@@ -188,6 +190,10 @@ export function buildRepositoryFile(
   // `run<Name>` per context retrieval targeting this aggregate.
   const runMs = aggRetrievals.map((r) => runMethod(agg, r, ctx, filterPred));
   const toWireM = toWireMethod(agg, ctx);
+  // Response-boundary read masking (`mask unless`): a sibling serializer that
+  // redacts masked fields per the caller.  Only for aggregates that declare a
+  // mask — a mask-free aggregate emits no `toWireMasked` and stays byte-identical.
+  const toWireMaskedM = aggHasFieldMask(agg) ? toWireMaskedMethod(agg) : "";
 
   // Render the class body first so the file's imports + `type Tx` can be
   // narrowed to what's actually referenced — keeps the generated header
@@ -225,6 +231,7 @@ export function buildRepositoryFile(
     // .NET <Agg>Response record so the cross-check sees identical specs.
     toWireM,
     "",
+    ...(toWireMaskedM ? [toWireMaskedM, ""] : []),
     `}`,
   );
 
