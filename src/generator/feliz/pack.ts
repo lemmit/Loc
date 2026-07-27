@@ -88,9 +88,19 @@ function primitiveStack(c: Ctx): string {
   return flexContainer("flex flex-col gap-4", c);
 }
 
-/** Group — a horizontal row that wraps (`flex flex-row flex-wrap …`). */
+/** Group — a horizontal row that wraps (`flex flex-row flex-wrap …`).
+ *  Uses the offside/curry-safe `containerEl` form (structural props on the
+ *  opening line + paren-wrap), NOT the bare `flexContainer`: a Group nested
+ *  INLINE inside another element's `prop.children [ … ]` — e.g. a scaffolded
+ *  `KeyValueRow` value cell, where a `provenanced` field pairs its value with a
+ *  `ProvenanceInfo` disclosure (`Group(Text(...), ProvenanceInfo(...))`) — is
+ *  otherwise rejected by Fable ("This value is not a function and cannot be
+ *  applied", the §24 curry).  An empty Group stays `Html.none` (the
+ *  flex-container convention — e.g. `scaffoldOperations` emits `Group()` when an
+ *  aggregate has no public operations). */
 function primitiveGroup(c: Ctx): string {
-  return flexContainer("flex flex-row flex-wrap items-center gap-2", c);
+  if (!c.hasChildren) return "Html.none";
+  return containerEl("div", "flex flex-row flex-wrap items-center gap-2", c);
 }
 
 /** A children-container primitive (Stack/Group/Paper/Toolbar/Breadcrumbs) with a

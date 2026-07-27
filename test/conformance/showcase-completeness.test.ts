@@ -187,8 +187,8 @@ function invokedNames(model: Model): Set<string> {
  *  fixture.
  *
  *  `ProvenanceInfo` — the provenance "?" disclosure — renders on React + Vue +
- *  Svelte + Angular today (native `<details>` over `<field>_provenance`;
- *  HEEx/Feliz still render a comment), so it isn't yet universal enough for the shared
+ *  Svelte + Angular + Feliz today (native `<details>` over `<field>_provenance`;
+ *  HEEx still renders a comment), so it isn't yet universal enough for the shared
  *  cross-frontend showcase fixture. Putting a `provenanced` field in
  *  `showcase.ddd` would also add the provenance runtime to all five
  *  cross-backend deployables (changing every conformance dimension, like
