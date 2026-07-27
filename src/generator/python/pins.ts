@@ -19,6 +19,12 @@ export const PYTHON_PINS = {
     "uuid6>=2024.7.10",
     // Prometheus metrics (GET /metrics) — ships type stubs (py.typed).
     "prometheus-client>=0.21,<1",
+    // OpenTelemetry tracing (M-T7.1): the request middleware opens a SERVER
+    // span per request; exported via OTLP/HTTP only when a collector endpoint
+    // is set (app/obs/tracing.py).
+    "opentelemetry-api>=1.27,<2",
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
   ],
   devDependencies: ["mypy>=1.13,<2", "ruff>=0.8,<1", "pytest>=8.3,<9", "pytest-asyncio>=0.24,<2"],
 } as const;

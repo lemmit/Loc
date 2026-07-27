@@ -25,6 +25,66 @@
 // single cross-backend catalog.
 // ---------------------------------------------------------------------------
 
+import {
+  HttpSpanAttr,
+  OTEL_ENDPOINT_ENV,
+  OTEL_SERVICE_NAME_ENV,
+  SpanAttr,
+} from "../../_obs/tracing.js";
+
+/** `app/obs/tracing.py` — the OTel tracer provider (conditional OTLP export)
+ *  + hex-id formatters the request middleware consumes.  A SERVER span opens
+ *  on every request (so trace_id rides the logs); spans EXPORT via OTLP/HTTP
+ *  only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. */
+export function renderPythonTracingFile(serviceName: string): string {
+  return `"""OpenTelemetry tracing (observability.md).  Auto-generated.
+
+A SERVER span opens on every request so its trace_id / span_id ride the log
+envelope (log<->trace correlation); spans are EXPORTED via OTLP/HTTP only when
+OTEL_EXPORTER_OTLP_ENDPOINT is set.
+"""
+
+import os
+
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+_endpoint = os.environ.get("${OTEL_ENDPOINT_ENV}")
+_provider = TracerProvider(
+    resource=Resource.create(
+        {"service.name": os.environ.get("${OTEL_SERVICE_NAME_ENV}", ${JSON.stringify(serviceName)})}
+    )
+)
+if _endpoint:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    _provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{_endpoint.rstrip('/')}/v1/traces"))
+    )
+trace.set_tracer_provider(_provider)
+
+#: The tracer every request seam opens its SERVER span from.
+tracer = trace.get_tracer("loom")
+
+
+def format_trace_id(trace_id: int) -> str:
+    """OTel trace id (128-bit int) -> the canonical 32-char lowercase hex."""
+    return format(trace_id, "032x")
+
+
+def format_span_id(span_id: int) -> str:
+    """OTel span id (64-bit int) -> the canonical 16-char lowercase hex."""
+    return format(span_id, "016x")
+
+
+def shutdown_tracing() -> None:
+    """Flush + shut down the span exporter on drain (no-op without export)."""
+    _provider.shutdown()
+`;
+}
+
 export const OBS_LOG_PY = `"""Structured JSON logging + ambient request context (observability.md,
 architecture/request-context.md).  Auto-generated.
 
@@ -74,6 +134,11 @@ class RequestContext:
     actor_id: str | None = None
     locale: str = "en"
     started_at: float = 0.0
+    # OTel span/trace ids (hex) — the log<->trace join keys, stamped onto every
+    # request-scoped line beside scope_id (observability.md).  Empty outside a
+    # traced request.
+    trace_id: str = ""
+    span_id: str = ""
 
 
 request_context_var: ContextVar[RequestContext | None] = ContextVar(
@@ -110,6 +175,18 @@ def actor_id() -> str | None:
     """The principal id, or None before auth runs / under no-auth."""
     ctx = request_context_var.get()
     return ctx.actor_id if ctx is not None else None
+
+
+def trace_id() -> str | None:
+    """The current request's OTel trace id (hex), or None outside a request."""
+    ctx = request_context_var.get()
+    return ctx.trace_id if ctx is not None and ctx.trace_id else None
+
+
+def span_id() -> str | None:
+    """The current request span's id (hex), or None outside a request."""
+    ctx = request_context_var.get()
+    return ctx.span_id if ctx is not None and ctx.span_id else None
 
 
 def locale() -> str:
@@ -203,6 +280,14 @@ class CatalogFormatter(logging.Formatter):
         aid = actor_id()
         if aid is not None:
             body["actor_id"] = aid
+        # trace_id / span_id join every request-scoped line to its OTel span
+        # (log<->trace correlation), read at format time like scope_id above.
+        tid = trace_id()
+        if tid is not None:
+            body["trace_id"] = tid
+        spid = span_id()
+        if spid is not None:
+            body["span_id"] = spid
         fields = getattr(record, "loom_fields", None)
         if isinstance(fields, dict):
             body.update(fields)
@@ -250,12 +335,14 @@ holds and read-after-create doesn't race the commit.
 
 import time
 
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.obs.log import RequestContext, log, new_id, open_context, reset_context
+from app.obs.log import RequestContext, actor_id, log, new_id, open_context, reset_context
 from app.obs.metrics import record_http_request
+from app.obs.tracing import format_span_id, format_trace_id, tracer
 
 
 class ObservabilityMiddleware:
@@ -273,17 +360,34 @@ class ObservabilityMiddleware:
             or request.headers.get("x-request-id")
             or new_id()
         )
+        method = request.method
+        path = request.url.path
+        scope_id = new_id()
+        # Open the request's OTel SERVER span.  Created on EVERY request so its
+        # trace_id / span_id ride the logs; exported only when a collector
+        # endpoint is set.  Renamed to the resolved route template on exit.
+        span = tracer.start_span(
+            f"{method} {path}",
+            kind=SpanKind.SERVER,
+            attributes={
+                "${SpanAttr.correlationId}": correlation,
+                "${SpanAttr.scopeId}": scope_id,
+                "${HttpSpanAttr.method}": method,
+                "${HttpSpanAttr.path}": path,
+            },
+        )
+        span_ctx = span.get_span_context()
         token = open_context(
             RequestContext(
                 correlation_id=correlation,
-                scope_id=new_id(),
+                scope_id=scope_id,
                 locale=request.headers.get("accept-language") or "en",
                 started_at=time.time(),
+                trace_id=format_trace_id(span_ctx.trace_id),
+                span_id=format_span_id(span_ctx.span_id),
             )
         )
         started = time.monotonic()
-        method = request.method
-        path = request.url.path
         log("info", "request_start", method=method, path=path)
 
         status_code = 500
@@ -296,6 +400,20 @@ class ObservabilityMiddleware:
                 headers["x-request-id"] = correlation
                 headers["x-correlation-id"] = correlation
             await send(message)
+
+        def _end_span(status: int) -> None:
+            # Close the SERVER span at the request_end seam: rename to the
+            # resolved route template, stamp status + the actor id (attached by
+            # auth mid-request), and mark 5xx as span errors.
+            route = _route_template(scope, path)
+            span.update_name(f"{method} {route}")
+            span.set_attribute("${HttpSpanAttr.route}", route)
+            span.set_attribute("${HttpSpanAttr.statusCode}", status)
+            aid = actor_id()
+            if aid is not None:
+                span.set_attribute("${SpanAttr.actorId}", aid)
+            span.set_status(Status(StatusCode.ERROR if status >= 500 else StatusCode.OK))
+            span.end()
 
         try:
             await self.app(scope, receive, send_wrapper)
@@ -310,6 +428,7 @@ class ObservabilityMiddleware:
                 duration_ms=duration_ms,
             )
             record_http_request(method, _route_template(scope, path), 500, duration_ms)
+            _end_span(500)
             reset_context(token)
             raise
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -325,6 +444,7 @@ class ObservabilityMiddleware:
         # — same seam as request_end.  Labelled by the matched route TEMPLATE
         # (not the raw path) so cardinality stays bounded.
         record_http_request(method, _route_template(scope, path), status_code, duration_ms)
+        _end_span(status_code)
         reset_context(token)
 
 
