@@ -257,6 +257,18 @@ A workflow `create` gate scopes to `currentUser` + the starter's command params
 gate lowers the same way but is inert until `handle` command handlers are
 surfaced as HTTP routes.)
 
+`currentUser` types against the system's `user { … }` claim block, so a gate
+that is a **bare boolean claim expression** — the simplest permission check —
+type-checks on its own:
+
+```ddd
+operation close() requires currentUser.permissions.contains(permissions.ticketsClose) { … }
+```
+
+No surrounding `== …` / `&& …` is needed to satisfy the `bool` requirement:
+`currentUser.permissions` types as the claim's declared `string[]`, so the
+`.contains(…)` membership types as `bool`.
+
 Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 (see the note at the top).  Without it (`enforcement: opt`, the
 default) a deployable on `auth: required` still serves any
@@ -407,7 +419,9 @@ The gate emits an in-handler **403** at the top of the find's route, evaluated
 against the request's `currentUser` before the query runs.  It is
 **`currentUser`-only** (plus constants) — no source row exists yet,
 so referencing an aggregate field is a compile error
-(`loom.find-gate-not-current-user`).  Use `where` to scope *which rows* come
+(`loom.find-gate-not-current-user`).  Like every `requires` clause it must
+**type to `bool`** (a non-bool gate — `requires 42` — is rejected, so it can't
+lower to an always-truthy no-op).  Use `where` to scope *which rows* come
 back, `requires` to decide *who* may run the find.  `requires true` is the
 intentionally-public escape that also satisfies default-deny.
 
