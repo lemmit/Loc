@@ -11,6 +11,7 @@ import {
   unionMembers,
 } from "../../../generator/_payload/union-wire.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
+import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
@@ -104,6 +105,30 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
  *  var stays `tx` on both, so the repo construction + close line are shared. */
 function txWrapperCall(usingMikro: boolean): string {
   return usingMikro ? `db.transactional(async (tx) => {` : `db.transaction(async (tx) => {`;
+}
+
+// ── Response-boundary read masking (`mask unless`, authorization.md §5) ──
+// A masked aggregate routes every RESPONSE serialization through
+// `repo.toWireMasked(x, __maskUser)` instead of `repo.toWire(x)`, redacting
+// masked fields the caller may not see.  `__maskUser` is a dedicated local
+// (never collides with a gate-bound `currentUser`) resolved fail-closed:
+// unauthenticated → null → redacted.  A mask-free aggregate keeps `toWire`
+// verbatim, so non-mask projects stay byte-identical.
+
+/** The `__maskUser` binding line(s) for a masked-aggregate response route. */
+function maskUserBind(agg: AggregateIR, pad: string): string[] {
+  return aggHasFieldMask(agg)
+    ? [
+        `${pad}const __maskUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User | undefined }).get("currentUser") ?? null;`,
+      ]
+    : [];
+}
+
+/** The response serializer call for one entity var — masked or plain. */
+function wireResp(agg: AggregateIR, repoVar: string, varExpr: string): string {
+  return aggHasFieldMask(agg)
+    ? `${repoVar}.toWireMasked(${varExpr}, __maskUser)`
+    : `${repoVar}.toWire(${varExpr})`;
 }
 
 /** History-row insert opener.  drizzle: `tx.insert(schema.<table>).values({`;
@@ -735,17 +760,18 @@ export function buildRoutesFile(
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
   lines.push(`      if (!found) throw new AggregateNotFoundError("not_found");`);
+  lines.push(...maskUserBind(agg, "      "));
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
-    lines.push(`      const out = repo.toWire(found);`);
+    lines.push(`      const out = ${wireResp(agg, "repo", "found")};`);
     lines.push(
       `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
     );
     lines.push(`      return c.json(out as z.infer<typeof ${agg.name}Response>, 200);`);
   } else {
     lines.push(
-      `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
+      `      return c.json(${wireResp(agg, "repo", "found")} as z.infer<typeof ${agg.name}Response>, 200);`,
     );
   }
   lines.push(`    },`);
@@ -1575,8 +1601,9 @@ function emitFindRoute(
     const pagedArgs = [...baseArgs, "params.page", "params.pageSize", "params.sort", "params.dir"];
     const argList = (usesUser ? [...pagedArgs, "currentUser"] : pagedArgs).join(", ");
     out.push(`    const result = await repo.${find.name}(${argList});`);
+    out.push(...maskUserBind(agg, "    "));
     out.push(
-      `    return c.json({ ...result, items: result.items.map((r) => repo.toWire(r)) } as z.infer<typeof ${paged.name}>, 200);`,
+      `    return c.json({ ...result, items: result.items.map((r) => ${wireResp(agg, "repo", "r")}) } as z.infer<typeof ${paged.name}>, 200);`,
     );
     out.push(`  },`);
     out.push(`);`);
@@ -1584,6 +1611,7 @@ function emitFindRoute(
   }
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
+  out.push(...maskUserBind(agg, "    "));
   if (unionSpec) {
     // Absence → the absent variant's edge translation: `none` rides the same
     // AggregateNotFoundError → 404 path optional finds use; an `error` payload
@@ -1606,37 +1634,39 @@ function emitFindRoute(
     // Found → the success variant directly (untagged).  A single-success
     // union find carries no discriminator: the 200 body is `<Agg>Response`,
     // identical to `<Agg>?` / `<Agg> option` (exception-less.md §4).
-    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
+    out.push(
+      `    return c.json(${wireResp(agg, "repo", "result")} as z.infer<typeof ${agg.name}Response>, 200);`,
+    );
   } else if (isList) {
     // Array responses skip wire_out — `Object.keys` over an array
     // returns positional indices, which aren't a useful shape signal.
     // (The catalog's `wire_out` is a key-set marker, not a length one.)
     out.push(
-      `    return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ${agg.name}Response>[], 200);`,
+      `    return c.json(result.map((r) => ${wireResp(agg, "repo", "r")}) as z.infer<typeof ${agg.name}Response>[], 200);`,
     );
   } else if (find.returnType.kind === "optional") {
     out.push(`    if (result == null) throw new AggregateNotFoundError("not_found");`);
     if (emitTrace) {
-      out.push(`    const wire = repo.toWire(result);`);
+      out.push(`    const wire = ${wireResp(agg, "repo", "result")};`);
       out.push(
         `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
       out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
-        `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
+        `    return c.json(${wireResp(agg, "repo", "result")} as z.infer<typeof ${agg.name}Response>, 200);`,
       );
     }
   } else {
     if (emitTrace) {
-      out.push(`    const wire = repo.toWire(result);`);
+      out.push(`    const wire = ${wireResp(agg, "repo", "result")};`);
       out.push(
         `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
       out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
-        `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
+        `    return c.json(${wireResp(agg, "repo", "result")} as z.infer<typeof ${agg.name}Response>, 200);`,
       );
     }
   }
@@ -1687,7 +1717,10 @@ function emitResponseDtoSchema(
       if (wf.source === "id") {
         lines.push(`  ${wf.name}: z.string(),`);
       } else {
-        lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
+        // A `mask unless` field is redacted to `null` for callers who fail the
+        // predicate (see `toWireMasked`), so its response schema must admit null.
+        const masked = wf.maskUnless !== undefined ? ".nullable()" : "";
+        lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)}${masked},`);
       }
     }
   }
