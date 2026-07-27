@@ -160,7 +160,7 @@
 | dap-node-debug.md | milestones 18–27 done | frontier → M-T8.1 |
 | debt-02-principal-nonrelational-filters.md | done | — |
 | debt-02-python-principal-filters.md | done | — |
-| debt-prioritized-backlog.md | **superseded by this plan** | open rows → M-T6.5 (14), M-T6.9 (17/18), M-T5.4 (24), M-T4.7 (26 residue), M-T6.11 (27), M-T2.6/M-T5.4 (28), M-T5.15 (29/30), M-T6.14 (8/12) |
+| debt-prioritized-backlog.md | **superseded by this plan** | open rows → M-T6.5 (14), M-T6.9 (17/18), M-T5.4 (24), M-T4.7 (26 residue), M-T6.11 (27), M-T2.6/M-T5.4 (28), ~~M-T5.15 (29/30)~~ (29 subsumed by projections/M-T4.2, 30c done, 30a/b dropped — see M-T5.15), M-T6.14 (8/12) |
 | elixir-eventsourcing-vanilla-plan.md | done (tail verify) | — |
 | feliz-frontend-build.md | in-progress | M-T1.16 |
 | flutter-mobile-implementation.md | mostly done (2026-07-20; "not started" note stale) *(added 2026-07-21)* | residue → M-T1.18 |
@@ -226,7 +226,7 @@
 | full-code-review-2026-07.md | #6→M-T5.6, #22→M-T5.16, C-mediums→M-T9.4 |
 | generated-code-ddd-review-2026-07.md | S5(d)→M-T4.3, S10 residue→M-T5.11, S4 default-on→M-T3.4, api-grouping→M-T6.13 |
 | generated-code-review-2026-06-30.md | SYS-1→M-T6.8 |
-| showcase-coverage-bugs.md | BUG-003/004→M-T5.15, BUG-006 verify landed |
+| showcase-coverage-bugs.md | BUG-003→M-T5.15 (open, P2), BUG-004 done (M-T5.18 Track C), BUG-006 verify landed |
 | domain-seam-log-parity.md | §3 residue ⚠ stale → M-T6.14 |
 | others (backend/frontend parity matrices, execution-context parity, gated-features-inventory, stack-versions, e2e-suite review, pack-equivalence, architecture-review-2026-06, generated-code-review-2026-06, frontend-test-parity, test-parity-generated-backends, proposal-surface-stability) | historical/reference — no open findings |
 
