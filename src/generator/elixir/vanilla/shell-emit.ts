@@ -216,7 +216,13 @@ defmodule ${appModule}.MixProject do
       {:plug_cowboy, "~> 2.6"},
       {:open_api_spex, "~> 3.0"},
       {:telemetry_metrics, "~> 1.0"},
-      {:telemetry_metrics_prometheus_core, "~> 1.1"}${liveViewDep}${extraBlock}${oidcDep}
+      {:telemetry_metrics_prometheus_core, "~> 1.1"},
+      # OpenTelemetry tracing (M-T7.1): the RequestContext plug opens a SERVER
+      # span per request; exported via OTLP/HTTP only when a collector endpoint
+      # is set (config/runtime.exs).
+      {:opentelemetry_api, "~> 1.4"},
+      {:opentelemetry, "~> 1.5"},
+      {:opentelemetry_exporter, "~> 1.8"}${liveViewDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -753,6 +759,18 @@ config :logger, :default_formatter,
   format: {${appModule}.LogFormatter, :format},
   metadata: :all
 
+# OpenTelemetry (M-T7.1): a SERVER span opens per request (the RequestContext
+# plug), threading trace_id/span_id onto Logger.metadata (log<->trace
+# correlation).  A batch processor buffers spans; the OTLP exporter is turned
+# ON in config/runtime.exs ONLY when a collector endpoint is set — default off
+# here so a local boot makes no export attempt.  service.name is overridable by
+# the OTEL_SERVICE_NAME env (the compose/k8s wiring sets it per deployable).
+config :opentelemetry,
+  span_processor: :batch,
+  traces_exporter: :none
+
+config :opentelemetry, :resource, service: %{name: "${appName}"}
+
 import_config "#{config_env()}.exs"
 `;
 }
@@ -833,6 +851,19 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+end
+
+# OpenTelemetry export (M-T7.1): turn the OTLP/HTTP exporter ON only when a
+# collector endpoint is set (the compose stack points it at the bundled jaeger
+# collector).  Applies in every env — spans are always created (so trace_id
+# rides the logs), but exported only here.  http/protobuf on the standard OTLP
+# HTTP port; the exporter appends /v1/traces.
+if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
+  config :opentelemetry, traces_exporter: :otlp
+
+  config :opentelemetry_exporter,
+    otlp_protocol: :http_protobuf,
+    otlp_endpoint: String.trim_trailing(otlp_endpoint, "/")
 end
 `;
 }

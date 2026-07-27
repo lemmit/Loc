@@ -52,11 +52,21 @@ function assertCarrier(files: Map<string, string>): void {
   expect(rc).toContain("locale: resolve_locale(conn),");
   expect(rc).toContain("started_at: System.system_time(:millisecond)");
   // Frame-local tier: a fresh scope id for the root frame (parity with .NET's
-  // OpenRoot / Hono's root frame); per-dispatch boundaries open child frames
-  // beneath it via with_child_frame/1.
-  expect(rc).toContain("scope_id: generate_id(),");
-  // Echoes the correlation id on the response.
-  expect(rc).toContain("put_resp_header(conn, @correlation_header, correlation_id)");
+  // OpenRoot / Hono's root frame), hoisted so the span attribute + metadata
+  // share it; per-dispatch boundaries open child frames via with_child_frame/1.
+  expect(rc).toContain("scope_id = generate_id()");
+  expect(rc).toContain("scope_id: scope_id,");
+  // Echoes the correlation id on the response (piped into the span-closing
+  // before_send callback).
+  expect(rc).toContain("put_resp_header(@correlation_header, correlation_id)");
+  // OTel SERVER span opens at the request seam, threading trace_id/span_id onto
+  // Logger.metadata (M-T7.1); closed in before_send with the resolved route.
+  expect(rc).toContain('OpenTelemetry.Tracer.start_span("#{conn.method} #{conn.request_path}"');
+  expect(rc).toContain("trace_id: format_trace_id(Span.trace_id(span_ctx)),");
+  expect(rc).toContain("span_id: format_span_id(Span.span_id(span_ctx))");
+  expect(rc).toContain("register_before_send(fn conn ->");
+  expect(rc).toContain('Span.set_attribute(span_ctx, "http.route", route)');
+  expect(rc).toContain("Span.end_span(span_ctx)");
   // Accessors for non-HTTP reads.
   expect(rc).toContain("def correlation_id, do: Logger.metadata()[:correlation_id]");
   expect(rc).toContain("def locale, do: Logger.metadata()[:locale]");

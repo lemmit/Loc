@@ -78,6 +78,42 @@ describe("vanilla — log_formatter.ex carries the JSON envelope", () => {
   });
 });
 
+describe("vanilla — OpenTelemetry tracing (M-T7.1)", () => {
+  it("adds the opentelemetry deps to mix.exs", async () => {
+    const files = await load();
+    const mix = files.get("api/mix.exs")!;
+    expect(mix).toContain("{:opentelemetry_api,");
+    expect(mix).toContain("{:opentelemetry,");
+    expect(mix).toContain("{:opentelemetry_exporter,");
+  });
+
+  it("config.exs defaults the exporter off; runtime.exs turns OTLP on only with an endpoint", async () => {
+    const files = await load();
+    const cfg = files.get("api/config/config.exs")!;
+    // Batch processor + exporter default OFF (no export attempt without a collector).
+    expect(cfg).toContain("config :opentelemetry,");
+    expect(cfg).toContain("span_processor: :batch");
+    expect(cfg).toContain("traces_exporter: :none");
+    const runtime = files.get("api/config/runtime.exs")!;
+    expect(runtime).toContain('System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT")');
+    expect(runtime).toContain("config :opentelemetry, traces_exporter: :otlp");
+    expect(runtime).toContain("otlp_protocol: :http_protobuf");
+  });
+
+  it("the RequestContext plug opens a SERVER span + threads trace_id/span_id onto metadata", async () => {
+    const files = await load();
+    const rc = files.get("api/lib/api/request_context.ex")!;
+    expect(rc).toContain("require OpenTelemetry.Tracer");
+    expect(rc).toContain('OpenTelemetry.Tracer.start_span("#{conn.method} #{conn.request_path}"');
+    expect(rc).toContain("trace_id: format_trace_id(Span.trace_id(span_ctx))");
+    expect(rc).toContain("Span.end_span(span_ctx)");
+    // The LogFormatter dumps every metadata key, so trace_id/span_id surface as
+    // top-level JSON fields with no whitelist needed.
+    const formatter = files.get("api/lib/api/log_formatter.ex")!;
+    expect(formatter).toContain("metadata");
+  });
+});
+
 describe("vanilla — telemetry.ex translates Phoenix endpoint events into the catalog", () => {
   it("emits lib/<app>/telemetry.ex (relocated from lib/<app>_web/telemetry.ex)", async () => {
     const files = await load();
