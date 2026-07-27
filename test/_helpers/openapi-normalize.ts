@@ -340,7 +340,16 @@ function schemaRefName(
     const m = schema.items.$ref.match(/^#\/components\/schemas\/(.+)$/);
     return m ? `array<${m[1]}>` : null;
   }
-  // Inline / non-ref shape: no single schema name to compare.
+  // Inline scalar body: a top-level `{ type: "string" | "boolean" | ... }`
+  // with no $ref.  This is the shape a SCALAR-return operation declares at 200
+  // (BUG-003, `operation describe(): string`).  Encoding the primitive (ignoring
+  // an OpenAPI `format` refinement, which is backend-cosmetic — e.g. Elixir's
+  // `format: :decimal` on a money string) lets the parity diff distinguish a
+  // 200-with-scalar-body from a 204 (both would otherwise collapse to "").
+  if (schema.type && ["string", "boolean", "integer", "number"].includes(schema.type)) {
+    return `scalar:${schema.type}`;
+  }
+  // Inline object / other non-ref shape: no single schema name to compare.
   return null;
 }
 

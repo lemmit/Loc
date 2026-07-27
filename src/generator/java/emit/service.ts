@@ -26,7 +26,13 @@ import {
   unionFindAsOptionalTwin,
 } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
-import { collectWireToDomainImports, wireToDomain } from "./wire.js";
+import {
+  collectWireImports,
+  collectWireToDomainImports,
+  domainToWire,
+  wireJavaType,
+  wireToDomain,
+} from "./wire.js";
 
 // ---------------------------------------------------------------------------
 // Application service per aggregate — the layered style's
@@ -326,6 +332,18 @@ export function renderJavaService(
       // ProblemDetail translation).
       const spec = returnUnionSpec(op, ctx.boundedContext);
       if (spec) unionReturnNames.add(spec.name);
+      // Scalar (non-union) return (BUG-003): the aggregate method returns a
+      // domain-typed value; the service converts it to wire and returns it (the
+      // controller wraps it in `ResponseEntity.ok`).  Void ops (no returnType)
+      // stay `void` + discard.
+      const scalarReturn = !spec && !!op.returnType;
+      if (scalarReturn) collectWireImports(op.returnType!, imports);
+      const returnsValue = !!spec || scalarReturn;
+      const retType = spec
+        ? spec.name
+        : scalarReturn
+          ? wireJavaType(op.returnType!, "Response")
+          : "void";
       // Per-operation audit (audit-and-logging.md): an `audited` op records a
       // who/what/when + before/after wire snapshot.  before/after are the
       // aggregate's wire projection either side of the mutation; the record is
@@ -334,14 +352,14 @@ export function renderJavaService(
       // / scope / parent ids are stamped from the ambient RequestContext.
       const audited = !!op.audited;
       return [
-        `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
+        `    public ${retType} ${op.name}(${paramSig}) {`,
         ...lets,
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         `        var aggregate = repository.getById(id);`,
         ifMatchGuard,
         whenGateLine(op),
         audited ? `        var __before = ${agg.name}Response.from(aggregate);` : null,
-        spec
+        returnsValue
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
         `        repository.save(aggregate);`,
@@ -364,7 +382,11 @@ export function renderJavaService(
           ? `        CatalogLog.event("audit_recorded", "debug", "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
           : null,
         `        publishEvents(aggregate);`,
-        spec ? `        return result;` : null,
+        spec
+          ? `        return result;`
+          : scalarReturn
+            ? `        return ${domainToWire(op.returnType!, "result")};`
+            : null,
         `    }`,
         ``,
       ].filter((l): l is string => l !== null);

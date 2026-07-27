@@ -598,14 +598,26 @@ ${pagingQueryParams()}
           },
           responses: %{
             ${
-              // An exception-less union-returning op answers 200 with the
-              // tagged union DTO (exception-less.md) — matching Hono's
-              // discriminatedUnion / .NET's [ProducesResponseType(union)];
-              // a void op stays 204 No Content.
-              op.returnType?.kind === "union"
+              // A returning op answers 200 with its value; a void op stays 204.
+              //   - union return (exception-less.md): the tagged union DTO —
+              //     matching Hono's discriminatedUnion / .NET's
+              //     [ProducesResponseType(union)].
+              //   - scalar return (`operation describe(): string`): the scalar's
+              //     own wire schema, via the SAME type→schema map the aggregate
+              //     Response emitter uses for a field (`openApiType`).  The
+              //     controller returns `json(conn, success)` at 200 for both, so
+              //     the spec must declare 200, not 204 (BUG-003).  Money rides the
+              //     field convention (`type: :string, format: :decimal`) — its
+              //     Decimal serialises to a string via Jason, matching a money
+              //     FIELD in the response body, so spec and runtime agree.
+              op.returnType
                 ? `200 => %OpenApiSpex.Response{
               description: "OK",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${unionSchemaAlias(op.returnType.variants)}}}
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${
+                op.returnType.kind === "union"
+                  ? `${schemasModule}.${unionSchemaAlias(op.returnType.variants)}`
+                  : openApiType(op.returnType, schemasModule)
+              }}}
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
             }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${

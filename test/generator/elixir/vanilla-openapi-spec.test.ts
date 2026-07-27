@@ -194,6 +194,71 @@ system Shop {
   });
 });
 
+describe("vanilla OpenAPI spec — scalar-return operations (BUG-003)", () => {
+  it("declares 200 with the scalar's wire schema (not 204) for string + money returns", async () => {
+    // A scalar-returning op (`operation describe(): string`) — the controller
+    // returns `json(conn, success)` at 200, so the spec must declare 200 with the
+    // scalar's own wire schema (BUG-003: it used to fall through to 204 because
+    // the 200 branch was gated on a `union` return).  Void ops stay 204.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        code: string
+        price: money
+        operation describe(): string { return code }
+        operation total(): money { return price }
+        operation touch() { code := code }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}`;
+    const files = await generateSystemFiles(src);
+    const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
+    const spec = files.get(specKey!)!;
+
+    // Scalar `string` return → 200 with the plain string schema, NOT 204.
+    const dStart = spec.indexOf('"/orders/{id}/describe"');
+    expect(dStart, "describe path present").toBeGreaterThanOrEqual(0);
+    const describe_ = spec.slice(dStart, dStart + 900);
+    expect(describe_).toContain("200 => %OpenApiSpex.Response{");
+    expect(describe_).toContain(
+      'content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :string}}}',
+    );
+    expect(describe_).not.toContain("204 =>");
+
+    // Scalar `money` return → 200 with the money wire schema (string/decimal —
+    // Jason serialises the Decimal to a string, matching a money FIELD), NOT 204.
+    const tStart = spec.indexOf('"/orders/{id}/total"');
+    expect(tStart, "total path present").toBeGreaterThanOrEqual(0);
+    const total = spec.slice(tStart, tStart + 900);
+    expect(total).toContain("200 => %OpenApiSpex.Response{");
+    expect(total).toContain(
+      'content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :string, format: :decimal}}}',
+    );
+    expect(total).not.toContain("204 =>");
+
+    // A VOID op (no return type) is unchanged — still 204 No Content.
+    const uStart = spec.indexOf('"/orders/{id}/touch"');
+    expect(uStart, "touch path present").toBeGreaterThanOrEqual(0);
+    const touch = spec.slice(uStart, uStart + 900);
+    expect(touch).toContain('204 => %OpenApiSpex.Response{description: "No Content"}');
+    expect(touch).not.toContain("200 =>");
+  });
+});
+
 describe("vanilla OpenAPI spec — union finds", () => {
   it("declares the absent variant's ProblemDetails status on a union find", async () => {
     // `find locate(...): Order or OrderNotFound` — absence translates to the

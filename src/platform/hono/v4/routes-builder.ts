@@ -1389,7 +1389,15 @@ function emitReturningOperationRoute(
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
   const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
   const u = op.returnType ? unionForFind(op.returnType, ctx) : null;
-  const unionName = u?.name ?? `${agg.name}Response`;
+  // Success 200 body schema: a union return declares the whole tagged union; a
+  // SCALAR return (BUG-003) declares that scalar's own field-wire schema (via
+  // the shared `zodForResponse`, so money/enum/VO scalars stay wire-consistent
+  // with a field of the same type); void ops don't reach here.
+  const successSchema = u
+    ? u.name
+    : op.returnType
+      ? zodForResponse(op.returnType, false)
+      : `${agg.name}Response`;
   // The HTTP status an error variant maps to: the api's `httpStatus` override
   // for this context (exception-less.md A1) if present, else the stdlib default.
   const statusFor = (tag: string): number =>
@@ -1419,7 +1427,7 @@ function emitReturningOperationRoute(
   // it (error variants are intercepted below) — the documented shape is the
   // closed set of outcomes, which a typed client narrows on `type`.
   out.push(
-    `      200: { description: "OK", content: { "application/json": { schema: ${unionName} } } },`,
+    `      200: { description: "OK", content: { "application/json": { schema: ${successSchema} } } },`,
   );
   for (const status of [...problemStatuses].sort((a, b) => a - b)) {
     out.push(
