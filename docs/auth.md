@@ -398,10 +398,40 @@ Unlike the allow ladder, deny is **not** restricted to `tenantOwned` aggregates 
 A lone `deny` with no matching `allow` is **not** flagged — aggregates are readable
 by default, so a carve-out with no prior grant is meaningful.
 
-**Not yet shipped (Phase 4.x follow-ups):** field-level masking (`field f { mask
-unless … }` / `deny read`), `data {}` row-attribute clauses, and per-operation /
-`Workflow` point gates — the larger slices the aggregate-level deny-wins
-primitive lays the plumbing for.
+**Not yet shipped (Phase 4.x follow-ups):** the `policy {}`-block field rules
+(`field f { mask unless … }` / `deny read` nested in a read block), `data {}`
+row-attribute clauses, and per-operation / `Workflow` point gates — the larger
+slices the aggregate-level deny-wins primitive lays the plumbing for.
+
+### Field masking — `mask unless` (read redaction)
+
+The **aggregate-field baseline** read mask (authorization.md §5) marks a field
+"sensitive everywhere, shown only to the authorised": it is REDACTED (null on the
+wire) UNLESS a `currentUser`-only predicate holds.
+
+```ddd
+aggregate Person {
+  name: string
+  salary: money mask unless currentUser.permissions.contains(permissions.salaryUnmask)
+}
+```
+
+The predicate is a **bool** and, like a `requires` gate, references only
+`currentUser` (+ constants) — it is evaluated at read projection as a param-free
+caller check, never against the row.
+
+**Status — foundation slice (M-T3.2 item 6).** The surface (grammar + IR +
+`mask`/`unless` printing), the validation, and the wire contract landed first;
+the per-backend DTO **read redaction** is the stacked follow-on. Until a backend
+emits the redaction, a `mask unless` field is a **compile error** on that backend
+(`loom.field-mask-unsupported`) rather than an unenforced no-op — a sensitive
+value never ships in the clear because the mask was declared but not yet emitted.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction |
+| *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates
 

@@ -299,7 +299,7 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
 // `unknown` ref.  An allowlist catches that (and any future refKind): only
 // `current-user`, `enum-value`, and internally-bound refs (`lambda` params,
 // pure `helper-fn`s) are legal in a gate.
-const GATE_ALLOWED_REFS: ReadonlySet<RefKind> = new Set<RefKind>([
+export const GATE_ALLOWED_REFS: ReadonlySet<RefKind> = new Set<RefKind>([
   "current-user",
   "enum-value",
   "lambda",
@@ -371,7 +371,7 @@ export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagno
 /** The name of the first reference in an expression tree that isn't in the
  *  gate's `allowed` refKind set, or null when the expression touches only
  *  allowed refs / constants / operators. */
-function firstNonGateRef(e: ExprIR, allowed: ReadonlySet<RefKind>): string | null {
+export function firstNonGateRef(e: ExprIR, allowed: ReadonlySet<RefKind>): string | null {
   if (e.kind === "ref") return allowed.has(e.refKind) ? null : e.name;
   switch (e.kind) {
     case "member":

@@ -231,6 +231,13 @@ export interface FieldIR {
    *  other `ExprIR`; consumed when synthesising a create for an aggregate
    *  with no explicit one. */
   default?: ExprIR;
+  /** Lowered `mask unless <expr>` read-mask predicate (authorization.md §5) —
+   *  a `currentUser`-only bool.  The field's wire value is REDACTED (null)
+   *  UNLESS the predicate holds.  Present only where the source declared the
+   *  clause; drives the DTO read redaction + the wire-spec `fieldCapabilities`
+   *  entry.  The gate expression, like a `requires` gate, references only
+   *  `currentUser` (+ constants) — never the row. */
+  maskUnless?: ExprIR;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */

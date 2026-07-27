@@ -457,6 +457,7 @@
     "stateField"
   ],
   "mantine": [],
+  "mask": [],
   "match": [],
   "meilisearch": [],
   "menu": [
@@ -859,6 +860,7 @@
     "paramName"
   ],
   "unique": [],
+  "unless": [],
   "urlStyle": [
     "nameRef",
     "paramName"

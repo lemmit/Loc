@@ -1030,7 +1030,9 @@ function printProperty(node: Property): string {
   // `message "..."` re-quotes (the STRING terminal is delimiter-stripped); only
   // parses with a `check`, so it's appended after it.
   const msg = node.message ? ` message ${JSON.stringify(node.message)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}${msg}`;
+  // `mask unless <expr>` — the read mask, grammar-last (after `check`).
+  const mask = node.maskUnless ? ` mask unless ${printExpr(node.maskUnless)}` : "";
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}${msg}${mask}`;
 }
 
 function printContainment(node: Containment): string {
