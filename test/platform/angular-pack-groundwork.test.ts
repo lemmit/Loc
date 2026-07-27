@@ -92,7 +92,9 @@ describe("angular pack format groundwork", () => {
     expect(pack.templates.has("api-client")).toBe(true);
     // index-html resolves to the ANGULAR shared layer (<app-root>, the
     // CLI injects bundles), not the Vite worlds' manual main script.
-    const indexHtml = pack.render("index-html", { title: "t" });
+    // `index-html` now takes a `baseHref` (default "/"; the generator threads
+    // "/app/" for a sub-path-mounted embed — see angular base-href support).
+    const indexHtml = pack.render("index-html", { title: "t", baseHref: "/" });
     expect(indexHtml).toContain("<app-root></app-root>");
     expect(indexHtml).toContain('<base href="/" />');
     expect(indexHtml).not.toContain("main.tsx");
