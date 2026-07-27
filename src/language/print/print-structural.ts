@@ -310,7 +310,14 @@ function printSubdomain(node: Subdomain): string {
 
 function printPermissionsBlock(node: PermissionsBlock): string {
   if (node.decls.length === 0) return "permissions {}";
-  return `permissions {\n${indent(node.decls.map((d) => d.name).join(", "))}\n}`;
+  const printDecl = (d: (typeof node.decls)[number]): string => {
+    if (!d.implies || d.implies.length === 0) return d.name;
+    // `edit implies read` (single) / `admin implies [read, write]` (multi) —
+    // mirrors the grammar's bracket-only-for-multi form.
+    const targets = d.implies.length === 1 ? d.implies[0]! : `[${d.implies.join(", ")}]`;
+    return `${d.name} implies ${targets}`;
+  };
+  return `permissions {\n${indent(node.decls.map(printDecl).join(", "))}\n}`;
 }
 
 function printThemeBlock(node: ThemeBlock): string {

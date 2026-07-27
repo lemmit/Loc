@@ -162,6 +162,7 @@ import type {
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
 import { classifyPage, type PageKind, type PageNameCtx } from "../util/page-kind.js";
+import { computePermissionClosures, type PermissionEdge } from "../util/permission-closure.js";
 import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
@@ -576,6 +577,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
       // the runtime string is computed once here so emitters and
       // resolvers don't have to spell the convention separately.
       const permissions: PermissionDeclIR[] = [];
+      const permEdges: PermissionEdge[] = [];
       for (const blk of m.permissions ?? []) {
         if (!isPermissionsBlock(blk)) continue;
         for (const d of blk.decls) {
@@ -583,7 +585,21 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
             name: d.name,
             runtimeString: `${m.name.toLowerCase()}.${d.name}`,
           });
+          permEdges.push({ name: d.name, implies: d.implies ?? [] });
         }
+      }
+      // `implies` transitive closure (authorization.md §6): stamp each
+      // permission's reverse closure (the perms that transitively imply it) as
+      // runtime strings, so a `contains(<perm>)` gate can expand to accept a
+      // broader permission at lowering — the runtime check stays flat.
+      const closures = computePermissionClosures(permEdges);
+      const runtimeOf = new Map(permissions.map((p) => [p.name, p.runtimeString]));
+      for (const p of permissions) {
+        const impliedByNames = closures.get(p.name)?.impliedBy ?? [];
+        const impliedBy = impliedByNames
+          .map((n) => runtimeOf.get(n))
+          .filter((s): s is string => s !== undefined);
+        if (impliedBy.length > 0) p.impliedBy = impliedBy;
       }
       subdomains.push({
         name: m.name,

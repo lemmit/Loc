@@ -712,6 +712,42 @@ function applySuffixToRecv(
       };
       return { recv: ternary, recvType: { kind: "optional", inner: numPrim } };
     }
+    // `implies` closure expansion (authorization.md §6): a
+    // `<perms>.contains(permissions.X)` check where `X` is (transitively)
+    // implied by broader permissions expands to `contains(X) || contains(P) …`
+    // over `X` plus its reverse closure, so holding a broader permission
+    // satisfies the gate.  Precomputed at lowering (`impliedBy` on the
+    // permission IR); the runtime stays flat membership tests.
+    if (collectionOp && ms.member === "contains" && args.length === 1) {
+      const arg = args[0];
+      const decl =
+        arg?.kind === "literal" && arg.lit === "string"
+          ? env.modulePermissions?.find((p) => p.runtimeString === arg.value)
+          : undefined;
+      if (decl?.impliedBy && decl.impliedBy.length > 0) {
+        const bool: TypeIR = { kind: "primitive", name: "bool" };
+        const containsFor = (runtime: string): ExprIR => ({
+          kind: "method-call",
+          receiver: structuredClone(recv),
+          member: "contains",
+          args: [lit("string", runtime)],
+          receiverType: recvType,
+          isCollectionOp: true,
+        });
+        let orExpr = containsFor(decl.runtimeString);
+        for (const impl of decl.impliedBy) {
+          orExpr = {
+            kind: "binary",
+            op: "||",
+            left: orExpr,
+            right: containsFor(impl),
+            leftType: bool,
+            resultType: bool,
+          };
+        }
+        return { recv: orExpr, recvType: bool };
+      }
+    }
     const mcIR: ExprIR = {
       kind: "method-call",
       receiver: recv,
