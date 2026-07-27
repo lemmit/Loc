@@ -1709,7 +1709,67 @@ export function decoderExprFor(t: TypeIR): string {
 interface WireRecord {
   typeName: string;
   decoderName: string;
-  fields: { name: string; type: TypeIR; optional: boolean }[];
+  fields: { name: string; type: TypeIR; optional: boolean; prov?: boolean }[];
+}
+
+/** The co-located provenance-lineage fields for a node's provenanced properties
+ *  — `<field>_provenance: ProvLineage option`, decoded via `provLineageDecoder`.
+ *  The `prov` marker overrides the type/decoder emission (there is no
+ *  `ProvLineage` `TypeIR`, so the placeholder `type` is never read). */
+function provWireFields(node: {
+  fields: { name: string; provenanced?: boolean }[];
+}): WireRecord["fields"] {
+  return node.fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({
+      name: `${f.name}_provenance`,
+      type: { kind: "primitive", name: "string" } as TypeIR,
+      optional: true,
+      prov: true,
+    }));
+}
+
+/** The fixed `ProvLineage` wire record + Thoth decoder — the Feliz analogue of
+ *  the JSX frontends' `provLineageSchema` (docs/provenance.md).  `computedValue`
+ *  and each input `value` are `unknown` JSON, so they decode through a permissive
+ *  scalar→string decoder (int/float/string/bool); `target` is dropped (not
+ *  displayed).  Emitted once, before the domain decoders that reference
+ *  `provLineageDecoder`. */
+export function renderProvLineageType(): string {
+  return lines(
+    "// Provenance lineage — the co-located `<field>_provenance` wire shape.",
+    "type ProvInput = { path: string; value: string }",
+    "",
+    "type ProvLineage =",
+    "  {",
+    "    snapshotId: string",
+    "    computedValue: string",
+    "    inputs: ProvInput list",
+    "  }",
+    "",
+    "let private provAnyToString : Decoder<string> =",
+    "  Decode.oneOf [",
+    "    Decode.string",
+    "    Decode.map string Decode.int",
+    "    Decode.map string Decode.float",
+    "    Decode.map string Decode.bool",
+    "  ]",
+    "",
+    "let provInputDecoder : Decoder<ProvInput> =",
+    "  Decode.object (fun get ->",
+    "    {",
+    '      path = get.Required.Field "path" Decode.string',
+    '      value = get.Required.Field "value" provAnyToString',
+    "    })",
+    "",
+    "let provLineageDecoder : Decoder<ProvLineage> =",
+    "  Decode.object (fun get ->",
+    "    {",
+    '      snapshotId = get.Required.Field "snapshotId" Decode.string',
+    '      computedValue = get.Required.Field "computedValue" provAnyToString',
+    '      inputs = get.Required.Field "inputs" (Decode.list provInputDecoder)',
+    "    })",
+  );
 }
 
 /** The F# type name a wire field references (an entity part / value object),
@@ -1756,14 +1816,14 @@ function collectRecords(
       if (!n || seen.has(n)) continue;
       const part = partByName.get(n);
       if (part) {
-        emit(
-          n,
-          forApiRead(wireFieldsForPart(part)).map((w) => ({
+        emit(n, [
+          ...forApiRead(wireFieldsForPart(part)).map((w) => ({
             name: w.name,
             type: w.type,
             optional: w.optional,
           })),
-        );
+          ...provWireFields(part),
+        ]);
         continue;
       }
       const vo = voWireByName.get(n);
@@ -1772,14 +1832,14 @@ function collectRecords(
   };
 
   for (const agg of aggregates) {
-    emit(
-      agg.name,
-      forApiRead(wireFieldsForAggregate(agg)).map((w) => ({
+    emit(agg.name, [
+      ...forApiRead(wireFieldsForAggregate(agg)).map((w) => ({
         name: w.name,
         type: w.type,
         optional: w.optional,
       })),
-    );
+      ...provWireFields(agg),
+    ]);
   }
   return out;
 }
@@ -1842,7 +1902,7 @@ export function renderWireTypes(
   // guard is uniform (a required File is always `Some`), mirroring the
   // always-truthy guard the JSX frontends emit.
   const fieldOptional = (f: WireRecord["fields"][number]): boolean =>
-    f.optional || f.type.kind === "optional" || typeIsFile(fieldBase(f));
+    f.prov || f.optional || f.type.kind === "optional" || typeIsFile(fieldBase(f));
 
   // A record that references another (a value object / entity part field) forms
   // a mutually-recursive group — F# is order-sensitive, so `type Order = { …
@@ -1856,7 +1916,7 @@ export function renderWireTypes(
       `${rec && i > 0 ? "and" : "type"} ${r.typeName} =`,
       "  {",
       ...r.fields.map((f) => {
-        const base = wireFieldType(fieldBase(f));
+        const base = f.prov ? "ProvLineage" : wireFieldType(fieldBase(f));
         return `    ${f.name}: ${fieldOptional(f) ? `${base} option` : base}`;
       }),
       "  }",
@@ -1876,7 +1936,9 @@ export function renderWireTypes(
         // `let rec … and` group (`Decoders.address` isn't in scope while the
         // module is being defined); `decoderExprFor` qualifies it for external
         // callers, so strip the self-module prefix here.
-        const dec = decoderExprFor(fieldBase(f)).replaceAll("Decoders.", "");
+        const dec = f.prov
+          ? "provLineageDecoder"
+          : decoderExprFor(fieldBase(f)).replaceAll("Decoders.", "");
         return `        ${f.name} = ${
           fieldOptional(f)
             ? `get.Optional.Field "${f.name}" ${dec}`

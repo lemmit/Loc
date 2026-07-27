@@ -89,6 +89,7 @@ import {
   renderNumberField as renderNumberFieldHeex,
   renderPaper as renderPaperHeex,
   renderPasswordField as renderPasswordFieldHeex,
+  renderProvenanceInfo as renderProvenanceInfoHeex,
   renderQueryView as renderQueryViewHeex,
   renderSection as renderSectionHeex,
   renderSelectField as renderSelectFieldHeex,
@@ -555,6 +556,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     group: "layout",
     admissibleInSource: true,
     tsx: emitProvenanceInfo,
+    heex: renderProvenanceInfoHeex,
     a11y: "presentational",
   },
   // Loading placeholder — content hidden from AT (aria-busy) while pending.
