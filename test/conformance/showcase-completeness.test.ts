@@ -186,17 +186,16 @@ function invokedNames(model: Model): Set<string> {
  *  until it's backfilled across the other frontends and can join the shared
  *  fixture.
  *
- *  `ProvenanceInfo` — the provenance "?" disclosure — renders on React + Vue +
- *  Svelte + Angular + Feliz today (native `<details>` over `<field>_provenance`;
- *  HEEx still renders a comment), so it isn't yet universal enough for the shared
- *  cross-frontend showcase fixture. Putting a `provenanced` field in
- *  `showcase.ddd` would also add the provenance runtime to all five
- *  cross-backend deployables (changing every conformance dimension, like
- *  `TenancyDecl`/`Projection`), and it's covered by `examples/provenance.ddd` +
- *  `web/src/examples/provenance-system.ddd`. The remaining cross-frontend
- *  backfill is tracked by M-T1.19 (docs/new-plan/T1-ui-frontend.md); drop this
- *  entry when it lands everywhere. */
-const REACT_ONLY_PRIMITIVES: ReadonlySet<string> = new Set(["ProvenanceInfo"]);
+ *  `ProvenanceInfo` — the provenance "?" disclosure — now renders on ALL SIX
+ *  frontends (React/Vue/Svelte/Angular/Feliz off the JSON wire, HEEx off the
+ *  server-side struct; M-T1.19 landed). It stays out of the shared showcase
+ *  fixture for a different reason: putting a `provenanced` field in
+ *  `showcase.ddd` would add the provenance runtime to every cross-backend
+ *  deployable (perturbing every conformance dimension, like
+ *  `TenancyDecl`/`Projection`). It's covered by its own fixtures instead
+ *  (`examples/provenance.ddd` + `web/src/examples/provenance-system.ddd` +
+ *  the cross-target render gate `provenance-info-cross-target.test.ts`). */
+const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set(["ProvenanceInfo"]);
 
 describe("conformance: showcase.ddd completeness", () => {
   it(`parses and validates ${SHOWCASE} with no errors`, async () => {
@@ -251,7 +250,7 @@ describe("conformance: showcase.ddd completeness", () => {
 
     const used = invokedNames(model);
     const primitives = [...STDLIB_LAYOUT_COMPONENTS]
-      .filter((p) => !REACT_ONLY_PRIMITIVES.has(p))
+      .filter((p) => !SHOWCASE_EXCLUDED_PRIMITIVES.has(p))
       .sort();
     const missing = primitives.filter((p) => !used.has(p));
 

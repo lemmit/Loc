@@ -869,6 +869,50 @@ function namedArg(expr: Extract<ExprIR, { kind: "call" }>, name: string): ExprIR
   return undefined;
 }
 
+/** `ProvenanceInfo(of: <record>, field: "<name>")` → a native `<details>`
+ *  disclosure over the co-located `<field>_provenance` lineage (the "?" that
+ *  reveals where a provenanced value came from — docs/provenance.md).
+ *
+ *  Unlike the JSX frontends — which consume a camelCase JSON wire — the LiveView
+ *  renders SERVER-SIDE straight from the Ecto struct.  The co-located jsonb
+ *  column (`schema-emit.ts`, `<field>_provenance` via the pass-through
+ *  `Provenance.Json` type) loads as a STRING-keyed map, so the lineage reads via
+ *  bracket access: `snapshot_id` (rule), `computed_value`, and the `inputs` list
+ *  (each `path` = `value`) — the snake_case shape `renderProvenancedAssign`
+ *  stores, not the frontends' `snapshotId`/`computedValue`.  Null-guarded with
+ *  `<%= if … %>`: an un-provenanced row (column `nil`) renders nothing, so the
+ *  value still shows on its own.  The `inputs` fan-out is a `for`-comprehension
+ *  (LiveView's list idiom) rather than the JS `.map` — the topology divergence
+ *  that keeps this a parallel HEEx renderer, not the shared walker. */
+export function renderProvenanceInfo(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const recordArg = namedArg(expr, "of");
+  const fieldArg = namedArg(expr, "field");
+  if (!recordArg || fieldArg?.kind !== "literal") {
+    return "<!-- ProvenanceInfo: missing record or field -->";
+  }
+  const record = renderExpr(recordArg, { ...ctx, position: "template" });
+  // `<field>_provenance` — snake_cased to match `provColumn` / the schema field.
+  const lineage = `${record}.${snake(fieldArg.value)}_provenance`;
+  const testid = testIdAttr(expr, ctx);
+  return [
+    `<%= if ${lineage} do %>`,
+    `  <details class="loom-provenance"${testid}>`,
+    `    <summary aria-label="How this value was computed">?</summary>`,
+    `    <dl class="loom-provenance-tree">`,
+    `      <div><dt>Rule</dt><dd><code><%= ${lineage}["snapshot_id"] %></code></dd></div>`,
+    `      <div><dt>Value</dt><dd><%= ${lineage}["computed_value"] %></dd></div>`,
+    `      <%= for inp <- ${lineage}["inputs"] || [] do %>`,
+    `        <div><dt><%= inp["path"] %></dt><dd><%= inp["value"] %></dd></div>`,
+    `      <% end %>`,
+    `    </dl>`,
+    `  </details>`,
+    `<% end %>`,
+  ].join("\n");
+}
+
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
 export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
