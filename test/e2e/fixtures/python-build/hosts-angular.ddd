@@ -1,0 +1,43 @@
+// Python (FastAPI) fullstack embed — Angular arm.
+// A `platform: python` deployable hosts a `framework: angular` ui block,
+// embedding the Angular SPA under ClientApp/.  Angular's `ng build`
+// (@angular/build:application) nests the browser bundle under
+// `dist/browser/`, so the multi-stage Dockerfile's `COPY --from=spa-build
+// /spa/dist/browser ./wwwroot` differs from the vite `dist/` react/vue arms
+// and the SvelteKit `build/` arm.  Routers stay under /api/*, main.py serves
+// the bundle from wwwroot/ with the index.html fallback.
+system PyHostsAngular {
+  subdomain D {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+
+  ui Store {
+    framework: angular
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+
+  api A from D
+
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+
+  deployable app {
+    platform: python
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    ui: Store
+    port: 8000
+    design: angularMaterial
+  }
+}

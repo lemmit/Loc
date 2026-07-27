@@ -658,9 +658,11 @@ const MONEY_METHOD: Record<string, string | undefined> = {
 function renderMoneyBinary(op: BinOp, left: string, right: string): string {
   const method = MONEY_METHOD[op];
   if (!method) {
-    // Unknown operator for money — fall through to native rendering
-    // so the failure surfaces in the generated source, not silently.
-    return `${left} ${op} ${right}`;
+    // Only `&&`/`||` are unmapped, and both are boolean-only — the type
+    // validator rejects them on money operands, so reaching here is a
+    // compiler/validator bug.  Fail loud rather than emit `decimal && decimal`
+    // (semantically wrong) into the output.
+    throw new Error(`renderMoneyBinary: unsupported operator '${op}' on money operands`);
   }
   const call = `${left}.${method}(${right})`;
   return op === "!=" ? `!(${call})` : call;

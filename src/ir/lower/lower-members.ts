@@ -119,6 +119,12 @@ export function lowerField(p: Property, env?: Env): FieldIR {
   // events / views never do, so a stray default there is dropped here (and
   // flagged by the validator).
   const defaultExpr = p.default && env ? lowerExprInContext(p.default, baseType, env) : undefined;
+  // `mask unless <expr>` read mask (authorization.md §5).  Lowered in the field
+  // env so `currentUser` / `permissions.<name>` resolve; a row reference lowers
+  // to a non-`current-user` ref, which the IR validator rejects
+  // (`loom.field-mask-not-current-user`) — the mask is a param-free caller
+  // predicate, evaluated at DTO projection.
+  const maskUnless = p.maskUnless && env ? lowerExpr(p.maskUnless, env) : undefined;
   return {
     name: p.name,
     // The field's `TypeIR` carries the same tag set as the field's
@@ -134,6 +140,7 @@ export function lowerField(p: Property, env?: Env): FieldIR {
     // Enrichment fills in the default / inferred-from-type cases.
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
     ...(defaultExpr ? { default: defaultExpr } : {}),
+    ...(maskUnless ? { maskUnless } : {}),
     origin: originFor(p),
   };
 }

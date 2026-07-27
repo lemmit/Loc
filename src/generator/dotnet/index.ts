@@ -43,6 +43,8 @@ import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { generateAngularForContexts } from "../angular/index.js";
+import { generateFelizForContexts } from "../feliz/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -964,7 +966,16 @@ function emitProjectFromContexts(
     usesValidators,
     usesStamping,
     hasEmbeddedSpa,
-    spaOutDir: system?.deployable.uiFramework === "svelte" ? "build" : "dist",
+    spaOutDir:
+      system?.deployable.uiFramework === "svelte"
+        ? "build"
+        : system?.deployable.uiFramework === "angular"
+          ? "dist/browser"
+          : "dist",
+    // Feliz builds via `dotnet fable` + `vite build`, so its embedded spa-build
+    // Dockerfile stage needs a .NET-SDK+Node image (not the npm-only node base
+    // the other four frameworks use).  Every non-feliz framework stays `vite`.
+    spaBuildKind: system?.deployable.uiFramework === "feliz" ? "feliz" : "vite",
     hasMigrations,
     hasSeeds,
     emitTrace,
@@ -1004,10 +1015,11 @@ function emitProjectFromContexts(
   // at the root).
   if (hasEmbeddedSpa && system) {
     // Frontend dispatch by the ui's framework — `framework: svelte` /
-    // `framework: vue` embed their static SPAs under ClientApp/
-    // exactly like the React embed (same /api origin, same wwwroot
-    // serving; only the SPA build output dir differs for svelte —
-    // see renderDockerfile).
+    // `framework: vue` / `framework: angular` embed their static SPAs
+    // under ClientApp/ exactly like the React embed (same /api origin,
+    // same wwwroot serving; only the SPA build output dir differs —
+    // `build` for svelte, `dist/browser` for angular — see
+    // renderDockerfile).
     const embedOpts = { apiBaseUrl: "/api", pathPrefix: "ClientApp/" };
     const uiFw = system.deployable.uiFramework;
     const spaFiles =
@@ -1015,7 +1027,11 @@ function emitProjectFromContexts(
         ? generateSvelteForContexts(contexts, system.sys, system.deployable, embedOpts)
         : uiFw === "vue"
           ? generateVueForContexts(contexts, system.sys, system.deployable, embedOpts)
-          : generateReactForContexts(contexts, system.sys, system.deployable, embedOpts);
+          : uiFw === "angular"
+            ? generateAngularForContexts(contexts, system.sys, system.deployable, embedOpts)
+            : uiFw === "feliz"
+              ? generateFelizForContexts(contexts, system.sys, system.deployable, embedOpts)
+              : generateReactForContexts(contexts, system.sys, system.deployable, embedOpts);
     // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
     // certs / e2e) and emit ClientApp/.gitignore — shared with the java /
     // python embed hosts (see embedded-spa.ts).
@@ -1666,7 +1682,11 @@ function emitProject(
     usesValidators?: boolean;
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
-    spaOutDir?: "dist" | "build";
+    spaOutDir?: "dist" | "build" | "dist/browser";
+    /** SPA build toolchain for the Dockerfile spa-build stage: `vite` (the
+     *  npm-only node base, for react/vue/svelte/angular) or `feliz` (a
+     *  .NET-SDK+Node stage, since Feliz builds via `dotnet fable` + `vite`). */
+    spaBuildKind?: "vite" | "feliz";
     hasMigrations?: boolean;
     hasSeeds?: boolean;
     emitTrace?: boolean;
@@ -1797,7 +1817,14 @@ function emitProject(
       },
     ),
   );
-  out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));
+  out.set(
+    "Dockerfile",
+    renderDockerfile(ns, {
+      hasEmbeddedSpa,
+      spaOutDir: options?.spaOutDir,
+      spaBuildKind: options?.spaBuildKind,
+    }),
+  );
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   // Catalog-identity request log — always-on.  Cross-backend parity

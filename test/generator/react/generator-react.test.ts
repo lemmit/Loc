@@ -47,6 +47,9 @@ describe("react generator", () => {
     expect(pkg.dependencies["react-hook-form"]).toBeTruthy();
     expect(pkg.dependencies["@hookform/resolvers"]).toBeTruthy();
     expect(pkg.dependencies["@mantine/form"]).toBeFalsy();
+    // `.npmrc` pins `legacy-peer-deps` so `npm install` stays deterministic
+    // against `@hookform/resolvers` 5.x's contradictory optional-peer graph.
+    expect(files.get("web_app/.npmrc")).toContain("legacy-peer-deps=true");
   });
 
   it("inherits the target's modules, so pages cover both Catalog and Sales", async () => {

@@ -317,6 +317,7 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",
+      ...(f.maskUnless ? { maskUnless: f.maskUnless } : {}),
     });
   }
   for (const c of agg.contains) {

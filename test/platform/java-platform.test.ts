@@ -49,8 +49,11 @@ describe("java platform — surface shape", () => {
     expect(javaPlatform.needsDb).toBe(true);
     expect(javaPlatform.isFrontend).toBe(false);
     expect(javaPlatform.mountsUi).toBe(true);
+    // EMBEDDABLE_FRAMEWORKS — the static bundles PLUS feliz (a backend host
+    // runs feliz's dotnet-fable SPA-build stage in its own Dockerfile).
     expect([...javaPlatform.hostableFrameworks].sort()).toEqual([
       "angular",
+      "feliz",
       "react",
       "static",
       "svelte",

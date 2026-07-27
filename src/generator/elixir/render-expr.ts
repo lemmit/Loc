@@ -1190,8 +1190,14 @@ function renderDecimalBinary(op: BinOp, l: string, r: string): string {
   if (op === "<=") return `Decimal.compare(${l}, ${r}) in [:lt, :eq]`;
   if (op === ">") return `Decimal.compare(${l}, ${r}) == :gt`;
   if (op === ">=") return `Decimal.compare(${l}, ${r}) in [:gt, :eq]`;
-  // Fall through for unsupported ops — surfaces in generated Elixir.
-  return `${l} ${op} ${r}`;
+  // decimal % decimal (money % money is type-rejected): `%` is not a Decimal
+  // operator in Elixir — `Decimal.rem/2` is the remainder function.
+  if (op === "%") return `Decimal.rem(${l}, ${r})`;
+  // Only `&&`/`||` remain, and both are boolean-only — the type validator
+  // rejects them on money/decimal operands, so reaching here is a
+  // compiler/validator bug.  Fail loud rather than emit `%Decimal{} && ...`
+  // (uncompilable) into the output.
+  throw new Error(`renderDecimalBinary: unsupported operator '${op}' on money/decimal operands`);
 }
 
 // ---------------------------------------------------------------------------

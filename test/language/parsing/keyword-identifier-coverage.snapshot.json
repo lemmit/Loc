@@ -349,6 +349,7 @@
     "paramName",
     "stateField"
   ],
+  "implies": [],
   "import": [],
   "in": [],
   "inMemory": [],
@@ -457,6 +458,7 @@
     "stateField"
   ],
   "mantine": [],
+  "mask": [],
   "match": [],
   "meilisearch": [],
   "menu": [
@@ -859,6 +861,7 @@
     "paramName"
   ],
   "unique": [],
+  "unless": [],
   "urlStyle": [
     "nameRef",
     "paramName"

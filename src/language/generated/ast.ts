@@ -174,6 +174,7 @@ export type DddKeywordNames =
     | "ignoring"
     | "immutable"
     | "implements"
+    | "implies"
     | "import"
     | "in"
     | "inMemory"
@@ -207,6 +208,7 @@ export type DddKeywordNames =
     | "main"
     | "managed"
     | "mantine"
+    | "mask"
     | "match"
     | "meilisearch"
     | "menu"
@@ -331,6 +333,7 @@ export type DddKeywordNames =
     | "type"
     | "ui"
     | "unique"
+    | "unless"
     | "urlStyle"
     | "use"
     | "user"
@@ -2618,11 +2621,13 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
 export interface PermissionDecl extends langium.AstNode {
     readonly $container: PermissionsBlock;
     readonly $type: 'PermissionDecl';
+    implies: Array<string>;
     name: string;
 }
 
 export const PermissionDecl = {
     $type: 'PermissionDecl',
+    implies: 'implies',
     name: 'name'
 } as const;
 
@@ -2901,6 +2906,7 @@ export interface Property extends langium.AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
+    maskUnless?: Expression;
     message?: string;
     name: 'await' | CommonSoftKeywords | string;
     provenanced: boolean;
@@ -2913,6 +2919,7 @@ export const Property = {
     access: 'access',
     check: 'check',
     default: 'default',
+    maskUnless: 'maskUnless',
     message: 'message',
     name: 'name',
     provenanced: 'provenanced',
@@ -6312,6 +6319,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         PermissionDecl: {
             name: PermissionDecl.$type,
             properties: {
+                implies: {
+                    name: PermissionDecl.implies,
+                    defaultValue: [],
+                    optional: true
+                },
                 name: {
                     name: PermissionDecl.name
                 }
@@ -6577,6 +6589,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 default: {
                     name: Property.default,
+                    optional: true
+                },
+                maskUnless: {
+                    name: Property.maskUnless,
                     optional: true
                 },
                 message: {

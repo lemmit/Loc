@@ -81,6 +81,14 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
   // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
+  // Fullstack embed dispatch — a `framework: angular` ui embeds the Angular
+  // SPA (not silently react); Dockerfile COPY targets `dist/browser`.
+  ["test/e2e/fixtures/python-build/hosts-angular.ddd", "app"],
+  // Fullstack embed dispatch — a `framework: feliz` ui embeds the Feliz
+  // (Fable/F#) SPA; the spa-build stage uses the .NET-SDK+Node base image
+  // (dotnet fable), not node:24-alpine.  Backend + Dockerfile emission only
+  // (the gate is BACKEND-static: uv sync + ruff + mypy + pytest, no SPA build).
+  ["test/e2e/fixtures/python-build/hosts-feliz.ddd", "app"],
   // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
   // File field (M-T1.2 slice 2a): FileRef TypedDict in a JSONB column +

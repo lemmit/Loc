@@ -9,7 +9,7 @@ WORKDIR /app
 COPY certs/ /usr/local/share/ca-certificates/
 RUN cat /usr/local/share/ca-certificates/*.crt 2>/dev/null >> /etc/ssl/cert.pem || true
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem NPM_CONFIG_CAFILE=/etc/ssl/cert.pem
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc* ./
 RUN npm ci || npm install
 COPY . .
 RUN npm run build

@@ -54,6 +54,7 @@ import {
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
 import { validateE2ETest } from "./test-checks.js";
 
@@ -2911,6 +2912,89 @@ export function validateProvenancedStorage(
         `type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,
     });
+  }
+}
+
+// `mask unless <expr>` read mask (authorization.md §5) — the aggregate-field
+// baseline that redacts a field on the wire unless a `currentUser`-only
+// predicate holds.  Two gates:
+//   - loom.field-mask-not-current-user — the predicate references something
+//     other than `currentUser` (+ constants): the mask is evaluated at DTO
+//     projection as a param-free CALLER predicate, so a row/param reference is
+//     illegal (mirrors the find gate's currentUser-only rule).
+//   - loom.field-mask-unsupported — the field is hosted by a backend whose DTO
+//     projection doesn't yet emit the redaction.  A parsed-but-unredacted mask
+//     is a SECURITY footgun (the sensitive value ships in the clear), so it
+//     fails fast rather than silently no-op'ing.  The supported set is EMPTY in
+//     this foundation slice (grammar + IR + validation + wire-spec landed; the
+//     per-backend read redaction is the stacked follow-on), so a `mask unless`
+//     field is currently a compile error on every backend rather than an
+//     unenforced no-op.  Each backend redaction slice adds its platform here.
+//     `node` emits response-boundary read redaction (`toWireMasked`) across its
+//     read routes + explicit handlers (M-T3.2 item 6, slice 2).
+const FIELD_MASK_BACKENDS = new Set<string>(["node"]);
+export function validateFieldMask(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const unsupported = [...backendPlatforms].filter((p) => !FIELD_MASK_BACKENDS.has(p));
+  const anyBackend = backendPlatforms.size > 0;
+  for (const agg of ctx.aggregates) {
+    const masked = agg.fields.filter((f) => f.maskUnless);
+    if (masked.length === 0) continue;
+    for (const f of masked) {
+      const offending = firstNonGateRef(f.maskUnless!, GATE_ALLOWED_REFS);
+      if (offending !== null) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-not-current-user",
+          message:
+            `aggregate '${agg.name}' field '${f.name}': a \`mask unless\` predicate is evaluated ` +
+            `at read projection as a param-free caller check, so it may only reference \`currentUser\` ` +
+            `(and constants) — \`${offending}\` is not available here.`,
+          source: `${ctx.name}/${agg.name}.${f.name}`,
+        });
+      }
+    }
+    if (anyBackend && unsupported.length === 0) continue;
+    const names = masked.map((f) => f.name).join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.field-mask-unsupported",
+      message:
+        `aggregate '${agg.name}' has \`mask unless\` field(s) ${names}, but read-mask redaction ` +
+        `is not emitted by the ${unsupported.join("/")} backend(s) yet (node emits it; the other ` +
+        `backends are the stacked follow-on). Drop the \`mask unless\` clause for those targets, ` +
+        `or track authorization.md §5 (M-T3.2 item 6).`,
+      source: `${ctx.name}/${agg.name}`,
+    });
+  }
+  // Query-time projection responses are NOT yet mask-redacted — the shorthand
+  // (no `select`) serialises the source aggregate's full wire, and a `select`
+  // may read any field — so a masked aggregate can't be a query-time projection
+  // source (it would leak the field past the mask).  An honest bound until
+  // projection read-masking lands; the field surface itself stays supported.
+  const maskedAggNames = new Set(
+    ctx.aggregates.filter((a) => a.fields.some((f) => f.maskUnless)).map((a) => a.name),
+  );
+  if (maskedAggNames.size > 0) {
+    for (const proj of ctx.projections) {
+      // `maskedAggNames` holds only aggregate names, so a `source` match is an
+      // aggregate source (a workflow / projection source can't collide).
+      const src = proj.query?.source;
+      if (src && maskedAggNames.has(src)) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-projection-source",
+          message:
+            `projection '${proj.name}' sources from aggregate '${src}', which has a \`mask unless\` ` +
+            `field — query-time projection responses are not yet read-masked, so this would expose ` +
+            `the masked field. Read the aggregate through its own routes, or drop the mask.`,
+          source: `${ctx.name}/projection/${proj.name}`,
+        });
+      }
+    }
   }
 }
 

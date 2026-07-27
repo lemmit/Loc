@@ -37,9 +37,12 @@ export function isHostOwnedSpaFile(path: string, prefix: string = EMBEDDED_SPA_P
 }
 
 /** The embedded SPA's `.gitignore` body.  SvelteKit's adapter-static writes
- *  `build/` (+ `.svelte-kit`); every Vite SPA (React / Vue) writes `dist/`. */
+ *  `build/` (+ `.svelte-kit`); Angular's `ng build` writes `dist/` (+ a
+ *  `.angular/` cache); every Vite SPA (React / Vue) writes `dist/`. */
 export function embeddedSpaGitignore(uiFramework: string | undefined): string {
-  return uiFramework === "svelte" ? "node_modules\nbuild\n.svelte-kit\n" : "node_modules\ndist\n";
+  if (uiFramework === "svelte") return "node_modules\nbuild\n.svelte-kit\n";
+  if (uiFramework === "angular") return "node_modules\ndist\n.angular\n";
+  return "node_modules\ndist\n";
 }
 
 /** Copy an already-generated SPA's files into the host `out` map, dropping

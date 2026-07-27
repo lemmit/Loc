@@ -16,7 +16,29 @@
 // naturally exempt: they don't exist at this layer.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import { type FindDecl, isFindDecl, type Model } from "../generated/ast.js";
+import { type FindDecl, isFindDecl, isProjection, type Model } from "../generated/ast.js";
+import { envForNode, typeOf, typeToString } from "../type-system.js";
+
+/** A read-path `requires <expr>` authorization gate must type to bool, exactly
+ *  like the operation / workflow `requires` clause (`statements.ts` /
+ *  `structural.ts`).  Without this a non-bool gate (`requires 42`) lowered to
+ *  an always-truthy no-op that silently never fired.  Now that `currentUser`
+ *  types precisely (`type-system.ts`), a bare
+ *  `requires currentUser.permissions.contains(permissions.x)` gate passes. */
+function checkGateIsBool(
+  gate: FindDecl["gate"],
+  node: FindDecl | import("../generated/ast.js").Projection,
+  accept: ValidationAcceptor,
+): void {
+  if (!gate) return;
+  const gt = typeOf(gate, envForNode(gate));
+  if (gt.kind !== "primitive" || gt.name !== "bool") {
+    accept("error", `'requires' must be of type 'bool', got '${typeToString(gt)}'.`, {
+      node,
+      property: "gate",
+    });
+  }
+}
 
 /** A find whose return type is a COLLECTION — an array (`T[]`) or the `paged`
  *  list carrier (`T paged`).  These are list queries; a single (`T`) or
@@ -29,7 +51,14 @@ function returnsCollection(find: FindDecl): boolean {
 
 export function checkRepositoryFinds(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
+    // Read-path `requires` gate bool check — the find and query-time projection
+    // (the "view" successor) gates, the read-side twins of the operation gate.
+    if (isProjection(node)) {
+      checkGateIsBool(node.gate, node, accept);
+      continue;
+    }
     if (!isFindDecl(node)) continue;
+    checkGateIsBool(node.gate, node, accept);
     if (!returnsCollection(node)) continue;
     accept(
       "warning",
