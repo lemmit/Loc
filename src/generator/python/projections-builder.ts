@@ -95,8 +95,18 @@ function projectionRoutes(proj: ProjectionIR): string {
   const slug = snake(proj.name);
   const row = `${proj.name}Row`;
   const shape = proj.wireShape ?? [];
+  // Folded read-model columns are ALL nullable (a projection row is written
+  // incrementally), so even a source-required `datetime`/`money` arrives off the
+  // ORM row as `T | None`.  Serialize every non-key field as optional so
+  // `iso()` / `money_str()` get their None-guard — otherwise `mypy --strict`
+  // rejects `iso(row.<dt>)` on a `datetime | None` column.
   const project = (rowVar: string): string =>
-    shape.map((f) => `"${f.name}": ${instanceFieldValue(rowVar, f)}`).join(", ");
+    shape
+      .map((f) => {
+        const wf = f.source === "id" ? f : { ...f, optional: true };
+        return `"${f.name}": ${instanceFieldValue(rowVar, wf)}`;
+      })
+      .join(", ");
   const list = lines(
     `@router.get("/${slug}", response_model=${T}ListResponse, operation_id="list${T}")`,
     `async def ${slug}_list(session: SessionDep) -> list[dict[str, object]]:`,
