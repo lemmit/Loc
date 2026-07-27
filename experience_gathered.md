@@ -3110,3 +3110,34 @@ corpus yet is wrong on an input the corpus never exercises.
   emits nothing that enforces always-false → a *silent* tenant-data leak, not a
   crash. The principled fix is a discriminated `FilterIR` node kind so a missing
   arm is a `tsc` error. Tracked in M-T9.9.
+
+## 55. Elixir corpus compile gate caught a silent unused-alias -Werror bug (2026-07-27)
+
+M-T9.10 — the per-feature corpus compile matrix (`corpus-build.yml`) capped at
+tsc/dotnet/java/python; Elixir was only compile-checked in the nightly, so an
+Elixir codegen regression on any corpus feature shipped green until then. Added
+the fifth leg (`test:elixir-corpus` + `corpus-elixir-build.yml`) — docker
+`mix compile --warnings-as-errors` per feature, reusing the vanilla gate's
+hexpm-image + `LOOM_HEX_MIRROR` plumbing, sharded one-feature-per-cell (a cold
+docker `mix deps.get` needs it; the SDK-on-PATH legs run the whole suite in one
+job).
+
+The gate immediately earned its keep: `resources` failed `-Werror` on an
+**unused `alias D.Sales, as: Context`**. Both the workflow and explicit-handler
+emitters gated that alias on `lines.some(l => l.kind === "with-clause")` — but a
+`with` clause that only calls `D.Resources.*` references no context module, so
+the alias was emitted yet never used. The correct predicate is whether the body
+actually contains `contextModuleFq` (the exact substring the alias-rewrite
+targets): `const hasContextCall = body.includes(contextModuleFq)`. One file
+changed across all 30 corpus features; 830 elixir gen tests stayed green → skip
+map lands empty.
+
+**Two lessons.** (1) A per-target compile gate that ends at four of five
+backends is a silent-gap generator — the missing leg's regressions surface a
+day late; the marginal fifth leg is where the real bug was hiding. (2) Behind
+the TLS-fingerprinting egress proxy the local hex mirror flakes under 30
+back-to-back cold `deps.get` calls (spurious `:timeout` "failures"); to
+establish a skip map, drive the compiles with a **shared hex-cache docker
+volume + deps.get retries** so tarballs download once — otherwise you can't tell
+a network flake from a real compile failure. (CI has direct hex.pm access, so
+the shipped test needs neither.)

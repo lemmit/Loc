@@ -1,0 +1,132 @@
+name: Corpus compile gate (Elixir)
+
+# The FIFTH backend cell of the per-feature corpus compile matrix (M-T9.10).
+# corpus-build.yml compiles every corpus feature on tsc/dotnet/java/python but
+# deliberately left Elixir out — it's the one backend that needs the docker
+# hexpm image + (behind a TLS-fingerprinting egress proxy) the LOOM_HEX_MIRROR
+# loopback CA dance, so it was "wired separately as a follow-up" (see that
+# workflow's header).  This is that follow-up.
+#
+# Before this gate, every corpus feature's Elixir emission was generation-
+# verified per-PR (corpus-coverage) but only COMPILE-checked in the nightly
+# cross-backend conformance run — so an Elixir codegen regression on any corpus
+# feature shipped green until the nightly.  This closes that silent gap: each
+# feature's generated plain-Ecto/Phoenix project is `mix compile
+# --warnings-as-errors`-checked inside the hexpm/elixir image, per PR.
+#
+# The generate + compile loop lives in `test/e2e/corpus-elixir-build.test.ts`
+# (entrypoint `npm run test:elixir-corpus`); the feature list is computed inside
+# the test from the shared manifest (test/fixtures/corpus/manifest.ts, key
+# `vanilla`) minus that backend's ELIXIR_COMPILE_SKIP map — one source of truth.
+#
+# Sharded one feature per cell (like elixir-vanilla-build.yml): a cold docker
+# `mix deps.get` + compile per feature comfortably fits a per-cell timeout, and
+# a `configure` job enumerates the corpus fixtures dynamically so adding a
+# `<feature>.ddd` needs no workflow edit.  CI has direct hex.pm access, so
+# LOOM_HEX_MIRROR stays unset here (a no-op).
+#
+# Triggers: any change to the elixir generator subtree, the shared expression
+# seam, the IR, the elixir platform surface / deployable validator, the corpus
+# fixtures, or this leg's test — plus push:main and manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/platform/elixir.ts'
+      - 'src/language/validators/deployable.ts'
+      - 'test/fixtures/corpus/**'
+      - 'test/e2e/corpus-elixir-build.test.ts'
+      - 'test/e2e/support/hex-mirror.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/corpus-elixir-build.yml'
+  pull_request:
+    paths:
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/platform/elixir.ts'
+      - 'src/language/validators/deployable.ts'
+      - 'test/fixtures/corpus/**'
+      - 'test/e2e/corpus-elixir-build.test.ts'
+      - 'test/e2e/support/hex-mirror.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/corpus-elixir-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Enumerate the corpus feature fixtures dynamically so dropping a
+  # `<feature>.ddd` under test/fixtures/corpus/ extends the matrix with no
+  # workflow edit.  Output is JSON consumed by the matrix below via `fromJSON`.
+  # A feature excluded from `vanilla` (or listed in ELIXIR_COMPILE_SKIP) still
+  # gets a cell, but the test filters it out → 0 tests → `--passWithNoTests`
+  # keeps the cell green; the test stays the single source of truth for what
+  # actually compiles.
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: set
+        run: |
+          features=$(for f in test/fixtures/corpus/*.ddd; do
+            basename "$f" .ddd
+          done | jq -R . | jq -cs .)
+          echo "matrix={\"feature\":$features}" >> "$GITHUB_OUTPUT"
+
+  # One job PER corpus feature (sharded).  A fully cold cell is ONE feature:
+  # npm ci + toolchain build, generate, then a docker `mix deps.get` + `mix
+  # compile --warnings-as-errors` (~2-3 min) — always fits the timeout.
+  corpus-elixir:
+    needs: configure
+    runs-on: ubuntu-latest
+    strategy:
+      # Surface every broken feature rather than aborting on the first.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    timeout-minutes: 20
+    name: ${{ matrix.feature }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # `npm ci` runs the `prepare` lifecycle (langium:generate + build); the
+      # toolchain compiles before the test's `generate system` step needs it.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # `--passWithNoTests` so a feature the manifest excludes from `vanilla`
+      # (or one in ELIXIR_COMPILE_SKIP) yields an empty `it.each` and still
+      # passes — the test's filter, not the matrix, decides what compiles.
+      - name: mix compile this corpus feature (Elixir/Phoenix)
+        env:
+          LOOM_ELIXIR_BUILD: "1"
+          LOOM_CORPUS_ELIXIR_CASE: ${{ matrix.feature }}
+        run: npx vitest run test/e2e/corpus-elixir-build.test.ts --passWithNoTests
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo "## Corpus Elixir compile failed: ${{ matrix.feature }}" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "mix compile this corpus feature" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics.' >> $GITHUB_STEP_SUMMARY
+          echo 'This cell generates `test/fixtures/corpus/${{ matrix.feature }}.ddd` on `platform: elixir` and compiles it in the hexpm/elixir image via `test/e2e/corpus-elixir-build.test.ts` (LOOM_CORPUS_ELIXIR_CASE=${{ matrix.feature }}).' >> $GITHUB_STEP_SUMMARY
