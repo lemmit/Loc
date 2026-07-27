@@ -94,6 +94,15 @@ const REGISTERED: Ratchet[] = [
   { file: "test/platform/pipeline-layering.test.ts", name: "ALLOWED", kind: "record", max: 0 },
   // The two sibling M-T9.8 gates' own escape valves (both empty at zero).
   { file: "test/platform/dead-generator-exports.test.ts", name: "ALLOW", kind: "set", max: 0 },
+  // Documented feature docs with no corpus fixture yet (feature-doc-coverage
+  // Phase 2 gate).  Two: domain-services + scaffold-macros — M-T9.3 owns
+  // draining these as the unit-tier corpus coverage fills in.
+  {
+    file: "test/conformance/feature-doc-coverage.test.ts",
+    name: "KNOWN_GAPS",
+    kind: "set",
+    max: 2,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to
