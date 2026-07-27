@@ -216,6 +216,34 @@ the conforming backends, and the fix that established it.
   gated statically per-PR by
   `test/conformance/rehydration-trust-parity.test.ts`.
 
+### RS-11 · Initial `version` is identical across backends on create
+- **Guarantee.** A freshly-created `versioned` aggregate reads back with the
+  same optimistic-concurrency `version` integer on every backend.
+- **Trigger.** A `versioned` aggregate created via `POST`, then read.
+- **Observable.** node currently emits `1` where dotnet/java/python emit `0`.
+  The divergence is uniform across every seeded row (ordering-independent), so
+  node is the lone outlier — the canonical value (0 vs 1) is a pending owner
+  decision; the *guarantee* is agreement.
+- **Conforms.** dotnet, java, python. **Target (open):** node.
+- **Provenance.** Surfaced proactively by the M-T9.11 cross-backend response
+  differential (run 30277275068, PR #2220) — not yet fixed. Tier: **behavioral**.
+
+### RS-12 · Money wire values carry a fixed scale
+- **Guarantee.** A money-typed field serializes with its type's scale intact;
+  trailing zeros are never stripped.
+- **Trigger.** A money field on the wire (e.g. `costFloor`).
+- **Observable.** node emits `"0"`; dotnet/java/python emit `"0.00"`. Uniform
+  across every seeded row — a real Hono money-serialization bug candidate.
+- **Conforms.** dotnet, java, python. **Target (open):** node.
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220) — not yet
+  fixed. Tier: **behavioral**.
+
+> **Candidate (not yet a rule):** the same differential flagged a *derived*
+> field (`seqTag`) interpolating money into a string with a `budget 100` vs
+> `budget 100.0` split, but that evidence is contaminated by the slice-(a)
+> index-based row alignment (rows aren't id-keyed across backends). It needs
+> M-T9.11 slice (b)'s id-keyed capture to confirm before it earns an RS number.
+
 ---
 
 ## Adding a rule

@@ -179,6 +179,44 @@
         "generated-code-ddd-review-2026-07 §S6"
       ],
       "tier": "static"
+    },
+    {
+      "id": "RS-11",
+      "title": "Initial `version` is identical across backends on create",
+      "trigger": "a `versioned` aggregate created via POST, then read back",
+      "observable": "the optimistic-concurrency `version` on the first read is the same integer on every backend — node currently emits 1 where dotnet/java/python emit 0 (canonical value pending owner confirmation; the point is agreement)",
+      "conforms": [
+        "dotnet",
+        "java",
+        "python"
+      ],
+      "targets": [
+        "node"
+      ],
+      "provenance": [
+        "M-T9.11 differential run 30277275068",
+        "PR #2220"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-12",
+      "title": "Money wire values carry a fixed scale (no trailing-zero stripping)",
+      "trigger": "a money-typed field serialized to the wire (e.g. `costFloor`)",
+      "observable": "the JSON string preserves the money type's scale — `\"0.00\"`, not `\"0\"`; node currently strips trailing zeros to `\"0\"` where dotnet/java/python keep the scale",
+      "conforms": [
+        "dotnet",
+        "java",
+        "python"
+      ],
+      "targets": [
+        "node"
+      ],
+      "provenance": [
+        "M-T9.11 differential run 30277275068",
+        "PR #2220"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

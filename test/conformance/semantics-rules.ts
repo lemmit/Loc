@@ -192,6 +192,33 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // structs — no invariant runs on those load paths by construction.
     tier: "static",
   },
+  {
+    id: "RS-11",
+    title: "Initial `version` is identical across backends on create",
+    trigger: "a `versioned` aggregate created via POST, then read back",
+    observable:
+      "the optimistic-concurrency `version` on the first read is the same integer on every backend — node currently emits 1 where dotnet/java/python emit 0 (canonical value pending owner confirmation; the point is agreement)",
+    // dotnet/java/python agree on 0; node is the lone divergent backend. The
+    // divergence is uniform across every seeded row (ordering-independent), so
+    // this is a clean cross-backend split, not an alignment artifact.
+    conforms: ["dotnet", "java", "python"],
+    targets: ["node"],
+    provenance: ["M-T9.11 differential run 30277275068", "PR #2220"],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-12",
+    title: "Money wire values carry a fixed scale (no trailing-zero stripping)",
+    trigger: "a money-typed field serialized to the wire (e.g. `costFloor`)",
+    observable:
+      'the JSON string preserves the money type\'s scale — `"0.00"`, not `"0"`; node currently strips trailing zeros to `"0"` where dotnet/java/python keep the scale',
+    // Uniform across every seeded row (all zero-valued), so ordering-independent.
+    // node is the lone outlier — a real Hono money-serialization bug candidate.
+    conforms: ["dotnet", "java", "python"],
+    targets: ["node"],
+    provenance: ["M-T9.11 differential run 30277275068", "PR #2220"],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------
