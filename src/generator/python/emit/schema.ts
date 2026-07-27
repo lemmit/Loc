@@ -247,6 +247,8 @@ export function renderPySchema(
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     pgNames.length > 0 ? `from sqlalchemy.dialects.postgresql import ${pgNames.join(", ")}` : null,
     "from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column",
+    uses("FileRef") ? "" : null,
+    uses("FileRef") ? "from app.domain.file_ref import FileRef" : null,
     "",
     "",
     "class Base(DeclarativeBase):",

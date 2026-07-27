@@ -106,6 +106,29 @@ const s3Adapter: PyResourceAdapter = {
         `    await asyncio.to_thread(_client.delete_object, Bucket=_${fn}_bucket, Key=key)`,
         "",
         "",
+        // Raw-bytes verbs consumed by the File upload/download endpoints
+        // (M-T1.2).  Unlike put/get (which JSON-encode), these store the exact
+        // bytes + contentType so a downloaded object streams back byte-identical.
+        `async def ${fn}_put_bytes(key: str, body: bytes, content_type: str) -> None:`,
+        "    await asyncio.to_thread(",
+        "        _client.put_object,",
+        `        Bucket=_${fn}_bucket,`,
+        "        Key=key,",
+        "        Body=body,",
+        "        ContentType=content_type,",
+        "    )",
+        "",
+        "",
+        `async def ${fn}_get_bytes(key: str) -> tuple[bytes, str] | None:`,
+        "    try:",
+        `        res = await asyncio.to_thread(_client.get_object, Bucket=_${fn}_bucket, Key=key)`,
+        "    except _client.exceptions.NoSuchKey:",
+        "        return None",
+        `    raw = await asyncio.to_thread(res["Body"].read)`,
+        `    content_type = res.get("ContentType") or "application/octet-stream"`,
+        "    return (raw, content_type)",
+        "",
+        "",
       );
     }
     return lines(
@@ -118,6 +141,102 @@ const s3Adapter: PyResourceAdapter = {
       "import boto3",
       "",
       '_client = boto3.client("s3")',
+      "",
+      "",
+      body,
+    );
+  },
+};
+
+/** localDisk — a dependency-free local-directory object store (M-T1.2), the
+ *  Python twin of `localDiskResourceAdapter` (hono/v4).  Stores each object's
+ *  raw bytes under a data dir keyed by `key`, plus a `<key>.meta.json` sidecar
+ *  carrying the contentType so a download round-trips its metadata.  Backs the
+ *  File upload/download endpoints without any cloud SDK (stdlib `pathlib`). */
+const localDiskAdapter: PyResourceAdapter = {
+  name: "localDisk",
+  deps: () => [],
+  devDeps: () => [],
+  emitModule(resources): string {
+    const body: string[] = [];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      body.push(
+        `# objectStore '${r.name}' — local-directory store (raw bytes + sidecar meta).`,
+        `_${fn}_dir = Path(os.environ.get("${envVar(r.name)}_DIR", "data/${r.name}"))`,
+        "",
+        "",
+        // Guard against path traversal: minted keys are uuids, but a
+        // `GET /files/{key}` param is caller-supplied, so keep the resolved
+        // path inside the data dir.
+        `def _${fn}_path(key: str) -> Path:`,
+        '    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in key)',
+        `    return _${fn}_dir / safe`,
+        "",
+        "",
+        // Raw-bytes verbs — the File endpoints' storage seam.
+        `async def ${fn}_put_bytes(key: str, body: bytes, content_type: str) -> None:`,
+        `    _${fn}_dir.mkdir(parents=True, exist_ok=True)`,
+        `    path = _${fn}_path(key)`,
+        "    path.write_bytes(body)",
+        '    path.with_name(path.name + ".meta.json").write_text(',
+        '        json.dumps({"contentType": content_type, "size": len(body)})',
+        "    )",
+        "",
+        "",
+        `async def ${fn}_get_bytes(key: str) -> tuple[bytes, str] | None:`,
+        `    path = _${fn}_path(key)`,
+        "    if not path.exists():",
+        "        return None",
+        "    body = path.read_bytes()",
+        '    content_type = "application/octet-stream"',
+        '    meta = path.with_name(path.name + ".meta.json")',
+        "    if meta.exists():",
+        "        data = json.loads(meta.read_text())",
+        '        stored = data.get("contentType")',
+        "        if isinstance(stored, str):",
+        "            content_type = stored",
+        "    return (body, content_type)",
+        "",
+        "",
+        // Vendor-neutral JSON verbs (parity with s3's put/get/list/delete) so
+        // workflow bodies that reach the store keep working against localDisk.
+        `async def ${fn}_put(key: str, body: object) -> None:`,
+        `    await ${fn}_put_bytes(key, json.dumps(body).encode(), "application/json")`,
+        "",
+        "",
+        `async def ${fn}_get(key: str) -> object | None:`,
+        `    obj = await ${fn}_get_bytes(key)`,
+        "    if obj is None:",
+        "        return None",
+        "    decoded: object = json.loads(obj[0])",
+        "    return decoded",
+        "",
+        "",
+        `async def ${fn}_list(prefix: str) -> list[str]:`,
+        `    if not _${fn}_dir.exists():`,
+        "        return []",
+        "    return [",
+        "        p.name",
+        `        for p in _${fn}_dir.iterdir()`,
+        '        if not p.name.endswith(".meta.json") and p.name.startswith(prefix)',
+        "    ]",
+        "",
+        "",
+        `async def ${fn}_delete(key: str) -> None:`,
+        `    path = _${fn}_path(key)`,
+        "    path.unlink(missing_ok=True)",
+        '    path.with_name(path.name + ".meta.json").unlink(missing_ok=True)',
+        "",
+        "",
+      );
+    }
+    return lines(
+      '"""Local-directory object-store resource clients (resources.md).  Auto-generated."""',
+      "",
+      "import json",
+      "import os",
+      "from pathlib import Path",
       "",
       "",
       body,
@@ -370,6 +489,7 @@ const sendgridAdapter: PyResourceAdapter = {
 
 const ADAPTERS: readonly PyResourceAdapter[] = [
   s3Adapter,
+  localDiskAdapter,
   rabbitmqAdapter,
   restApiAdapter,
   smtpAdapter,

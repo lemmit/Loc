@@ -8,17 +8,29 @@ deployable 404s the upload at runtime. Slice 2 fills that gap backend-by-backend
 **2a is Python** — the host-verifiable leg (`uv sync` + ruff + mypy --strict +
 pytest), and the reference the other three stack on.*
 
-## The gap
+## The gap — bigger than "missing endpoints"
 
 `validateFileFieldObjectStorage` (`loom.file-field-needs-object-storage`) allows
 a `File` field on **any** backend that binds an `objectStore` dataSource — it is
-not platform-restricted. But only the Hono backend emits the app-level upload/
-download endpoints (`src/generator/typescript/emit/routes.ts` → `POST /files` +
-`GET /files/:key`, wired to `<res>$putBytes` / `<res>$getBytes`). The Python
-resource layer today emits only the **JSON-oriented** resource verbs
-(`<fn>_put(key, body)` / `<fn>_get(key)` — `json.dumps`ed) and has **no
-`localDisk` adapter** at all, so there is nothing to serve raw bytes with a
-content-type.
+not platform-restricted. But only Hono emits the app-level upload/download
+endpoints (`src/generator/typescript/emit/routes.ts`).
+
+Verifying against fresh `main` surfaced that **File was never actually
+implemented on Python** beyond the type-mapper arm — a File-bearing Python
+project did not even compile:
+
+- `py-columns.ts` sent `File` to the `default` arm → a `Text`/`str` column (not
+  JSONB), so the FileRef object could never round-trip.
+- The domain aggregate, schema, and repository annotated the field as
+  `FileRef`, but **`FileRef` was never emitted or imported** — `ruff`/`mypy`
+  `F821 Undefined name FileRef`. No `LOOM_PYTHON_BUILD` fixture had a `File`
+  field, so the exhaustive-`PrimitiveName`-switch "lands on all five backends"
+  claim was never compile-checked off Hono.
+- The resource layer emitted only the **JSON-oriented** verbs (`_put`/`_get` —
+  `json.dumps`ed) with **no raw-bytes verbs** and **no `localDisk` adapter**.
+
+So slice 2a is really "**complete `File` on Python end-to-end**", of which the
+endpoints are the last mile.
 
 ## Scope (2a)
 

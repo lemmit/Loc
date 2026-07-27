@@ -83,6 +83,11 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
   // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
+  // File field (M-T1.2 slice 2a): FileRef TypedDict in a JSONB column +
+  // app-level POST /files / GET /files/{key} over the localDisk bytes adapter.
+  // The first File-bearing python project to compile — domain/schema/repository
+  // never type-checked with a File field before (FileRef was undefined).
+  ["test/e2e/fixtures/python-build/file-upload.ddd", "api"],
   // shape: document: one jsonb (id, data, version) blob + in-memory finds.
   ["test/e2e/fixtures/python-build/document.ddd", "api"],
   // shape: document + capability filter (DEBT-02 tail complete): non-principal
