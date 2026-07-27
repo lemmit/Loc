@@ -902,7 +902,9 @@ export function generateTypeScriptForContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, out);
   }
-  emitObservabilityFiles(out);
+  // The OTel `service.name` resource attribute default — the deployable's
+  // name (compose/k8s override it via OTEL_SERVICE_NAME per service).
+  emitObservabilityFiles(out, system?.deployable.name ?? "api");
   // Persist-time audit-stamp helper (node-persist-time-auditing): emitted once
   // per project when any served aggregate carries lifecycle stamps, so the
   // backend `save()` can stamp the audit columns from the ambient request
@@ -1444,7 +1446,8 @@ function renderProjectIndexTs(
     ? `import { serve } from "@hono/node-server";
 import { createApp } from "./http/index";
 ${MIKRO_INDEX_IMPORTS.join("\n")}
-${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`
+${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
+import { shutdownTracing } from "./obs/tracing";`
     : `import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
@@ -1477,7 +1480,8 @@ ${
           : ""
       }`
     : ""
-}${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";`;
+}${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";
+import { shutdownTracing } from "./obs/tracing";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
     : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
@@ -1582,6 +1586,9 @@ async function shutdown(signal: string): Promise<void> {
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });
+  // Flush buffered OTel spans to the collector before exit (no-op when no
+  // OTLP endpoint is configured).
+  await shutdownTracing();
   ${usingMikro ? "await orm.close();" : "await pool.end();"}
   process.exit(0);
 }
