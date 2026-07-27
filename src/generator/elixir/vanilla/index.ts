@@ -25,6 +25,8 @@ import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { brokerChannelBindings } from "../../_channels/bindings.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
+import { generateAngularForContexts } from "../../angular/index.js";
+import { generateFelizForContexts } from "../../feliz/index.js";
 import { generateReactForContexts } from "../../react/index.js";
 import { generateSvelteForContexts } from "../../svelte/index.js";
 import { generateVueForContexts } from "../../vue/index.js";
@@ -404,13 +406,16 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // through the `list_<agg>s()` / `get_<agg>(id)` tuple-returning fetches.
   // The collected `liveRoutes` are spliced into the
   // router's `live_session` by `emitVanillaShellFiles` below.  An embedded-SPA
-  // (`framework: react|vue|svelte`) ui owns its own UI, so no LiveView pages.
+  // (`framework: react|vue|svelte|angular`) ui owns its own UI, so no
+  // LiveView pages.
   const embedReact =
     deployable.uiFramework === "react" ||
     deployable.uiFramework === "vue" ||
-    deployable.uiFramework === "svelte";
+    deployable.uiFramework === "svelte" ||
+    deployable.uiFramework === "angular" ||
+    deployable.uiFramework === "feliz";
   // --- Embedded SPA (fullstack Phoenix) --------------------------------------
-  // A `hosts:` React/Vue/Svelte ui means the Phoenix deployable is a JSON-API
+  // A `hosts:` React/Vue/Svelte/Angular ui means the Phoenix deployable is a JSON-API
   // backend that ALSO serves a client-side SPA.  Emit that SPA under `assets/`
   // — Phoenix's conventional JS home — served at `/app` (so its client-side
   // routes deep-link) by the endpoint `Plug.Static` + router fallback below,
@@ -421,8 +426,22 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // The SPA hits `/api/*` on its own origin (`apiBaseUrl: "/api"`) — the
   // Phoenix routes already live under `scope "/api"`, so no route-prefix
   // rework is needed (unlike .NET).
-  const spaOutDir = deployable.uiFramework === "svelte" ? "build" : "dist";
+  // Where each framework's build stage drops its bundle: SvelteKit's
+  // adapter-static writes `build/`; Angular's `ng build` nests the browser
+  // artefacts under `dist/browser/`; every Vite SPA (React / Vue / Feliz —
+  // Feliz's `dotnet fable` → `vite build` writes a FLAT `dist/`) writes
+  // `dist/`.  Drives the Dockerfile's `COPY --from=spa-build /spa/<spaOutDir>`.
+  const spaOutDir =
+    deployable.uiFramework === "svelte"
+      ? "build"
+      : deployable.uiFramework === "angular"
+        ? "dist/browser"
+        : "dist";
   if (embedReact && deployable.uiName) {
+    // Angular additionally consumes `basePath` (→ `baseHref: "/app/"` in
+    // angular.json + `<base href="/app/">` in index.html) so its asset URLs
+    // and client-side deep links resolve under the `/app` Plug.Static mount,
+    // exactly as Svelte consumes it via `kit.paths.base`.
     const embedOpts = { apiBaseUrl: "/api", pathPrefix: "assets/", basePath: "/app" };
     const uiFw = deployable.uiFramework;
     const spaFiles =
@@ -430,7 +449,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
         ? generateSvelteForContexts(contexts, sys, deployable, embedOpts)
         : uiFw === "vue"
           ? generateVueForContexts(contexts, sys, deployable, embedOpts)
-          : generateReactForContexts(contexts, sys, deployable, embedOpts);
+          : uiFw === "angular"
+            ? generateAngularForContexts(contexts, sys, deployable, embedOpts)
+            : uiFw === "feliz"
+              ? generateFelizForContexts(contexts, sys, deployable, embedOpts)
+              : generateReactForContexts(contexts, sys, deployable, embedOpts);
     // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
     // certs / e2e — Phoenix ships its own at the project root) and emit
     // `assets/.gitignore`; shared with the .NET/Java/Python embed hosts.
@@ -641,6 +664,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       embedReact && !!deployable.uiName,
       spaOutDir,
       channelBindings.some((b) => b.transport === "kafka"),
+      // Feliz builds via `dotnet fable` + `vite build`, so its spa-build stage
+      // needs a .NET-SDK+Node base image (not the node-only vite stage the
+      // React/Vue/Svelte/Angular embeds use).
+      deployable.uiFramework === "feliz" ? "feliz" : "vite",
     ),
   );
   out.set(".dockerignore", renderDockerignore());

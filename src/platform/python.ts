@@ -1,8 +1,8 @@
 import { generatePythonForContexts } from "../generator/python/index.js";
 import {
   type ComposeServiceShape,
+  EMBEDDABLE_FRAMEWORKS,
   type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
 } from "./surface.js";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ const pythonPlatform: PlatformSurface = {
   isFrontend: false,
   // Static-asset host (FastAPI StaticFiles): can serve any
   // static-bundle framework.  D-PHOENIX-SURFACE.
-  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+  hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
   // The Python repository auto-emits these per aggregate (snake_cased
   // on the Python side: `save`, `find_by_id`, `get_by_id`, `delete`).
   // The validator compares DSL-cased find names (and unions the

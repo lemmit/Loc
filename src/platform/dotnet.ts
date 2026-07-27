@@ -8,8 +8,8 @@ import { DOTNET_TFM } from "../generator/dotnet/emit/program.js";
 import { generateDotnetForContexts } from "../generator/dotnet/index.js";
 import {
   type ComposeServiceShape,
+  EMBEDDABLE_FRAMEWORKS,
   type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
 } from "./surface.js";
 
 /** Pascal-cased root namespace for a deployable's .NET project — the same
@@ -28,7 +28,7 @@ const dotnetPlatform: PlatformSurface = {
   isFrontend: false,
   // Static-asset host (embeds a SPA via wwwroot + SPA fallback):
   // serves any static-bundle framework.  D-PHOENIX-SURFACE.
-  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+  hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
   // .NET admits an embedded React SPA via static-files middleware +
   // SPA fallback route — see the fullstack branch in
   // `generator/dotnet/index.ts` that fires when `deployable.uiName`

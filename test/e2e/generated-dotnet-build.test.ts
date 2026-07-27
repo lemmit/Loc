@@ -118,6 +118,101 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // Fullstack embed — Angular arm.  A `platform: dotnet` deployable hosting a
+    // `framework: angular` ui embeds the Angular SPA under ClientApp/ (parity
+    // with the react/vue/svelte arms).  `generate dotnet` above is legacy
+    // single-project mode (no embed), so this must go through `generate system`.
+    // Angular's `ng build` nests the browser bundle under `dist/browser/`, so
+    // the multi-stage Dockerfile COPY differs from the vite `dist/` (react/vue)
+    // and SvelteKit `build/` arms.  We assert the embed shape, then build the
+    // .NET api project under /warnaserror (the Angular SPA compile is gated by
+    // the generated-angular-build workflow, not here).
+    it("system fullstack `ui: framework: angular` — dotnet api builds; ClientApp/ + dist/browser embed emitted", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-angular-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/hosts-angular.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "app");
+        // Angular SPA embedded under ClientApp/, dist/browser bundle copied into
+        // wwwroot/ by the multi-stage Dockerfile.
+        expect(fs.existsSync(path.join(proj, "ClientApp", "angular.json"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "ClientApp", "package.json"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "ClientApp", "Dockerfile"))).toBe(false);
+        const dockerfile = fs.readFileSync(path.join(proj, "Dockerfile"), "utf8");
+        expect(dockerfile).toContain("COPY --from=spa-build /spa/dist/browser ./wwwroot");
+        // The .NET side compiles under /warnaserror.
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
+    // Fullstack embed — Feliz arm.  A `platform: dotnet` deployable hosting a
+    // `framework: feliz` ui embeds the Feliz (Fable/F#) SPA under ClientApp/
+    // (parity with the react/vue/svelte/angular arms).  Feliz builds via
+    // `dotnet fable` + `vite build`, so the multi-stage Dockerfile's spa-build
+    // stage runs on the .NET-SDK+Node image (not node:*-alpine) — but the build
+    // gate here only builds the BACKEND .NET project (no dotnet-fable cost);
+    // the Feliz SPA compile is gated by generated-feliz-build.yml.  We assert
+    // the embed shape + the Dockerfile stage, then build the api under
+    // /warnaserror.  Vite output is flat dist/ (like react/vue).
+    it("system fullstack `ui: framework: feliz` — dotnet api builds; ClientApp/ Feliz embed + SDK spa-build stage emitted", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-feliz-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/hosts-feliz.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "app");
+        // Feliz SPA embedded under ClientApp/ — App.fsproj + the Fable tool
+        // manifest; the multi-stage Dockerfile copies the flat dist/ into wwwroot/.
+        expect(fs.existsSync(path.join(proj, "ClientApp", "App.fsproj"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "ClientApp", ".config", "dotnet-tools.json"))).toBe(
+          true,
+        );
+        expect(fs.existsSync(path.join(proj, "ClientApp", "Dockerfile"))).toBe(false);
+        const dockerfile = fs.readFileSync(path.join(proj, "Dockerfile"), "utf8");
+        expect(dockerfile).toContain("mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build");
+        expect(dockerfile).toContain("dotnet tool restore");
+        expect(dockerfile).not.toMatch(/FROM node:\d+-alpine AS spa-build/);
+        expect(dockerfile).toContain("COPY --from=spa-build /spa/dist ./wwwroot");
+        // The .NET side compiles under /warnaserror.
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // D-REALIZATION-AXES Phase 5c: `persistence: dapper` is a SYSTEM-MODE
     // selection, so `generate dotnet` above never sees it.  Generate the SYSTEM
     // and build the dapper deployable's project under /warnaserror — proving the

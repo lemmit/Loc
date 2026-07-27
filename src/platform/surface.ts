@@ -44,6 +44,19 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set([
   "angular",
 ]);
 
+/** Frameworks a BACKEND host can embed under its served static root.  A
+ *  superset of `STATIC_BUNDLE_FRAMEWORKS` that adds `feliz`: Feliz is NOT a
+ *  vite-only static bundle (it builds via `dotnet fable` → JS → `vite build`),
+ *  so a static-asset FRONTEND host can't serve it — but a backend host owns
+ *  its own Dockerfile and can run a `dotnet fable` SPA-build stage before
+ *  serving the resulting static bundle.  Backend hosts advertise this set;
+ *  the frontend static hosts (react/vue/svelte/angular) stay on
+ *  `STATIC_BUNDLE_FRAMEWORKS`.  Feliz still self-hosts only its own framework. */
+export const EMBEDDABLE_FRAMEWORKS: ReadonlySet<string> = new Set([
+  ...STATIC_BUNDLE_FRAMEWORKS,
+  "feliz",
+]);
+
 // ---------------------------------------------------------------------------
 // Platform surface contract.
 //

@@ -12,23 +12,46 @@ export function renderDockerfile(
   /** kafka-wired projects pull brod, whose crc32cer NIF builds via cmake
    *  (M-T4.4 slice 8d) — absent otherwise so the image stays lean. */
   needsCmake = false,
+  /** How the embedded SPA builds.  `"vite"` (React/Vue/Svelte/Angular) runs a
+   *  node-only `npm run build`; `"feliz"` builds via `dotnet fable` + `vite
+   *  build`, so its stage needs a .NET-SDK+Node base image (mirrors the feliz
+   *  standalone Dockerfile).  Only consulted when `embedReact` is set. */
+  spaBuildKind: "vite" | "feliz" = "vite",
 ): string {
-  // Embedded-React mode: a first `spa-build` stage runs the SPA's own
-  // Vite build (the React project the orchestrator emitted under
-  // `assets/`), then the builder stage copies its `dist/` into
-  // `priv/static/app` so `mix release` packages it and `Plug.Static`
-  // (at `/app`) serves it.  Mirrors the .NET multi-stage embed
-  // (spa-build → app build → runtime).
-  const spaBuildStage = embedReact
-    ? `FROM node:24-alpine AS spa-build
+  // Embedded-SPA mode: a first `spa-build` stage runs the hosted SPA's own
+  // build (the frontend project the orchestrator emitted under `assets/`),
+  // then the builder stage copies its output into `priv/static/app` so
+  // `mix release` packages it and `Plug.Static` (at `/app`) serves it.
+  // Mirrors the .NET multi-stage embed (spa-build → app build → runtime).
+  //
+  // The vite path (React/Vue/Svelte/Angular) builds on a node-only base.
+  // Feliz builds F# → JS via `dotnet fable` then bundles via `vite build`,
+  // so its stage carries the .NET SDK plus Node (byte-for-byte the recipe of
+  // the feliz standalone Dockerfile: sdk:8.0 → nodesource setup_20 → dotnet
+  // tool restore → npm install → npm run build).
+  const feliz = spaBuildKind === "feliz";
+  const spaBuildStage = !embedReact
+    ? ""
+    : feliz
+      ? `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
+WORKDIR /spa
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+  && apt-get install -y --no-install-recommends nodejs \\
+  && rm -rf /var/lib/apt/lists/*
+COPY assets/ ./
+RUN dotnet tool restore
+RUN npm install
+RUN npm run build
+
+`
+      : `FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY assets/package.json assets/package-lock.json* ./
 RUN npm ci --prefer-offline --no-audit --no-fund || npm install
 COPY assets/ ./
 RUN npm run build
 
-`
-    : "";
+`;
   // In embedded mode, drop the built SPA into priv/static/app before
   // `mix compile`/`mix release` so the release overlay includes it.
   const spaCopy = embedReact

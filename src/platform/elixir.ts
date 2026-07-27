@@ -46,11 +46,20 @@ const elixirPlatform: PlatformSurface = {
   // is BOTH a server-render runtime (LiveView, spelled `phoenixLiveView`)
   // AND a static-asset host (`priv/static`) — it hosts its
   // runtime-coupled LiveView plus every static bundle (react / vue /
-  // svelte), all served from `/app`.  The SvelteKit bundle builds with
-  // `paths.base = "/app"` so its asset URLs + base-aware links resolve
-  // under the prefix (the same `basePath` thread react/vue use for their
-  // vite `base`).
-  hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue", "svelte"]),
+  // svelte / angular), all served from `/app`.  The SvelteKit bundle builds
+  // with `paths.base = "/app"` and the Angular bundle with `baseHref = "/app/"`
+  // (angular.json + the `<base>` tag) so their asset URLs + base-aware links
+  // resolve under the prefix — the same `basePath` thread react/vue use for
+  // their vite `base`.
+  hostableFrameworks: new Set([
+    "phoenixLiveView",
+    "react",
+    "static",
+    "vue",
+    "svelte",
+    "angular",
+    "feliz",
+  ]),
   // Context-function conventions.  A user-declared find named one of
   // these would collide with the generated CRUD context function of the
   // same name (`get_<agg>` / `create_<agg>` / …).

@@ -1,0 +1,43 @@
+// Java `hosts:` fullstack embed (M-T6.5) — Feliz (F#/Fable) arm.
+// A `platform: java` deployable `hosts:` a `framework: feliz` ui block,
+// embedding the Feliz SPA under ClientApp/.  Feliz is embeddable like the
+// static-bundle frontends but differs ONLY in its build toolchain: it compiles
+// via `dotnet fable` + `vite build` (not npm-only), so the host Dockerfile's
+// spa-build stage is a .NET SDK + Node image (`mcr.microsoft.com/dotnet/sdk`,
+// `dotnet tool restore`), not `node:22-alpine`.  Its vite output is still flat
+// `dist/` (like react/vue), so the runtime COPY is unchanged.  This gate runs
+// `gradle testClasses bootJar` (BACKEND compile only — it does NOT build the
+// SPA), so it verifies the java project compiles with feliz wiring + emits the
+// right Dockerfile, with no dotnet-fable cost.  Controllers stay under /api/*,
+// SpaWebConfig serves the bundle from UI_DIR with the index.html fallback.
+system HSF {
+  subdomain D {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+  api A from D
+  ui Store {
+    framework: feliz
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable hsfApp {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    hosts: Store
+    port: 8081
+    design: "dracula"
+  }
+}

@@ -385,22 +385,41 @@ export function renderHealthController(basePkg: string): string {
 }
 
 export function renderDockerfile(
-  options: { embeddedSpa?: boolean; spaOutDir?: string } = {},
+  options: { embeddedSpa?: boolean; spaOutDir?: string; spaBuildKind?: "vite" | "feliz" } = {},
 ): string {
-  // Fullstack: a node stage builds the embedded React SPA (ClientApp/)
-  // and the runtime image serves the bundle from /app/ui on the same
-  // origin as the /api/* controllers (SpaWebConfig).
-  const spaStage = options.embeddedSpa
-    ? [
-        `FROM node:22-alpine AS spa-build`,
-        `WORKDIR /spa`,
-        `COPY ClientApp/package.json ClientApp/package-lock.json* ./`,
-        `RUN npm ci --prefer-offline --no-audit --no-fund || npm install`,
-        `COPY ClientApp/ ./`,
-        `RUN npm run build`,
-        ``,
-      ]
-    : [];
+  // Fullstack: a build stage compiles the embedded SPA (ClientApp/) and the
+  // runtime image serves the bundle from /app/ui on the same origin as the
+  // /api/* controllers (SpaWebConfig).  Two build shapes:
+  //  - "vite" (react / vue / svelte / angular): a node-only `npm ci … && npm
+  //    run build` stage.
+  //  - "feliz" (F#/Fable): the bundle is compiled by `dotnet fable` + `vite
+  //    build`, so the stage needs a .NET SDK image with Node layered on and a
+  //    `dotnet tool restore` for the fable tool (mirrors the standalone feliz
+  //    Dockerfile).  There is no lockfile, so `npm install` (not `npm ci`).
+  const spaStage = !options.embeddedSpa
+    ? []
+    : options.spaBuildKind === "feliz"
+      ? [
+          `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build`,
+          `WORKDIR /spa`,
+          `RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\`,
+          `  && apt-get install -y --no-install-recommends nodejs \\`,
+          `  && rm -rf /var/lib/apt/lists/*`,
+          `COPY ClientApp/ ./`,
+          `RUN dotnet tool restore`,
+          `RUN npm install`,
+          `RUN npm run build`,
+          ``,
+        ]
+      : [
+          `FROM node:22-alpine AS spa-build`,
+          `WORKDIR /spa`,
+          `COPY ClientApp/package.json ClientApp/package-lock.json* ./`,
+          `RUN npm ci --prefer-offline --no-audit --no-fund || npm install`,
+          `COPY ClientApp/ ./`,
+          `RUN npm run build`,
+          ``,
+        ];
   return lines(
     ...spaStage,
     `FROM gradle:${GRADLE_IMAGE_MAJOR}-jdk${JAVA_VERSION} AS build`,
@@ -431,7 +450,7 @@ export function renderDockerfile(
 }
 
 export function renderDockerignore(
-  options: { embeddedSpa?: boolean; spaOutDir?: string } = {},
+  options: { embeddedSpa?: boolean; spaOutDir?: string; spaBuildKind?: "vite" | "feliz" } = {},
 ): string {
   return lines(
     `build/`,
@@ -441,6 +460,8 @@ export function renderDockerignore(
     options.embeddedSpa ? `ClientApp/node_modules/` : null,
     options.embeddedSpa ? `ClientApp/${options.spaOutDir ?? "dist"}/` : null,
     options.embeddedSpa && options.spaOutDir === "build" ? `ClientApp/.svelte-kit/` : null,
+    // Feliz compiles F# → JS into `ClientApp/out/` via Fable before vite bundles.
+    options.embeddedSpa && options.spaBuildKind === "feliz" ? `ClientApp/out/` : null,
     ``,
   );
 }
