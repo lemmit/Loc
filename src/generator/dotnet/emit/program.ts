@@ -1117,8 +1117,9 @@ export function renderDockerfile(
     hasEmbeddedSpa?: boolean;
     /** SPA build output dir relative to ClientApp/ — `dist` for the
      *  React/Vite embed, `build` for the SvelteKit adapter-static
-     *  embed.  Defaults to `dist`. */
-    spaOutDir?: "dist" | "build";
+     *  embed, `dist/browser` for the Angular `ng build` embed.
+     *  Defaults to `dist`. */
+    spaOutDir?: "dist" | "build" | "dist/browser";
   },
 ): string {
   if (options?.hasEmbeddedSpa) {

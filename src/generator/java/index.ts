@@ -46,6 +46,7 @@ import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { generateAngularForContexts } from "../angular/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -1242,8 +1243,11 @@ function emitProjectFromContexts(
   if (openApiCustomizer) {
     place("OpenApiContractCustomizer.java", "config", openApiCustomizer);
   }
-  // SvelteKit's adapter-static writes `build/`; Vite SPAs write `dist/`.
-  const spaOutDir = system?.deployable.uiFramework === "svelte" ? "build" : "dist";
+  // SvelteKit's adapter-static writes `build/`; Angular's `ng build`
+  // (@angular/build:application) nests the browser bundle under
+  // `dist/browser/`; every other Vite SPA writes `dist/`.
+  const spaFw = system?.deployable.uiFramework;
+  const spaOutDir = spaFw === "svelte" ? "build" : spaFw === "angular" ? "dist/browser" : "dist";
   out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
   // Proxy-CA escape hatch (see renderDockerfile) — always present so the
   // Dockerfile's `COPY certs/` never fails and CA injection has a target.
@@ -1258,9 +1262,9 @@ function emitProjectFromContexts(
   if (hasEmbeddedSpa && system) {
     out.set(mainSourcePath(`${basePkg}.config`, "SpaWebConfig.java"), renderSpaWebConfig(basePkg));
     // Dispatch on the hosted ui's framework — every static-bundle
-    // frontend (react / svelte / vue) embeds under ClientApp/; only the
-    // SPA build output dir differs (svelte `build/`, vite `dist/` — see
-    // renderDockerfile's spaOutDir).
+    // frontend (react / svelte / vue / angular) embeds under ClientApp/;
+    // only the SPA build output dir differs (svelte `build/`, angular
+    // `dist/browser/`, vite `dist/` — see renderDockerfile's spaOutDir).
     const uiFw = system.deployable.uiFramework;
     const spaFiles =
       uiFw === "svelte"
@@ -1273,10 +1277,15 @@ function emitProjectFromContexts(
               apiBaseUrl: "/api",
               pathPrefix: "ClientApp/",
             })
-          : generateReactForContexts(contexts, system.sys, system.deployable, {
-              apiBaseUrl: "/api",
-              pathPrefix: "ClientApp/",
-            });
+          : uiFw === "angular"
+            ? generateAngularForContexts(contexts, system.sys, system.deployable, {
+                apiBaseUrl: "/api",
+                pathPrefix: "ClientApp/",
+              })
+            : generateReactForContexts(contexts, system.sys, system.deployable, {
+                apiBaseUrl: "/api",
+                pathPrefix: "ClientApp/",
+              });
     // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
     // certs / e2e) and emit ClientApp/.gitignore — shared with the dotnet /
     // python embed hosts (see embedded-spa.ts).

@@ -22,7 +22,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
 /** A java deployable hosting a `framework:`-owning ui block via `hosts:`. */
-function src(framework: "react" | "vue" | "svelte", design: string): string {
+function src(framework: "react" | "vue" | "svelte" | "angular", design: string): string {
   return `system JH {
   subdomain D {
     context Shop {
@@ -114,6 +114,20 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
     expect(files.has("jh_app/ClientApp/package.json")).toBe(true);
     expect(files.has("jh_app/ClientApp/svelte.config.js")).toBe(true);
     expect(files.get("jh_app/Dockerfile")!).toContain("COPY --from=spa-build /spa/build /app/ui");
+  });
+
+  // Angular's `ng build` (@angular/build:application) nests the browser
+  // bundle under `dist/browser/`, so the Dockerfile copy differs again.
+  it("dispatches a hosted angular SPA (dist/browser) into ClientApp/", async () => {
+    const files = await generateSystemFiles(src("angular", "angularMaterial@v1"));
+    expect(files.has("jh_app/ClientApp/package.json")).toBe(true);
+    expect(files.has("jh_app/ClientApp/angular.json")).toBe(true);
+    expect(files.has(`${ROOT}/config/SpaWebConfig.java`)).toBe(true);
+    const c = files.get(`${ROOT}/features/products/ProductsController.java`)!;
+    expect(c).toContain('@RequestMapping("/api/products")');
+    expect(files.get("jh_app/Dockerfile")!).toContain(
+      "COPY --from=spa-build /spa/dist/browser /app/ui",
+    );
   });
 
   it("a standalone java deployable still serves /api and emits no SPA files", async () => {

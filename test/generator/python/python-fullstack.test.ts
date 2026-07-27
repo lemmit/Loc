@@ -74,3 +74,50 @@ describe("fullstack python — embedded SPA alongside the API", () => {
     expect(files.get("app/Dockerfile")!).not.toContain("spa-build");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Non-react embed dispatch — a python host advertises
+// STATIC_BUNDLE_FRAMEWORKS (react/vue/svelte/angular), so `ui { framework: X }`
+// must generate THAT framework's SPA under ClientApp/ (not silently react).
+// Angular's `ng build` nests the browser bundle under `dist/browser/`; svelte
+// under `build/`; vite (react/vue) under `dist/` — the multi-stage Dockerfile
+// COPY must match so the bundle lands in wwwroot/.
+// ---------------------------------------------------------------------------
+
+const ANGULAR_FIXTURE = fs.readFileSync(
+  path.resolve(here, "../../e2e/fixtures/python-build/hosts-angular.ddd"),
+  "utf8",
+);
+
+describe("fullstack python — non-react embed dispatch", () => {
+  it("hosts a framework: angular ui as an Angular SPA under ClientApp/", async () => {
+    const files = await build(ANGULAR_FIXTURE);
+    // Angular project markers present…
+    expect(files.has("app/ClientApp/angular.json")).toBe(true);
+    expect(files.has("app/ClientApp/src/main.ts")).toBe(true);
+    // …and no React leak.
+    expect(files.has("app/ClientApp/src/main.tsx")).toBe(false);
+    expect([...files.keys()].some((k) => k.endsWith(".tsx") && k.includes("ClientApp"))).toBe(
+      false,
+    );
+    // Angular's `dist/browser/` build output flows into the Dockerfile COPY.
+    const docker = files.get("app/Dockerfile")!;
+    expect(docker).toContain("COPY --from=spa-build /spa/dist/browser ./wwwroot");
+    expect(docker).not.toContain("/spa/dist ./wwwroot");
+    // Same-origin SPA serving is wired into main.py.
+    const main = files.get("app/app/main.py")!;
+    expect(main).toContain('_WWWROOT = FilePath(__file__).resolve().parent.parent / "wwwroot"');
+    expect(main).toContain('@app.get("/{spa_path:path}", include_in_schema=False)');
+    // The embedded .gitignore is Angular's, not react's.
+    expect(files.get("app/ClientApp/.gitignore")).toContain(".angular");
+  });
+
+  it("react (default) still copies vite dist/ — non-angular parity", async () => {
+    const files = await build(FIXTURE);
+    const docker = files.get("app/Dockerfile")!;
+    expect(docker).toContain("COPY --from=spa-build /spa/dist ./wwwroot");
+    expect(docker).not.toContain("/spa/dist/browser");
+    // Standalone: no angular surface leaks into the react embed.
+    expect(files.has("app/ClientApp/angular.json")).toBe(false);
+  });
+});

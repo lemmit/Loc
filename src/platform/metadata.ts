@@ -230,7 +230,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     needsDb: true,
     mountsUi: true,
     isFrontend: false,
-    hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue", "svelte"]),
+    hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue", "svelte", "angular"]),
     reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
   },
   python: {

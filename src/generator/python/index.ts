@@ -32,7 +32,10 @@ import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { generateAngularForContexts } from "../angular/index.js";
 import { generateReactForContexts } from "../react/index.js";
+import { generateSvelteForContexts } from "../svelte/index.js";
+import { generateVueForContexts } from "../vue/index.js";
 import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
@@ -229,6 +232,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // an index.html fallback, the Dockerfile becomes multi-stage, and the
   // React project is generated under ClientApp/.
   const hasEmbeddedSpa = !!args.deployable.uiName;
+  // Dispatch on the hosted ui's framework — every static-bundle frontend
+  // (react / svelte / vue / angular) embeds under ClientApp/; only the SPA
+  // build output dir differs: SvelteKit's adapter-static writes `build/`,
+  // Angular's `ng build` nests the browser bundle under `dist/browser/`,
+  // every other Vite SPA writes `dist/`.
+  const uiFw = args.deployable.uiFramework;
+  const spaOutDir = uiFw === "svelte" ? "build" : uiFw === "angular" ? "dist/browser" : "dist";
   // Resource verb clients (resources.md): async client modules for the
   // objectStore / queue / api resources this deployable wires.  Workflow
   // / saga `resource-call`s import the verb helpers from these.
@@ -264,7 +274,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka"] : [],
     ),
   );
-  out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
+  out.set("Dockerfile", hasEmbeddedSpa ? renderPyFullstackDockerfile(spaOutDir) : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
   out.set("app/__init__.py", "");
@@ -401,15 +411,23 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     ),
   );
   if (hasEmbeddedSpa) {
-    const spaFiles = generateReactForContexts(args.contexts, args.sys, args.deployable, {
-      apiBaseUrl: "/api",
-      pathPrefix: "ClientApp/",
-    });
-    // Python embeds React only, so the SPA build dir is Vite's `dist/`
-    // (`"react"` never takes the svelte `.gitignore` branch).  Drop the SPA
-    // pack's host-owned root files and emit ClientApp/.gitignore — shared with
-    // the dotnet / java embed hosts (see embedded-spa.ts).
-    embedSpaInto(out, spaFiles, "react");
+    // Dispatch on the hosted ui's framework — every static-bundle frontend
+    // (react / svelte / vue / angular) embeds under ClientApp/ hitting
+    // `/api` on its own origin; only the SPA build output dir differs (see
+    // spaOutDir above, consumed by the multi-stage Dockerfile's COPY).
+    const embedOpts = { apiBaseUrl: "/api", pathPrefix: "ClientApp/" } as const;
+    const spaFiles =
+      uiFw === "svelte"
+        ? generateSvelteForContexts(args.contexts, args.sys, args.deployable, embedOpts)
+        : uiFw === "vue"
+          ? generateVueForContexts(args.contexts, args.sys, args.deployable, embedOpts)
+          : uiFw === "angular"
+            ? generateAngularForContexts(args.contexts, args.sys, args.deployable, embedOpts)
+            : generateReactForContexts(args.contexts, args.sys, args.deployable, embedOpts);
+    // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
+    // certs / e2e) and emit ClientApp/.gitignore — shared with the dotnet /
+    // java embed hosts (see embedded-spa.ts).
+    embedSpaInto(out, spaFiles, uiFw);
   }
 
   out.set("app/domain/__init__.py", "");
@@ -1197,11 +1215,15 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 `;
 
-// Fullstack image: stage 1 builds the React SPA under ClientApp/,
+// Fullstack image: stage 1 builds the embedded SPA under ClientApp/,
 // stage 2 is the standard python image with the bundle copied into
-// wwwroot/ for main.py's FileResponse fallback (dotnet parity).
-const DOCKERFILE_PY_FULLSTACK = `# syntax=docker/dockerfile:1
-# Auto-generated — fullstack Python + React (embedded SPA).
+// wwwroot/ for main.py's FileResponse fallback (dotnet parity).  The SPA
+// build output dir varies by framework (svelte `build/`, angular
+// `dist/browser/`, vite `dist/`) — hence the `spaOutDir` parameter on the
+// stage-2 COPY.
+function renderPyFullstackDockerfile(spaOutDir: string): string {
+  return `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack Python + embedded SPA.
 
 FROM node:24-alpine AS spa-build
 WORKDIR /spa
@@ -1224,11 +1246,12 @@ COPY pyproject.toml ./
 RUN uv sync --no-dev
 COPY app/ ./app/
 COPY migrations/ ./migrations/
-COPY --from=spa-build /spa/dist ./wwwroot
+COPY --from=spa-build /spa/${spaOutDir} ./wwwroot
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 `;
+}
 
 const DOCKERIGNORE_PY = `# Auto-generated.
 .venv

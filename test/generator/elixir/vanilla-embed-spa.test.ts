@@ -82,6 +82,47 @@ system Shop {
 }
 `;
 
+// Same system, hosting a `framework: angular` ui instead.  Angular has the
+// deeper base-href requirement: served under `/app`, its bundle must build with
+// `baseHref: "/app/"` (angular.json build option) + `<base href="/app/">` in
+// index.html, or its asset URLs and client-side deep links break — the analog
+// of svelte's `kit.paths.base`.  `ng build` nests the browser artefacts under
+// `dist/browser/`, so the Dockerfile copies `/spa/dist/browser`.
+const ANGULAR_EMBED_SOURCE = `
+system Shop {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product {
+        name: string
+        price: decimal
+        invariant name.length > 0
+      }
+      repository Products for Product { }
+    }
+  }
+  api CatalogApi from Catalog
+  ui Storefront {
+    framework: angular
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    hosts: Storefront
+    port: 4000
+    design: angularMaterial
+  }
+}
+`;
+
 function endsWith(files: Map<string, string>, suffix: string): string {
   const key = [...files.keys()].find((k) => k.endsWith(suffix));
   expect(key, `${suffix} not emitted`).toBeDefined();
@@ -141,6 +182,44 @@ describe("vanilla Phoenix embedded-SPA host (M-T6.1)", () => {
     const keys = [...files.keys()];
     expect(keys.some((k) => k.includes("_live") || k.endsWith("_live.ex"))).toBe(false);
     expect(keys.some((k) => k.endsWith("/nav.ex"))).toBe(false);
+  });
+
+  it("emits the Angular SPA under assets/ with base-href /app/ (angular.json + index.html)", async () => {
+    const files = await generateSystemFiles(ANGULAR_EMBED_SOURCE);
+    const keys = [...files.keys()];
+    // The Angular project lands under the Phoenix deployable's `assets/` dir.
+    expect(keys.some((k) => k.endsWith("/assets/package.json"))).toBe(true);
+    expect(keys.some((k) => k.endsWith("/assets/angular.json"))).toBe(true);
+    expect(keys.some((k) => k.endsWith("/assets/src/main.ts"))).toBe(true);
+    // Same-origin API base.
+    const apiConfig = endsWith(files, "/assets/src/api/config.ts");
+    expect(apiConfig).toContain('"/api"');
+    // Base-href threaded into BOTH the angular.json build option and the
+    // `<base>` tag so `/app`-mounted asset URLs + deep links resolve.
+    const angularJson = endsWith(files, "/assets/angular.json");
+    expect(angularJson).toContain('"baseHref": "/app/"');
+    const indexHtml = endsWith(files, "/assets/src/index.html");
+    expect(indexHtml).toContain('<base href="/app/" />');
+  });
+
+  it("packages the Angular SPA (dist/browser → priv/static/app) and wires the SpaController", async () => {
+    const files = await generateSystemFiles(ANGULAR_EMBED_SOURCE);
+    // `ng build` nests under `dist/browser/`, so the Dockerfile copies that.
+    const dockerfile = endsWith(files, "phoenix_app/Dockerfile");
+    expect(dockerfile).toContain("AS spa-build");
+    expect(dockerfile).toContain("COPY --from=spa-build /spa/dist/browser priv/static/app");
+    // Same framework-agnostic /app serving wiring as the React arm.
+    const spa = endsWith(files, "/controllers/spa_controller.ex");
+    expect(spa).toContain("defmodule PhoenixAppWeb.SpaController");
+    const endpoint = endsWith(files, "_web/endpoint.ex");
+    expect(endpoint).toContain('at: "/app"');
+    expect(endpoint).toContain('from: {:phoenix_app, "priv/static/app"}');
+    const router = endsWith(files, "_web/router.ex");
+    expect(router).toContain('get "/app/*path", SpaController, :index');
+    // No LiveView pages for a hosted-SPA deployable.
+    expect([...files.keys()].some((k) => k.includes("_live") || k.endsWith("_live.ex"))).toBe(
+      false,
+    );
   });
 
   it("leaves the plain JSON-API-only deployable byte-identical (no SPA wiring)", async () => {

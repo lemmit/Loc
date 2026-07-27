@@ -110,6 +110,14 @@ export function generateAngularForContexts(
   // overrides it with VITE_API_PROXY_TARGET (→ the backend SERVICE); a local
   // `node server.mjs` falls back to the backend on localhost.
   const apiProxyTarget = `http://localhost:${target?.port ?? 8080}`;
+  // Sub-path the bundle is served under (Phoenix `/app`).  Angular threads a
+  // single `baseHref` into (a) the angular.json build option and (b) the
+  // `<base href>` tag in index.html; the router reads it back off the `<base>`
+  // tag via `PlatformLocation` (APP_BASE_HREF), so `provideRouter` needs no
+  // change.  Root-served hosts (java/dotnet/python, `basePath` unset) keep the
+  // default `/` and omit the angular.json option → byte-identical output.
+  const basePath = options.basePath ?? "";
+  const baseHref = basePath ? `${basePath}/` : "/";
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
@@ -128,7 +136,12 @@ export function generateAngularForContexts(
 
   // --- Project shell (pack-emitted) -----------------------------------
   out.set("package.json", pack.render("package-json", { usesMoney }));
-  out.set("angular.json", pack.render("angular-json", {}));
+  // `baseHref` build option only when the bundle is sub-path-mounted; unset
+  // (root-mount) omits it so the emitted angular.json stays byte-identical.
+  out.set(
+    "angular.json",
+    pack.render("angular-json", { baseHref: basePath ? baseHref : undefined }),
+  );
   out.set("tsconfig.json", pack.render("tsconfig", {}));
   out.set("tsconfig.app.json", pack.render("tsconfig-app", {}));
   out.set("src/main.ts", pack.render("main", {}));
@@ -385,6 +398,7 @@ export function generateAngularForContexts(
     "src/index.html",
     pack.render("index-html", {
       title: humanize(sys.name),
+      baseHref,
       description: undefined,
       ogImage: undefined,
       canonical: undefined,

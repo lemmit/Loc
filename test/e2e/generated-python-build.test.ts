@@ -81,6 +81,9 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
   // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
+  // Fullstack embed dispatch — a `framework: angular` ui embeds the Angular
+  // SPA (not silently react); Dockerfile COPY targets `dist/browser`.
+  ["test/e2e/fixtures/python-build/hosts-angular.ddd", "app"],
   // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
   // shape: document: one jsonb (id, data, version) blob + in-memory finds.

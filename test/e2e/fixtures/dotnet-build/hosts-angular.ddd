@@ -1,0 +1,37 @@
+// Fullstack `platform: dotnet` hosting a `framework: angular` ui — the Angular
+// arm of the .NET embed dispatch (parity with the react/vue/svelte arms).
+//
+// A single .NET deployable that BOTH serves the API AND embeds the Angular SPA
+// under ClientApp/, served from wwwroot/.  Angular's `ng build`
+// (@angular/build:application) nests the browser bundle under `dist/browser/`,
+// so the multi-stage Dockerfile's COPY differs from the vite `dist/` (react /
+// vue) and SvelteKit `build/` arms — the same non-flat build-output quirk as
+// svelte.  Controllers stay under /api/*; Program.cs serves the bundle via
+// UseStaticFiles + MapFallbackToFile.
+system HostsAngular {
+  subdomain Sales {
+    context Orders {
+      aggregate Customer with crudish {
+        name: string
+        derived display: string = name
+      }
+      repository Customers for Customer { }
+    }
+  }
+  api SalesApi from Sales
+  storage primarySql { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+  ui WebApp with scaffold(subdomains: [Sales]) {
+    framework: angular
+    api Sales: SalesApi
+  }
+  deployable app {
+    platform: dotnet
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: SalesApi
+    ui: WebApp
+    port: 8080
+    design: angularMaterial
+  }
+}
