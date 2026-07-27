@@ -88,7 +88,8 @@ describe("e2e projection-read surface", () => {
     const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
     expect(
       diags.some(
-        (d) => d.code === "loom.e2e-unknown-method" && /projection read.*frobnicate/.test(d.message),
+        (d) =>
+          d.code === "loom.e2e-unknown-method" && /projection read.*frobnicate/.test(d.message),
       ),
     ).toBe(true);
   });

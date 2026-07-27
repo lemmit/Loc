@@ -921,6 +921,13 @@ surface.  Member-access chains describe the call shape:
 | `api.<aggregate>.getById(idExpr)` | `GET /<plural>/{id}`. |
 | `api.<aggregate>.<operation>(idExpr, body?)` | `POST /<plural>/{id}/<op_snake>` with the body (or `{}` if absent). |
 | `api.<aggregate>.<find>(args)` | `GET /<plural>/<find_snake>?…` with args as query string. |
+| `api.<projection>.byKey(keyExpr)` | `GET /projections/<proj_snake>/{key}` — one folded read-model row by its correlation key. |
+| `api.<projection>.list()` | `GET /projections/<proj_snake>` — every folded read-model row. |
+
+The projection verbs read a folded `projection`'s read model (see
+[`projection.md`](old/proposals/projection.md)), so a `test e2e` can
+assert the state an operation's events fold into (drive an operation,
+then `byKey` the row and `expect` its columns).
 
 When an argument is a previously bound `let` name (typically the result
 of a `create` call), `.id` is appended automatically — `api.x.getById(p)`
