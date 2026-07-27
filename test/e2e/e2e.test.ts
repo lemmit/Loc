@@ -444,7 +444,19 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // step: every bucket it prints is a candidate RS-rule.
     if (process.env.LOOM_DIFF_REPORT === "1") {
       try {
-        const md = await captureDifferentialReport(specs);
+        // showcase gates its reads (`auth: required`), so an unauthenticated
+        // capture 401s on every collection and diffs nothing — a false green.
+        // Reuse the same real Keycloak token the authz test below mints so the
+        // capture reads the SEEDED (populated, deterministic) collections.
+        // Best-effort: if the grant fails, fall back to an unauth capture
+        // rather than failing this non-blocking block.
+        let token: string | undefined;
+        try {
+          token = await keycloakPasswordGrantToken(outDir);
+        } catch (e) {
+          console.warn("[differential] token grant failed; capturing unauthenticated:", e);
+        }
+        const md = await captureDifferentialReport(specs, token);
         fs.writeFileSync("/tmp/loom-differential-report.md", md);
         console.warn(`\n${md}`);
       } catch (err) {
@@ -670,7 +682,12 @@ function collectionPaths(spec: OpenApiSpec): string[] {
 /** GET every collection endpoint of every up backend, normalize the body, and
  *  render the pairwise bucketed report.  Best-effort per request — a single
  *  non-200 or non-array read is skipped, never fatal. */
-async function captureDifferentialReport(specs: Record<string, OpenApiSpec>): Promise<string> {
+async function captureDifferentialReport(
+  specs: Record<string, OpenApiSpec>,
+  token?: string,
+): Promise<string> {
+  const headers: Record<string, string> = { connection: "close" };
+  if (token) headers.authorization = `Bearer ${token}`;
   const captures: BackendCapture[] = [];
   for (const [backend, spec] of Object.entries(specs)) {
     const base = DIFF_BASES[backend];
@@ -678,7 +695,7 @@ async function captureDifferentialReport(specs: Record<string, OpenApiSpec>): Pr
     const reads: Record<string, Json> = {};
     for (const p of collectionPaths(spec)) {
       try {
-        const r = await fetch(base + p, { headers: { connection: "close" } });
+        const r = await fetch(base + p, { headers });
         if (!r.ok) continue;
         reads[p] = normalizeBody((await r.json()) as Json);
       } catch {
