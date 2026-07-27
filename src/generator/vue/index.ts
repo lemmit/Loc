@@ -23,6 +23,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
@@ -44,9 +45,7 @@ import {
   E2E_PACKAGE_JSON,
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
-  REACT_LIB_PROV_LINEAGE_BLOCK,
   REACT_LIB_SCHEMAS_MONEY_TS,
-  REACT_LIB_SCHEMAS_PROV_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
@@ -539,9 +538,7 @@ export function generateVueForContexts(
   if (usesMoney || usesProvenance) {
     let schemas = usesMoney ? REACT_LIB_SCHEMAS_MONEY_TS : "";
     if (usesProvenance) {
-      schemas = usesMoney
-        ? `${schemas}\n${REACT_LIB_PROV_LINEAGE_BLOCK}`
-        : REACT_LIB_SCHEMAS_PROV_TS;
+      schemas = usesMoney ? `${schemas}\n${PROV_LINEAGE_SCHEMA_BLOCK}` : LIB_SCHEMAS_PROV_TS;
     }
     out.set("src/lib/schemas.ts", schemas);
   }

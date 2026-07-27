@@ -10,6 +10,7 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_SVELTE, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
@@ -19,6 +20,7 @@ import {
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
+import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
@@ -220,8 +222,16 @@ export function generateSvelteForContexts(
     out.set("src/lib/components/RealtimeHandlers.svelte", buildSvelteRealtimeHandlers(ui, pack));
   }
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
-  if (usesMoney) {
-    out.set("src/lib/schemas.ts", SVELTE_LIB_SCHEMAS_MONEY);
+  // Provenance surfaces the co-located lineage sibling on the wire so the
+  // scaffold's `ProvenanceInfo` "?" disclosure has a typed lineage to read
+  // (mirrors React/Vue).  The lineage carrier is framework-neutral zod.
+  const usesProvenance = contextsHaveProvenancedField(contexts);
+  if (usesMoney || usesProvenance) {
+    let schemas = usesMoney ? SVELTE_LIB_SCHEMAS_MONEY : "";
+    if (usesProvenance) {
+      schemas = usesMoney ? `${schemas}\n${PROV_LINEAGE_SCHEMA_BLOCK}` : LIB_SCHEMAS_PROV_TS;
+    }
+    out.set("src/lib/schemas.ts", schemas);
   }
 
   // App shell — the chrome group's layout, driven by the same nav

@@ -68,8 +68,9 @@ export interface ApiModuleOptions {
 
 /** True iff the aggregate (root or a part) declares a `provenanced` field —
  *  the gate for surfacing the lineage sibling on the wire + importing
- *  `provLineageSchema`. */
-function aggregateHasProvenanced(agg: EnrichedAggregateIR): boolean {
+ *  `provLineageSchema`.  Exported so the Svelte api-builder (which emits its
+ *  response schema through the sibling `zod-schemas.ts` copy) shares the gate. */
+export function aggregateHasProvenanced(agg: EnrichedAggregateIR): boolean {
   return (
     agg.fields.some((f) => f.provenanced) ||
     agg.parts.some((p) => p.fields.some((f) => f.provenanced))

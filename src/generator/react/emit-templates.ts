@@ -55,37 +55,6 @@ export const moneySchema = z.union([z.instanceof(Decimal), z.string()]).transfor
 });
 `;
 
-// Shared provenance-lineage schema — the nullable `provLineageSchema` the
-// `<Agg>Response` of a provenanced aggregate references (docs/provenance.md).
-// Mirrors the Hono route's `ProvenanceLineage` zod shape byte-for-byte so the
-// frontend parses the co-located `<field>_provenance` wire sibling into a typed
-// `ProvLineage` a `ProvenanceInfo` disclosure reads.  Emitted to
-// `src/lib/schemas.ts` whenever a served context declares a `provenanced` field.
-//
-// Two forms so the money + provenance combinations stay minimal:
-//   - `REACT_LIB_SCHEMAS_PROV_TS`      — standalone file (own header + z import)
-//     for a provenance-but-no-money project.
-//   - `REACT_LIB_PROV_LINEAGE_BLOCK`   — the bare export block, appended after
-//     the money schema (which already imports `z`) when both are used.
-export const REACT_LIB_PROV_LINEAGE_BLOCK = `
-/**
- * Provenance lineage for a \`provenanced\` field — the co-located
- * \`<field>_provenance\` wire sibling.  Nullable: absent on backends that carry
- * the field but don't capture lineage.
- */
-export const provLineageSchema = z.object({
-  snapshotId: z.string(),
-  target: z.object({ type: z.string(), field: z.string() }),
-  inputs: z.array(z.object({ path: z.string(), value: z.unknown() })),
-  computedValue: z.unknown(),
-});
-export type ProvLineage = z.infer<typeof provLineageSchema>;
-`;
-
-export const REACT_LIB_SCHEMAS_PROV_TS = `// Auto-generated.  Do not edit by hand.
-import { z } from "zod";
-${REACT_LIB_PROV_LINEAGE_BLOCK}`;
-
 // =============================================================================
 // Frontend ACL shared utilities — see docs/old/proposals/frontend-acl.md.
 //
