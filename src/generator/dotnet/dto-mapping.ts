@@ -9,6 +9,7 @@ import type {
   PayloadIR,
   TypeIR,
   ValueObjectIR,
+  WireField,
 } from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
@@ -18,6 +19,21 @@ import {
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { upperFirst } from "../../util/naming.js";
+import { renderCsExpr } from "./render-expr.js";
+
+/** Wrap a masked field's projected value in a fail-closed read redaction
+ *  (`mask unless`, authorization.md §5): the value is shown only when the
+ *  caller's ambient principal satisfies the predicate, else `null`.  Reads the
+ *  request-scoped principal via `RequestContext.Current` (the same ambient
+ *  accessor the read-side filter uses — no DI threading), so an unauthenticated
+ *  request (`CurrentUser` null) redacts.  `wf.maskUnless` absent ⇒ unchanged. */
+function maskWrap(valueExpr: string, wf: WireField, ctx: EnrichedBoundedContextIR): string {
+  if (!wf.maskUnless) return valueExpr;
+  let t = wireType(wf.type, ctx, "response");
+  if (!t.endsWith("?")) t = `${t}?`;
+  const pred = renderCsExpr(wf.maskUnless, { thisName: "this", currentUserExpr: "__maskUser" });
+  return `(RequestContext.Current?.CurrentUser is { } __maskUser && (${pred})) ? (${t})(${valueExpr}) : null`;
+}
 
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
@@ -443,7 +459,9 @@ export function projectEntityArgs(
             : projectEntityExpr(accessor, part, ctx),
       );
     } else {
-      args.push(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx));
+      args.push(
+        maskWrap(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx), wf, ctx),
+      );
     }
   }
   // Provenance: trailing `<Field>Provenance` lineage args, in field order,
@@ -558,7 +576,9 @@ function responseRecordParams(
       // (null) containment fails.  Scalar/VO fields already carry their own
       // nullability in the type, so the `endsWith("?")` guard keeps this idempotent.
       let csType = wireType(wf.type, ctx, "response");
-      if (wf.optional && !csType.endsWith("?")) csType = `${csType}?`;
+      // A `mask unless` field is redacted to null for callers who fail the
+      // predicate (see `maskWrap`), so its response param must be nullable.
+      if ((wf.optional || wf.maskUnless) && !csType.endsWith("?")) csType = `${csType}?`;
       parts.push(dtoParam(csType, upperFirst(wf.name)));
     }
   }
