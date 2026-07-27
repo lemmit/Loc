@@ -118,16 +118,36 @@ describe("ProvenanceInfo — Svelte renders an `{#if}`/`{#each}` disclosure", ()
   });
 });
 
+describe("ProvenanceInfo — Angular renders an `@if (…; as prov)` disclosure", () => {
+  it("surfaces the lineage on the response interface (no shared zod lib)", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("angular")));
+    // Angular has no zod lib — the lineage is a plain TS interface + a field.
+    expect(out).toContain("export interface ProvLineage {");
+    expect(out).toContain("total_provenance?: ProvLineage | null;");
+  });
+
+  it("renders the disclosure on the scaffolded detail page", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("angular")));
+    expect(out).toContain('data-testid="orders-detail-total-prov"');
+    // A signal-call result can't narrow in place — the `as prov` alias binds it.
+    expect(out).toMatch(/@if \([\w.()!]+\.total_provenance; as prov\)/);
+    expect(out).toContain("{{ prov.snapshotId }}");
+    // `unknown` values ride `$any(...)` (templates can't call `String`).
+    expect(out).toContain("{{ $any(prov.computedValue) }}");
+    expect(out).toContain("@for (inp of prov.inputs; track inp.path)");
+  });
+});
+
 describe("ProvenanceInfo — not-yet-ported frontends degrade honestly (value only)", () => {
-  for (const frontend of ["angular"]) {
+  for (const frontend of ["feliz"]) {
     it(`${frontend}: the "?" falls through to a comment and the lineage is not carried`, async () => {
       const out = allFiles(await generateSystemFiles(provScaffoldSystem(frontend)));
       // The primitive comments itself out — the value still renders.
       expect(out).toContain(`provenance disclosure not yet supported on ${frontend}`);
       // No lineage carrier on the FRONTEND: `provLineageSchema` is unique to the
-      // ported frontends — the backend's own lineage column/DTO (`total_provenance`,
-      // `ProvLineage`) is emitted regardless of frontend, so it's the camelCase
-      // schema name that must be absent here.
+      // ported JSX frontends — the backend's own lineage column/DTO
+      // (`total_provenance`, `ProvLineage`) is emitted regardless of frontend, so
+      // it's the camelCase schema name that must be absent here.
       expect(out).not.toContain("provLineageSchema");
     });
   }
