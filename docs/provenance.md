@@ -39,6 +39,28 @@ The grammar admits `provenanced` on any stored property; the
 validator rejects it on `derived` properties (their value is
 recomputed, not assigned).
 
+**`provenanced` / `sensitive(...)` / the access modifier parse in any
+order.** Marking an *existing* `sensitive(...)` or access-modified field
+provenanced by appending the keyword at the end just works:
+
+```ddd
+total: int sensitive(pii) provenanced   // ✓
+total: int provenanced sensitive(pii)   // ✓ — same meaning, either order
+total: int managed provenanced          // ✓
+```
+
+`= default` and `check ...` still must come **after** all three flags
+(see [`language.md`](language.md)'s property-grammar row) — `default`'s
+expression can end in a bare identifier, and the access-modifier names
+(`managed`, `secret`, …) double as valid identifiers, so a flag keyword
+left unconsumed after an in-progress default risks the expression
+greedily swallowing it:
+
+```ddd
+total: int = 0 provenanced   // ✗ parse error — provenanced can't follow a default
+total: int provenanced = 0   // ✓
+```
+
 ## Rule snapshots
 
 Each distinct assignment site (`:=`, `+=`, `-=`) to a `provenanced`
