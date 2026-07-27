@@ -626,11 +626,12 @@ export interface WalkerTarget {
 
   /** OPTIONAL — whole-primitive override for `ProvenanceInfo(of: <record>,
    *  field: <name>)`.  The shared `emitProvenanceInfo` delegates here first; a
-   *  non-null return is used verbatim.  React renders a native `<details>`
-   *  disclosure inline (no override); the other JSX frontends omit it and fall
-   *  through to a visible comment (the value still renders, only the "?" is
-   *  absent — React-first).  A future Feliz port would fork here to emit the
-   *  F# disclosure the way `renderFileLink` forks `Html.a`. */
+   *  non-null return is used verbatim.  The JSX family (React/Vue/Svelte/Angular)
+   *  renders the disclosure directly from `emitProvenanceInfo`'s per-framework
+   *  branch (no override); everything else falls through to a visible comment.
+   *  `felizTarget` forks here to emit the F# `Html.details` disclosure (a
+   *  `Some`/`None` match over the `ProvLineage option`), the way `renderFileLink`
+   *  forks `Html.a`. */
   renderProvenanceInfo?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The

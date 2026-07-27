@@ -58,8 +58,18 @@ const UIS: Record<string, { bind: string; api: string }> = {
 };
 
 /** Silent-degradation markers the shared/per-frontend walkers emit when they
- *  cannot render a construct (the fail-fast path THROWS instead). */
-const FALLBACK_MARKERS = ["not supported", "unsupported expr", "unknown layout component"];
+ *  cannot render a construct (the fail-fast path THROWS instead).  The Feliz
+ *  procedural pack emits `(* feliz pack: no renderer for "X" *)` — a compile-clean
+ *  F# block comment — when its `RENDERERS` table lacks a primitive; catching that
+ *  substring here is what makes a silently-dropped Feliz primitive fail this
+ *  matrix (the load-time `REQUIRED_PRIMITIVES` gate never runs for the procedural
+ *  pack — see `feliz-pack-groundwork.test.ts` for its structural sibling). */
+const FALLBACK_MARKERS = [
+  "not supported",
+  "unsupported expr",
+  "unknown layout component",
+  "feliz pack: no renderer",
+];
 
 // Anchor the injected deployable on the last static frontend deployable
 // (`adminWeb`) so it lands INSIDE the system, past the top-level

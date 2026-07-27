@@ -1462,7 +1462,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // lambda param / shell local).  Receivers that emit as the
       // `/* unresolved: X */ undefined` sentinel keep a visible TODO
       // placeholder — emitting `undefined.<method>(...)` would be
-      // runtime-broken code.
+      // runtime-broken code.  This branch is now DEAD on valid `.ddd`:
+      // `loom.method-call-unresolved-receiver` (ui-checks.ts F2) rejects an
+      // unresolved method-call receiver at IR-validate time (phase ⑦), before
+      // codegen — so the placeholder is defence-in-depth for an unvalidated
+      // IR, not a silent generator gap.
       const recv = emitExpr(expr.receiver, ctx);
       const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       if (recv.includes("/* unresolved:")) {

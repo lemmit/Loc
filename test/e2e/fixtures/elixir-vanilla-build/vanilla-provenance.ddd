@@ -6,10 +6,15 @@
 // transaction.  Compiled by build-generated-elixir-vanilla so the rendered
 // capture + flush + the Provenance SDK actually pass
 // `mix compile --warnings-as-errors` against plain Ecto.
+//
+// A scaffolded LiveView ui is hosted on the backend (`ui: Web`) so the emitted
+// `order_detail_live.ex` carries the `ProvenanceInfo` "?" disclosure — the
+// native `<details>` over the co-located `<field>_provenance` jsonb column read
+// off the Ecto struct (M-T1.19) — and this gate proves that HEEx compiles.
 system Ordering {
   subdomain Sales {
     context Orders {
-      aggregate Order {
+      aggregate Order with crudish {
         quantity: int
         unitPrice: int
         discount: int
@@ -35,6 +40,7 @@ system Ordering {
     }
   }
   api OrdersApi from Sales
+  ui Web with scaffold(subdomains: [Sales]) { }
   storage pg { type: postgres }
   resource orderState { for: Orders, kind: state, use: pg }
   deployable api {
@@ -42,6 +48,7 @@ system Ordering {
     contexts: [Orders]
     dataSources: [orderState]
     serves: OrdersApi
+    ui: Web
     port: 4000
   }
 }

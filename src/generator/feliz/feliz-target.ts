@@ -380,6 +380,35 @@ export const felizTarget: WalkerTarget = {
     return `(match ${recv} with Some __f -> ${anchor} | None -> Html.text "—")`;
   },
 
+  // `ProvenanceInfo(of: <record>, field: "<name>")` → a native `<details>`
+  // disclosure over the co-located `<field>_provenance` (a `ProvLineage option`
+  // on the decoded record).  Feliz forks because its "markup" is F# (`Html.details
+  // [ … ]`).  A SINGLE-LINE expression (the walker doesn't re-indent seam output),
+  // wrapped in `Html.span` so it starts with `Html.` (a bare `(match …)` list item
+  // curries onto its sibling); a `Some`/`None` match guards the nullish lineage.
+  renderProvenanceInfo: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const ofIdx = argNames.indexOf("of");
+    const ofArg = ofIdx >= 0 ? call.args[ofIdx] : (call.args ?? []).find((_, i) => !argNames[i]);
+    const fieldIdx = argNames.indexOf("field");
+    const fieldArg = fieldIdx >= 0 ? call.args[fieldIdx] : undefined;
+    if (!ofArg || fieldArg?.kind !== "literal") {
+      return felizTarget.renderComment("ProvenanceInfo: missing record or field");
+    }
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const rule =
+      'Html.div [ prop.children [ Html.dt [ prop.text "Rule" ]; Html.dd [ Html.code [ prop.text __p.snapshotId ] ] ] ]';
+    const value =
+      'Html.div [ prop.children [ Html.dt [ prop.text "Value" ]; Html.dd [ prop.text __p.computedValue ] ] ]';
+    const inputRow =
+      "Html.div [ prop.children [ Html.dt [ prop.text __i.path ]; Html.dd [ prop.text __i.value ] ] ]";
+    const dl = `Html.dl [ prop.children (List.append [ ${rule}; ${value} ] [ for __i in __p.inputs -> ${inputRow} ]) ]`;
+    const details = `Html.details [ prop.className "loom-provenance"; prop.children [ Html.summary [ prop.text "?" ]; ${dl} ] ]`;
+    const match = `(match ${lineage} with Some __p -> ${details} | None -> Html.none)`;
+    return `Html.span [ prop.children [ ${match} ] ]`;
+  },
+
   // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
   // `<Op><Agg> id` (the route id bound by the detail page's view fn).  The
   // trigger `Msg` + POST `Cmd` + refetch-on-success live in `update`/`Api` (wired

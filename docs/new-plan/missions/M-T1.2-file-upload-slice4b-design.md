@@ -1,7 +1,10 @@
 # M-T1.2 slice 4b — FileUpload cross-frontend fan-out (Vue / Svelte / Angular)
 
-*In-flight. Fans the `FileUpload` input (shipped React-only in slice 4a, #2039)
-out to the remaining JSX frontends and flips the required-primitives gate.*
+*Shipped (#2052). Fanned the `FileUpload` input (shipped React-only in slice 4a,
+#2039) out to the remaining JSX frontends and flipped the required-primitives
+gate. The still-deferred remainder below (HEEx `live_file_input`, the `FileLink`
+display primitive, Angular standalone, Feliz) all subsequently landed in #2077,
+which closed the whole FileUpload matrix.*
 
 ## Scope
 

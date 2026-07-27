@@ -84,6 +84,7 @@ import {
   renderEncoders,
   renderFileRefType,
   renderFormTypes,
+  renderProvLineageType,
   renderValidation,
   renderViewModule,
   renderWireTypes,
@@ -975,6 +976,10 @@ function renderAppFs(
   // reference it (F# is order-sensitive).  Detected off the rendered records
   // (`wireFieldType` spells a File field `FileRef`).
   const hasFileWire = wire.domain.includes("FileRef");
+  // A `provenanced` aggregate wire field decodes to the `ProvLineage` record, so
+  // its type + `provLineageDecoder` must ship AHEAD of the domain decoders that
+  // reference it (detected off the rendered records, like `hasFileWire`).
+  const hasProvWire = wire.domain.includes("ProvLineage");
   // Multi-variant async effects emit a discriminated-union outcome type, placed
   // right after the domain records (its cases reference them).
   const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);
@@ -1099,6 +1104,11 @@ function renderAppFs(
     // domain decoders (which reference `fileRefDecoder`) + Model + the Api module.
     (hasFileState || hasFileWire) && "",
     (hasFileState || hasFileWire) && renderFileRefType(),
+    // ProvLineage record + decoder — before the domain decoders that reference
+    // `provLineageDecoder` (F# is order-sensitive), when a provenanced field
+    // decodes to it.
+    hasProvWire && "",
+    hasProvWire && renderProvLineageType(),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
