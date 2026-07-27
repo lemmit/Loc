@@ -88,12 +88,15 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 | `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | store gate lifted on all 5 — `store-checks.ts:301-304` |
 | Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ✓ | multi-variant unions + params + missing-`else` render; paramless-page instance effect rejected uniformly (`loom.instance-effect-needs-route-id`, `ui-checks.ts`); Feliz-only gate = component host / non-instance-op |
 | `design:` axis | pack family | pack family | pack family | pack family | daisyUI **theme** | Rule 14 feliz branch, `deployable.ts:363`; `DAISYUI_THEMES` |
-| Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (inline showcase only) |
-| Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | no `generated-feliz-e2e.yml` |
+| Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (showcase + scaffold + auth-gate legs) |
+| Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✓² | folded into `generated-feliz-build.yml` (`vite preview` + Playwright) |
 
 ¹ Feliz cell updated 2026-07-27: was **🔴 20/44** at the time of the audit; the
 gap is now closed — renderers drained + the procedural-pack groundwork gate.
 See F1's resolution note below.
+
+² Feliz cell updated 2026-07-27: was **✗** at the time of the audit; the runtime
+gate now exists — see F2's resolution note below.
 
 ---
 
@@ -191,6 +194,25 @@ fails validation").**
 
 ### F2 (LOW) — no Feliz runtime-e2e gate; build gate uses a curated example only
 
+> **Resolved 2026-07-27 (already fixed on `main`, postdating this audit).** The
+> runtime-e2e gate now exists — it was **folded into `generated-feliz-build.yml`**
+> rather than made a separate `generated-feliz-e2e.yml`, deliberately reusing the
+> one slow `dotnet fable` step (the workflow header calls it "the runtime sibling
+> the other frontends get from `generated-{vue,svelte}-e2e.yml`, folded in here").
+> All three legs now `vite preview` the bundle and drive it in headless Chromium
+> (`scripts/feliz-{smoke,scaffold-smoke,authgate-smoke}.mjs`): the showcase leg
+> exercises the MVU loop + routing + the wire layer's `Remote`/`QueryView` state +
+> a `match await` async effect; the scaffold leg drives a `with scaffold(...)` app
+> (List/New/Detail/Home + `WorkflowForm`, auth-gated); the auth-gate leg stubs
+> `/api/auth/me` to run both branches of a `requires currentUser.role` gate. It
+> runs **per-PR** (path-filtered to the Feliz surface) **and** post-merge —
+> stronger positioning than `generated-react-e2e.yml`, which is post-merge only.
+> A *separate* `generated-feliz-e2e.yml` would only duplicate the expensive Fable
+> compile, so it was intentionally not built. F1's separate concern — "the curated
+> showcase can never surface F1" — is also moot now: F1 is caught structurally by
+> the fast `feliz-pack-groundwork.test.ts`, not by the e2e example.
+
+The original finding (now historical):
 `generated-feliz-build.yml` compiles a hand-picked inline `showcase.ddd` that, by
 the workflow's own comment, "grows example-by-example as the procedural pack
 does" — i.e. it is deliberately restricted to primitives Feliz supports, so it can
@@ -242,7 +264,7 @@ Genuinely honest gap (parity invariant working as designed):
 |---|---|
 | F1 `Section`/`Sticky` crashed Vue/Angular codegen | **Still fixed** — both are in `TSX_ONLY_PRIMITIVES` (`required-primitives.ts:126`), enforced on the `tsx`/`svelte`/`vue` formats; `angular` filters `modal` but keeps `section`/`sticky`. The load-time gate now names a missing pack instead of crashing. |
 | F2 pack breadth uneven | **Unchanged (LOW)** — React 4 families, Vue/Svelte 2, Angular 3 (`primeng`/`spartanNg` shipped). New: `daisyui@v1` HEEx pack shipped alongside `coreComponents`. |
-| F3 no runtime-e2e for React/Angular | **Still fixed** for React/Vue/Svelte/Angular. New residual: **Feliz** has none (F2 above). |
+| F3 no runtime-e2e for React/Angular | **Still fixed** for React/Vue/Svelte/Angular. Feliz's (F2 above) has since landed — folded into `generated-feliz-build.yml`. |
 | F4 stale "stubbed" Angular comments | Fixed. |
 
 ## 4. Design-pack roster (refreshed)
