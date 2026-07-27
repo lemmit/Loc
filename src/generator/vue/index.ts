@@ -14,6 +14,7 @@ import type {
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
 import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
+import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -43,7 +44,9 @@ import {
   E2E_PACKAGE_JSON,
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
+  REACT_LIB_PROV_LINEAGE_BLOCK,
   REACT_LIB_SCHEMAS_MONEY_TS,
+  REACT_LIB_SCHEMAS_PROV_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
@@ -147,7 +150,10 @@ export function generateVueForContexts(
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(
       `src/api/${agg.name[0]!.toLowerCase()}${agg.name.slice(1)}.ts`,
-      buildApiModule(agg, repo, ctx, { queryPackage: "@tanstack/vue-query" }),
+      buildApiModule(agg, repo, ctx, {
+        queryPackage: "@tanstack/vue-query",
+        carryProvenance: true,
+      }),
     );
   }
 
@@ -526,8 +532,18 @@ export function generateVueForContexts(
   }
 
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
-  if (usesMoney) {
-    out.set("src/lib/schemas.ts", REACT_LIB_SCHEMAS_MONEY_TS);
+  // Provenance surfaces the co-located lineage sibling on the wire so the
+  // scaffold's `ProvenanceInfo` "?" disclosure has a typed lineage to read
+  // (mirrors the React generator).  The lib schema is framework-neutral zod.
+  const usesProvenance = contextsHaveProvenancedField(contexts);
+  if (usesMoney || usesProvenance) {
+    let schemas = usesMoney ? REACT_LIB_SCHEMAS_MONEY_TS : "";
+    if (usesProvenance) {
+      schemas = usesMoney
+        ? `${schemas}\n${REACT_LIB_PROV_LINEAGE_BLOCK}`
+        : REACT_LIB_SCHEMAS_PROV_TS;
+    }
+    out.set("src/lib/schemas.ts", schemas);
   }
   out.set("package.json", renderShell(pack, "package-json", { usesMoney }));
   out.set("tsconfig.json", renderShell(pack, "tsconfig", {}));
