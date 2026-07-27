@@ -17,6 +17,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
+import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import {
@@ -33,9 +34,7 @@ import {
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
   REACT_LIB_APPLY_SERVER_ERRORS_TS,
-  REACT_LIB_PROV_LINEAGE_BLOCK,
   REACT_LIB_SCHEMAS_MONEY_TS,
-  REACT_LIB_SCHEMAS_PROV_TS,
   REACT_LIB_STRICT_FIELD_MAP_TS,
 } from "./emit-templates.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
@@ -408,9 +407,7 @@ export function generateReactForContexts(
   if (usesMoney || usesProvenance) {
     let schemas = usesMoney ? REACT_LIB_SCHEMAS_MONEY_TS : "";
     if (usesProvenance) {
-      schemas = usesMoney
-        ? `${schemas}\n${REACT_LIB_PROV_LINEAGE_BLOCK}`
-        : REACT_LIB_SCHEMAS_PROV_TS;
+      schemas = usesMoney ? `${schemas}\n${PROV_LINEAGE_SCHEMA_BLOCK}` : LIB_SCHEMAS_PROV_TS;
     }
     out.set("src/lib/schemas.ts", schemas);
   }

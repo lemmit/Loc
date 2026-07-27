@@ -49,6 +49,8 @@ export function emitProvenanceInfo(
       return reactDisclosure(lineage, testid);
     case "vue":
       return vueDisclosure(lineage, testid);
+    case "svelte":
+      return svelteDisclosure(lineage, testid);
     default:
       // Schema not wired on this frontend yet — comment out so the scaffolded
       // provenanced field still compiles (the value renders without the "?").
@@ -90,5 +92,24 @@ function vueDisclosure(lineage: string, testid: string): string {
     `    <div v-for="inp in ${lineage}.inputs" :key="inp.path"><dt>{{ inp.path }}</dt><dd>{{ String(inp.value) }}</dd></div>`,
     `  </dl>`,
     `</details>`,
+  ].join("\n");
+}
+
+/** Svelte: an `{#if}` guard on the nullish wire field, `{expr}` interpolation,
+ *  and a keyed `{#each … (inp.path)}` over the input list. */
+function svelteDisclosure(lineage: string, testid: string): string {
+  return [
+    `{#if ${lineage} != null}`,
+    `  <details class="loom-provenance"${testid}>`,
+    `    <summary aria-label="How this value was computed">?</summary>`,
+    `    <dl class="loom-provenance-tree">`,
+    `      <div><dt>Rule</dt><dd><code>{${lineage}.snapshotId}</code></dd></div>`,
+    `      <div><dt>Value</dt><dd>{String(${lineage}.computedValue)}</dd></div>`,
+    `      {#each ${lineage}.inputs as inp (inp.path)}`,
+    `        <div><dt>{inp.path}</dt><dd>{String(inp.value)}</dd></div>`,
+    `      {/each}`,
+    `    </dl>`,
+    `  </details>`,
+    `{/if}`,
   ].join("\n");
 }

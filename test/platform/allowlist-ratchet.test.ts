@@ -57,10 +57,10 @@ const REGISTERED: Ratchet[] = [
     max: 14,
   },
   // Walker primitives with a TSX renderer but no HEEx one.  One entry:
-  // `ProvenanceInfo` — the React-first provenance "?" disclosure (a native
-  // `<details>` over `<field>_provenance`); the HEEx port is tracked by
-  // M-T1.19 (docs/new-plan/T1-ui-frontend.md) and needs the Phoenix response to
-  // carry the lineage first.  Raised 0→1 as a reviewed line (M-T9.8).
+  // `ProvenanceInfo` — the provenance "?" disclosure (a native `<details>` over
+  // `<field>_provenance`, now rendered on React/Vue/Svelte); the HEEx port is
+  // tracked by M-T1.19 (docs/new-plan/T1-ui-frontend.md) and needs the Phoenix
+  // response to carry the lineage first.  Raised 0→1 as a reviewed line (M-T9.8).
   {
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",

@@ -12,7 +12,7 @@ import {
   type RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import { emitOperationUnionResponse } from "../_frontend/api-module.js";
+import { aggregateHasProvenanced, emitOperationUnionResponse } from "../_frontend/api-module.js";
 import {
   collectUsedTypes,
   emitEnumSchema,
@@ -54,6 +54,13 @@ export function buildSvelteApiModule(
   lines.push(`import { api } from "./client";`);
   if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
     lines.push(`import { moneySchema } from "../schemas";`);
+  }
+  // Provenance lineage rides the response schema when this aggregate has a
+  // `provenanced` field, so the scaffold's `ProvenanceInfo` "?" disclosure has a
+  // typed lineage to read (mirrors React/Vue).
+  const carryProv = aggregateHasProvenanced(agg);
+  if (carryProv) {
+    lines.push(`import { provLineageSchema } from "../schemas";`);
   }
   lines.push("");
 
@@ -129,9 +136,9 @@ export function buildSvelteApiModule(
   lines.push("");
 
   for (const part of agg.parts) {
-    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
+    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false, carryProv));
   }
-  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
+  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true, carryProv));
   lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
   lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
   {

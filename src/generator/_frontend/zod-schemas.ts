@@ -127,6 +127,7 @@ export function emitResponseSchema(
   ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
+  carryProvenance = false,
 ): string[] {
   const lines: string[] = [];
   const name = `${ent.name}Response`;
@@ -145,6 +146,14 @@ export function emitResponseSchema(
       lines.push(`  ${wf.name}: z.string(),`);
     } else {
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
+    }
+  }
+  // Co-located provenance lineage rides the wire DTO after the regular fields —
+  // mirrors the api-module.ts twin (React/Vue) and the Hono `toWire` append.
+  // Nullish: absent on backends that don't capture lineage and on create.
+  if (carryProvenance) {
+    for (const f of ent.fields.filter((f) => f.provenanced)) {
+      lines.push(`  ${f.name}_provenance: provLineageSchema.nullish(),`);
     }
   }
   lines.push(`});`);

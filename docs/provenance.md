@@ -216,7 +216,7 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
 ```
 
-## Scaffolded UI — the "?" provenance disclosure (React + Vue)
+## Scaffolded UI — the "?" provenance disclosure (React + Vue + Svelte)
 
 The lineage is already on the wire (the co-located `<field>_provenance`
 key above), so a **scaffolded detail page** now surfaces it: every
@@ -224,10 +224,10 @@ key above), so a **scaffolded detail page** now surfaces it: every
 expands to show where the value came from — the rule it was computed by,
 the computed value, and the input list (`path = value`).
 
-Rendered on **React** (`<details>` + JSX) and **Vue** (`<details v-if>` +
-`v-for`); Svelte/Angular/HEEx/Feliz render the value alone for now (the
-primitive comments itself out) until they're backfilled (M-T1.19). Two
-things make it work:
+Rendered on **React** (`<details>` + JSX), **Vue** (`<details v-if>` +
+`v-for`), and **Svelte** (`{#if}` + keyed `{#each}`); Angular/HEEx/Feliz
+render the value alone for now (the primitive comments itself out) until
+they're backfilled (M-T1.19). Two things make it work:
 
 1. The React frontend response schema carries the lineage as a nullable
    `provLineageSchema` field (`src/lib/schemas.ts`), so the client type
