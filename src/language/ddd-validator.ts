@@ -44,6 +44,7 @@ import {
   checkDurationConstructors,
   checkExpectMatcher,
   checkFactoryCreateFields,
+  checkFactoryCreateFieldTypes,
   checkFileUploadBinding,
   checkGenericCarriers,
   checkHandlerBodies,
@@ -197,6 +198,10 @@ export class DddValidator {
     // aggregate's create-input contract (server-owned `managed`/`token`/`internal`
     // fields, or typos) — they compile the .ddd but fail the emitted project's tsc.
     guard("factory-create-fields", model, () => checkFactoryCreateFields(model, accept));
+    // …and the VALUE-type twin: an object-literal entry whose name IS a valid
+    // create-input field but whose value type mismatches (`Order.create({ qty:
+    // "abc" })` where `qty: int`) — the factory analogue of construction-field-type.
+    guard("factory-create-field-types", model, () => checkFactoryCreateFieldTypes(model, accept));
     // M-T6.18 gap #3 — per-argument TYPE checks at the predicate-bearing
     // expression slots the statement/expression walk never reaches: find
     // `where`/`requires`, retrieval `where:`, criterion / policy-fn bodies, and

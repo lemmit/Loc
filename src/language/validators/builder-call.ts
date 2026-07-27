@@ -34,7 +34,14 @@ import {
   isStateField,
   isValueObject,
 } from "../generated/ast.js";
-import { type DddType, resolveTypeRef, T } from "../type-system.js";
+import {
+  type DddType,
+  envForNode,
+  resolveTypeRef,
+  T,
+  typeOf,
+  typeToString,
+} from "../type-system.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
 /** Bindable page-body inputs — they wire to a `state` field via `bind:`. */
@@ -436,6 +443,110 @@ export function checkFactoryCreateFields(model: Model, accept: ValidationAccepto
           { node: entry, property: "name", code: "loom.create-unknown-field" },
         );
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `loom.create-field-type` — the VALUE-type twin of `checkFactoryCreateFields`
+// (M-T6.18 gap #3).  That gate checks the object-literal KEYS of a crudish
+// factory call `Agg.create({ … })` against the create-input contract; this
+// checks each entry's VALUE against the target field's declared type.  A
+// wrong-typed create input (`Order.create({ qty: "abc" })` where `qty: int`)
+// names a valid field, so `checkFactoryCreateFields` passes it, then the emitted
+// backend's create-input DTO (`int qty`) fails its OWN tsc/gradle/mix.
+//
+// `Agg.create({ … })` is the WIRE boundary, not a domain assignment — it is
+// deliberately more permissive than `:=` / `emit` (which reject `string` into a
+// `datetime`/`X id` field).  Create-input values are JSON-shaped: a `string`
+// literal is the idiomatic form for `datetime`/`guid` (ISO / UUID text) and for
+// an `X id` reference (`holder: "00000000-…"`), exactly as the shipping examples
+// write them.  So the check compares WIRE FAMILIES (number / bool / text /
+// object), flagging only an unambiguous cross-family mismatch (`qty: "abc"` —
+// text into a numeric field) and never a same-family wire coercion.  This keeps
+// the false-positive rate at zero on the real corpus while still catching the
+// "wrong JSON kind" that breaks the emitted DTO.  Model-wide, so it fires
+// wherever the factory call lives — aggregate ops, workflow bodies, page actions.
+// ---------------------------------------------------------------------------
+
+type WireFamily = "num" | "bool" | "text" | "obj" | "skip";
+
+/** The wire (JSON) family a create-input value serialises as.  `skip` means
+ *  "don't compare" — an unknown / json / File / array / optional-unknown type
+ *  whose shape is too loose to flag without risking a false positive. */
+function wireFamily(t: DddType): WireFamily {
+  const base = t.kind === "optional" ? t.inner : t;
+  switch (base.kind) {
+    case "primitive":
+      if (
+        base.name === "int" ||
+        base.name === "long" ||
+        base.name === "decimal" ||
+        base.name === "money"
+      )
+        return "num";
+      if (base.name === "bool") return "bool";
+      if (base.name === "string" || base.name === "datetime" || base.name === "guid") return "text";
+      return "skip"; // json / File — arbitrary wire shape
+    case "id":
+    case "enum":
+      return "text"; // ids + enum values serialise as strings on the wire
+    case "valueobject":
+    case "aggregate":
+    case "entity":
+    case "payload":
+      return "obj";
+    default:
+      return "skip"; // unknown / array / slot / action …
+  }
+}
+
+export function checkFactoryCreateFieldTypes(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const head = chain.head;
+    if (!isNameRef(head)) continue;
+    const first = chain.suffixes[0];
+    if (!first || !isMemberSuffix(first) || !first.call || first.member !== "create") continue;
+    if (first.args.length !== 1) continue;
+    const argVal = first.args[0]?.value;
+    if (!argVal || !isObjectLit(argVal)) continue;
+    const agg = resolveAggregateByName(head.name, head, model);
+    if (!agg) continue;
+
+    // Create-input contract mapped to declared types — declared `Property`
+    // members whose access is NOT server-owned (`managed`/`token`/`internal`),
+    // the same set `checkFactoryCreateFields` admits by name.
+    const createInput = new Map<string, DddType>();
+    for (const m of agg.members) {
+      if (!isProperty(m)) continue;
+      const access = typeof m.access === "string" ? m.access : "";
+      if (!SERVER_OWNED_ACCESS.has(access)) createInput.set(m.name, resolveTypeRef(m.type));
+    }
+
+    const env = envForNode(argVal);
+    for (const entry of argVal.fields) {
+      const name = typeof entry.name === "string" ? entry.name : String(entry.name);
+      const expected = createInput.get(name);
+      if (!expected) continue; // unknown / server-owned key — `checkFactoryCreateFields`' concern
+      const expFam = wireFamily(expected);
+      // Only compare when the field is a concrete scalar wire family; skip
+      // `obj`/`skip` targets (a VO / nested / json field — an inline object
+      // literal into a VO is not a cross-family error and would false-positive).
+      if (expFam !== "num" && expFam !== "bool" && expFam !== "text") continue;
+      const actual = typeOf(entry.value, env);
+      if (actual.kind === "unknown") continue; // typo'd bare value — reported at its source
+      const actFam = wireFamily(actual);
+      // Same family (incl. every wire coercion — string→datetime, string→id) or a
+      // loose/object actual → accept.  A numeric-literal promotion (`qty: 5` into
+      // a `money`/`decimal` field) is same-family too, so it needs no special case.
+      if (actFam === "skip" || actFam === "obj" || actFam === expFam) continue;
+      accept(
+        "error",
+        `'${agg.name}.create' field '${name}' expects a ${expFam === "num" ? "numeric" : expFam === "bool" ? "boolean" : "text"} value ('${typeToString(expected)}') but got '${typeToString(actual)}'.`,
+        { node: entry, property: "value", code: "loom.create-field-type" },
+      );
     }
   }
 }
