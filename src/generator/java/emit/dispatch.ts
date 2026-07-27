@@ -105,7 +105,7 @@ function renderProjectionFold(
   // gets the `<Corr>Id` it expects.
   const keyExpr = on.correlation
     ? renderJavaExpr(on.correlation, renderCtx)
-    : `${param}.${snake(corr)}()`;
+    : `${param}.${lowerFirst(corr)}()`;
   if (on.correlation) collectJavaExprImports(on.correlation, imports);
 
   const cls = projectionRowClass(proj);
@@ -457,7 +457,7 @@ function renderHandler(
   // correlation field (omitted-`by` rule).
   const keyExpr = resolved.correlation
     ? renderJavaExpr(resolved.correlation, renderCtx)
-    : `${param}.${snake(corr)}()`;
+    : `${param}.${lowerFirst(corr)}()`;
   if (resolved.correlation) collectJavaExprImports(resolved.correlation, imports);
 
   const hasEmit = bodyHasEmit(resolved.statements);
@@ -561,7 +561,7 @@ function renderEsHandler(
   const renderCtx = { thisName: "state" };
   const keyExpr = resolved.correlation
     ? renderJavaExpr(resolved.correlation, renderCtx)
-    : `${param}.${snake(corr)}()`;
+    : `${param}.${lowerFirst(corr)}()`;
   if (resolved.correlation) collectJavaExprImports(resolved.correlation, imports);
 
   const hasEmit = bodyHasEmit(resolved.statements);
@@ -781,7 +781,7 @@ function renderEsMergedHandler(
   const renderCtx = { thisName: "state" };
   const keyExpr = createResolved.correlation
     ? renderJavaExpr(createResolved.correlation, renderCtx)
-    : `${param}.${snake(corr)}()`;
+    : `${param}.${lowerFirst(corr)}()`;
   if (createResolved.correlation) collectJavaExprImports(createResolved.correlation, imports);
 
   const createBranch = esMergedBranchLines(
