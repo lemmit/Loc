@@ -1,0 +1,56 @@
+// Stdlib macros (scaffold-macros.md) — compile-time `with <macro>(...)` clauses
+// spliced into the host AST in phase ② (macro expand), before lowering.  This
+// fixture covers the two BACKEND-generatable macro families:
+//
+//   crudish      — adds a generated create(...) factory, update(...) op, and
+//                  destroy {} terminator (POST / POST /{id}/update / DELETE).
+//   softDeletable + softDelete — the builtin softDeletable *capability*
+//                  (isDeleted + deletedAt? + the `!this.isDeleted` read filter)
+//                  paired with the softDelete *macro* (softDelete()/restore()
+//                  ops).  `crudish(updateOnly: true)` leaves the delete
+//                  lifecycle to soft-delete (the doc's recommended combo).
+//
+// The `scaffold` (page) family is UI-tier — it synthesises frontend pages and
+// is out of scope for the domain-focused corpus; it's exercised by the
+// generated-frontend build gates over examples/*.ddd instead.
+system MacroShop {
+  subdomain Catalog {
+    context Catalog {
+
+      // ── crudish ── full create/update/destroy lifecycle from field decls.
+      aggregate Product with crudish {
+        name: string
+        price: decimal
+        invariant price >= 0
+      }
+
+      // ── softDeletable capability + softDelete macro ── soft-delete ops + the
+      // read filter; crudish(updateOnly:) yields the update op without a
+      // competing hard-delete destroy.
+      aggregate Item with crudish(updateOnly: true), softDeletable, softDelete {
+        label: string
+      }
+
+      repository Products for Product { }
+      repository Items for Item { }
+    }
+  }
+
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 4000
+  }
+
+  // api e2e — crudish create + read-back proves the generated write+read routes.
+  test e2e "crudish create emits a working POST + GET round-trip" against d {
+    let p = api.products.create({ name: "Widget", price: 9.99 })
+    let read = api.products.getById(p)
+    expect(read.name).toBe("Widget")
+  }
+}

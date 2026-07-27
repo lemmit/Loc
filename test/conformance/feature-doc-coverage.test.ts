@@ -52,11 +52,9 @@ const FEATURE_DOCS: readonly string[] = [
   "payloads",
   "provenance",
   "resources",
+  "scaffold-macros",
   "tenancy",
   "workflow",
-  // Documented domain features with no canonical corpus fixture yet (see
-  // KNOWN_GAPS).
-  "scaffold-macros",
 ];
 
 /** FEATURE_DOCS not yet cited by any manifest row — the honest coverage gaps.
@@ -64,9 +62,10 @@ const FEATURE_DOCS: readonly string[] = [
  *  Drain one by adding a `<feature>.ddd` + a manifest row citing the doc, then
  *  delete its entry here (and lower the ratchet max in the same PR). */
 const KNOWN_GAPS: readonly string[] = [
-  // `scaffold` macro expansion (pages from aggregates) — generatable, uncovered
-  // by the domain-focused corpus.  M-T9.3 (unit-tier drain).
-  "scaffold-macros",
+  // Empty — every documented feature has a corpus fixture.  A new feature doc
+  // with no fixture fails the gate; acknowledge it here (with an open tracker)
+  // only if the fixture is a genuine follow-up, and raise the allowlist-ratchet
+  // max in the same reviewed diff.
 ];
 
 /** Docs cited by >=1 manifest row. */

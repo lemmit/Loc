@@ -77,6 +77,12 @@ export const CORPUS: readonly CorpusFeature[] = [
     doc: "domain-services",
     backends: ALL,
   },
+  {
+    id: "scaffold-macros",
+    title: "stdlib macros — crudish (create/update/destroy) + softDeletable capability + softDelete ops",
+    doc: "scaffold-macros",
+    backends: ALL,
+  },
 ] as const;
 
 /** Lookup by id. */
