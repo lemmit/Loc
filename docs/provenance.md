@@ -39,6 +39,22 @@ The grammar admits `provenanced` on any stored property; the
 validator rejects it on `derived` properties (their value is
 recomputed, not assigned).
 
+**Modifier order is fixed, and `provenanced` goes first.** A property's
+optional modifiers parse in exactly one order: `type (provenanced)?
+(sensitive(...))? (access)? (= default)? (check ...)?` (see
+[`language.md`](language.md)'s property-grammar row). Marking an
+*existing* field provenanced by appending the keyword at the end —
+after `sensitive(...)`, an access modifier like `managed`, or a `=
+default` — is a **parse error**, not a validator warning:
+
+```ddd
+total: int sensitive(pii) provenanced   // ✗ parse error: Expecting token of type '}'
+total: int provenanced sensitive(pii)   // ✓ provenanced goes right after the type
+```
+
+The fix is always to move `provenanced` immediately after the type,
+never to append it.
+
 ## Rule snapshots
 
 Each distinct assignment site (`:=`, `+=`, `-=`) to a `provenanced`

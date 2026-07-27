@@ -1,5 +1,7 @@
-import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
-import { snake } from "../../../util/naming.js";
+import type { EnrichedBoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
+import type { MigrationsIR, TableShape } from "../../../ir/types/migrations-ir.js";
+import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import { plural, snake } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,11 @@ function migrationTag(version: string, module: string, name: string): string {
 export function emitTypescriptMigrations(
   migrations: MigrationsIR[],
   out: Map<string, string>,
+  // Additional (version, tag) rows to fold into the journal alongside the
+  // platform-neutral migrations — used for the LATE provenance migration
+  // (`emitTypescriptProvenanceMigration`), which is hand-emitted outside
+  // `MigrationsIR` so it has no `migrationHistory` entry of its own.
+  extraHistory: ReadonlyArray<{ version: string; tag: string }> = [],
 ): void {
   let anyEmitted = false;
   for (const m of migrations) {
@@ -50,7 +57,7 @@ export function emitTypescriptMigrations(
     out.set(`db/migrations/${tag}.sql`, sql + "\n");
     anyEmitted = true;
   }
-  if (!anyEmitted) return;
+  if (!anyEmitted && extraHistory.length === 0) return;
 
   // Build the journal from each migration's `next.migrationHistory` —
   // the builder already merged the previous history with any newly
@@ -58,11 +65,14 @@ export function emitTypescriptMigrations(
   // deployable contribute one combined journal; their entries
   // interleave by version, which is the lexicographic sort order
   // anyway since versions are monotonically increasing.
-  const journal = renderJournal(migrations);
+  const journal = renderJournal(migrations, extraHistory);
   out.set("db/migrations/meta/_journal.json", journal);
 }
 
-function renderJournal(migrations: MigrationsIR[]): string {
+function renderJournal(
+  migrations: MigrationsIR[],
+  extraHistory: ReadonlyArray<{ version: string; tag: string }> = [],
+): string {
   const entries: {
     idx: number;
     version: string;
@@ -71,24 +81,23 @@ function renderJournal(migrations: MigrationsIR[]): string {
     breakpoints: boolean;
   }[] = [];
   let idx = 0;
-  // One row per (module, history entry).  Modules in the same deployable
-  // share a version on their initial migration, so the journal must be
-  // keyed on the module too — de-duping by version alone would collapse
-  // every module's "Initial" into one entry and drop the rest of the
-  // database's tables.  Sort by (version, module) for a stable, ordered
-  // journal that mirrors the emitted `.sql` filenames.
+  // One row per (module, history entry) plus any extra (e.g. provenance)
+  // rows.  Modules in the same deployable share a version on their initial
+  // migration, so rows are keyed on the resolved tag (not bare version) —
+  // de-duping by version alone would collapse every module's "Initial" into
+  // one entry and drop the rest of the database's tables.  Sort by
+  // (version, tag) for a stable, ordered journal that mirrors the emitted
+  // `.sql` filenames.
   const rows = migrations
-    .flatMap((m) => (m.next.migrationHistory ?? []).map((e) => ({ ...e, module: m.module })))
+    .flatMap((m) =>
+      (m.next.migrationHistory ?? []).map((e) => ({
+        version: e.version,
+        tag: migrationTag(e.version, m.module, e.name),
+      })),
+    )
+    .concat(extraHistory)
     .sort((a, b) =>
-      a.version !== b.version
-        ? a.version < b.version
-          ? -1
-          : 1
-        : a.module < b.module
-          ? -1
-          : a.module > b.module
-            ? 1
-            : 0,
+      a.version !== b.version ? (a.version < b.version ? -1 : 1) : a.tag < b.tag ? -1 : 1,
     );
   for (const row of rows) {
     entries.push({
@@ -102,7 +111,7 @@ function renderJournal(migrations: MigrationsIR[]): string {
       // same epoch millis), so add `idx` to break ties.  Since `rows` is sorted
       // by version and `idx` increases by 1 per row, `base + idx` is monotonic.
       when: versionToEpochMillis(row.version) + idx,
-      tag: migrationTag(row.version, row.module, row.name),
+      tag: row.tag,
       breakpoints: true,
     });
     idx++;
@@ -136,4 +145,108 @@ function versionToEpochMillis(version: string): number {
   const min = Number(version.slice(10, 12));
   const sec = Number(version.slice(12, 14));
   return Date.UTC(year, month, day, hour, min, sec);
+}
+
+// ---------------------------------------------------------------------------
+// LATE provenance migration (provenance.md) — the Hono/Drizzle counterpart of
+// `emitDotnetProvenanceAuditMigration` / `emitPythonProvenanceMigration` /
+// elixir-vanilla's `create_provenance` migration.  Provenance is NOT part of
+// the platform-neutral `MigrationsIR` (it's feature-local, mirroring the
+// co-located `<field>_provenance` column `db/schema.ts` already declares), so
+// without this the Drizzle schema model references a column and a
+// `provenance_records` table that no migration ever creates.  A version far in
+// the future sorts this migration after every module's initial + delta
+// migrations (parity with the `29991231235959` / `29991231000000` siblings),
+// regardless of module count.
+// ---------------------------------------------------------------------------
+
+const PROVENANCE_MIGRATION_VERSION = "29991231000000";
+
+/** The LATE migration's tag (sorts after every module migration). */
+export function provenanceMigrationTag(): string {
+  return `${PROVENANCE_MIGRATION_VERSION}_provenance`;
+}
+
+/** Snake-cased name of the co-located backing column for a provenanced field
+ *  (`total` → `total_provenance`) — must agree with `schema.ts` /
+ *  `aggregate.ts` / the repository builders, which all derive it the same
+ *  way. */
+function provColumn(fieldName: string): string {
+  return `${snake(fieldName)}_provenance`;
+}
+
+/** Emit `db/migrations/<version>_provenance.sql`: ADD the co-located
+ *  `<field>_provenance` jsonb column per provenanced aggregate table, then
+ *  CREATE the `provenance_records` history table (column-for-column parity
+ *  with the `db/schema.ts` `provenanceRecords` table).  No-op (nothing
+ *  emitted, `undefined` returned) when no served aggregate declares a
+ *  provenanced field. Returns the `(version, tag)` pair so the caller can fold
+ *  it into the Drizzle journal — a `.sql` file that's absent from the journal
+ *  is never applied by the runtime migrator. */
+export function emitTypescriptProvenanceMigration(
+  contexts: readonly EnrichedBoundedContextIR[],
+  sys: SystemIR | undefined,
+  out: Map<string, string>,
+): { version: string; tag: string } | undefined {
+  const steps: string[] = [];
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      if (agg.isAbstract) continue;
+      const fields = agg.fields.filter((f) => f.provenanced);
+      if (fields.length === 0) continue;
+      const ds = sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined;
+      const base = snake(plural(agg.name));
+      const table = ds?.tablePrefix ? `${ds.tablePrefix}${base}` : base;
+      for (const f of fields) {
+        steps.push(
+          renderPgStep({
+            op: "addColumn",
+            table,
+            schema: ds?.schema,
+            column: { name: provColumn(f.name), type: { kind: "json" }, nullable: true },
+          }),
+        );
+      }
+    }
+  }
+  if (steps.length === 0) return undefined;
+
+  const historyTable: TableShape = {
+    name: "provenance_records",
+    ownerModule: "provenance",
+    columns: [
+      { name: "trace_id", type: { kind: "text" }, nullable: false },
+      { name: "snapshot_id", type: { kind: "text" }, nullable: false },
+      { name: "target_type", type: { kind: "text" }, nullable: false },
+      { name: "field", type: { kind: "text" }, nullable: false },
+      { name: "inputs", type: { kind: "json" }, nullable: false },
+      { name: "computed_value", type: { kind: "json" }, nullable: true },
+      { name: "at", type: { kind: "datetime" }, nullable: false },
+      { name: "correlation_id", type: { kind: "text" }, nullable: true },
+      { name: "scope_id", type: { kind: "text" }, nullable: true },
+      { name: "actor_id", type: { kind: "text" }, nullable: true },
+      { name: "parent_id", type: { kind: "text" }, nullable: true },
+    ],
+    primaryKey: ["trace_id"],
+    foreignKeys: [],
+    indexes: [
+      {
+        name: "provenance_records_target_idx",
+        table: "provenance_records",
+        columns: ["target_type", "field"],
+        unique: false,
+      },
+      {
+        name: "provenance_records_correlation_idx",
+        table: "provenance_records",
+        columns: ["correlation_id"],
+        unique: false,
+      },
+    ],
+  };
+  steps.push(renderPgStep({ op: "createTable", table: historyTable }));
+
+  const tag = provenanceMigrationTag();
+  out.set(`db/migrations/${tag}.sql`, `${steps.join(`\n${STATEMENT_BREAKPOINT}\n`)}\n`);
+  return { version: PROVENANCE_MIGRATION_VERSION, tag };
 }

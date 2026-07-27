@@ -80,6 +80,51 @@ describe("provenanced — grammar", () => {
     const { errors } = await parseModel(src);
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  // The property grammar admits its modifiers in ONE fixed order —
+  // `type (provenanced)? (sensitive(...))? (access)? (= default)? (check ...)?`
+  // (docs/language.md's property-grammar row, `ddd.langium`'s `Property` rule).
+  // `provenanced` slots right after the type, so appending it to a field that
+  // already has a later modifier — the natural instinct when marking an
+  // *existing* `sensitive(...)` / access / defaulted field provenanced — is a
+  // parse error, not a validation warning. This is the "parsing/grammar
+  // error" surprise: the fix is always to move `provenanced` immediately
+  // after the type, never to append it at the end.
+  describe("provenanced — fixed modifier order (gotcha)", () => {
+    const aggWith = (fieldLine: string) => `
+system S { subdomain M { context C {
+  aggregate Cart { ${fieldLine}
+    operation noop() { }
+  }
+  repository Carts for Cart { }
+} } deployable api { platform: node, contexts: [C], port: 3000 } }
+`;
+
+    it("parses when `provenanced` precedes sensitivity, access, and a default", async () => {
+      const src = aggWith("total: int provenanced sensitive(pii) managed = 0");
+      const { errors } = await parseModel(src);
+      expect(errors).toEqual([]);
+    });
+
+    it("is a PARSE error (not a validation warning) when written after `sensitive(...)`", async () => {
+      const src = aggWith("total: int sensitive(pii) provenanced");
+      const { errors } = await parseModel(src);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some((e) => /Expecting token/.test(e))).toBe(true);
+    });
+
+    it("is a PARSE error when written after an access modifier", async () => {
+      const src = aggWith("total: int managed provenanced");
+      const { errors } = await parseModel(src);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("is a PARSE error when written after a `= default`", async () => {
+      const src = aggWith("total: int = 0 provenanced");
+      const { errors } = await parseModel(src);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe("provenanced — validation", () => {
@@ -170,6 +215,83 @@ describe("provenanced — TypeScript emission", () => {
     expect(schema).toContain(", jsonb }");
     expect(schema).toContain('total_provenance: jsonb("total_provenance").$type<');
     expect(schema).toContain('export const provenanceRecords = pgTable("provenance_records"');
+  });
+
+  // Regression: `db/schema.ts` (Drizzle) declared the co-located
+  // `<field>_provenance` column and the `provenanceRecords` table above, but
+  // no SQL migration ever created either — `generate system` wrote the
+  // Drizzle model without the DDL to back it, so the first boot-time
+  // `migrate(...)` left both missing and any write to the column, or a
+  // history-table insert, failed against a live database. Every other
+  // provenance-capable backend (.NET / Java / Python / elixir) already emits
+  // an equivalent LATE migration (`docs/provenance.md`); this pins the same
+  // shape for Hono/Drizzle.
+  describe("provenanced — TypeScript migration (regression)", () => {
+    it("emits the LATE provenance migration (ADD column + CREATE history table)", async () => {
+      const { model } = await parseModel(SYSTEM(""));
+      const files = generateSystems(model).files;
+      const mig = files.get("api/db/migrations/29991231000000_provenance.sql")!;
+      expect(mig).toBeDefined();
+      expect(mig).toContain('ALTER TABLE "carts" ADD COLUMN "total_provenance" JSONB');
+      expect(mig).toContain('CREATE TABLE "provenance_records" (');
+      expect(mig).toContain('"snapshot_id" TEXT NOT NULL');
+      expect(mig).toContain("--> statement-breakpoint");
+    });
+
+    it("registers the migration in the Drizzle journal (unregistered ⇒ never applied)", async () => {
+      const { model } = await parseModel(SYSTEM(""));
+      const files = generateSystems(model).files;
+      const journal = JSON.parse(files.get("api/db/migrations/meta/_journal.json")!);
+      const tags = journal.entries.map((e: { tag: string }) => e.tag);
+      expect(tags).toContain("29991231000000_provenance");
+      // `when` must be strictly increasing across every entry, or drizzle's
+      // runtime migrator silently collapses the tie and skips one file.
+      const whens = journal.entries.map((e: { when: number }) => e.when);
+      expect(whens).toEqual([...whens].sort((a, b) => a - b));
+      expect(new Set(whens).size).toBe(whens.length);
+    });
+
+    it("the migration sorts after every module migration", async () => {
+      const { model } = await parseModel(SYSTEM(""));
+      const files = generateSystems(model).files;
+      const sqlFiles = [...files.keys()].filter(
+        (k) => k.startsWith("api/db/migrations/") && k.endsWith(".sql"),
+      );
+      const provFile = sqlFiles.find((k) => k.endsWith("_provenance.sql"));
+      expect(provFile).toBeDefined();
+      const others = sqlFiles.filter((k) => k !== provFile);
+      for (const other of others)
+        expect(provFile!.split("/").pop()! > other.split("/").pop()!).toBe(true);
+    });
+
+    it("picks up a newly-added provenanced field on the next regenerate", async () => {
+      // Models the exact user-hit scenario: a field is marked `provenanced`
+      // after the aggregate already had migrations — regenerating must fold
+      // the new column into the (regenerated-from-scratch) late migration,
+      // not just leave the field itself added with no lineage column.
+      const before = SYSTEM("");
+      const after = before.replace("discount: int", "discount: int provenanced");
+      const migBefore = generateSystems((await parseModel(before)).model).files.get(
+        "api/db/migrations/29991231000000_provenance.sql",
+      )!;
+      const migAfter = generateSystems((await parseModel(after)).model).files.get(
+        "api/db/migrations/29991231000000_provenance.sql",
+      )!;
+      expect(migBefore).not.toContain("discount_provenance");
+      expect(migAfter).toContain('ADD COLUMN "discount_provenance" JSONB');
+      expect(migAfter).toContain('ADD COLUMN "total_provenance" JSONB');
+    });
+
+    it("emits no provenance migration when nothing is provenanced", async () => {
+      const src = SYSTEM("").replace("total: int provenanced", "total: int");
+      const { model } = await parseModel(src);
+      const files = generateSystems(model).files;
+      expect([...files.keys()].some((k) => k.endsWith("_provenance.sql"))).toBe(false);
+      const journal = JSON.parse(files.get("api/db/migrations/meta/_journal.json")!);
+      expect(journal.entries.some((e: { tag: string }) => e.tag.includes("provenance"))).toBe(
+        false,
+      );
+    });
   });
 
   it("flushes the history transactionally and rides the lineage on the wire", async () => {

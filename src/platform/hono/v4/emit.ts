@@ -24,7 +24,10 @@ import {
 } from "../../../generator/typescript/emit/audit-stamp.js";
 import { renderChannelsModule } from "../../../generator/typescript/emit/channels.js";
 import { renderDomainServices } from "../../../generator/typescript/emit/domain-service.js";
-import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
+import {
+  emitTypescriptMigrations,
+  emitTypescriptProvenanceMigration,
+} from "../../../generator/typescript/emit/migrations.js";
 import {
   MIKRO_INDEX_IMPORTS,
   mikroConnectionSetup,
@@ -920,8 +923,19 @@ export function generateTypeScriptForContexts(
   // emits no drizzle migration files and `hasMigrations` stays false (which
   // suppresses the boot-time `migrate(...)` call in index.ts).
   const hasMigrations = !usingMikro && !!(system?.migrations && system.migrations.length > 0);
-  if (hasMigrations) {
-    emitTypescriptMigrations(system!.migrations!, out);
+  // The LATE provenance migration rides the same drizzle-runtime-migrator
+  // journal as the platform-neutral migrations above, so it must be folded
+  // into the SAME journal write (a `.sql` file absent from the journal is
+  // never applied).  mikroorm owns its own schema sync, so it's skipped
+  // there too — `renderMikroEntities` above already threads `provenance` into
+  // the EntitySchema instead.
+  const provenanceHistory: Array<{ version: string; tag: string }> = [];
+  if (!usingMikro && emitProvenance) {
+    const emitted = emitTypescriptProvenanceMigration(contexts, system?.sys, out);
+    if (emitted) provenanceHistory.push(emitted);
+  }
+  if (hasMigrations || provenanceHistory.length > 0) {
+    emitTypescriptMigrations(system?.migrations ?? [], out, provenanceHistory);
   }
   // First-boot seed data (database-seeding.md, Phase 2) — emits `db/seed.ts`
   // when the served contexts declare any `seed` block.  Through the domain
