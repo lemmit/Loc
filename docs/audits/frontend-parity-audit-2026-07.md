@@ -83,7 +83,7 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 |---|:--:|:--:|:--:|:--:|:--:|---|
 | Required `WalkerTarget` seams | ✓ | ✓ | ✓ | ✓ | ✓ | `target.ts` (incl. expr-leaf seam) |
 | Expression-syntax leaves | ✓ JS | ✓ JS | ✓ JS | ✓ JS | ✓ F# | `js-expr-leaves.ts` / feliz `FS_LEAVES` |
-| Pack-dispatched primitives ship on target | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | **🔴 20/44** | `REQUIRED_PRIMITIVES` gate — **Feliz not gated**; `feliz/pack.ts` |
+| Pack-dispatched primitives ship on target | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate) | ✓ (gate)¹ | `REQUIRED_PRIMITIVES` gate; procedural-pack sibling gate for Feliz (`feliz-pack-groundwork.test.ts`) |
 | Forms (Create/Op/Workflow/Destroy) | ✓ RHF | ✓ | ✓ | ✓ Reactive Forms | ✓ Elmish seams | Feliz `renderCreateForm`… `feliz-target.ts` |
 | `store` UI primitive | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ Elmish Model | store gate lifted on all 5 — `store-checks.ts:301-304` |
 | Async effects (`await` op in action) | ✓ | ✓ | ✓ | ✓ | ✓ | multi-variant unions + params + missing-`else` render; paramless-page instance effect rejected uniformly (`loom.instance-effect-needs-route-id`, `ui-checks.ts`); Feliz-only gate = component host / non-instance-op |
@@ -91,11 +91,29 @@ silent` / `N/A`. The final column cites the authoritative gate + `file:line`.
 | Build CI gate | ✓ | ✓ | ✓ | ✓ | ✓ (curated) | `generated-feliz-build.yml` (inline showcase only) |
 | Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | ✗ | no `generated-feliz-e2e.yml` |
 
+¹ Feliz cell updated 2026-07-27: was **🔴 20/44** at the time of the audit; the
+gap is now closed — renderers drained + the procedural-pack groundwork gate.
+See F1's resolution note below.
+
 ---
 
 ## Findings
 
 ### F1 (HIGH, 🔴 SILENT) — Feliz drops 24 page primitives as compile-clean placeholders
+
+> **Resolved 2026-07-27.** Both halves of F1 are now closed. The **principled fix**
+> landed first (renderers drained — `feliz/pack.ts` `RENDERERS` now covers the full
+> JSX-family display + input surface minus the seam-covered `primitive-form-of`;
+> pinned by the `test/generator/feliz/*.test.ts` "no `no renderer` leaks" suites).
+> The **structural gate** then closed the remaining safety-net hole: a `feliz` entry
+> in `REQUIRED_PRIMITIVES` (`required-primitives.ts`) + a
+> `test/platform/feliz-pack-groundwork.test.ts` that asserts every required-core
+> primitive has a real renderer (the procedural-pack analogue of the load-time
+> `compilePack` gate, mirroring `flutter-pack-groundwork.test.ts`), **and**
+> `"feliz pack: no renderer"` added to `FALLBACK_MARKERS` in
+> `frontend-showcase-render.test.ts` so any future silent placeholder fails the
+> showcase matrix too. A new `SHARED_PRIMITIVES`/`TSX_ONLY_PRIMITIVES` entry without
+> a Feliz renderer now fails CI instead of silently vanishing.
 
 **What.** Feliz's procedural pack (`feliz/pack.ts`) registers **20** of the **44**
 pack-dispatched JSX-family primitives (`SHARED_PRIMITIVES` + `TSX_ONLY_PRIMITIVES`
