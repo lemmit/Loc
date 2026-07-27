@@ -146,9 +146,7 @@ public sealed record Paged<T>(IReadOnlyList<T> Items, int Page, int PageSize, in
 
 public sealed record Envelope<T>(string Id, DateTime Ts, T Body);
 
-${fileRef}
-
-/// <summary>
+${fileRef}/// <summary>
 /// Domain-termed read-scope bypass for a retrieval (the DSL <c>ignoring</c>
 /// clause).  <c>All</c> skips every capability scope (<c>ignoring *</c>);
 /// <c>Capabilities</c> names the specific capabilities to skip by their DOMAIN
