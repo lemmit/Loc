@@ -47,6 +47,7 @@ export {
   checkConstructionArgTypes,
   checkEmit,
   checkOperation,
+  checkPredicateSlotArgs,
   checkRetrievalLiteral,
   checkStatement,
 } from "./statements.js";

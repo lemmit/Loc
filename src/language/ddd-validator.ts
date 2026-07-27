@@ -61,6 +61,7 @@ import {
   checkOrgPathReferences,
   checkPayloads,
   checkPolicyFns,
+  checkPredicateSlotArgs,
   checkPrimitiveConversions,
   checkProjectSingletons,
   checkRepositoryFinds,
@@ -196,6 +197,11 @@ export class DddValidator {
     // aggregate's create-input contract (server-owned `managed`/`token`/`internal`
     // fields, or typos) — they compile the .ddd but fail the emitted project's tsc.
     guard("factory-create-fields", model, () => checkFactoryCreateFields(model, accept));
+    // M-T6.18 gap #3 — per-argument TYPE checks at the predicate-bearing
+    // expression slots the statement/expression walk never reaches: find
+    // `where`/`requires`, retrieval `where:`, criterion / policy-fn bodies, and
+    // operation `requires`/`when` gates.  (Predicate arity is already model-wide.)
+    guard("predicate-slot-args", model, () => checkPredicateSlotArgs(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));

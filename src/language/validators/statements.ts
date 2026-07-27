@@ -9,36 +9,45 @@ import type {
   AssignOrCallStmt,
   BuilderCall,
   Create,
+  Criterion,
   Destroy,
   EmitStmt,
   Expression,
+  FindDecl,
   FunctionDecl,
   LValue,
   Model,
   Operation,
   Parameter,
+  PolicyDecl,
+  Retrieval,
   Statement,
 } from "../generated/ast.js";
 import {
   isAssignOrCallStmt,
   isCallSuffix,
+  isCriterion,
   isDerivedProp,
   isEmitStmt,
+  isFindDecl,
   isFunctionDecl,
   isLetStmt,
   isMemberSuffix,
   isModel,
   isNameRef,
   isOperation,
+  isPolicyDecl,
   isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
+  isRetrieval,
   isRetrievalLiteral,
   isThisRef,
 } from "../generated/ast.js";
 import {
   type DddType,
   type Env,
+  envForNode,
   findFunction,
   findOperation,
   freeCallFunction,
@@ -449,6 +458,46 @@ export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcc
         }
       }
       curType = typeAfterSuffix(curType, s, env);
+    }
+  }
+}
+
+/** M-T6.18 gap #3 — arg-type + construction-value checking at the EXPRESSION
+ *  slots the operation/function/default/invariant/derived walk never reaches:
+ *  repository `find … where` / `… requires`, retrieval `where:` (named +
+ *  anonymous), criterion / policy-fn bodies, and operation `requires` / `when`
+ *  gates.  Each holds an `Expression` that can nest a criterion/policy predicate
+ *  call, a free/member domain call, or a record construction — all already
+ *  type-checkable by the shared `checkExprCallArgs` / `checkConstructionArgTypes`
+ *  under the slot's lexical env (`envForNode`, which binds a find's `for`
+ *  aggregate + params and an operation's `this` + params).  Predicate-call ARITY
+ *  is already model-wide (`loom.criterion-arity` / `loom.policy-fn-arity`); this
+ *  adds the per-argument TYPE those gates don't touch, reusing the same
+ *  `loom.call-arg-type` / `loom.construction-field-type` codes as the statement
+ *  walk.  These seven slots are disjoint from `checkExprCallArgs`'s eight
+ *  existing hook points, so no diagnostic is reported twice. */
+export function checkPredicateSlotArgs(model: Model, accept: ValidationAcceptor): void {
+  const visit = (expr: Expression | undefined): void => {
+    if (!expr) return;
+    const env = envForNode(expr);
+    checkConstructionArgTypes(expr, env, accept);
+    checkExprCallArgs(expr, env, accept);
+  };
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (isFindDecl(node)) {
+      visit((node as FindDecl).filter);
+      visit((node as FindDecl).gate);
+    } else if (isRetrieval(node)) {
+      visit((node as Retrieval).where);
+    } else if (isRetrievalLiteral(node)) {
+      visit(node.where);
+    } else if (isCriterion(node)) {
+      visit((node as Criterion).body);
+    } else if (isPolicyDecl(node)) {
+      visit((node as PolicyDecl).body);
+    } else if (isOperation(node)) {
+      visit((node as Operation).gate);
+      visit((node as Operation).when);
     }
   }
 }
