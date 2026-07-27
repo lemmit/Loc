@@ -435,6 +435,18 @@ export function generateReactForContexts(
   );
   out.set("Dockerfile", renderShellFile("dockerfile", {}, pack));
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
+  // `@hookform/resolvers` 5.x declares two mutually-exclusive optional
+  // peer deps (`valibot@^1` vs the `@typeschema/valibot@^0.39` branch);
+  // npm's optional-peer resolver intermittently drags in the conflicting
+  // graph and aborts `npm install` with ERESOLVE — even though this app
+  // only ever imports `zodResolver` and never touches valibot.  Pinning
+  // `legacy-peer-deps` makes the install deterministic across registry
+  // drift (this exact conflict red-lined the conformance-full and a11y
+  // nightlies for two days, then "recovered" on its own — the classic
+  // signature of an unpinned optional-peer bug).  It only relaxes peer-
+  // range resolution; tsc / vite build still catch real emitted-code
+  // breakage, so the build gates keep their teeth.
+  out.set(".npmrc", "# Auto-generated.\nlegacy-peer-deps=true\n");
   out.set("certs/.gitkeep", "");
 
   // Pack-specific extras — declared by the pack itself in
