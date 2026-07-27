@@ -19,6 +19,7 @@ import {
 import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   AggregateIR,
+  ApplyIR,
   BoundedContextIR,
   ConfigEntryIR,
   ConfigValueIR,
@@ -1645,6 +1646,90 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
               `jsonb column), flatten the nesting, or host this context on another backend.`,
             source: `${sys.name}/${dep.name}`,
             code: "loom.vanilla-containment-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Event-sourced applier fold support on elixir (vanilla).
+//
+// An `apply(e: E) { … }` fold folds a stored event into in-memory state.  On
+// elixir the fold rebinds a plain struct (`state = %{state | field: …}`) — an
+// event-sourced aggregate/workflow has NO state table, its truth is the stream.
+// Scalar and primitive/enum-collection mutations fold cleanly (`total -= e.amt`
+// → arithmetic, `tags += e.tag` → list append), and a value-object collection
+// mutation (`charges += Money{…}`) folds too — a VO lowers to an `object`
+// expression that renders as a plain map (`%{amount: …}`) the ES controller's
+// `serialize_<vo>/1` reads by either key.  All are fully emitted
+// (`fold-stmt-emit.ts`).
+//
+// The one shape the fold can't build is a mutation that CONSTRUCTS a contained
+// ENTITY PART — `boxes += Box{…}`.  A part construction is a `new` expression,
+// which the elixir expression renderer emits as a STRUCT (`%Ctx.Box{}`) — but
+// the schema emitters SKIP event-sourced aggregates (no state table ⇒ no Ecto
+// schema), so that struct module is never emitted and the fold would reference
+// an undefined struct.  The other backends render a `new` structurally (a bare
+// object literal), so they fold it; elixir needs the module.  Gate it honestly
+// until ES contained-part folds are wired, rather than emit a reference to a
+// missing struct (or, before this gate, SILENTLY drop the whole applier body,
+// so the folded state lost the transition while compiling green).
+//
+// Mirrors `validateVanillaContainmentSupport` (the state-based containment
+// twin).  A NON-constructing fold, or one constructing only value objects, is
+// allowed.
+// ---------------------------------------------------------------------------
+
+/** Does an `add`/`remove` fold statement construct a contained entity part —
+ *  i.e. does its value expression contain a `new Part{…}` node?  (A value
+ *  object lowers to an `object`, not a `new`, and folds as a plain map.) */
+function esApplierStmtConstructs(s: StmtIR): boolean {
+  if (s.kind !== "add" && s.kind !== "remove") return false;
+  let constructs = false;
+  walkExpr(s.value, (e) => {
+    if (e.kind === "new") constructs = true;
+  });
+  return constructs;
+}
+
+export function validateVanillaEsApplierSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "elixir") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      // Appliers only exist on event-sourced holders — the phase-⑦ discipline
+      // validator rejects `apply(...)` on a state-based aggregate — so the mere
+      // presence of appliers is the event-sourced signal here.
+      const holders: { label: string; appliers: ApplyIR[] }[] = [
+        ...ctx.aggregates.map((a) => ({
+          label: `aggregate '${ctxName}.${a.name}'`,
+          appliers: a.appliers ?? [],
+        })),
+        ...(ctx.workflows ?? []).map((w) => ({
+          label: `workflow '${ctxName}.${w.name}'`,
+          appliers: w.appliers ?? [],
+        })),
+      ];
+      for (const h of holders) {
+        for (const ap of h.appliers) {
+          if (!ap.statements.some(esApplierStmtConstructs)) continue;
+          diags.push({
+            severity: "error",
+            code: "loom.vanilla-es-applier-unsupported",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ${h.label} whose ` +
+              `apply(${ap.event}) folds an event by CONSTRUCTING a contained entity part ` +
+              `(a '+=' / '-=' with a 'Part{…}' value). The elixir event-sourced fold builds in-memory ` +
+              `state and has no emitted struct module for that part — the schema emitters skip ` +
+              `event-sourced aggregates — so it cannot construct it. Fold into scalar, ` +
+              `primitive-collection, or value-object state fields instead, or host this context on ` +
+              `another backend (node / dotnet / python / java).`,
+            source: `${sys.name}/${dep.name}`,
           });
         }
       }

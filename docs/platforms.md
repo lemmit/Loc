@@ -158,8 +158,9 @@ The document sub-case below is the one feature with a partial story:
 
 | Feature | `elixir` (vanilla) | Gate (fail-fast) |
 |---|---|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ emits | — |
-| Event-sourced **workflow** (saga appliers) | 🚫 gated | `loom.event-sourced-workflow-unsupported` |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ emits (incl. `+=` / `-=` folds²) | — |
+| Event-sourced **workflow** (`eventSourced` saga) | ✓ emits (per-correlation stream + fold) | — (`loom.event-sourced-workflow-unsupported` gates only non-supporting backends) |
+| ES `apply(…)` fold that CONSTRUCTS a contained entity part (`boxes += Box{…}`) | 🚫 gated | `loom.vanilla-es-applier-unsupported` |
 | Provenanced fields (runtime trace) | ✓ emits | — |
 | `shape(document)` aggregate | ✓ CRUD + finds/ops/functions/returning-ops; small residual gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
 | `or`-union-returning op with `emit`/`add`/`remove` body | ✓ full bodies | — |
@@ -173,6 +174,17 @@ value-object-subfield reads), **named operations** (body over the `data` map →
 audited/provenanced ops, collection mutation, derived / dereferenced-entity /
 collection-method reads, and paged/union finds; host those on
 node/dotnet/python/java.
+
+² An `apply(e: E) { … }` fold rebinds in-memory state, so a scalar compound
+`-=` (`balance -= e.amount`), a primitive-collection `+=` (`tags += e.tag`), and
+a value-object-collection `+=` (`charges += Money{…}`, which folds as a plain
+map) all emit — `src/generator/elixir/vanilla/fold-stmt-emit.ts` (M-T6.2, shared
+by the aggregate and event-sourced-workflow folds). Before M-T6.2 these were
+silently dropped (a `# unsupported applier statement` comment that compiled green
+while losing the transition). The one shape still gated is a fold that
+CONSTRUCTS a contained entity part (`boxes += Box{…}`) — a `new` expression that
+needs a `%Ctx.Box{}` struct module the ES path doesn't emit (see the gate row
+above).
 
 Every emitter is compiled against real Elixir/Ecto by
 `elixir-vanilla-build.yml` (one fixture per feature under

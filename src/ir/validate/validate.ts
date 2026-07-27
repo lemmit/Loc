@@ -77,6 +77,7 @@ import {
   validateUiRealtimeSupport,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
+  validateVanillaEsApplierSupport,
   validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
@@ -162,6 +163,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
     validateVanillaContainmentSupport(sys, diags);
+    validateVanillaEsApplierSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);

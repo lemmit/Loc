@@ -1,0 +1,90 @@
+// M-T6.2 — event-sourced applier folds that MUTATE state with `+=` / `-=`.
+// Before M-T6.2 the vanilla fold renderer handled only `:=` / `let` and emitted
+// a silent `# unsupported applier statement: add|remove` comment for a compound
+// mutation, so a collection-append / scalar-arithmetic fold compiled GREEN while
+// dropping the transition at runtime.  This fixture compile-gates the fold of:
+//   * a scalar `-=`               (`balance -= e.amount`)
+//   * a primitive-collection `+=` (`tags += e.tag`)
+// under `mix compile --warnings-as-errors`.
+//
+// Deliberately NOT here:
+//   * a value-object-collection fold (`charges += Money{…}`) — the fold renders
+//     correctly (a plain map) but a `Money[]` field on an EVENT-SOURCED aggregate
+//     emits a table-backed `<agg>_charges` Ecto schema with `belongs_to` the ES
+//     aggregate (a plain struct, not an Ecto schema), which fails compile — a
+//     pre-existing, applier-independent VO-collection-on-ES schema gap, out of
+//     scope for the applier-fold fix.  The fold rendering itself is unit-pinned.
+//   * a part-CONSTRUCTING fold (`boxes += Box{…}`) — honestly gated by
+//     `loom.vanilla-es-applier-unsupported` (test/ir/vanilla-es-applier-support.test.ts).
+system Ledger {
+  subdomain Core {
+    context Accounts {
+      event Opened { account: Account id, owner: string }
+      event Deposited { account: Account id, amount: int }
+      event Withdrawn { account: Account id, amount: int }
+      event Tagged { account: Account id, tag: string }
+
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        balance: int
+        tags: string[]
+
+        create open(owner: string) {
+          emit Opened { account: id, owner: owner }
+        }
+
+        operation deposit(amount: int) {
+          precondition amount > 0
+          emit Deposited { account: id, amount: amount }
+        }
+
+        operation withdraw(amount: int) {
+          precondition amount > 0
+          precondition balance >= amount
+          emit Withdrawn { account: id, amount: amount }
+        }
+
+        operation tag(tag: string) {
+          emit Tagged { account: id, tag: tag }
+        }
+
+        apply(e: Opened) {
+          owner := e.owner
+          balance := 0
+        }
+
+        apply(e: Deposited) {
+          balance := balance + e.amount
+        }
+
+        // scalar compound `-=` — was silently dropped before M-T6.2.
+        apply(e: Withdrawn) {
+          balance -= e.amount
+        }
+
+        // primitive-collection `+=` — the ONLY use of `e` is inside the mutation,
+        // so the applier head must bind `e` (not `_e`) or this fails
+        // `--warnings-as-errors`.
+        apply(e: Tagged) {
+          tags += e.tag
+        }
+      }
+
+      repository Accounts for Account {
+        find byOwner(owner: string): Account? where this.owner == owner
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage pg { type: postgres }
+  resource accountsLog { for: Accounts, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: elixir
+    contexts: [Accounts]
+    dataSources: [accountsLog]
+    serves: LedgerApi
+    port: 4000
+  }
+}
