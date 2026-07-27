@@ -154,7 +154,7 @@ describe("Java execution-context carrier", () => {
     const files = await generateSystemFiles(SYSTEM(""));
     const tracing = get(files, "/config/Tracing.java");
     // Process-wide OpenTelemetrySdk holder with the service.name resource.
-    expect(tracing).toContain("public static final Tracer TRACER = OTEL.getTracer(\"loom\");");
+    expect(tracing).toContain('public static final Tracer TRACER = OTEL.getTracer("loom");');
     expect(tracing).toContain('System.getenv().getOrDefault("OTEL_SERVICE_NAME"');
     // Export is env-gated: the OTLP exporter is wired only when the endpoint set.
     expect(tracing).toContain('var endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT");');
