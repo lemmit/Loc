@@ -194,26 +194,32 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-11",
-    title: "Initial `version` is identical across backends on create",
+    title: "A created `versioned` aggregate reads back at version 1",
     trigger: "a `versioned` aggregate created via POST, then read back",
     observable:
-      "the optimistic-concurrency `version` on the first read is the same integer on every backend — node currently emits 1 where dotnet/java/python emit 0 (canonical value pending owner confirmation; the point is agreement)",
-    // dotnet/java/python agree on 0; node is the lone divergent backend. The
-    // divergence is uniform across every seeded row (ordering-independent), so
-    // this is a clean cross-backend split, not an alignment artifact.
-    conforms: ["dotnet", "java", "python"],
-    targets: ["node"],
-    provenance: ["M-T9.11 differential run 30277275068", "PR #2220"],
+      "the optimistic-concurrency `version` on the first read is 1 — the `versioned` capability declares `version: int token = 1` (src/macros/prelude.ts), mirrored to `version INTEGER NOT NULL DEFAULT 1`. node honors the default; dotnet/java/python currently seed 0 (they drop the `= 1` on the create/insert path).",
+    // Canonical value is 1 per the capability's `= 1` default — NOT a majority
+    // vote (three backends agree on the WRONG value). node conforms; the other
+    // three are the fix targets. Divergence is uniform across every seeded row.
+    conforms: ["node"],
+    targets: ["dotnet", "java", "python"],
+    provenance: [
+      "M-T9.11 differential run 30277275068",
+      "PR #2220",
+      "src/macros/prelude.ts (versioned `= 1`)",
+    ],
     tier: "behavioral",
   },
   {
     id: "RS-12",
-    title: "Money wire values carry a fixed scale (no trailing-zero stripping)",
+    title: "Money wire scale is consistent across backends",
     trigger: "a money-typed field serialized to the wire (e.g. `costFloor`)",
     observable:
-      'the JSON string preserves the money type\'s scale — `"0.00"`, not `"0"`; node currently strips trailing zeros to `"0"` where dotnet/java/python keep the scale',
-    // Uniform across every seeded row (all zero-valued), so ordering-independent.
-    // node is the lone outlier — a real Hono money-serialization bug candidate.
+      'the money JSON string has the same scale on every backend. Today it does NOT: dotnet/java/python preserve scale (`"0.00"` via toPlainString / format(d,"f") / invariant decimal); node\'s decimal.js `.toString()` normalizes to `"0"`. Unlike RS-11 there is no spec-mandated scale — and java itself drops the scale in DERIVED string contexts (the deferred `seqTag` finding) — so the canonical money wire format is an OPEN owner decision, not a settled node-only bug.',
+    // Provisional direction: majority + "money carries scale" convention put
+    // dotnet/java/python as conforming and node as target, but this is a
+    // CONVENTION call pending an owner decision on the canonical format — flip
+    // if "0" (natural decimal.js) is chosen instead. Uniform across seeded rows.
     conforms: ["dotnet", "java", "python"],
     targets: ["node"],
     provenance: ["M-T9.11 differential run 30277275068", "PR #2220"],

@@ -216,27 +216,35 @@ the conforming backends, and the fix that established it.
   gated statically per-PR by
   `test/conformance/rehydration-trust-parity.test.ts`.
 
-### RS-11 · Initial `version` is identical across backends on create
-- **Guarantee.** A freshly-created `versioned` aggregate reads back with the
-  same optimistic-concurrency `version` integer on every backend.
+### RS-11 · A created `versioned` aggregate reads back at version 1
+- **Guarantee.** A freshly-created `versioned` aggregate reads back with
+  `version` = **1** — the canonical value, fixed by the capability declaration
+  `version: int token = 1` (`src/macros/prelude.ts`), mirrored to
+  `version INTEGER NOT NULL DEFAULT 1`.
 - **Trigger.** A `versioned` aggregate created via `POST`, then read.
-- **Observable.** node currently emits `1` where dotnet/java/python emit `0`.
-  The divergence is uniform across every seeded row (ordering-independent), so
-  node is the lone outlier — the canonical value (0 vs 1) is a pending owner
-  decision; the *guarantee* is agreement.
-- **Conforms.** dotnet, java, python. **Target (open):** node.
-- **Provenance.** Surfaced proactively by the M-T9.11 cross-backend response
-  differential (run 30277275068, PR #2220) — not yet fixed. Tier: **behavioral**.
+- **Observable.** node honors the `= 1` default; dotnet/java/python currently
+  seed `0` (they drop the default on the create/insert path). This is **not** a
+  majority vote — three backends agree on the *wrong* value; the source of
+  truth is the `= 1` declaration, so node conforms and the other three are the
+  fix targets. (A cautionary case: the differential found the *divergence*, but
+  the oracle came from the spec, not the majority.)
+- **Conforms.** node. **Targets (open, to fix):** dotnet, java, python.
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220);
+  `src/macros/prelude.ts` `versioned = 1`. Tier: **behavioral**.
 
-### RS-12 · Money wire values carry a fixed scale
-- **Guarantee.** A money-typed field serializes with its type's scale intact;
-  trailing zeros are never stripped.
+### RS-12 · Money wire scale is consistent across backends
+- **Guarantee.** A money-typed field has the same scale on every backend's
+  wire. *(Canonical format — `"0.00"` vs `"0"` — is an open owner decision;
+  unlike RS-11 no spec mandates it.)*
 - **Trigger.** A money field on the wire (e.g. `costFloor`).
-- **Observable.** node emits `"0"`; dotnet/java/python emit `"0.00"`. Uniform
-  across every seeded row — a real Hono money-serialization bug candidate.
-- **Conforms.** dotnet, java, python. **Target (open):** node.
-- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220) — not yet
-  fixed. Tier: **behavioral**.
+- **Observable.** dotnet/java/python preserve scale (`"0.00"`); node's
+  decimal.js `.toString()` normalizes to `"0"`. And java *itself* drops the
+  scale in derived string contexts (the deferred `seqTag` finding), so this is
+  a canonical-format decision, not a settled node-only bug. Provisional
+  direction below follows majority + the "money carries scale" convention.
+- **Conforms (provisional).** dotnet, java, python. **Target:** node.
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220) — direction
+  pending owner confirmation. Tier: **behavioral**.
 
 > **Candidate (not yet a rule):** the same differential flagged a *derived*
 > field (`seqTag`) interpolating money into a string with a `budget 100` vs
