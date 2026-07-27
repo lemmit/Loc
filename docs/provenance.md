@@ -216,7 +216,7 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
 ```
 
-## Scaffolded UI — the "?" provenance disclosure (React, Vue, Svelte, Angular, Feliz)
+## Scaffolded UI — the "?" provenance disclosure (all six frontends)
 
 The lineage is already on the wire (the co-located `<field>_provenance`
 key above), so a **scaffolded detail page** now surfaces it: every
@@ -224,11 +224,12 @@ key above), so a **scaffolded detail page** now surfaces it: every
 expands to show where the value came from — the rule it was computed by,
 the computed value, and the input list (`path = value`).
 
-Rendered on **React** (`<details>` + JSX), **Vue** (`<details v-if>` +
-`v-for`), **Svelte** (`{#if}` + keyed `{#each}`), **Angular** (`@if (…; as
-prov)` + `@for`), and **Feliz** (F# `Html.details`, a `Some`/`None` match over
-the `ProvLineage option`); HEEx renders the value alone for now (the primitive
-comments itself out) until it's backfilled (M-T1.19). Two things make it work:
+Rendered on **all six frontends**: **React** (`<details>` + JSX), **Vue**
+(`<details v-if>` + `v-for`), **Svelte** (`{#if}` + keyed `{#each}`),
+**Angular** (`@if (…; as prov)` + `@for`), **Feliz** (F# `Html.details`, a
+`Some`/`None` match over the `ProvLineage option`), and **HEEx** (Phoenix
+LiveView: a null-guarded `<%= if … %>` `<details>` + a `<%= for … %>`
+comprehension). Two things make it work:
 
 1. The React frontend response schema carries the lineage as a nullable
    `provLineageSchema` field (`src/lib/schemas.ts`), so the client type
@@ -280,6 +281,30 @@ which the React generator renders as the native disclosure over
 The disclosure is null-guarded: on a backend that carries the field but
 doesn't capture lineage (Python/Java), `total_provenance` is null and the
 "?" simply doesn't render — the value still shows.
+
+**HEEx is the exception to "read the wire".** Phoenix LiveView renders
+server-side straight from the Ecto struct, so there is no JSON wire to carry
+a camelCase `provLineageSchema` — the co-located `<field>_provenance` jsonb
+column (already persisted by the vanilla provenance runtime) loads as a
+**string-keyed** map, and the renderer reads it directly:
+
+```heex
+<%= if @data.total_provenance do %>
+  <details class="loom-provenance" data-testid="orders-detail-total-prov">
+    <summary aria-label="How this value was computed">?</summary>
+    <dl class="loom-provenance-tree">
+      <div><dt>Rule</dt><dd><code><%= @data.total_provenance["snapshot_id"] %></code></dd></div>
+      <div><dt>Value</dt><dd><%= @data.total_provenance["computed_value"] %></dd></div>
+      <%= for inp <- @data.total_provenance["inputs"] || [] do %>
+        <div><dt><%= inp["path"] %></dt><dd><%= inp["value"] %></dd></div>
+      <% end %>
+    </dl>
+  </details>
+<% end %>
+```
+
+Note the snake_case keys (`snapshot_id`, `computed_value`) — the shape the
+backend *stores*, not the frontends' camelCase JSON wire.
 
 ## Other backends
 

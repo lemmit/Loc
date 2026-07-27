@@ -163,6 +163,59 @@ describe("ProvenanceInfo — Feliz renders an F# `Html.details` disclosure", () 
   });
 });
 
+/** The HEEx twin of `provScaffoldSystem`: Phoenix LiveView is fullstack, so the
+ *  scaffolded ui is hosted ON the elixir backend (no separate frontend
+ *  deployable / no `targets:` — the detail page renders server-side). */
+const provScaffoldHeex = `
+  system ProvDemo {
+    subdomain Ordering {
+      context Ordering {
+        aggregate Order with crudish {
+          reference: string
+          quantity: int
+          unitPrice: int
+          discount: int
+          total: int provenanced
+          operation reprice(qty: int, price: int) {
+            quantity := qty
+            unitPrice := price
+            total := qty * price - discount
+          }
+          derived display: string = reference
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui Web with scaffold(subdomains: [Ordering]) { }
+    storage primary { type: postgres }
+    resource orderingState { for: Ordering, kind: state, use: primary }
+    deployable api {
+      platform: elixir, contexts: [Ordering], dataSources: [orderingState], port: 3000, ui: Web
+    }
+  }
+`;
+
+describe("ProvenanceInfo — HEEx renders a native `<details>` off the Ecto struct", () => {
+  it("renders the disclosure on the scaffolded LiveView detail page", async () => {
+    // The Phoenix LiveView renders server-side straight from the struct, so the
+    // co-located `<field>_provenance` jsonb column is read via string-keyed
+    // bracket access (snake_case — the shape the backend STORES, not the
+    // frontends' camelCase JSON wire).
+    const out = allFiles(await generateSystemFiles(provScaffoldHeex));
+    expect(out).toContain('data-testid="orders-detail-total-prov"');
+    // Null-guarded EEx `if` over the struct field, then rule id + value.
+    expect(out).toMatch(/<%= if [\w.@]+\.total_provenance do %>/);
+    expect(out).toContain('<details class="loom-provenance"');
+    expect(out).toContain('.total_provenance["snapshot_id"]');
+    expect(out).toContain('.total_provenance["computed_value"]');
+    // Inputs fan out via a `for`-comprehension (LiveView's list idiom), keyed
+    // on the same string-keyed `path`/`value`.
+    expect(out).toMatch(/<%= for inp <- [\w.@]+\.total_provenance\["inputs"\] \|\| \[\] do %>/);
+    expect(out).toContain('inp["path"]');
+    expect(out).toContain('inp["value"]');
+  });
+});
+
 describe("ProvenanceInfo — not-yet-ported frontends degrade honestly (value only)", () => {
   for (const frontend of ["flutter"]) {
     it(`${frontend}: the "?" falls through to a comment and the lineage is not carried`, async () => {
