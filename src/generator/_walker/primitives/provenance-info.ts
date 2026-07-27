@@ -51,6 +51,8 @@ export function emitProvenanceInfo(
       return vueDisclosure(lineage, testid);
     case "svelte":
       return svelteDisclosure(lineage, testid);
+    case "angular":
+      return angularDisclosure(lineage, testid);
     default:
       // Schema not wired on this frontend yet — comment out so the scaffolded
       // provenanced field still compiles (the value renders without the "?").
@@ -111,5 +113,27 @@ function svelteDisclosure(lineage: string, testid: string): string {
     `    </dl>`,
     `  </details>`,
     `{/if}`,
+  ].join("\n");
+}
+
+/** Angular: an `@if (…; as prov)` alias (a signal-call result like
+ *  `data()!.<field>_provenance` can't be narrowed in place — the `as` binds the
+ *  truthy value), `{{ }}` interpolation, and a tracked `@for`.  `computedValue`
+ *  and `inp.value` are `unknown`; Angular templates can't call `String(...)`, so
+ *  they ride `$any(...)` (the interpolation stringifies). */
+function angularDisclosure(lineage: string, testid: string): string {
+  return [
+    `@if (${lineage}; as prov) {`,
+    `  <details class="loom-provenance"${testid}>`,
+    `    <summary aria-label="How this value was computed">?</summary>`,
+    `    <dl class="loom-provenance-tree">`,
+    `      <div><dt>Rule</dt><dd><code>{{ prov.snapshotId }}</code></dd></div>`,
+    `      <div><dt>Value</dt><dd>{{ $any(prov.computedValue) }}</dd></div>`,
+    `      @for (inp of prov.inputs; track inp.path) {`,
+    `        <div><dt>{{ inp.path }}</dt><dd>{{ $any(inp.value) }}</dd></div>`,
+    `      }`,
+    `    </dl>`,
+    `  </details>`,
+    `}`,
   ].join("\n");
 }

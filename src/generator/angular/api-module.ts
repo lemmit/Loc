@@ -19,6 +19,7 @@ import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { aggregateHasProvenanced } from "../_frontend/api-module.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate Angular API module (`src/api/<agg>.ts`).
@@ -141,6 +142,31 @@ function emitVoResponseInterface(vo: ValueObjectIR): string[] {
   ];
 }
 
+/** The shared `ProvLineage` TS interface — the Angular analogue of the
+ *  React/Vue/Svelte `provLineageSchema` (there is no shared zod lib on Angular,
+ *  so the type is emitted inline into each api module that carries lineage).
+ *  Mirrors the Hono `ProvenanceLineage` wire shape. */
+const PROV_LINEAGE_INTERFACE: string[] = [
+  "export interface ProvLineage {",
+  "  snapshotId: string;",
+  "  target: { type: string; field: string };",
+  "  inputs: { path: string; value: unknown }[];",
+  "  computedValue: unknown;",
+  "}",
+  "",
+];
+
+/** Co-located provenance-lineage interface fields for a node's provenanced
+ *  properties — `<field>_provenance?: ProvLineage | null` — appended after the
+ *  regular wire fields (parity with the api-module.ts twin's Zod append).  A
+ *  no-op (empty) when the node has no provenanced field, so a plain aggregate
+ *  stays byte-identical. */
+function provResponseFields(ent: { fields: { name: string; provenanced?: boolean }[] }): string[] {
+  return ent.fields
+    .filter((f) => f.provenanced)
+    .map((f) => `  ${f.name}_provenance?: ProvLineage | null;`);
+}
+
 /** `export interface <Part>Response { … }` over a containment part's canonical
  *  wire shape (its `id` + declared fields + nested containments + derived) — the
  *  precise type an aggregate's `contains lines: OrderLine[]` field points at.
@@ -152,6 +178,7 @@ function emitPartResponseInterface(part: EntityPartIR): string[] {
     ...forApiRead(wireFieldsFor(part)).map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
     ),
+    ...provResponseFields(part),
     "}",
     "",
   ];
@@ -409,6 +436,9 @@ export function buildAngularApiModule(
     // Response-side value objects + enums, typed by name (nested interfaces /
     // enum unions) so a detail-page dereference compiles.
     ...responseEnums.map(emitEnumType).flatMap((l) => [l, ""]),
+    // Provenance lineage carrier — emitted before the response interfaces that
+    // reference it, when this aggregate (or a part) has a `provenanced` field.
+    ...(aggregateHasProvenanced(agg) ? PROV_LINEAGE_INTERFACE : []),
     ...responseVos.flatMap(emitVoResponseInterface),
     // Containment-part response interfaces (children-first) — the precise types
     // the aggregate's `contains` fields point at.
@@ -417,6 +447,7 @@ export function buildAngularApiModule(
     ...fields.map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
     ),
+    ...provResponseFields(agg),
     "}",
     "",
     // Client-suppliable create payload (server-controlled fields dropped).
