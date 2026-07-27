@@ -61,9 +61,15 @@ Sources: [multi-file-source](../old/plans/multi-file-source.md), [implicit-syste
 The coordinator shape (Phase 2); Shape C stays deferred. Plus shipped-tier refinements (read-port shape, `audited` on service ops).
 Sources: [domain-services](../old/proposals/domain-services.md).
 
-## M-T5.15 — Language misc (DEBT-29/30, BUG-003/004) — `open` · **S–M** · P3
-Joined view sources + per-view params (DEBT-29, grammar-level); seed create-shape validation, applier misc, block-body lambdas (DEBT-30 a/b/c); BUG-003 scalar-return op HTTP divergence (gate reverted — re-land properly); ~~BUG-004 `resource`-keyword field name collision~~ **fixed** in M-T5.18 Track C (`resource` + the whole declarable-but-unreadable class are now member-accessible).
-Sources: old DEBT backlog, [showcase-coverage-bugs](../audits/showcase-coverage-bugs.md).
+## M-T5.15 — Scalar-return operation HTTP-contract convergence (BUG-003) — `open` · **S–M** · P2 ⭐ parity break
+Drained 2026-07-27: this mission was a grab-bag (DEBT-29/30, BUG-003/004); a code-verification pass against fresh `main` retired everything except BUG-003, which is a real cross-backend parity break — **re-scoped to it and promoted to P2**.
+**The one live item — BUG-003 (scalar-return op HTTP divergence).** A scalar (non-`or`-union) return-typed operation — `operation describe(): string { return code }` — diverges 3 ways across the five backends: some emit the value **200-with-body**, others **compute-then-discard as 204** (Python `routes-builder.ts:1100` `return Response(status_code=204)`; .NET `emit/api.ts:471` `[ProducesResponseType(204)]`). Scalar returns are a shipped, tested feature (the op-self-call build fixtures depend on them), so the first fix — a gate rejecting non-union operation returns (`loom.operation-return-scalar-unsupported`) — was **reverted** (it broke the shipped pattern; `test/ir/operation-returns.test.ts:208` now guards the gate stays absent). The real fix is to **converge the HTTP wire contract** (200-with-body vs 204-discard) across all five backends and pin it with a `conformance-parity` assertion — the divergence is the wire contract, not the feature.
+**Retired items (verified resolved on `main` 2026-07-27, `fe50cee`):**
+- ~~BUG-004 `resource`-keyword field-name collision~~ — **fixed** in M-T5.18 Track C; the whole declarable-but-unreadable keyword class is member-accessible (`test/language/parsing/keyword-field-member-access.test.ts`).
+- ~~DEBT-30c block-body lambdas~~ — **done**: `ddd.langium:2241` `Lambda: param=ID '=>' (body=Expression | '{' stmts+=Statement* '}')` (block bodies with `let`/`:=`/`+=`/`emit` admissible).
+- ~~DEBT-29 joined view sources + per-view params~~ — **subsumed** by the projection generalization (read-path-architecture, "projection generalises view"; `lower-view` machinery relocated): joined sources → `projection … join <Aggregate> as <c> on <idRef>` (`ddd.langium:1462+`), per-view params → `projection name(params…)` (`1448`). Remaining projection *emit* parity is tracked under M-T4.2, not here.
+- DEBT-30 a/b (seed create-shape validation, applier misc) — dropped as unverifiable grab-bag residue; re-file as a specific mission only if a fresh repro surfaces.
+Sources: [showcase-coverage-bugs](../audits/showcase-coverage-bugs.md) BUG-003.
 
 ## M-T5.16 — Compiler-internal fragility guards — `open` · **M** · P2
 From the weak-spot review §7: (a) exhaustiveness-check the type-system's parallel walkers (`stepInto` + `typeAfterSuffix`) so a new bindable type can't silently miss one; (b) revisit the `unknown`-cascade suppression (a placeholder type silently disables ALL downstream operand checks) — at minimum a lint that counts suppressed sites; (c) full-code-review #22: macro expansion under LSP incremental rebuilds (C5).
