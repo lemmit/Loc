@@ -1,0 +1,47 @@
+// Python (FastAPI) fullstack embed — Feliz arm.
+// A `platform: python` deployable hosts a `framework: feliz` ui block,
+// embedding the Feliz (Fable/F#) SPA under ClientApp/.  Feliz builds via
+// `dotnet fable` + `vite build` (not npm-only), so the multi-stage
+// Dockerfile's spa-build stage uses the .NET-SDK+Node base image
+// (`mcr.microsoft.com/dotnet/sdk` + `dotnet tool restore`), not
+// node:24-alpine.  Fable's vite output is flat `dist/`, so the stage-2
+// `COPY --from=spa-build /spa/dist ./wwwroot` matches the react/vue arms.
+// Routers stay under /api/*, main.py serves the bundle from wwwroot/ with
+// the index.html fallback.  The python build gate is BACKEND-only (uv sync +
+// ruff + mypy + pytest) — this fixture verifies backend + Dockerfile
+// emission, not the dotnet-fable SPA build.
+system PyHostsFeliz {
+  subdomain D {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+
+  ui Store {
+    framework: feliz
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+
+  api A from D
+
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+
+  deployable app {
+    platform: python
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    ui: Store
+    port: 8000
+    design: "dracula"
+  }
+}

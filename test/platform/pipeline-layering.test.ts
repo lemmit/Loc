@@ -266,6 +266,14 @@ describe("pipeline layering — value imports point one way", () => {
       "src/generator/java/index.ts -> generator/svelte/",
       "src/generator/java/index.ts -> generator/vue/",
       "src/generator/java/index.ts -> generator/angular/",
+      // Feliz (F#/Fable) joins the embeddable frontends (EMBEDDABLE_FRAMEWORKS
+      // = static-bundle + feliz): each fullstack host dispatches it under
+      // `ClientApp/` alongside the static-bundle frameworks, differing only in
+      // the SPA-build toolchain (dotnet-fable + vite, not npm-only).
+      "src/generator/dotnet/index.ts -> generator/feliz/",
+      "src/generator/elixir/vanilla/index.ts -> generator/feliz/",
+      "src/generator/java/index.ts -> generator/feliz/",
+      "src/generator/python/index.ts -> generator/feliz/",
       // Python's fullstack embed now dispatches all four static-bundle
       // frameworks (was react-only — svelte/vue silently mis-emitted react
       // before); each SPA generator is imported to emit under `ClientApp/`.

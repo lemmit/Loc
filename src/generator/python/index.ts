@@ -33,6 +33,7 @@ import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
+import { generateFelizForContexts } from "../feliz/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -232,13 +233,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // an index.html fallback, the Dockerfile becomes multi-stage, and the
   // React project is generated under ClientApp/.
   const hasEmbeddedSpa = !!args.deployable.uiName;
-  // Dispatch on the hosted ui's framework — every static-bundle frontend
-  // (react / svelte / vue / angular) embeds under ClientApp/; only the SPA
-  // build output dir differs: SvelteKit's adapter-static writes `build/`,
-  // Angular's `ng build` nests the browser bundle under `dist/browser/`,
-  // every other Vite SPA writes `dist/`.
+  // Dispatch on the hosted ui's framework — every embeddable frontend
+  // (react / svelte / vue / angular / feliz) embeds under ClientApp/; only the
+  // SPA build output dir differs: SvelteKit's adapter-static writes `build/`,
+  // Angular's `ng build` nests the browser bundle under `dist/browser/`, every
+  // other Vite SPA (react / vue / feliz) writes flat `dist/`.
   const uiFw = args.deployable.uiFramework;
   const spaOutDir = uiFw === "svelte" ? "build" : uiFw === "angular" ? "dist/browser" : "dist";
+  // Feliz builds via `dotnet fable` + `vite build` (not npm-only), so its
+  // spa-build stage needs a .NET-SDK+Node base image instead of node:24-alpine.
+  const spaBuildKind = uiFw === "feliz" ? "feliz" : "vite";
   // Resource verb clients (resources.md): async client modules for the
   // objectStore / queue / api resources this deployable wires.  Workflow
   // / saga `resource-call`s import the verb helpers from these.
@@ -274,7 +278,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka"] : [],
     ),
   );
-  out.set("Dockerfile", hasEmbeddedSpa ? renderPyFullstackDockerfile(spaOutDir) : DOCKERFILE_PY);
+  out.set(
+    "Dockerfile",
+    hasEmbeddedSpa ? renderPyFullstackDockerfile(spaOutDir, spaBuildKind) : DOCKERFILE_PY,
+  );
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
   out.set("app/__init__.py", "");
@@ -411,8 +418,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     ),
   );
   if (hasEmbeddedSpa) {
-    // Dispatch on the hosted ui's framework — every static-bundle frontend
-    // (react / svelte / vue / angular) embeds under ClientApp/ hitting
+    // Dispatch on the hosted ui's framework — every embeddable frontend
+    // (react / svelte / vue / angular / feliz) embeds under ClientApp/ hitting
     // `/api` on its own origin; only the SPA build output dir differs (see
     // spaOutDir above, consumed by the multi-stage Dockerfile's COPY).
     const embedOpts = { apiBaseUrl: "/api", pathPrefix: "ClientApp/" } as const;
@@ -423,7 +430,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           ? generateVueForContexts(args.contexts, args.sys, args.deployable, embedOpts)
           : uiFw === "angular"
             ? generateAngularForContexts(args.contexts, args.sys, args.deployable, embedOpts)
-            : generateReactForContexts(args.contexts, args.sys, args.deployable, embedOpts);
+            : uiFw === "feliz"
+              ? generateFelizForContexts(args.contexts, args.sys, args.deployable, embedOpts)
+              : generateReactForContexts(args.contexts, args.sys, args.deployable, embedOpts);
     // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
     // certs / e2e) and emit ClientApp/.gitignore — shared with the dotnet /
     // java embed hosts (see embedded-spa.ts).
@@ -1220,17 +1229,39 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 // wwwroot/ for main.py's FileResponse fallback (dotnet parity).  The SPA
 // build output dir varies by framework (svelte `build/`, angular
 // `dist/browser/`, vite `dist/`) — hence the `spaOutDir` parameter on the
-// stage-2 COPY.
-function renderPyFullstackDockerfile(spaOutDir: string): string {
-  return `# syntax=docker/dockerfile:1
-# Auto-generated — fullstack Python + embedded SPA.
-
-FROM node:24-alpine AS spa-build
+// stage-2 COPY.  The spa-build STAGE also varies: a plain-Vite frontend
+// (react / vue / svelte / angular) builds with npm alone on node:24-alpine,
+// but Feliz compiles F#→JS via `dotnet fable` first, so its stage needs a
+// .NET-SDK+Node base + `dotnet tool restore` (mirrors the feliz standalone
+// Dockerfile) — hence the `spaBuildKind` parameter.
+function renderPyFullstackDockerfile(
+  spaOutDir: string,
+  spaBuildKind: "vite" | "feliz" = "vite",
+): string {
+  // Feliz spa-build stage: the .NET SDK runs Fable, Node runs vite — so the
+  // stage carries both (dotnet/sdk base + nodesource Node), restores the
+  // dotnet CLI tools (fable), then the same npm install + build.
+  const spaBuildStage =
+    spaBuildKind === "feliz"
+      ? `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
+WORKDIR /spa
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+  && apt-get install -y --no-install-recommends nodejs \\
+  && rm -rf /var/lib/apt/lists/*
+COPY ClientApp/ ./
+RUN dotnet tool restore
+RUN npm install
+RUN npm run build`
+      : `FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY ClientApp/package.json ./
 RUN npm install --no-audit --no-fund
 COPY ClientApp/ ./
-RUN npm run build
+RUN npm run build`;
+  return `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack Python + embedded SPA.
+
+${spaBuildStage}
 
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/

@@ -51,7 +51,15 @@ const elixirPlatform: PlatformSurface = {
   // (angular.json + the `<base>` tag) so their asset URLs + base-aware links
   // resolve under the prefix — the same `basePath` thread react/vue use for
   // their vite `base`.
-  hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue", "svelte", "angular"]),
+  hostableFrameworks: new Set([
+    "phoenixLiveView",
+    "react",
+    "static",
+    "vue",
+    "svelte",
+    "angular",
+    "feliz",
+  ]),
   // Context-function conventions.  A user-declared find named one of
   // these would collide with the generated CRUD context function of the
   // same name (`get_<agg>` / `create_<agg>` / …).

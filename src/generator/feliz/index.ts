@@ -131,6 +131,14 @@ function renderAuthGate(): string {
 
 export interface GenerateFelizOptions {
   apiBaseUrl?: string;
+  /** Prepended to every emitted path.  Backend fullstack hosts pass
+   *  `ClientApp/` (or `assets/` for Phoenix) so the Feliz project nests
+   *  inside the host tree — mirrors the react/angular embed post-pass. */
+  pathPrefix?: string;
+  /** Sub-path the built bundle is served under (Phoenix `/app`).  Threads
+   *  into vite's `base` so asset URLs + the SPA fallback resolve under the
+   *  prefix; unset (root-served hosts) keeps vite's default `/`. */
+  basePath?: string;
 }
 
 /** Indent every line of `block` by `n` spaces. */
@@ -1232,10 +1240,14 @@ const PACKAGE_JSON = (name: string): string =>
     2,
   )}\n`;
 
-const VITE_CONFIG = `import { defineConfig } from "vite";
+/** Vite config for the Feliz bundle.  `base` is set only for a sub-path
+ *  embed (Phoenix `/app`) so built asset URLs carry the prefix; unset
+ *  (root-served) keeps vite's default `/` → byte-identical to before. */
+const renderViteConfig = (basePath: string): string =>
+  `import { defineConfig } from "vite";
 
 export default defineConfig({
-  build: { outDir: "dist" },
+${basePath ? `  base: "${basePath}/",\n` : ""}  build: { outDir: "dist" },
 });
 `;
 
@@ -1355,7 +1367,11 @@ export function generateFelizForContexts(
   deployable: DeployableIR,
   options: GenerateFelizOptions = {},
 ): Map<string, string> {
-  void options;
+  // apiBaseUrl is a no-op for Feliz — its wire routes are already `/api`
+  // relative (see wire.ts `API_BASE_PATH`), so an embedded same-origin bundle
+  // reaches the host backend without a baked base.  `basePath` (Phoenix `/app`)
+  // threads into vite's `base`; `pathPrefix` relocates the whole project.
+  const basePath = options.basePath ?? "";
   const out = new Map<string, string>();
   if (!deployable.uiName) {
     throw new Error(
@@ -1399,7 +1415,7 @@ export function generateFelizForContexts(
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
-  out.set("vite.config.js", VITE_CONFIG);
+  out.set("vite.config.js", renderViteConfig(basePath));
   out.set("index.html", INDEX_HTML(theme));
   out.set("styles.css", STYLES_CSS);
   out.set("tailwind.config.js", TAILWIND_CONFIG(theme));
@@ -1446,5 +1462,11 @@ export function generateFelizForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  return out;
+  // Fullstack embed: relocate the whole project under the host's prefix
+  // (`ClientApp/` or Phoenix `assets/`).  Mirrors react/angular's post-pass.
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) prefixed.set(`${pathPrefix}${path}`, content);
+  return prefixed;
 }

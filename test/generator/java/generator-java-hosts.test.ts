@@ -22,7 +22,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
 /** A java deployable hosting a `framework:`-owning ui block via `hosts:`. */
-function src(framework: "react" | "vue" | "svelte" | "angular", design: string): string {
+function src(framework: "react" | "vue" | "svelte" | "angular" | "feliz", design: string): string {
   return `system JH {
   subdomain D {
     context Shop {
@@ -128,6 +128,34 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
     expect(files.get("jh_app/Dockerfile")!).toContain(
       "COPY --from=spa-build /spa/dist/browser /app/ui",
     );
+  });
+
+  // Feliz (F#/Fable) is embeddable too, but differs in its BUILD toolchain:
+  // it compiles via `dotnet fable` + `vite build` (not npm-only), so the host
+  // Dockerfile's spa-build stage needs a .NET SDK + Node image rather than
+  // `node:22-alpine`.  Its vite output is still flat `dist/` (like react/vue).
+  it("dispatches a hosted feliz SPA (F#/Fable, flat dist) into ClientApp/", async () => {
+    const files = await generateSystemFiles(src("feliz", '"dracula"'));
+    // Feliz project lands under ClientApp/ — its F# project files, vite config,
+    // and the dotnet-tools manifest (fable tool) all nest under the prefix.
+    expect(files.has("jh_app/ClientApp/App.fsproj")).toBe(true);
+    expect(files.has("jh_app/ClientApp/vite.config.js")).toBe(true);
+    expect(files.has("jh_app/ClientApp/.config/dotnet-tools.json")).toBe(true);
+    expect(files.has("jh_app/ClientApp/package.json")).toBe(true);
+    // Host SPA-serving config + controllers under /api are unchanged.
+    expect(files.has(`${ROOT}/config/SpaWebConfig.java`)).toBe(true);
+    const c = files.get(`${ROOT}/features/products/ProductsController.java`)!;
+    expect(c).toContain('@RequestMapping("/api/products")');
+    // The crux: the spa-build stage is a .NET SDK + Node image with a
+    // `dotnet tool restore`, NOT the node-only vite stage.
+    const docker = files.get("jh_app/Dockerfile")!;
+    expect(docker).toContain("FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build");
+    expect(docker).not.toContain("FROM node:22-alpine AS spa-build");
+    expect(docker).toContain("RUN dotnet tool restore");
+    // Feliz still emits flat `dist/`, so the runtime copy is unchanged.
+    expect(docker).toContain("COPY --from=spa-build /spa/dist /app/ui");
+    // Host-owned root files are still dropped from the embedded copy.
+    expect(files.has("jh_app/ClientApp/Dockerfile")).toBe(false);
   });
 
   it("a standalone java deployable still serves /api and emits no SPA files", async () => {

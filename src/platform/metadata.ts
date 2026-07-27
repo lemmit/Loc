@@ -1,5 +1,9 @@
 import type { Platform } from "../ir/types/loom-ir.js";
-import { type PlatformDescriptor, STATIC_BUNDLE_FRAMEWORKS } from "./surface.js";
+import {
+  EMBEDDABLE_FRAMEWORKS,
+  type PlatformDescriptor,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Platform METADATA — the client-safe half of the platform registry.
@@ -156,7 +160,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     needsDb: true,
     mountsUi: true,
     isFrontend: false,
-    hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+    hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
     reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
   },
   node: {
@@ -230,7 +234,15 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     needsDb: true,
     mountsUi: true,
     isFrontend: false,
-    hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue", "svelte", "angular"]),
+    hostableFrameworks: new Set([
+      "phoenixLiveView",
+      "react",
+      "static",
+      "vue",
+      "svelte",
+      "angular",
+      "feliz",
+    ]),
     reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
   },
   python: {
@@ -239,7 +251,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     needsDb: true,
     mountsUi: true,
     isFrontend: false,
-    hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+    hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
     reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
   },
   java: {
@@ -248,7 +260,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     needsDb: true,
     mountsUi: true,
     isFrontend: false,
-    hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+    hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
     reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete", "findAll"]),
   },
 };

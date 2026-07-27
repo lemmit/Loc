@@ -121,3 +121,67 @@ describe("fullstack python — non-react embed dispatch", () => {
     expect(files.has("app/ClientApp/angular.json")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Feliz embed dispatch — a `framework: feliz` ui embeds the Fable/F# SPA under
+// ClientApp/.  Feliz builds via `dotnet fable` + `vite build` (not npm-only),
+// so the multi-stage Dockerfile's spa-build stage uses a .NET-SDK+Node base
+// image (`mcr.microsoft.com/dotnet/sdk` + `dotnet tool restore`), NOT
+// node:24-alpine.  Fable's vite output is flat `dist/`, so the stage-2 COPY
+// targets `/spa/dist ./wwwroot` like the react/vue arms.
+// ---------------------------------------------------------------------------
+
+const FELIZ_FIXTURE = fs.readFileSync(
+  path.resolve(here, "../../e2e/fixtures/python-build/hosts-feliz.ddd"),
+  "utf8",
+);
+
+describe("fullstack python — feliz embed dispatch", () => {
+  it("hosts a framework: feliz ui as a Feliz (Fable/F#) SPA under ClientApp/", async () => {
+    const files = await build(FELIZ_FIXTURE);
+    // Feliz project markers present (Fable App.fsproj + tool manifest + vite)…
+    expect(files.has("app/ClientApp/App.fsproj")).toBe(true);
+    expect(files.has("app/ClientApp/vite.config.js")).toBe(true);
+    expect(files.has("app/ClientApp/.config/dotnet-tools.json")).toBe(true);
+    expect(files.has("app/ClientApp/src/App.fs")).toBe(true);
+    // …and no React leak.
+    expect(files.has("app/ClientApp/src/main.tsx")).toBe(false);
+    expect(files.has("app/ClientApp/angular.json")).toBe(false);
+    // The python host owns the container surfaces — the feliz pack's own
+    // Dockerfile / certs / e2e are dropped from the embedded copy.
+    expect(files.has("app/ClientApp/Dockerfile")).toBe(false);
+    expect(files.has("app/ClientApp/certs/.gitkeep")).toBe(false);
+    // The embedded .gitignore is the flat-`dist` default (feliz vite output).
+    expect(files.get("app/ClientApp/.gitignore")).toContain("dist");
+  });
+
+  it("the spa-build stage uses the .NET SDK + dotnet tool restore, not node:24-alpine", async () => {
+    const files = await build(FELIZ_FIXTURE);
+    const docker = files.get("app/Dockerfile")!;
+    expect(docker).toContain("FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build");
+    expect(docker).toContain("RUN dotnet tool restore");
+    expect(docker).toContain("&& apt-get install -y --no-install-recommends nodejs");
+    expect(docker).not.toContain("node:24-alpine");
+    // Fable's flat dist/ flows into the stage-2 COPY (like react/vue).
+    expect(docker).toContain("COPY --from=spa-build /spa/dist ./wwwroot");
+    expect(docker).not.toContain("/spa/dist/browser");
+    expect(docker).toContain('CMD ["uvicorn", "app.main:app"');
+  });
+
+  it("wires same-origin SPA serving into main.py", async () => {
+    const files = await build(FELIZ_FIXTURE);
+    const main = files.get("app/app/main.py")!;
+    expect(main).toContain('_WWWROOT = FilePath(__file__).resolve().parent.parent / "wwwroot"');
+    expect(main).toContain('@app.get("/{spa_path:path}", include_in_schema=False)');
+    expect(main).toContain('app.include_router(product_router, prefix="/api")');
+  });
+
+  it("standalone: no feliz surface leaks into the react embed", async () => {
+    const files = await build(FIXTURE);
+    expect(files.has("app/ClientApp/App.fsproj")).toBe(false);
+    expect(files.has("app/ClientApp/.config/dotnet-tools.json")).toBe(false);
+    const docker = files.get("app/Dockerfile")!;
+    expect(docker).not.toContain("dotnet/sdk");
+    expect(docker).toContain("FROM node:24-alpine AS spa-build");
+  });
+});

@@ -1120,8 +1120,58 @@ export function renderDockerfile(
      *  embed, `dist/browser` for the Angular `ng build` embed.
      *  Defaults to `dist`. */
     spaOutDir?: "dist" | "build" | "dist/browser";
+    /** SPA build toolchain for the spa-build stage.  `vite` (default) uses the
+     *  npm-only `node:*-alpine` base — react/vue/svelte/angular all bundle with
+     *  a plain `npm run build`.  `feliz` needs the F# → JS Fable step first
+     *  (`dotnet fable`), so its stage runs on a .NET-SDK image with Node layered
+     *  on and `dotnet tool restore` ahead of the `npm run build`. */
+    spaBuildKind?: "vite" | "feliz";
   },
 ): string {
+  if (options?.hasEmbeddedSpa && options.spaBuildKind === "feliz") {
+    // Fullstack mode — Feliz (Fable/F#) embed.  The spa-build stage carries
+    // BOTH the .NET SDK (for `dotnet fable`, which compiles the F# view to JS)
+    // and Node (for `vite build`, which bundles the Fable output), so it starts
+    // from the .NET SDK image and layers Node on — the npm-only `node:*-alpine`
+    // base the other four frameworks use can't run Fable.  Mirrors the Feliz
+    // standalone Dockerfile (src/generator/feliz/index.ts DOCKERFILE).  Vite
+    // output is flat `dist/`, so the wwwroot COPY is unchanged.
+    return `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack .NET + Feliz (embedded Fable/F# SPA).
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
+WORKDIR /spa
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+  && apt-get install -y --no-install-recommends nodejs \\
+  && rm -rf /var/lib/apt/lists/*
+COPY ClientApp/ ./
+RUN dotnet tool restore
+RUN npm install
+RUN npm run build
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
+WORKDIR /src
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>&1 | tail -1 || true
+COPY ${ns}.csproj ./
+RUN dotnet restore ${ns}.csproj
+COPY . .
+RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+# wget for the compose healthcheck (see the other dockerfile branch).
+RUN apt-get update -y && apt-get install -y --no-install-recommends wget \\
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+COPY --from=dotnet-build /app/publish ./
+# SPA bundle lands under wwwroot/ so UseStaticFiles + MapFallbackToFile
+# can serve it on the same origin as the /api/* controller routes.
+COPY --from=spa-build /spa/${options?.spaOutDir ?? "dist"} ./wwwroot
+ENTRYPOINT ["dotnet", "${ns}.dll"]
+`;
+  }
   if (options?.hasEmbeddedSpa) {
     // Fullstack mode — multi-stage build.  Stage 1 builds the React
     // SPA under ClientApp/, stage 2 builds the .NET project, stage 3

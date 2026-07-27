@@ -47,6 +47,7 @@ import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
+import { generateFelizForContexts } from "../feliz/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -1248,11 +1249,18 @@ function emitProjectFromContexts(
   // `dist/browser/`; every other Vite SPA writes `dist/`.
   const spaFw = system?.deployable.uiFramework;
   const spaOutDir = spaFw === "svelte" ? "build" : spaFw === "angular" ? "dist/browser" : "dist";
-  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
+  // Feliz (F#/Fable) builds via `dotnet fable` + `vite build`, so its spa-build
+  // stage needs a .NET SDK + Node image, not `node:22-alpine`.  Every other
+  // hosted frontend is npm-only ("vite").  Its vite output is still flat `dist/`.
+  const spaBuildKind = spaFw === "feliz" ? "feliz" : "vite";
+  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir, spaBuildKind }));
   // Proxy-CA escape hatch (see renderDockerfile) — always present so the
   // Dockerfile's `COPY certs/` never fails and CA injection has a target.
   out.set("certs/.gitkeep", "");
-  out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
+  out.set(
+    ".dockerignore",
+    renderDockerignore({ embeddedSpa: hasEmbeddedSpa, spaOutDir, spaBuildKind }),
+  );
   // Proxy-CA escape hatch (see the Dockerfile's COPY certs/) — mirrors
   // every other backend so the dir always exists for the docker build.
   out.set("certs/.gitkeep", "");
@@ -1261,10 +1269,11 @@ function emitProjectFromContexts(
   // fallback) and the embedded React project under ClientApp/.
   if (hasEmbeddedSpa && system) {
     out.set(mainSourcePath(`${basePkg}.config`, "SpaWebConfig.java"), renderSpaWebConfig(basePkg));
-    // Dispatch on the hosted ui's framework — every static-bundle
-    // frontend (react / svelte / vue / angular) embeds under ClientApp/;
-    // only the SPA build output dir differs (svelte `build/`, angular
-    // `dist/browser/`, vite `dist/` — see renderDockerfile's spaOutDir).
+    // Dispatch on the hosted ui's framework — every embeddable frontend
+    // (react / svelte / vue / angular + feliz) embeds under ClientApp/;
+    // the SPA build output dir differs (svelte `build/`, angular
+    // `dist/browser/`, vite `dist/` — see renderDockerfile's spaOutDir), as
+    // does feliz's spa-build stage (dotnet-fable, not node-only — spaBuildKind).
     const uiFw = system.deployable.uiFramework;
     const spaFiles =
       uiFw === "svelte"
@@ -1282,10 +1291,15 @@ function emitProjectFromContexts(
                 apiBaseUrl: "/api",
                 pathPrefix: "ClientApp/",
               })
-            : generateReactForContexts(contexts, system.sys, system.deployable, {
-                apiBaseUrl: "/api",
-                pathPrefix: "ClientApp/",
-              });
+            : uiFw === "feliz"
+              ? generateFelizForContexts(contexts, system.sys, system.deployable, {
+                  apiBaseUrl: "/api",
+                  pathPrefix: "ClientApp/",
+                })
+              : generateReactForContexts(contexts, system.sys, system.deployable, {
+                  apiBaseUrl: "/api",
+                  pathPrefix: "ClientApp/",
+                });
     // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
     // certs / e2e) and emit ClientApp/.gitignore — shared with the dotnet /
     // python embed hosts (see embedded-spa.ts).

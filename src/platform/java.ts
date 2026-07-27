@@ -7,8 +7,8 @@ import { generateJavaForContexts } from "../generator/java/index.js";
 import { basePackageFor, javaPackageSegment } from "../generator/java/naming.js";
 import {
   type ComposeServiceShape,
+  EMBEDDABLE_FRAMEWORKS,
   type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
 } from "./surface.js";
 
 // ---------------------------------------------------------------------------
@@ -33,11 +33,12 @@ const javaPlatform: PlatformSurface = {
   // spa stage copies the framework's build output (Vite `dist/`,
   // SvelteKit `build/`) into the serving dir.
   mountsUi: true,
-  // Static-asset host (embeds a SPA via /app/ui + an SPA fallback) —
-  // serves any static-bundle framework (react / svelte / vue): the
-  // Dockerfile spa stage copies the framework's build output (Vite
-  // `dist/`, SvelteKit `build/`) into the serving dir.
-  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+  // Backend host: embeds any static-bundle SPA (react/svelte/vue/angular) +
+  // Feliz — its Dockerfile spa stage copies the framework's build output
+  // (Vite `dist/`, SvelteKit `build/`, Angular `dist/browser`, or a
+  // dotnet-fable stage for Feliz) into the serving dir.  EMBEDDABLE_FRAMEWORKS,
+  // not static-only.
+  hostableFrameworks: EMBEDDABLE_FRAMEWORKS,
   // The java repository auto-emits `save`, `findById`, `getById`,
   // `delete`, and `findAll` (Spring Data conventions).  All but
   // `findAll` are already reserved by the Hono surface; the union

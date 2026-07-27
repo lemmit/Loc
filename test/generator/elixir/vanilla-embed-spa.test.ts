@@ -123,6 +123,46 @@ system Shop {
 }
 `;
 
+// Same system, hosting a `framework: feliz` (Fable/Feliz/Elmish F#) ui.  Feliz
+// is NOT a node-only Vite SPA: it builds F# → JS via `dotnet fable` then bundles
+// via `vite build`, so its Dockerfile spa-build stage needs a .NET-SDK+Node base
+// image (`mcr.microsoft.com/dotnet/sdk` + `dotnet tool restore`), not the
+// node-only stage the React/Vue/Svelte/Angular embeds use.  Its vite output is
+// flat `dist/` (like React/Vue), and `basePath: "/app"` threads into vite `base`.
+const FELIZ_EMBED_SOURCE = `
+system Shop {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product {
+        name: string
+        price: decimal
+        invariant name.length > 0
+      }
+      repository Products for Product { }
+    }
+  }
+  api CatalogApi from Catalog
+  ui Storefront {
+    framework: feliz
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 } }
+    }
+  }
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    hosts: Storefront
+    port: 4000
+  }
+}
+`;
+
 function endsWith(files: Map<string, string>, suffix: string): string {
   const key = [...files.keys()].find((k) => k.endsWith(suffix));
   expect(key, `${suffix} not emitted`).toBeDefined();
@@ -209,6 +249,47 @@ describe("vanilla Phoenix embedded-SPA host (M-T6.1)", () => {
     expect(dockerfile).toContain("AS spa-build");
     expect(dockerfile).toContain("COPY --from=spa-build /spa/dist/browser priv/static/app");
     // Same framework-agnostic /app serving wiring as the React arm.
+    const spa = endsWith(files, "/controllers/spa_controller.ex");
+    expect(spa).toContain("defmodule PhoenixAppWeb.SpaController");
+    const endpoint = endsWith(files, "_web/endpoint.ex");
+    expect(endpoint).toContain('at: "/app"');
+    expect(endpoint).toContain('from: {:phoenix_app, "priv/static/app"}');
+    const router = endsWith(files, "_web/router.ex");
+    expect(router).toContain('get "/app/*path", SpaController, :index');
+    // No LiveView pages for a hosted-SPA deployable.
+    expect([...files.keys()].some((k) => k.includes("_live") || k.endsWith("_live.ex"))).toBe(
+      false,
+    );
+  });
+
+  it("emits the Feliz SPA under assets/ with vite base /app/ (App.fsproj + dotnet-tools)", async () => {
+    const files = await generateSystemFiles(FELIZ_EMBED_SOURCE);
+    const keys = [...files.keys()];
+    // The Feliz project lands under the Phoenix deployable's `assets/` dir —
+    // the F# project file + Fable tool manifest, not a package.json-only tree.
+    expect(keys.some((k) => k.endsWith("/assets/App.fsproj"))).toBe(true);
+    expect(keys.some((k) => k.endsWith("/assets/.config/dotnet-tools.json"))).toBe(true);
+    expect(keys.some((k) => k.endsWith("/assets/src/App.fs"))).toBe(true);
+    expect(keys.some((k) => k.endsWith("/assets/package.json"))).toBe(true);
+    // `basePath: "/app"` threads into vite `base` so `/app`-mounted asset URLs
+    // resolve (Feliz's vite config, not a `.ts` one — the F# host emits `.js`).
+    const vite = endsWith(files, "/assets/vite.config.js");
+    expect(vite).toContain('base: "/app/"');
+  });
+
+  it("packages the Feliz SPA via a .NET-SDK+Node spa-build stage (dotnet fable → dist)", async () => {
+    const files = await generateSystemFiles(FELIZ_EMBED_SOURCE);
+    const dockerfile = endsWith(files, "phoenix_app/Dockerfile");
+    // Feliz builds via `dotnet fable` + `vite build`, so the spa-build stage
+    // uses a .NET-SDK+Node base image (NOT the node-only vite stage) and runs
+    // `dotnet tool restore` before the npm build.
+    expect(dockerfile).toContain("AS spa-build");
+    expect(dockerfile).toContain("mcr.microsoft.com/dotnet/sdk");
+    expect(dockerfile).toContain("dotnet tool restore");
+    expect(dockerfile).not.toContain("node:24-alpine AS spa-build");
+    // Flat `dist/` output copied into priv/static/app (same as React/Vue).
+    expect(dockerfile).toContain("COPY --from=spa-build /spa/dist priv/static/app");
+    // Same framework-agnostic /app serving wiring as the React/Angular arms.
     const spa = endsWith(files, "/controllers/spa_controller.ex");
     expect(spa).toContain("defmodule PhoenixAppWeb.SpaController");
     const endpoint = endsWith(files, "_web/endpoint.ex");

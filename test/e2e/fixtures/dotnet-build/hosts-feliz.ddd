@@ -1,0 +1,37 @@
+// Fullstack `platform: dotnet` hosting a `framework: feliz` ui — the Feliz arm
+// of the .NET embed dispatch (parity with the react/vue/svelte/angular arms).
+//
+// A single .NET deployable that BOTH serves the API AND embeds the Feliz
+// (Fable/F#) SPA under ClientApp/, served from wwwroot/.  Feliz builds via
+// `dotnet fable` + `vite build`, so its multi-stage Dockerfile spa-build stage
+// runs on a .NET-SDK+Node image (not the npm-only node base the other four
+// frameworks use).  Vite output is flat `dist/`, so the wwwroot COPY matches
+// the react/vue arms.  Controllers stay under /api/*; Program.cs serves the
+// bundle via UseStaticFiles + MapFallbackToFile.  Feliz's `design:` slot selects
+// a daisyUI theme (omitted here → the `corporate` default), not a pack family.
+system HostsFeliz {
+  subdomain Sales {
+    context Orders {
+      aggregate Customer with crudish {
+        name: string
+        derived display: string = name
+      }
+      repository Customers for Customer { }
+    }
+  }
+  api SalesApi from Sales
+  storage primarySql { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+  ui WebApp with scaffold(subdomains: [Sales]) {
+    framework: feliz
+    api Sales: SalesApi
+  }
+  deployable app {
+    platform: dotnet
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: SalesApi
+    ui: WebApp
+    port: 8080
+  }
+}
