@@ -33,6 +33,7 @@
     "test:java-corpus": "LOOM_JAVA_BUILD=1 vitest run test/e2e/corpus-java-build.test.ts",
     "test:python-corpus": "LOOM_PYTHON_BUILD=1 vitest run test/e2e/corpus-python-build.test.ts",
     "test:dotnet-corpus": "LOOM_DOTNET_BUILD=1 vitest run test/e2e/corpus-dotnet-build.test.ts",
+    "test:elixir-corpus": "LOOM_ELIXIR_BUILD=1 vitest run test/e2e/corpus-elixir-build.test.ts",
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/e2e/generated-react-build.test.ts",
     "test:react-e2e": "LOOM_REACT_E2E=1 vitest run test/e2e/generated-react-e2e.test.ts",
     "test:tsc-react-extern": "LOOM_REACT_BUILD=1 vitest run test/e2e/extern-component-build.test.ts",
