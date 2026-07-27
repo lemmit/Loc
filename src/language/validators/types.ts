@@ -592,6 +592,24 @@ export function checkPropertyCheck(p: Property, env: Env, accept: ValidationAcce
   }
 }
 
+/** `mask unless <expr>` (authorization.md §5): the read-mask predicate must
+ *  type to bool, exactly like a `requires` gate.  `currentUser` types against
+ *  the system `user { … }` block, so a bare
+ *  `mask unless currentUser.permissions.contains(permissions.x)` type-checks.
+ *  The currentUser-only restriction is an IR-level check
+ *  (`loom.field-mask-not-current-user`). */
+export function checkPropertyMask(p: Property, env: Env, accept: ValidationAcceptor): void {
+  if (!p.maskUnless) return;
+  const t = typeOf(p.maskUnless, env);
+  if (t.kind !== "primitive" || t.name !== "bool") {
+    accept(
+      "error",
+      `'mask unless' on '${p.name}' must be of type 'bool', got '${typeToString(t)}'.`,
+      { node: p, property: "maskUnless" },
+    );
+  }
+}
+
 /** Type-check a field default (`field: T = <expr>`) against the field's
  * declared type.  Mirrors `checkDerived` — literal promotion (e.g. an int
  * literal defaulting a `money` / `decimal` field) is allowed. */

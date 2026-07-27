@@ -207,6 +207,7 @@ export type DddKeywordNames =
     | "main"
     | "managed"
     | "mantine"
+    | "mask"
     | "match"
     | "meilisearch"
     | "menu"
@@ -331,6 +332,7 @@ export type DddKeywordNames =
     | "type"
     | "ui"
     | "unique"
+    | "unless"
     | "urlStyle"
     | "use"
     | "user"
@@ -2901,6 +2903,7 @@ export interface Property extends langium.AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
+    maskUnless?: Expression;
     message?: string;
     name: 'await' | CommonSoftKeywords | string;
     provenanced: boolean;
@@ -2913,6 +2916,7 @@ export const Property = {
     access: 'access',
     check: 'check',
     default: 'default',
+    maskUnless: 'maskUnless',
     message: 'message',
     name: 'name',
     provenanced: 'provenanced',
@@ -6577,6 +6581,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 default: {
                     name: Property.default,
+                    optional: true
+                },
+                maskUnless: {
+                    name: Property.maskUnless,
                     optional: true
                 },
                 message: {

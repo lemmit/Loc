@@ -257,6 +257,18 @@ A workflow `create` gate scopes to `currentUser` + the starter's command params
 gate lowers the same way but is inert until `handle` command handlers are
 surfaced as HTTP routes.)
 
+`currentUser` types against the system's `user { … }` claim block, so a gate
+that is a **bare boolean claim expression** — the simplest permission check —
+type-checks on its own:
+
+```ddd
+operation close() requires currentUser.permissions.contains(permissions.ticketsClose) { … }
+```
+
+No surrounding `== …` / `&& …` is needed to satisfy the `bool` requirement:
+`currentUser.permissions` types as the claim's declared `string[]`, so the
+`.contains(…)` membership types as `bool`.
+
 Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 (see the note at the top).  Without it (`enforcement: opt`, the
 default) a deployable on `auth: required` still serves any
@@ -386,10 +398,40 @@ Unlike the allow ladder, deny is **not** restricted to `tenantOwned` aggregates 
 A lone `deny` with no matching `allow` is **not** flagged — aggregates are readable
 by default, so a carve-out with no prior grant is meaningful.
 
-**Not yet shipped (Phase 4.x follow-ups):** field-level masking (`field f { mask
-unless … }` / `deny read`), `data {}` row-attribute clauses, and per-operation /
-`Workflow` point gates — the larger slices the aggregate-level deny-wins
-primitive lays the plumbing for.
+**Not yet shipped (Phase 4.x follow-ups):** the `policy {}`-block field rules
+(`field f { mask unless … }` / `deny read` nested in a read block), `data {}`
+row-attribute clauses, and per-operation / `Workflow` point gates — the larger
+slices the aggregate-level deny-wins primitive lays the plumbing for.
+
+### Field masking — `mask unless` (read redaction)
+
+The **aggregate-field baseline** read mask (authorization.md §5) marks a field
+"sensitive everywhere, shown only to the authorised": it is REDACTED (null on the
+wire) UNLESS a `currentUser`-only predicate holds.
+
+```ddd
+aggregate Person {
+  name: string
+  salary: money mask unless currentUser.permissions.contains(permissions.salaryUnmask)
+}
+```
+
+The predicate is a **bool** and, like a `requires` gate, references only
+`currentUser` (+ constants) — it is evaluated at read projection as a param-free
+caller check, never against the row.
+
+**Status — foundation slice (M-T3.2 item 6).** The surface (grammar + IR +
+`mask`/`unless` printing), the validation, and the wire contract landed first;
+the per-backend DTO **read redaction** is the stacked follow-on. Until a backend
+emits the redaction, a `mask unless` field is a **compile error** on that backend
+(`loom.field-mask-unsupported`) rather than an unenforced no-op — a sensitive
+value never ships in the clear because the mask was declared but not yet emitted.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction |
+| *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates
 
@@ -407,7 +449,9 @@ The gate emits an in-handler **403** at the top of the find's route, evaluated
 against the request's `currentUser` before the query runs.  It is
 **`currentUser`-only** (plus constants) — no source row exists yet,
 so referencing an aggregate field is a compile error
-(`loom.find-gate-not-current-user`).  Use `where` to scope *which rows* come
+(`loom.find-gate-not-current-user`).  Like every `requires` clause it must
+**type to `bool`** (a non-bool gate — `requires 42` — is rejected, so it can't
+lower to an always-truthy no-op).  Use `where` to scope *which rows* come
 back, `requires` to decide *who* may run the find.  `requires true` is the
 intentionally-public escape that also satisfies default-deny.
 

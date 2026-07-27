@@ -1708,7 +1708,15 @@ Property:
     // `check <expr>` is a per-field validation predicate; an optional trailing
     // `message "..."` (nested so it only parses with a check) gives it the same
     // author-written message the invariant clause does.
-    ('check' check=Expression ('message' message=STRING)?)?;
+    ('check' check=Expression ('message' message=STRING)?)?
+    // `mask unless <expr>` — the aggregate-field baseline read mask
+    // (authorization.md §5).  The field is REDACTED (null on the wire) UNLESS
+    // the `currentUser`-only bool predicate holds — "sensitive everywhere, shown
+    // only to the authorised".  Stays after the flag group + default + check for
+    // the same greedy-expression reason those do.  `mask`/`unless` are keywords
+    // (like the sibling `requires` / `implies` gate words, they are not
+    // re-admitted as identifiers — pinned by keyword-identifier-completeness).
+    ('mask' 'unless' maskUnless=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are

@@ -52,6 +52,7 @@ import {
   validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
+  validateFieldMask,
   validateFileFieldObjectStorage,
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
@@ -254,6 +255,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateFieldMask(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
