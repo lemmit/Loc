@@ -4,7 +4,23 @@
 // templates — pure string concatenation.
 // ---------------------------------------------------------------------------
 
-export function renderCommon(ns: string, opts: { concurrencyException?: boolean } = {}): string {
+export function renderCommon(
+  ns: string,
+  opts: { concurrencyException?: boolean; file?: boolean } = {},
+): string {
+  // FileRef — the wire + jsonb shape a `File` field round-trips
+  // ({url, key, contentType, size}); the object-store reference an upload
+  // returns (M-T1.2).  PascalCase properties serialize camelCase via the
+  // project's global JsonNamingPolicy, matching the Hono / other backends.
+  // Emitted ONLY when a hosted aggregate declares a File field, so a File-free
+  // project stays byte-identical.
+  const fileRef = opts.file
+    ? `/// <summary>The {url, key, contentType, size} an object-store upload
+/// returns for a <c>File</c> field (M-T1.2).</summary>
+public sealed record FileRef(string Url, string Key, string ContentType, long Size);
+
+`
+    : "";
   // Optimistic-concurrency conflict exception — the persistence-neutral
   // sibling of EF's `DbUpdateConcurrencyException`.  The Dapper adapter's
   // version-CAS `SaveAsync` throws it when a guarded upsert affects zero rows
@@ -129,6 +145,8 @@ public interface IDomainEventDispatcher
 public sealed record Paged<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total, int TotalPages);
 
 public sealed record Envelope<T>(string Id, DateTime Ts, T Body);
+
+${fileRef}
 
 /// <summary>
 /// Domain-termed read-scope bypass for a retrieval (the DSL <c>ignoring</c>

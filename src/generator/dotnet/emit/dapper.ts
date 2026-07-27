@@ -89,6 +89,10 @@ function primTypes(name: string): { sql: string; cs: string } {
       return { sql: "uuid", cs: "Guid" };
     case "json":
       return { sql: "jsonb", cs: "string" };
+    case "File":
+      // A `File` field's FileRef persists as jsonb (M-T1.2); the row DTO
+      // carries the raw JSON string (fieldColumn serializes FileRef ⇄ string).
+      return { sql: "jsonb", cs: "string" };
     default:
       return { sql: "text", cs: "string" };
   }
@@ -143,6 +147,24 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
   const acc = `${accBase}.${prop}`;
   switch (type.kind) {
     case "primitive": {
+      if (type.name === "File") {
+        // A `File` field's FileRef persists as jsonb via System.Text.Json —
+        // structurally the value-object arm, but the CLR type is `FileRef`.
+        return {
+          col,
+          sql: "jsonb",
+          nullable,
+          rowCs: nullable ? "string?" : "string",
+          cast: "::jsonb",
+          save: nullable
+            ? `${acc} is null ? null : System.Text.Json.JsonSerializer.Serialize(${acc})`
+            : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
+          stateProp: prop,
+          hydrate: nullable
+            ? `r.${col} is null ? (FileRef?)null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`
+            : `System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`,
+        };
+      }
       const { sql, cs } = primTypes(type.name);
       return {
         col,

@@ -128,6 +128,11 @@ export function renderProgram(
      *  index.ts (it holds the pre-merge context names the event stores key
      *  off).  Consumed only when `usingDapper` — the EF path uses open generics. */
     dapperPortRegistrations?: string[];
+    /** File upload/download (M-T1.2): fully-qualified raw-bytes helper method
+     *  references for the bound objectStore, so Program.cs maps root
+     *  `POST /files` + `GET /files/{key}` over them.  Undefined ⇒ no File field,
+     *  no routes (byte-identical). */
+    fileUpload?: { putBytes: string; getBytes: string };
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -184,6 +189,30 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
     catch (OperationCanceledException) { }
     finally { hub.Unsubscribe(id); }
 }).ExcludeFromDescription();
+`
+    : "";
+  // File upload/download (M-T1.2): root POST /files (multipart) stores the raw
+  // bytes via the bound objectStore's adapter and returns a FileRef; GET streams
+  // it back with its contentType.  Root-mounted (not /api) to match the frontend
+  // api-client (`api.upload("/files")`, `FileRef.url = "/files/<key>"`) and Hono.
+  const fileUpload = options?.fileUpload;
+  const fileRoutesEndpoint = fileUpload
+    ? `// File upload/download (M-T1.2) — root /files over the bound objectStore.
+app.MapPost("/files", async (IFormFile file) =>
+{
+    var key = Guid.NewGuid().ToString();
+    using var ms = new MemoryStream();
+    await file.CopyToAsync(ms);
+    var bytes = ms.ToArray();
+    var contentType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
+    await ${fileUpload.putBytes}(key, bytes, contentType);
+    return Results.Json(new { url = "/files/" + key, key, contentType, size = bytes.Length }, statusCode: 201);
+}).DisableAntiforgery();
+app.MapGet("/files/{key}", async (string key) =>
+{
+    var obj = await ${fileUpload.getBytes}(key);
+    return obj is null ? Results.NotFound() : Results.File(obj.Value.Bytes, obj.Value.ContentType);
+});
 `
     : "";
   // Non-channel, non-realtime core registration (byte-identical to the
@@ -872,7 +901,7 @@ app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
 ${authMount}app.MapControllers();
-${realtimeEndpoint}${authMe}${authHandshake}${
+${fileRoutesEndpoint}${realtimeEndpoint}${authMe}${authHandshake}${
   hasEmbeddedSpa
     ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.

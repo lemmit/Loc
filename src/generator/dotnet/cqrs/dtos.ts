@@ -11,6 +11,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
@@ -84,13 +85,16 @@ export function emitResponseDtos(
   // root and any provenanced containment part.
   const exposesProvenance =
     entityExposesProvenance(agg) || agg.parts.some((p) => entityExposesProvenance(p));
+  // A `File` field's DTO param is the shared `FileRef` record (M-T1.2), also in
+  // Domain.Common — same import trigger as the provenance lineage.
+  const needsCommon = exposesProvenance || aggregateHasFileField(agg);
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
     renderResponseDtos({
       ns,
       aggName: agg.name,
       records,
-      extraUsings: exposesProvenance ? [`${ns}.Domain.Common`] : undefined,
+      extraUsings: needsCommon ? [`${ns}.Domain.Common`] : undefined,
     }),
   );
 }
@@ -344,8 +348,17 @@ export function emitRequestDtos(
         .join(", "),
     });
   }
+  // A `File` create-input / op param is the shared `FileRef` (Domain.Common);
+  // gate precisely on an actual FileRef param so a File-free request DTO neither
+  // misses the import nor trips CS8019 (unnecessary using) under /warnaserror.
+  const needsCommon = records.some((r) => /\bFileRef\b/.test(r.params));
   out.set(
     `Application/${aggFolder}/Requests/${agg.name}Requests.cs`,
-    renderRequestDtos({ ns, aggName: agg.name, records }),
+    renderRequestDtos({
+      ns,
+      aggName: agg.name,
+      records,
+      extraUsings: needsCommon ? [`${ns}.Domain.Common`] : undefined,
+    }),
   );
 }

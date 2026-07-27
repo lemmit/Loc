@@ -10,6 +10,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { resolveToSource } from "../../../ir/types/origin.js";
+import { typeIsFile } from "../../../ir/util/file-field.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -881,6 +882,9 @@ export function renderAbstractBaseEntity(
     : { thisName: "this", agg: base, idAccessor: "IdBoxed" };
   const usings = new Set<string>();
   for (const d of base.derived) collectCsExprUsings(d.expr, usings);
+  // A `File` field's type is the shared `FileRef` record in Domain.Common (M-T1.2)
+  // — the base header (unlike the concrete one) does not import it unconditionally.
+  if (base.fields.some((f) => typeIsFile(f.type))) usings.add(`${ns}.Domain.Common`);
   // A TPH base owns the shared `Id`; the concretes inherit it.  `internal set`
   // matches the field accessors so hydration (`_Create` / `Create`) assigns it
   // across the same assembly.  A TPC base owns no table/identity; it exposes a
