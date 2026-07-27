@@ -194,10 +194,73 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
 ```
 
+## Scaffolded UI — the "?" provenance disclosure (React)
+
+The lineage is already on the wire (the co-located `<field>_provenance`
+key above), so a **scaffolded React detail page** now surfaces it: every
+`provenanced` field's value pairs with a small **"?" disclosure** that
+expands to show where the value came from — the rule it was computed by,
+the computed value, and the input list (`path = value`).
+
+Two things make this work, both React-first (the other frontends render
+the value alone until they're ported — the primitive comments itself out):
+
+1. The React frontend response schema carries the lineage as a nullable
+   `provLineageSchema` field (`src/lib/schemas.ts`), so the client type
+   has a typed lineage to read.
+2. The scaffold pairs the value cell with the closed `ProvenanceInfo`
+   primitive — a native `<details>`/`<summary>` (no design-pack component,
+   no client state, accessible by default).
+
+```ddd
+// A scaffolded aggregate with a provenanced field (examples/provenance.ddd):
+aggregate Order with crudish {
+  quantity: int
+  unitPrice: int
+  discount: int
+  total: int provenanced          // ← the scaffold detail page adds a "?" here
+
+  operation reprice(qty: int, price: int) {
+    total := qty * price - discount
+  }
+}
+```
+
+The scaffolded `unfold`-able page body pairs the value with the disclosure:
+
+```ddd
+KeyValueRow("Total",
+  Group(Text(data.total),
+        ProvenanceInfo(of: data, field: "total", testid: "orders-detail-total-prov")))
+```
+
+which the React generator renders as the native disclosure over
+`data.total_provenance`:
+
+```tsx
+{orderById.data.total_provenance != null ? (
+  <details className="loom-provenance" data-testid="orders-detail-total-prov">
+    <summary aria-label="How this value was computed">?</summary>
+    <dl className="loom-provenance-tree">
+      <div><dt>Rule</dt><dd><code>{orderById.data.total_provenance.snapshotId}</code></dd></div>
+      <div><dt>Value</dt><dd>{String(orderById.data.total_provenance.computedValue)}</dd></div>
+      {orderById.data.total_provenance.inputs.map((inp) => (
+        <div key={inp.path}><dt>{inp.path}</dt><dd>{String(inp.value)}</dd></div>
+      ))}
+    </dl>
+  </details>
+) : null}
+```
+
+The disclosure is null-guarded: on a backend that carries the field but
+doesn't capture lineage (Python/Java), `total_provenance` is null and the
+"?" simply doesn't render — the value still shows.
+
 ## Other backends
 
-`react` parses `provenanced` and treats it as a
-no-op at runtime.  The snapshot capture still produces a file for the
+The React **runtime** doesn't *capture* lineage (a frontend runs no domain
+logic) — it *consumes* the lineage the backend already recorded, as the
+disclosure above.  The snapshot capture still produces a file for the
 system as a whole; surfaces that don't implement the runtime half
 ignore it.
 

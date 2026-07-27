@@ -52,7 +52,10 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 //  in-form inputs still go through Form-level dispatch.  A newly-added
 //  TSX-only primitive re-introduces a gap and fails this test until it gets a
 //  `heex` renderer or is pinned here with a reason.
-const KNOWN_HEEX_GAPS: Record<string, string> = {};
+const KNOWN_HEEX_GAPS: Record<string, string> = {
+  ProvenanceInfo:
+    "React-first: a native <details> disclosure whose body maps over lineage.inputs (JS-flavoured). HEEx port tracked by M-T1.19 (needs the Phoenix response to carry the lineage first); a provenanced field still renders its value on Phoenix, only the '?' is absent.",
+};
 
 describe("HEEx walker parity (finding #5)", () => {
   it("the TSX-rendered-without-HEEx gap matches the pinned list", () => {

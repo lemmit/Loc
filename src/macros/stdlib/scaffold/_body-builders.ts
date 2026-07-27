@@ -560,10 +560,29 @@ function buildDataCardParts(
       continue;
     }
     const kind = kindForType(f.type, true)!; // non-array, VO handled above ⇒ always a cell
+    const cell = typedCell(() => memberAccess(nameRefExpr(cellVar), name), kind);
+    // A `provenanced` field pairs its value with a "?" disclosure over the
+    // value's lineage (docs/provenance.md): `Group(value, ProvenanceInfo)` so
+    // the figure and its "why" sit side by side.  ProvenanceInfo reads the
+    // co-located `<field>_provenance` wire sibling the React response schema
+    // carries; other frontends render the value alone (the primitive comments
+    // itself out — React-first).
+    const valueCell = f.provenanced
+      ? callExpr("Group", [
+          { value: cell },
+          {
+            value: callExpr("ProvenanceInfo", [
+              { name: "of", value: nameRefExpr(cellVar) },
+              { name: "field", value: stringLit(name) },
+              { name: "testid", value: stringLit(`${slug}-detail-${name}-prov`) },
+            ]),
+          },
+        ])
+      : cell;
     rows.push({
       value: callExpr("KeyValueRow", [
         { value: stringLit(humanize(name)) },
-        { value: typedCell(() => memberAccess(nameRefExpr(cellVar), name), kind) },
+        { value: valueCell },
         { name: "testid", value: stringLit(`${slug}-detail-${name}`) },
       ]),
     });

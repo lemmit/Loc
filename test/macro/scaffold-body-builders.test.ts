@@ -327,6 +327,38 @@ describe("scaffoldDetails — aggregate read view + related cards", () => {
         .join("\n"),
     ).toBe("");
   });
+
+  it("pairs a provenanced field's value with a ProvenanceInfo disclosure", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          aggregate Order {
+            reference: string
+            total: int provenanced
+          }
+          repository Orders for Order { }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    const src = printExpr(scaffoldDetails(order));
+    // The provenanced field wraps value + a "?" disclosure in a Group.
+    expect(src).toContain("Group(");
+    expect(src).toContain("Text(data.total)");
+    expect(src).toContain(
+      'ProvenanceInfo(of: data, field: "total", testid: "orders-detail-total-prov")',
+    );
+    // A plain field gets no disclosure — exactly one ProvenanceInfo on the page.
+    expect(src).toContain('KeyValueRow("Reference", Text(data.reference)');
+    expect(src.match(/ProvenanceInfo\(/g)).toHaveLength(1);
+    // Still prints to re-parseable `.ddd` source (unfold-safe).
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
 });
 
 describe("scaffold instance builders — observable workflow pages", () => {
