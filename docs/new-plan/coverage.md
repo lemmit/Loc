@@ -168,7 +168,7 @@
 | full-review-remediation.md | mostly landed | residue → M-T9.4 |
 | global-test-coverage-plan.md | phases 0–1 partial | M-T9.3 |
 | java-backend-implementation.md | done | — |
-| java-uniform-publisher-s5c.md | in-flight | M-T4.5 |
+| java-uniform-publisher-s5c.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
 | lifecycle-audit-todo.md | design-first | M-T3.9 |
 | liveview-on-vanilla-port.md | done | — |
 | multi-file-source.md | stage A partial | M-T5.13 |
@@ -183,8 +183,8 @@
 | packaging-split.md | P0–P2 done; P3-s5 blocked | M-T8.7 |
 | per-pack-migration.md | reference companion | — |
 | phase-a-platform-expansion-prereqs.md | done | — |
-| phoenix-event-delivery-s5a.md | in-flight | M-T4.5 |
-| phoenix-op-guards-403-422.md | in-flight | M-T4.5 |
+| phoenix-event-delivery-s5a.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
+| phoenix-op-guards-403-422.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
 | phoenix-surface-generator-wiring.md | phases 1–5 done | Phase 6–7 → M-T6.1 |
 | platform-expansion-roadmap.md | superseded index | open phases → M-T10.x, M-T6.x |
 | playground-git-vfs-implementation.md | done | — |
@@ -198,7 +198,7 @@
 | runtime-semantics-tier-followups.md | done (RST drained) | RST-4 admin click → M-T9.7 |
 | s7-repository-ports.md | done (A+B+C) | — |
 | s7-slice-c-dotnet-uow.md | done | HasColumnName bug → M-T6.14 |
-| saga-starter-guard-s5b.md | in-flight | M-T4.5 |
+| saga-starter-guard-s5b.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
 | showcase-100-coverage.md | done | bugs → M-T5.15 |
 | source-map-debug-kickoff.md | spine shipped | M-T8.2 |
 | span-tracking-emission.md | TS/Hono shipped | M-T8.2 |

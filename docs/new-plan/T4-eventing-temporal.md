@@ -66,8 +66,14 @@ Sources: [dispatch-delivery-semantics](../old/proposals/dispatch-delivery-semant
 
 Sources: [channels.md](../old/proposals/channels.md) §brokers, production-readiness §3.3, weak-spots (runtime islands).
 
-## M-T4.5 — Saga hardening slices (in-flight review remediation) — `in-flight` · **S–M** · P1
-Live branches from the generated-code DDD review: S5(a) Phoenix persist-then-dispatch (+S12), S5(b) ES saga starter exists-guard (all 5 backends), S5(c) Java unconditional publisher, Phoenix op guards 403/422. Land or re-drive each; they're small and correctness-grade.
+## M-T4.5 — Saga hardening slices (review remediation) — `done` · **S–M** · P1 (all four slices landed + test-pinned on `main`, re-verified 2026-07-27)
+Four correctness-grade slices from the generated-code DDD review, all shipped:
+- **S5(a) Phoenix persist-then-dispatch (+S12)** — op bodies restructured to persist first, then fan events through the context `Dispatcher` only on `{:ok, saved}` (no phantom events on failed writes, saga seam reachable). Pinned by `test/generator/elixir/vanilla-event-delivery-s5a.test.ts`; audit §S5(a) ✅.
+- **S5(b) ES saga starter exists-guard (all 5 backends)** — a same-event `create`+`on` pair no longer double-appends: the starter no-ops when the stream already exists (the inverse of the `on` emptiness guard), so each event folds exactly once regardless of fan-out order. Pinned per backend by `{hono,dotnet,java,python,vanilla}-saga-starter-guard.test.ts`; audit §S5(b) ✅ (#1695).
+- **S5(c) Java uniform publisher** — `<Agg>Service.publishEvents` now publishes through Spring's `ApplicationEventPublisher` **unconditionally** (`dispatches = true`), matching .NET's always-`DispatchAsync`; no silent drop when a context has no subscriber. Pinned by `java-workflow-dispatch.test.ts` ("still publishes … with no subscriber (uniform, S5c)"); audit §S5(c) ✅.
+- **Phoenix op guards 403/422** — an aggregate op's `requires`/`precondition` denial no longer 500s: the controller rescues `ArgumentError` and maps the `Forbidden:`/`Precondition failed:` message prefixes to 403/422 via `ProblemDetails`. Pinned by `vanilla-op-action-bang.test.ts` + `vanilla-document.test.ts` + `phoenix-find-gate.test.ts`; audit §Phoenix-boundary ✅ (#1710/#1716, "No open Phoenix defects remain from this audit").
+
+Remaining §S5 work — (d) transactional outbox / Hono fire-and-forget upgrade path — is by design deferred until brokers land (tracked under M-T4.4 residuals), NOT part of this mission.
 Sources: [phoenix-event-delivery-s5a](../old/plans/phoenix-event-delivery-s5a.md), [saga-starter-guard-s5b](../old/plans/saga-starter-guard-s5b.md), [java-uniform-publisher-s5c](../old/plans/java-uniform-publisher-s5c.md), [phoenix-op-guards-403-422](../old/plans/phoenix-op-guards-403-422.md).
 
 ## M-T4.6 — Day-one batteries: `job`, `email`, object `storage` — `partial` · **L** · P1
