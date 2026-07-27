@@ -62,11 +62,18 @@ Mirror the Hono contract (`$putBytes(key, bytes, contentType)` /
 - `LOOM_PYTHON_BUILD=1 npm run test:python` on a File-bearing fixture (localDisk):
   `uv sync` + `ruff` + `mypy --strict` + `pytest` clean.
 
-## Stacked follow-ons (own slices)
+## Stacked follow-ons — all landed (PR #2231)
 
-- 2b .NET / ASP.NET (Minimal API `/files` + bytes adapter; docker `dotnet build`).
-- 2c Java / Spring (`@RestController` + bytes adapter; docker gradle).
-- 2d Elixir / Phoenix (`Plug`/controller + bytes adapter; docker `mix compile`,
-  `LOOM_HEX_MIRROR`).
-- Slice 3 (s3 **presigned** direct-to-bucket) and File-delete cleanup stay
-  owner-deferred.
+- ✅ 2b .NET / ASP.NET — FileRef record + EF/Dapper jsonb converter + Minimal-API
+  `/files` + s3/localDisk bytes adapters. `dotnet build /warnaserror` clean.
+- ✅ 2c Java / Spring — FileRef record + `@JdbcTypeCode` jsonb + `FilesController`
+  + s3/localDisk bytes adapters. `gradle testClasses bootJar` clean.
+- ✅ 2d Elixir / Phoenix — schema `File → :map` fix + root `FilesController` +
+  s3/localDisk bytes adapters. `mix compile --warnings-as-errors` clean
+  (docker + `LOOM_HEX_MIRROR`).
+- Each leg also **completed `File` on that backend** — it never compiled off
+  Hono (undefined `FileRef` on the typed backends; `File → :string` schema
+  mismatch on Elixir).
+
+Still owner-deferred: Slice 3 (s3 **presigned** direct-to-bucket) and File-delete
+object cleanup.
