@@ -105,7 +105,15 @@ describe.skipIf(!ENABLED)(
         ).toBe(true);
         runMixCompile(proj, mirror);
       } finally {
-        fs.rmSync(outDir, { recursive: true, force: true });
+        // Best-effort: the docker container runs as root and writes root-owned
+        // `deps/` + `_build/` into the mounted project dir, so a non-root CI
+        // runner's rmSync can't remove them (EACCES).  The compile result is
+        // what gates; a leftover temp dir on an ephemeral runner is harmless.
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          // leave the root-owned tree for the runner's own /tmp cleanup
+        }
       }
     }, 700_000);
   },
