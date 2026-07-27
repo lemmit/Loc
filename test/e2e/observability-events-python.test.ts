@@ -73,6 +73,9 @@ interface LogLine {
   level: string;
   event: string;
   request_id?: string;
+  scope_id?: string;
+  trace_id?: string;
+  span_id?: string;
   [k: string]: unknown;
 }
 
@@ -259,6 +262,16 @@ describe.skipIf(!ENABLED)(
         expect(start!.scope_id).toBeTruthy();
         expect(ok!.scope_id).toBe(start!.scope_id);
         expect(end!.scope_id).toBe(start!.scope_id);
+        // trace_id / span_id ride every request-scoped line (M-T7.1 — the OTel
+        // SERVER span projected onto the frame): a canonical 32-hex trace id
+        // shared across the bracket, for log<->trace correlation.  The span is
+        // created regardless of whether a collector is configured, so it's
+        // always present + valid (non-zero).
+        expect(start!.trace_id, ctx).toMatch(/^[0-9a-f]{32}$/);
+        expect(start!.trace_id).not.toBe("0".repeat(32));
+        expect(ok!.trace_id).toBe(start!.trace_id);
+        expect(end!.trace_id).toBe(start!.trace_id);
+        expect(start!.span_id).toMatch(/^[0-9a-f]{16}$/);
         expect(start!.method).toBe("GET");
         expect(start!.path).toBe("/health");
         expect(end!.status).toBe(200);

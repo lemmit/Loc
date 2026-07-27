@@ -114,6 +114,18 @@ function scopeIdOf(l: DotnetLogLine): string | undefined {
   return undefined;
 }
 
+/** Extract a carrier id from the `Scopes` array by its BeginScope key
+ *  (`traceId` / `spanId` — the OTel span ids threaded onto the log scope by
+ *  RequestContextMiddleware, M-T7.1).  Same channel as `scopeId`. */
+function scopeFieldOf(l: DotnetLogLine, key: string): string | undefined {
+  const scopes = (l.Scopes as Array<Record<string, unknown>> | undefined) ?? [];
+  for (const s of scopes) {
+    const v = s[key];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return undefined;
+}
+
 describe.skipIf(!ENABLED)(
   "generated .NET backend emits the observability catalog on stdout (LOOM_OBS_E2E_DOTNET=1)",
   () => {
@@ -291,6 +303,18 @@ describe.skipIf(!ENABLED)(
         const startScope = scopeIdOf(start!);
         expect(startScope, ctx).toBeTruthy();
         expect(scopeIdOf(end!), ctx).toBe(startScope);
+        // trace_id / span_id ride the same `Scopes` array (M-T7.1 — the OTel
+        // SERVER span's ids, stamped onto Activity.Current by
+        // RequestContextMiddleware and threaded onto the log scope): a
+        // canonical 32-hex trace id shared across the bracket, for log<->trace
+        // correlation.  The AspNetCore instrumentation creates the span
+        // regardless of whether a collector is configured, so it's always
+        // present + valid (non-zero).
+        const startTrace = scopeFieldOf(start!, "traceId");
+        expect(startTrace, ctx).toMatch(/^[0-9a-f]{32}$/);
+        expect(startTrace).not.toBe("0".repeat(32));
+        expect(scopeFieldOf(end!, "traceId"), ctx).toBe(startTrace);
+        expect(scopeFieldOf(start!, "spanId"), ctx).toMatch(/^[0-9a-f]{16}$/);
       } finally {
         // Best-effort teardown.
         try {

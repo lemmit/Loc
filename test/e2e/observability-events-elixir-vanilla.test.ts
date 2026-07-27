@@ -313,6 +313,17 @@ describe.skipIf(!ENABLED)(
         expect(start!.path).toBe("/health");
         expect(end!.status).toBe(200);
         expect(typeof end!.duration_ms).toBe("number");
+        // trace_id / span_id ride every request-scoped line (M-T7.1 — the OTel
+        // SERVER span opened by the RequestContext plug, threaded onto
+        // Logger.metadata; the telemetry-emitted request lines run in the same
+        // request process, so they carry it too): a canonical 32-hex trace id
+        // shared across the bracket, for log<->trace correlation.  The span is
+        // created regardless of whether a collector is configured, so it's
+        // always present + valid (non-zero).
+        expect(start!.trace_id, ctx).toMatch(/^[0-9a-f]{32}$/);
+        expect(start!.trace_id).not.toBe("0".repeat(32));
+        expect(end!.trace_id).toBe(start!.trace_id);
+        expect(start!.span_id).toMatch(/^[0-9a-f]{16}$/);
       } finally {
         try {
           if (mixChild?.pid) {
