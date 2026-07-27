@@ -74,6 +74,7 @@ import {
   KAFKA_CLIENTS_VERSION,
   LETTUCE_CORE_VERSION,
   renderJavaChannelFiles,
+  renderJavaOutboxDelivery,
   renderJavaOutboxFiles,
 } from "./emit/channels.js";
 import {
@@ -346,6 +347,13 @@ function emitProjectFromContexts(
   // `queue`/`work` consumer relies on broker ack semantics + idempotent
   // reactors (the slice-3 stance).
   const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  // Idempotent-consumer marker carrier (dispatch-delivery-semantics.md §3): the
+  // saga dispatcher's handler preamble references OutboxDelivery whenever a
+  // hosted context carries a durable channel, so it must exist whether or not a
+  // broker is wired.  Byte-identical for channel-less / ephemeral-only projects.
+  if (hostedDurable.size > 0) {
+    place("OutboxDelivery.java", "domain-common", renderJavaOutboxDelivery(basePkg));
+  }
   const durableBrokerEvents = new Set(
     channelBindings
       .filter((b) => b.retention === "work" || b.retention === "log")
