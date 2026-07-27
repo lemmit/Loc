@@ -233,6 +233,27 @@ function checkMagicCall(
     }
     return;
   }
+  // A folded projection's read surface (projection.md): `api.<proj>.byKey(k)` /
+  // `.list()` read `GET /projections/<snake>`.  Resolved before the aggregate
+  // lookup — the read verbs (`byKey`/`list`) are projection-only.  Only `api`
+  // tests reach a projection (the UI has no projection-read page object).
+  if (magicId === "api") {
+    const proj = contexts
+      .flatMap((c) => c.projections)
+      .find((p) => lowerFirst(p.name) === aggregateSlug || snake(p.name) === aggregateSlug);
+    if (proj) {
+      if (method === "byKey" || method === "list") return;
+      diags.push({
+        severity: "error",
+        code: "loom.e2e-unknown-method",
+        message:
+          `e2e: unknown projection read '${magicId}.${aggregateSlug}.${method}'. ` +
+          `A folded projection exposes: byKey, list.`,
+        source,
+      });
+      return;
+    }
+  }
   const agg = findAggregateBySlug(aggregateSlug, contexts);
   if (!agg) {
     const known = contexts

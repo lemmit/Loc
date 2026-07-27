@@ -6,6 +6,7 @@ import type {
   FindIR,
   OperationIR,
   Platform,
+  ProjectionIR,
   SubdomainIR,
   SystemIR,
   TestE2EIR,
@@ -32,6 +33,12 @@ import { renderExpectStmt } from "./expect-stmt.js";
 //   api.orders.<operationName>(id, body?)
 //                                    → POST /orders/{id}/<op_snake>
 //   api.orders.<findName>(args)      → GET  /orders/<find_snake>?...
+//
+// A folded `projection`'s read surface (projection.md) is reachable too, so an
+// e2e body can assert the read model an operation's events fold into:
+//
+//   api.orderBoard.byKey(key)        → GET  /projections/<proj_snake>/{key}
+//   api.orderBoard.list()            → GET  /projections/<proj_snake>
 //
 // Each call awaits, parses JSON, and returns the response.  An `expect`
 // statement maps directly to vitest `expect(<expr>).toBe(true)`.
@@ -219,6 +226,12 @@ function findContextForSlug(
     for (const c of m.contexts) {
       for (const a of c.aggregates) {
         if (snake(plural(a.name)) === slug) return c.name;
+      }
+      // A folded projection's read verbs (`byKey`/`list`) reference it by its
+      // own slug (`lowerFirst`/`snake` of the name), so a projection-only e2e
+      // body still resolves to its owning context for backend compatibility.
+      for (const p of c.projections) {
+        if (lowerFirst(p.name) === slug || snake(p.name) === slug) return c.name;
       }
     }
   }
@@ -487,6 +500,15 @@ function matchApiCall(e: ExprIR): ApiCallShape | null {
 }
 
 function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
+  // A folded projection's read surface (projection.md): `api.<proj>.byKey(k)` /
+  // `.list()` read `GET /projections/<snake>[/{key}]`.  Resolved before the
+  // aggregate lookup — the read verbs (`byKey`/`list`) are projection-only, so a
+  // projection whose slug shadowed an aggregate would still route reads here.
+  const proj = findProjectionBySlug(call.aggregateSlug, ctx.contexts);
+  if (proj && (call.method === "byKey" || call.method === "list")) {
+    return renderProjectionRead(proj, call, ctx);
+  }
+
   const agg = findAggregateBySlug(call.aggregateSlug, ctx.contexts);
   if (!agg) {
     const known = ctx.contexts
@@ -561,6 +583,36 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
     return `${rendered}.id`;
   }
   return rendered;
+}
+
+/** Render a folded-projection read (`api.<proj>.byKey(k)` / `.list()`).  The
+ *  route is `GET /projections/<snake(name)>[/{key}]` on every backend (the
+ *  read-model row surface projection.md emits), so one assertion runs against
+ *  the whole behavioural matrix. */
+function renderProjectionRead(proj: ProjectionIR, call: ApiCallShape, ctx: RenderCtx): string {
+  const slug = snake(proj.name);
+  const prefix = ctx.apiBasePath;
+  if (call.method === "list") {
+    return `await __get(\`\${base}${prefix}/projections/${slug}\`)`;
+  }
+  // byKey(key) — the correlation column the fold routed to.
+  if (call.args.length < 1) {
+    throw new Error(`e2e: api.${call.aggregateSlug}.byKey(key) requires a key argument`);
+  }
+  const keyExpr = renderIdArg(call.args[0], ctx);
+  return `await __get(\`\${base}${prefix}/projections/${slug}/\${${keyExpr}}\`)`;
+}
+
+function findProjectionBySlug(
+  slug: string,
+  contexts: BoundedContextIR[],
+): ProjectionIR | undefined {
+  for (const c of contexts) {
+    for (const p of c.projections) {
+      if (lowerFirst(p.name) === slug || snake(p.name) === slug) return p;
+    }
+  }
+  return undefined;
 }
 
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
