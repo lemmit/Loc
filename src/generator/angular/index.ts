@@ -74,6 +74,10 @@ import { buildAngularWorkflowsModule } from "./workflows-module.js";
 export interface GenerateAngularOptions {
   apiBaseUrl?: string;
   basePath?: string;
+  /** Prepended to every emitted path.  Fullstack backend hosts pass
+   *  `ClientApp/` so the Angular project nests inside the host tree
+   *  (mirrors `GenerateReactOptions.pathPrefix`). */
+  pathPrefix?: string;
   topLevelComponents?: ComponentIR[];
   /** Generate-time source-map recorder (`--sourcemap`) — see
    *  `PlatformSurface.emitProject`'s doc comment.  Records whole-file
@@ -456,7 +460,13 @@ export function generateAngularForContexts(
   out.set(".dockerignore", pack.render("dockerignore", {}));
   out.set("certs/.gitkeep", "");
 
-  return out;
+  // Fullstack embed: relocate the whole project under the host's prefix
+  // (e.g. `ClientApp/`).  Mirrors react/svelte/vue's post-pass.
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) prefixed.set(`${pathPrefix}${path}`, content);
+  return prefixed;
 }
 
 const HOME_COMPONENT = `// Auto-generated.
