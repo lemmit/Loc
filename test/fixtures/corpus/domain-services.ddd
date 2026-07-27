@@ -31,6 +31,22 @@ system DomainSvc {
         operation deposit(amount: Money) {
           balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
         }
+
+        // Pure-domain (unit) test — decimal value-object ARITHMETIC through
+        // operations (deposit `+`, withdraw `-`), a surface the existing corpus
+        // domain tests (enum/containment/precondition/single-containment) don't
+        // stress: a `Money` VO reconstructed from `balance.amount ± amount.amount`
+        // and read back, exercising cross-backend decimal coercion in a pure op.
+        test "deposit and withdraw adjust the decimal Money balance" {
+          let a = Account.create({ holder: "alice", balance: Money { amount: 100.00, currency: "USD" } })
+          expect(a.balance.amount).toBe(100.00)
+          let credit = Money { amount: 50.00, currency: "USD" }
+          a.deposit(credit)
+          expect(a.balance.amount).toBe(150.00)
+          let debit = Money { amount: 30.00, currency: "USD" }
+          a.withdraw(debit)
+          expect(a.balance.amount).toBe(120.00)
+        }
       }
 
       repository Accounts for Account {
