@@ -197,12 +197,15 @@ const TSX_FORM: readonly string[] = [
   "realtime-toast",
 ];
 
-// `flutter` is keyed alongside the `PackFormat` union here (rather than in
-// `PackFormat` itself) because the format is registered by the Flutter-target
-// integrator in `src/util/builtin-formats.ts`; the required-set only needs the
-// key.  When that registration lands, `PackFormat | "flutter"` collapses to
-// `PackFormat` with no change here.
-export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = {
+// `flutter` and `feliz` are keyed alongside the `PackFormat` union here (rather
+// than in `PackFormat` itself) because both ship PROCEDURAL packs (F#/Dart code,
+// not `.hbs` templates) constructed directly — they never pass through
+// `compilePack`, so the load-time gate (`loader.ts:346`) never runs for them and
+// there is no `PackFormat` value to register.  Their required set is instead the
+// contract a dedicated groundwork test enforces structurally
+// (`flutter-pack-groundwork.test.ts` / `feliz-pack-groundwork.test.ts`): every
+// `core` name must have a real renderer, not the missing-renderer sentinel.
+export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {
   tsx: {
     core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
     shell: SHARED_SHELL,
@@ -285,6 +288,24 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter", RequiredSet> = 
       ...TSX_ONLY_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
     ],
     shell: ["pubspec"],
+  },
+  // Feliz (fable-elmish-frontend.md §4 — F#/Fable/Elmish).  A second PROCEDURAL
+  // pack (`src/generator/feliz/pack.ts`, daisyUI-classed `Html.div [ … ]` F#),
+  // constructed directly in `feliz/index.ts` — so, like `flutter`, it never
+  // passes through `compilePack` and this entry is enforced by the groundwork
+  // test, not the load-time gate.  The required surface is the FULL JSX-family
+  // display + input primitive set MINUS `primitive-form-of`: Feliz's forms
+  // (Create/Op/Workflow/Destroy) render inline through the Elmish
+  // `renderCreateForm`… seams (`feliz-target.ts`), so `primitive-form-of` never
+  // pack-dispatches (same drop as `angular`).  Feliz DOES keep `primitive-modal`
+  // (it ships a real `primitiveModal` renderer — unlike `angular`, which renders
+  // the modal inline).  No `fieldInput` / `form` sets (the field-input-* / form-*
+  // TSX form-pipeline templates have no procedural analogue), and no `shell` set:
+  // the Feliz project shell (main / package.json / vite / fable config) is
+  // emitted by `feliz/index.ts` directly, not by the pack.
+  feliz: {
+    core: [...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"), ...TSX_ONLY_PRIMITIVES],
+    shell: [],
   },
 };
 
