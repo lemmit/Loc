@@ -89,6 +89,29 @@ const s3PhoenixAdapter: PhoenixResourceAdapter = {
         "    :ok",
         "  end",
         "",
+        `  # Raw-bytes verbs — the File upload/download endpoints' storage seam`,
+        `  # (M-T1.2).  Unlike put/get (JSON), these store the exact bytes with`,
+        `  # their content-type so a download streams back byte-identical.`,
+        `  def ${fn}_put_bytes(key, body, content_type) do`,
+        `    ExAws.S3.put_object(@${fn}_bucket, key, body, content_type: content_type)`,
+        "    |> ExAws.request!()",
+        "    :ok",
+        "  end",
+        "",
+        `  def ${fn}_get_bytes(key) do`,
+        `    case ExAws.S3.get_object(@${fn}_bucket, key) |> ExAws.request() do`,
+        "      {:ok, %{body: body, headers: headers}} ->",
+        `        content_type =`,
+        `          Enum.find_value(headers, "application/octet-stream", fn {k, v} ->`,
+        `            if String.downcase(k) == "content-type", do: v`,
+        "          end)",
+        "        {body, content_type}",
+        "",
+        "      {:error, _} ->",
+        "        nil",
+        "    end",
+        "  end",
+        "",
       );
     }
     lines.push("end", "");
@@ -310,8 +333,96 @@ const sendgridPhoenixAdapter: PhoenixResourceAdapter = {
   },
 };
 
+/** localDisk — a dependency-free local-directory object store (M-T1.2), the
+ *  Elixir twin of Hono's / Python's / .NET's / Java's localDisk adapter.  Stores
+ *  each object's raw bytes under a data dir keyed by `key`, plus a `<key>.meta`
+ *  sidecar carrying the content-type so a download round-trips its metadata.
+ *  Backs the File upload/download endpoints with no external hex dep (`File`). */
+const localDiskPhoenixAdapter: PhoenixResourceAdapter = {
+  name: "localDisk",
+  hexDeps: () => ({}),
+  emitClientModule(resources, _stores, appModule): string {
+    const lines: string[] = [
+      "# Auto-generated.",
+      `defmodule ${resourceModuleName(appModule, "localDisk")} do`,
+    ];
+    for (const r of resources) {
+      const fn = snake(r.name);
+      lines.push(
+        `  @${fn}_dir System.get_env("${envVar(r.name).replace(/_URL$/, "")}_DIR") || "data/${r.name}"`,
+        "",
+        // Guard against path traversal: minted keys are UUIDs, but a
+        // GET /files/:key param is caller-supplied, so keep it inside the dir.
+        `  defp ${fn}_path(key) do`,
+        `    safe = String.replace(key, ~r/[^A-Za-z0-9._-]/, "_")`,
+        `    Path.join(@${fn}_dir, safe)`,
+        "  end",
+        "",
+        // Raw-bytes verbs — the File endpoints' storage seam.
+        `  def ${fn}_put_bytes(key, body, content_type) do`,
+        `    File.mkdir_p!(@${fn}_dir)`,
+        `    path = ${fn}_path(key)`,
+        "    File.write!(path, body)",
+        '    File.write!(path <> ".meta", content_type)',
+        "    :ok",
+        "  end",
+        "",
+        `  def ${fn}_get_bytes(key) do`,
+        `    path = ${fn}_path(key)`,
+        "",
+        "    if File.exists?(path) do",
+        "      content_type =",
+        '        case File.read(path <> ".meta") do',
+        "          {:ok, ct} -> ct",
+        '          _ -> "application/octet-stream"',
+        "        end",
+        "",
+        "      {File.read!(path), content_type}",
+        "    else",
+        "      nil",
+        "    end",
+        "  end",
+        "",
+        // Vendor-neutral JSON verbs (parity with s3's put/get/list/delete) so
+        // workflow bodies reaching the store keep working against localDisk.
+        `  def ${fn}_put(key, body) do`,
+        `    ${fn}_put_bytes(key, Jason.encode!(body), "application/json")`,
+        "  end",
+        "",
+        `  def ${fn}_get(key) do`,
+        `    case ${fn}_get_bytes(key) do`,
+        "      {body, _} -> Jason.decode!(body)",
+        "      nil -> nil",
+        "    end",
+        "  end",
+        "",
+        `  def ${fn}_list(prefix) do`,
+        `    if File.dir?(@${fn}_dir) do`,
+        `      @${fn}_dir`,
+        "      |> File.ls!()",
+        '      |> Enum.filter(fn name -> not String.ends_with?(name, ".meta") and String.starts_with?(name, prefix) end)',
+        "    else",
+        "      []",
+        "    end",
+        "  end",
+        "",
+        `  def ${fn}_delete(key) do`,
+        `    path = ${fn}_path(key)`,
+        "    File.rm(path)",
+        '    File.rm(path <> ".meta")',
+        "    :ok",
+        "  end",
+        "",
+      );
+    }
+    lines.push("end", "");
+    return lines.join("\n");
+  },
+};
+
 const ADAPTERS: readonly PhoenixResourceAdapter[] = [
   s3PhoenixAdapter,
+  localDiskPhoenixAdapter,
   rabbitmqPhoenixAdapter,
   restApiPhoenixAdapter,
   smtpPhoenixAdapter,

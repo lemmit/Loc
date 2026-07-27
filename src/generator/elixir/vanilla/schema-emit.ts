@@ -423,6 +423,12 @@ export function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): stri
           return "Ecto.UUID";
         case "json":
           return ":map";
+        case "File":
+          // A `File` field's FileRef ({url,key,contentType,size}) is a plain map
+          // stored in a jsonb column (M-T1.2) — the schema type must be `:map`
+          // to agree with the migration (jsonb) and the typespec (map()), or a
+          // load/changeset mismatches the string default.
+          return ":map";
         default:
           return ":string";
       }
