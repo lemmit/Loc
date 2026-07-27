@@ -154,7 +154,11 @@ import {
   renderJavaSpringDataRepository,
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
-import { renderExecutionContextFilter, renderRequestContext } from "./emit/request-context.js";
+import {
+  renderExecutionContextFilter,
+  renderRequestContext,
+  renderTracing,
+} from "./emit/request-context.js";
 import {
   anyTimerUsesCron,
   cronTimers,
@@ -443,6 +447,10 @@ function emitProjectFromContexts(
   // request-context.md).  The principal's actor_id is stamped by UserFilter.
   place("RequestContext.java", "config", renderRequestContext(basePkg));
   place("ExecutionContextFilter.java", "config", renderExecutionContextFilter(basePkg));
+  // OpenTelemetry tracing (M-T7.1) — the process-wide OpenTelemetrySdk holder;
+  // ExecutionContextFilter opens a SERVER span per request from Tracing.TRACER
+  // and threads trace_id/span_id onto MDC.
+  place("Tracing.java", "config", renderTracing(basePkg, ns));
 
   // Provenance runtime (provenance.md) — the shared lineage SDK + the
   // append-only history table.  Emitted only when a context declares a

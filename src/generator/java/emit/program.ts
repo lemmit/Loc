@@ -56,6 +56,12 @@ export const SPRINGDOC_VERSION = "3.0.3";
  *  here; requires logback 1.5+ (which Spring Boot 4.x brings). */
 export const LOGSTASH_ENCODER_VERSION = "8.1";
 
+/** OpenTelemetry Java BOM (M-T7.1) — aligns opentelemetry-api / -sdk /
+ *  -exporter-otlp so the request seam opens a SERVER span per request,
+ *  exported via OTLP/HTTP only when a collector endpoint is set.  Pinned via
+ *  platform() (not the Spring Boot BOM, which doesn't manage OTel). */
+export const OTEL_VERSION = "1.59.0";
+
 /** Nimbus JOSE+JWT — the JWKS/JWT library the generated OIDC verifier uses
  *  (D-AUTH-OIDC).  Pinned explicitly: unlike Flyway / Spring Security, the
  *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
@@ -237,6 +243,14 @@ export function renderGradleBuild(
     // ids + timestamp into the cross-backend `{ts,level,event,…}` envelope, so
     // CatalogLog logs through SLF4J instead of hand-serialising JSON.
     `    implementation("net.logstash.logback:logstash-logback-encoder:${LOGSTASH_ENCODER_VERSION}")`,
+    // OpenTelemetry tracing (M-T7.1): the ExecutionContextFilter opens a SERVER
+    // span per request; exported via OTLP/HTTP only when a collector endpoint
+    // is set (Tracing.java).  BOM-aligned via platform() so api/sdk/exporter
+    // stay version-consistent.
+    `    implementation(platform("io.opentelemetry:opentelemetry-bom:${OTEL_VERSION}"))`,
+    `    implementation("io.opentelemetry:opentelemetry-api")`,
+    `    implementation("io.opentelemetry:opentelemetry-sdk")`,
+    `    implementation("io.opentelemetry:opentelemetry-exporter-otlp")`,
     // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
     `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
