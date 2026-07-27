@@ -45,6 +45,7 @@ export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,
   checkCallStmt,
+  checkComponentPropTypes,
   checkConstructionArgTypes,
   checkEmit,
   checkOperation,

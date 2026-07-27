@@ -35,6 +35,7 @@ import {
   checkBuilderCallType,
   checkChannels,
   checkComponent,
+  checkComponentPropTypes,
   checkConstructionFields,
   checkContext,
   checkCriteria,
@@ -212,6 +213,9 @@ export class DddValidator {
     // never walked by the aggregate statement checker, so arity + arg types went
     // unchecked. Resolve `<store>.<action>` and check both invocation forms.
     guard("store-action-args", model, () => checkStoreActionCallArgs(model, accept));
+    // User-component prop passing (`Panel(amount: "x")` / `Panel { amount: "x" }`) —
+    // check each provided prop value against the component's declared param type.
+    guard("component-prop-types", model, () => checkComponentPropTypes(model, accept));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));

@@ -9,6 +9,7 @@ import type {
   Aggregate,
   AssignOrCallStmt,
   BuilderCall,
+  Component,
   Create,
   Criterion,
   Destroy,
@@ -29,6 +30,7 @@ import {
   isActionDecl,
   isAssignOrCallStmt,
   isCallSuffix,
+  isComponent,
   isCriterion,
   isDerivedProp,
   isEmitStmt,
@@ -71,6 +73,7 @@ import {
   typeToString,
   withTags,
 } from "../type-system.js";
+import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   canPromoteLiteralTo,
   checkBlankMessage,
@@ -583,6 +586,107 @@ export function checkStoreActionCallArgs(model: Model, accept: ValidationAccepto
       argNode,
       accept,
     );
+  }
+}
+
+/** Resolve a page-body component invocation NAME to its `Component` declaration,
+ *  or `undefined` when the name isn't a reachable component.  Mirrors
+ *  `checkBuilderCallType`'s component resolution but returns the node (for its
+ *  typed params): the enclosing `ui`'s components win, else a top-level component
+ *  in the same document.  Cross-document components (workspace index) are skipped
+ *  — their params aren't in hand here, so the prop check fails open on them. */
+function resolveComponent(name: string, node: AstNode, model: Model): Component | undefined {
+  const ui = AstUtils.getContainerOfType(node, isUi);
+  if (ui) {
+    for (const m of ui.members) if (isComponent(m) && m.name === name) return m;
+  }
+  for (const m of model.members) if (isComponent(m) && m.name === name) return m;
+  return undefined;
+}
+
+/** M-T6.18 gap #3 — per-prop type check for a page-body COMPONENT invocation
+ *  (`Panel(amount: "x")` / `Panel { amount: "x" }`).  A user `component` declares
+ *  typed params, but neither invocation form had its prop VALUES checked — a
+ *  `string` into an `int` param compiled the .ddd and only failed the emitted
+ *  frontend's tsc.  Both forms are covered: the paren call (`Panel(amount: x)` — a
+ *  single-suffix `PostfixChain` `CallSuffix`, positional or named) and the brace
+ *  builder (`Panel { amount: x }` — a `BuilderCall`, which record constructions
+ *  also use, so a name resolving to a value object / part / payload is left to
+ *  `checkConstructionArgTypes`).  `slot`/`action`-typed params carry JSX / a
+ *  callback, not a value, so they're skipped; optional / defaulted params need no
+ *  arg, so only PROVIDED props are checked. */
+export function checkComponentPropTypes(model: Model, accept: ValidationAcceptor): void {
+  const checkProps = (
+    comp: Component,
+    provided: { name?: string; value: Expression | undefined; node: AstNode }[],
+    label: string,
+  ): void => {
+    provided.forEach((arg, i) => {
+      const param =
+        typeof arg.name === "string"
+          ? comp.params.find((p) => p.name === arg.name)
+          : comp.params[i];
+      if (!param) return; // unknown prop / excess positional — not this check's concern
+      const expected = paramType(param);
+      // `slot` (JSX child) / `action` (callback) params take no value; a loose
+      // `unknown` param type can't be compared.
+      if (expected.kind === "slot" || expected.kind === "action" || expected.kind === "unknown")
+        return;
+      const actual = typeOf(arg.value, envForNode(arg.node));
+      if (
+        actual.kind !== "unknown" &&
+        !isAssignable(actual, expected) &&
+        !canPromoteLiteralTo(arg.value, expected)
+      ) {
+        accept(
+          "error",
+          `Prop '${param.name}' of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          { node: arg.node, property: "value", code: "loom.component-prop-type" },
+        );
+      }
+    });
+  };
+
+  for (const node of AstUtils.streamAllContents(model)) {
+    // Brace form: `Panel { amount: x }`.  Skip record constructions (VO / part /
+    // payload — `checkConstructionArgTypes` owns those) and walker primitives.
+    if (node.$type === "BuilderCall") {
+      const bc = node as BuilderCall;
+      if (isWalkerPrimitive(bc.type) || resolveRecordDecl(bc, model)) continue;
+      const comp = resolveComponent(bc.type, bc, model);
+      if (!comp) continue;
+      checkProps(
+        comp,
+        bc.entries.map((e) => ({
+          name: typeof e.name === "string" ? e.name : undefined,
+          value: e.value,
+          node: e,
+        })),
+        `component '${bc.type}'`,
+      );
+      continue;
+    }
+    // Paren form: `Panel(amount: x)` / `Panel(x)` — a NameRef head with a single
+    // leading CallSuffix.  A name that resolves to a user FUNCTION is a call
+    // (`checkExprCallArgs`' job), not a component invocation.
+    if (isPostfixChain(node)) {
+      const head = node.head;
+      const first = node.suffixes[0];
+      if (!isNameRef(head) || node.suffixes.length !== 1 || !first || !isCallSuffix(first))
+        continue;
+      if (freeCallFunction(head.name, envForNode(node))) continue;
+      const comp = resolveComponent(head.name, node, model);
+      if (!comp) continue;
+      checkProps(
+        comp,
+        first.args.map((a) => ({
+          name: typeof a.name === "string" ? a.name : undefined,
+          value: a.value,
+          node: a,
+        })),
+        `component '${head.name}'`,
+      );
+    }
   }
 }
 
