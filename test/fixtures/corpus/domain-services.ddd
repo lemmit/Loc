@@ -1,0 +1,101 @@
+// Domain services (domain-services.md) — a stateless, context-level container of
+// cross-aggregate `operation`s, across the full three-tier capability ladder:
+//
+//   FeeQuote     — PURE     (params only; a stateless static/module fn everywhere)
+//   Registration — READING  (a read-only repo query `Accounts.byHolder`, orchestrated)
+//   Transfer     — MUTATING (mutates the passed-in aggregate ARGS via their own ops)
+//
+// The reading + mutating tiers are application-orchestrator-only: the `MoveMoney`
+// / `RegisterAccount` workflows LOAD the aggregates, the service reads/mutates
+// them, and the workflow's auto-save-at-exit persists — the service never writes
+// a repository and never commits.  Shapes mirror the proven generator/compile
+// fixtures (test/e2e/fixtures/elixir-vanilla-build/vanilla-domain-service-mutating.ddd,
+// web/src/examples/banking-reading-service.ddd).  Params are `source`/`dest`
+// (`from`/`to` are reserved).
+system DomainSvc {
+  subdomain Accounts {
+    context Accounts {
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      aggregate Account with crudish {
+        holder: string
+        balance: Money
+        operation withdraw(amount: Money) {
+          balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
+        }
+        operation deposit(amount: Money) {
+          balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
+        }
+      }
+
+      repository Accounts for Account {
+        find byHolder(holder: string): Account? where this.holder == holder
+      }
+
+      // ── pure tier ── params only; callable from anywhere, no infrastructure.
+      domainService FeeQuote {
+        operation forAmount(amount: Money): Money {
+          return Money { amount: amount.amount, currency: amount.currency }
+        }
+      }
+
+      // ── reading tier ── a read-only repository query; the RegisterAccount
+      // workflow orchestrates it as a precondition.
+      domainService Registration {
+        operation isHolderFree(holder: string): bool {
+          return Accounts.byHolder(holder) == null
+        }
+      }
+
+      // ── mutating tier ── mutates the passed-in Account args via their own ops;
+      // MoveMoney loads them, this transfers, the workflow persists at exit.
+      domainService Transfer {
+        operation run(source: Account, dest: Account, amount: Money) {
+          source.withdraw(amount)
+          dest.deposit(amount)
+        }
+      }
+
+      workflow RegisterAccount transactional {
+        create(holder: string, balance: Money) {
+          precondition Registration.isHolderFree(holder)
+          let acct = Account.create({ holder: holder, balance: balance })
+        }
+      }
+
+      workflow MoveMoney transactional {
+        create(source: Account id, dest: Account id, amount: Money) {
+          let s = Accounts.getById(source)
+          let d = Accounts.getById(dest)
+          Transfer.run(s, d, amount)
+        }
+      }
+    }
+  }
+
+  api AccountsApi from Accounts
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Accounts]
+    dataSources: [accountsState]
+    serves: AccountsApi
+    port: 4000
+  }
+
+  // api e2e — seeds an account and reads it back via the `byHolder` find the
+  // reading service calls, proving the read mechanics at runtime.  (The
+  // workflow→service wiring is proven by the per-PR compile gates; the e2e DSL
+  // has no workflow accessor — same split as banking-reading-service.ddd.)
+  test e2e "byHolder returns the account the reading service would find" against d {
+    let a = api.accounts.create({ holder: "alice", balance: { amount: 100, currency: "USD" } })
+    let found = api.accounts.byHolder({ holder: "alice" })
+    expect(found.holder).toBe("alice")
+  }
+}

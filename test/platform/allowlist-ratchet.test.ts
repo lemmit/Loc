@@ -95,13 +95,13 @@ const REGISTERED: Ratchet[] = [
   // The two sibling M-T9.8 gates' own escape valves (both empty at zero).
   { file: "test/platform/dead-generator-exports.test.ts", name: "ALLOW", kind: "set", max: 0 },
   // Documented feature docs with no corpus fixture yet (feature-doc-coverage
-  // Phase 2 gate).  Two: domain-services + scaffold-macros — M-T9.3 owns
-  // draining these as the unit-tier corpus coverage fills in.
+  // Phase 2 gate).  One: scaffold-macros — domain-services drained by its
+  // corpus fixture; M-T9.3 owns draining the rest.
   {
     file: "test/conformance/feature-doc-coverage.test.ts",
     name: "KNOWN_GAPS",
     kind: "set",
-    max: 2,
+    max: 1,
   },
 ];
 

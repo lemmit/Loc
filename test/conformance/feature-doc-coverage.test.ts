@@ -45,6 +45,7 @@ const FEATURE_DOCS: readonly string[] = [
   "capabilities",
   "channels",
   "criterion",
+  "domain-services",
   "extern",
   "inheritance",
   "language",
@@ -55,7 +56,6 @@ const FEATURE_DOCS: readonly string[] = [
   "workflow",
   // Documented domain features with no canonical corpus fixture yet (see
   // KNOWN_GAPS).
-  "domain-services",
   "scaffold-macros",
 ];
 
@@ -64,9 +64,6 @@ const FEATURE_DOCS: readonly string[] = [
  *  Drain one by adding a `<feature>.ddd` + a manifest row citing the doc, then
  *  delete its entry here (and lower the ratchet max in the same PR). */
 const KNOWN_GAPS: readonly string[] = [
-  // `domainService` stateless cross-aggregate calculators — a backend-generatable
-  // domain feature with no dedicated corpus fixture.  M-T9.3 (unit-tier drain).
-  "domain-services",
   // `scaffold` macro expansion (pages from aggregates) — generatable, uncovered
   // by the domain-focused corpus.  M-T9.3 (unit-tier drain).
   "scaffold-macros",

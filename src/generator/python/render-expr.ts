@@ -619,6 +619,18 @@ function renderNew(
 }
 
 function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "binary" }>): string {
+  // `x == null` / `x != null` → Python identity `x is None` / `x is not None`.
+  // A native `== None` is valid Python but trips ruff's E711 (a default-scope
+  // rule).  Parity with the union-find `absenceCheck` (`is not None`); the
+  // subject is whichever operand isn't the null literal.
+  if (e.op === "==" || e.op === "!=") {
+    const leftNull = isNullLiteral(e.left);
+    const rightNull = isNullLiteral(e.right);
+    if (leftNull || rightNull) {
+      const subject = leftNull ? right : left;
+      return `${subject} is ${e.op === "!=" ? "not " : ""}None`;
+    }
+  }
   // A5 temporal — Python's datetime/timedelta overload the native
   // operators (`datetime ± timedelta`, `datetime - datetime → timedelta`,
   // timedelta algebra/scaling) directly, so no dedicated arm is needed.
@@ -626,6 +638,10 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
   // Python's `Decimal` overloads the native operators precisely, so
   // money needs no method-dispatch detour (unlike decimal.js).
   return `${left} ${pyBinOp(e.op)} ${right}`;
+}
+
+function isNullLiteral(e: ExprIR): boolean {
+  return e.kind === "literal" && e.lit === "null";
 }
 
 function pyBinOp(op: BinOp): string {

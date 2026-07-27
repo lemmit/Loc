@@ -405,6 +405,14 @@ describe("py renderPyExpr — operators / ternary / match / convert", () => {
     expect(renderPyExpr(bin("||", litBool("true"), litBool("false")))).toBe("True or False");
   });
 
+  it("renders `== null` / `!= null` as identity `is None` / `is not None` (ruff E711)", () => {
+    const nul: ExprIR = { kind: "literal", lit: "null", value: "" };
+    expect(renderPyExpr(bin("==", refParam("holder"), nul))).toBe("holder is None");
+    expect(renderPyExpr(bin("!=", refParam("holder"), nul))).toBe("holder is not None");
+    // subject stays on the left regardless of which operand is the null literal
+    expect(renderPyExpr(bin("==", nul, refParam("holder")))).toBe("holder is None");
+  });
+
   it("renders ! as not; unary minus natively", () => {
     expect(renderPyExpr({ kind: "unary", op: "!", operand: refParam("active") })).toBe(
       "not active",
