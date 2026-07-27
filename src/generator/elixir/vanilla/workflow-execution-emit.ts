@@ -1441,7 +1441,13 @@ function renderWorkflowModule(
   // that references no actor renders byte-identically to before (no extra arg).
   const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
   const userParam = needsUser ? ", current_user \\\\ nil" : "";
-  const hasContextCall = lines.some((l) => l.kind === "with-clause");
+  // Emit the `Context` alias iff the body actually references the context
+  // module — a `with`-clause alone is NOT proof (a workflow whose `with`
+  // clauses only call `D.Resources.*` / `Domain.Services` references no
+  // context module, so the alias would be unused and fail -Werror).  The
+  // rewrite below keys on the same `contextModuleFq` substring, so this
+  // predicate exactly matches "would the alias be used".
+  const hasContextCall = body.includes(contextModuleFq);
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
   // Rewrite the body's fully-qualified context module to the `Context`
   // alias to keep the rendered Elixir tidy and avoid long-line warnings.

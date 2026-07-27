@@ -361,9 +361,14 @@ function renderHandlerModule(
   };
 
   const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx);
-  const hasContextCall = lines.some((l) => l.kind === "with-clause");
   const resultExpr = h.returnValue ? renderExpr(h.returnValue, renderCtx) : ":ok";
   const body = assembleHandlerBody(lines, resultExpr);
+  // Emit the `Context` alias iff the body actually references the context
+  // module — a `with`-clause alone is NOT proof (a handler whose `with`
+  // clauses only call `D.Resources.*` references no context module, so the
+  // alias would be unused and fail -Werror).  Keys on the same
+  // `contextModuleFq` substring the rewrite below uses.
+  const hasContextCall = body.includes(contextModuleFq);
   // Rewrite the fully-qualified context module to the `Context` alias (kept
   // tidy + short-line-safe), exactly as the workflow emitter does.  Only when
   // there is a context call — otherwise the alias would be unused (-Werror).
