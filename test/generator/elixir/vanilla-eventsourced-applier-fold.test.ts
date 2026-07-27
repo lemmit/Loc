@@ -21,19 +21,25 @@ const AGG_SRC = `system EsFold {
       event Tagged { order: Order id, tag: string }
       event Discounted { order: Order id, amount: int }
       event Charged { order: Order id, amt: int }
+      event Boxed { order: Order id, label: string }
       aggregate Order persistedAs: eventLog {
         customer: string
         total: int
         tags: string[]
         charges: Money[]
+        contains boxes: Box[]
+        entity Box { label: string  contains items: Item[] }
+        entity Item { sku: string }
         create place(customer: string) { emit Placed { order: id, customer: customer } }
         operation tag(tag: string) { emit Tagged { order: id, tag: tag } }
         operation discount(amount: int) { emit Discounted { order: id, amount: amount } }
         operation charge(amt: int) { emit Charged { order: id, amt: amt } }
+        operation box(label: string) { emit Boxed { order: id, label: label } }
         apply(e: Placed) { customer := e.customer }
         apply(e: Tagged) { tags += e.tag }
         apply(e: Discounted) { total -= e.amount }
         apply(e: Charged) { charges += Money { amount: e.amt, currency: "USD" } }
+        apply(e: Boxed) { boxes += Box { label: e.label } }
       }
       repository Orders for Order {
         find byCustomer(customer: string): Order[] where this.customer == customer
@@ -69,17 +75,26 @@ describe("vanilla elixir ES applier fold — collection/scalar mutations", () =>
     expect(fold).not.toContain("%Api.Orders.Events.Discounted{} = _e");
   });
 
-  it("folds a value-object collection `+=` as a plain map (no struct module needed)", async () => {
-    // Renderer-level fact: a VO `new` lowers to an `object` expression → a plain
-    // map, which the ES controller's `serialize_<vo>/1` reads by either key — so
-    // the FOLD needs no struct module and is NOT gated.  (A `Money[]` field on an
-    // ES aggregate has a separate, applier-independent schema gap — the
-    // `<agg>_charges` table-backed schema `belongs_to` the ES struct — so the
-    // whole VO-collection-on-ES project doesn't `mix compile` yet; that's why
-    // this stays a unit assertion, not a compile fixture.)
-    const fold = (await generateSystemFiles(AGG_SRC)).get("api/lib/api/orders/order_fold.ex")!;
+  it("folds a value-object collection `+=` as a plain map (no child schema emitted)", async () => {
+    const files = await generateSystemFiles(AGG_SRC);
+    const fold = files.get("api/lib/api/orders/order_fold.ex")!;
     expect(fold).toContain(
       'state = %{state | charges: (state.charges || []) ++ [%{amount: e.amt, currency: "USD"}]}',
+    );
+    // Drain B: the ES aggregate emits NO `<agg>_charges` value-collection Ecto
+    // schema (which would `belongs_to` the plain-struct ES aggregate → a compile
+    // error over a table the migration never creates).
+    expect(files.has("api/lib/api/orders/order_charges.ex")).toBe(false);
+  });
+
+  it("folds a contained ENTITY-PART `+=` as a wire-shape map with a minted id", async () => {
+    // Drain A: an ES aggregate has no `%Ctx.Box{}` Ecto schema, so the fold builds
+    // a plain map over the part's wire shape — a fresh id, the provided fields,
+    // and `[]` for the part's OWN containment (`items`) so `serialize_box/1`'s
+    // `Enum.map(record.items || [], …)` is safe (part-in-part).
+    const fold = (await generateSystemFiles(AGG_SRC)).get("api/lib/api/orders/order_fold.ex")!;
+    expect(fold).toContain(
+      "state = %{state | boxes: (state.boxes || []) ++ [%{id: Ecto.UUID.generate(), label: e.label, items: []}]}",
     );
   });
 

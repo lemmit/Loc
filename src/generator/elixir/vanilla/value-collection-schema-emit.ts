@@ -69,6 +69,16 @@ export function emitVanillaValueCollectionSchemas(
   const ctxSnake = snake(ctx.name);
   const enumsByName = new Map(ctx.enums.map((e) => [e.name, e]));
   for (const agg of ctx.aggregates) {
+    // Event-sourced aggregates have NO state table — the migration emits no
+    // `<owner>_<field>` child table for them, and the aggregate module is a
+    // plain in-memory struct (not an Ecto schema).  A value-collection child
+    // schema's `belongs_to :<owner>, <Struct>` would therefore reference a
+    // non-Ecto module (a `mix compile` "invalid association" error) over a
+    // table that doesn't exist.  On ES the VO collection lives INLINE in the
+    // folded struct as a list of maps (the applier's `charges += Money{…}`
+    // appends one), which the ES controller's `serialize_<vo>/1` projects — no
+    // child schema needed.
+    if (agg.persistedAs === "eventLog") continue;
     for (const { vc, vo } of valueCollectionsWithVo(agg, ctx)) {
       out.set(
         `lib/${appSnake}/${ctxSnake}/${vc.childTable}.ex`,

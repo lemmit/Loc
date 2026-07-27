@@ -206,11 +206,16 @@ function renderFoldModule(appModule: string, ctxModule: string, agg: AggregateIR
     contextModule: `${appModule}.${ctxModule}`,
     foundation: "vanilla",
   };
+  // A `boxes += Box{…}` fold constructs a contained entity part; the fold
+  // projects the part's wire shape into a plain map (no `%Ctx.Box{}` Ecto
+  // schema exists on the ES path), so it needs to resolve the part by name.
+  // Every entity part is declared at aggregate level, so `agg.parts` is flat.
+  const foldOpts = { resolvePart: (name: string) => agg.parts.find((p) => p.name === name) };
 
   const clauses = (agg.appliers ?? []).map((ap) => {
-    const usesParam = foldStmtsUseParam(ap.statements, ap.param, renderCtx);
+    const usesParam = foldStmtsUseParam(ap.statements, ap.param, renderCtx, foldOpts);
     const bind = usesParam ? snake(ap.param) : `_${snake(ap.param)}`;
-    const body = ap.statements.map((s) => renderFoldStatement(s, renderCtx)).join("\n");
+    const body = ap.statements.map((s) => renderFoldStatement(s, renderCtx, foldOpts)).join("\n");
     return `  def apply_event(state, %${eventsModule}.${upperFirst(ap.event)}{} = ${bind}) do
 ${body}
     state

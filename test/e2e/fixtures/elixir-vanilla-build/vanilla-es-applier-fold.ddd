@@ -1,33 +1,37 @@
-// M-T6.2 — event-sourced applier folds that MUTATE state with `+=` / `-=`.
+// M-T6.2 — event-sourced applier folds that MUTATE state (drained, no gate).
 // Before M-T6.2 the vanilla fold renderer handled only `:=` / `let` and emitted
 // a silent `# unsupported applier statement: add|remove` comment for a compound
-// mutation, so a collection-append / scalar-arithmetic fold compiled GREEN while
-// dropping the transition at runtime.  This fixture compile-gates the fold of:
-//   * a scalar `-=`               (`balance -= e.amount`)
-//   * a primitive-collection `+=` (`tags += e.tag`)
-// under `mix compile --warnings-as-errors`.
-//
-// Deliberately NOT here:
-//   * a value-object-collection fold (`charges += Money{…}`) — the fold renders
-//     correctly (a plain map) but a `Money[]` field on an EVENT-SOURCED aggregate
-//     emits a table-backed `<agg>_charges` Ecto schema with `belongs_to` the ES
-//     aggregate (a plain struct, not an Ecto schema), which fails compile — a
-//     pre-existing, applier-independent VO-collection-on-ES schema gap, out of
-//     scope for the applier-fold fix.  The fold rendering itself is unit-pinned.
-//   * a part-CONSTRUCTING fold (`boxes += Box{…}`) — honestly gated by
-//     `loom.vanilla-es-applier-unsupported` (test/ir/vanilla-es-applier-support.test.ts).
+// mutation, so a fold compiled GREEN while dropping the transition at runtime.
+// This fixture compile-gates every fold shape under `mix compile
+// --warnings-as-errors`:
+//   * scalar `-=`                  (`balance -= e.amount`)
+//   * primitive-collection `+=`    (`tags += e.tag`)
+//   * value-object-collection `+=` (`charges += Money{…}` → plain map; the ES
+//     path emits NO `<agg>_charges` child schema — it folds inline)
+//   * contained-ENTITY-PART `+=`   (`boxes += Box{…}` → a wire-shape map with a
+//     minted id; the ES path emits no `%…Box{}` Ecto struct)
+//   * part-in-part                 (`Box` itself `contains items` → the box map
+//     carries `items: []`, which `serialize_box/1` reads safely)
 system Ledger {
   subdomain Core {
     context Accounts {
+      valueobject Money { amount: int  currency: string }
+
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
       event Withdrawn { account: Account id, amount: int }
       event Tagged { account: Account id, tag: string }
+      event Charged { account: Account id, amt: int }
+      event Boxed { account: Account id, label: string }
 
       aggregate Account persistedAs: eventLog {
         owner: string
         balance: int
         tags: string[]
+        charges: Money[]
+        contains boxes: Box[]
+        entity Box { label: string  contains items: Item[] }
+        entity Item { sku: string }
 
         create open(owner: string) {
           emit Opened { account: id, owner: owner }
@@ -48,6 +52,15 @@ system Ledger {
           emit Tagged { account: id, tag: tag }
         }
 
+        operation charge(amt: int) {
+          precondition amt > 0
+          emit Charged { account: id, amt: amt }
+        }
+
+        operation box(label: string) {
+          emit Boxed { account: id, label: label }
+        }
+
         apply(e: Opened) {
           owner := e.owner
           balance := 0
@@ -62,11 +75,22 @@ system Ledger {
           balance -= e.amount
         }
 
-        // primitive-collection `+=` — the ONLY use of `e` is inside the mutation,
-        // so the applier head must bind `e` (not `_e`) or this fails
-        // `--warnings-as-errors`.
+        // primitive-collection `+=` — the applier head must bind `e` (not `_e`)
+        // or `e.tag` is an unbound-variable compile error.
         apply(e: Tagged) {
           tags += e.tag
+        }
+
+        // value-object-collection `+=` — folds as a plain map (Drain B: no child
+        // schema emitted for the ES aggregate).
+        apply(e: Charged) {
+          charges += Money { amount: e.amt, currency: "USD" }
+        }
+
+        // contained-entity-part `+=` with part-in-part (Drain A) — folds to a map
+        // with a minted id + `items: []`.
+        apply(e: Boxed) {
+          boxes += Box { label: e.label }
         }
       }
 
