@@ -41,7 +41,7 @@ import { aggregateNeedsUpdateChangeset } from "./changeset-emit.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritance-emit.js";
-import { readPreloadRels } from "./read-preload.js";
+import { containmentPreloadRels, readPreloadRels } from "./read-preload.js";
 import {
   containsRefCollField,
   hasRefColls,
@@ -135,12 +135,13 @@ function renderRepository(
   // associations — preloaded on every read so the wire shape materialises (an
   // unloaded association serialises as `%Ecto.Association.NotLoaded{}`, which
   // Jason can't encode → 500).  Empty on an embedded aggregate (the parts fold
-  // into the jsonb column and load with the row).  (Value-object collections
-  // fold into the shared `readPreloadRels` list below alongside these.)
-  const containmentRels =
-    ctx && usesRelationalContainments(agg, ctx, sys)
-      ? agg.contains.map((c) => `:${snake(c.name)}`)
-      : [];
+  // into the jsonb column and load with the row).  Part-in-part nests the
+  // preload (`lines: :tags`), so keyword (nested) entries trail the atoms — the
+  // update path preloads the SAME shape before `cast_assoc`.  (Value-object
+  // collections fold into the shared `readPreloadRels` list below alongside
+  // these.)
+  const containmentSplit = containmentPreloadRels(agg, ctx, sys);
+  const containmentRels = [...containmentSplit.flat, ...containmentSplit.nested];
 
   // Lifecycle stamps (`with audit`/`auditable`, `stamp onCreate/onUpdate`) →
   // `put_change` pipe lines on the changeset right before the Repo write.  A

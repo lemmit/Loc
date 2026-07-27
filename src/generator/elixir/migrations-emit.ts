@@ -173,6 +173,32 @@ function orderParentTablesByFk(tables: TableShape[]): TableShape[] {
   return order;
 }
 
+/** Order part tables (containment children + value-collection children) so each
+ *  is created AFTER the table its cascade FK references — a parent aggregate
+ *  (pre-emitted, in `parentNames`) or a SIBLING PART (a part-in-part grandchild
+ *  like `tags` FKs `lines`).  Same FK-topological algorithm as
+ *  `orderParentTablesByFk`, but `emitted` is pre-seeded with the already-created
+ *  aggregate tables, and only cascade FKs onto OTHER PART tables constrain the
+ *  order (a non-cascade cross-aggregate FK targets a parent, already emitted). */
+function orderPartTablesByFkTopo(partTables: TableShape[], parentNames: Set<string>): TableShape[] {
+  const partNames = new Set(partTables.map((t) => t.name));
+  const remaining = [...partTables].sort((a, b) => a.name.localeCompare(b.name));
+  const emitted = new Set<string>(parentNames);
+  const order: TableShape[] = [];
+  while (remaining.length > 0) {
+    let idx = remaining.findIndex((t) =>
+      t.foreignKeys.every(
+        (fk) => fk.refTable === t.name || !partNames.has(fk.refTable) || emitted.has(fk.refTable),
+      ),
+    );
+    if (idx === -1) idx = 0; // cycle — best effort, keep alphabetical head
+    const [t] = remaining.splice(idx, 1);
+    order.push(t!);
+    emitted.add(t!.name);
+  }
+  return order;
+}
+
 function emitInitial(
   m: MigrationsIR,
   appModule: string,
@@ -214,8 +240,11 @@ function emitInitial(
   for (let i = 0; i < parentTables.length; i++) {
     writeInitialFile(parentTables[i]!, base + i, appModule, out);
   }
-  // Parts (incl. value-collection children) — grouped by parent.
+  // Parts (incl. value-collection children) — grouped by parent AGGREGATE,
+  // byte-identical to before: parent i's parts get `base + N*10 + i*10 + (j+1)`.
   const parentCount = parentTables.length;
+  const parentNames = new Set(parentTables.map((t) => t.name));
+  const tier0 = new Set<string>();
   for (let i = 0; i < parentTables.length; i++) {
     const parent = parentTables[i]!;
     const partsOfThis = partTables
@@ -224,8 +253,22 @@ function emitInitial(
       )
       .sort((a, b) => a.name.localeCompare(b.name));
     for (let j = 0; j < partsOfThis.length; j++) {
-      const ts = base + parentCount * 10 + i * 10 + (j + 1);
-      writeInitialFile(partsOfThis[j]!, ts, appModule, out);
+      writeInitialFile(partsOfThis[j]!, base + parentCount * 10 + i * 10 + (j + 1), appModule, out);
+      tier0.add(partsOfThis[j]!.name);
+    }
+  }
+  // Part-in-part GRANDCHILDREN — a part whose cascade FK targets a SIBLING PART
+  // (`tags` FKs `lines`), not a parent aggregate, so the parent-grouped loop
+  // above never emits it (the elixir-specific reason relational part-in-part was
+  // gated).  Emit them AFTER the whole tier-0 block (so every FK target is
+  // already created) in FK-topological order (a deeper grandchild after its
+  // parent part).  Existing single-level output is untouched — this block is
+  // empty unless a part contains a part.
+  const grandchildren = partTables.filter((t) => !tier0.has(t.name));
+  if (grandchildren.length > 0) {
+    const ordered = orderPartTablesByFkTopo(grandchildren, new Set([...parentNames, ...tier0]));
+    for (let m = 0; m < ordered.length; m++) {
+      writeInitialFile(ordered[m]!, base + parentCount * 20 + m, appModule, out);
     }
   }
   // Join tables — placed above the part block so the references on

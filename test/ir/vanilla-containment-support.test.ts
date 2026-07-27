@@ -1,18 +1,21 @@
-// Vanilla (plain Ecto) containment gate.  Nested entity parts now persist on a
-// vanilla aggregate two ways:
+// Vanilla (plain Ecto) containment — every shape now persists nested entity
+// parts, so the `loom.vanilla-containment-unsupported` gate is FULLY RETIRED
+// (M-T6.2 Drain C).  This suite is the regression guard that no containment
+// shape re-gates:
 //   * `shape: embedded` — each part is an Ecto `embedded_schema` the root
 //     `embeds_many`s (inline jsonb column); a containment-mutating op
 //     (`items += Item{…}`) appends + `put_embed`s (DEBT-32).
 //   * RELATIONAL (default shape, §11c) — each part is a child TABLE the root
-//     `has_many`s + `cast_assoc`s, preloaded on read (the value-object
-//     collection pattern).  Persist + read AND in-operation containment mutation
-//     (`items += Item{…}`) are now wired: the op persist tail `put_assoc`s the
-//     mutated part-struct list (`on_replace: :delete` rewrites the child rows),
-//     so `loom.vanilla-containment-mutation-unsupported` is retired.
+//     `has_many`s + `cast_assoc`s, preloaded on read.  Persist + read AND
+//     in-operation mutation (`items += Item{…}`, `put_assoc`) are wired.
+//   * RELATIONAL part-in-part (Drain C) — a part whose OWN `contains` folds to a
+//     `has_many` on its own grandchild table (the migration emits it FK'd to the
+//     direct parent, `renderPartSchema` recurses `has_many`/`cast_assoc`, and the
+//     read/update preload nests `[items: :tags]`).  Boot-verified nested
+//     create → read round-trip on real Postgres.
 //   * `shape: document` (Route A) — each part folds into the `<Agg>.Data` embed
-//     as `embeds_many`/`embeds_one` (same as embedded), the changeset `cast_embed`s
-//     it, and the wireShape serializer projects it through `serialize_<part>/1`.
-//     Boot-verified round-trip; the document containment gate is retired.
+//     as `embeds_many`/`embeds_one`, the changeset `cast_embed`s it, and the
+//     wireShape serializer projects it through `serialize_<part>/1`.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -35,17 +38,20 @@ async function containmentErrors(
  *  `mutates` adds an `items += Item{…}` operation (the gated relational case). */
 function sys(
   platform: string,
-  opts: { contains: boolean; shape?: string; mutates?: boolean },
+  opts: { contains: boolean; shape?: string; mutates?: boolean; nested?: boolean },
 ): string {
   const shapeMod = opts.shape ? ` shape(${opts.shape})` : "";
   const op = opts.mutates
     ? `
         operation addItem(sku: string, qty: int) { items += Item { sku: sku, qty: qty } }`
     : "";
+  // `nested` makes Item itself `contains tags` — a relational part-in-part.
+  const itemBody = opts.nested ? " contains tags: Tag[]" : "";
+  const tagDecl = opts.nested ? "\n        entity Tag { label: string }" : "";
   const body = opts.contains
     ? `
         contains items: Item[]
-        entity Item { sku: string  qty: int }${op}`
+        entity Item { sku: string  qty: int${itemBody} }${tagDecl}${op}`
     : "";
   return `
 system Shop {
@@ -87,6 +93,10 @@ describe("vanilla containment support gate", () => {
     ).toEqual([]);
     // …and neither does the plain unsupported gate.
     expect(await containmentErrors(source)).toEqual([]);
+  });
+
+  it("accepts RELATIONAL part-in-part on a vanilla aggregate (Drain C — grandchild has_many)", async () => {
+    expect(await containmentErrors(sys("elixir", { contains: true, nested: true }))).toEqual([]);
   });
 
   it("accepts an entity containment on a shape: document vanilla aggregate (Route A — embeds_many)", async () => {
