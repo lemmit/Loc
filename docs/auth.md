@@ -493,9 +493,24 @@ def to_wire_masked(self, root: Person) -> dict[str, object]:
     return d
 ```
 
+On **Java** the aggregate's `<Agg>Response` record gains a second static mapper,
+`fromMasked`, that binds the ambient principal off the static
+`CurrentUserAccessor.currentOrNull()` and redacts each masked component; the read
+services + explicit handlers project through it, while audit before/after
+snapshots keep the unmasked `from`.
+
+```java
+// generated (Spring) — audit keeps `from`; reads use `fromMasked`
+public static PersonResponse fromMasked(Person value) {
+    User __maskUser = CurrentUserAccessor.currentOrNull();
+    return new PersonResponse(value.id().value(), value.name(),
+        (__maskUser != null && (__maskUser.permissions().contains("hr.salaryUnmask"))) ? value.salary() : null);
+}
+```
+
 **Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
-plus read redaction on **node**, **.NET**, and **Python**, have shipped. The
-remaining two backends (**Java** / **Elixir**) still **compile-error** on a
+plus read redaction on **node**, **.NET**, **Python**, and **Java**, have
+shipped. The remaining backend (**Elixir**) still **compile-errors** on a
 `mask unless` field (`loom.field-mask-unsupported`) rather than silently ship the
 value — a declared mask never leaks. The write-side (`write(...)` /
 `readonly when`) is the next slice.
@@ -503,7 +518,7 @@ value — a declared mask never leaks. The write-side (`write(...)` /
 | Diagnostic | When |
 | --- | --- |
 | `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
-| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (Java / Elixir) |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (Elixir) |
 | `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
 | *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 

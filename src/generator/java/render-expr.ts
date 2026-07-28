@@ -46,6 +46,12 @@ import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 export interface JavaRenderContext {
   /** Rendered name for the implicit receiver (`this` by default). */
   thisName: string;
+  /** Override for a `current-user` ref — the local the ambient principal was
+   *  read into.  The read-mask projection (`<Agg>Response.from`) sets it to the
+   *  method-local `__maskUser` (bound off the STATIC `CurrentUserAccessor
+   *  .currentOrNull()`), so the fail-closed predicate reads that narrowed local
+   *  rather than the bean-injected `currentUser` a static mapper can't see. */
+  currentUserExpr?: string;
   /** Aggregate whose bodies we're lowering — used by `new <Part>` to
    *  order the part's constructor arguments by declared field order. */
   agg?: EnrichedAggregateIR;
@@ -458,7 +464,7 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
-      return "currentUser";
+      return ctx.currentUserExpr ?? "currentUser";
     default:
       return e.name;
   }

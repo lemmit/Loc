@@ -569,6 +569,9 @@ function emitPagedRunAction(
   const run = pagedRunStmt(h, ctx);
   const agg = run.aggName;
   responsePkgs.add(responsePkgOf(agg));
+  // A masked aggregate redacts its paged items fail-closed (authorization.md §5).
+  const runAgg = ctx.aggregates.find((a) => a.name === agg);
+  const runFrom = runAgg?.fields.some((f) => f.maskUnless) ? "fromMasked" : "from";
   const pathNames = pathParamNames(r.path);
   const bind = new Map(
     h.params.map((p) => [
@@ -594,7 +597,7 @@ function emitPagedRunAction(
     `    @GetMapping("${r.path}")`,
     `    public ResponseEntity<?> ${lowerFirst(h.name)}(${actionParams}) {`,
     `        var result = ${field}.handle(${callArgs});`,
-    `        return ResponseEntity.ok(new Paged<>(result.items().stream().map(${agg}Response::from).toList(),`,
+    `        return ResponseEntity.ok(new Paged<>(result.items().stream().map(${agg}Response::${runFrom}).toList(),`,
     `            result.page(), result.pageSize(), result.total(), result.totalPages()));`,
     `    }`,
     ``,
@@ -621,12 +624,27 @@ function projectReturn(
     ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
   if (!owning) return "result";
   responsePkgs.add(responsePkgOf(owning.name));
+  // A `mask unless` aggregate redacts its response fields fail-closed
+  // (authorization.md §5) — a handler returning such an aggregate projects
+  // through the redacting `fromMasked` mapper.  Only a masked AGGREGATE (never a
+  // part, which has no `fromMasked`) qualifies.
+  const projectedAgg = ctx.aggregates.find((a) => a.name === info.base);
+  const masked = projectedAgg?.fields.some((f) => f.maskUnless) ?? false;
+  const from = masked ? "fromMasked" : "from";
+  if (retType.kind === "entity") return `${info.base}Response.${from}(result)`;
   // A bare (non-optional) entity gets the clean factory call; optional /
   // collection returns defer to the shared wire helper, which null-guards and
-  // maps elements via `<Ent>Response::from`.
-  return retType.kind === "entity"
-    ? `${info.base}Response.from(result)`
-    : domainToWire(retType, "result");
+  // maps elements via `<Ent>Response::from`.  A masked aggregate reproduces that
+  // shape with `fromMasked` (the wire helper is mask-blind).
+  if (masked) {
+    if (retType.kind === "array") {
+      return `result.stream().map(${info.base}Response::fromMasked).toList()`;
+    }
+    if (retType.kind === "optional") {
+      return `result == null ? null : ${info.base}Response.fromMasked(result)`;
+    }
+  }
+  return domainToWire(retType, "result");
 }
 
 /** Emit one `@RestController` per api whose route list is non-empty: each
