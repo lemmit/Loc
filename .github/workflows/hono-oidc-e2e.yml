@@ -31,7 +31,7 @@ on:
   # negative-authz (M-T3.13) + OIDC assertions gate the PR that changes them,
   # not a red main a merge later.
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize, reopened]
   merge_group:
 permissions:
   contents: read
@@ -47,7 +47,7 @@ jobs:
     # merge_group and manual (`workflow_dispatch`) runs always proceed.
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.label.name == 'run-e2e'
+      contains(github.event.pull_request.labels.*.name, 'run-e2e')
     # Keycloak boot (~25s) + the generated project's npm install (cold
     # ~3-4min) dominate.  12min cap.
     timeout-minutes: 12
