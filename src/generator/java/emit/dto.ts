@@ -18,7 +18,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId } from "../render-expr.js";
+import { javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
   domainToWire,
@@ -317,6 +317,8 @@ function wireRecord(
   const imports = new Set<string>();
   const components: string[] = [];
   const args: string[] = [];
+  const maskedArgs: string[] = [];
+  let maskedAny = false;
   if (declared) {
     // The record omits `id` (grammar-reserved) — re-prepend it exactly as the
     // wireShape id row derives, so the leading component/mapper match.
@@ -334,10 +336,33 @@ function wireRecord(
   } else {
     const shape = forApiRead(wireFieldsFor(entity));
     for (const w of shape) {
-      const t = wireFieldType(w);
+      const masked = w.maskUnless !== undefined;
+      // A `mask unless` field can be redacted to null on a RESPONSE (fail-closed),
+      // so its component must admit null — force the boxed/nullable wire type even
+      // when the field is declared non-optional (authorization.md §5).  The
+      // component is shared by both mappers; `from` still projects the real value
+      // (auto-boxed), only `fromMasked` may pass null.
+      const t = masked ? eff(wireFieldType(w), true) : wireFieldType(w);
       collectWireImports(t, imports);
       components.push(`${wireJavaType(t, "Response")} ${w.name}`);
-      args.push(domainToWire(t, `value.${accessor(w)}`));
+      const projected = domainToWire(t, `value.${accessor(w)}`);
+      // `from` stays UNMASKED — internal audit before/after snapshots project
+      // through it and must record the real value.
+      args.push(projected);
+      if (masked) {
+        // `fromMasked` redacts unless the ambient principal satisfies the
+        // predicate.  `__maskUser` is bound off the STATIC `CurrentUserAccessor
+        // .currentOrNull()` (a static mapper injects no bean); an unauthenticated
+        // request (`__maskUser == null`) always redacts.
+        maskedAny = true;
+        const pred = renderJavaExpr(w.maskUnless!, {
+          thisName: "value",
+          currentUserExpr: "__maskUser",
+        });
+        maskedArgs.push(`(__maskUser != null && (${pred})) ? ${projected} : null`);
+      } else {
+        maskedArgs.push(projected);
+      }
     }
   }
   // Co-located provenance (provenance.md): each provenanced field appends a
@@ -350,10 +375,32 @@ function wireRecord(
     components.push(`ProvLineage ${f.name}Provenance`);
     args.push(`value.${f.name}Provenance()`);
   }
+  // A `mask unless` field redacts fail-closed on a RESPONSE via a SECOND mapper,
+  // `fromMasked` — `from` stays unmasked for audit snapshots.  `fromMasked` binds
+  // the ambient principal once off the STATIC accessor (a static mapper injects
+  // no bean), then each masked arg guards on it (authorization.md §5).  The
+  // imports + second method ride in only when a mask is present, so mask-free
+  // records stay byte-identical.
+  if (maskedAny) {
+    imports.add(`${basePkg}.auth.CurrentUserAccessor`);
+    imports.add(`${basePkg}.auth.User`);
+  }
   const body = [
     `    public static ${recordName} from(${entity.name} value) {`,
     `        return new ${recordName}(${args.join(", ")});`,
     `    }`,
+    ...(maskedAny
+      ? [
+          ``,
+          `    /** Response projection with \`mask unless\` fields redacted to null`,
+          `     *  unless the ambient principal satisfies each field's predicate`,
+          `     *  (fail-closed — unauthenticated redacts). */`,
+          `    public static ${recordName} fromMasked(${entity.name} value) {`,
+          `        User __maskUser = CurrentUserAccessor.currentOrNull();`,
+          `        return new ${recordName}(${maskedArgs.join(", ")});`,
+          `    }`,
+        ]
+      : []),
   ];
   return {
     name: `${recordName}.java`,

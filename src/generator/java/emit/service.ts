@@ -79,6 +79,10 @@ export function renderJavaService(
   const createInputs = forCreateInput(agg.fields);
   const eff = (t: TypeIR, optional: boolean): TypeIR =>
     optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
+  // A `mask unless` aggregate projects RESPONSE reads through the redacting
+  // `fromMasked` mapper (authorization.md §5); audit before/after snapshots keep
+  // the unmasked `from`.  Byte-identical (`from`) when no field is masked.
+  const respFrom = agg.fields.some((f) => f.maskUnless) ? "fromMasked" : "from";
 
   // --- create -----------------------------------------------------------------
   // Event-sourced aggregates are constructible through their `create`
@@ -170,7 +174,7 @@ export function renderJavaService(
   const readLines = [
     `    @Transactional(readOnly = true)`,
     `    public ${agg.name}Response get${agg.name}ById(${idClass} id) {`,
-    `        return repository.findById(id).map(${agg.name}Response::from).orElse(null);`,
+    `        return repository.findById(id).map(${agg.name}Response::${respFrom}).orElse(null);`,
     `    }`,
     ``,
     ...(isPagedAutoAll(repo)
@@ -180,7 +184,7 @@ export function renderJavaService(
           `    @Transactional(readOnly = true)`,
           `    public Paged<${agg.name}Response> all${agg.name}(int page, int pageSize, String sort, String dir) {`,
           `        var result = repository.findAllPaged(page, pageSize, sort, dir);`,
-          `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+          `        return new Paged<>(result.items().stream().map(${agg.name}Response::${respFrom}).toList(),`,
           `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
           `    }`,
           ``,
@@ -188,7 +192,7 @@ export function renderJavaService(
       : [
           `    @Transactional(readOnly = true)`,
           `    public List<${agg.name}Response> all${agg.name}() {`,
-          `        return repository.findAll().stream().map(${agg.name}Response::from).toList();`,
+          `        return repository.findAll().stream().map(${agg.name}Response::${respFrom}).toList();`,
           `    }`,
           ``,
         ]),
@@ -212,7 +216,7 @@ export function renderJavaService(
           `    @Transactional(readOnly = true)`,
           `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
           `        var result = repository.${f.name}(${pagedArgs});`,
-          `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+          `        return new Paged<>(result.items().stream().map(${agg.name}Response::${respFrom}).toList(),`,
           `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
           `    }`,
           ``,
@@ -223,7 +227,7 @@ export function renderJavaService(
           `    @Transactional(readOnly = true)`,
           `    public ${agg.name}Response ${f.name}(${params}) {`,
           `        var found = repository.${f.name}(${args});`,
-          `        return found == null ? null : ${agg.name}Response.from(found);`,
+          `        return found == null ? null : ${agg.name}Response.${respFrom}(found);`,
           `    }`,
           ``,
         ];
@@ -231,7 +235,7 @@ export function renderJavaService(
       return [
         `    @Transactional(readOnly = true)`,
         `    public List<${agg.name}Response> ${f.name}(${params}) {`,
-        `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::from).toList();`,
+        `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::${respFrom}).toList();`,
         `    }`,
         ``,
       ];
