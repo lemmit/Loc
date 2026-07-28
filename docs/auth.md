@@ -572,16 +572,23 @@ common domain word.
 `fieldCapabilities` (`{ "<Agg>.<field>": { "write": true } }`, alongside `mask`),
 the review/diff surface for a field's authorization posture.
 
+Each backend enforces at the create + operation handler, before the domain call —
+node/`ForbiddenError`, .NET/`ForbiddenException` (command handler), Python raising
+the shared `ForbiddenError`, Java/`ForbiddenException` (service method, off the
+static `CurrentUserAccessor.currentOrNull()`), and Elixir returning a 403
+`ProblemDetails` from a `cond` (the controller action reads `conn.assigns`
+directly). Each guarded route also declares `403` in its OpenAPI.
+
 **Status.** Grammar + IR + printer + wire-spec `fieldCapabilities` + validation
-have shipped (foundation); a write-gated field is a fail-closed compile error
-(`loom.field-write-gate-unsupported`) on **every** backend until per-backend
-enforcement stacks (node first, then .NET/Python/Java/Elixir), exactly as the mask
-redaction stacked.
+plus enforcement on **all five backends** (node, .NET, Python, Java, Elixir) have
+shipped — a write-gated field now returns 403 fail-closed on every backend when a
+client supplies it without permission. Row-aware gates (referencing the old row
+value) are the documented follow-up.
 
 | Diagnostic | When |
 | --- | --- |
 | `loom.field-write-gate-not-current-user` | the predicate references the row / a param, not just `currentUser` |
-| `loom.field-write-gate-unsupported` | the hosting backend does not yet enforce the write gate (all backends today — enforcement is the stacked follow-on) |
+| `loom.field-write-gate-unsupported` | the hosting backend does not enforce the write gate (none today — every backend enforces it) |
 | *(AST)* `'write(...)' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates
