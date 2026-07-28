@@ -17,6 +17,7 @@ import {
   type EnrichedEntityPartIR,
   type ExprIR,
   exprUsesCurrentUser,
+  type FieldIR,
   findUsesCurrentUser,
   type InvariantIR,
   type OperationIR,
@@ -248,23 +249,25 @@ export function buildPyRoutesFile(
     // route and the update stamp rides the operation routes — so a read-only
     // aggregate (no create surface, no operations) references neither and must
     // not import `User` (ruff F401 under `--warnings-as-errors`).
-    publicOps.some(operationUsesCurrentUser) ||
-      emittableFinds(repo).some(findUsesCurrentUser) ||
-      // A find `requires` gate that reads currentUser binds `current_user: User`.
-      emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
-      (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
-      (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
-      // A `currentUser.*` create-field default binds `current_user: User` in
-      // the create handler for its per-request coalesce.
-      (hasCreateFactory(agg) &&
-        forCreateInput(agg.fields).some(
-          (f) =>
-            f.default !== undefined &&
-            isServerSourcedDefault(f.default) &&
-            exprUsesCurrentUser(f.default),
-        ))
-      ? "from app.auth.user import User"
-      : null,
+    authUserImportLine(
+      publicOps.some(operationUsesCurrentUser) ||
+        emittableFinds(repo).some(findUsesCurrentUser) ||
+        // A find `requires` gate that reads currentUser binds `current_user: User`.
+        emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
+        (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
+        (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
+        // A `currentUser.*` create-field default binds `current_user: User` in
+        // the create handler for its per-request coalesce.
+        (hasCreateFactory(agg) &&
+          forCreateInput(agg.fields).some(
+            (f) =>
+              f.default !== undefined &&
+              isServerSourcedDefault(f.default) &&
+              exprUsesCurrentUser(f.default),
+          )),
+      // The write-side field gate binds the non-raising `current_user()` getter.
+      emitsWriteGuard(agg),
+    ),
     "from app.db.engine import get_session",
     // Wire-format helpers for a scalar operation-return value (money → its
     // canonical decimal string, datetime → ISO-8601) — the same projection
@@ -787,6 +790,78 @@ function stampCall(agg: EnrichedAggregateIR, event: "create" | "update", varName
   return `    ${varName}._stamp_on_${event}(${stampUsesUser(agg, event) ? "current_user" : ""})`;
 }
 
+// --- write-side field gate ------------------------------------------------------
+
+/** Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
+ *  authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
+ *  A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that
+ *  must hold whenever a CLIENT-SUPPLIED param of the SAME NAME is present
+ *  (op-param granularity — Loom has no PATCH partial update).  Returns the
+ *  write-gated fields covered by `params`, in param order, deduped. */
+function writeGatedParams(
+  agg: EnrichedAggregateIR,
+  params: readonly { name: string }[],
+): FieldIR[] {
+  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
+  const seen = new Set<string>();
+  const out: FieldIR[] = [];
+  for (const p of params) {
+    const f = gated.get(p.name);
+    if (f && !seen.has(f.name)) {
+      seen.add(f.name);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
+/** The handler-body guard lines for {@link writeGatedParams}: a fail-closed 403
+ *  (`ForbiddenError` → the routes onError → RFC-7807) emitted BEFORE the domain
+ *  call.  The gate is principal-only, so it fails fast (no aggregate load
+ *  needed).  Fail-closed: an unauthenticated caller (`current_user() is None`)
+ *  is rejected.  Binds `__write_user` ONCE per handler even when several params
+ *  are gated (via the non-raising `current_user()` getter — the same one the
+ *  read-mask projection reads).  Byte-identical (no lines) when no supplied
+ *  param is write-gated. */
+function writeGateGuards(agg: EnrichedAggregateIR, params: readonly { name: string }[]): string[] {
+  const gated = writeGatedParams(agg, params);
+  if (gated.length === 0) return [];
+  const out: string[] = ["    __write_user = current_user()"];
+  for (const f of gated) {
+    const pred = renderPyExpr(f.writeGate!, { thisName: "self", currentUserExpr: "__write_user" });
+    out.push(
+      `    if not (__write_user is not None and (${pred})):`,
+      `        raise ForbiddenError(${JSON.stringify(`Forbidden: write ${f.name}`)})`,
+    );
+  }
+  return out;
+}
+
+/** The single `from app.auth.user import …` line for the routes module — `User`
+ *  (threaded principal / stamp actor) and/or `current_user` (the non-raising
+ *  getter the write-side field gate reads).  Null when neither is referenced, so
+ *  a principal-free routes file stays byte-identical (and never trips ruff F401).
+ *  Names are sorted (isort-stable), matching the repository module's helper. */
+function authUserImportLine(needsUser: boolean, needsGetter: boolean): string | null {
+  const names = [needsUser ? "User" : null, needsGetter ? "current_user" : null]
+    .filter((n): n is string => n != null)
+    .sort();
+  return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
+}
+
+/** Whether ANY route in this aggregate's routes file emits a write-side gate —
+ *  the create route (over its create-input fields / ES create params) or any
+ *  public operation (over its params).  Gates the `current_user` getter import
+ *  so a gate-free routes file stays byte-identical. */
+function emitsWriteGuard(agg: EnrichedAggregateIR): boolean {
+  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  const createParams = esCreate ? esCreate.params : forCreateInput(agg.fields);
+  if (hasCreateFactory(agg) && writeGatedParams(agg, createParams).length > 0) return true;
+  return agg.operations
+    .filter((o) => o.visibility === "public")
+    .some((op) => writeGatedParams(agg, op.params).length > 0);
+}
+
 // --- routes ---------------------------------------------------------------------
 
 // The lifecycle audit row for a `create(...) audited` — staged through the repo
@@ -814,9 +889,14 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     const args = esCreate.params
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
+    const gated = writeGatedParams(agg, esCreate.params).length > 0;
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, gated ? [403] : [])})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
+      // Write-side field gate — reject (403) before constructing the aggregate
+      // when a client-supplied create param is write-gated and the ambient
+      // principal fails its predicate (authorization.md §5).
+      ...writeGateGuards(agg, esCreate.params),
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
       auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
@@ -857,9 +937,15 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     ...(stampUsesPrincipal ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
+  const gated = writeGatedParams(agg, inputs).length > 0;
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, gated ? [403] : [])})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
+    // Write-side field gate — reject (403) before constructing the aggregate
+    // when a client-supplied create-input field is write-gated and the ambient
+    // principal fails its predicate (authorization.md §5).  Fail-fast, principal-
+    // only (no aggregate exists yet).
+    ...writeGateGuards(agg, inputs),
     stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
@@ -1063,6 +1149,10 @@ function operationRoute(
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
   const resolve = conflictResolver(ctx);
+  // Write-side field gate: a client-supplied op param whose name matches a
+  // write-gated field denies with 403 before the domain method runs.
+  const writeGated = writeGatedParams(agg, op.params).length > 0;
+  const writeGateStatuses = writeGated ? [403] : [];
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -1090,8 +1180,10 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), [...versionedConflictStatuses(agg, op, resolve), ...writeGateStatuses], resolve)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      // Write-side field gate — fail-closed 403 before the aggregate loads.
+      ...writeGateGuards(agg, op.params),
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
         : null,
@@ -1158,8 +1250,10 @@ function operationRoute(
     );
   }
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), [...versionedConflictStatuses(agg, op, resolve), ...writeGateStatuses], resolve)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
+    // Write-side field gate — fail-closed 403 before the aggregate loads.
+    ...writeGateGuards(agg, op.params),
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,

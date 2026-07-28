@@ -67,10 +67,11 @@ describe("field write gate — IR gates", () => {
   it.each([
     "node",
     "dotnet",
+    "python",
   ])("%s enforces the write gate — no unsupported diagnostic", async (plat) => {
-    // node (Hono) and dotnet (.NET Mediator command handlers) emit the
-    // fail-closed 403 in their create/op handlers, so a write-gated field hosted
-    // on either is no longer a compile error.
+    // node (Hono), dotnet (.NET Mediator command handlers), and python (FastAPI
+    // route handlers) emit the fail-closed 403 in their create/op handlers, so a
+    // write-gated field hosted on any of them is no longer a compile error.
     const codes = await diags(
       "write(currentUser.permissions.contains(permissions.setSalary))",
       plat,
@@ -79,11 +80,10 @@ describe("field write gate — IR gates", () => {
   });
 
   it.each([
-    "python",
     "java",
     "elixir",
   ])("%s still compile-gates an unenforced write gate (stacked follow-on)", async (plat) => {
-    // The remaining three backends don't enforce yet, so a parsed write gate
+    // The remaining two backends don't enforce yet, so a parsed write gate
     // stays a fail-closed compile error there until each backend slice lands.
     const codes = await diags(
       "write(currentUser.permissions.contains(permissions.setSalary))",

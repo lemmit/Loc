@@ -2948,10 +2948,12 @@ export function validateFieldMask(
 //     so it fails fast rather than silently no-op'ing.  `node` (Hono) enforces
 //     the gate in its create/op handlers (fail-closed 403 before the domain
 //     call); `dotnet` enforces it in its create/operation Mediator command
-//     handlers (fail-closed 403 before the domain method); the other three
-//     backends are the stacked follow-on, each adding its platform here as
+//     handlers (fail-closed 403 before the domain method); `python` enforces it
+//     in its create/operation FastAPI route handlers (fail-closed 403 via
+//     ForbiddenError before the domain call); the remaining two backends
+//     (java, elixir) are the stacked follow-on, each adding its platform here as
 //     enforcement lands.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet"]);
+const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python"]);
 export function validateFieldWriteGate(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
