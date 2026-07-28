@@ -17,6 +17,7 @@ import {
   type TypeIR,
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 
 /** The minimal read shape the query-time projection reuse feeds
  *  `viewFindMethod` — a name, an aggregate source, an optional filter and
@@ -1482,10 +1483,15 @@ function wireValue(
   }
   if (t.kind === "primitive" && t.name === "money") {
     // Money crosses the wire as its canonical decimal STRING on every
-    // backend (Hono `.toString()`, .NET/Java `ToString`, Phoenix
-    // `{type: string, format: decimal}`); a bare Decimal would JSON-encode
-    // as a number and diverge both the payload and the OpenAPI type.
-    return optional ? `(None if ${expr} is None else str(${expr}))` : `str(${expr})`;
+    // backend (Hono `.toFixed(4)`, .NET `ToString("F4")`, Java `setScale(4)`);
+    // a bare Decimal would JSON-encode as a number and diverge both the
+    // payload and the OpenAPI type.  Quantize to the FIXED money scale (RS-12):
+    // a stored value arrives pre-quantized at `NUMERIC(19,4)`, but a DERIVED
+    // money (`derived costFloor: money = money("0.00")`) carries its literal's
+    // own scale, so `str(...)` alone would emit `"0.00"` — pin it to 4 dp for a
+    // wire value byte-consistent with the other backends.
+    const q = `${expr}.quantize(Decimal("1e-${MONEY_WIRE_SCALE}"), rounding="ROUND_HALF_UP")`;
+    return optional ? `(None if ${expr} is None else str(${q}))` : `str(${q})`;
   }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);

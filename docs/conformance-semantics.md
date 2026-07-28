@@ -241,24 +241,31 @@ the conforming backends, and the fix that established it.
   **behavioral**.
 
 ### RS-12 · Money wire scale is consistent across backends
-- **Guarantee.** A money-typed field has the same scale on every backend's
-  wire. *(Canonical format — `"0.00"` vs `"0"` — is an open owner decision;
-  unlike RS-11 no spec mandates it.)*
-- **Trigger.** A money field on the wire (e.g. `costFloor`).
-- **Observable.** dotnet/java/python preserve scale (`"0.00"`); node's
-  decimal.js `.toString()` normalizes to `"0"`. And java *itself* drops the
-  scale in derived string contexts (the deferred `seqTag` finding), so this is
-  a canonical-format decision, not a settled node-only bug. Provisional
-  direction below follows majority + the "money carries scale" convention.
-- **Conforms (provisional).** dotnet, java, python. **Target:** node.
-- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220) — direction
-  pending owner confirmation. Tier: **behavioral**.
-
-> **Candidate (not yet a rule):** the same differential flagged a *derived*
-> field (`seqTag`) interpolating money into a string with a `budget 100` vs
-> `budget 100.0` split, but that evidence is contaminated by the slice-(a)
-> index-based row alignment (rows aren't id-keyed across backends). It needs
-> M-T9.11 slice (b)'s id-keyed capture to confirm before it earns an RS number.
+- **Guarantee.** A money-typed field serializes at a FIXED scale of **4**
+  decimal places on every backend's wire — the canonical `NUMERIC(19,4)` money
+  storage scale (`MONEY_WIRE_SCALE`, `src/generator/money-scale.ts`). `12.5`,
+  `12.50`, and `12` all read back as `"12.5000"`, `"12.5000"`, `"12.0000"`.
+- **Trigger.** A money field on the wire — stored (`subtotal`) OR derived
+  (`derived floor: money = money("0.00")` → `"0.0000"`).
+- **Observable / decision.** Owner decision (2026-07-27, refined 2026-07-28
+  from a live 5-backend probe): **fixed scale 4**, not "preserve the submitted
+  scale." The backends could not agree on a value scale — node's decimal.js
+  `.toString()` normalizes trailing zeros (`"12.5"`), dotnet/java echoed the
+  as-parsed scale (`"12.50"`), python's `NUMERIC(19,4)` quantized stored money
+  to `"12.5000"` but a DERIVED money still stringified at its literal scale
+  (`"0.00"`) — and node *cannot* echo a submitted scale at all (decimal.js
+  normalizes at parse time). A fixed scale is the only representable consistent
+  choice, and 4 (the storage scale) is the lossless one. Each backend now
+  formats money to 4 dp at the wire boundary: node `.toFixed(4)`, .NET
+  `ToString("F4")`, Java `setScale(4, HALF_UP).toPlainString()`, Python
+  `quantize(Decimal("1e-4"), ROUND_HALF_UP)`, Elixir `Decimal.round(d, 4)` (the
+  `__money_round/1` wire helper). This subsumes the `seqTag` derived-money
+  candidate: a money value carries scale 4 in every wire context.
+- **Conforms.** node, dotnet, java, python, elixir. (node/python/java/dotnet
+  runtime round-trip verified byte-identical on a real postgres boot — stored
+  and derived money both read back at 4 dp; elixir verified by emission.)
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220); owner
+  decision. Fixed by M-T6.11. Tier: **behavioral**.
 
 ---
 

@@ -19,6 +19,7 @@ import {
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { upperFirst } from "../../util/naming.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { renderCsExpr } from "./render-expr.js";
 
 /** Wrap a masked field's projected value in a fail-closed read redaction
@@ -316,8 +317,12 @@ export function projectToResponse(
         return csCanonicalInstantWire(domainExpr);
       }
       if (info.primitive === "money") {
-        // System.Decimal → wire string, InvariantCulture for stability.
-        return `${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
+        // System.Decimal → wire string at the FIXED money scale (RS-12): the
+        // bare `.ToString()` echoes the value's own scale (`12.5` vs `12.50`),
+        // so format to the canonical `NUMERIC(19,4)` scale for a wire value
+        // byte-consistent with the other backends.  InvariantCulture pins the
+        // decimal separator.
+        return `${domainExpr}.ToString("F${MONEY_WIRE_SCALE}", System.Globalization.CultureInfo.InvariantCulture)`;
       }
       return domainExpr;
     case "id":

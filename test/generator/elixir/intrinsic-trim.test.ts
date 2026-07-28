@@ -226,7 +226,8 @@ describe("elixir generator — numeric intrinsics batch (stdlib A3)", () => {
   it("renders abs in-memory — Decimal.abs on money, Kernel abs on int", async () => {
     const files = await generateSystemFiles(A3_SRC);
     const ctrl = fileEndingWith(files, "/controllers/product_controller.ex");
-    expect(ctrl).toContain('"absAmount" => Decimal.abs(record.amount)');
+    // A money-typed derived is pinned to the fixed wire scale (RS-12).
+    expect(ctrl).toContain('"absAmount" => __money_round(Decimal.abs(record.amount))');
     expect(ctrl).toContain('"absQty" => abs(record.qty)');
   });
 
@@ -235,13 +236,18 @@ describe("elixir generator — numeric intrinsics batch (stdlib A3)", () => {
     const ctrl = fileEndingWith(files, "/controllers/product_controller.ex");
     expect(ctrl).toContain('"qtyCap" => min(record.qty, 100)');
     expect(ctrl).toContain('"qtyFloor" => max(record.qty, 0)');
-    expect(ctrl).toContain('"amountLo" => Decimal.min(record.amount, record.amount)');
+    expect(ctrl).toContain(
+      '"amountLo" => __money_round(Decimal.min(record.amount, record.amount))',
+    );
   });
 
   it("renders floor/ceil in-memory via Decimal.round modes (receiver-typed whole values)", async () => {
     const files = await generateSystemFiles(A3_SRC);
     const ctrl = fileEndingWith(files, "/controllers/product_controller.ex");
-    expect(ctrl).toContain('"amountDown" => Decimal.round(record.amount, 0, :floor)');
+    expect(ctrl).toContain(
+      '"amountDown" => __money_round(Decimal.round(record.amount, 0, :floor))',
+    );
+    // `rateUp` is a `decimal` derived — not money, so it is NOT scale-pinned.
     expect(ctrl).toContain('"rateUp" => Decimal.round(record.rate, 0, :ceiling)');
   });
 
