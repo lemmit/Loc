@@ -30,6 +30,7 @@
 import type { ExprIR, UiIR } from "../../ir/types/loom-ir.js";
 import { walkExprDeep } from "../../ir/util/walk.js";
 import { contentHash } from "../../util/content-hash.js";
+import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { namedArgValue, positionalArgs } from "./shared/args.js";
 
 /** One source-language catalog entry: a stable key and its English text. */
@@ -37,44 +38,6 @@ export interface MessageEntry {
   key: string;
   message: string;
 }
-
-/** Where a user-visible string sits inside a primitive call.  `role` is the
- *  human-readable slot label baked into the catalog key. */
-type Slot =
-  | { role: string; kind: "positional"; index: number }
-  | { role: string; kind: "named"; name: string };
-
-// The user-visible text slots per walker primitive.  Each slot is extracted
-// only when it actually holds a plain string literal — so listing a primitive
-// here is safe even when the slot is often dynamic (a `ref` slot is skipped).
-// Verified against each primitive's emitter (src/generator/_walker/primitives/*).
-const USER_VISIBLE_SLOTS: Record<string, readonly Slot[]> = {
-  Heading: [{ role: "heading", kind: "positional", index: 0 }],
-  Text: [{ role: "text", kind: "positional", index: 0 }],
-  Bold: [{ role: "bold", kind: "positional", index: 0 }],
-  Italic: [{ role: "italic", kind: "positional", index: 0 }],
-  InlineCode: [{ role: "code", kind: "positional", index: 0 }],
-  Empty: [{ role: "empty", kind: "positional", index: 0 }],
-  Anchor: [{ role: "anchor", kind: "positional", index: 0 }],
-  KeyValueRow: [{ role: "keyValue", kind: "positional", index: 0 }],
-  Badge: [{ role: "badge", kind: "positional", index: 0 }],
-  Button: [
-    { role: "button", kind: "positional", index: 0 },
-    { role: "buttonAria", kind: "named", name: "label" },
-  ],
-  Stat: [
-    { role: "statLabel", kind: "positional", index: 0 },
-    { role: "statValue", kind: "positional", index: 1 },
-  ],
-  Card: [{ role: "cardTitle", kind: "positional", index: 0 }],
-  Alert: [
-    { role: "alert", kind: "positional", index: 0 },
-    { role: "alertTitle", kind: "named", name: "title" },
-  ],
-  Toolbar: [{ role: "toolbarAria", kind: "named", name: "label" }],
-  Divider: [{ role: "dividerLabel", kind: "named", name: "label" }],
-  Modal: [{ role: "modalTitle", kind: "named", name: "title" }],
-};
 
 /** The plain-string value of an expression, or undefined when it is not a
  *  bare string literal (a dynamic ref/expr, or an interpolated `+` chain). */

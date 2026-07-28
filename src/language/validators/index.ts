@@ -28,6 +28,7 @@ export {
 export { checkDuplicateNames } from "./duplicates.js";
 export { checkGenericCarriers, checkSelfType } from "./generics.js";
 export { checkHandlerBodies } from "./handlers.js";
+export { checkUserVisibleConcat } from "./i18n-strings.js";
 export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
 export {
