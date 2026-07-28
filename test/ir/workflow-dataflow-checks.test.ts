@@ -8,10 +8,13 @@
 //
 // Scope note (verify-first): the sibling data-flow codes are already covered —
 // `emit-unknown-field` / `emit-unknown-event` by message in
-// `test/language/validation/validation.test.ts`, and `name-collision` /
+// `test/language/validation/validation.test.ts`.  `name-collision` /
 // `create-unknown-aggregate` are preempted by earlier checks
-// (`loom.duplicate-workflow`, correlation resolution) so they never reach these
-// arms.  The four below are the reachable, previously-untested remainder.
+// (`loom.duplicate-workflow`, correlation resolution), and `unknown-repository`
+// / `run-unknown-repository` are unreachable (an unknown repo name lowers to a
+// generic `expr-let`, never the `repo-let`/`repo-run` those arms switch on) —
+// all four handed to M-T9.8 as unemittable.  The six below are the reachable,
+// previously-untested remainder.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -23,12 +26,23 @@ import { parseString } from "../_helpers/index.js";
 // correlation-required noise so the injected data-flow error is isolated.
 const src = (body: string) => `
   system S { subdomain M { context C {
+    enum Priority { Low, High }
     event Done { at: datetime }
     aggregate Order {
       total: int
+      priority: Priority
       operation bump() { total := total + 1 }
     }
+    aggregate Widget {
+      size: int
+      operation grow() { size := size + 1 }
+    }
+    criterion HighP of Order = priority == High
+    criterion BigW of Widget = size > 10
+    retrieval OrderQ(p: Priority) of Order { where: HighP }
+    retrieval WidgetQ of Widget { where: BigW }
     repository Orders for Order { }
+    repository Widgets for Widget { }
     workflow W {
       create(orderId: Order id) {
         ${body}
@@ -77,5 +91,30 @@ describe("workflow-body data-flow checks (IR, phase ⑦)", () => {
     expect(await codes("emit Done { at: now() }")).not.toContain(
       "loom.workflow-emit-missing-field",
     );
+  });
+
+  it("flags a `Repo.run(<Retrieval>)` whose retrieval is over another aggregate", async () => {
+    // WidgetQ is `of Widget`, but Orders is a repository for Order.
+    expect(await codes("let xs = Orders.run(WidgetQ())")).toContain(
+      "loom.workflow-run-retrieval-mismatch",
+    );
+  });
+
+  it("accepts a `Repo.run(<Retrieval>)` whose retrieval matches the repository", async () => {
+    expect(await codes("let xs = Orders.run(OrderQ(High))")).not.toContain(
+      "loom.workflow-run-retrieval-mismatch",
+    );
+  });
+
+  it("flags a `for … in` op-call on an unknown binding", async () => {
+    const c = await codes(
+      "let xs = Orders.run(OrderQ(High))\n        for o in xs { ghost.bump() }",
+    );
+    expect(c).toContain("loom.workflow-foreach-unknown-binding");
+  });
+
+  it("accepts a `for … in` op-call on the loop variable", async () => {
+    const c = await codes("let xs = Orders.run(OrderQ(High))\n        for o in xs { o.bump() }");
+    expect(c).not.toContain("loom.workflow-foreach-unknown-binding");
   });
 });
