@@ -22,6 +22,18 @@ system OrderingSystem {
           discount := amount
           total := quantity * unitPrice - amount
         }
+
+        // Pure-domain (unit) test — INTEGER arithmetic through an operation
+        // (`total := qty * price - discount`, all `int`) gated by two
+        // preconditions: a distinct cross-backend coercion surface from the
+        // decimal/money arithmetic the other corpus domain tests cover.
+        test "reprice recomputes the integer total" {
+          let o = Order.create({ reference: "R1", quantity: 2, unitPrice: 50, discount: 10, total: 90 })
+          expect(o.total).toBe(90)
+          o.reprice(3, 40)
+          expect(o.quantity).toBe(3)
+          expect(o.total).toBe(110)
+        }
       }
       repository Orders for Order {
         find byReference(reference: string): Order? where this.reference == reference
