@@ -45,18 +45,18 @@ describe("field mask — IR gates", () => {
     expect(salary.maskUnless!.kind).toBe("method-call");
   });
 
-  it("node emits read redaction — no unsupported gate", async () => {
+  it.each(["node", "dotnet"])("%s emits read redaction — no unsupported gate", async (plat) => {
     const codes = await diags(
       "mask unless currentUser.permissions.contains(permissions.unmask)",
-      "node",
+      plat,
     );
     expect(codes).not.toContain("loom.field-mask-unsupported");
   });
 
-  it("still gates the backends whose redaction hasn't landed (dotnet)", async () => {
+  it("still gates the backends whose redaction hasn't landed (java)", async () => {
     const codes = await diags(
       "mask unless currentUser.permissions.contains(permissions.unmask)",
-      "dotnet",
+      "java",
     );
     expect(codes).toContain("loom.field-mask-unsupported");
   });

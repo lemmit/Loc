@@ -13,6 +13,13 @@ import { projectEntityExpr } from "../dto-mapping.js";
 import { renderQuery, renderQueryHandler } from "../emit.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
+/** `<ns>.Domain.Common` is where `RequestContext` lives; a read handler that
+ *  projects a `mask unless` field references `RequestContext.Current` in its
+ *  DTO projection (see `dto-mapping.maskWrap`), so it needs that using. */
+function maskUsings(agg: EnrichedAggregateIR, ns: string): string[] {
+  return agg.fields.some((f) => f.maskUnless) ? [`${ns}.Domain.Common`] : [];
+}
+
 // ---------------------------------------------------------------------------
 // Get-by-id query (returns Response | null)
 // ---------------------------------------------------------------------------
@@ -94,6 +101,7 @@ export function emitGetByIdQueryAndHandler(
       handlerName: `Get${agg.name}ByIdHandler`,
       queryName: `Get${agg.name}ByIdQuery`,
       returnType: `${agg.name}Response?`,
+      extraUsings: maskUsings(agg, ns),
       body:
         `        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);\n` +
         `        return found is null ? null : ${projectEntityExpr("found", agg, ctx)};\n`,
@@ -159,7 +167,14 @@ export function emitFindQueriesAndHandlers(
         returnType: queryReturn,
         body: buildFindHandlerBody(find, agg, ctx, usesUser, gateUsesUser),
         extraDeps: needsUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
-        extraUsings: [...(needsUser ? [`${ns}.Auth`] : []), ...pagedUsings, ...gateUsings],
+        extraUsings: [
+          ...new Set([
+            ...(needsUser ? [`${ns}.Auth`] : []),
+            ...pagedUsings,
+            ...gateUsings,
+            ...maskUsings(agg, ns),
+          ]),
+        ],
       }),
     );
   }
