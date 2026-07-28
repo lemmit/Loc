@@ -6,6 +6,7 @@ using CatalogApi.Domain.Common;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using FluentValidation;
 using CatalogApi.Application.Products.Commands;
 using CatalogApi.Application.Products.Queries;
 using CatalogApi.Application.Products.Requests;
@@ -31,6 +32,7 @@ public sealed class ProductsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<CreateProductResponse>> CreateProduct([FromBody] CreateProductRequest request)
     {
+        new CreateProductRequestValidator().ValidateAndThrow(request);
         var cmd = new CreateProductCommand(
             request.Sku,
             new Money(request.Price.Amount, request.Price.Currency)
@@ -75,6 +77,7 @@ public sealed class ProductsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), 409)]
     public async Task<IActionResult> UpdateProduct([FromRoute] Guid id, [FromBody] UpdateProductRequest request)
     {
+        new UpdateProductRequestValidator().ValidateAndThrow(request);
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Product", "update", id);
         HttpMetrics.RecordDomainOperation("Product", "update");
         var cmd = new UpdateCommand(
