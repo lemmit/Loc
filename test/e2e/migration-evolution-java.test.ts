@@ -51,7 +51,9 @@ const javaDriver: BackendDriver = {
     const jdbc = `jdbc:postgresql://${pg.host}:${pg.port}/${pg.db}`;
     // Boot with the toolchain JDK (Java 25 → class-file v69); a stale PATH
     // `java` on the runner throws UnsupportedClassVersionError.
-    const javaBin = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
+    const javaBin = process.env.JAVA_HOME
+      ? path.join(process.env.JAVA_HOME, "bin", "java")
+      : "java";
     const child = spawn(javaBin, ["-jar", path.join("build", "libs", jar)], {
       cwd: appDir,
       env: {

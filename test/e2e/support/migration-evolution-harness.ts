@@ -19,14 +19,14 @@
 //     A destructive/lossy column change the derive should have gated shows up
 //     here as a lost or wrong row.
 //
-// The two `.ddd` versions live in test/fixtures/migration-evolution/{base,
+// The two `.ddd` versions live in test/e2e/fixtures/migration-evolution/{base,
 // evolved}.ddd; the v1→v2 delta is a value-preserving rename + a back-filled
 // NOT-NULL add + a nullable add (see evolved.ddd).  Only the boot mechanics
 // differ per backend, so those stay in a per-backend `BackendDriver`; the
 // Postgres lifecycle, the schema fingerprint, and both assertion sequences live
 // here and are backend-agnostic.
 
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -375,7 +375,7 @@ export interface BackendDriver {
 }
 
 /** Kill a detached child's whole process group, best-effort. */
-export function killChild(child: ReturnType<typeof spawn> | undefined): void {
+export function killChild(child: ChildProcess | undefined): void {
   if (!child?.pid) return;
   try {
     process.kill(-child.pid, "SIGTERM");
@@ -386,9 +386,9 @@ export function killChild(child: ReturnType<typeof spawn> | undefined): void {
 
 /** Wire a spawned child's stdout/stderr into an accumulating boot log + BootHandle. */
 export function handleFor(
-  child: ReturnType<typeof spawn>,
+  child: ChildProcess,
   base: string,
-): { handle: BootHandle; child: ReturnType<typeof spawn> } {
+): { handle: BootHandle; child: ChildProcess } {
   let log = "";
   child.stdout?.on("data", (c: Buffer) => {
     log += c.toString("utf8");
@@ -412,7 +412,9 @@ export function handleFor(
 
 export async function runMigrationEvolutionGate(driver: BackendDriver): Promise<void> {
   if (!driver.toolchain.check()) {
-    throw new Error(`migration-evolution ${driver.platform}: \`${driver.toolchain.name}\` not on PATH.`);
+    throw new Error(
+      `migration-evolution ${driver.platform}: \`${driver.toolchain.name}\` not on PATH.`,
+    );
   }
   const base = readFixture("base");
   const evolved = readFixture("evolved");
