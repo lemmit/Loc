@@ -26,6 +26,7 @@ import {
 import type {
   AggregateIR,
   BoundedContextIR,
+  FieldIR,
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
@@ -70,6 +71,81 @@ function memberOperations(agg: { operations: readonly OperationIR[] }): Operatio
   return agg.operations.filter(
     (op) => op.visibility === "public" && !CRUD_RESERVED_NAMES.has(op.name),
   );
+}
+
+/** Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
+ *  authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
+ *  A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that
+ *  must hold whenever a CLIENT-SUPPLIED action param of the SAME NAME is present
+ *  (op-param granularity — Loom has no PATCH partial update).  Returns the
+ *  write-gated fields covered by `params`, in param order, deduped. */
+function writeGatedParams(agg: AggregateIR, params: readonly { name: string }[]): FieldIR[] {
+  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
+  const seen = new Set<string>();
+  const out: FieldIR[] = [];
+  for (const p of params) {
+    const f = gated.get(p.name);
+    if (f && !seen.has(f.name)) {
+      seen.add(f.name);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
+/** Indent every non-empty line of `s` by `pad` (blank lines stay blank so the
+ *  Elixir stays free of trailing-whitespace warnings). */
+function indentLines(s: string, pad: string): string {
+  return s
+    .split("\n")
+    .map((l) => (l.length === 0 ? l : pad + l))
+    .join("\n");
+}
+
+/** Fail-closed write-side gate for a vanilla controller ACTION body.  When a
+ *  client-supplied action param (`params`) shares its name with a write-gated
+ *  field, the action must reject (403) BEFORE the domain call unless the ambient
+ *  principal satisfies that field's predicate.  The controller action already
+ *  has `conn` in scope, so the gate reads `current_user` straight off
+ *  `conn.assigns` (unlike the read serializer, which had no conn and had to use
+ *  the process dictionary), then a `cond do` returns a per-field 403 on the
+ *  first failed gate and otherwise runs the wrapped body.  Fail-closed: an
+ *  unauthenticated caller (nil principal) is rejected.  Returns `null` — so the
+ *  action stays BYTE-IDENTICAL — when no supplied param is write-gated.  The
+ *  predicate is `currentUser`-only (validated), rendered in-memory against the
+ *  `current_user` local; the `current-user` ref already renders to
+ *  `current_user`, so no override is needed. */
+function writeGateGuard(
+  agg: AggregateIR,
+  params: readonly { name: string }[],
+  contextModule: string,
+): { wrap: (body: string) => string } | null {
+  const gated = writeGatedParams(agg, params);
+  if (gated.length === 0) return null;
+  const arms = gated
+    .map((f) => {
+      const pred = renderElixirExpr(f.writeGate!, {
+        thisName: "record",
+        contextModule,
+        foundation: "vanilla",
+      });
+      return (
+        `      not (current_user != nil and (${pred})) ->\n` +
+        `        ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+          `Forbidden: write ${f.name}`,
+        )})`
+      );
+    })
+    .join("\n\n");
+  return {
+    wrap: (body: string) =>
+      `    current_user = Map.get(conn.assigns, :current_user)\n` +
+      `    cond do\n` +
+      `${arms}\n\n` +
+      `      true ->\n` +
+      `${indentLines(body, "    ")}\n` +
+      `    end`,
+  };
 }
 
 export interface VanillaApiEmitResult {
@@ -323,8 +399,13 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
   // a missing row is 404.
   const opActions = memberOps
     .map((op) => {
+      // Write-side field gate (authorization.md §5): a write-gated op param the
+      // client supplies rejects with a fail-closed 403 before the domain call
+      // unless the ambient principal satisfies its predicate.  Null (byte-
+      // identical) when no supplied op param is write-gated.
+      const opGate = writeGateGuard(agg, op.params, facadeMod);
       if (isReturningOperation(op)) {
-        return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
+        return renderReturningOpControllerAction(ctxModule, agg, op, ctx, opGate?.wrap);
       }
       const opSnake = snake(op.name);
       // An op whose guard/body references `currentUser` needs `current_user`
@@ -361,9 +442,7 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
       {:error, :precondition_failed} ->
         ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`
           : "");
-      return `
-  def ${opSnake}(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+      const opInner = `    attrs = Map.drop(params, ["id"])
 ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         { name: "aggregate", valueExpr: `"${aggPascal}"` },
         { name: "op", valueExpr: `"${op.name}"` },
@@ -380,7 +459,10 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)${denialArms}
-    end
+    end`;
+      return `
+  def ${opSnake}(conn, %{"id" => id} = params) do
+${opGate ? opGate.wrap(opInner) : opInner}
 ${GUARD_RESCUE}
   end`;
     })
@@ -412,11 +494,14 @@ ${GUARD_RESCUE}
   // its router route + OpenAPI `post` — an aggregate with no canonical create
   // emits no create action (rather than an orphaned `def create` no route
   // reaches, mirroring how `delete` is `emitsRestDelete`-gated below).
-  const createAction = !emitsRestCreate(agg)
-    ? ""
-    : auditCreate
-      ? `  def create(conn, params) do
-${createCuBind}    result =
+  // Write-side field gate (authorization.md §5): a write-gated create-input
+  // field that the client supplies rejects with a fail-closed 403 BEFORE the
+  // domain call unless the ambient principal satisfies its predicate.  The
+  // guard binds `current_user` off `conn.assigns` and wraps the whole action
+  // body; a create-input free of write gates stays byte-identical (`null`).
+  const createGate = writeGateGuard(agg, createInputFields(agg), facadeMod);
+  const createInner = auditCreate
+    ? `${createCuBind}    result =
       ${appModule}.Repo.transaction(fn ->
         case ${ctxModule}.create_${aggSnake}(params${createActor}) do
           {:ok, record} ->
@@ -452,10 +537,8 @@ ${auditRecordCall({
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end`
-      : `  def create(conn, params) do
-${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
+    end`
+    : `${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
       {:ok, record} ->
         ${renderPhoenixLogCall("aggregateCreated", [
           { name: "aggregate", valueExpr: `"${aggPascal}"` },
@@ -469,8 +552,12 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end`;
+    end`;
+  const createAction = !emitsRestCreate(agg)
+    ? ""
+    : `  def create(conn, params) do\n${
+        createGate ? createGate.wrap(createInner) : createInner
+      }\n  end`;
 
   // FK-restrict destroy conflict (M-T3.4a) — deleting a still-referenced
   // aggregate trips a Postgres foreign_key_violation (23503; a cross-aggregate
@@ -604,10 +691,13 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // `Map.drop(params, ["id"])` → `update_<agg>`; it does not dispatch to the
   // op body — the op's own member endpoint does.)  (`hasUpdateOp` is computed
   // above, alongside the optimistic-concurrency gate.)
-  const updateAction = !hasUpdateOp
-    ? ""
-    : `  def update(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+  // Write-side field gate on the generic field-update action: the update op's
+  // params are the writable update fields, so a write-gated one that the client
+  // supplies rejects with a fail-closed 403 before the domain call (parity with
+  // create + the member ops).  Byte-identical when no update param is gated.
+  const updateOp = agg.operations.find((o) => o.name === "update");
+  const updateGate = updateOp ? writeGateGuard(agg, updateOp.params, facadeMod) : null;
+  const updateInner = `    attrs = Map.drop(params, ["id"])
 ${cuBind}${updateCuBind}${versionBind}
     with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}${versionCallArg}) do
@@ -618,8 +708,12 @@ ${cuBind}${updateCuBind}${versionBind}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end`;
+    end`;
+  const updateAction = !hasUpdateOp
+    ? ""
+    : `  def update(conn, %{"id" => id} = params) do\n${
+        updateGate ? updateGate.wrap(updateInner) : updateInner
+      }\n  end`;
   const writeActions = readOnly
     ? ""
     : [createAction, updateAction, deleteAction].filter((a) => a !== "").join("\n\n");

@@ -125,6 +125,18 @@ export function lowerField(p: Property, env?: Env): FieldIR {
   // (`loom.field-mask-not-current-user`) — the mask is a param-free caller
   // predicate, evaluated at DTO projection.
   const maskUnless = p.maskUnless && env ? lowerExpr(p.maskUnless, env) : undefined;
+  // Write-side authorization gate (authorization.md §5).  Both spellings
+  // normalise to a single ALLOWED-WHEN predicate so backends emit one check
+  // (`if (!writeGate) 403`): `write(X)` → `X`; `readonly when X` → `!(X)`.
+  // Lowered in the field env like the mask so `currentUser` / `permissions.<n>`
+  // resolve; a row reference lowers to a non-`current-user` ref the IR validator
+  // rejects (`loom.field-write-gate-not-current-user`).
+  const writeGate =
+    p.write && env
+      ? lowerExpr(p.write, env)
+      : p.readonlyWhen && env
+        ? ({ kind: "unary", op: "!", operand: lowerExpr(p.readonlyWhen, env) } as const)
+        : undefined;
   return {
     name: p.name,
     // The field's `TypeIR` carries the same tag set as the field's
@@ -141,6 +153,7 @@ export function lowerField(p: Property, env?: Env): FieldIR {
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
     ...(defaultExpr ? { default: defaultExpr } : {}),
     ...(maskUnless ? { maskUnless } : {}),
+    ...(writeGate ? { writeGate } : {}),
     origin: originFor(p),
   };
 }

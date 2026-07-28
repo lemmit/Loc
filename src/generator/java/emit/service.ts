@@ -35,6 +35,53 @@ import {
 } from "./wire.js";
 
 // ---------------------------------------------------------------------------
+// Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
+// authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
+// A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that must
+// hold whenever a CLIENT-SUPPLIED create/op param of the SAME NAME is present
+// (op-param granularity — Loom has no PATCH partial update).  Emits a
+// fail-closed 403 (ForbiddenException → ApiExceptionAdvice) BEFORE the domain
+// call: the gate is principal-only, so it fails fast (no aggregate load needed).
+// Binds `__writeUser` ONCE off the STATIC accessor (a plain guard needs no
+// injected bean), reused by every gated param; the predicate reads that narrowed
+// local via the `currentUserExpr` render override.  Fail-closed: an
+// unauthenticated caller (null principal) is rejected.  Byte-identical (no lines,
+// no imports added) when no supplied param is write-gated.
+// ---------------------------------------------------------------------------
+function writeGateGuards(
+  agg: EnrichedAggregateIR,
+  params: readonly { name: string }[],
+  imports: Set<string>,
+  basePkg: string,
+): string[] {
+  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
+  const covered: FieldIR[] = [];
+  const seen = new Set<string>();
+  for (const p of params) {
+    const f = gated.get(p.name);
+    if (f && !seen.has(f.name)) {
+      seen.add(f.name);
+      covered.push(f);
+    }
+  }
+  if (covered.length === 0) return [];
+  imports.add(`${basePkg}.auth.CurrentUserAccessor`);
+  imports.add(`${basePkg}.auth.User`);
+  imports.add(`${basePkg}.domain.common.ForbiddenException`);
+  const out: string[] = [`        User __writeUser = CurrentUserAccessor.currentOrNull();`];
+  for (const f of covered) {
+    collectJavaExprImports(f.writeGate!, imports);
+    const pred = renderJavaExpr(f.writeGate!, { thisName: "this", currentUserExpr: "__writeUser" });
+    out.push(
+      `        if (!(__writeUser != null && (${pred}))) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: write ${f.name}`,
+      )});`,
+    );
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Application service per aggregate — the layered style's
 // Controller → Service → Repository middle.  Owns: request → domain
 // mapping (typed parses live here, like the .NET command construction),
@@ -161,10 +208,17 @@ export function renderJavaService(
         `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
+  // Write-side field gate — reject the request (403) before constructing the
+  // aggregate when a client-supplied create-input field is write-gated and the
+  // ambient principal fails its predicate (authorization.md §5).
+  const createWriteGuards = emitsRestCreate(agg)
+    ? writeGateGuards(agg, createParams, imports, ctx.basePkg)
+    : [];
   const createLines = emitsRestCreate(agg)
     ? [
         `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
         createDefaultUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        ...createWriteGuards,
         ...createLets,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
         `        repository.save(aggregate);`,
@@ -310,6 +364,9 @@ export function renderJavaService(
       const args = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
         ", ",
       );
+      // Write-side field gate — fail-closed 403 before loading/mutating the
+      // aggregate when a client-supplied op param is write-gated (authorization.md §5).
+      const opWriteGuards = writeGateGuards(agg, op.params, imports, ctx.basePkg);
       if (op.extern) {
         // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
         // real aggregate method now — it runs its preconditions, delegates to the
@@ -321,6 +378,7 @@ export function renderJavaService(
           `    public void ${op.name}(${paramSig}) {`,
           ...lets,
           usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+          ...opWriteGuards,
           `        var aggregate = repository.getById(id);`,
           ifMatchGuard,
           whenGateLine(op),
@@ -359,6 +417,7 @@ export function renderJavaService(
         `    public ${retType} ${op.name}(${paramSig}) {`,
         ...lets,
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        ...opWriteGuards,
         `        var aggregate = repository.getById(id);`,
         ifMatchGuard,
         whenGateLine(op),

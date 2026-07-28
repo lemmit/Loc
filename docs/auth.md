@@ -528,7 +528,6 @@ end
 **Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
 plus read redaction on **all five backends** (node, .NET, Python, Java, Elixir),
 have shipped — a `mask unless` field now redacts fail-closed on every backend.
-The write-side (`write(...)` / `readonly when`) is the next slice.
 
 | Diagnostic | When |
 | --- | --- |
@@ -536,6 +535,61 @@ The write-side (`write(...)` / `readonly when`) is the next slice.
 | `loom.field-mask-unsupported` | the hosting backend does not emit the read redaction (none today — every backend supports it) |
 | `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
 | *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
+
+### Field write gate — `write(...)` / `readonly when` (write authorization)
+
+The **write-side twin** of `mask unless` (authorization.md §5): a field carrying a
+write gate is **rejected (403)** when a client-supplied operation param of the same
+name is present and the `currentUser`-only bool predicate fails. Two equivalent
+spellings, one normalised gate:
+
+```ddd
+aggregate Employee with crudish {
+  name: string
+  salary: money write(currentUser.permissions.contains(permissions.setSalary))
+  title: string readonly when currentUser.role == "viewer"
+}
+```
+
+- **`write(<expr>)`** — writable **only when** `<expr>` holds.
+- **`readonly when <expr>`** — readonly (reject) **when** `<expr>` holds; the IR
+  stores the inverse (`!<expr>`), so a backend emits one check: `if (!gate) 403`.
+
+"Supplied" is **op-param granularity** — the gate fires on `create` and any
+operation that takes the field as a same-named param (the client-supply set),
+evaluated in the handler where `currentUser` is already bound. Loom has no
+partial-update PATCH path (its `update` is a full-replace `operation`), so this is
+the Loom-idiomatic reading of the proposal's `if cmd.field.isSet`. Like the mask,
+the predicate is currentUser-only in this slice (row-aware gates —
+`readonly when status == "closed"` — are a documented follow-up).
+
+Because `write` and `readonly` became trailing Property clause keywords, both are
+now **reserved** (no longer admissible as field/param/name-ref identifiers — the
+coverage-snapshot update is the reviewed record of that trade). Neither is a
+common domain word.
+
+`write(...)`/`readonly when` are surfaced in `.loom/wire-spec.json` under
+`fieldCapabilities` (`{ "<Agg>.<field>": { "write": true } }`, alongside `mask`),
+the review/diff surface for a field's authorization posture.
+
+Each backend enforces at the create + operation handler, before the domain call —
+node/`ForbiddenError`, .NET/`ForbiddenException` (command handler), Python raising
+the shared `ForbiddenError`, Java/`ForbiddenException` (service method, off the
+static `CurrentUserAccessor.currentOrNull()`), and Elixir returning a 403
+`ProblemDetails` from a `cond` (the controller action reads `conn.assigns`
+directly). Each guarded route also declares `403` in its OpenAPI.
+
+**Status.** Grammar + IR + printer + wire-spec `fieldCapabilities` + validation
+plus enforcement on **all five backends** (node, .NET, Python, Java, Elixir) have
+shipped — a write-gated field now returns 403 fail-closed on every backend when a
+client supplies it without permission. Row-aware gates (referencing the old row
+value) are the documented follow-up.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.field-write-gate-not-current-user` | the predicate references the row / a param, not just `currentUser` |
+| `loom.field-write-gate-unsupported` | the hosting backend does not enforce the write gate (none today — every backend enforces it) |
+| *(AST)* `'write(...)' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates
 
