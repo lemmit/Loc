@@ -423,7 +423,7 @@ export function renderJavaController(
       : null,
     // WebDataBinder for the @InitBinder that registers this aggregate's command
     // validators — only when at least one is emitted.
-    javaCommandValidatorNames(agg).length > 0
+    javaCommandValidatorNames(agg, ctx.boundedContext?.valueObjects ?? []).length > 0
       ? `import org.springframework.web.bind.WebDataBinder;`
       : null,
     ``,
@@ -440,7 +440,7 @@ export function renderJavaController(
     anyFindGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
-    ...initBinderLines(agg),
+    ...initBinderLines(agg, ctx.boundedContext?.valueObjects ?? []),
     ...body,
     `}`,
     ``,
@@ -453,8 +453,11 @@ export function renderJavaController(
  *  supports that target — so we add only the one matching `binder.getTarget()`.
  *  The Spring seam analogous to .NET registering the FluentValidation pipeline
  *  behavior.  Emitted only when a validator exists. */
-function initBinderLines(agg: EnrichedAggregateIR): (string | null)[] {
-  const validators = javaCommandValidatorNames(agg);
+function initBinderLines(
+  agg: EnrichedAggregateIR,
+  vos: readonly import("../../../ir/types/loom-ir.js").ValueObjectIR[],
+): (string | null)[] {
+  const validators = javaCommandValidatorNames(agg, vos);
   if (validators.length === 0) return [];
   return [
     `    @InitBinder`,
