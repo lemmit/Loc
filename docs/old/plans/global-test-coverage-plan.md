@@ -135,7 +135,7 @@ A `materializeCorpusFixture(feature, backend, dir)` helper lets the per-backend 
 
 (Sandbox note: `.NET`/Phoenix compile-verify is blocked here by package-registry egress — `NU1301` to nuget.org, `unknown_ca` to hex.pm; both compile in CI. The repointed .NET cells are CI-verified.)
 
-**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), implement workflow own-state mutation across the five workflow backends (the lone remaining compile-tier skip — a feature, scoped as a Phase-5 item), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
+**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), implement workflow own-state mutation across the five workflow backends (the lone remaining compile-tier skip — a feature, scoped as a Phase-5 item), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5). **Phase 2 is landed** — `showcase-completeness.test.ts` flipped `HARD_GATE = true`, and `feature-doc-coverage.test.ts` (below) closes the inverse doc/fixture direction.
 
 ---
 
@@ -163,10 +163,10 @@ Each addition = one corpus `.ddd` + a manifest row + the backend's existing comp
 
 **Gate:** a new `corpus-coverage.test.ts` (fast, no-docker) asserts every `manifest` row marked for a backend has a generatable fixture and that no supported `(feature, backend)` cell is missing — making future regressions impossible.
 
-## Phase 2 — Flip the completeness gates to hard
+## Phase 2 — Flip the completeness gates to hard ✅ shipped
 
-- **`showcase-completeness.test.ts`**: finish building `showcase.ddd` out to 100 % of AST kinds + walker primitives, then set `HARD_GATE = true`. A new grammar feature without showcase coverage now fails CI.
-- **New `feature-doc-coverage.test.ts`**: cross-reference `docs/<feature>.md` (the 14 feature reference docs) against the manifest — a documented feature with no corpus fixture fails. Keeps docs and tests honest with each other.
+- **`showcase-completeness.test.ts`**: finish building `showcase.ddd` out to 100 % of AST kinds + walker primitives, then set `HARD_GATE = true`. A new grammar feature without showcase coverage now fails CI. **Landed** — `HARD_GATE = true` (its residual un-emitted grammar kinds excused via the ratcheted `ALLOWLIST`, drained by M-T6.16).
+- **New `feature-doc-coverage.test.ts`**: cross-reference `docs/<feature>.md` (the 14 feature reference docs) against the manifest — a documented feature with no corpus fixture fails. Keeps docs and tests honest with each other. **Landed** — a curated `FEATURE_DOCS` set (all 14 doc-cited corpus features; `KNOWN_GAPS` now **empty**); the gate asserts every documented feature is corpus-covered, so a new feature doc with no fixture — or dropping a covered feature's last fixture — fails per-PR. **Both original gaps drained:** `domain-services.ddd` (pure/reading/mutating tiers orchestrated by workflows) — which surfaced a real Python emitter bug (`x == null` emitted `== None`, tripping ruff E711; now `is None`, parity with the union-find `absenceCheck`) — and `scaffold-macros.ddd` (the backend macro families: `crudish` create/update/destroy + the `softDeletable` capability + `softDelete` ops). Both compile-verified on all five backends. (The page-`scaffold` family is UI-tier — covered by the generated-frontend build gates, not the domain corpus.)
 
 ## Phase 3 — Extend the cheap no-docker wire-parity tier
 

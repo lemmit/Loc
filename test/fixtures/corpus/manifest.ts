@@ -71,6 +71,18 @@ export const CORPUS: readonly CorpusFeature[] = [
     doc: "criterion",
     backends: ALL,
   },
+  {
+    id: "domain-services",
+    title: "domainService — cross-aggregate pure/reading/mutating ops orchestrated by workflows",
+    doc: "domain-services",
+    backends: ALL,
+  },
+  {
+    id: "scaffold-macros",
+    title: "stdlib macros — crudish (create/update/destroy) + softDeletable capability + softDelete ops",
+    doc: "scaffold-macros",
+    backends: ALL,
+  },
 ] as const;
 
 /** Lookup by id. */
