@@ -60,7 +60,12 @@ concurrency:
 jobs:
   behavioral-elixir:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The Erlang/OTP setup + `mix deps.get` + compile + boot sequence already
+    # ran 15-20 min (see the concurrency note above); adding the OpenTelemetry
+    # hex deps (opentelemetry{,_api,_exporter} → grpcbox/chatterbox rebar3
+    # builds, M-T7.1) pushed a cold-cache run past the old 20-min cap. Bumped to
+    # give headroom for the extra deps.get + compile.
+    timeout-minutes: 30
 
     services:
       postgres:
