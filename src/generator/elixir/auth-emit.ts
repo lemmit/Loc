@@ -55,6 +55,12 @@ export interface AuthEmitArgs {
   deployable: DeployableIR;
   appName: string;
   appModule: string;
+  /** A hosted aggregate declares a `mask unless` field (authorization.md §5).
+   *  The Auth plug then ALSO stashes the resolved principal in the process
+   *  dictionary (`Process.put(:loom_current_user, user)`) so the REST
+   *  controllers' `serialize/1` — which has no `conn` in scope — can read it to
+   *  redact masked fields fail-closed.  Off ⇒ the plug stays byte-identical. */
+  hasFieldMask?: boolean;
 }
 
 export interface AuthEmitResult {
@@ -92,7 +98,14 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
 
   files.set(
     `lib/${appName}_web/auth.ex`,
-    renderAuthPlug(sys.user, webModule, auth, sys.tenancy?.claimField, orgPathRegistry),
+    renderAuthPlug(
+      sys.user,
+      webModule,
+      auth,
+      sys.tenancy?.claimField,
+      orgPathRegistry,
+      args.hasFieldMask ?? false,
+    ),
   );
   files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule, auth));
   // OIDC only: the :browser-pipeline plug that seeds the Phoenix session's
@@ -179,6 +192,7 @@ function renderAuthPlug(
   auth: AuthIR | undefined,
   orgPathClaim?: string,
   orgPathRegistry?: OrgPathRegistryRef,
+  hasFieldMask = false,
 ): string {
   const buildUserBody = renderBuildUser(user, auth);
   const idKey = actorIdKey(user);
@@ -418,7 +432,15 @@ ${tokenBlock}
           # principal (PII) onto every line.  The full principal stays on
           # conn.assigns.current_user.
           Logger.metadata(actor_id: user[:${idKey}])
-          assign(conn, :current_user, user)
+${
+  hasFieldMask
+    ? `          # A hosted aggregate has a \`mask unless\` field: stash the principal in
+          # the process dictionary too, so the REST \`serialize/1\` (no conn in
+          # scope) can read it to redact masked fields fail-closed.
+          Process.put(:loom_current_user, user)
+`
+    : ""
+}          assign(conn, :current_user, user)
 
         _ ->
           send_unauthorized(conn)

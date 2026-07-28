@@ -533,6 +533,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     deployable,
     appName,
     appModule,
+    // A hosted `mask unless` aggregate needs the principal in the process
+    // dictionary (the REST `serialize/1` reads it to redact fail-closed).
+    hasFieldMask: contexts.some((c) =>
+      c.aggregates.some((a) => a.fields.some((f) => f.maskUnless)),
+    ),
   });
   for (const [path, content] of authFiles) {
     // The LiveView `on_mount` hook imports `Phoenix.Component` /

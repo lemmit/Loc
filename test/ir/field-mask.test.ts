@@ -50,20 +50,13 @@ describe("field mask — IR gates", () => {
     "dotnet",
     "python",
     "java",
+    "elixir",
   ])("%s emits read redaction — no unsupported gate", async (plat) => {
     const codes = await diags(
       "mask unless currentUser.permissions.contains(permissions.unmask)",
       plat,
     );
     expect(codes).not.toContain("loom.field-mask-unsupported");
-  });
-
-  it("still gates the backends whose redaction hasn't landed (elixir)", async () => {
-    const codes = await diags(
-      "mask unless currentUser.permissions.contains(permissions.unmask)",
-      "elixir",
-    );
-    expect(codes).toContain("loom.field-mask-unsupported");
   });
 
   it("rejects a mask predicate that references the row", async () => {

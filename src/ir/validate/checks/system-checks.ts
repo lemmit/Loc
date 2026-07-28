@@ -2864,8 +2864,11 @@ export function validateProvenancedStorage(
 //     routes response boundaries through `to_wire_masked` (reads the ambient
 //     `current_user()` and redacts fail-closed); `java` adds a `<Agg>Response
 //     .fromMasked` mapper (static `CurrentUserAccessor.currentOrNull()` guard) the
-//     read services + explicit handlers project through (audit keeps `from`).
-const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java"]);
+//     read services + explicit handlers project through (audit keeps `from`);
+//     `elixir` (vanilla Phoenix) makes `serialize/1` redact (reading the principal
+//     from the process dictionary the Auth plug stashes), moving the raw map to
+//     `serialize_unmasked/1` for audit snapshots.
+const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
 export function validateFieldMask(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

@@ -126,17 +126,26 @@ function derivedRenderable(e: ExprIR, scope: ReadonlySet<string> = new Set()): b
 export interface WireSerializeResult {
   /** The `serialize/1` function definition (module-indented) — an untyped
    *  `defp serialize(record)` head, used by the single-aggregate REST/ES
-   *  controllers. */
+   *  controllers.  When the aggregate declares a `mask unless` field this is the
+   *  REDACTING serializer (delegates to `serialize_unmasked/1`, then nils each
+   *  masked key unless the ambient principal — `Process.get(:loom_current_user)`,
+   *  stashed by the Auth plug — satisfies its predicate, fail-closed); the raw
+   *  map moves to the `serialize_unmasked/1` helper for audit snapshots. */
   serialize: string;
   /** Just the `%{ … }` wire-map body (indented for a function body), for a
    *  caller that needs its own function head — e.g. the ViewsController, which
    *  dispatches per aggregate with a struct-typed head
-   *  (`defp serialize(%Agg{} = record)`). */
+   *  (`defp serialize(%Agg{} = record)`).  Always the UNMASKED map. */
   body: string;
   /** Nested `serialize_<part|vo>/1` private helper defs, deduped by name,
    *  in completion order.  Empty when the wire shape references no contained
-   *  entities / value objects. */
+   *  entities / value objects.  Includes `serialize_unmasked/1` when the
+   *  aggregate is masked. */
   helpers: string[];
+  /** True iff the aggregate declares at least one `mask unless` field — the
+   *  gate the controllers read to route audit snapshots through the unmasked
+   *  `serialize_unmasked/1` (responses keep calling `serialize/1`). */
+  masked: boolean;
 }
 
 function unwrapOptional(t: TypeIR): TypeIR {
@@ -322,6 +331,40 @@ export function renderWireSerialize(
 
   const body = renderMap(wireShape, "    ", /* isVo */ false, aggDerived, idExpr);
   const preludeBind = opts.bind ? `${opts.bind}\n` : "";
-  const serialize = `  defp serialize(${headVar}) do\n${preludeBind}${body}\n  end`;
-  return { serialize, body, helpers: [...helpers.values()] };
+
+  // `mask unless` read redaction (authorization.md §5): the masked root wire
+  // fields, projected fail-closed against the ambient principal.  When present,
+  // the raw map moves to `serialize_unmasked/1` (audit snapshots project through
+  // it, unredacted) and `serialize/1` delegates to it, then nils each masked key
+  // unless the caller satisfies its predicate.  A mask-free aggregate keeps the
+  // single unmasked `serialize/1` verbatim (byte-identical).
+  const maskedFields = wireShape.filter((wf) => wf.maskUnless !== undefined);
+  if (maskedFields.length === 0) {
+    const serialize = `  defp serialize(${headVar}) do\n${preludeBind}${body}\n  end`;
+    return { serialize, body, helpers: [...helpers.values()], masked: false };
+  }
+  const redactLines = maskedFields
+    .map((wf) => {
+      // The predicate is `currentUser`-only (validated); render it in-memory
+      // (`filterArgs` unset) against the `current_user` local bound below.  The
+      // `current_user != nil` guard short-circuits so an unauthenticated request
+      // (nil principal) redacts without a `nil.<claim>` crash.
+      const pred = renderExpr(wf.maskUnless!, derivedRc);
+      return `    wire = if current_user != nil and (${pred}), do: wire, else: Map.put(wire, "${wf.name}", nil)`;
+    })
+    .join("\n");
+  const serialize =
+    `  defp serialize(${headVar}) do\n` +
+    `    current_user = Process.get(:loom_current_user)\n` +
+    `    wire = serialize_unmasked(${headVar})\n` +
+    `${redactLines}\n` +
+    `    wire\n` +
+    `  end`;
+  const serializeUnmasked = `  defp serialize_unmasked(${headVar}) do\n${preludeBind}${body}\n  end`;
+  return {
+    serialize,
+    body,
+    helpers: [serializeUnmasked, ...helpers.values()],
+    masked: true,
+  };
 }

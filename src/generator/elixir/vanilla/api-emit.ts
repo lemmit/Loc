@@ -220,6 +220,13 @@ function renderController(
   const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
 
+  // A `mask unless` aggregate emits a redacting `serialize/1` (responses) plus an
+  // unmasked `serialize_unmasked/1`; audit before/after snapshots must record the
+  // REAL value, so they project through the unmasked one (authorization.md §5).
+  const auditSerialize = agg.fields.some((f) => f.maskUnless)
+    ? "serialize_unmasked(record)"
+    : "serialize(record)";
+
   // Reference collections (`X id[]` → `many_to_many`) are projected to id arrays
   // in the wire response: each loaded relationship is mapped to its members'
   // ids by `__ref_ids/1` (emitted directly by the wireShape-driven serializer).
@@ -420,7 +427,7 @@ ${auditRecordCall({
   targetType: aggPascal,
   targetId: "record.id",
   before: "nil",
-  after: "serialize(record)",
+  after: auditSerialize,
   indent: "            ",
 })}
 
@@ -508,7 +515,7 @@ ${auditRecordCall({
   action: destroyMeta.action,
   targetType: aggPascal,
   targetId: "id",
-  before: "serialize(record)",
+  before: auditSerialize,
   after: "nil",
   indent: "             ",
 })}
