@@ -158,8 +158,8 @@ The document sub-case below is the one feature with a partial story:
 
 | Feature | `elixir` (vanilla) | Gate (fail-fast) |
 |---|---|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ emits | — |
-| Event-sourced **workflow** (saga appliers) | 🚫 gated | `loom.event-sourced-workflow-unsupported` |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ emits (incl. every `apply(…)` fold shape²) | — |
+| Event-sourced **workflow** (`eventSourced` saga) | ✓ emits (per-correlation stream + fold) | — (`loom.event-sourced-workflow-unsupported` gates only non-supporting backends) |
 | Provenanced fields (runtime trace) | ✓ emits | — |
 | `shape(document)` aggregate | ✓ CRUD + finds/ops/functions/returning-ops; small residual gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
 | `or`-union-returning op with `emit`/`add`/`remove` body | ✓ full bodies | — |
@@ -173,6 +173,26 @@ value-object-subfield reads), **named operations** (body over the `data` map →
 audited/provenanced ops, collection mutation, derived / dereferenced-entity /
 collection-method reads, and paged/union finds; host those on
 node/dotnet/python/java.
+
+² An `apply(e: E) { … }` fold rebinds in-memory state (an ES aggregate has no
+state table), so EVERY fold shape emits — `src/generator/elixir/vanilla/fold-stmt-emit.ts`
+(M-T6.2, shared by the aggregate and event-sourced-workflow folds):
+- scalar compound `-=` (`balance -= e.amount`) → arithmetic;
+- primitive-collection `+=` (`tags += e.tag`) → list append;
+- value-object-collection `+=` (`charges += Money{…}`) → a plain map appended
+  inline (NO `<agg>_charges` child schema is emitted for an ES aggregate — it
+  has no child table);
+- contained-**entity-part** `+=` (`boxes += Box{…}`) → a plain map over the
+  part's wire shape with a freshly minted `id` and `[]` for any of the part's
+  own containments (part-in-part), since the ES path emits no `%Ctx.Box{}` Ecto
+  struct — mirroring the other backends' ES folds (node: `Box._create({ id:
+  Ids.newBoxId(), … })`).
+
+Before M-T6.2 the compound-mutation shapes were silently dropped (a `# unsupported
+applier statement` comment that compiled green while losing the transition).
+Minting the contained-part id in the fold is non-deterministic across replays —
+a shared limitation of the ES contained-part model on every backend, tracked as a
+cross-backend follow-up.
 
 Every emitter is compiled against real Elixir/Ecto by
 `elixir-vanilla-build.yml` (one fixture per feature under

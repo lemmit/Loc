@@ -1,0 +1,43 @@
+// M-T6.2 Drain C — relational deep part-in-part on vanilla Phoenix.
+//
+// A part that itself declares `contains` (part-in-part) on a RELATIONAL
+// (state-based) aggregate was gated (`loom.vanilla-containment-unsupported`)
+// because the elixir migration emitter dropped the grandchild table (its part
+// tier only emitted parts FK'd to a parent AGGREGATE, never one FK'd to a
+// sibling PART) and the schema kept the nested containment an inline `embeds_many`.
+// Now drained: the migration emits `tags` (FK `line_id` → `lines`) in
+// FK-topological order, `Line` `has_many`s/`cast_assoc`s `tags` (a real child
+// table with `belongs_to :line`), and reads/updates preload `[lines: :tags]`.
+// This fixture compile-gates the whole surface under `mix compile
+// --warnings-as-errors`.
+system Warehouse {
+  subdomain Core {
+    context Orders {
+      aggregate Order {
+        name: string
+        contains lines: Line[]
+        entity Line {
+          sku: string
+          qty: int
+          contains tags: Tag[]
+        }
+        entity Tag { label: string }
+      }
+      repository Orders for Order {
+        find byName(name: string): Order[] where this.name == name
+      }
+    }
+  }
+
+  api OrdersApi from Core
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

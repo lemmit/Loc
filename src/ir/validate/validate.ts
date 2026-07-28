@@ -75,7 +75,6 @@ import {
   validateSavingShapeSupport,
   validateSystem,
   validateUiRealtimeSupport,
-  validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
   validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
@@ -161,7 +160,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
-    validateVanillaContainmentSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);

@@ -16,7 +16,13 @@
 // `generated-code-ddd-review-2026-07.md`: "a `NotLoaded` Jason crash on the
 // no-preload projection read").
 
-import type { AggregateIR, BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ContainmentIR,
+  EntityPartIR,
+  SystemIR,
+} from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
 import { preloadList } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
@@ -46,9 +52,54 @@ export function readPreloadRels(
   const valueCollectionRels = ctx
     ? valueCollectionsWithVo(agg, ctx).map((v) => `:${snake(v.vc.fieldName)}`)
     : [];
-  const containmentRels =
-    ctx && usesRelationalContainments(agg, ctx, sys)
-      ? agg.contains.map((c) => `:${snake(c.name)}`)
-      : [];
-  return [...valueCollectionRels, ...containmentRels, ...preloadList(agg)];
+  const { flat, nested } = containmentPreloadRels(agg, ctx, sys);
+  return [
+    ...valueCollectionRels,
+    ...flat,
+    ...preloadList(agg),
+    // Keyword (nested) entries LAST — `[:a, b: :c]` parses, `[b: :c, :a]` does not.
+    ...nested,
+  ];
+}
+
+/** The relational-containment preload terms, SPLIT into plain-`:atom` entries
+ *  (a leaf containment: `:lines`) and keyword entries whose contained part has
+ *  its OWN containments (part-in-part: `lines: :tags`).  Ecto requires keyword
+ *  entries to trail the atoms in a list literal (`[:a, b: :c]` parses,
+ *  `[b: :c, :a]` does not), so callers splice `nested` after their atoms.  A
+ *  nested `has_many` left unpreloaded serialises as `NotLoaded` (a 500), and the
+ *  update path needs the prior nested rows loaded for `cast_assoc` to diff. */
+export function containmentPreloadRels(
+  agg: AggregateIR,
+  ctx: BoundedContextIR | undefined,
+  sys?: SystemIR,
+): { flat: string[]; nested: string[] } {
+  if (!ctx || !usesRelationalContainments(agg, ctx, sys)) return { flat: [], nested: [] };
+  const partsByName = new Map((agg.parts ?? []).map((p) => [p.name, p]));
+  const flat: string[] = [];
+  const nested: string[] = [];
+  for (const c of agg.contains) {
+    const term = nestedPreloadOf(c, partsByName);
+    if (term) nested.push(`${snake(c.name)}: ${term}`);
+    else flat.push(`:${snake(c.name)}`);
+  }
+  return { flat, nested };
+}
+
+/** The nested-preload term for a containment whose contained part ITSELF has
+ *  relational containments — `:tags` for one child, `[:tags, :labels]` for
+ *  several, recursing (`[items: :notes]`) for deeper nesting.  `undefined` when
+ *  the contained part is a leaf (no further containments to preload). */
+function nestedPreloadOf(
+  c: ContainmentIR,
+  partsByName: Map<string, EntityPartIR>,
+): string | undefined {
+  const part = partsByName.get(c.partName);
+  const children = part?.contains ?? [];
+  if (children.length === 0) return undefined;
+  const terms = children.map((cc) => {
+    const deeper = nestedPreloadOf(cc, partsByName);
+    return deeper ? `[${snake(cc.name)}: ${deeper}]` : `:${snake(cc.name)}`;
+  });
+  return terms.length === 1 ? terms[0]! : `[${terms.join(", ")}]`;
 }

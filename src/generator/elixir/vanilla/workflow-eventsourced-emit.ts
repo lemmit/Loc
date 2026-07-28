@@ -28,11 +28,12 @@ import type {
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
-import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 
 /** Event-sourced workflows in a context. */
 export function eventSourcedWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] {
@@ -130,28 +131,10 @@ function renderFoldModule(contextModule: string, wf: WorkflowIR): string {
   ];
 
   const clauses = (wf.appliers ?? []).map((ap) => {
-    const token = new RegExp(`\\b${snake(ap.param)}\\b`);
-    const rhs = ap.statements
-      .map((s) =>
-        s.kind === "assign"
-          ? renderExpr(s.value, renderCtx)
-          : s.kind === "let"
-            ? renderExpr(s.expr, renderCtx)
-            : "",
-      )
-      .join(" ");
-    const bind = token.test(rhs) ? snake(ap.param) : `_${snake(ap.param)}`;
-    const body = ap.statements
-      .map((s) => {
-        if (s.kind === "assign") {
-          return `    state = %{state | ${snake(s.target.segments[0] ?? "")}: ${renderExpr(s.value, renderCtx)}}`;
-        }
-        if (s.kind === "let")
-          return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, renderCtx)}`;
-        if (s.kind === "expression") return `    _ = ${renderExpr(s.expr, renderCtx)}`;
-        return `    # unsupported applier statement: ${s.kind}`;
-      })
-      .join("\n");
+    const bind = foldStmtsUseParam(ap.statements, ap.param, renderCtx)
+      ? snake(ap.param)
+      : `_${snake(ap.param)}`;
+    const body = ap.statements.map((s) => renderFoldStatement(s, renderCtx)).join("\n");
     return `  def apply_event(state, %${eventsModule}.${upperFirst(ap.event)}{} = ${bind}) do
 ${body}
     state

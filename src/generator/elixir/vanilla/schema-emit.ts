@@ -21,6 +21,7 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import {
   effectiveSavingShape,
   resolveDataSourceConfig,
@@ -115,7 +116,7 @@ export function emitVanillaSchemas(
     for (const part of agg.parts) {
       out.set(
         `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`,
-        renderPartSchema(appModule, ctxModule, part, enumsByName, relational),
+        renderPartSchema(appModule, ctxModule, part, enumsByName, relational, agg),
       );
     }
   }
@@ -158,36 +159,51 @@ function renderPartSchema(
   part: EntityPartIR,
   enumsByName: Map<string, EnumIR>,
   relational = false,
+  // The owning aggregate — needed on a relational owner to resolve a nested
+  // part's DIRECT parent (a sibling part's table, not the aggregate root), so a
+  // part-in-part FK lines up with the shared migration's `tableForPart` DDL.
+  agg?: AggregateIR,
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(part.name)}`;
   const fieldLines = part.fields
     .map((f) => renderFieldLine(f, enumsByName))
     .filter(Boolean)
     .join("\n");
-  // Nested part-in-part containments stay inline embeds even on a relational
-  // owner (the relational gate rejects them; this keeps embedded output intact).
+  // Part-in-part containment.  On a relational owner it is a `has_many`/`has_one`
+  // to the nested part's OWN child table (§11c deep-nesting — the migration
+  // already emits that grandchild table, FK'd to THIS part); on an embedded owner
+  // it stays an inline `embeds_many`/`embeds_one` jsonb fold.
   const containLines = (part.contains ?? [])
-    .map((c) => containmentLine(appModule, ctxModule, c, part.name, false))
+    .map((c) => containmentLine(appModule, ctxModule, c, part.name, relational))
     .join("\n");
-  // Relational: the parent association — `belongs_to :<owner>, <OwnerMod>` with
-  // the migration's `<owner>_id` FK.  Stripped from the wire by `@derive only`.
-  // The child table carries `timestamps()` (the shared `tableForPart` migration
-  // emits NOT-NULL `inserted_at`/`updated_at`), so the schema must auto-stamp
-  // them on insert — `:utc_datetime` mirrors the owner aggregate's convention.
-  // (`@derive only` keeps them off the wire.)
+  // Relational: the parent association — `belongs_to :<direct-parent>` with the
+  // migration's `<direct-parent>_id` FK.  For a NESTED part the direct parent is
+  // a sibling part (`directParentName`), not the aggregate root, so the FK
+  // targets the sibling's table exactly as `tableForPart` FKs it.  Stripped from
+  // the wire by `@derive only`.  The child table carries `timestamps()` (the
+  // migration emits NOT-NULL `inserted_at`/`updated_at`), so `:utc_datetime`
+  // auto-stamps on insert.
+  const ownerName = relational
+    ? agg
+      ? directParentName(agg, part.name, part.parentName)
+      : part.parentName
+    : part.parentName;
   const belongsToLine = relational
-    ? `    belongs_to :${snake(part.parentName)}, ${appModule}.${ctxModule}.${upperFirst(part.parentName)}, foreign_key: :${snake(part.parentName)}_id, type: :binary_id`
+    ? `    belongs_to :${snake(ownerName)}, ${appModule}.${ctxModule}.${upperFirst(ownerName)}, foreign_key: :${snake(ownerName)}_id, type: :binary_id`
     : "";
   const timestampsLine = relational ? "    timestamps(type: :utc_datetime)" : "";
   const schemaBody = [fieldLines, containLines, belongsToLine, timestampsLine]
     .filter(Boolean)
     .join("\n");
-  // Cast list: scalar columns only (nested embeds round-trip via `cast_embed`).
+  // Cast list: scalar columns only.  A nested containment round-trips via
+  // `cast_assoc` on a relational owner (its own child rows) or `cast_embed` on an
+  // embedded owner (inline jsonb).
   const castCols = part.fields
     .filter((f) => !SYSTEM_FIELDS.has(f.name) && mapTypeToEcto(f.type, enumsByName))
     .map((f) => `:${snake(f.name)}`);
+  const castAssocVerb = relational ? "cast_assoc" : "cast_embed";
   const castEmbeds = (part.contains ?? [])
-    .map((c) => `    |> cast_embed(:${snake(c.name)})`)
+    .map((c) => `    |> ${castAssocVerb}(:${snake(c.name)})`)
     .join("\n");
   // Wire shape: id, scalar fields, then containment names (the
   // `@derive Jason.Encoder` atom list).

@@ -35,7 +35,6 @@ import type {
   EventIR,
   FindIR,
   OperationIR,
-  StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
@@ -43,6 +42,7 @@ import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js"
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
+import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
@@ -206,11 +206,16 @@ function renderFoldModule(appModule: string, ctxModule: string, agg: AggregateIR
     contextModule: `${appModule}.${ctxModule}`,
     foundation: "vanilla",
   };
+  // A `boxes += Box{…}` fold constructs a contained entity part; the fold
+  // projects the part's wire shape into a plain map (no `%Ctx.Box{}` Ecto
+  // schema exists on the ES path), so it needs to resolve the part by name.
+  // Every entity part is declared at aggregate level, so `agg.parts` is flat.
+  const foldOpts = { resolvePart: (name: string) => agg.parts.find((p) => p.name === name) };
 
   const clauses = (agg.appliers ?? []).map((ap) => {
-    const usesParam = appliersStmtsUseParam(ap.statements, ap.param, renderCtx);
+    const usesParam = foldStmtsUseParam(ap.statements, ap.param, renderCtx, foldOpts);
     const bind = usesParam ? snake(ap.param) : `_${snake(ap.param)}`;
-    const body = renderFoldStatements(ap.statements, renderCtx);
+    const body = ap.statements.map((s) => renderFoldStatement(s, renderCtx, foldOpts)).join("\n");
     return `  def apply_event(state, %${eventsModule}.${upperFirst(ap.event)}{} = ${bind}) do
 ${body}
     state
@@ -234,42 +239,6 @@ defmodule ${aggModule}Fold do
 ${clauses.join("\n\n")}
 end
 `;
-}
-
-/** Render an applier's fold body — assignments rebind `state` via struct
- *  update; `let`/`expression` lower as usual.  ES discipline guarantees the
- *  body is pure (assignments / lets only — no emit, no side-effecting calls). */
-function renderFoldStatements(stmts: StmtIR[], ctx: RenderCtx): string {
-  return stmts
-    .map((s) => {
-      switch (s.kind) {
-        case "assign":
-          return `    state = %{state | ${snake(s.target.segments[0] ?? "")}: ${renderExpr(s.value, ctx)}}`;
-        case "let":
-          return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, ctx)}`;
-        case "expression":
-          return `    _ = ${renderExpr(s.expr, ctx)}`;
-        default:
-          // ES discipline rejects everything else inside an applier; keep the
-          // renderer total with a comment rather than emitting broken Elixir.
-          return `    # unsupported applier statement: ${s.kind}`;
-      }
-    })
-    .join("\n");
-}
-
-/** True when any applier statement's value expression references the bound
- *  event param — decides whether the `apply_event` head binds it or `_param`s
- *  it (an unused bind fails `--warnings-as-errors`). */
-function appliersStmtsUseParam(stmts: StmtIR[], param: string, ctx: RenderCtx): boolean {
-  const token = new RegExp(`\\b${snake(param)}\\b`);
-  const rhs: string[] = [];
-  for (const s of stmts) {
-    if (s.kind === "assign") rhs.push(renderExpr(s.value, ctx));
-    else if (s.kind === "let") rhs.push(renderExpr(s.expr, ctx));
-    else if (s.kind === "expression") rhs.push(renderExpr(s.expr, ctx));
-  }
-  return rhs.some((r) => token.test(r));
 }
 
 // --- `<Agg>Repository` — load+fold reads, append writes ---------------------

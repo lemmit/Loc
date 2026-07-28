@@ -1,0 +1,114 @@
+// M-T6.2 — event-sourced applier folds that MUTATE state (drained, no gate).
+// Before M-T6.2 the vanilla fold renderer handled only `:=` / `let` and emitted
+// a silent `# unsupported applier statement: add|remove` comment for a compound
+// mutation, so a fold compiled GREEN while dropping the transition at runtime.
+// This fixture compile-gates every fold shape under `mix compile
+// --warnings-as-errors`:
+//   * scalar `-=`                  (`balance -= e.amount`)
+//   * primitive-collection `+=`    (`tags += e.tag`)
+//   * value-object-collection `+=` (`charges += Money{…}` → plain map; the ES
+//     path emits NO `<agg>_charges` child schema — it folds inline)
+//   * contained-ENTITY-PART `+=`   (`boxes += Box{…}` → a wire-shape map with a
+//     minted id; the ES path emits no `%…Box{}` Ecto struct)
+//   * part-in-part                 (`Box` itself `contains items` → the box map
+//     carries `items: []`, which `serialize_box/1` reads safely)
+system Ledger {
+  subdomain Core {
+    context Accounts {
+      valueobject Money { amount: int  currency: string }
+
+      event Opened { account: Account id, owner: string }
+      event Deposited { account: Account id, amount: int }
+      event Withdrawn { account: Account id, amount: int }
+      event Tagged { account: Account id, tag: string }
+      event Charged { account: Account id, amt: int }
+      event Boxed { account: Account id, label: string }
+
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        balance: int
+        tags: string[]
+        charges: Money[]
+        contains boxes: Box[]
+        entity Box { label: string  contains items: Item[] }
+        entity Item { sku: string }
+
+        create open(owner: string) {
+          emit Opened { account: id, owner: owner }
+        }
+
+        operation deposit(amount: int) {
+          precondition amount > 0
+          emit Deposited { account: id, amount: amount }
+        }
+
+        operation withdraw(amount: int) {
+          precondition amount > 0
+          precondition balance >= amount
+          emit Withdrawn { account: id, amount: amount }
+        }
+
+        operation tag(tag: string) {
+          emit Tagged { account: id, tag: tag }
+        }
+
+        operation charge(amt: int) {
+          precondition amt > 0
+          emit Charged { account: id, amt: amt }
+        }
+
+        operation box(label: string) {
+          emit Boxed { account: id, label: label }
+        }
+
+        apply(e: Opened) {
+          owner := e.owner
+          balance := 0
+        }
+
+        apply(e: Deposited) {
+          balance := balance + e.amount
+        }
+
+        // scalar compound `-=` — was silently dropped before M-T6.2.
+        apply(e: Withdrawn) {
+          balance -= e.amount
+        }
+
+        // primitive-collection `+=` — the applier head must bind `e` (not `_e`)
+        // or `e.tag` is an unbound-variable compile error.
+        apply(e: Tagged) {
+          tags += e.tag
+        }
+
+        // value-object-collection `+=` — folds as a plain map (Drain B: no child
+        // schema emitted for the ES aggregate).
+        apply(e: Charged) {
+          charges += Money { amount: e.amt, currency: "USD" }
+        }
+
+        // contained-entity-part `+=` with part-in-part (Drain A) — folds to a map
+        // with a minted id + `items: []`.
+        apply(e: Boxed) {
+          boxes += Box { label: e.label }
+        }
+      }
+
+      repository Accounts for Account {
+        find byOwner(owner: string): Account? where this.owner == owner
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage pg { type: postgres }
+  resource accountsLog { for: Accounts, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: elixir
+    contexts: [Accounts]
+    dataSources: [accountsLog]
+    serves: LedgerApi
+    port: 4000
+  }
+}
