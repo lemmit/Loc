@@ -78,7 +78,7 @@
 | nested-state-writes-copywith-frontends.md | shipped (write emission 2026-07, #2118) *(added 2026-07-21)* | residue → M-T1.16 (feliz), M-T1.18 (flutter) |
 | nestjs-backend.md | proposed | M-T10.3 (frozen; needs re-derivation) |
 | nextjs-frontend.md | proposed | M-T10.6 (frozen) |
-| observability.md | partial (logs shipped) | metrics/traces → M-T7.1 |
+| observability.md | shipped (logs + Prometheus metrics + OTel traces, all five backends) | — (M-T7.1 done) |
 | offerability-can-query.md | proposed | M-T3.10 |
 | organization-context.md | proposed | M-T3.6 |
 | page-derived-bindings.md | shipped | — |
