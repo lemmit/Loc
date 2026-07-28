@@ -50,6 +50,7 @@ import {
   checkEmit,
   checkExprCallArgs,
   checkOperation,
+  checkWorkflowBodyCallStmts,
 } from "./statements.js";
 import {
   checkDerived,
@@ -304,6 +305,10 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
       const env = envForNode(m);
       checkConstructionArgTypes(m, env, accept);
       checkExprCallArgs(m, env, accept);
+      // Bare operation/function-call STATEMENTS (`o.bump(x)`) — an LValue, not a
+      // PostfixChain, so `checkExprCallArgs` above doesn't see them.  Now that a
+      // factory-loaded receiver types as its aggregate, these resolve.
+      checkWorkflowBodyCallStmts(m, accept);
       for (const n of AstUtils.streamAst(m)) {
         if (isEmitStmt(n)) checkEmit(n, envForNode(n), accept);
       }

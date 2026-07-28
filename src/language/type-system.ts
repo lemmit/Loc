@@ -8,6 +8,7 @@ import { durationUnitOf } from "../util/temporal.js";
 import type {
   Aggregate,
   BaseType,
+  BoundedContext,
   Criterion,
   EntityPart,
   EnumDecl,
@@ -479,6 +480,22 @@ export interface Env {
   part?: EntityPart;
   // The value object currently in scope, if any.
   valueObject?: ValueObject;
+  // The bounded context currently in scope.  Set explicitly for scopes that
+  // have no `this` aggregate/part/value-object anchor — notably WORKFLOW bodies
+  // (a saga orchestrates across aggregates and has no `this`) — so
+  // context-level name lookups (value objects, criteria, policy fns, aggregate
+  // names) still resolve there.  When absent, it's derived from the enclosing
+  // aggregate/part/value-object via `envContext`.
+  context?: BoundedContext;
+}
+
+/** The bounded context an `env` is scoped to: the explicit `context` anchor when
+ *  set (a workflow body has no `this`, so it carries the context directly), else
+ *  the context enclosing the aggregate / part / value object in scope. */
+function envContext(env: Env): BoundedContext | undefined {
+  if (env.context) return env.context;
+  const start = env.aggregate ?? env.part ?? env.valueObject;
+  return start ? AstUtils.getContainerOfType(start, isBoundedContext) : undefined;
 }
 
 export function typeOf(expr: Expression | undefined, env: Env): DddType {
@@ -761,6 +778,27 @@ function typeOfPostfixChain(expr: PostfixChain, env: Env): DddType {
       curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
     }
     return curType;
+  }
+  // `<Aggregate>.create(...)` — the crudish (and custom) factory returns an
+  // INSTANCE of the aggregate.  A workflow / operation body binds
+  // `let o = Order.create({ … })` and then calls operations on `o`; the bare
+  // aggregate NAME `Order` is not itself a value, so without this the chain
+  // types `unknown` and every downstream `o.field` / `o.op(...)` is suppressed.
+  if (
+    isNameRef(expr.head) &&
+    first &&
+    isMemberSuffix(first) &&
+    first.call &&
+    first.member === "create"
+  ) {
+    const ent = lookupEntityByName(expr.head.name, env);
+    if (ent && isAggregate(ent)) {
+      curType = { kind: "aggregate", ref: ent };
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
+    }
   }
   curType = typeOf(expr.head, env);
   for (const s of expr.suffixes) {
@@ -1165,7 +1203,7 @@ function lookupTopLevelFunction(
   name: string,
   env: Env,
 ): import("./generated/ast.js").FunctionDecl | undefined {
-  const anchor = env.aggregate ?? env.part ?? env.valueObject;
+  const anchor = env.aggregate ?? env.part ?? env.valueObject ?? env.context;
   if (anchor) {
     const model = AstUtils.getContainerOfType(anchor, isModel);
     if (model) {
@@ -1200,9 +1238,7 @@ function typeOfBuilderCall(expr: import("./generated/ast.js").BuilderCall, env: 
 }
 
 function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | undefined {
-  const start = env.aggregate ?? env.part ?? env.valueObject;
-  if (!start) return undefined;
-  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  const ctx = envContext(env);
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isAggregate(m)) {
@@ -1220,9 +1256,7 @@ function lookupEntityByName(name: string, env: Env): Aggregate | EntityPart | un
  *  docs/criterion.md); a reference to one in expression position types
  *  as `bool`. */
 function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
-  const start = env.aggregate ?? env.part ?? env.valueObject;
-  if (!start) return undefined;
-  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  const ctx = envContext(env);
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isCriterion(m) && m.name === name) return m;
@@ -1236,9 +1270,7 @@ function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
  *  function form (carrying a `returnType`) is callable; a block-form
  *  `policy {}` read ladder is not. */
 function lookupPolicyFnByName(name: string, env: Env): PolicyDecl | undefined {
-  const start = env.aggregate ?? env.part ?? env.valueObject;
-  if (!start) return undefined;
-  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  const ctx = envContext(env);
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isPolicyDecl(m) && m.returnType !== undefined && m.name === name) return m;
@@ -1251,9 +1283,7 @@ function lookupValueObjectByName(name: string, env: Env): ValueObject | undefine
   // BoundedContext is `ContextMember[]` in the generated AST — we use
   // the typed `isValueObject` guard to narrow rather than escape-hatch
   // casting through `unknown`.
-  const start = env.aggregate ?? env.part ?? env.valueObject;
-  if (!start) return undefined;
-  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  const ctx = envContext(env);
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
@@ -1313,12 +1343,18 @@ export type SymbolOrigin =
 export function makeEnv(
   outer: Env | undefined,
   bindings: Map<string, { type: DddType; origin: AstNode }>,
-  ctx: { aggregate?: Aggregate; part?: EntityPart; valueObject?: ValueObject } = {},
+  ctx: {
+    aggregate?: Aggregate;
+    part?: EntityPart;
+    valueObject?: ValueObject;
+    context?: BoundedContext;
+  } = {},
 ): Env {
   return {
     aggregate: ctx.aggregate ?? outer?.aggregate,
     part: ctx.part ?? outer?.part,
     valueObject: ctx.valueObject ?? outer?.valueObject,
+    context: ctx.context ?? outer?.context,
     resolve(name) {
       const found = bindings.get(name);
       if (found) return found;
@@ -1351,7 +1387,12 @@ const lettingInFlight = new Set<import("./generated/ast.js").LetStmt>();
 function addTypedLets(
   bindings: Map<string, { type: DddType; origin: AstNode }>,
   stmts: import("./generated/ast.js").Statement[],
-  ctx: { aggregate?: Aggregate; part?: EntityPart; valueObject?: ValueObject },
+  ctx: {
+    aggregate?: Aggregate;
+    part?: EntityPart;
+    valueObject?: ValueObject;
+    context?: BoundedContext;
+  },
 ): void {
   // `env` reads `bindings` live (makeEnv closes over the map by reference),
   // so each let is typed against everything bound so far — params, members,
@@ -1544,6 +1585,10 @@ export function envForNode(node: AstNode): Env {
     aggregate: agg ?? undefined,
     part: part ?? undefined,
     valueObject: vo ?? undefined,
+    // The bounded-context anchor — so a let initializer in a workflow body
+    // (`let o = Order.create({ … })`) resolves context-level names (the
+    // aggregate `Order`) even though the workflow has no `this`.
+    context: AstUtils.getContainerOfType(node, isBoundedContext),
   };
   if (op) {
     addTypedLets(bindings, op.body, letCtx);
@@ -1589,6 +1634,10 @@ export function envForNode(node: AstNode): Env {
     aggregate: agg ?? undefined,
     part: part ?? undefined,
     valueObject: vo ?? undefined,
+    // The enclosing bounded context — the anchor context-level name lookups
+    // (value objects, criteria, policy fns, aggregate names) use when there is
+    // no `this` aggregate/part/vo, e.g. inside a workflow body.
+    context: AstUtils.getContainerOfType(node, isBoundedContext),
   });
 }
 
