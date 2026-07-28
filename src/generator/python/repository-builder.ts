@@ -60,7 +60,7 @@ import {
   rowClassName,
   valueCollectionRowClassName,
 } from "./py-columns.js";
-import { renderPyType } from "./render-expr.js";
+import { renderPyExpr, renderPyType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Repository emission — `app/db/repositories/<snake(agg)>_repository.py`.
@@ -88,11 +88,20 @@ export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
 }
 
 /** The `from app.auth.user import …` line for a repository module, or null when
- *  it references neither symbol.  `User` is needed for a per-find currentUser
- *  param; `require_current_user` is the ambient accessor a principal capability
- *  filter weaves into every root read (DEBT-02). */
-export function authUserImport(needsUser: boolean, needsAccessor: boolean): string | null {
-  const names = [needsUser ? "User" : null, needsAccessor ? "require_current_user" : null]
+ *  it references no symbol.  `User` is needed for a per-find currentUser param;
+ *  `require_current_user` is the ambient accessor a principal capability filter
+ *  weaves into every root read (DEBT-02); `current_user` is the non-raising
+ *  (`User | None`) getter the read-mask projection reads to fail closed. */
+export function authUserImport(
+  needsUser: boolean,
+  needsAccessor: boolean,
+  needsGetter = false,
+): string | null {
+  const names = [
+    needsUser ? "User" : null,
+    needsGetter ? "current_user" : null,
+    needsAccessor ? "require_current_user" : null,
+  ]
     .filter((n): n is string => n != null)
     .sort();
   return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
@@ -274,6 +283,7 @@ export function buildPyRepositoryFile(
     ...parts.flatMap((p) => ["", partHydrateMethod(p, agg, ctx)]),
     "",
     toWireMethod(agg, ctx),
+    aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : null,
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
     aggHasAuditedTarget(agg) ? ["", recordAuditMethod()] : null,
   );
@@ -368,6 +378,9 @@ export function buildPyRepositoryFile(
       // sets an always-false write scope that references NO principal, so an
       // unconditional import would be unused → ruff F401 on the generated project.
       aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),
+      // `current_user` (the non-raising getter) rides in for the read-mask
+      // projection's fail-closed principal read (`to_wire_masked`).
+      aggHasFieldMask(agg),
     ),
     hasAudit ? "from app.db.audit import AuditRecordRow" : null,
     refersTo("PagedResult") ? "from app.domain.paging import PagedResult" : null,
@@ -1543,6 +1556,45 @@ export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedConte
     [...wireProjection(agg, "root", ctx), ...provPairs].map((p) => `            ${p},`),
     "        }",
   );
+}
+
+/** The read-masked wire fields of an aggregate (`field: T mask unless <expr>`,
+ *  authorization.md §5) — the API-read wire fields whose `maskUnless` predicate
+ *  is set.  Empty when the aggregate declares no field mask. */
+export function maskedWireFields(agg: EnrichedAggregateIR): FieldIR[] {
+  return agg.fields.filter((f) => f.maskUnless !== undefined);
+}
+
+/** True iff `agg` declares at least one `mask unless` field — the gate for
+ *  emitting `to_wire_masked` and routing responses through it. */
+export function aggHasFieldMask(agg: EnrichedAggregateIR): boolean {
+  return maskedWireFields(agg).length > 0;
+}
+
+/** `to_wire_masked(root)` — the response serializer for an aggregate with
+ *  `mask unless` fields.  Projects the full wire dict via `to_wire`, then
+ *  REDACTS each masked field to `None` unless the ambient principal satisfies
+ *  the field's predicate (an unauthenticated `current_user() is None` always
+ *  redacts — fail-closed).  Internal (non-response) `to_wire` uses stay
+ *  unmasked; only response boundaries route through this.  Emitted only when
+ *  `aggHasFieldMask(agg)` — a mask-free aggregate stays byte-identical. */
+export function toWireMaskedMethod(agg: EnrichedAggregateIR): string {
+  const masked = maskedWireFields(agg);
+  const body: (string | null)[] = [
+    `    def to_wire_masked(self, root: ${agg.name}) -> dict[str, object]:`,
+    `        d = self.to_wire(root)`,
+    `        _mask_user = current_user()`,
+  ];
+  for (const f of masked) {
+    // `maskUnless` is a `current_user`-only predicate; render it against the
+    // narrowed `_mask_user` local (the `current-user` ref arm rewrites through
+    // `currentUserExpr`).  Guard the null caller before evaluating (fail-closed).
+    const pred = renderPyExpr(f.maskUnless!, { thisName: "self", currentUserExpr: "_mask_user" });
+    body.push(`        if not (_mask_user is not None and (${pred})):`);
+    body.push(`            d[${JSON.stringify(snake(f.name))}] = None`);
+  }
+  body.push(`        return d`);
+  return lines(...body);
 }
 
 export function partWireMethod(p: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {

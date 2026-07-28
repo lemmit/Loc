@@ -2860,8 +2860,10 @@ export function validateProvenancedStorage(
 //     unenforced no-op.  Each backend redaction slice adds its platform here.
 //     `node` emits response-boundary read redaction (`toWireMasked`) across its
 //     read routes + explicit handlers (M-T3.2 item 6, slice 2); `dotnet` redacts
-//     each masked field's DTO-projection arg via the ambient principal.
-const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet"]);
+//     each masked field's DTO-projection arg via the ambient principal; `python`
+//     routes response boundaries through `to_wire_masked` (reads the ambient
+//     `current_user()` and redacts fail-closed).
+const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python"]);
 export function validateFieldMask(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

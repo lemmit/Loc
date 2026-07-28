@@ -466,13 +466,13 @@ The predicate is a **bool** and, like a `requires` gate, references only
 `currentUser` (+ constants) — it is evaluated at read projection as a param-free
 caller check, never against the row.
 
-**node** emits the redaction at the **response boundary**: every read route
-(GET `/:id`, each `find` shape) and explicit query-handler routes a masked
-aggregate through a `toWireMasked(root, currentUser)` serializer that redacts
-each masked field to `null` unless the caller satisfies its predicate —
-**fail-closed** (an unauthenticated request always redacts). The masked field is
-`.nullable()` in the response schema. Internal audit/provenance snapshots stay
-unmasked (they record the real value). A mask-free aggregate is byte-identical.
+The redaction lands at the **response boundary**: every read route (GET `/:id`,
+each `find` shape) and explicit query-handler routes a masked aggregate through a
+masked serializer that redacts each masked field to `null` unless the caller
+satisfies its predicate — **fail-closed** (an unauthenticated request always
+redacts). The masked field is nullable in the response schema. Internal
+audit/provenance snapshots stay unmasked (they record the real value). A
+mask-free aggregate is byte-identical.
 
 ```ts
 // generated (Hono) — the aggregate's read serializer
@@ -483,17 +483,27 @@ toWireMasked(root: Person, currentUser: User | null): unknown {
 }
 ```
 
+```py
+# generated (FastAPI) — reads the ambient principal, no caller-passed arg
+def to_wire_masked(self, root: Person) -> dict[str, object]:
+    d = self.to_wire(root)
+    _mask_user = current_user()
+    if not (_mask_user is not None and ("hr.salaryUnmask" in _mask_user.permissions)):
+        d["salary"] = None
+    return d
+```
+
 **Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
-plus **node** read redaction, have shipped. The other four backends (.NET / Java
-/ Python / Elixir) still **compile-error** on a `mask unless` field
-(`loom.field-mask-unsupported`) rather than silently ship the value — a declared
-mask never leaks. The write-side (`write(...)` / `readonly when`) is the next
-slice.
+plus read redaction on **node**, **.NET**, and **Python**, have shipped. The
+remaining two backends (**Java** / **Elixir**) still **compile-error** on a
+`mask unless` field (`loom.field-mask-unsupported`) rather than silently ship the
+value — a declared mask never leaks. The write-side (`write(...)` /
+`readonly when`) is the next slice.
 
 | Diagnostic | When |
 | --- | --- |
 | `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
-| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (all but node) |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (Java / Elixir) |
 | `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
 | *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 

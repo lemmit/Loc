@@ -35,6 +35,11 @@ import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 export interface PyRenderContext {
   /** Rendered name for the implicit receiver (`self` by default). */
   thisName: string;
+  /** Override for a `current-user` ref — the local the ambient principal was
+   *  read into.  The read-mask projection (`to_wire_masked`) sets it so its
+   *  fail-closed predicate reads a narrowed local, not a bare `current_user`
+   *  that would clash with the ambient getter of the same name. */
+  currentUserExpr?: string;
   /** Variant-`match` binding side-channel (variant-match.md) — maps a bound
    *  name to the scrutinee text it aliases inside an arm's value. */
   matchBindings?: ReadonlyMap<string, string>;
@@ -324,7 +329,7 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       // scrutinee dict — render the subject text installed in `ctx.matchBindings`.
       return ctx.matchBindings?.get(e.name) ?? snake(e.name);
     case "current-user":
-      return "current_user";
+      return ctx.currentUserExpr ?? "current_user";
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (member-chain receivers rendered verbatim) — same contract as

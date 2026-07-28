@@ -45,7 +45,11 @@ describe("field mask — IR gates", () => {
     expect(salary.maskUnless!.kind).toBe("method-call");
   });
 
-  it.each(["node", "dotnet"])("%s emits read redaction — no unsupported gate", async (plat) => {
+  it.each([
+    "node",
+    "dotnet",
+    "python",
+  ])("%s emits read redaction — no unsupported gate", async (plat) => {
     const codes = await diags(
       "mask unless currentUser.permissions.contains(permissions.unmask)",
       plat,
