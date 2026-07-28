@@ -5,6 +5,10 @@ system FulfillmentSys {
     context Fulfillment {
       aggregate Order {
         status: string
+        // An explicit create so the saga can be driven at runtime (the
+        // eventSourced workflow below is triggered by OrderPlaced, which
+        // `place()` emits — so an Order must first exist).
+        create(status: string) { }
         operation place() {
           precondition status == "Draft"
           status := "Placed"
@@ -45,5 +49,25 @@ system FulfillmentSys {
     serves: FulfillmentApi
     dataSources: [fulfillmentState]
     port: 4000
+  }
+
+  // Runtime validation of the self-folding saga (M-T9.12): `place()` emits
+  // OrderPlaced, which starts the eventSourced workflow — its create emits
+  // PaymentRegistered, apply(PaymentRegistered) folds `paid`, the on() handler
+  // reads that folded `paid` in `precondition paid >= 0` and emits
+  // FulfillmentCancelled, and apply(FulfillmentCancelled) folds `cancelled`.
+  // Driving the cascade end to end exercises the whole emit → apply-fold →
+  // precondition-reads-folded-state chain in one request (synchronous
+  // in-process dispatch); a backend whose applier doesn't fold before the next
+  // handler's precondition reads it throws mid-cascade and `place()` fails.
+  // (Asserting the folded instance SCALARS — `paid`/`cancelled` — needs a
+  // workflow-instance read verb the `test e2e` DSL doesn't have yet; tracked as
+  // M-T9.12 follow-up. This asserts the observable: the order round-trips and
+  // the saga ran without error.)
+  test e2e "placing an order drives the self-folding fulfillment saga without error" against d {
+    let o = api.orders.create({ status: "Draft" })
+    api.orders.place(o)
+    let read = api.orders.getById(o)
+    expect(read.status).toBe("Placed")
   }
 }

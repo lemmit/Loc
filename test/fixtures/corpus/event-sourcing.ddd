@@ -38,4 +38,29 @@ system Ledger {
     serves: LedgerApi
     port: 4000
   }
+
+  // Runtime validation of the append-only fold (M-T9.12): the aggregate row is
+  // NOT the truth — the event stream is, and the balance is reconstructed by
+  // replaying Opened/Deposited/Withdrawn through the apply(...) folds on every
+  // read.  A backend whose fold mis-orders, double-counts, or drops an event
+  // reads back the wrong balance here (compile-clean but runtime-wrong), which
+  // the per-feature behavioural legs (all five backends) now catch.
+  test e2e "the append-only fold reconstructs balance across deposit + withdraw" against d {
+    let a = api.accounts.create({ owner: "alice" })
+    api.accounts.deposit(a, { amount: 100 })
+    api.accounts.withdraw(a, { amount: 30 })
+    let read = api.accounts.getById(a)
+    expect(read.owner).toBe("alice")
+    expect(read.balance).toBe(70)
+  }
+
+  // The same fold reconstructed through a non-getById reader (the `byOwner`
+  // filter query) — proves the stream reconstitution is reader-independent.
+  test e2e "the fold reconstructs balance through a filter-query read" against d {
+    let a = api.accounts.create({ owner: "bob" })
+    api.accounts.deposit(a, { amount: 250 })
+    let found = api.accounts.byOwner({ owner: "bob" })
+    expect(found.owner).toBe("bob")
+    expect(found.balance).toBe(250)
+  }
 }
