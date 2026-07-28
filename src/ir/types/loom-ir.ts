@@ -238,16 +238,6 @@ export interface FieldIR {
    *  entry.  The gate expression, like a `requires` gate, references only
    *  `currentUser` (+ constants) — never the row. */
   maskUnless?: ExprIR;
-  /** Lowered write-side authorization gate (authorization.md §5) — the write-side
-   *  twin of `maskUnless`.  A `currentUser`-only bool ALLOWED-WHEN predicate:
-   *  a client-supplied operation param of this field's name is REJECTED (403)
-   *  unless the gate holds.  Both source spellings normalise here — `write(X)`
-   *  stores `X`, `readonly when X` stores `!(X)` — so a backend emits one check:
-   *  `if (!writeGate) 403`.  Present only where the source declared a write rule;
-   *  drives the create/op-handler write redaction + the wire-spec
-   *  `fieldCapabilities` entry.  References only `currentUser` (+ constants),
-   *  never the row (slice-1 restriction, mirroring the mask gate). */
-  writeGate?: ExprIR;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
