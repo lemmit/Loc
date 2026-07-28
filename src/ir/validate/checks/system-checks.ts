@@ -2945,16 +2945,18 @@ export function validateFieldMask(
 //   - loom.field-write-gate-unsupported — the field is hosted by a backend whose
 //     create/op handlers don't yet enforce the gate.  A parsed-but-unenforced
 //     write gate is a SECURITY footgun (the client can set a field it shouldn't),
-//     so it fails fast rather than silently no-op'ing.  `node` (Hono) enforces
-//     the gate in its create/op handlers (fail-closed 403 before the domain
-//     call); `dotnet` enforces it in its create/operation Mediator command
-//     handlers (fail-closed 403 before the domain method); `python` enforces it
-//     in its create/operation FastAPI route handlers (fail-closed 403 via
-//     ForbiddenError before the domain call); `java` enforces it in its
-//     create/operation @Service methods (fail-closed 403 via ForbiddenException
-//     before the domain call); the remaining backend (elixir) is the stacked
-//     follow-on, adding its platform here as enforcement lands.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python", "java"]);
+//     so it fails fast rather than silently no-op'ing.  All five backends now
+//     enforce it: `node` (Hono) in its create/op handlers (fail-closed 403 before
+//     the domain call); `dotnet` in its create/operation Mediator command
+//     handlers (fail-closed 403 before the domain method); `python` in its
+//     create/operation FastAPI route handlers (fail-closed 403 via ForbiddenError
+//     before the domain call); `java` in its create/operation @Service methods
+//     (fail-closed 403 via ForbiddenException before the domain call); `elixir`
+//     (plain Ecto/Phoenix) in its create/update/operation controller actions
+//     (fail-closed 403 `cond` reading `current_user` off `conn.assigns` before
+//     the domain call).  This diagnostic can no longer fire for a backend
+//     deployable, but the set is retained for out-of-tree / future backends.
+const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
 export function validateFieldWriteGate(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

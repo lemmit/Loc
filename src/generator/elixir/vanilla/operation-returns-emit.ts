@@ -1048,6 +1048,10 @@ export function renderReturningOpControllerAction(
   agg: AggregateIR,
   op: OperationIR,
   ctx: BoundedContextIR,
+  /** Write-side field gate (authorization.md §5): wraps the action body in a
+   *  fail-closed 403 `cond` when a client-supplied op param is write-gated.
+   *  Undefined (byte-identical) when the op has no write-gated param. */
+  guardWrap?: (body: string) => string,
 ): string {
   const opSnake = snake(op.name);
   const aggSnake = snake(agg.name);
@@ -1116,9 +1120,7 @@ export function renderReturningOpControllerAction(
   const opActor = opUsesCurrentUser(op);
   const opCuBind = opActor ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const opCallActor = opActor ? ", current_user" : "";
-  return `
-  def ${opSnake}(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+  const inner = `    attrs = Map.drop(params, ["id"])
 ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
     { name: "aggregate", valueExpr: `"${aggPascal}"` },
     { name: "op", valueExpr: `"${op.name}"` },
@@ -1131,7 +1133,10 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
-    end
+    end`;
+  return `
+  def ${opSnake}(conn, %{"id" => id} = params) do
+${guardWrap ? guardWrap(inner) : inner}
 ${GUARD_RESCUE}
   end
 

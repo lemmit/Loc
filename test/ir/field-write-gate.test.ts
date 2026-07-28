@@ -69,28 +69,19 @@ describe("field write gate — IR gates", () => {
     "dotnet",
     "python",
     "java",
+    "elixir",
   ])("%s enforces the write gate — no unsupported diagnostic", async (plat) => {
-    // node (Hono), dotnet (.NET Mediator command handlers), python (FastAPI
-    // route handlers), and java (Spring @Service methods) emit the fail-closed
-    // 403 in their create/op handlers, so a write-gated field hosted on any of
-    // them is no longer a compile error.
+    // All five backends emit the fail-closed 403 before the domain call: node
+    // (Hono create/op handlers), dotnet (.NET Mediator command handlers), python
+    // (FastAPI route handlers), java (Spring @Service methods), and elixir (plain
+    // Ecto/Phoenix create/update/operation controller actions). A write-gated
+    // field is no longer a compile error on any of them, so
+    // loom.field-write-gate-unsupported can no longer fire for a backend.
     const codes = await diags(
       "write(currentUser.permissions.contains(permissions.setSalary))",
       plat,
     );
     expect(codes).not.toContain("loom.field-write-gate-unsupported");
-  });
-
-  it.each([
-    "elixir",
-  ])("%s still compile-gates an unenforced write gate (stacked follow-on)", async (plat) => {
-    // The remaining backend doesn't enforce yet, so a parsed write gate
-    // stays a fail-closed compile error there until its backend slice lands.
-    const codes = await diags(
-      "write(currentUser.permissions.contains(permissions.setSalary))",
-      plat,
-    );
-    expect(codes).toContain("loom.field-write-gate-unsupported");
   });
 
   it("rejects a write-gate predicate that references the row", async () => {
