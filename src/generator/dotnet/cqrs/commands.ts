@@ -3,6 +3,7 @@ import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  FieldIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -20,6 +21,49 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
   if (!op.when) return "";
   const pred = renderCsExpr(op.when, { thisName: "aggregate" });
   return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
+}
+
+/** Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
+ *  authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
+ *  A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that
+ *  must hold whenever a CLIENT-SUPPLIED command param of the SAME NAME is
+ *  present (op-param granularity — Loom has no PATCH partial update).  Returns
+ *  the write-gated fields covered by `params`, in param order, deduped. */
+function writeGatedParams(agg: AggregateIR, params: readonly { name: string }[]): FieldIR[] {
+  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
+  const seen = new Set<string>();
+  const out: FieldIR[] = [];
+  for (const p of params) {
+    const f = gated.get(p.name);
+    if (f && !seen.has(f.name)) {
+      seen.add(f.name);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
+/** The command-handler-body guard lines for {@link writeGatedParams}: a
+ *  fail-closed 403 (ForbiddenException → DomainExceptionFilter → RFC-7807)
+ *  emitted BEFORE the aggregate load/mutation — the gate is principal-only, so
+ *  it fails fast (no aggregate load needed).  Binds the ambient principal
+ *  (`RequestContext.Current?.CurrentUser`, nullable `User?`) ONCE per handler
+ *  even when several params are gated; an unauthenticated caller (null
+ *  principal) is rejected via the `is not null` narrowing.  `RequestContext`
+ *  and `ForbiddenException` both live in `Domain.Common`, already in the base
+ *  command-handler usings — no extra using.  Empty string (byte-identical) when
+ *  no supplied param is write-gated. */
+function writeGateGuards(agg: AggregateIR, params: readonly { name: string }[]): string {
+  const gated = writeGatedParams(agg, params);
+  if (gated.length === 0) return "";
+  let out = "        var __writeUser = RequestContext.Current?.CurrentUser;\n";
+  for (const f of gated) {
+    const pred = renderCsExpr(f.writeGate!, { thisName: "this", currentUserExpr: "__writeUser" });
+    out +=
+      `        if (!(__writeUser is not null && (${pred}))) throw new ForbiddenException(` +
+      `${JSON.stringify(`Forbidden: write ${f.name}`)});\n`;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +170,11 @@ export function emitCreateCommandAndHandler(
       extraDeps: createAuditDeps,
       extraUsings: createAuditUsings,
       body:
+        // Write-side field gate — reject the request (403) before constructing
+        // the aggregate when a client-supplied create-input field is
+        // write-gated and the ambient principal fails its predicate
+        // (authorization.md §5).
+        writeGateGuards(agg, requiredFields) +
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
@@ -389,8 +438,13 @@ export function emitOperationCommandAndHandler(
       `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
       `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
       whenGate(agg, op);
+    // Write-side field gate — reject (403) before the aggregate load/mutation
+    // when a client-supplied op param is write-gated and the ambient principal
+    // fails its predicate (authorization.md §5).  Principal-only ⇒ fails fast.
+    const writeGate = writeGateGuards(agg, op.params);
     const handlerBody = returnUnion
-      ? loadLine +
+      ? writeGate +
+        loadLine +
         auditBefore +
         `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
         auditStage +
@@ -401,13 +455,15 @@ export function emitOperationCommandAndHandler(
           // it to wire on the way out (`projectToResponse` handles money →
           // InvariantCulture string, datetime → ISO-8601, identity for the plain
           // scalars) so the handler's `<WireType>` result is returned, not Unit.
+          writeGate +
           loadLine +
           auditBefore +
           `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
           auditStage +
           `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
           `        return ${projectToResponse("result", op.returnType!, ctx)};\n`
-        : loadLine +
+        : writeGate +
+          loadLine +
           auditBefore +
           `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
           auditStage +
