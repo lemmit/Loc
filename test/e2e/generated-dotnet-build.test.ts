@@ -500,6 +500,39 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // File field (M-T1.2 slice 2b): the FileRef record + the EF value-converter
+    // jsonb column + the localDisk bytes adapter + the root POST /files /
+    // GET /files/{key} endpoints.  The first File-bearing .NET project to
+    // compile — domain/EF/DTO never type-checked with a File field before
+    // (FileRef undefined, the column was a plain scalar).
+    it("File field (dotnet) — FileRef + jsonb column + /files endpoints build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-file-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/file-upload.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // `ignoring` filter-bypass (named-filter-bypass.md §11) — the only honoring
     // backend this slice.  Compiles all three read sites (`find ignoring <Cap>`,
     // `find ignoring *`, view bypass, inline `Repo.findAll(...) ignoring …`) so

@@ -210,7 +210,9 @@ export function jpaFieldAnnotations(
     return [`    @Enumerated(EnumType.STRING)`, `    @Column(name = "${col}")`];
   }
 
-  if (t.kind === "primitive" && t.name === "json") {
+  if (t.kind === "primitive" && (t.name === "json" || t.name === "File")) {
+    // A `File` field's FileRef persists as jsonb, exactly like `json` (M-T1.2);
+    // Hibernate maps the `FileRef` record ⇄ JSON via @JdbcTypeCode.
     return [`    @JdbcTypeCode(SqlTypes.JSON)`, `    @Column(name = "${col}")`];
   }
 
@@ -231,7 +233,7 @@ function associationFor(
 export function needsHibernateTypes(fields: readonly FieldIR[]): boolean {
   return fields.some((f) => {
     const t = unwrap(f.type);
-    if (t.kind === "primitive" && t.name === "json") return true;
+    if (t.kind === "primitive" && (t.name === "json" || t.name === "File")) return true;
     return t.kind === "array" && t.element.kind !== "id" && t.element.kind !== "valueobject";
   });
 }

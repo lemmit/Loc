@@ -10,6 +10,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
+import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -555,8 +556,11 @@ export function renderConfiguration(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
       // Provenance lineage type + its shared JSON options for the co-located
-      // `<field>_provenance` value-converter.
-      provColumnLines.length > 0 || filterRefsCurrentUser ? `using ${ns}.Domain.Common;` : null,
+      // `<field>_provenance` value-converter; FileRef for a `File` field's jsonb
+      // value-converter (M-T1.2).
+      provColumnLines.length > 0 || filterRefsCurrentUser || aggregateHasFileField(agg)
+        ? `using ${ns}.Domain.Common;`
+        : null,
       "",
       `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
       "",
@@ -861,6 +865,19 @@ function fieldConfigLines(
   // snake_case, otherwise it defaults to the PascalCase property name.  In the
   // embedded shape the field is a JSON key, so emit nothing (the default).
   if (embedded) return [];
+  // A `File` field's FileRef persists as jsonb (M-T1.2) — a System.Text.Json
+  // value converter round-trips FileRef ⇄ string, on a `.HasColumnType("jsonb")`
+  // column (the same shape as the provenance / embedded-ref-collection jsonb
+  // converters below).
+  if (leaf.kind === "primitive" && leaf.name === "File") {
+    const opts = "(System.Text.Json.JsonSerializerOptions?)null";
+    const conv = isOptional
+      ? `.HasConversion(v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, ${opts}), v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(v, ${opts}))`
+      : `.HasConversion(v => System.Text.Json.JsonSerializer.Serialize(v, ${opts}), v => System.Text.Json.JsonSerializer.Deserialize<FileRef>(v, ${opts})!)`;
+    return [
+      `${indent}${builder}.Property(x => x.${upperFirst(f.name)})${colName}.HasColumnType("jsonb")${conv};`,
+    ];
+  }
   const tokenSuffix = concurrencyToken ? ".IsConcurrencyToken()" : "";
   return [
     `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasColumnName("${col}")${tokenSuffix};`,

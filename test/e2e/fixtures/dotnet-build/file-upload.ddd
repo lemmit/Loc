@@ -1,0 +1,33 @@
+// File upload/download on .NET (M-T1.2 slice 2b).  A `File` field stores its
+// FileRef ({url,key,contentType,size}) in a jsonb column (EF value converter);
+// the deployable serves app-level POST /files / GET /files/{key} over the bound
+// localDisk objectStore's raw-bytes adapter.  Compiling this proves File is real
+// on .NET end-to-end (FileRef record + jsonb column + upload endpoints) —
+// domain/EF/DTO never type-checked with a File field before (FileRef undefined).
+system FileUploadSys {
+  subdomain Docs {
+    context Docs {
+      aggregate Doc {
+        title: string
+        attachment: File
+      }
+      repository Docs for Doc { }
+    }
+  }
+
+  api DocsApi from Docs
+
+  storage pg   { type: postgres }
+  storage disk { type: localDisk }
+
+  resource docState { for: Docs, kind: state,       use: pg }
+  resource docFiles { for: Docs, kind: objectStore, use: disk }
+
+  deployable api {
+    platform: dotnet
+    contexts: [Docs]
+    dataSources: [docState, docFiles]
+    serves: DocsApi
+    port: 8080
+  }
+}

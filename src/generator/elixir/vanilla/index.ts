@@ -19,6 +19,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../../ir/util/aggregate-flags.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
+import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
@@ -33,6 +34,7 @@ import { generateVueForContexts } from "../../vue/index.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
+  resourceModuleName,
 } from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
 import { toModulePrefix, toSnakeApp } from "../app-naming.js";
@@ -61,6 +63,7 @@ import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-handlers-emit.js";
 import { emitVanillaExternModules } from "./extern-emit.js";
+import { emitVanillaFilesController } from "./files-controller-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import {
@@ -213,6 +216,29 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
+  // File upload/download (M-T1.2): a hosted File field + a bound objectStore ⇒
+  // mount root POST /files / GET /files/:key over that store's raw-bytes adapter.
+  // The IR validator guarantees the binding.  File-free ⇒ nothing (byte-identical).
+  if (
+    sys?.dataSources &&
+    contexts.some((c) => c.aggregates.some((a) => aggregateHasFileField(a)))
+  ) {
+    const wired = new Set(deployable.dataSourceNames ?? []);
+    const storeType = new Map((sys.storages ?? []).map((s) => [s.name, s.type] as const));
+    const objStore = sys.dataSources.find((r) => wired.has(r.name) && r.kind === "objectStore");
+    const st = objStore ? storeType.get(objStore.storageName) : undefined;
+    if (objStore && st) {
+      apiRoutes.push(
+        ...emitVanillaFilesController(
+          appName,
+          appModule,
+          resourceModuleName(appModule, st),
+          snake(objStore.name),
+          out,
+        ),
+      );
+    }
+  }
   const allProjections: VanillaProjectionRef[] = [];
   const allQueryProjections: VanillaQueryProjectionRef[] = [];
   const workflowGroups: WorkflowControllerGroup[] = [];

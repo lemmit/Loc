@@ -27,6 +27,8 @@ export function dtImportLine(refersTo: (n: string) => boolean): string | null {
 export interface PyTypeImports {
   usesDecimal: boolean;
   usesDatetime: boolean;
+  /** A `File` field → the shared `FileRef` TypedDict (M-T1.2). */
+  usesFile: boolean;
   /** Aggregate / part target names whose `<Name>Id` NewType is used. */
   idNames: Set<string>;
   voNames: Set<string>;
@@ -37,6 +39,7 @@ export function emptyPyTypeImports(): PyTypeImports {
   return {
     usesDecimal: false,
     usesDatetime: false,
+    usesFile: false,
     idNames: new Set(),
     voNames: new Set(),
     enumNames: new Set(),
@@ -48,6 +51,7 @@ export function visitPyTypeImports(t: TypeIR, acc: PyTypeImports): void {
     case "primitive":
       if (t.name === "money") acc.usesDecimal = true;
       if (t.name === "datetime") acc.usesDatetime = true;
+      if (t.name === "File") acc.usesFile = true;
       return;
     case "id":
       acc.idNames.add(t.targetName);

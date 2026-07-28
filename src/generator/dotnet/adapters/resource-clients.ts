@@ -119,6 +119,145 @@ const s3DotnetAdapter: DotnetResourceAdapter = {
         `        await ${cls}Client.DeleteObjectAsync(${cls}Bucket, key);`,
         "    }",
         "",
+        // Raw-bytes verbs — the File upload/download endpoints' storage seam
+        // (M-T1.2).  Unlike _Put/_Get (JSON strings), these store the exact
+        // bytes with their contentType so a download streams back byte-identical.
+        `    public static async Task ${cls}_PutBytes(string key, byte[] body, string contentType)`,
+        "    {",
+        "        using var stream = new MemoryStream(body);",
+        `        await ${cls}Client.PutObjectAsync(new PutObjectRequest`,
+        "        {",
+        `            BucketName = ${cls}Bucket,`,
+        "            Key = key,",
+        "            InputStream = stream,",
+        "            ContentType = contentType,",
+        "        });",
+        "    }",
+        "",
+        `    public static async Task<(byte[] Bytes, string ContentType)?> ${cls}_GetBytes(string key)`,
+        "    {",
+        "        try",
+        "        {",
+        `            using var res = await ${cls}Client.GetObjectAsync(${cls}Bucket, key);`,
+        "            using var ms = new MemoryStream();",
+        "            await res.ResponseStream.CopyToAsync(ms);",
+        '            return (ms.ToArray(), res.Headers.ContentType ?? "application/octet-stream");',
+        "        }",
+        "        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)",
+        "        {",
+        "            return null;",
+        "        }",
+        "    }",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  },
+};
+
+/** localDisk — a dependency-free local-directory object store (M-T1.2), the
+ *  .NET twin of Hono's / Python's localDisk adapter.  Stores each object's raw
+ *  bytes under a data dir keyed by `key`, plus a `<key>.meta.json` sidecar
+ *  carrying the contentType so a download round-trips its metadata.  Backs the
+ *  File upload/download endpoints with no cloud SDK (BCL `System.IO`). */
+const localDiskDotnetAdapter: DotnetResourceAdapter = {
+  name: "localDisk",
+  nugetDeps: () => ({}),
+  emitClientClass(resources, _stores, ns): string {
+    const lines: string[] = [
+      "// Auto-generated.",
+      "using System;",
+      "using System.Collections.Generic;",
+      "using System.IO;",
+      "using System.Text;",
+      "using System.Text.Json;",
+      "using System.Threading.Tasks;",
+      "",
+      `namespace ${ns}.Resources;`,
+      "",
+      "public static class LocalDiskResources",
+      "{",
+    ];
+    for (const r of resources) {
+      const cls = upperFirst(r.name);
+      lines.push(
+        `    private static readonly string ${cls}Dir =`,
+        `        Environment.GetEnvironmentVariable("${envVar(r.name).replace(/_URL$/, "")}_DIR") ?? Path.Combine("data", ${JSON.stringify(r.name)});`,
+        "",
+        // Guard against path traversal: minted keys are GUIDs, but a
+        // GET /files/{key} param is caller-supplied, so keep it inside the dir.
+        `    private static string ${cls}Path(string key)`,
+        "    {",
+        "        var safe = new string(Array.ConvertAll(",
+        "            key.ToCharArray(),",
+        "            c => char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-' ? c : '_'));",
+        `        return Path.Combine(${cls}Dir, safe);`,
+        "    }",
+        "",
+        // Raw-bytes verbs — the File endpoints' storage seam.
+        `    public static async Task ${cls}_PutBytes(string key, byte[] body, string contentType)`,
+        "    {",
+        `        Directory.CreateDirectory(${cls}Dir);`,
+        `        var path = ${cls}Path(key);`,
+        "        await File.WriteAllBytesAsync(path, body);",
+        "        await File.WriteAllTextAsync(",
+        '            path + ".meta.json",',
+        "            JsonSerializer.Serialize(new { contentType, size = body.Length }));",
+        "    }",
+        "",
+        `    public static async Task<(byte[] Bytes, string ContentType)?> ${cls}_GetBytes(string key)`,
+        "    {",
+        `        var path = ${cls}Path(key);`,
+        "        if (!File.Exists(path)) return null;",
+        "        var body = await File.ReadAllBytesAsync(path);",
+        '        var contentType = "application/octet-stream";',
+        '        var meta = path + ".meta.json";',
+        "        if (File.Exists(meta))",
+        "        {",
+        "            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(meta));",
+        '            if (doc.RootElement.TryGetProperty("contentType", out var ct) && ct.ValueKind == JsonValueKind.String)',
+        "                contentType = ct.GetString() ?? contentType;",
+        "        }",
+        "        return (body, contentType);",
+        "    }",
+        "",
+        // Vendor-neutral JSON verbs (parity with s3's Put/Get/List/Delete) so
+        // workflow bodies reaching the store keep working against localDisk.
+        `    public static async Task ${cls}_Put(string key, string body)`,
+        "    {",
+        `        await ${cls}_PutBytes(key, Encoding.UTF8.GetBytes(body), "application/json");`,
+        "    }",
+        "",
+        `    public static async Task<string?> ${cls}_Get(string key)`,
+        "    {",
+        `        var obj = await ${cls}_GetBytes(key);`,
+        "        return obj is null ? null : Encoding.UTF8.GetString(obj.Value.Bytes);",
+        "    }",
+        "",
+        `    public static Task<IReadOnlyList<string>> ${cls}_List(string prefix)`,
+        "    {",
+        `        if (!Directory.Exists(${cls}Dir))`,
+        "            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());",
+        "        var keys = new List<string>();",
+        `        foreach (var f in Directory.GetFiles(${cls}Dir))`,
+        "        {",
+        "            var name = Path.GetFileName(f);",
+        '            if (!name.EndsWith(".meta.json", StringComparison.Ordinal)',
+        "                && name.StartsWith(prefix, StringComparison.Ordinal)) keys.Add(name);",
+        "        }",
+        "        return Task.FromResult<IReadOnlyList<string>>(keys);",
+        "    }",
+        "",
+        `    public static Task ${cls}_Delete(string key)`,
+        "    {",
+        `        var path = ${cls}Path(key);`,
+        "        if (File.Exists(path)) File.Delete(path);",
+        '        var meta = path + ".meta.json";',
+        "        if (File.Exists(meta)) File.Delete(meta);",
+        "        return Task.CompletedTask;",
+        "    }",
+        "",
       );
     }
     lines.push("}", "");
@@ -376,6 +515,7 @@ const sendgridDotnetAdapter: DotnetResourceAdapter = {
 
 const ADAPTERS: readonly DotnetResourceAdapter[] = [
   s3DotnetAdapter,
+  localDiskDotnetAdapter,
   rabbitmqDotnetAdapter,
   restApiDotnetAdapter,
   smtpDotnetAdapter,

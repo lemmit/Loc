@@ -57,6 +57,9 @@ function recordFile(
   imports: Set<string>,
   entityImport?: string,
 ): string {
+  // A `File` component is the shared `FileRef` record in domain.common (M-T1.2)
+  // — imported precisely (not wildcarded) so a File-free DTO stays byte-identical.
+  const usesFileRef = components.some((c) => /\bFileRef\b/.test(c));
   return lines(
     `package ${pkg};`,
     ``,
@@ -65,6 +68,7 @@ function recordFile(
     `import ${basePkg}.domain.enums.*;`,
     `import ${basePkg}.domain.ids.*;`,
     `import ${basePkg}.domain.valueobjects.*;`,
+    usesFileRef ? `import ${basePkg}.domain.common.FileRef;` : null,
     entityImport ? entityImport : null,
     ``,
     `public record ${name}(${components.join(", ")}) {`,

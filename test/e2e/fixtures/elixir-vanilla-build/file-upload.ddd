@@ -1,0 +1,33 @@
+// File upload/download on Elixir/Phoenix (M-T1.2 slice 2d).  A `File` field
+// stores its FileRef ({url,key,contentType,size}) in a :map (jsonb) column; the
+// deployable serves app-level POST /files / GET /files/:key over the bound
+// localDisk objectStore's raw-bytes adapter.  Compiling this proves File is real
+// on Phoenix end-to-end (the schema mapped File to :string before — a load/cast
+// mismatch against the jsonb migration column).
+system FileUploadSys {
+  subdomain Docs {
+    context Docs {
+      aggregate Doc {
+        title: string
+        attachment: File
+      }
+      repository Docs for Doc { }
+    }
+  }
+
+  api DocsApi from Docs
+
+  storage pg   { type: postgres }
+  storage disk { type: localDisk }
+
+  resource docState { for: Docs, kind: state,       use: pg }
+  resource docFiles { for: Docs, kind: objectStore, use: disk }
+
+  deployable api {
+    platform: elixir
+    contexts: [Docs]
+    dataSources: [docState, docFiles]
+    serves: DocsApi
+    port: 4000
+  }
+}

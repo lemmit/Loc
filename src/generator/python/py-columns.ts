@@ -147,6 +147,12 @@ export function columnsFor(
           return [{ attr, pyType: "str", saType: "Uuid(as_uuid=False)", optional: opt }];
         case "json":
           return [{ attr, pyType: "object", saType: "JSONB", optional: opt }];
+        case "File":
+          // A `File` field stores its `FileRef` ({url,key,contentType,size}) in
+          // a JSONB column (M-T1.2).  `FileRef` is a TypedDict — a dict at
+          // runtime — so it round-trips JSONB with no serde, and `Mapped[FileRef]`
+          // keeps `row.<f>` typed for the repository.
+          return [{ attr, pyType: "FileRef", saType: "JSONB", optional: opt }];
         default:
           return [{ attr, pyType: "str", saType: "Text", optional: opt }];
       }

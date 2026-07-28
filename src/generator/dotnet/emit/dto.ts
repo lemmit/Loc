@@ -9,6 +9,9 @@ export function renderRequestDtos(args: {
   ns: string;
   aggName: string;
   records: Array<{ name: string; params: string }>;
+  /** Extra `using` namespaces — e.g. `Domain.Common` when a request carries a
+   *  `File` field's `FileRef` create-input param (M-T1.2). */
+  extraUsings?: string[];
 }): string {
   return renderDtoFile(args, "Requests");
 }

@@ -120,6 +120,11 @@ const FIXTURES: Array<[string, string]> = [
   // Resource clients (objectStore / queue / api): S3 / RabbitMQ /
   // HttpClient classes + workflow resource-op call sites.
   ["test/e2e/fixtures/java-build/resources.ddd", "rc_api"],
+  // File field (M-T1.2 slice 2c): the FileRef record + @JdbcTypeCode jsonb
+  // column + the localDisk bytes adapter + the root POST /files /
+  // GET /files/{key} controller.  The first File-bearing Java project to
+  // compile — domain/JPA/DTO never type-checked with a File field before.
+  ["test/e2e/fixtures/java-build/file-upload.ddd", "fu_api"],
   // Event sourcing (persistedAs: eventLog): JdbcTemplate stream
   // append + applier fold, no state table / Spring Data interface.
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],

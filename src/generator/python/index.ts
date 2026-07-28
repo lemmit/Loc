@@ -17,6 +17,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
+import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
@@ -69,6 +70,7 @@ import { renderPyServiceTestsFile, renderPyTestsFile, renderPyVoTestsFile } from
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-handlers-emit.js";
 import { buildPyExternHookModule, externHookModulePath } from "./extern-builder.js";
+import { renderPyFileRefModel, renderPyFilesRoutes } from "./files-routes-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
 import { buildPyQueryProjectionsFile } from "./query-projections-builder.js";
@@ -248,6 +250,35 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // / saga `resource-call`s import the verb helpers from these.
   const resources = emitPyResourceFiles(args.sys, args.deployable.dataSourceNames);
   for (const [path, content] of resources.files) out.set(path, content);
+  // File upload/download (M-T1.2): when this deployable hosts a File-bearing
+  // aggregate AND binds an objectStore, mount root `/files` routes over that
+  // store's bytes adapter (`<res>_put_bytes` / `<res>_get_bytes`).  The IR
+  // validator (`loom.file-field-needs-object-storage`) guarantees the binding,
+  // so no File field → emit nothing (byte-identical).  Mounted at root (not
+  // under `/api`) to match Hono + the frontend api-client (`api.upload("/files")`).
+  let hasFileRoutes = false;
+  {
+    const hasFileField = args.contexts.some((ctx) =>
+      ctx.aggregates.some((agg) => aggregateHasFileField(agg)),
+    );
+    if (hasFileField) {
+      // The shared FileRef TypedDict the domain / schema / wire layers import.
+      out.set("app/domain/file_ref.py", renderPyFileRefModel());
+      const wired = new Set(args.deployable.dataSourceNames);
+      const storeType = new Map(args.sys.storages.map((s) => [s.name, s.type] as const));
+      const objStore = args.sys.dataSources.find(
+        (r) => wired.has(r.name) && r.kind === "objectStore",
+      );
+      const st = objStore ? storeType.get(objStore.storageName) : undefined;
+      if (objStore && st) {
+        hasFileRoutes = true;
+        out.set(
+          "app/http/files_routes.py",
+          renderPyFilesRoutes(snake(objStore.name), `app.resources.${snake(st)}`),
+        );
+      }
+    }
+  }
   // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
   // in pyproject only under an `auth { oidc }` block.
   const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
@@ -415,6 +446,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasChannels,
       hasChannelConsumers,
       hasRealtime,
+      hasFileRoutes,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -927,6 +959,7 @@ function renderMain(
   hasChannels = false,
   hasChannelConsumers = false,
   hasRealtime = false,
+  hasFileRoutes = false,
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -1006,6 +1039,7 @@ function renderMain(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
     hasRealtime ? "from app.realtime import realtime_router" : null,
+    hasFileRoutes ? "from app.http.files_routes import router as files_router" : null,
     "from app.obs.log import log",
     "from app.obs.metrics import render_metrics",
     "from app.obs.middleware import ObservabilityMiddleware",
@@ -1147,6 +1181,10 @@ function renderMain(
     // broadcast-channel events to connected browsers (mounted under the shared
     // API base so `${API_BASE_URL}/realtime/events` lines up).
     hasRealtime ? `app.include_router(realtime_router${routerArgs})` : null,
+    // File upload/download (M-T1.2): mounted at ROOT `/files` (no `/api` prefix)
+    // so `${API_BASE_URL}/files` + the `FileRef.url = "/files/<key>"` anchor line
+    // up with the Hono backend and the frontend api-client.
+    hasFileRoutes ? "app.include_router(files_router)" : null,
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
     // and the handshake redirect lands at `/api/auth/callback`.

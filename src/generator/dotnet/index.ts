@@ -23,6 +23,7 @@ import {
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
+import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
@@ -53,7 +54,7 @@ import {
   type DotnetArtifactCategory,
 } from "./adapters/by-layer-layout.js";
 import { cqrsStyleAdapter } from "./adapters/cqrs-style.js";
-import { emitDotnetResourceFiles } from "./adapters/resource-clients.js";
+import { emitDotnetResourceFiles, resourceClassName } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import {
   emitBaseReaders,
@@ -355,7 +356,27 @@ function emitProjectFromContexts(
   const emitsConcurrencyException =
     system?.deployable.persistence === "dapper" &&
     aggregatesNeedConcurrency(contexts.flatMap((c) => c.aggregates));
-  emitCommon(ns, out, { concurrencyException: emitsConcurrencyException });
+  // File upload/download (M-T1.2): does a hosted aggregate declare a File field
+  // (⇒ emit the shared FileRef record), and which objectStore does this
+  // deployable bind (⇒ mount root `/files` over its raw-bytes adapter)?  The IR
+  // validator (`loom.file-field-needs-object-storage`) guarantees the binding.
+  // File-free ⇒ nothing below fires and the output stays byte-identical.
+  const hasFileField = contexts.some((c) => c.aggregates.some((a) => aggregateHasFileField(a)));
+  let fileUpload: { putBytes: string; getBytes: string } | undefined;
+  if (hasFileField && system) {
+    const wired = new Set(system.deployable.dataSourceNames);
+    const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+    const objStore = system.sys.dataSources.find(
+      (r) => wired.has(r.name) && r.kind === "objectStore",
+    );
+    const st = objStore ? storeType.get(objStore.storageName) : undefined;
+    if (objStore && st) {
+      // Fully qualified — Program.cs carries no `using <ns>.Resources`.
+      const call = `${ns}.Resources.${resourceClassName(st)}.${upperFirst(objStore.name)}`;
+      fileUpload = { putBytes: `${call}_PutBytes`, getBytes: `${call}_GetBytes` };
+    }
+  }
+  emitCommon(ns, out, { concurrencyException: emitsConcurrencyException, file: hasFileField });
   emitDispatcher(ns, out, hasSubscriptions);
   out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns, hasSubscriptions));
   // Adapter dispatch context — built once per system-mode emit so
@@ -976,6 +997,7 @@ function emitProjectFromContexts(
         )
       : [],
     resourceNugetDeps: resourceEmission.nugetDeps,
+    fileUpload,
     oidc: !!(authRequired && system?.sys.auth),
     // Tenant hierarchy (multi-tenancy P2.2): the registry opts into
     // `tenantRegistry` (a `dataKey` column), so Program.cs registers the scoped
@@ -1701,6 +1723,11 @@ function emitProject(
      *  "who computed".  Undefined when the deployable has no auth. */
     actorIdProp?: string;
     resourceNugetDeps?: Record<string, string>;
+    /** File upload/download (M-T1.2): the bound objectStore's raw-bytes helper
+     *  method references (`S3Resources.Foo_PutBytes` / `_GetBytes`), so
+     *  Program.cs maps root `POST /files` + `GET /files/{key}` over them.
+     *  Undefined ⇒ no File field, no `/files` routes (byte-identical). */
+    fileUpload?: { putBytes: string; getBytes: string };
     /** OIDC turnkey auth (D-AUTH-OIDC): the system declares `auth { oidc }`,
      *  so emit the generated verifier registration + its NuGet refs. */
     oidc?: boolean;
@@ -1753,6 +1780,7 @@ function emitProject(
       outboxNoopInner: !!options?.outboxNoopInner,
       hasRealtime: !!options?.hasRealtime,
       hasAudit: !!options?.hasAudit,
+      fileUpload: options?.fileUpload,
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,

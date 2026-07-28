@@ -186,6 +186,7 @@ export function renderPyAggregate(
   const usesDatetime =
     types.usesDatetime || exprImports.has("datetime") || createSeedsDatetime === true;
   const usesDecimal = types.usesDecimal || exprImports.has("decimal");
+  const usesFile = types.usesFile;
 
   // Symbol-reference scan over the rendered body (string literals
   // stripped, the TS emitter's trick) for VO / enum / id-factory needs.
@@ -271,6 +272,7 @@ export function renderPyAggregate(
       : null,
     usesCurrentUser ? "from app.auth.user import User" : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
+    usesFile ? "from app.domain.file_ref import FileRef" : null,
     `from app.domain.events import ${eventImports.join(", ")}`,
     `from app.domain.ids import ${idImports.join(", ")}`,
     emitProvenance

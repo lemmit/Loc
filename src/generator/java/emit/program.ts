@@ -384,6 +384,57 @@ export function renderHealthController(basePkg: string): string {
   );
 }
 
+/** Root-mounted `POST /files` + `GET /files/{key}` (M-T1.2) over the bound
+ *  objectStore's raw-bytes adapter.  Mounted at the root (no `/api` prefix, no
+ *  `@RequestMapping` on the class) to match the frontend api-client
+ *  (`api.upload("/files")`, `FileRef.url = "/files/<key>"`) and the other
+ *  backends.  `resourceClass` is the bound store's helper class (e.g.
+ *  `LocalDiskResources`); `resourceName` its per-resource method prefix. */
+export function renderFilesController(
+  basePkg: string,
+  resourceClass: string,
+  resourceName: string,
+): string {
+  return lines(
+    `package ${basePkg}.api;`,
+    ``,
+    `import java.io.IOException;`,
+    `import java.util.UUID;`,
+    `import org.springframework.http.MediaType;`,
+    `import org.springframework.http.ResponseEntity;`,
+    `import org.springframework.web.bind.annotation.GetMapping;`,
+    `import org.springframework.web.bind.annotation.PathVariable;`,
+    `import org.springframework.web.bind.annotation.PostMapping;`,
+    `import org.springframework.web.bind.annotation.RequestParam;`,
+    `import org.springframework.web.bind.annotation.RestController;`,
+    `import org.springframework.web.multipart.MultipartFile;`,
+    `import ${basePkg}.domain.common.FileRef;`,
+    `import ${basePkg}.resources.${resourceClass};`,
+    ``,
+    `@RestController`,
+    `public class FilesController {`,
+    `    @PostMapping("/files")`,
+    `    public ResponseEntity<FileRef> upload(@RequestParam("file") MultipartFile file) throws IOException {`,
+    `        var key = UUID.randomUUID().toString();`,
+    `        var bytes = file.getBytes();`,
+    `        var contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";`,
+    `        ${resourceClass}.${resourceName}PutBytes(key, bytes, contentType);`,
+    `        return ResponseEntity.status(201).body(new FileRef("/files/" + key, key, contentType, bytes.length));`,
+    `    }`,
+    ``,
+    `    @GetMapping("/files/{key}")`,
+    `    public ResponseEntity<byte[]> download(@PathVariable String key) {`,
+    `        var obj = ${resourceClass}.${resourceName}GetBytes(key);`,
+    `        if (obj == null) {`,
+    `            return ResponseEntity.notFound().build();`,
+    `        }`,
+    `        return ResponseEntity.ok().contentType(MediaType.parseMediaType(obj.contentType())).body(obj.bytes());`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderDockerfile(
   options: { embeddedSpa?: boolean; spaOutDir?: string; spaBuildKind?: "vite" | "feliz" } = {},
 ): string {
