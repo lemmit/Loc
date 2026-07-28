@@ -446,15 +446,67 @@ function primitiveButton(c: Ctx): string {
 }
 
 // ---------------------------------------------------------------------------
-// TODO(flutter full-parity): the interactive / form family is NOT rendered in
-// the walking skeleton and is deliberately absent from both `RENDERERS` and the
-// `flutter` required-primitive set.  Full parity adds Dart renderers (or the
-// `flutterTarget` inline seams) for: Field / MultilineField / PasswordField /
-// NumberField / SelectField / Toggle (Material `TextFormField` /
-// `DropdownButtonFormField` / `Switch`), Form / MasterDetail (a `Form` +
-// two-pane layout), Modal (`showDialog`), and Tabs (`DefaultTabController` +
-// `TabBar`/`TabBarView`).
+// Controlled input primitives — each binds a page/component `state` field via
+// `bind:`.  READS `state.<bind>`; WRITES via the generated `set<Field>` method
+// (a bare call — resolved to a ConsumerWidget page-shell tear-off or a stateful
+// component's in-class method; `c.setter` is `set<Field>`, generated per state
+// field by `riverpod-emit.ts` / `component-emit.ts`).  An input with no
+// resolvable bind (`hasBind` false) renders a read-only stub (`onChanged: null`)
+// so the widget tree still compiles.  Material widget shapes mirror the
+// CI-compiled form-field emitters in `forms-emit.ts`.
+//
+// Still deferred (kept in `FLUTTER_UNRENDERED_PRIMITIVES`, honest-gated by
+// `loom.flutter-primitive-unsupported`): NumberField (needs the bound field's
+// int-vs-double type to parse the text input), FileUpload (multipart POST to
+// `/files` — folds into M-T1.2 slice 4), and Tabs (`DefaultTabController` +
+// per-tab child panes).  Forms (Create/Operation/Workflow/Destroy) and Modal
+// are NOT here — they render via the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------
+
+/** `state.<bind>` — the reactive read of a bound state field. */
+function boundRead(c: Ctx): string {
+  return `state.${String(c.bind ?? "")}`;
+}
+
+/** A field's `InputDecoration(labelText: '…')` from the walked label. */
+function inputDecoration(c: Ctx): string {
+  return `InputDecoration(labelText: '${dartStr(String(c.labelText ?? "").trim())}')`;
+}
+
+/** `onChanged` callback — a bare setter call, or `null` (disabled) with no bind.
+ *  `valueExpr` maps the raw callback arg `v` to the setter's argument. */
+function onChangedSetter(c: Ctx, valueExpr = "v"): string {
+  return c.hasBind ? `(v) => ${String(c.setter)}(${valueExpr})` : "null";
+}
+
+function primitiveField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveMultilineField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}minLines: 3, maxLines: 5, keyboardType: TextInputType.multiline, decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitivePasswordField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}obscureText: true, decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveToggle(c: Ctx): string {
+  const label = dartStr(String(c.labelText ?? "").trim());
+  const value = c.hasBind ? boundRead(c) : "false";
+  return `SwitchListTile(${arg(testidKey(c))}title: const Text('${label}'), value: ${value}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveSelectField(c: Ctx): string {
+  const options = String(c.optionsExpr ?? "[]");
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  const items = `(${options}).map((o) => DropdownMenuItem<String>(value: o, child: Text(o))).toList()`;
+  const onChanged = c.hasBind ? `(v) => ${String(c.setter)}(v ?? '')` : "null";
+  return `DropdownButtonFormField<String>(${arg(testidKey(c))}${init}decoration: ${inputDecoration(c)}, isExpanded: true, items: ${items}, onChanged: ${onChanged})`;
+}
 
 const RENDERERS: Record<string, (c: Ctx) => string> = {
   // Layout containers.
@@ -499,6 +551,13 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   // Button — a List page's row actions + a Detail page's operation triggers
   // both dispatch it.
   "primitive-button": primitiveButton,
+  // Controlled inputs — bind a page/component `state` field (read `state.<bind>`,
+  // write `set<Field>(v)`).
+  "primitive-field": primitiveField,
+  "primitive-multiline-field": primitiveMultilineField,
+  "primitive-password-field": primitivePasswordField,
+  "primitive-toggle": primitiveToggle,
+  "primitive-select-field": primitiveSelectField,
 };
 
 /** Build the procedural flutterMaterial pack.  Implements the `LoadedPack`

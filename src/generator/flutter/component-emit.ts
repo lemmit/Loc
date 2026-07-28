@@ -29,6 +29,7 @@ import type {
   UiApiParamIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { upperFirst } from "../../util/naming.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
@@ -217,6 +218,20 @@ function renderStatefulComponent(
     return lines(`  ${sig} {`, "    setState(() {", ...body, "    });", "  }");
   });
 
+  // Per-state-field setters — the in-class write side of a controlled input's
+  // `bind:` (`set<Field>` from `inputs.ts`; the pack emits a bare call that
+  // resolves here in a component, or to a page-shell tear-off on a page).  Dart
+  // flags unused LOCALS, not unused methods, so emitting one per cell is safe.
+  const setterMethods = stateFields.map((f) =>
+    lines(
+      `  void set${upperFirst(f.name)}(${f.dt} v) {`,
+      `    setState(() {`,
+      `      state = state.copyWith(${f.name}: v);`,
+      "    });",
+      "  }",
+    ),
+  );
+
   const stateClassName = `_${c.name}State`;
   const stateClassLines = lines(
     `class ${stateClassName} extends State<${c.name}> {`,
@@ -229,6 +244,7 @@ function renderStatefulComponent(
     `    state = ${modelCtor};`,
     "  }",
     ...actionMethods.flatMap((m) => ["", m]),
+    ...setterMethods.flatMap((m) => ["", m]),
     "",
     "  @override",
     "  Widget build(BuildContext context) {",

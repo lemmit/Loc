@@ -292,26 +292,26 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
   }
 }
 
-// Honesty gate for the Flutter-DEFERRED page-primitive family
-// (`loom.flutter-primitive-unsupported`).  The Flutter walking-skeleton pack
-// renders the display / layout primitives but DEFERS the whole interactive
-// input / form family — `FLUTTER_DEFERRED_BUILDER_NAMES`, derived once from the
-// pack's `FLUTTER_INLINE_OR_DEFERRED` set in `src/util/flutter-deferred-
-// primitives.ts`.  Because frontends validate against the target-AGNOSTIC
-// walker-stdlib, a page using `Toggle` / `Field` / `Tabs` / `Modal` / a form
-// while targeting a `platform: flutter` deployable type-checks and validates
-// clean — then the Flutter walker emits a `// flutter pack: no renderer for
-// "X"` comment (valid Dart, so `generated-flutter-build.yml` stays green) where
-// the widget should be, and the UI element silently VANISHES.
+// Honesty gate for the Flutter-UNRENDERED page primitives
+// (`loom.flutter-primitive-unsupported`).  The Flutter pack renders the display
+// / layout primitives AND the controlled inputs (Field / MultilineField /
+// PasswordField / Toggle / SelectField) AND — via the walker SEAMS — the form
+// family + Modal.  What has NO renderer yet is `FLUTTER_DEFERRED_BUILDER_NAMES`,
+// derived once from the `FLUTTER_UNRENDERED_PRIMITIVES` set in
+// `src/util/flutter-deferred-primitives.ts` (NumberField / FileUpload / Tabs).
+// Because frontends validate against the target-AGNOSTIC walker-stdlib, a page
+// using one of those while targeting a `platform: flutter` deployable
+// type-checks and validates clean — then the Flutter walker emits a `// flutter
+// pack: no renderer for "X"` comment (valid Dart, so `generated-flutter-build.yml`
+// stays green) where the widget should be, and the UI element silently VANISHES.
 //
 // This fails fast at compile time instead — the frontend-target twin of
-// `loom.feliz-store-unsupported` / `loom.ui-realtime-unsupported`, matching how
-// the four Handlebars frontends fail loud at pack-load when a required template
-// is missing.  Flutter is a self-hosting frontend platform (`platform: flutter`
-// only ever serves the `framework: flutter` bundle), so the deployable platform
-// is the reliable target detector.  DERIVED from the pack set: when a primitive
-// grows a real Flutter renderer and leaves `FLUTTER_INLINE_OR_DEFERRED`, the
-// gate auto-closes with no edit here.
+// `loom.feliz-store-unsupported` / `loom.ui-realtime-unsupported`.  Flutter is a
+// self-hosting frontend platform (`platform: flutter` only ever serves the
+// `framework: flutter` bundle), so the deployable platform is the reliable
+// target detector.  DERIVED from the unrendered set: when a primitive grows a
+// real Flutter renderer and leaves `FLUTTER_UNRENDERED_PRIMITIVES`, the gate
+// auto-closes with no edit here (as Field / Toggle / … just did).
 export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (d.platform !== "flutter") continue;
@@ -325,7 +325,7 @@ export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagno
       ];
       for (const host of hosts) {
         // One diagnostic per (host, primitive-name) — a page repeating the same
-        // deferred primitive shouldn't spam the report.
+        // unrendered primitive shouldn't spam the report.
         const flagged = new Set<string>();
         walkExpr(host.body, (e) => {
           if (e.kind !== "call" || !FLUTTER_DEFERRED_BUILDER_NAMES.has(e.name)) return;
@@ -336,14 +336,14 @@ export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagno
             severity: "error",
             code: "loom.flutter-primitive-unsupported",
             message:
-              `${where}: uses the '${e.name}' primitive, but the Flutter frontend defers the ` +
-              `interactive input / form family (Tabs / Field* / Toggle / FileUpload / Modal / the ` +
-              `CreateForm·OperationForm·WorkflowForm·DestroyForm shells) — the Flutter pack has no ` +
-              `renderer for it, so hosting deployable '${d.name}' (platform 'flutter') would emit a ` +
-              `\`// flutter pack: no renderer\` comment where the widget should be and the element ` +
-              `would silently vanish.  Host this page on an SPA frontend (react / vue / svelte / ` +
-              `angular) or a Feliz/Phoenix deployable, or restrict the Flutter ui to the supported ` +
-              `display / layout primitives until '${e.name}' gains a Flutter renderer.`,
+              `${where}: uses the '${e.name}' primitive, but the Flutter frontend has no renderer ` +
+              `for it yet (NumberField / FileUpload / Tabs are still deferred) — so hosting ` +
+              `deployable '${d.name}' (platform 'flutter') would emit a \`// flutter pack: no ` +
+              `renderer\` comment where the widget should be and the element would silently vanish. ` +
+              `Host this page on an SPA frontend (react / vue / svelte / angular) or a Feliz/Phoenix ` +
+              `deployable, or restrict the Flutter ui to the supported primitives (display / layout, ` +
+              `the Field/MultilineField/PasswordField/Toggle/SelectField inputs, forms, and Modal) ` +
+              `until '${e.name}' gains a Flutter renderer.`,
             source: where,
           });
         });

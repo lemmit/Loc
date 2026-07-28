@@ -145,19 +145,25 @@ jobs:
                   Button { "Add product", to: "/products/new" }
                 }
               }
-              // The Flutter frontend DEFERS the interactive input / form family
-              // (CreateForm/OperationForm/WorkflowForm/DestroyForm/Modal/Field*/
-              // Toggle/Tabs) — loom.flutter-primitive-unsupported now rejects
-              // them on a platform: flutter target (they would emit a silent
-              // "no renderer" widget).  So this Flutter showcase exercises only
-              // the supported surface: display/layout primitives, components,
-              // state/actions, QueryView + For, the match-await operation path,
-              // and navigation.
-              page NewProduct { route: "/products/new"  body: Stack {
-                Heading { "New", level: 1 },
-                Text { "Product creation lives in the web/SPA app." },
-                Button { "Back to products", to: "/products" }
-              } }
+              // Forms (Create/Operation/Workflow/Destroy) + Modal render via the
+              // flutterTarget walker SEAMS; the controlled inputs (Field /
+              // MultilineField / PasswordField / Toggle / SelectField) render via
+              // the flutter pack.  Only NumberField / FileUpload / Tabs remain
+              // deferred — loom.flutter-primitive-unsupported rejects those on a
+              // platform: flutter target, so the showcase avoids them.
+              page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              page Preferences {
+                route: "/preferences"
+                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system" }
+                body: Stack {
+                  Heading { "Preferences", level: 1 },
+                  Toggle { "Notifications", bind: notify },
+                  Field { "Display name", bind: displayName },
+                  MultilineField { "About", bind: about },
+                  PasswordField { "Secret", bind: secret },
+                  SelectField { "Theme", bind: themePref, options: ["system", "light", "dark"] }
+                }
+              }
               page RestockProduct {
                 route: "/products/:id/restock"
                 state { note: string = "" }
@@ -169,14 +175,12 @@ jobs:
                 }
                 body: Stack { Heading { "Restock", level: 1 }, Text { note }, Button { "Restock", onClick: restock } }
               }
-              page NewCategory { route: "/categories/new"  body: Stack {
-                Heading { "New category", level: 1 },
-                Text { "Category creation lives in the web/SPA app." }
-              } }
+              page NewCategory { route: "/categories/new"  body: Stack { Heading { "New category", level: 1 }, WorkflowForm { runs: addCategory } } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
                 Heading { "Admin", level: 1 },
-                Text { "Rename / delete live in the web/SPA app." },
-                Button { "Back to products", to: "/products" }
+                OperationForm { of: Product, op: rename },
+                Modal { OperationForm { of: Product, op: rename }, trigger: Button { "Rename…" }, title: "Rename product" },
+                DestroyForm { of: Product }
               } }
             }
             deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }

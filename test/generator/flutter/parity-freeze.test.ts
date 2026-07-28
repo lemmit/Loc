@@ -24,8 +24,11 @@ import { analyzeFlutterParity } from "../../../src/generator/flutter/parity.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // A flutter ui whose CreateForm's aggregate exercises the four form-field drop
-// sites (M-A markers) and whose page hosts a standalone `Field` (the pack's
-// no-renderer fallback, M-D).  Every one of these is a KNOWN gap pinned below.
+// sites (M-A markers) and whose page hosts a standalone `NumberField` (a still-
+// unrendered input → the pack's no-renderer fallback, M-D).  The now-rendered
+// inputs (Field/Toggle/MultilineField/PasswordField/SelectField) would NOT
+// produce a marker, so the exerciser uses NumberField, still deferred.  Every
+// one of these is a KNOWN gap pinned below.
 const GAP_EXERCISER = `
 system Par {
   api A from D
@@ -50,8 +53,8 @@ system Par {
     api Shop: A
     page Home {
       route: "/"
-      state { s: string = "" }
-      body: Stack { Heading { "H", level: 1 }, Field("Name", bind: s) }
+      state { n: int = 0 }
+      body: Stack { Heading { "H", level: 1 }, NumberField("Qty", bind: n) }
     }
     page NewItem { route: "/new" body: Stack { Heading { "New", level: 1 }, CreateForm { of: Item } } }
   }
@@ -91,9 +94,9 @@ const KNOWN_FLUTTER_GAPS: Record<string, { reason: string; mission: "M-A" | "M-B
       "the scalar-array row editor renders text/number rows only; a repeatable enum (dropdown) row editor is unbuilt.",
     mission: "M-B",
   },
-  'flutter pack: no renderer for "primitive-field"': {
+  'flutter pack: no renderer for "primitive-number-field"': {
     reason:
-      "the flutterMaterial walking-skeleton pack ships no standalone-input renderer; a bare Field/Toggle/etc. falls back to the pack no-renderer line.",
+      "NumberField needs the bound field's int-vs-double type to parse the text input; the shared input Ctx carries only the bind name, so it stays deferred (Field/Toggle/MultilineField/PasswordField/SelectField now render).",
     mission: "M-B",
   },
 };

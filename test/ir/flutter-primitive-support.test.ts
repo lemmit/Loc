@@ -1,13 +1,15 @@
-// Honesty gate for the Flutter-DEFERRED page-primitive family
-// (`loom.flutter-primitive-unsupported`).  The Flutter walking-skeleton pack
-// renders the display / layout primitives but DEFERS the whole interactive
-// input / form family (Tabs / Field* / Toggle / FileUpload / Modal / the
-// CreateForm·OperationForm·WorkflowForm·DestroyForm shells).  Frontends validate
-// against the target-AGNOSTIC walker-stdlib, so a page using one of these while
-// targeting a `platform: flutter` deployable type-checks and validates clean,
-// then the Flutter walker emits a `// flutter pack: no renderer` comment and the
-// widget silently vanishes.  This gate fails fast at compile time instead — and
-// leaves the same page on a Handlebars frontend (react) compiling.
+// Honesty gate for the Flutter-UNRENDERED page primitives
+// (`loom.flutter-primitive-unsupported`).  The Flutter pack renders the display
+// / layout primitives AND the controlled inputs (Field / MultilineField /
+// PasswordField / Toggle / SelectField) AND — via the walker SEAMS — the form
+// family (Create/Operation/Workflow/Destroy) and Modal.  What has NO renderer
+// yet: NumberField, FileUpload, and Tabs.  Frontends validate against the
+// target-AGNOSTIC walker-stdlib, so a page using one of those unrendered
+// primitives on a `platform: flutter` target type-checks, then the Flutter
+// walker emits a `// flutter pack: no renderer` comment and the widget silently
+// vanishes.  This gate fails fast at compile time instead — WITHOUT rejecting
+// the primitives Flutter now renders, and leaving every primitive compiling on a
+// Handlebars frontend (react).
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -15,7 +17,7 @@ import { lowerModel } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import {
   FLUTTER_DEFERRED_BUILDER_NAMES,
-  FLUTTER_INLINE_OR_DEFERRED,
+  FLUTTER_UNRENDERED_PRIMITIVES,
   UNMAPPED_DEFERRED_IDS,
 } from "../../src/util/flutter-deferred-primitives.js";
 import { parseString } from "../_helpers/parse.js";
@@ -28,8 +30,7 @@ async function flutterPrimitiveErrors(source: string): Promise<string[]> {
 }
 
 // A single page whose body renders `bodyPrimitive`, hosted on a frontend of the
-// given platform.  The aggregate carries the fields the interactive primitives
-// bind against (`active` for Toggle, `name` for a form field).
+// given platform.  The aggregate carries the fields the primitives bind against.
 function sys(frontendPlatform: string, framework: string, bodyPrimitive: string): string {
   return `
 system FlutterGate {
@@ -48,7 +49,7 @@ system FlutterGate {
     api Shop: ShopApi
     page Settings {
       route: "/settings"
-      state { enabled: bool = false }
+      state { enabled: bool = false  qty: int = 0 }
       body: Stack {
         Heading { "Settings", level: 1 },
         ${bodyPrimitive}
@@ -63,30 +64,40 @@ system FlutterGate {
 `;
 }
 
-describe("flutter deferred-primitive honesty gate (`loom.flutter-primitive-unsupported`)", () => {
-  it("errors when a Flutter-targeted page uses Toggle (a deferred primitive)", async () => {
+describe("flutter unrendered-primitive honesty gate (`loom.flutter-primitive-unsupported`)", () => {
+  it("errors when a Flutter-targeted page uses NumberField (still unrendered)", async () => {
     const errs = await flutterPrimitiveErrors(
-      sys("flutter", "flutter", 'Toggle { label: "Notifications", bind: enabled }'),
+      sys("flutter", "flutter", 'NumberField { "Qty", bind: qty }'),
     );
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("'Toggle'");
+    expect(errs[0]).toContain("'NumberField'");
     expect(errs[0]).toContain("silently vanish");
     expect(errs[0]).toContain("platform 'flutter'");
   });
 
-  it("errors when a Flutter-targeted page uses a CreateForm (form-family deferred)", async () => {
+  it("errors when a Flutter-targeted page uses Tabs (still unrendered)", async () => {
     const errs = await flutterPrimitiveErrors(
-      sys("flutter", "flutter", "CreateForm { of: Product }"),
+      sys("flutter", "flutter", 'Tabs { Tab { title: "a", Text { "x" } } }'),
     );
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("'CreateForm'");
+    expect(errs[0]).toContain("'Tabs'");
   });
 
-  it("does NOT error for the same page on a Handlebars frontend (react)", async () => {
+  it("does NOT error for the now-rendered controlled inputs (Toggle) on flutter", async () => {
     expect(
-      await flutterPrimitiveErrors(
-        sys("react", "react", 'Toggle { label: "Notifications", bind: enabled }'),
-      ),
+      await flutterPrimitiveErrors(sys("flutter", "flutter", 'Toggle { "Notify", bind: enabled }')),
+    ).toEqual([]);
+  });
+
+  it("does NOT error for a seam-rendered CreateForm on flutter", async () => {
+    expect(
+      await flutterPrimitiveErrors(sys("flutter", "flutter", "CreateForm { of: Product }")),
+    ).toEqual([]);
+  });
+
+  it("does NOT error for NumberField on a Handlebars frontend (react)", async () => {
+    expect(
+      await flutterPrimitiveErrors(sys("react", "react", 'NumberField { "Qty", bind: qty }')),
     ).toEqual([]);
   });
 
@@ -95,39 +106,29 @@ describe("flutter deferred-primitive honesty gate (`loom.flutter-primitive-unsup
       [],
     );
   });
-
-  it("gates every deferred primitive that appears in one Flutter page", async () => {
-    // Tabs + Field + Toggle in one body → three distinct diagnostics (deduped
-    // per name).
-    const body = [
-      'Tabs { Tab { title: "a", Text { "x" } } }',
-      'Field { "Name", bind: name }',
-      'Toggle { label: "On", bind: enabled }',
-    ].join(",\n        ");
-    const errs = await flutterPrimitiveErrors(sys("flutter", "flutter", body));
-    expect(errs.length).toBe(3);
-    expect(errs.some((m) => m.includes("'Tabs'"))).toBe(true);
-    expect(errs.some((m) => m.includes("'Field'"))).toBe(true);
-    expect(errs.some((m) => m.includes("'Toggle'"))).toBe(true);
-  });
 });
 
-describe("flutter deferred-primitive set (single source of truth)", () => {
-  it("maps every FLUTTER_INLINE_OR_DEFERRED id to at least one builder name", () => {
+describe("flutter unrendered-primitive set (single source of truth)", () => {
+  it("maps every FLUTTER_UNRENDERED_PRIMITIVES id to at least one builder name", () => {
     // A newly-deferred `primitive-*` id without a builder-name mapping would
     // silently escape the validator gate — pin that it can't.
     expect(UNMAPPED_DEFERRED_IDS).toEqual([]);
   });
 
-  it("derives the gated builder names from the pack set (auto-closes on removal)", () => {
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Toggle")).toBe(true);
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("CreateForm")).toBe(true);
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Modal")).toBe(true);
-    // A supported display primitive is NOT gated.
+  it("gates the unrendered primitives, not the ones Flutter now renders", () => {
+    // Unrendered → gated.
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("NumberField")).toBe(true);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("FileUpload")).toBe(true);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Tabs")).toBe(true);
+    // Now rendered by the pack → NOT gated.
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Toggle")).toBe(false);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Field")).toBe(false);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("SelectField")).toBe(false);
+    // Seam-rendered → NOT gated.
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("CreateForm")).toBe(false);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Modal")).toBe(false);
+    // Supported display primitive → NOT gated.
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Text")).toBe(false);
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Stack")).toBe(false);
-    // The set is non-empty exactly while the pack still defers primitives.
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.size).toBeGreaterThan(0);
-    expect(FLUTTER_INLINE_OR_DEFERRED.size).toBeGreaterThan(0);
+    expect(FLUTTER_UNRENDERED_PRIMITIVES.size).toBeGreaterThan(0);
   });
 });

@@ -452,6 +452,18 @@ export function renderRiverpod(
     for (const b of body) notifierLines.push(`    ${b}`);
     notifierLines.push("  }");
   }
+  // Per-state-field setters — the write side of a controlled input's `bind:`
+  // (`set<Field>` from `inputs.ts`) and the `notifier.set<Field>(…)` the render
+  // tree's `state := …` seam (`flutterTarget.renderStateWrite`) targets.  One
+  // typed setter per cell; an unused one is a harmless dead public method (Dart
+  // `analyze` flags unused LOCALS, not unused methods), so no bound-field
+  // collection is needed here.
+  for (const f of fields) {
+    notifierLines.push("");
+    notifierLines.push(`  void set${upperFirst(f.name)}(${f.dt} v) {`);
+    notifierLines.push(`    state = state.copyWith(${f.name}: v);`);
+    notifierLines.push("  }");
+  }
   notifierLines.push("}");
 
   const providerLine = `final ${providerName} = NotifierProvider<${notifierClass}, ${stateClass}>(${notifierClass}.new);`;
