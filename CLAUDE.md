@@ -92,6 +92,7 @@ npm run test:tsc-corpus     # LOOM_TS_BUILD=1  (per-feature shard via LOOM_CORPU
 npm run test:dotnet-corpus  # LOOM_DOTNET_BUILD=1
 npm run test:java-corpus    # LOOM_JAVA_BUILD=1
 npm run test:python-corpus  # LOOM_PYTHON_BUILD=1
+npm run test:elixir-corpus  # LOOM_ELIXIR_BUILD=1 — mix compile per feature in the hexpm/elixir image (needs LOOM_HEX_MIRROR)
 
 # Tenancy runtime e2e — flat isolation + registry self-scope/signup bootstrap, all five backends
 # (shared harness; docker postgres sidecar, or LOOM_TENANCY_PG_URL to skip it):
@@ -318,7 +319,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - **Generated-frontend runtime gates (per-PR):** `generated-{react,vue,svelte,angular}-e2e.yml` — `vite build` + `vite preview` + the emitted Playwright smoke spec (pure client-side, no backend).
 - `generated-a11y.yml` — axe-core WCAG-AA scan over generated frontends across an 11-pack matrix. Nightly / `a11y` label / dispatch.
 - **Generated-backend build gates (per-PR):** `hono-build.yml` (`tsc --noEmit` + `tsup`), `dotnet-build.yml` (`dotnet build /warnaserror`), `java-build.yml` (`gradle testClasses bootJar`, main + emitted JUnit sources), `python-build.yml` (`uv sync` + `ruff` + `mypy --strict` + `pytest`), `elixir-vanilla-build.yml` (`mix compile --warnings-as-errors` in an Elixir docker image).
-- `corpus-build.yml` — compiles EVERY corpus feature fixture (`test/fixtures/corpus/*.ddd`, list from `manifest.ts` minus per-backend `COMPILE_SKIP`) on tsc/dotnet/java/python as matrix jobs. Per-PR — the cross-feature compile-regression net.
+- `corpus-build.yml` — compiles EVERY corpus feature fixture (`test/fixtures/corpus/*.ddd`, list from `manifest.ts` minus per-backend `COMPILE_SKIP`) on tsc/dotnet/java/python as matrix jobs. Per-PR — the cross-feature compile-regression net. `corpus-elixir-build.yml` is the fifth leg (`mix compile` per feature in the `hexpm/elixir` image + `LOOM_HEX_MIRROR`, sharded via `LOOM_CORPUS_ELIXIR_CASE`), split out because it needs the Elixir docker image + hex egress.
 - **Behavioral gates (per-PR):** `behavioral-e2e.yml` (Hono on PGlite, headless — api + unit tiers), `behavioral-e2e-{dotnet,elixir,java,python}.yml` (same emitted api suite against the real booted backend + postgres sidecar), `behavioral-e2e-mikroorm.yml` (the node/Hono backend on the MikroORM persistence adapter — booted against a real postgres sidecar since `@mikro-orm/postgresql` can't use PGlite; api tier), `behavioral-ui-e2e.yml` (React/Mantine `*.ui.spec.ts` Playwright round-trips against Hono-on-PGlite). `frontend-fullstack-e2e.yml` drives the NON-React frontends (vue/svelte/angular/feliz) through the same full round-trip — nightly / `frontend-fullstack` label.
 - **OIDC auth gates (main-push + dispatch):** `{hono,dotnet,java,python}-oidc-e2e.yml` — native backend OIDC runtime e2e against dockerized Keycloak; `auth-oidc-compose-e2e.yml` — the full generated compose stack + bundled dev Keycloak, real token → User mapping.
 - `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch/label.
