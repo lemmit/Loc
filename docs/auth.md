@@ -147,6 +147,52 @@ slice 1B — referencing a permission declared in another subdomain
 shows up as the same "no permission named 'X'" diagnostic as a
 typo.
 
+#### `implies` — permission grant hierarchy (authorization.md §6)
+
+A permission may declare that holding it transitively **grants** one or more
+others.  Single target omits the brackets; multiple targets require them:
+
+```ddd
+permissions {
+  read,
+  edit   implies read,        // holding `edit` grants `read`
+  approve implies edit,       // … and `approve` grants `edit` (so also `read`)
+  admin  implies [read, edit] // fan-out
+}
+```
+
+The transitive closure is **precomputed at lowering**; the runtime check stays a
+flat membership test.  A gate `currentUser.permissions.contains(permissions.read)`
+expands to an OR over `read` plus every permission that (transitively) implies
+it, so a caller holding `approve` or `edit` satisfies the `read` gate without the
+token carrying `read`:
+
+```ts
+// generated (Hono) — `read` gate on the `edit implies read`, `approve implies edit` catalogue
+if (!((currentUser.permissions).includes("m.read")
+   || (currentUser.permissions).includes("m.approve")
+   || (currentUser.permissions).includes("m.edit"))) throw new ForbiddenError("Forbidden: …");
+```
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.permission-implies-unknown` | an `implies` target names no permission declared in the subdomain |
+| `loom.permission-implies-self` | a permission `implies` itself (a no-op) |
+
+A mutual-implication cycle (`a implies b`, `b implies a`) is **allowed** — the
+two simply grant each other; the closure computation is cycle-safe.
+
+#### Policy decision-id (audit seam)
+
+Every authorization gate has a stable, deterministic **decision-id**
+(`policyDecisionId(qualifiedTarget, gateSource)` → `pd_<8-hex>`), derived purely
+from the gate's identity so an audit entry can reference *which* decision
+authorised an action and still resolve after a regeneration.  Gates are already
+IR-inspectable (each `requires` lowers to a `requires` StmtIR carrying its
+`source`), so the id is **derived on demand**, not stamped.  Its consumer — the
+strict-tier `AuditRecord.policyDecisionId` — lands with the audit-promotion
+mission; the stable formula is the seam that mission plugs into.
+
 ### `.contains(x)` on arrays
 
 Slice 1B introduces `.contains(x)` as a collection op (joining
@@ -256,6 +302,18 @@ A workflow `create` gate scopes to `currentUser` + the starter's command params
 (a saga has no aggregate `this`) and renders identically.  (A workflow `handle`
 gate lowers the same way but is inert until `handle` command handlers are
 surfaced as HTTP routes.)
+
+`currentUser` types against the system's `user { … }` claim block, so a gate
+that is a **bare boolean claim expression** — the simplest permission check —
+type-checks on its own:
+
+```ddd
+operation close() requires currentUser.permissions.contains(permissions.ticketsClose) { … }
+```
+
+No surrounding `== …` / `&& …` is needed to satisfy the `bool` requirement:
+`currentUser.permissions` types as the claim's declared `string[]`, so the
+`.contains(…)` membership types as `bool`.
 
 Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 (see the note at the top).  Without it (`enforcement: opt`, the
@@ -386,10 +444,58 @@ Unlike the allow ladder, deny is **not** restricted to `tenantOwned` aggregates 
 A lone `deny` with no matching `allow` is **not** flagged — aggregates are readable
 by default, so a carve-out with no prior grant is meaningful.
 
-**Not yet shipped (Phase 4.x follow-ups):** field-level masking (`field f { mask
-unless … }` / `deny read`), `data {}` row-attribute clauses, and per-operation /
-`Workflow` point gates — the larger slices the aggregate-level deny-wins
-primitive lays the plumbing for.
+**Not yet shipped (Phase 4.x follow-ups):** the `policy {}`-block field rules
+(`field f { mask unless … }` / `deny read` nested in a read block), `data {}`
+row-attribute clauses, and per-operation / `Workflow` point gates — the larger
+slices the aggregate-level deny-wins primitive lays the plumbing for.
+
+### Field masking — `mask unless` (read redaction)
+
+The **aggregate-field baseline** read mask (authorization.md §5) marks a field
+"sensitive everywhere, shown only to the authorised": it is REDACTED (null on the
+wire) UNLESS a `currentUser`-only predicate holds.
+
+```ddd
+aggregate Person {
+  name: string
+  salary: money mask unless currentUser.permissions.contains(permissions.salaryUnmask)
+}
+```
+
+The predicate is a **bool** and, like a `requires` gate, references only
+`currentUser` (+ constants) — it is evaluated at read projection as a param-free
+caller check, never against the row.
+
+**node** emits the redaction at the **response boundary**: every read route
+(GET `/:id`, each `find` shape) and explicit query-handler routes a masked
+aggregate through a `toWireMasked(root, currentUser)` serializer that redacts
+each masked field to `null` unless the caller satisfies its predicate —
+**fail-closed** (an unauthenticated request always redacts). The masked field is
+`.nullable()` in the response schema. Internal audit/provenance snapshots stay
+unmasked (they record the real value). A mask-free aggregate is byte-identical.
+
+```ts
+// generated (Hono) — the aggregate's read serializer
+toWireMasked(root: Person, currentUser: User | null): unknown {
+  const wire = this.toWire(root) as Record<string, unknown>;
+  if (!(currentUser !== null && ((currentUser.permissions).includes("hr.salaryUnmask")))) wire.salary = null;
+  return wire;
+}
+```
+
+**Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
+plus **node** read redaction, have shipped. The other four backends (.NET / Java
+/ Python / Elixir) still **compile-error** on a `mask unless` field
+(`loom.field-mask-unsupported`) rather than silently ship the value — a declared
+mask never leaks. The write-side (`write(...)` / `readonly when`) is the next
+slice.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
+| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (all but node) |
+| `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
+| *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 
 ### Find `requires` gates
 
@@ -407,7 +513,9 @@ The gate emits an in-handler **403** at the top of the find's route, evaluated
 against the request's `currentUser` before the query runs.  It is
 **`currentUser`-only** (plus constants) — no source row exists yet,
 so referencing an aggregate field is a compile error
-(`loom.find-gate-not-current-user`).  Use `where` to scope *which rows* come
+(`loom.find-gate-not-current-user`).  Like every `requires` clause it must
+**type to `bool`** (a non-bool gate — `requires 42` — is rejected, so it can't
+lower to an always-truthy no-op).  Use `where` to scope *which rows* come
 back, `requires` to decide *who* may run the find.  `requires true` is the
 intentionally-public escape that also satisfies default-deny.
 

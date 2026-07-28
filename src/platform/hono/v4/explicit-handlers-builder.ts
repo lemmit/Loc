@@ -48,6 +48,7 @@
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
+import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -74,6 +75,21 @@ import {
   honoWorkflowStmtTarget,
   renderExprWithParams,
 } from "./workflow-builder.js";
+
+// Response-boundary read masking (`mask unless`) for explicit handler routes —
+// the `httpCtx` twin of routes-builder's `maskUserBind`/`wireResp`.
+function maskBind(masked: boolean, pad: string): string[] {
+  return masked
+    ? [
+        `${pad}const __maskUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User | undefined }).get("currentUser") ?? null;`,
+      ]
+    : [];
+}
+function wireRespH(masked: boolean, repoVar: string, varExpr: string): string {
+  return masked
+    ? `${repoVar}.toWireMasked(${varExpr}, __maskUser)`
+    : `${repoVar}.toWire(${varExpr})`;
+}
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
 
@@ -235,8 +251,10 @@ function emitPagedRunHandler(
     ", ",
   );
   out.push(`    const result = await ${repoVar}.${run.retrievalName}(${callArgs});`);
+  const runMasked = !!ctx.aggregates.find((a) => a.name === run.aggName && aggHasFieldMask(a));
+  out.push(...maskBind(runMasked, "    "));
   out.push(
-    `    return httpCtx.json({ ...result, items: result.items.map((__e) => ${repoVar}.toWire(__e)) }, 200);`,
+    `    return httpCtx.json({ ...result, items: result.items.map((__e) => ${wireRespH(runMasked, repoVar, "__e")}) }, 200);`,
   );
   out.push(`  },`);
   out.push(`);`);
@@ -429,12 +447,17 @@ function emitRouteHandler(
     // scaffolded aggregate route's `... as z.infer<typeof <Agg>Response>`
     // pattern) so the value satisfies the declared response under strict tsc.
     // Id / scalar returns serialise as-is.
+    const retMasked =
+      !!ret &&
+      !!retRepoVar &&
+      !!ctx.aggregates.find((a) => a.name === ret.agg && aggHasFieldMask(a));
+    out.push(...maskBind(retMasked, "    "));
     const payload = ret
       ? ret.isCollection
-        ? `${retExpr}.map((__e) => ${retRepoVar}.toWire(__e))`
+        ? `${retExpr}.map((__e) => ${wireRespH(retMasked, retRepoVar!, "__e")})`
         : typedResponseName
-          ? `${retRepoVar}.toWire(${retExpr}) as z.infer<typeof ${typedResponseName}>`
-          : `${retRepoVar}.toWire(${retExpr})`
+          ? `${wireRespH(retMasked, retRepoVar!, retExpr)} as z.infer<typeof ${typedResponseName}>`
+          : `${wireRespH(retMasked, retRepoVar!, retExpr)}`
       : `${retExpr} as unknown`;
     out.push(`    return httpCtx.json(${payload}, 200);`);
   } else {

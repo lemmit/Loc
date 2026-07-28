@@ -310,7 +310,14 @@ function printSubdomain(node: Subdomain): string {
 
 function printPermissionsBlock(node: PermissionsBlock): string {
   if (node.decls.length === 0) return "permissions {}";
-  return `permissions {\n${indent(node.decls.map((d) => d.name).join(", "))}\n}`;
+  const printDecl = (d: (typeof node.decls)[number]): string => {
+    if (!d.implies || d.implies.length === 0) return d.name;
+    // `edit implies read` (single) / `admin implies [read, write]` (multi) —
+    // mirrors the grammar's bracket-only-for-multi form.
+    const targets = d.implies.length === 1 ? d.implies[0]! : `[${d.implies.join(", ")}]`;
+    return `${d.name} implies ${targets}`;
+  };
+  return `permissions {\n${indent(node.decls.map(printDecl).join(", "))}\n}`;
 }
 
 function printThemeBlock(node: ThemeBlock): string {
@@ -1030,7 +1037,9 @@ function printProperty(node: Property): string {
   // `message "..."` re-quotes (the STRING terminal is delimiter-stripped); only
   // parses with a `check`, so it's appended after it.
   const msg = node.message ? ` message ${JSON.stringify(node.message)}` : "";
-  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}${msg}`;
+  // `mask unless <expr>` — the read mask, grammar-last (after `check`).
+  const mask = node.maskUnless ? ` mask unless ${printExpr(node.maskUnless)}` : "";
+  return `${node.name}: ${printTypeRef(node.type)}${provenanced}${sensitivity}${access}${def}${check}${msg}${mask}`;
 }
 
 function printContainment(node: Containment): string {

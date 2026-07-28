@@ -25,7 +25,8 @@ name: Corpus compile gates
 #
 # Elixir/Phoenix has a corpus suite too (test:elixir-corpus) but needs the
 # docker hexpm image + the LOOM_HEX_MIRROR loopback CA dance behind the
-# egress proxy — wired separately as a follow-up, not here.
+# egress proxy — so it's wired separately in corpus-elixir-build.yml (M-T9.10),
+# not here.
 #
 # Triggers: any change to a generator / the shared IR / system / platform
 # layers / the corpus fixtures (so a cross-backend regression fires every

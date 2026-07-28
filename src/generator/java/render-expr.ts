@@ -913,9 +913,16 @@ function renderMoneyBinary(op: BinaryExpr["op"], l: string, r: string): string {
       return `${l}.compareTo(${r}) > 0`;
     case ">=":
       return `${l}.compareTo(${r}) >= 0`;
+    case "%":
+      // decimal % decimal (money % money is type-rejected) — BigDecimal has no
+      // `%` operator; `remainder` is exact (no MathContext needed, unlike divide).
+      return `${l}.remainder(${r})`;
     default:
-      // &&/||/% on money — not type-correct upstream; surface verbatim.
-      return `${l} ${op} ${r}`;
+      // Only `&&`/`||` remain, and both are boolean-only — the type validator
+      // rejects them on money/decimal operands, so reaching here is a
+      // compiler/validator bug, not valid input.  Fail loud rather than emit
+      // `bigDecimal && bigDecimal` (uncompilable) into the output.
+      throw new Error(`renderMoneyBinary: unsupported operator '${op}' on money/decimal operands`);
   }
 }
 

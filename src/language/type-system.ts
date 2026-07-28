@@ -3,6 +3,7 @@ import { AstUtils } from "langium";
 import type { PrimitiveName } from "../ir/types/loom-ir.js";
 import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops.js";
 import { intrinsicFor, intrinsicReturnType, intrinsicsForReceiver } from "../util/intrinsics.js";
+import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../util/principal.js";
 import { durationUnitOf } from "../util/temporal.js";
 import type {
   Aggregate,
@@ -24,6 +25,7 @@ import type {
   Property,
   Repository,
   TypeRef,
+  UserBlock,
   ValueObject,
 } from "./generated/ast.js";
 import {
@@ -76,6 +78,7 @@ import {
   isTernaryExpr,
   isThisRef,
   isUnaryExpr,
+  isUserBlock,
   isValueObject,
   isWorkflow,
   isWorkflowCreateDecl,
@@ -109,6 +112,16 @@ export type DddType =
    *  `stepInto`'s payload arm so field-level type checks (comparison /
    *  arithmetic / assignment) apply instead of cascading to `unknown`. */
   | { kind: "payload"; ref: EventDecl | PayloadDecl; sensitivity?: SensitivityTags }
+  /** The authentication principal — the `currentUser` magic identifier backed
+   *  by the system's `user { … }` claim block.  A flat record of `UserField`s
+   *  (plus the derived `orgPath` / `rootOrg` members); member access resolves
+   *  through `lookupUserMember` so a claim-field's real type (e.g.
+   *  `permissions: string[]`) flows into downstream checks — a bare gate like
+   *  `requires currentUser.permissions.contains(permissions.x)` types as
+   *  `bool` instead of cascading to `unknown`.  Fails open on an unknown member
+   *  (string), mirroring the IR layer (`lower-expr.ts`), so it never introduces
+   *  a new error on an already-valid claim reference. */
+  | { kind: "userclaim"; ref: UserBlock; sensitivity?: SensitivityTags }
   | { kind: "array"; element: DddType; sensitivity?: SensitivityTags }
   | { kind: "optional"; inner: DddType; sensitivity?: SensitivityTags }
   /** Element-shaped param marker — mirrors the `TypeIR.slot` variant
@@ -215,6 +228,8 @@ export function typeToString(t: DddType): string {
         return t.ref.name;
       case "payload":
         return t.ref.name;
+      case "userclaim":
+        return "currentUser";
       case "array":
         return `${typeToString(t.element)}[]`;
       case "optional":
@@ -297,6 +312,9 @@ export function isAssignable(value: DddType, target: DddType): boolean {
   if (value.kind === "primitive" && target.kind === "primitive") {
     if (value.name === "int" && (target.name === "long" || target.name === "decimal")) return true;
     if (value.name === "long" && target.name === "decimal") return true;
+    // guid ↔ string bridge — see `guidStringBridge` (tenancy stamps a `guid`
+    // claim into a `string tenantId` column and back).
+    if (guidStringBridge(value.name, target.name)) return true;
   }
   return false;
 }
@@ -332,10 +350,24 @@ export function comparable(a: DddType, b: DddType): boolean {
   if (a.kind === "primitive" && b.kind === "primitive") {
     const numeric = (n: PrimitiveName) => n === "int" || n === "long" || n === "decimal";
     if (numeric(a.name) && numeric(b.name)) return true;
+    if (guidStringBridge(a.name, b.name)) return true;
   }
   if (a.kind === "optional") return comparable(a.inner, b);
   if (b.kind === "optional") return comparable(a, b.inner);
   return false;
+}
+
+/** `guid` and `string` are a compatible pair for comparison / assignment.
+ *  A guid is a string-shaped scalar (its literals are string literals), and
+ *  Loom's own tenancy infrastructure freely bridges the two: the built-in
+ *  `tenantOwned` capability stamps a `guid` `currentUser.<claim>` into a
+ *  `string tenantId` column and filters `this.tenantId (string) ==
+ *  currentUser.<claim> (guid)`, a binding `tenancyClaimBinding` blesses as
+ *  "guid-from-string".  Treating the pair as compatible keeps those
+ *  Loom-authored expressions valid (they were only ever accepted because
+ *  `currentUser` used to type as `unknown`, silently suppressing the check). */
+function guidStringBridge(a: PrimitiveName, b: PrimitiveName): boolean {
+  return (a === "guid" && b === "string") || (a === "string" && b === "guid");
 }
 
 /**
@@ -521,6 +553,17 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isNameRef(expr)) {
     const looked = env.resolve(expr.name);
     if (looked) return looked.type;
+    // `currentUser` — the authentication principal, backed by the system's
+    // `user { … }` claim block.  Resolving it to a `userclaim` type (rather
+    // than the historical `unknown`) lets `currentUser.<claim>` member access
+    // type precisely, so a bare boolean gate such as
+    // `requires currentUser.permissions.contains(permissions.x)` type-checks
+    // instead of falsely rejecting (previously it only passed when a
+    // surrounding `==`/`&&`/`||` forced the result to bool).
+    if (expr.name === "currentUser") {
+      const ub = userBlockFor(expr);
+      if (ub) return { kind: "userclaim", ref: ub };
+    }
     // A bare reference to a parameterless criterion / policy function is a
     // boolean predicate.
     if (lookupCriterionByName(expr.name, env)) return T.prim("bool");
@@ -838,6 +881,9 @@ export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: E
   if (recvType.kind === "payload") {
     return lookupPayloadMember(recvType.ref, memberName);
   }
+  if (recvType.kind === "userclaim") {
+    return lookupUserMember(recvType.ref, memberName);
+  }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
     if (memberName === "matches" && ms.call) return T.prim("bool");
@@ -900,6 +946,29 @@ function lookupPayloadMember(target: EventDecl | PayloadDecl, name: string): Ddd
     if (f.name === name) return withTags(resolveTypeRef(f.type), propertySensitivity(f));
   }
   return T.unknown;
+}
+
+/** Member type on the `currentUser` principal — a claim field from the
+ *  `user { … }` block, or one of the derived tenant members (`orgPath` /
+ *  `rootOrg`, both string paths).  Mirrors the IR layer's principal typing
+ *  (`lower-expr.ts`), including its **fail-open** posture: an unknown member
+ *  resolves to `string` rather than `unknown`, so introducing precise typing
+ *  here never turns an already-valid `currentUser.<x>` reference into a new
+ *  error — it only lets the *known* claim types (arrays, ints, …) flow into
+ *  the collection-op / comparison checks that previously saw `unknown`. */
+function lookupUserMember(target: UserBlock, name: string): DddType {
+  if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG) return T.prim("string");
+  const f = target.fields.find((f) => f.name === name);
+  if (f) return resolveTypeRef(f.type);
+  return T.prim("string");
+}
+
+/** The `user { … }` claim block reachable from a node — its enclosing system's
+ *  principal.  `undefined` when the node isn't inside a `system` (a loose /
+ *  sibling-file context), matching the historical `unknown` typing there. */
+function userBlockFor(node: AstNode): UserBlock | undefined {
+  const sys = AstUtils.getContainerOfType(node, isSystem);
+  return sys?.members.find(isUserBlock);
 }
 
 /** For the unknown-member validator: when `recvType` is a record we can
@@ -1694,6 +1763,18 @@ export function membersOfType(t: DddType): MemberCompletion[] {
         kind: "field",
         detail: typeToString(resolveTypeRef(f.type)),
       }));
+    case "userclaim":
+      return [
+        ...t.ref.fields.map(
+          (f): MemberCompletion => ({
+            name: f.name,
+            kind: "field",
+            detail: typeToString(resolveTypeRef(f.type)),
+          }),
+        ),
+        { name: PRINCIPAL_ORG_PATH, kind: "field", detail: "string" },
+        { name: PRINCIPAL_ROOT_ORG, kind: "field", detail: "string" },
+      ];
     default:
       return [];
   }

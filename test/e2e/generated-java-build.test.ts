@@ -102,6 +102,18 @@ const FIXTURES: Array<[string, string]> = [
   // bound via the D-PHOENIX-SURFACE `hosts:` clause onto a framework-owning
   // `ui { }` block — the dotnet `hosts:` twin.
   ["test/e2e/fixtures/java-build/fullstack-hosts.ddd", "fsh_app"],
+  // `hosts:` fullstack embed — Angular arm.  Angular's `ng build` nests the
+  // browser bundle under `dist/browser/`, so the Dockerfile COPY differs from
+  // the vite `dist/` (react/vue) and SvelteKit `build/` arms; the ClientApp/
+  // Angular project must `ng build` clean.
+  ["test/e2e/fixtures/java-build/hosts-angular.ddd", "hsa_app"],
+  // `hosts:` fullstack embed — Feliz (F#/Fable) arm.  Feliz builds via
+  // `dotnet fable` + `vite build`, so the host Dockerfile's spa-build stage is
+  // a .NET SDK + Node image, not `node:22-alpine`; its vite output is flat
+  // `dist/`.  This gate is a BACKEND compile (gradle testClasses bootJar) — it
+  // verifies the java project compiles with feliz wiring + emits the Dockerfile,
+  // with no dotnet-fable cost (the SPA itself isn't built here).
+  ["test/e2e/fixtures/java-build/hosts-feliz.ddd", "hsf_app"],
   // Union finds (`Order or NotFound` / `Order option`): optional-twin
   // repo/service, tagged 200 wire record, problem/bare-404 absence.
   ["test/e2e/fixtures/java-build/union-finds.ddd", "uf_api"],

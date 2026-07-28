@@ -24,6 +24,8 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'test/e2e/fixtures/java-build/hosts-feliz.ddd'
+      - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
@@ -37,6 +39,8 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'test/e2e/fixtures/java-build/hosts-feliz.ddd'
+      - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
@@ -373,3 +377,25 @@ jobs:
             sleep 1
           done
           SMOKE_URL=http://localhost:4176/ node "$GITHUB_WORKSPACE/scripts/feliz-authgate-smoke.mjs"
+
+      # Backend-embed case: a `platform: java` backend hosting a
+      # `framework: feliz` ui relocates the whole Feliz project under
+      # `ClientApp/` (pathPrefix).  Fable+vite-build that relocated project to
+      # prove the embed emits a compilable bundle (the per-backend build gates
+      # compile only the BACKEND, never the embedded SPA — this is the one
+      # place the embedded Feliz F# actually compiles).  Same `dotnet fable`
+      # toolchain already set up above, so the marginal cost is one compile.
+      - name: Generate the fullstack-embed (java hosts feliz) system
+        run: |
+          node bin/cli.js generate system \
+            test/e2e/fixtures/java-build/hosts-feliz.ddd -o ci-feliz/embed-out
+      - name: Locate the embedded Feliz project (ClientApp/)
+        id: eproj
+        run: echo "dir=$(dirname "$(find ci-feliz/embed-out -path '*ClientApp*' -name App.fsproj | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: Fable compile + vite build (embedded feliz)
+        working-directory: ${{ steps.eproj.outputs.dir }}
+        run: |
+          dotnet tool restore
+          dotnet fable App.fsproj -o out --extension .js
+          npm install
+          npx vite build

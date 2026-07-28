@@ -13,6 +13,17 @@ import { defineConfig, devices } from "@playwright/test";
 // from jsdelivr.  Tests need real internet access and generous
 // per-action timeouts.
 
+// The heavy in-browser bundle+boot specs — each runs the full npm-install
+// bundle + PGlite boot, so they dominate wall-clock and, when they fail,
+// eat the 10-min boot wait ×N retries.  Isolated into their own project
+// (below) with a tighter retry budget.  Kept as a named constant so the
+// default lane can `testIgnore` exactly what the heavy lane `testMatch`es.
+const HEAVY_PREVIEW_SPECS = [
+  "**/*-preview-runtime.spec.ts",
+  "**/preview-shadcn.spec.ts",
+  "**/runtime.spec.ts",
+];
+
 export default defineConfig({
   testDir: "./e2e",
   // Whole-test timeout: bundle + WASM + first dispatch take time.
@@ -84,6 +95,33 @@ export default defineConfig({
     stderr: "pipe",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // Default lane: everything except the heavy in-browser bundle+boot
+    // specs.  Keeps the global `retries: 3` that the builder-canvas /
+    // Mantine-popover flakes genuinely need.
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: HEAVY_PREVIEW_SPECS,
+    },
+    // Heavy lane: the `*-preview-runtime` + `preview-shadcn` + `runtime`
+    // specs each run the full in-browser npm-install bundle and a PGlite
+    // boot, so a single FAILING attempt burns the ~10-min boot wait
+    // (`backend-status` → "booted", timeout 600s) before conceding.  Under
+    // the global `retries: 3` that's ~44 min of wall-clock for ONE broken
+    // spec; four of them starve the 75-min job cap, which ends the run as
+    // `cancelled` — and a cancelled job never flushes the html reporter, so
+    // for a week+ every nightly shipped ZERO report to triage from.  These
+    // specs don't have the canvas/popover flakiness the global retry budget
+    // targets, so give them their own lane with a single retry: a genuine
+    // boot failure now fails ~2x faster, the job COMPLETES, and the html
+    // report (the thing needed to fix the underlying boot break) actually
+    // gets uploaded.  One retry still absorbs a transient registry/CDN
+    // hiccup during the bundle.
+    {
+      name: "heavy-preview",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: HEAVY_PREVIEW_SPECS,
+      retries: process.env.CI ? 1 : 0,
+    },
   ],
 });

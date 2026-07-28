@@ -1,0 +1,50 @@
+// A vanilla (plain Ecto) Phoenix backend that EMBEDS a Feliz SPA — the Feliz
+// (Fable/Feliz/Elmish F#) sibling of vanilla-embed-angular.ddd.  `platform:
+// elixir` `hosts:` a `ui { framework: feliz }`: the orchestrator emits the
+// domain + `/api` controllers + OpenAPI (no LiveView pages), plus the Feliz
+// project under `assets/` (App.fsproj + .config/dotnet-tools.json) built with
+// vite `base: "/app/"` so the bundle's asset URLs resolve under the `/app`
+// Plug.Static mount, plus the serve-wiring (endpoint `/app` Plug.Static, router
+// `/app` SpaController fallback).  Feliz builds F# → JS via `dotnet fable` +
+// `vite build`, so the multi-stage Dockerfile's spa-build stage uses a
+// .NET-SDK+Node base image; the elixir build gate compiles the BACKEND only
+// (`mix compile`) — no dotnet-fable cost.
+system PhoenixEmbedFeliz {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product {
+        name: string
+        derived display: string = name
+        price: decimal
+        invariant name.length > 0
+        operation reprice(to: decimal) {
+          precondition to > 0
+        }
+      }
+      repository Products for Product { }
+    }
+  }
+
+  api CatalogApi from Catalog
+
+  ui Storefront {
+    framework: feliz
+    page Products {
+      route: "/products"
+      title: "Products"
+      body: Stack { Heading { "Products", level: 2 }, QueryView { of: Product.all, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load products" }, empty: Empty { "No products yet." }, data: rows => Table { Column { "ID", o => Text { o.id } }, Column { "Name", o => Text { o.name } }, Column { "Price", o => Text { o.price } }, rows: rows }, testid: "products-list" } }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    hosts: Storefront
+    port: 4000
+  }
+}

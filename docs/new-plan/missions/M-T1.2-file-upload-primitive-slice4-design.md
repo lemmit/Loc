@@ -1,9 +1,15 @@
 # M-T1.2 — `FileUpload` UI primitive, Slice 4 (the visible payoff)
 
-*Status: in-flight. Follows the merged Slice 1 (PR #2007 — the `File` field
-type + `FileRef` wire contract on all five backends + `localDisk` + Hono
-`POST /files`/`GET /files/:key`). Slice 4 is the M-T1.2 headline: an input
-primitive that lets a user actually upload a file from a generated form.*
+*Status: **shipped** — #2039 (slice 4a, React), #2052 (slice 4b, Vue/Svelte/
+Angular), #2077 (slice 4c — HEEx `live_file_input` + Feliz Elmish upload +
+Angular standalone + the `FileLink` display primitive; all HEEx pins removed).
+`FileUpload` now renders on all six frontends and every design pack; the
+`required-primitives` gate is flipped (`primitive-file-upload` in
+`TSX_ONLY_PRIMITIVES`, `field-input-file` in `TSX_FIELD_INPUT`). Follows the
+merged Slice 1 (PR #2007 — the `File` field type + `FileRef` wire contract on
+all five backends + `localDisk` + Hono `POST /files`/`GET /files/:key`). Slice 4
+was the M-T1.2 headline: an input primitive that lets a user actually upload a
+file from a generated form.*
 
 ## What it does
 

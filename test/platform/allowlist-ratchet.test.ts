@@ -56,16 +56,16 @@ const REGISTERED: Ratchet[] = [
     // the Projection/CommandHandler mid-flight entries).
     max: 14,
   },
-  // Walker primitives with a TSX renderer but no HEEx one.  One entry:
-  // `ProvenanceInfo` — the provenance "?" disclosure (a native `<details>` over
-  // `<field>_provenance`, now rendered on React/Vue/Svelte/Angular); the HEEx port is
-  // tracked by M-T1.19 (docs/new-plan/T1-ui-frontend.md) and needs the Phoenix
-  // response to carry the lineage first.  Raised 0→1 as a reviewed line (M-T9.8).
+  // Walker primitives with a TSX renderer but no HEEx one.  Empty: the last
+  // entry — `ProvenanceInfo`, the provenance "?" disclosure — landed its HEEx
+  // renderer (a native `<details>` over the co-located `<field>_provenance`
+  // jsonb column, read server-side off the Ecto struct; M-T1.19), so it now
+  // renders on all six frontends.  Lowered 1→0 as the drain (M-T9.8).
   {
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",
     kind: "record",
-    max: 1,
+    max: 0,
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).

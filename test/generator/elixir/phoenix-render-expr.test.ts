@@ -152,6 +152,22 @@ describe("phoenix renderExpr — binary operators", () => {
     ).toBe('Decimal.compare(Decimal.new("5"), Decimal.new("3")) == :gt');
   });
 
+  it("renders `%` on decimal as Decimal.rem (`%` is not a Decimal operator in Elixir)", () => {
+    const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+    expect(
+      renderExpr(
+        {
+          kind: "binary",
+          op: "%",
+          left: { kind: "literal", lit: "decimal", value: "7" },
+          right: { kind: "literal", lit: "decimal", value: "3" },
+          leftType: DECIMAL,
+        },
+        ctx,
+      ),
+    ).toBe('Decimal.rem(Decimal.new("7"), Decimal.new("3"))');
+  });
+
   it("renders `+` on string types as Elixir <>", () => {
     expect(
       renderExpr(

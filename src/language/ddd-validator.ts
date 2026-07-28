@@ -62,6 +62,7 @@ import {
   checkMigrations,
   checkOrgPathReferences,
   checkPayloads,
+  checkPermissionImplies,
   checkPolicyFns,
   checkPredicateSlotArgs,
   checkPrimitiveConversions,
@@ -282,6 +283,9 @@ export class DddValidator {
     // loom.repository-find-deprecated — a wire-shaped list `find` warns (steer
     // to run(criterion)/retrieval); reconstitution finds stay legal.
     guard("repository-finds", model, () => checkRepositoryFinds(model, accept));
+    // loom.permission-implies-* — `implies` targets resolve by name against the
+    // subdomain catalogue; self-implication is rejected.
+    guard("permission-implies", model, () => checkPermissionImplies(model, accept));
     // `Self id` (typed-capabilities.md) is only valid inside a `capability`.
     guard("self-type", model, () => checkSelfType(model, accept));
     // Discriminated unions (payload-transport-layer.md, P4): anonymous

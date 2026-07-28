@@ -231,6 +231,13 @@ export interface FieldIR {
    *  other `ExprIR`; consumed when synthesising a create for an aggregate
    *  with no explicit one. */
   default?: ExprIR;
+  /** Lowered `mask unless <expr>` read-mask predicate (authorization.md §5) —
+   *  a `currentUser`-only bool.  The field's wire value is REDACTED (null)
+   *  UNLESS the predicate holds.  Present only where the source declared the
+   *  clause; drives the DTO read redaction + the wire-spec `fieldCapabilities`
+   *  entry.  The gate expression, like a `requires` gate, references only
+   *  `currentUser` (+ constants) — never the row. */
+  maskUnless?: ExprIR;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
@@ -524,6 +531,12 @@ export interface WireField {
    * and `"derived"` it is `"editable"` until a real case demands
    * otherwise. */
   access: FieldAccess;
+  /** Read-mask predicate (`field: T mask unless <expr>`, authorization.md §5)
+   * carried through from the originating `FieldIR.maskUnless` for `source:
+   * "property"` fields.  A `currentUser`-only boolean: when it evaluates false
+   * for the caller, the field is REDACTED (null) on the wire.  Absent = the
+   * field is always visible.  Every wire consumer that redacts reads this. */
+  maskUnless?: ExprIR;
 }
 
 export interface AggregateIR {
@@ -2856,6 +2869,13 @@ export interface PermissionDeclIR {
    *  across regens so claim payloads can be expressed in plain
    *  strings on the wire. */
   runtimeString: string;
+  /** Runtime strings of the permissions that transitively IMPLY this one
+   *  (`X implies Y` ⇒ `impliedBy(Y)` includes `X`).  A `contains(this)`
+   *  authorization check is expanded to also accept any of these, so holding
+   *  a broader permission satisfies a narrower gate.  Absent / empty when
+   *  nothing implies it.  See `src/ir/util/permission-closure.ts`
+   *  (authorization.md §6). */
+  impliedBy?: string[];
 }
 
 /** D-STORAGE-SPLIT: a per-(context, kind) binding from a domain
