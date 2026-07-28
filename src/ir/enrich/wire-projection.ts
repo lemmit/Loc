@@ -25,7 +25,7 @@ import { satisfiableAtConstruction } from "../validate/invariant-classify.js";
  * and `FieldIR` satisfy this — backends choose the shape that suits
  * the call site (wire shape includes the synthetic id row; field list
  * is property-only). */
-type WithAccess = { access?: FieldAccess };
+export type WithAccess = { access?: FieldAccess };
 
 /** Fields visible in an **API read** response (HTTP/OpenAPI surfaces).
  * Excludes:

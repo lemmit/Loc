@@ -15,6 +15,7 @@ import type {
   WireField,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { renderTsExpr } from "./render-expr.js";
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
@@ -136,6 +137,14 @@ function wireProjectionValue(
       return optional
         ? `(${expr} == null ? null : (${expr} as Date).toISOString())`
         : `(${expr} as Date).toISOString()`;
+    // money carries a FIXED wire scale (RS-12): decimal.js `.toJSON()`
+    // normalizes trailing zeros (`"12.50"` → `"12.5"`), so serialize with the
+    // canonical scale (4, matching money's NUMERIC(19,4) storage) instead — the
+    // wire value is byte-consistent with the other backends' 4-dp money.
+    if (t.name === "money")
+      return optional
+        ? `(${expr} == null ? null : ${expr}.toFixed(${MONEY_WIRE_SCALE}))`
+        : `${expr}.toFixed(${MONEY_WIRE_SCALE})`;
     // decimal: JSON number — .NET serializes decimal the same way, so
     // both backends round-trip identically.
     return expr;

@@ -94,7 +94,10 @@ describe("java generator — scalar (non-union) operation returns (BUG-003)", ()
     // money → domain BigDecimal serialized to its precise-decimal wire string
     expect(svc).toContain("public String quote(OrderId id");
     expect(svc).toContain("var result = aggregate.quote();");
-    expect(svc).toContain("return result.toPlainString();");
+    // Money scalar return → wire string at the FIXED NUMERIC(19,4) scale (RS-12).
+    expect(svc).toContain(
+      "return result.setScale(4, java.math.RoundingMode.HALF_UP).toPlainString();",
+    );
     // definitely NOT the old void/discard shape
     expect(svc).not.toContain("public void describe(");
     expect(svc).not.toContain("public void quote(");

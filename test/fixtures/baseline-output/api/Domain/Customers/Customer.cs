@@ -85,6 +85,7 @@ public sealed class Customer
         e.Username = username;
         e.Email = email;
         e.Age = age;
+        e.Version = 1;
         e.AssertInvariants();
         return e;
     }

@@ -12,6 +12,7 @@ import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
+import { constructionSeededDefaults } from "../../_frontend/server-default.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import type { SourceMapSubRegion } from "../../_trace/sourcemap.js";
 import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
@@ -750,6 +751,17 @@ export function renderJavaEntity(
           `        var e = new ${entity.name}();`,
           `        e.id = ${idClass}.newId();`,
           ...createInputFieldList.map((f) => `        e.${f.name} = ${f.name};`),
+          // Server-seeded literal defaults (RS-11): fields outside the create-
+          // input set (`token`/`managed`/`internal`) whose default is a plain
+          // constant — the `versioned` capability's `version: int token = 1` is
+          // the canonical case.  Setting it here (a non-"unsaved" value) makes
+          // Hibernate keep it as the seed and INSERT 1, so a created versioned
+          // aggregate reads back at version 1 rather than the primitive-int 0.
+          ...(isAgg(entity)
+            ? constructionSeededDefaults(entity.fields).map(
+                (f) => `        e.${f.name} = ${renderJavaExpr(f.default, renderCtx)};`,
+              )
+            : []),
           emitTrace ? `        e._assertInvariants("<init>");` : `        e._assertInvariants();`,
           `        return e;`,
           `    }`,

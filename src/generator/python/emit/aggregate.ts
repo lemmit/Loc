@@ -19,6 +19,7 @@ import {
 import { directParentName, partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
+import { constructionSeededDefaults } from "../../_frontend/server-default.js";
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { externHookCall, externHookModuleName } from "../extern-builder.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
@@ -773,8 +774,18 @@ function renderEntity(
         ? `${snake(f.name)}: ${renderPyType(f.type)} = None`
         : `${snake(f.name)}: ${renderPyType(f.type)}`,
     );
+    // Server-seeded literal defaults (RS-11): a field outside the create-input
+    // set (`token`/`managed`/`internal`) whose default is a plain constant —
+    // the `versioned` capability's `version: int token = 1` is the canonical
+    // case — must be constructed at its declared default, not the type zero, or
+    // the created aggregate reads back at version 0 instead of 1.
+    const defaultSeeds = new Map(
+      constructionSeededDefaults(e.fields).map((f) => [f.name, renderPyExpr(f.default)]),
+    );
     const fieldInit = (f: FieldIR): string => {
       if (inputNames.has(f.name)) return snake(f.name);
+      const seeded = defaultSeeds.get(f.name);
+      if (seeded !== undefined) return seeded;
       if (f.optional) return "None";
       return serverInitSeed(f.type);
     };

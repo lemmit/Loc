@@ -43,6 +43,7 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
+import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** A derived wire field is projected only when its expression evaluates cleanly
@@ -214,6 +215,9 @@ export function renderWireSerialize(
 
   const helpers = new Map<string, string>();
   const building = new Set<string>();
+  // Set when any money field is projected — gates the `__money_round/1` helper
+  // that pins money to the FIXED wire scale (RS-12).
+  let usedMoney = false;
 
   // Value expression for one wire field over the `record` var.  `source: "id"`
   // and `source: "derived"` are handled by the caller (id → `record.id`,
@@ -296,6 +300,16 @@ export function renderWireSerialize(
       } else {
         ve = valueExpr(wf, isVo);
       }
+      // Money → FIXED wire scale (RS-12): a bare `%Decimal{}` Jason-encodes at
+      // its own scale (a DB-stored `12.5`, a derived `Decimal.new("0.00")`), so
+      // round every money-typed entry — regular OR derived — to the canonical
+      // `NUMERIC(19,4)` scale for a wire value byte-consistent with the other
+      // backends.  The `__money_round/1` helper is nil-safe for `money?`.
+      const innerMoney = unwrapOptional(wf.type);
+      if (innerMoney.kind === "primitive" && innerMoney.name === "money") {
+        usedMoney = true;
+        ve = `__money_round(${ve})`;
+      }
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
     }
     if (entries.length === 0) return `${baseIndent}%{}`;
@@ -331,6 +345,18 @@ export function renderWireSerialize(
 
   const body = renderMap(wireShape, "    ", /* isVo */ false, aggDerived, idExpr);
   const preludeBind = opts.bind ? `${opts.bind}\n` : "";
+
+  // RS-12 money-scale helper — emitted once when the wire shape carries money.
+  // `Decimal.round/2` defaults to `:half_up` (matching node/.NET/Java/Python)
+  // and sets the exponent to `-scale`, so trailing zeros are preserved
+  // (`Decimal.round(Decimal.new("12.5"), 4)` → `"12.5000"`).
+  if (usedMoney) {
+    helpers.set(
+      "__money_round",
+      `  defp __money_round(nil), do: nil\n\n` +
+        `  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`,
+    );
+  }
 
   // `mask unless` read redaction (authorization.md §5): the masked root wire
   // fields, projected fail-closed against the ambient principal.  When present,
