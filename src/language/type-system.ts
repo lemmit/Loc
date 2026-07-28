@@ -779,6 +779,27 @@ function typeOfPostfixChain(expr: PostfixChain, env: Env): DddType {
     }
     return curType;
   }
+  // `<Aggregate>.create(...)` — the crudish (and custom) factory returns an
+  // INSTANCE of the aggregate.  A workflow / operation body binds
+  // `let o = Order.create({ … })` and then calls operations on `o`; the bare
+  // aggregate NAME `Order` is not itself a value, so without this the chain
+  // types `unknown` and every downstream `o.field` / `o.op(...)` is suppressed.
+  if (
+    isNameRef(expr.head) &&
+    first &&
+    isMemberSuffix(first) &&
+    first.call &&
+    first.member === "create"
+  ) {
+    const ent = lookupEntityByName(expr.head.name, env);
+    if (ent && isAggregate(ent)) {
+      curType = { kind: "aggregate", ref: ent };
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
+    }
+  }
   curType = typeOf(expr.head, env);
   for (const s of expr.suffixes) {
     curType = typeAfterSuffix(curType, s, env);
