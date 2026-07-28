@@ -131,11 +131,19 @@ export function lowerField(p: Property, env?: Env): FieldIR {
   // Lowered in the field env like the mask so `currentUser` / `permissions.<n>`
   // resolve; a row reference lowers to a non-`current-user` ref the IR validator
   // rejects (`loom.field-write-gate-not-current-user`).
+  // `readonly when X` is the INVERSE of `write(...)`, so its allowed-when gate is
+  // `!(X)`.  The operand is wrapped in a `paren` node so a binary/comparison
+  // predicate (`role == "viewer"`) renders as `!(role == "viewer")`, not the
+  // precedence-broken `!role == "viewer"` (`!` binds tighter than `==`).
   const writeGate =
     p.write && env
       ? lowerExpr(p.write, env)
       : p.readonlyWhen && env
-        ? ({ kind: "unary", op: "!", operand: lowerExpr(p.readonlyWhen, env) } as const)
+        ? ({
+            kind: "unary",
+            op: "!",
+            operand: { kind: "paren", inner: lowerExpr(p.readonlyWhen, env) },
+          } as const)
         : undefined;
   return {
     name: p.name,

@@ -49,6 +49,13 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection", title: "folded projection — read model folded from aggregate events (keyed row + on() folds)", backends: ALL },
   { id: "auth-oidc", title: "OIDC authentication — provider config + requires-guard", doc: "auth", backends: ALL },
   { id: "auth-simple", title: "dev-stub auth — user shape + requires-guard", doc: "auth", backends: ALL },
+  {
+    id: "field-auth",
+    title:
+      "field-level authz — `mask unless` read redaction + `write(...)`/`readonly when` write gate",
+    doc: "auth",
+    backends: ALL,
+  },
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
   {
     id: "channels-broker",
