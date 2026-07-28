@@ -233,6 +233,25 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(auth).toContain('email: get_claim(claims, "email")');
   });
 
+  it("rescues a raising verify so a malformed token is 401, not 500", async () => {
+    const files = await build(source({ oidc: true }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    // A structurally-malformed token (undecodable header / missing kid) makes
+    // joken / joken_jwks RAISE, which the `with/else` (error-tuple only) can't
+    // catch — an unguarded raise escapes the plug as a 500.  verify_token/1 must
+    // carry a `rescue` clause funnelling any verify exception to {:error, ...}
+    // (→ send_unauthorized → 401), matching the other four backends.
+    const verify = auth.slice(
+      auth.indexOf("defp verify_token(token) when is_binary(token) do"),
+      auth.indexOf("defp require_claims"),
+    );
+    expect(verify).toContain("rescue");
+    expect(verify).toContain("_ -> {:error, :invalid_token}");
+    // The rescue must sit AFTER the `with` body (function-level rescue), so it
+    // guards the verify_and_validate call itself.
+    expect(verify.indexOf("verify_and_validate")).toBeLessThan(verify.indexOf("rescue"));
+  });
+
   it("emits the /auth/me probe controller + route", async () => {
     const files = await build(source({ oidc: true }));
     expect(files.get("api/lib/api_web/controllers/auth_controller.ex")).toContain(

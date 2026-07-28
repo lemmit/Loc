@@ -543,6 +543,14 @@ ${audienceFn}
     else
       _ -> {:error, :invalid_token}
     end
+  rescue
+    # A STRUCTURALLY-malformed token (undecodable header, missing \`kid\`, JWKS
+    # signer lookup) makes joken / joken_jwks RAISE rather than return an error
+    # tuple — the \`with\` above only catches error tuples, so an unguarded raise
+    # escapes the plug as a 500.  Any verification exception is an invalid token:
+    # reject with 401, matching the other four backends (which 401 on a thrown
+    # verify).
+    _ -> {:error, :invalid_token}
   end
 
   # joken's validators only run for claims PRESENT in the token, so enforce the
