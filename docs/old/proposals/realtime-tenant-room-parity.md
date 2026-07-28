@@ -1,13 +1,24 @@
 # Realtime tenant-room parity — scope SSE broadcasts per tenant on .NET / Java / Python
 
-> Status: **PROPOSAL (2026-07-21).** Found by the post-cycle integrity audit
-> (channels/realtime, M-T4.4 / M-T1.10). Realtime SSE ships on four backends
-> (node/dotnet/java/python) + native LiveView on elixir, but **only node scopes
+> Status: **LANDED (2026-07-28).** Per-tenant rooms now ship on all four SSE
+> backends (node/dotnet/java/python), each consuming the shared
+> `realtimeRoomPlan` derivation: a tenant-scoped event reaches only the
+> emitter's tenant room, never cross-tenant. The interim
+> `loom.realtime-tenant-broadcast` honesty warning is **retired** (the gap it
+> tracked no longer exists). Emitters:
+> `src/generator/{dotnet/emit,java/emit,python}/realtime{-builder,}.ts`;
+> connect-time room join in the .NET Program.cs SSE endpoint. Per-backend emit
+> assertions live in `test/generator/{dotnet,java,python}/realtime-emission.test.ts`.
+> The runtime-isolation e2e leg (below, "Tests" §) is the remaining follow-up.
+>
+> Original proposal (2026-07-21), found by the post-cycle integrity audit
+> (channels/realtime, M-T4.4 / M-T1.10): realtime SSE shipped on four backends
+> (node/dotnet/java/python) + native LiveView on elixir, but **only node scoped
 > broadcasts per tenant** — .NET, Java, and Python broadcast every realtime event
 > to *every* subscriber. On a `tenantOwned` context this puts one tenant's
-> mutations on another tenant's wire. Today it's an **honest** gap (a validator
-> warning fires), not silent — but it's the single most material realtime
-> integrity gap. This doc is the port plan.
+> mutations on another tenant's wire. It was an **honest** gap (a validator
+> warning fired), not silent — but the single most material realtime integrity
+> gap. This doc is the port plan.
 >
 > Feature reference: [`docs/channels.md`](../../channels.md) → Part I (realtime).
 > Missions: [`docs/new-plan/T1-ui-frontend.md`](../../new-plan/T1-ui-frontend.md) (M-T1.10, lines ~62-63).

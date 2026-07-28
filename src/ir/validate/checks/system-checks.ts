@@ -50,7 +50,6 @@ import {
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { realtimeRoomPlan } from "../../util/realtime-rooms.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -849,44 +848,6 @@ export function validateRelayTargetNotSubscribed(sys: SystemIR, diags: LoomDiagn
           source: d.name,
         });
       }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Realtime tenant-broadcast honesty (channels.md — "rooms + policy-derived
-// routing v1").  The Hono/node backend scopes realtime delivery by the tenant
-// DataKey (per-tenant rooms); the other SSE backends (.NET / Java / Python)
-// still broadcast every carried event to every connected browser.  In a
-// tenant-owned context that means a tenant-scoped event's payload crosses the
-// tenant boundary on the wire — the authorized refetch remains the gate, but
-// the payload itself is over-delivered.  Warn so the per-backend rollout gap
-// is a reviewed decision, not a silent cross-tenant leak.  (Phoenix/LiveView
-// re-renders server-side through the authorized read, so it is not in this
-// set — `backendServesRealtime` already excludes it.)
-export function validateRealtimeTenantBroadcast(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  for (const d of sys.deployables) {
-    if (!backendServesRealtime(d.platform) || d.platform === "node") continue;
-    for (const ctxName of d.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      const plan = realtimeRoomPlan(ctx);
-      if (!plan.tenantScoped) continue;
-      diags.push({
-        severity: "warning",
-        code: "loom.realtime-tenant-broadcast",
-        message:
-          `Deployable '${d.name}' (platform '${d.platform}') serves realtime for tenant-owned ` +
-          `context '${ctxName}', but its SSE wire broadcasts every carried event to every ` +
-          `connected browser — tenant-scoped event payloads (${[...plan.tenantEventTypes]
-            .sort()
-            .join(", ")}) cross the tenant boundary on the wire. Per-tenant rooms ship on the ` +
-          `node/Hono backend; on '${d.platform}' the authorized refetch remains the gate, but ` +
-          `the payload is over-delivered until rooms land there.`,
-        source: d.name,
-      });
     }
   }
 }

@@ -217,12 +217,13 @@ structural half.
   ships on node/dotnet/java/python (`backendServesRealtime()`,
   `src/ir/util/channels.ts:14`), plus native LiveView PubSub on elixir
   (`src/generator/elixir/realtime-liveview.ts`), consumed by the
-  react/vue/svelte/angular/feliz frontends. Remaining gaps: **tenant rooms are
-  node-only** — dotnet/java/python broadcast every carried event to every
-  connected browser regardless of tenant scope (gated by the
-  `loom.realtime-tenant-broadcast` warning, `system-checks.ts:773`), so
-  tenant-scoped payloads cross the tenant boundary on the wire on those three
-  backends; and Flutter has no realtime consumer yet (warned via
+  react/vue/svelte/angular/feliz frontends. **Tenant rooms now ship on all four
+  SSE backends** — node/dotnet/java/python each key subscribers by the tenant
+  DataKey from the shared `realtimeRoomPlan` derivation
+  (`src/ir/util/realtime-rooms.ts`), so a tenant-scoped event reaches only the
+  emitter's tenant room, never cross-tenant (the former
+  `loom.realtime-tenant-broadcast` honesty warning is retired). Remaining gap:
+  Flutter has no realtime consumer yet (warned via
   `loom.ui-realtime-unsupported`).
 - **Elixir/java saga `last_event_id` dedup residual** — the column exists in
   migrations but hosted-durable consumer dedup is wired only on

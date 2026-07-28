@@ -4,9 +4,12 @@
 //     via an `on <chan>.<Event>` handler, but its relay backend (the one its
 //     frontend `targets:`) neither hosts the channel's owning context nor binds
 //     it — the SSE relay can't legally serve those events.
-//   - `loom.realtime-tenant-broadcast` (warning): a tenant-owned realtime
-//     context served by a non-node SSE backend broadcasts tenant-scoped event
-//     payloads cross-tenant (per-tenant rooms ship on node/Hono only, v1).
+//
+// The former `loom.realtime-tenant-broadcast` warning (tenant-owned realtime
+// on a non-node SSE backend over-delivers cross-tenant) is retired: per-tenant
+// rooms now ship on ALL SSE backends (node/dotnet/java/python), so the gap the
+// warning tracked no longer exists.  Per-backend room emission is asserted in
+// test/generator/{dotnet,java,python}/realtime-emission.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -101,7 +104,7 @@ describe("relay obligation gate (`loom.relay-target-not-subscribed`)", () => {
   });
 });
 
-// ─── loom.realtime-tenant-broadcast ────────────────────────────────────────
+// ─── rooms parity: no residual tenant-broadcast warning ─────────────────────
 
 function tenantSys(backendPlatform: string): string {
   const dataSources = backendPlatform === "elixir" ? "" : " dataSources: [coreSt, acctSt]";
@@ -135,19 +138,15 @@ system TenantRt {
 `;
 }
 
-describe("tenant-broadcast honesty gate (`loom.realtime-tenant-broadcast`)", () => {
-  it("warns for a tenant-owned realtime context on a broadcast-only backend (dotnet)", async () => {
-    const warns = await diags(tenantSys("dotnet"), "loom.realtime-tenant-broadcast");
-    expect(warns.length).toBe(1);
-    expect(warns[0]).toContain("cross the tenant boundary on the wire");
-    expect(warns[0]).toContain("OrderPlaced");
-  });
-
-  it("warns for python too", async () => {
-    expect((await diags(tenantSys("python"), "loom.realtime-tenant-broadcast")).length).toBe(1);
-  });
-
-  it("does not warn on the node backend (per-tenant rooms ship there)", async () => {
-    expect(await diags(tenantSys("node"), "loom.realtime-tenant-broadcast")).toEqual([]);
+describe("realtime rooms parity (`loom.realtime-tenant-broadcast` retired)", () => {
+  // Per-tenant rooms ship on every SSE backend now, so the honesty warning
+  // that flagged the .NET / Java / Python over-delivery gap is gone entirely.
+  it.each([
+    "dotnet",
+    "java",
+    "python",
+    "node",
+  ])("raises no tenant-broadcast warning on %s", async (backend) => {
+    expect(await diags(tenantSys(backend), "loom.realtime-tenant-broadcast")).toEqual([]);
   });
 });
