@@ -10,6 +10,7 @@ import type {
   ProjectionOnIR,
   StmtIR,
   SystemIR,
+  TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
@@ -644,6 +645,15 @@ function stateDefault(t: import("../../ir/types/loom-ir.js").TypeIR): string {
  *  reactor).  The fold body is `StmtIR` (the applier statement set), so it only
  *  ever carries `:=` assigns — rendered here directly, matching the ES-applier
  *  `state = %{state | field: value}` shape. */
+/** True for a `datetime` field type (unwrapping `optional`) — its Ecto column is
+ *  `:utc_datetime` (second precision), so a folded microsecond value needs a
+ *  `DateTime.truncate(:second)` before it can be dumped. */
+function isDatetimeType(t: TypeIR): boolean {
+  return t.kind === "optional"
+    ? isDatetimeType(t.inner)
+    : t.kind === "primitive" && t.name === "datetime";
+}
+
 function renderProjectionFoldHandler(
   appModule: string,
   contextModule: string,
@@ -660,18 +670,44 @@ function renderProjectionFoldHandler(
   // Routing key: the `by <expr>` value, else the event field name-matching the
   // correlation field (the omitted-`by` rule) — an id, so `Repo.get` keys on it.
   const keyExpr = on.correlation ? renderExpr(on.correlation, renderCtx) : `event.${snake(corr)}`;
-  // Each `field := value` → an in-memory struct update.  The correlation `:=`
-  // (if the fold spells it) is skipped: it's the immutable primary key, seeded
-  // at allocation (parity with the java / hono / python folds).
-  const assignLines = on.statements
+  // A `datetime` read-model column is Ecto `:utc_datetime` (second precision),
+  // but a folded value derived from `now()` is `DateTime.utc_now()` (microsecond
+  // precision).  The fold sets the struct field directly and persists through
+  // `Ecto.Changeset.change/1`, which — unlike a `cast` changeset — does NOT
+  // truncate, so Ecto raises dumping the microsecond value into `:utc_datetime`
+  // (a 500 on the emitting operation).  Truncate datetime assignments to
+  // `:second` to match the column, the same stance `audit-emit`/`provenance-emit`
+  // take for `now()` (nil-safe + single-eval via `then/2`, since an OPTIONAL
+  // datetime field may fold a nil).
+  const datetimeFields = new Set(
+    proj.stateFields.filter((f) => isDatetimeType(f.type)).map((f) => snake(f.name)),
+  );
+  // Each `field := value` → a tracked changeset CHANGE (not an in-memory struct
+  // rebind).  `Ecto.Changeset.change(state, %{…})` is load-bearing: a bare
+  // `change(state)` after `state = %{state | f: v}` carries NO changes, so on an
+  // EXISTING row (the second event for a key) `insert_or_update` → `Repo.update`
+  // is a silent no-op and the fold never persists (e.g. `OrderShipped` would
+  // never flip the row to `Shipped`).  Passing the changes to `change/2` tracks
+  // them, so the update actually writes.  The correlation `:=` (if the fold
+  // spells it) is skipped: it's the immutable primary key, seeded at allocation
+  // (parity with the java / hono / python folds).
+  const changeEntries = on.statements
     .filter(
       (s): s is Extract<StmtIR, { kind: "assign" }> =>
         s.kind === "assign" && snake(s.target.segments[0] ?? "") !== snake(corr),
     )
-    .map(
-      (s) =>
-        `    state = %{state | ${snake(s.target.segments[0]!)}: ${renderExpr(s.value, renderCtx)}}`,
-    );
+    .map((s) => {
+      const field = snake(s.target.segments[0]!);
+      const rendered = renderExpr(s.value, renderCtx);
+      const value = datetimeFields.has(field)
+        ? `(${rendered}) |> then(&(&1 && DateTime.truncate(&1, :second)))`
+        : rendered;
+      return `${field}: ${value}`;
+    });
+  const changeset =
+    changeEntries.length > 0
+      ? `Ecto.Changeset.change(state, %{${changeEntries.join(", ")}})`
+      : `Ecto.Changeset.change(state)`;
   const body = [
     `    key = ${keyExpr}`,
     "",
@@ -680,9 +716,8 @@ function renderProjectionFoldHandler(
     `        nil -> %${rowMod}{${snake(corr)}: key}`,
     `        existing -> existing`,
     `      end`,
-    ...(assignLines.length > 0 ? ["", ...assignLines] : []),
     "",
-    `    {:ok, _} = ${appModule}.Repo.insert_or_update(Ecto.Changeset.change(state))`,
+    `    {:ok, _} = ${appModule}.Repo.insert_or_update(${changeset})`,
     `    :ok`,
   ];
   return `# Auto-generated.
