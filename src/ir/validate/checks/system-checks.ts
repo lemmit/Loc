@@ -2950,10 +2950,11 @@ export function validateFieldMask(
 //     call); `dotnet` enforces it in its create/operation Mediator command
 //     handlers (fail-closed 403 before the domain method); `python` enforces it
 //     in its create/operation FastAPI route handlers (fail-closed 403 via
-//     ForbiddenError before the domain call); the remaining two backends
-//     (java, elixir) are the stacked follow-on, each adding its platform here as
-//     enforcement lands.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python"]);
+//     ForbiddenError before the domain call); `java` enforces it in its
+//     create/operation @Service methods (fail-closed 403 via ForbiddenException
+//     before the domain call); the remaining backend (elixir) is the stacked
+//     follow-on, adding its platform here as enforcement lands.
+const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python", "java"]);
 export function validateFieldWriteGate(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
