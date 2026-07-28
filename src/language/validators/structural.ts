@@ -60,6 +60,7 @@ import {
   checkPropertyCheck,
   checkPropertyDefault,
   checkPropertyMask,
+  checkPropertyWriteGate,
 } from "./types.js";
 
 /** `slot` is a UI-only element-shaped param marker — meaningful only
@@ -559,6 +560,8 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     if (isProperty(m)) checkInferredContainment(m, accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.maskUnless) checkPropertyMask(m, envForAggregate(agg), accept);
+    if (isProperty(m) && (m.write || m.readonlyWhen))
+      checkPropertyWriteGate(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     // Parameter defaults on aggregate actions (`operation cancel(reason = "x")`,
     // `create(...)`) get the same type-check as field defaults — `envForAggregate`
@@ -754,6 +757,8 @@ export function checkEntityPart(
     if (isInvariant(m)) checkInvariant(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.maskUnless) checkPropertyMask(m, envForPart(agg, part), accept);
+    if (isProperty(m) && (m.write || m.readonlyWhen))
+      checkPropertyWriteGate(m, envForPart(agg, part), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForPart(agg, part), accept);
     if (isDerivedProp(m)) checkDerived(m, envForPart(agg, part), accept);
     if (isFunctionDecl(m)) checkFunction(m, agg, part, accept);
@@ -768,6 +773,8 @@ export function checkValueObject(vo: ValueObject, accept: ValidationAcceptor): v
     if (isInvariant(m)) checkInvariant(m, envForValueObject(vo), accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForValueObject(vo), accept);
     if (isProperty(m) && m.maskUnless) checkPropertyMask(m, envForValueObject(vo), accept);
+    if (isProperty(m) && (m.write || m.readonlyWhen))
+      checkPropertyWriteGate(m, envForValueObject(vo), accept);
     if (isDerivedProp(m)) {
       checkDerived(m, envForValueObject(vo), accept);
       if (m.name === "display" || m.name === "inspect") {
