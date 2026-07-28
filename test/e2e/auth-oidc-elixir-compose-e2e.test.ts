@@ -191,6 +191,23 @@ describe.skipIf(!RUN)(
         expect(login.status).toBe(302);
         expect(login.headers.get("location") ?? "").toContain("/protocol/openid-connect/auth");
         expect(login.headers.get("set-cookie") ?? "").toContain("oidc_state");
+
+        // --- Negative-authz runtime gate (M-T3.13): the emitted `requires`
+        // filter must ENFORCE at runtime, not merely compile.  The demo user's
+        // realm roles are [user, agent] (no admin), so the two gated finds split:
+        // Authorized (role present) → 200 — the gate-satisfied control that
+        // proves the gate isn't always-deny.
+        expect(
+          (await fetch(`${API_BASE}/api/tickets/agent_scoped`, { headers: bearer })).status,
+        ).toBe(200);
+        // Authenticated but UNauthorized (role absent) → 403 — the deny half; a
+        // forgetful backend emitting a no-op gate would return 200 here.
+        expect(
+          (await fetch(`${API_BASE}/api/tickets/admin_scoped`, { headers: bearer })).status,
+        ).toBe(403);
+        // Unauthenticated hitting the gated route → 401 (authn precedes authz;
+        // the unscoped call is rejected before the gate is even reached).
+        expect((await fetch(`${API_BASE}/api/tickets/admin_scoped`)).status).toBe(401);
       } catch (err) {
         console.error(`\n===== compose logs =====\n${composeLogs()}\n========================\n`);
         throw err;

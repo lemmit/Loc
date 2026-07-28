@@ -25,7 +25,15 @@ system Helpdesk {
         subject: string
         open: bool
       }
-      repository Tickets for Ticket { }
+      repository Tickets for Ticket {
+        // Negative-authz runtime gate (M-T3.13): two `requires`-gated reads let
+        // the e2e prove the emitted 403 filter actually ENFORCES (not a no-op a
+        // compile gate can't see).  The dev Keycloak `demo` user carries realm
+        // roles [user, agent] (no admin), so `adminScoped` denies (403) while the
+        // `agentScoped` sibling passes (200 — the gate-satisfied control).
+        find adminScoped(): Ticket[] requires currentUser.roles.contains("admin")
+        find agentScoped(): Ticket[] requires currentUser.roles.contains("agent")
+      }
     }
   }
 
