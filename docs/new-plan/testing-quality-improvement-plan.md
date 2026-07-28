@@ -56,17 +56,16 @@ Add focused unit tests (mock target / minimal IR fixtures, no full generation) f
 
 ## C — Honest validator gates that fire in no test (P2)
 
-387 `loom.*` diagnostic codes are emitted; ~288 are asserted by code identity, and a second valid style (message-substring assertions in `validation.test.ts` and the `workflow-*` families) covers many more. After filtering both styles, these gates are confirmed to fire in **neither** — a no-op regression (validator silently stops emitting) would pass CI:
+387 `loom.*` diagnostic codes are emitted; ~288 are asserted by code identity, and a second valid style (message-substring assertions) covers many more. **Verify-first caveat — this class rots the fastest.** An initial sweep flagged ~23 "uncovered" codes; on re-check against fresh `main`, **most were false gaps** — their tests live in `test/language/` (not `test/language/validation/`) or assert by *message* in `validation.test.ts`, both of which a code-identity grep misses. Always confirm code-**and**-message absence, and reachability, before writing.
 
-### M-T9.19 — Negative tests for the unexercised validator gates — `open` · **S** · P2
-- **`src/language/validators/auth.ts`** — all **5** codes (`auth-without-user`, `auth-unknown-provider`, `auth-missing-issuer`, `auth-missing-client-id`, `auth-unknown-claim-field`). The whole AST validator is unexercised (the `*auth*` generator tests are codegen, not negative-validation).
-- **`src/language/validators/permissions.ts`** — both codes (`permission-implies-self`, `permission-implies-unknown`); `permission-*.test.ts` covers IR lowering, not these gates.
-- **`src/language/validators/seed.ts`** — `seed-foreign-aggregate`, `seed-duplicate-field`, `seed-id-needs-raw`, `seed-raw-unsupported-column`.
-- **`src/language/validators/types.ts`** — `ternary-condition`, `ternary-branches`.
-- **`src/ir/validate/checks/workflow-checks.ts`** — the data-flow family (`workflow-unknown-name`/`-repository`/`-binding`, `workflow-run-retrieval-mismatch`, `workflow-emit-missing-field`, `workflow-create-unknown-aggregate`, `workflow-name-collision`, …) — ~10–12 codes the existing `workflow-*.test.ts` (state/correlation/appliers) don't reach.
-- **Template-literal codes** — `loom.derived-${field}-not-string` (`structural.ts:598`) and `loom.canonical-${kind}-conflict` (`structural.ts:716`) interpolate the code, so no static-string test can ever match; assert these by **message**, not code.
+### M-T9.19 — Negative tests for the unexercised validator gates — `partial` · **S** · P2
+**Already covered (do NOT re-add — verified 2026-07-28):** `auth.ts` (all 5 codes → `test/language/auth-block.test.ts`), `permissions.ts` (both → `test/language/permission-implies.test.ts`), `seed.ts` (all 4 → `test/language/seed.test.ts`), `types.ts` ternary (both → `test/language/type-system/ternary.test.ts`, by message), and the workflow `emit-unknown-field` / `emit-unknown-event` codes (→ `validation.test.ts:2051,2099`, by message).
 
-Each is a cheap parse-and-assert-diagnostic test; no runtime. Cross-ref: M-T3.13 (#2259) adds the *runtime* authz-refusal gate, which is complementary — this is the *validator*-layer negative half.
+**Unreachable / preempted (→ M-T9.8 "diagnostic codes defined but unemittable", not a test gap):** `loom.workflow-name-collision` (`workflow-checks.ts:180` — `loom.duplicate-workflow` fires first) and `loom.workflow-create-unknown-aggregate` (`:502` — correlation/scope resolution preempts it). Audit each for `assertNever`-style deadness or removal.
+
+**Genuine, reachable gaps — LANDED (this doc's companion PR):** `test/ir/workflow-dataflow-checks.test.ts` pins the four IR-layer checks that were reachable from `.ddd` source yet asserted nowhere — `loom.workflow-unknown-name` (unknown name in a precondition), `loom.workflow-unknown-binding` (op-call on an unbound let), `loom.workflow-unknown-operation` (op-call of a non-existent operation), `loom.workflow-emit-missing-field` (emit omitting a declared event field), each with a passing counterpart.
+
+**Still open:** the template-literal codes `loom.derived-${field}-not-string` (`structural.ts:598`) and `loom.canonical-${kind}-conflict` (`structural.ts:716`) interpolate the code, so no static-string test can match — assert these by **message**. Plus a reachability pass over the remaining `workflow-checks.ts` arms (`-unknown-repository`, `-run-unknown-repository`, `-run-retrieval-mismatch`, `-foreach-unknown-binding`) to split genuine gaps from preempted-dead before testing.
 
 ---
 
@@ -86,7 +85,7 @@ Lower-severity, but each is a place where one target's emitter is pinned per-kin
 ## Suggested order of attack
 
 1. **M-T9.17** (shared-core unit tests) — highest leverage per unit of effort: one bug in these cores fans out across backends, and the tests are cheap (mock target / minimal fixtures). *(In flight — companion PR to this doc.)*
-2. **M-T9.19** (validator negative tests) — cheapest overall; pure parse-and-assert, no runtime, closes silent no-op regressions.
+2. **M-T9.19** (validator negative tests) — *mostly done on re-check*: the four reachable workflow data-flow gaps landed; the rest were false gaps (already covered) or unreachable (→ M-T9.8). Remaining: template-literal codes by message + a reachability pass over the last `workflow-checks.ts` arms.
 3. **M-T9.12** (event-sourcing runtime) and **M-T9.16 / M-T9.11** (per-PR runtime differential) — close the "compiles green, runs wrong" class on the highest-risk features.
 4. **M-T9.14 / M-T9.15** (Flutter + one non-React per-PR round-trip) — frontend runtime proof.
 5. The rest as capacity allows.
