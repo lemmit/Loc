@@ -86,4 +86,20 @@ describe("field write gate — node enforcement", () => {
     expect(r).not.toContain("__writeUser");
     expect(r).not.toContain("Forbidden: write");
   });
+
+  it("parenthesises the `readonly when` operand (precedence)", async () => {
+    // `readonly when X` normalises to the inverse gate `!(X)`.  The operand MUST
+    // be parenthesised or `!` binds tighter than the comparison — `!role == "v"`
+    // would be `(!role) == "v"` (always false), a semantic bug tsc accepts.
+    const files = await generateSystemFiles(
+      SYSTEM.replace(
+        "salary: decimal write(currentUser.permissions.contains(permissions.setSalary))",
+        'salary: decimal readonly when currentUser.role == "viewer"',
+      ),
+    );
+    const r = [...files.entries()].find(([p]) => p.endsWith("http/p.routes.ts"))?.[1];
+    expect(r, "http/p.routes.ts").toBeDefined();
+    expect(r!).toContain('!(__writeUser.role === "viewer")');
+    expect(r!).not.toContain('!__writeUser.role === "viewer"');
+  });
 });

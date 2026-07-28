@@ -1,0 +1,40 @@
+// Field-level authorization (auth.md §5) — the field twin of the operation
+// `requires` gate, both halves of M-T3.2 item 6 on one aggregate:
+//   - `mask unless <expr>` READ redaction: a field is null on the wire unless a
+//     currentUser-only predicate holds (fail-closed).
+//   - `write(<expr>)` / `readonly when <expr>` WRITE gate: a client-supplied
+//     create/op param of the field's name is rejected 403 unless the predicate
+//     holds (op-param granularity — Loom has no PATCH partial update).
+// `salary` carries BOTH a mask and a write gate; `title` uses the `readonly when`
+// spelling (normalised to the inverse write gate).  Compiles on every backend.
+system FieldAuth {
+  user { id: guid  role: string  permissions: string[] }
+  subdomain HR {
+    permissions { salaryUnmask, salarySet }
+    context People {
+      aggregate Employee with crudish {
+        name: string
+        // Read-redacted AND write-gated on the same field: the salary is hidden
+        // on reads (unless `salaryUnmask`) and can only be SET by a caller with
+        // `salarySet` (else the create/update is rejected 403).
+        salary: money
+          mask unless currentUser.permissions.contains(permissions.salaryUnmask)
+          write(currentUser.permissions.contains(permissions.salarySet))
+        // Write-gated via the `readonly when` spelling — a "viewer" may not set it.
+        title: string readonly when currentUser.role == "viewer"
+      }
+      repository People for Employee { }
+    }
+  }
+  storage primary { type: postgres }
+  resource peopleState { for: People, kind: state, use: primary }
+  api HRApi from HR
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [People]
+    serves: HRApi
+    dataSources: [peopleState]
+    port: 4000
+    auth: required
+  }
+}
