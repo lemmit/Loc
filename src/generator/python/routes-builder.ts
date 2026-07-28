@@ -56,7 +56,7 @@ import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
-import { renderPyExpr } from "./render-expr.js";
+import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 import { aggHasFieldMask, emittableFinds } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -1289,7 +1289,10 @@ function findRoute(
   const userBind = needsUser ? "    current_user: User = request.state.current_user" : null;
   const gateLines: LinesPart = find.requires
     ? [
-        `    if not (${renderPyExpr(find.requires)}):`,
+        // renderPyNegatedGuard so a bare `.contains(...)` membership gate emits
+        // `x not in y` rather than `not (x in y)` (ruff E713) — the same helper
+        // the operation/workflow/projection `requires` guards use.
+        `    if ${renderPyNegatedGuard(find.requires)}:`,
         `        raise ForbiddenError(${JSON.stringify(`Forbidden: find ${find.name}`)})`,
       ]
     : null;

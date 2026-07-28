@@ -543,6 +543,14 @@ ${audienceFn}
     else
       _ -> {:error, :invalid_token}
     end
+  rescue
+    # A malformed bearer token (a non-base64 / non-JSON header segment) makes
+    # joken_jwks' before_verify hook RAISE inside \`Joken.peek_header/1\` rather
+    # than return an error tuple, which would escape the \`with\` and surface as a
+    # 500.  Rescue it to the same {:error, :invalid_token} → 401 the other four
+    # backends return for a garbage token — a bad credential is rejected, never
+    # a crash.
+    _ -> {:error, :invalid_token}
   end
 
   # joken's validators only run for claims PRESENT in the token, so enforce the

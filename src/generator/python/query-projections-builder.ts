@@ -13,7 +13,7 @@ import {
   lowerWorkflowFilterToSqlAlchemy,
   type PyPredicate,
 } from "./find-predicate.js";
-import { renderPyExpr } from "./render-expr.js";
+import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Query-time projection routes — `app/http/query_projections_routes.py`,
@@ -196,7 +196,9 @@ function projectionRoute(
     needsUser ? "    current_user: User = request.state.current_user" : null,
     ...(gate
       ? [
-          `    if not (${renderPyExpr(gate)}):`,
+          // renderPyNegatedGuard: a `.contains(...)` membership gate emits
+          // `x not in y`, not `not (x in y)` (ruff E713).
+          `    if ${renderPyNegatedGuard(gate)}:`,
           `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
         ]
       : []),
@@ -273,7 +275,9 @@ function rowSourcedProjectionRoute(
     needsUser ? "    current_user: User = request.state.current_user" : null,
     ...(gate
       ? [
-          `    if not (${renderPyExpr(gate)}):`,
+          // renderPyNegatedGuard: a `.contains(...)` membership gate emits
+          // `x not in y`, not `not (x in y)` (ruff E713).
+          `    if ${renderPyNegatedGuard(gate)}:`,
           `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
         ]
       : []),
