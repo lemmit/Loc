@@ -13,6 +13,7 @@ import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { constructionSeededDefaults } from "../../_frontend/server-default.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import {
@@ -714,6 +715,18 @@ export function renderEntity(
   const createAssignments = createInputFieldList.map(
     (f) => `        e.${upperFirst(f.name)} = ${f.name};`,
   );
+  // Server-seeded literal defaults (RS-11): fields outside the create-input set
+  // (`token`/`managed`/`internal`) whose default is a plain constant — the
+  // `versioned` capability's `version: int token = 1` is the canonical case.
+  // Without this the field falls to the CLR zero and the ORM writes it into the
+  // INSERT, so a created `versioned` aggregate reads back at version 0 (the DB
+  // column `DEFAULT 1` never fires).  Seeding it in the factory is persistence-
+  // agnostic (EF, Dapper, and document rebuild all flow through `Create`).
+  const createDefaultSeeds = isAgg(entity)
+    ? constructionSeededDefaults(entity.fields).map(
+        (f) => `        e.${upperFirst(f.name)} = ${renderCsExpr(f.default, renderCtx)};`,
+      )
+    : [];
   const createPublicLines =
     isRoot && isAgg(entity) && hasCreate(entity) && !eventSourced
       ? [
@@ -724,6 +737,7 @@ export function renderEntity(
           `        var e = new ${entity.name}();`,
           `        e.Id = new ${idClass}(${csNewIdValue(effIdValueType)});`,
           ...createAssignments,
+          ...createDefaultSeeds,
           // Public Create factory — same "<init>" label as the hydration path.
           emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
           "        return e;",

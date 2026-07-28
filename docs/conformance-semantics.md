@@ -222,15 +222,23 @@ the conforming backends, and the fix that established it.
   `version: int token = 1` (`src/macros/prelude.ts`), mirrored to
   `version INTEGER NOT NULL DEFAULT 1`.
 - **Trigger.** A `versioned` aggregate created via `POST`, then read.
-- **Observable.** node honors the `= 1` default; dotnet/java/python currently
-  seed `0` (they drop the default on the create/insert path). This is **not** a
-  majority vote — three backends agree on the *wrong* value; the source of
-  truth is the `= 1` declaration, so node conforms and the other three are the
-  fix targets. (A cautionary case: the differential found the *divergence*, but
-  the oracle came from the spec, not the majority.)
-- **Conforms.** node. **Targets (open, to fix):** dotnet, java, python.
+- **Observable.** Every backend now reads back `1`. node stamps `version = 1`
+  in its versioned save; elixir carries the Ecto `field :version, :integer,
+  default: 1`; dotnet/java/python originally seeded `0` — a `token` field is
+  dropped from the create body, so the ORM inserted the persistence-layer zero
+  and the DB `DEFAULT 1` never fired. The fix seeds the field's `= 1` IR default
+  in each domain `create` factory (`constructionSeededDefaults`,
+  `src/generator/_frontend/server-default.ts`), which is persistence-agnostic —
+  every create path flows through the factory (EF/Dapper/document, JPA
+  `@Version` keeps the non-unsaved value, SQLAlchemy inserts `aggregate.version`).
+  (A cautionary case: the differential found the *divergence*, but the oracle
+  came from the spec — the `= 1` declaration — not the three-backend majority.)
+- **Conforms.** node, dotnet, java, python, elixir. (dotnet/java/python fixed +
+  runtime round-trip verified — created `versioned` aggregate reads back
+  `version: 1` on a real postgres boot.)
 - **Provenance.** M-T9.11 differential (run 30277275068, PR #2220);
-  `src/macros/prelude.ts` `versioned = 1`. Tier: **behavioral**.
+  `src/macros/prelude.ts` `versioned = 1`. Fixed by M-T6.11. Tier:
+  **behavioral**.
 
 ### RS-12 · Money wire scale is consistent across backends
 - **Guarantee.** A money-typed field has the same scale on every backend's
