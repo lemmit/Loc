@@ -508,17 +508,32 @@ public static PersonResponse fromMasked(Person value) {
 }
 ```
 
+On **Elixir** (vanilla Phoenix) the aggregate REST/ES controller's `serialize/1`
+becomes the redacting serializer — it delegates to `serialize_unmasked/1` (the
+raw map, which audit before/after snapshots project through) and nils each masked
+key unless the ambient principal satisfies the predicate. The controller has no
+`conn` in scope, so it reads the principal from the process dictionary the Auth
+plug stashes (`Process.put(:loom_current_user, user)`).
+
+```elixir
+# generated (Phoenix) — reads the principal off the process dictionary
+defp serialize(record) do
+  current_user = Process.get(:loom_current_user)
+  wire = serialize_unmasked(record)
+  wire = if current_user != nil and (Enum.member?(current_user.permissions, "hr.salaryUnmask")), do: wire, else: Map.put(wire, "salary", nil)
+  wire
+end
+```
+
 **Status (M-T3.2 item 6).** Grammar + IR + printer + wire contract + validation,
-plus read redaction on **node**, **.NET**, **Python**, and **Java**, have
-shipped. The remaining backend (**Elixir**) still **compile-errors** on a
-`mask unless` field (`loom.field-mask-unsupported`) rather than silently ship the
-value — a declared mask never leaks. The write-side (`write(...)` /
-`readonly when`) is the next slice.
+plus read redaction on **all five backends** (node, .NET, Python, Java, Elixir),
+have shipped — a `mask unless` field now redacts fail-closed on every backend.
+The write-side (`write(...)` / `readonly when`) is the next slice.
 
 | Diagnostic | When |
 | --- | --- |
 | `loom.field-mask-not-current-user` | the predicate references the row / a param, not just `currentUser` |
-| `loom.field-mask-unsupported` | the hosting backend does not yet emit the read redaction (Elixir) |
+| `loom.field-mask-unsupported` | the hosting backend does not emit the read redaction (none today — every backend supports it) |
 | `loom.field-mask-projection-source` | a masked aggregate is a query-time `projection` source — projection responses aren't read-masked yet, so it would leak |
 | *(AST)* `'mask unless' … must be of type 'bool'` | the predicate is not a bool |
 
