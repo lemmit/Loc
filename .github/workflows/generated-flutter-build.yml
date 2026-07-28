@@ -145,7 +145,19 @@ jobs:
                   Button { "Add product", to: "/products/new" }
                 }
               }
-              page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              // The Flutter frontend DEFERS the interactive input / form family
+              // (CreateForm/OperationForm/WorkflowForm/DestroyForm/Modal/Field*/
+              // Toggle/Tabs) — loom.flutter-primitive-unsupported now rejects
+              // them on a platform: flutter target (they would emit a silent
+              // "no renderer" widget).  So this Flutter showcase exercises only
+              // the supported surface: display/layout primitives, components,
+              // state/actions, QueryView + For, the match-await operation path,
+              // and navigation.
+              page NewProduct { route: "/products/new"  body: Stack {
+                Heading { "New", level: 1 },
+                Text { "Product creation lives in the web/SPA app." },
+                Button { "Back to products", to: "/products" }
+              } }
               page RestockProduct {
                 route: "/products/:id/restock"
                 state { note: string = "" }
@@ -157,12 +169,14 @@ jobs:
                 }
                 body: Stack { Heading { "Restock", level: 1 }, Text { note }, Button { "Restock", onClick: restock } }
               }
-              page NewCategory { route: "/categories/new"  body: Stack { Heading { "New category", level: 1 }, WorkflowForm { runs: addCategory } } }
+              page NewCategory { route: "/categories/new"  body: Stack {
+                Heading { "New category", level: 1 },
+                Text { "Category creation lives in the web/SPA app." }
+              } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
                 Heading { "Admin", level: 1 },
-                OperationForm { of: Product, op: rename },
-                Modal { OperationForm { of: Product, op: rename }, trigger: Button { "Rename…" }, title: "Rename product" },
-                DestroyForm { of: Product }
+                Text { "Rename / delete live in the web/SPA app." },
+                Button { "Back to products", to: "/products" }
               } }
             }
             deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }

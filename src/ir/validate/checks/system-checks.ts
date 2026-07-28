@@ -10,6 +10,7 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
+import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
 import { lowerFirst, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
@@ -287,6 +288,66 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${framework}' has no realtime consumption, so the handlers are silently dropped.`,
         source: d.name,
       });
+    }
+  }
+}
+
+// Honesty gate for the Flutter-DEFERRED page-primitive family
+// (`loom.flutter-primitive-unsupported`).  The Flutter walking-skeleton pack
+// renders the display / layout primitives but DEFERS the whole interactive
+// input / form family — `FLUTTER_DEFERRED_BUILDER_NAMES`, derived once from the
+// pack's `FLUTTER_INLINE_OR_DEFERRED` set in `src/util/flutter-deferred-
+// primitives.ts`.  Because frontends validate against the target-AGNOSTIC
+// walker-stdlib, a page using `Toggle` / `Field` / `Tabs` / `Modal` / a form
+// while targeting a `platform: flutter` deployable type-checks and validates
+// clean — then the Flutter walker emits a `// flutter pack: no renderer for
+// "X"` comment (valid Dart, so `generated-flutter-build.yml` stays green) where
+// the widget should be, and the UI element silently VANISHES.
+//
+// This fails fast at compile time instead — the frontend-target twin of
+// `loom.feliz-store-unsupported` / `loom.ui-realtime-unsupported`, matching how
+// the four Handlebars frontends fail loud at pack-load when a required template
+// is missing.  Flutter is a self-hosting frontend platform (`platform: flutter`
+// only ever serves the `framework: flutter` bundle), so the deployable platform
+// is the reliable target detector.  DERIVED from the pack set: when a primitive
+// grows a real Flutter renderer and leaves `FLUTTER_INLINE_OR_DEFERRED`, the
+// gate auto-closes with no edit here.
+export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (d.platform !== "flutter") continue;
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui) continue;
+      const hosts: { where: string; body?: ExprIR }[] = [
+        ...ui.pages.map((p) => ({ where: `page '${p.name}'`, body: p.body })),
+        ...ui.components.map((c) => ({ where: `component '${c.name}'`, body: c.body })),
+      ];
+      for (const host of hosts) {
+        // One diagnostic per (host, primitive-name) — a page repeating the same
+        // deferred primitive shouldn't spam the report.
+        const flagged = new Set<string>();
+        walkExpr(host.body, (e) => {
+          if (e.kind !== "call" || !FLUTTER_DEFERRED_BUILDER_NAMES.has(e.name)) return;
+          if (flagged.has(e.name)) return;
+          flagged.add(e.name);
+          const where = `${host.where} on ui '${uiName}'`;
+          diags.push({
+            severity: "error",
+            code: "loom.flutter-primitive-unsupported",
+            message:
+              `${where}: uses the '${e.name}' primitive, but the Flutter frontend defers the ` +
+              `interactive input / form family (Tabs / Field* / Toggle / FileUpload / Modal / the ` +
+              `CreateForm·OperationForm·WorkflowForm·DestroyForm shells) — the Flutter pack has no ` +
+              `renderer for it, so hosting deployable '${d.name}' (platform 'flutter') would emit a ` +
+              `\`// flutter pack: no renderer\` comment where the widget should be and the element ` +
+              `would silently vanish.  Host this page on an SPA frontend (react / vue / svelte / ` +
+              `angular) or a Feliz/Phoenix deployable, or restrict the Flutter ui to the supported ` +
+              `display / layout primitives until '${e.name}' gains a Flutter renderer.`,
+            source: where,
+          });
+        });
+      }
     }
   }
 }
