@@ -76,6 +76,7 @@ import {
   renderJavaChannelFiles,
   renderJavaOutboxDelivery,
   renderJavaOutboxFiles,
+  renderJavaStandaloneOutboxFiles,
 } from "./emit/channels.js";
 import {
   renderAggregateNotFoundException,
@@ -374,9 +375,18 @@ function emitProjectFromContexts(
       retention: b.retention,
     }));
   const brokerEvents = new Set(channelBindings.flatMap((b) => b.events));
+  // Standalone (no-broker) outbox tier (dispatch-delivery-semantics.md §1-2):
+  // hosted durable events on a channel with NO `channelSource` still get
+  // crash-safe in-process delivery (the tee records → LocalOutboxRelay
+  // redelivers), parity with node/dotnet/python.  Only when this deployable
+  // wires no broker at all — the broker path owns the `channels:`-wired case, so
+  // exactly one relay drains __loom_outbox (no double-processing race).
+  const standaloneOutbox = !hasChannels && hostedDurable.size > 0;
   // Dispatcher handler methods for broker-routed events, collected across the
   // per-context loop below — the ChannelConsumerService's dispatch table.
   const consumerHandlers: ChannelConsumerHandler[] = [];
+  // The same, for standalone-durable events → LocalOutboxRelay's dispatch table.
+  const localOutboxHandlers: ChannelConsumerHandler[] = [];
   // Fullstack mode (`ui:` on a java deployable): the SPA owns the
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
@@ -849,6 +859,7 @@ function emitProjectFromContexts(
         contextSchema: ctxSchema,
         extraChannels: hasChannels ? wiredForeignChannels : undefined,
         brokerEvents: hasChannels ? brokerEvents : undefined,
+        localDurableEvents: standaloneOutbox ? hostedDurable : undefined,
       },
       dispatcherOpFragments,
     );
@@ -872,6 +883,18 @@ function emitProjectFromContexts(
             event: h.event,
           })),
       );
+      if (standaloneOutbox) {
+        localOutboxHandlers.push(
+          ...dispatcher.handlers
+            .filter((h) => hostedDurable.has(h.event))
+            .map((h) => ({
+              dispatcherClass: `${ctx.name}Dispatcher`,
+              dispatcherPkg: pkgFor("workflow-service"),
+              method: h.method,
+              event: h.event,
+            })),
+        );
+      }
     }
     // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
     // slice 3): every observable (correlation-bearing) saga gets
@@ -1028,6 +1051,35 @@ function emitProjectFromContexts(
       },
     });
     if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
+  }
+
+  // Standalone (no-broker) transactional-outbox tier
+  // (dispatch-delivery-semantics.md §1-2): a durable channel with no
+  // `channelSource` gets the __loom_outbox entity/repo + the LoomEventOutbox tee
+  // (records durable events in the tx) + the LocalOutboxRelay (redelivers to the
+  // dropped-@EventListener reactors post-commit).  OutboxDelivery is already
+  // emitted above (hostedDurable > 0).  Broker-wired projects take the broker
+  // path below instead; channel-less projects emit none of this.
+  if (standaloneOutbox) {
+    for (const f of renderJavaOutboxFiles(basePkg, {
+      configPkg: pkgFor("config"),
+      entityPkg: pkgFor("infra-persistence"),
+      repoPkg: pkgFor("spring-data-repository"),
+    })) {
+      // The broker relay (OutboxRelayService) is replaced by LocalOutboxRelay;
+      // reuse only the shared __loom_outbox entity + repository.
+      if (f.name === "OutboxRelayService.java") continue;
+      place(f.name, f.category, f.content);
+    }
+    for (const f of renderJavaStandaloneOutboxFiles(basePkg, {
+      durableEvents: [...hostedDurable],
+      handlers: localOutboxHandlers,
+      configPkg: pkgFor("config"),
+      entityPkg: pkgFor("infra-persistence"),
+      repoPkg: pkgFor("spring-data-repository"),
+    })) {
+      place(f.name, f.category, f.content);
+    }
   }
 
   // Broker transport (M-T4.4 slice 6b) — channel-less projects stay
