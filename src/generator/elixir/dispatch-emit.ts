@@ -15,6 +15,7 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { resolveContextSchema } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -205,11 +206,12 @@ export function emitWorkflowStateSchemas(
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
     if (!wf.correlationField || wf.eventSourced) continue;
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf, schema),
+      renderStateSchema(contextModule, wf, schema, durable),
     );
   }
 }
@@ -259,10 +261,11 @@ export function emitDispatch(
       correlationWfs.set(sub.workflow.name, sub.workflow);
   }
   const dispatchSchema = sys ? resolveContextSchema(ctx, sys) : undefined;
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of correlationWfs.values()) {
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf, dispatchSchema),
+      renderStateSchema(contextModule, wf, dispatchSchema, durable),
     );
   }
 
@@ -350,7 +353,14 @@ function ectoStateFieldType(t: import("../../ir/types/loom-ir.js").TypeIR): stri
   return ":string";
 }
 
-function renderStateSchema(contextModule: string, wf: WorkflowIR, schema?: string): string {
+function renderStateSchema(
+  contextModule: string,
+  wf: WorkflowIR,
+  schema?: string,
+  /** Idempotent-consumer marker (dispatch-delivery-semantics.md §3): a durable
+   *  channel maps the shared `last_event_id` column the migrations add. */
+  durable = false,
+): string {
   const corr = wf.correlationField as string;
   const corrField = (wf.stateFields ?? []).find((f) => f.name === corr);
   const pkType =
@@ -359,6 +369,7 @@ function renderStateSchema(contextModule: string, wf: WorkflowIR, schema?: strin
   const fieldLines = (wf.stateFields ?? [])
     .filter((f) => f.name !== corr)
     .map((f) => `    field :${snake(f.name)}, ${ectoStateFieldType(f.type)}`);
+  if (durable) fieldLines.push(`    field :last_event_id, :string`);
   // `@schema_prefix` targets the workflow's context schema, matching the
   // migration `prefix:`.  Omitted ⇒ public, byte-identical.
   const prefixLine = schema ? `  @schema_prefix ${JSON.stringify(schema)}\n` : "";
@@ -512,9 +523,14 @@ function renderHandler(
     channels,
   );
 
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): under a
+  // durable channel, the ChannelConsumer parks the envelope id (= the outbox
+  // row id) in the process dictionary; the saga handler no-ops on a redelivery
+  // of the recorded id and stamps it before the state save.
+  const durable = durableEventTypes(ctx).size > 0;
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
-    ? renderPersistedBody(appModule, contextModule, wf, sub, body, usesThis)
+    ? renderPersistedBody(appModule, contextModule, wf, sub, body, usesThis, durable)
     : indent(body, 4).join("\n");
 
   // Module names render fully-qualified throughout the body, so the only
@@ -561,6 +577,10 @@ function renderPersistedBody(
   sub: Subscription,
   bodyLines: string[],
   usesThis: boolean,
+  /** Under a durable channel the body is wrapped in the idempotent-consumer
+   *  marker (check the process-dictionary event id against the loaded row, and
+   *  stamp it after the fold) — dispatch-delivery-semantics.md §3. */
+  durable = false,
 ): string {
   const corr = wf.correlationField as string;
   const stateMod = stateModule(contextModule, wf);
@@ -573,7 +593,18 @@ function renderPersistedBody(
         paramRenames: { [sub.param]: "event" },
       })
     : `event.${snake(corr)}`;
-  const bind = usesThis ? "state" : "_state";
+  // A durable handler always reads/stamps the loaded row, so `state` must bind
+  // even when the fold body itself never touches `this`.
+  const bind = usesThis || durable ? "state" : "_state";
+  // The stamp: rewrite the (possibly body-rebound) row with the processed id,
+  // in the same Repo call window as the fold — a redelivery then no-ops above.
+  const stampLines = (base: number): string[] =>
+    durable
+      ? [
+          `${" ".repeat(base)}if event_id,`,
+          `${" ".repeat(base + 2)}do: ${appModule}.Repo.update!(Ecto.Changeset.change(state, %{last_event_id: event_id}))`,
+        ]
+      : [];
 
   if (sub.trigger === "create") {
     // Load-or-allocate: a fresh key seeds the instance row (typed defaults).
@@ -582,7 +613,7 @@ function renderPersistedBody(
       if (f.name === corr || f.optional) continue;
       allocFields.push(`${snake(f.name)}: ${stateDefault(f.type)}`);
     }
-    return [
+    const load = [
       `    key = ${keyExpr}`,
       `    ${bind} =`,
       `      case ${appModule}.Repo.get(${stateMod}, key) do`,
@@ -590,7 +621,18 @@ function renderPersistedBody(
       `        existing -> existing`,
       `      end`,
       "",
-      ...indent(bodyLines, 4),
+    ];
+    if (!durable) return [...load, ...indent(bodyLines, 4)].join("\n");
+    return [
+      ...load,
+      `    event_id = Process.get(:loom_event_id)`,
+      "",
+      `    if event_id && state.last_event_id == event_id do`,
+      `      :ok`,
+      `    else`,
+      ...indent(bodyLines, 6),
+      ...stampLines(6),
+      `    end`,
     ].join("\n");
   }
   // Reactor: route to the started instance, else drop + log `event_unrouted`.
@@ -599,6 +641,26 @@ function renderPersistedBody(
     { name: "event_type", valueExpr: JSON.stringify(sub.event) },
     { name: "key", valueExpr: "key" },
   ]);
+  if (durable) {
+    return [
+      `    key = ${keyExpr}`,
+      `    case ${appModule}.Repo.get(${stateMod}, key) do`,
+      `      nil ->`,
+      `        ${logCall}`,
+      `        :ok`,
+      "",
+      `      state ->`,
+      `        event_id = Process.get(:loom_event_id)`,
+      "",
+      `        if event_id && state.last_event_id == event_id do`,
+      `          :ok`,
+      `        else`,
+      ...indent(bodyLines, 10),
+      ...stampLines(10),
+      `        end`,
+      `    end`,
+    ].join("\n");
+  }
   return [
     `    key = ${keyExpr}`,
     `    case ${appModule}.Repo.get(${stateMod}, key) do`,

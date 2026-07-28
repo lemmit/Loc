@@ -644,6 +644,17 @@ end
   }
 
   if (routes.length > 0) {
+    // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): where this
+    // deployable hosts a durable channel's context, park the envelope id (= the
+    // producer's outbox row id) in the process dictionary before routing, so the
+    // saga handler no-ops on a redelivery of the same id (at-least-once →
+    // effectively-once).  Every consumed event overwrites it before route/1, so
+    // no stale id leaks across messages on the consumer process.  Foreign
+    // consumers (durableBroker false) keep the ack-semantics stance.
+    const markEvLine = (indent: number): string =>
+      opts.durableBroker
+        ? `${" ".repeat(indent)}Process.put(:loom_event_id, envelope["id"])\n`
+        : "";
     const consumedLog = renderPhoenixLogCall("channelConsumed", [
       { name: "address", valueExpr: "address" },
       { name: "type", valueExpr: `envelope["type"]` },
@@ -745,7 +756,7 @@ end
     with {:ok, envelope} <- Jason.decode(payload),
          bare = envelope["type"] |> String.split(".") |> List.last(),
          ev when not is_nil(ev) <- ${appModule}.Channels.decode(bare, envelope["data"] || %{}) do
-      route(ev)
+${markEvLine(6)}      route(ev)
       ${consumedLog}
     end
 
@@ -835,7 +846,7 @@ end
   end
 
   defp deliver(envelope, ev, meta, address, queue, chan, payload) do
-    route(ev)
+${markEvLine(4)}    route(ev)
     ${consumedLog}
     :ok = AMQP.Basic.ack(chan, meta.delivery_tag)
   rescue
@@ -991,7 +1002,7 @@ defmodule ${appModule}.KafkaConsumer do
     case decode_payload(raw) do
       {:ok, envelope, ev} ->
         try do
-          ${appModule}.ChannelConsumer.route_decoded(ev)
+${markEvLine(10)}          ${appModule}.ChannelConsumer.route_decoded(ev)
           ${kafkaConsumedLog}
         rescue
           error ->

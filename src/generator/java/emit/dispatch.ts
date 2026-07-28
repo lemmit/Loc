@@ -9,6 +9,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
@@ -395,6 +396,11 @@ export function renderJavaDispatcher(
   if (methods.some((m) => m.includes("ForbiddenException"))) {
     imports.add(`${dctx.basePkg}.domain.common.ForbiddenException`);
   }
+  // The idempotent-consumer marker preamble (renderHandler, above) references
+  // OutboxDelivery only for non-event-sourced sagas under a durable channel.
+  if (durableEventTypes(ctx).size > 0 && stateWfs.length > 0) {
+    imports.add(`${dctx.basePkg}.domain.common.OutboxDelivery`);
+  }
 
   return {
     name: `${className}.java`,
@@ -466,6 +472,12 @@ function renderHandler(
 
   // The handler body at the 8-space base; wrapped below in a child frame so the
   // base shifts to 12-space without rewriting every line.
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): when a
+  // durable channel is wired, the relay (broker-publish) rides the outbox row id
+  // as the envelope id, which the ChannelConsumerService parks on
+  // OutboxDelivery around each dispatch.  A repeat of the recorded id is a no-op
+  // (at-least-once → effectively-once); inline (ephemeral) dispatch carries null.
+  const durable = durableEventTypes(ctx).size > 0;
   const body: string[] = [`        var __key = ${keyExpr};`];
   if (sub.trigger === "create") {
     body.push(
@@ -478,6 +490,12 @@ function renderHandler(
       `            CatalogLog.event("event_unrouted", "warn", "workflow", "${wf.name}", "event_type", "${sub.event}", "key", __key);`,
     );
     body.push(`            return;`);
+    body.push(`        }`);
+  }
+  if (durable) {
+    body.push(`        var __eventId = OutboxDelivery.currentEventId();`);
+    body.push(`        if (__eventId != null && __eventId.equals(state.lastEventId())) {`);
+    body.push(`            return; // already processed — at-least-once redelivery`);
     body.push(`        }`);
   }
   if (hasEmit) body.push(`        var __events = new ArrayList<DomainEvent>();`);
@@ -516,6 +534,9 @@ function renderHandler(
     body.push(`        ${repoField(s.aggName)}.save(${s.name});`);
     body.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
   }
+  // Stamp the processed marker before the state save (same tx window as the
+  // saga mutation) so a redelivery of this id short-circuits above.
+  if (durable) body.push(`        if (__eventId != null) state.setLastEventId(__eventId);`);
   body.push(`        ${repo}.save(state);`);
   if (hasEmit) {
     body.push(`        for (var __e : __events) events.publishEvent(__e);`);

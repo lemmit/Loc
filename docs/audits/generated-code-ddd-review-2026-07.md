@@ -49,7 +49,8 @@ generator defects.
 > the *default-on* recommendation is unadopted (proposal `fb02e61d`). S3 is
 > **mostly closed** (showcase now tsc-gated on Hono/.NET/Angular; residual =
 > python-build corpus). **Still open:** S7 (ports), S10 (extern), the
-> `api`-grouping / open-host-service gap, and S5(d). Per-finding markers below are
+> `api`-grouping / open-host-service gap. (**S5(d) closed 2026-07-27** — outbox
+> shipped once brokers landed; see the S5 marker below.) Per-finding markers below are
 > updated; the original snapshot prose (grade matrix, executive summary) is
 > annotated in place, not rewritten.
 >
@@ -65,8 +66,8 @@ generator defects.
 > Also FIXED since the 07-11 pass: the Phoenix **shorthand-view `NotLoaded`
 > crash** (#1783 — the view query preloads its wireShape associations). The
 > **genuinely open** remainder is design work, not concrete defects: S7 (ports),
-> S10 (extern), the `api`-grouping / open-host-service gap, and S5(d) (outbox — by
-> design until brokers land).
+> S10 (extern), and the `api`-grouping / open-host-service gap. (S5(d) outbox is
+> now **closed** — brokers landed and the outbox tier shipped on all five backends.)
 
 ---
 
@@ -337,8 +338,15 @@ make it real when brokers land.
 > race). Structurally pinned per-PR by `test/generator/dotnet/dotnet-saga-starter-guard.test.ts`
 > and `test/generator/java/java-saga-starter-guard.test.ts` (same-event pair →
 > single branching handler; different-event pair → two independent handlers).
-> **Still open:** (d) the outbox / Hono fire-and-forget upgrade path (by design
-> until brokers land).
+> **(d) CLOSED [2026-07-27].** Brokers have landed (M-T4.4 done), and the
+> transactional outbox → broker upgrade path is now built on **all five backends**:
+> `__loom_outbox` (the MigrationsIR-owned table) is written by a per-backend
+> write-tee inside the caller's transaction and drained by a polling relay that
+> publishes to the broker (or, on node/dotnet/python, to the in-process dispatcher
+> when no broker is bound) at-least-once, dead-lettering after `MAX_ATTEMPTS`
+> (`event_dead_lettered`). Residual parity items (standalone no-broker outbox +
+> `last_event_id` markers on java/elixir; LISTEN/NOTIFY over polling) are tracked
+> under M-T4.3, not S5(d).
 
 ### S6 · Rehydration re-runs creation invariants (P2 — Hono, Python)
 

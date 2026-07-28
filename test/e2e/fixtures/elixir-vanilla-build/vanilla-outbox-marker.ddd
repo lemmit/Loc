@@ -1,0 +1,66 @@
+// Durable-channel variant of vanilla-channels.ddd — the SAME deployable hosts
+// the durable channel's context AND consumes it (the OrderFulfillment saga's
+// `create` starter + `on` reactor), so the idempotent-consumer marker
+// (dispatch-delivery-semantics.md §3) engages on BOTH handler shapes: each saga
+// handler maps `last_event_id`, reads the process-dictionary event id parked by
+// the ChannelConsumer, no-ops on a redelivery of that id, and stamps it before
+// the state save.  Gates that the marker restructure compiles under
+// `mix compile --warnings-as-errors` on plain Ecto/Phoenix.
+system FulfillmentSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        total: int
+      }
+      repository Orders for Order { }
+
+      aggregate Shipment with crudish {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: queue
+        retention: work
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation — one instance per order
+        attempts: int              // typed saga state
+
+        // Starter: allocates the instance, requests a shipment.
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+
+        // Continuation: route to the started instance by order; mark shipment.
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  storage primary { type: postgres }
+  storage bus { type: rabbitmq }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  channelSource lifecycleBus { for: Lifecycle, use: bus }
+  deployable api {
+    platform: elixir
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    channels: [lifecycleBus]
+    serves: FulfillmentApi
+    port: 4000
+  }
+}

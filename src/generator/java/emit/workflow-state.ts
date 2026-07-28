@@ -4,6 +4,7 @@ import type {
   FieldIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaTypeImports, renderJavaType } from "../render-expr.js";
@@ -105,6 +106,16 @@ export function renderWorkflowStateEntity(
     fieldLines.push(...jpaFieldAnnotations(f, owner, { voLookup }));
     fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
   }
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): a durable
+  // channel (`retention: log | work`) maps the shared `last_event_id` column the
+  // module migrations add to this saga table (migrations-builder.ts), so the
+  // dispatcher's handler preamble can no-op on the relay's / broker's
+  // at-least-once redelivery.  Byte-identical when no channel asks for durability.
+  const durable = durableEventTypes(ctx).size > 0;
+  if (durable) {
+    fieldLines.push(`    @Column(name = "last_event_id")`);
+    fieldLines.push(`    String lastEventId;`);
+  }
 
   // Public allocate factory — the dispatcher (a different package) seeds a new
   // saga row keyed by the correlation id, with typed defaults for every
@@ -146,6 +157,7 @@ export function renderWorkflowStateEntity(
       ...accessor(renderJavaType(f.type), f.name),
       ...setter(renderJavaType(f.type), f.name),
     ]),
+    ...(durable ? [...accessor("String", "lastEventId"), ...setter("String", "lastEventId")] : []),
   ];
 
   const usesHibernateTypes = needsHibernateTypes(stateOnly);
