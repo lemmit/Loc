@@ -261,10 +261,20 @@ const phoenixSystem = (): string => `
 /** Concatenate every generated file whose content mentions the escaped
  *  fragment or the raw payload — i.e. the page(s) the body rendered into.
  *  Scanning all files keeps the assertion path-agnostic across the four
- *  frontend layouts + Phoenix. */
+ *  frontend layouts + Phoenix.
+ *
+ *  Excludes `.loom/` review artifacts: those are data, not rendered markup
+ *  (they never ship to runtime — docs/loom-artifacts.md), and one of them —
+ *  `messages.en.json`, the i18n catalog — deliberately stores the raw
+ *  source-language string a translator edits.  HTML-escaping is the frontend's
+ *  job at render time, not the catalog's, so a raw `<` there is correct and
+ *  must not count as a rendered-output leak. */
 function renderedText(files: Map<string, string>): string {
   let all = "";
-  for (const content of files.values()) all += `\n${content}`;
+  for (const [path, content] of files) {
+    if (path.startsWith(".loom/")) continue;
+    all += `\n${content}`;
+  }
   return all;
 }
 
