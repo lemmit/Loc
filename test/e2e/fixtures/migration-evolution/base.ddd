@@ -1,0 +1,37 @@
+// Migration-evolution gate (M-T2.13) — the BASE model (v1).
+//
+// Paired with evolved.ddd (v2).  The e2e harness generates v1, boots it against
+// a throwaway Postgres (the `Initial` migration applies), seeds a Product row
+// through the REST surface, then regenerates v2 OVER THE SAME TREE so the
+// snapshot diff derives a forward migration, reboots (the delta migration
+// applies), and asserts the seeded row survives with correct values.
+//
+// v1 → v2 is a deliberately non-destructive evolution exercising the three
+// data-preserving move classes:
+//   • a plain nullable add            (`description: string?`)
+//   • a NOT-NULL add with a backfill  (`sku: string` + `Product.sku = "SEED"`)
+//   • a column rename                 (`price -> unitPrice`, value preserved)
+//
+// `__PLATFORM__` is swapped per backend by the harness (node/dotnet/java/
+// python/elixir).  Deployable name `d` matches the other e2e fixtures.
+system ShopEvo {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
