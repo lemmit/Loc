@@ -4,6 +4,7 @@ import { isTphBase } from "../../../ir/util/inheritance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
+import { OTEL_ENDPOINT_ENV, OTEL_SERVICE_NAME_ENV } from "../../_obs/tracing.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
 
 // Program.cs is top-level statements, not a class — so the renderer's
@@ -504,6 +505,8 @@ ${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${u
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
 using ${ns}.Infrastructure.Events;${options?.hasChannels ? `\nusing ${ns}.Infrastructure.Channels;` : ""}${authUsing}
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -546,6 +549,29 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     "error" => Microsoft.Extensions.Logging.LogLevel.Error,
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
+
+// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// span per request (so Activity.Current.TraceId is populated on every request
+// — RequestContextMiddleware stamps the loom.* ids onto it and threads
+// trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
+// only when OTEL_EXPORTER_OTLP_ENDPOINT is set (the compose stack points it at
+// the bundled jaeger collector); no endpoint, no exporter.
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService(
+        System.Environment.GetEnvironmentVariable("${OTEL_SERVICE_NAME_ENV}") ?? "${ns}"))
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation();
+        var otlpEndpoint = System.Environment.GetEnvironmentVariable("${OTEL_ENDPOINT_ENV}");
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+        {
+            t.AddOtlpExporter(o =>
+            {
+                o.Endpoint = new System.Uri($"{otlpEndpoint.TrimEnd('/')}/v1/traces");
+                o.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+            });
+        }
+    });
 
 // Per-request HTTP log.  ASP.NET Core's built-in middleware records
 // method/path on entry and status/duration on exit.  Combined with
@@ -1105,7 +1131,14 @@ ${persistenceRefs}
     <!-- OpenAPI spec emitted at /openapi.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
-    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${kafkaChannelRef}${oidcRefs}${resourceRefs}
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+    <!-- OpenTelemetry tracing (M-T7.1): AspNetCore instrumentation gives a
+         SERVER span per request; exported via OTLP/HTTP only when a collector
+         endpoint is set (Program.cs).  1.17.x clears the NU1902 advisories on
+         the older 1.10/1.12 lines. -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />${scrutorRef}${validatorRef}${specRef}${cronosRef}${redisChannelRef}${rabbitChannelRef}${kafkaChannelRef}${oidcRefs}${resourceRefs}
   </ItemGroup>${mailkitAuditSuppress}
 </Project>
 `;

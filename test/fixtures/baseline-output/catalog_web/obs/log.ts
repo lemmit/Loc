@@ -31,9 +31,13 @@ export const baseLogger: Logger = pino({
   mixin() {
     const ctx = requestContextStore.getStore();
     if (ctx === undefined) return {};
+    // trace_id / span_id join every request-scoped line to its OTel span —
+    // the log↔trace correlation the tracing layer projects onto the frame
+    // (see obs/tracing.ts).  Present alongside scope_id (the audit join key).
+    const ids = { trace_id: ctx.traceId, span_id: ctx.spanId };
     return ctx.actorId == null
-      ? { scope_id: ctx.scopeId }
-      : { scope_id: ctx.scopeId, actor_id: ctx.actorId };
+      ? { scope_id: ctx.scopeId, ...ids }
+      : { scope_id: ctx.scopeId, actor_id: ctx.actorId, ...ids };
   },
 });
 

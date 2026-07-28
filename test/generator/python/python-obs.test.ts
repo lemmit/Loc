@@ -110,8 +110,37 @@ describe("python observability", () => {
     const mw = files.get("api/app/obs/middleware.py")!;
     expect(mw).toContain("open_context(");
     expect(mw).toContain("correlation_id=correlation");
-    expect(mw).toContain("scope_id=new_id()");
+    // scope_id is hoisted (minted once, shared by the span attribute + carrier).
+    expect(mw).toContain("scope_id = new_id()");
+    expect(mw).toContain("scope_id=scope_id");
     expect(mw).toContain('locale=request.headers.get("accept-language") or "en"');
+    // OTel SERVER span opens at the request seam, threading trace_id/span_id
+    // onto the carrier (M-T7.1).
+    expect(mw).toContain("tracer.start_span(");
+    expect(mw).toContain("trace_id=format_trace_id(span_ctx.trace_id)");
+    expect(mw).toContain("span_id=format_span_id(span_ctx.span_id)");
+  });
+
+  it("emits the OTel tracing module: conditional OTLP export + hex-id formatters", async () => {
+    const files = await build(FIXTURE);
+    const tracing = files.get("api/app/obs/tracing.py")!;
+    expect(tracing).toBeDefined();
+    // Tracer provider with the service.name resource; the tracer the seam uses.
+    expect(tracing).toContain("_provider = TracerProvider(");
+    expect(tracing).toContain('"service.name": os.environ.get("OTEL_SERVICE_NAME"');
+    expect(tracing).toContain('tracer = trace.get_tracer("loom")');
+    // Export is env-gated: the OTLP exporter is wired only when the endpoint
+    // is set (a span is still created every request so trace_id rides logs).
+    expect(tracing).toContain('_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")');
+    expect(tracing).toContain("if _endpoint:");
+    expect(tracing).toContain("BatchSpanProcessor(OTLPSpanExporter(");
+    // Canonical hex-id formatters (32/16 chars) join the span to the logs.
+    expect(tracing).toContain('return format(trace_id, "032x")');
+    expect(tracing).toContain('return format(span_id, "016x")');
+    // The carrier + formatter carry trace_id/span_id onto every line.
+    const log = files.get("api/app/obs/log.py")!;
+    expect(log).toContain('    trace_id: str = ""');
+    expect(log).toContain('body["trace_id"] = tid');
   });
 
   it("emits the per-dispatch child-frame seam (parent_id chaining)", async () => {

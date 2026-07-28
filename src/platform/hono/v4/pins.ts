@@ -26,6 +26,12 @@ export const BACKEND_PINS = {
     pg: "^8.22.0",
     pino: "^9.14.0",
     "prom-client": "^15.1.0",
+    // OpenTelemetry tracing (M-T7.1) — see the v5 pins for rationale.
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.1.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
+    "@opentelemetry/resources": "^2.1.0",
+    "@opentelemetry/semantic-conventions": "^1.37.0",
     uuidv7: "^1.0.2",
   },
   devDependencies: {

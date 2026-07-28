@@ -62,7 +62,7 @@ import {
   emitPythonProvenanceMigration,
   MIGRATE_PY,
 } from "./emit/migrations.js";
-import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
+import { OBS_LOG_PY, OBS_MIDDLEWARE_PY, renderPythonTracingFile } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
@@ -323,6 +323,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/obs/__init__.py", "");
   out.set("app/obs/log.py", OBS_LOG_PY);
   out.set("app/obs/middleware.py", OBS_MIDDLEWARE_PY);
+  // app/obs/tracing.py — OTel tracer provider (conditional OTLP export); the
+  // request middleware opens a SERVER span per request and threads
+  // trace_id/span_id onto the carrier (M-T7.1).
+  out.set("app/obs/tracing.py", renderPythonTracingFile(args.deployable.name));
   // app/obs/metrics.py — Prometheus registry (default process/GC collectors
   // + the catalog's HTTP counter/histogram), served at GET /metrics and
   // recorded from the observability middleware's request_end seam.
@@ -1043,6 +1047,7 @@ function renderMain(
     "from app.obs.log import log",
     "from app.obs.metrics import render_metrics",
     "from app.obs.middleware import ObservabilityMiddleware",
+    "from app.obs.tracing import shutdown_tracing",
     "",
     "",
     ...(oidc
@@ -1130,6 +1135,9 @@ function renderMain(
     hasChannels ? "    await close_channel_transports()" : null,
     '    log("info", "server_shutdown", signal="SIGTERM")',
     '    log("info", "server_drained")',
+    // Flush buffered OTel spans to the collector before exit (no-op when no
+    // OTLP endpoint is configured).
+    "    shutdown_tracing()",
     "",
     "",
     "# Interactive API docs (/docs, /redoc) are gated OFF in production via",

@@ -40,6 +40,15 @@ export const BACKEND_PINS = {
     pg: "^8.13.0",
     pino: "^10.3.0",
     "prom-client": "^15.1.0",
+    // OpenTelemetry tracing (M-T7.1): the request seam opens a SERVER span
+    // per request; exported via OTLP/HTTP only when a collector endpoint is
+    // set (obs/tracing.ts).  The `-otlp-http` exporter posts JSON via fetch,
+    // so it bundles for the browser playground too.
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.1.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
+    "@opentelemetry/resources": "^2.1.0",
+    "@opentelemetry/semantic-conventions": "^1.37.0",
     uuidv7: "^1.0.2",
   },
   devDependencies: {

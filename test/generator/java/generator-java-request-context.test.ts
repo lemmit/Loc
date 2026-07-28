@@ -72,13 +72,20 @@ describe("Java execution-context carrier", () => {
     expect(filter).toContain("var correlation = request.getHeader(CORRELATION_HEADER);");
     expect(filter).toContain("var requestId = request.getHeader(REQUEST_ID_HEADER);");
     expect(filter).toContain("return RequestContext.newId();");
-    // Stamps the request-stable tier + root scope_id into MDC.
+    // Stamps the request-stable tier + root scope_id into MDC (scope_id is
+    // hoisted to a var, shared by the span attribute + MDC).
     expect(filter).toContain("MDC.put(RequestContext.CORRELATION_ID, correlationId);");
-    expect(filter).toContain("MDC.put(RequestContext.SCOPE_ID, RequestContext.newId());");
+    expect(filter).toContain("var scopeId = RequestContext.newId();");
+    expect(filter).toContain("MDC.put(RequestContext.SCOPE_ID, scopeId);");
     expect(filter).toContain("MDC.put(RequestContext.LOCALE, resolveLocale(request));");
     // Echoes the correlation id, and clears MDC on the way out (thread hygiene).
     expect(filter).toContain("response.setHeader(CORRELATION_HEADER, correlationId);");
     expect(filter).toContain("MDC.clear();");
+    // OTel SERVER span opens at the request seam, threading trace_id/span_id
+    // onto MDC (M-T7.1).
+    expect(filter).toContain("Tracing.TRACER.spanBuilder(");
+    expect(filter).toContain("MDC.put(RequestContext.TRACE_ID, spanContext.getTraceId());");
+    expect(filter).toContain("MDC.put(RequestContext.SPAN_ID, spanContext.getSpanId());");
   });
 
   it("emits the per-dispatch child-frame seam (openChild → parent_id chaining)", async () => {
@@ -134,10 +141,30 @@ describe("Java execution-context carrier", () => {
     expect(logback).toContain("<includeMdcKeyName>correlation_id</includeMdcKeyName>");
     expect(logback).toContain("<includeMdcKeyName>scope_id</includeMdcKeyName>");
     expect(logback).toContain("<includeMdcKeyName>actor_id</includeMdcKeyName>");
+    // trace_id / span_id whitelisted so log<->trace correlation rides every line.
+    expect(logback).toContain("<includeMdcKeyName>trace_id</includeMdcKeyName>");
+    expect(logback).toContain("<includeMdcKeyName>span_id</includeMdcKeyName>");
     expect(logback).toContain("<mdcKeyFieldName>correlation_id=request_id</mdcKeyFieldName>");
     expect(logback).toContain("<keyValuePairs/>");
     // Catalog logger is dedicated + non-additive (JSON stays off the text console).
     expect(logback).toContain('<logger name="loomCatalog" level="TRACE" additivity="false">');
+  });
+
+  it("emits the OpenTelemetry tracing holder + BOM-aligned deps (M-T7.1)", async () => {
+    const files = await generateSystemFiles(SYSTEM(""));
+    const tracing = get(files, "/config/Tracing.java");
+    // Process-wide OpenTelemetrySdk holder with the service.name resource.
+    expect(tracing).toContain('public static final Tracer TRACER = OTEL.getTracer("loom");');
+    expect(tracing).toContain('System.getenv().getOrDefault("OTEL_SERVICE_NAME"');
+    // Export is env-gated: the OTLP exporter is wired only when the endpoint set.
+    expect(tracing).toContain('var endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT");');
+    expect(tracing).toContain("if (endpoint != null && !endpoint.isBlank()) {");
+    expect(tracing).toContain("OtlpHttpSpanExporter.builder().setEndpoint(url).build()");
+    // BOM-aligned OTel deps on the gradle build.
+    const gradle = get(files, "build.gradle.kts");
+    expect(gradle).toContain('implementation(platform("io.opentelemetry:opentelemetry-bom:');
+    expect(gradle).toContain('implementation("io.opentelemetry:opentelemetry-sdk")');
+    expect(gradle).toContain('implementation("io.opentelemetry:opentelemetry-exporter-otlp")');
   });
 
   it("UserFilter stamps the principal's actor_id after the verifier succeeds", async () => {

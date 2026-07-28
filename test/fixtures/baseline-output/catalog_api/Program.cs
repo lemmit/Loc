@@ -6,6 +6,8 @@ using CatalogApi.Api;
 using CatalogApi.Domain.Common;
 using CatalogApi.Infrastructure.Persistence;
 using CatalogApi.Infrastructure.Events;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -48,6 +50,29 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     "error" => Microsoft.Extensions.Logging.LogLevel.Error,
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
+
+// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// span per request (so Activity.Current.TraceId is populated on every request
+// — RequestContextMiddleware stamps the loom.* ids onto it and threads
+// trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
+// only when OTEL_EXPORTER_OTLP_ENDPOINT is set (the compose stack points it at
+// the bundled jaeger collector); no endpoint, no exporter.
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService(
+        System.Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "CatalogApi"))
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation();
+        var otlpEndpoint = System.Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+        {
+            t.AddOtlpExporter(o =>
+            {
+                o.Endpoint = new System.Uri($"{otlpEndpoint.TrimEnd('/')}/v1/traces");
+                o.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+            });
+        }
+    });
 
 // Per-request HTTP log.  ASP.NET Core's built-in middleware records
 // method/path on entry and status/duration on exit.  Combined with

@@ -9,6 +9,7 @@ import {
   brokerChannelBindings,
   channelTransportStorageNames,
 } from "../generator/_channels/bindings.js";
+import { OTEL_ENDPOINT_ENV, OTEL_SERVICE_NAME_ENV } from "../generator/_obs/tracing.js";
 import type { DeployableIR, SystemIR } from "../ir/types/loom-ir.js";
 import { platformFor } from "../platform/registry.js";
 
@@ -195,6 +196,13 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
     // loop.  Override per deployable via the chart's `env:` overlay.
     if (!platform.isFrontend) {
       configEnv.push({ name: "LOOM_OPENAPI_UI", value: "false" });
+      // OpenTelemetry (M-T7.1): `OTEL_SERVICE_NAME` groups this backend's
+      // spans; the OTLP endpoint is an overridable placeholder (empty =
+      // export off).  The compose inner loop bundles a jaeger collector; a
+      // cluster points this at its own collector Service via the chart's
+      // `env:` overlay (`http://<collector>:4318`).
+      configEnv.push({ name: OTEL_SERVICE_NAME_ENV, value: slug });
+      configEnv.push({ name: OTEL_ENDPOINT_ENV, value: "" });
     }
     return {
       deployableName: d.name,

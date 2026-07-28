@@ -192,6 +192,8 @@ defmodule ${appModule}.RequestContext do
   """
   @behaviour Plug
   import Plug.Conn
+  require OpenTelemetry.Tracer
+  alias OpenTelemetry.Span
 
   @correlation_header "x-correlation-id"
   @request_id_header "x-request-id"
@@ -202,6 +204,22 @@ defmodule ${appModule}.RequestContext do
   @impl Plug
   def call(conn, _opts) do
     correlation_id = resolve_correlation_id(conn)
+    scope_id = generate_id()
+
+    # Open the request's OTel SERVER span (M-T7.1).  Created on every request so
+    # its trace_id / span_id ride the log envelope (the LogFormatter dumps every
+    # Logger.metadata key); exported only when a collector endpoint is set.  The
+    # route template isn't matched yet (this plug runs before the router), so the
+    # span opens on the raw path and is renamed to the template on the way out.
+    span_ctx =
+      OpenTelemetry.Tracer.start_span("#{conn.method} #{conn.request_path}", %{kind: :server})
+
+    Span.set_attributes(span_ctx, [
+      {"loom.correlation_id", correlation_id},
+      {"loom.scope_id", scope_id},
+      {"http.request.method", conn.method},
+      {"url.path", conn.request_path}
+    ])
 
     # Frame-local tier: the root frame for this request gets a fresh scope id
     # and no parent (parity with .NET's OpenRoot / Hono's root frame).  Each
@@ -210,12 +228,35 @@ defmodule ${appModule}.RequestContext do
     # scope.  scope_id rides every log line, so causality is greppable.
     Logger.metadata(
       correlation_id: correlation_id,
-      scope_id: generate_id(),
+      scope_id: scope_id,
       locale: resolve_locale(conn),
-      started_at: System.system_time(:millisecond)
+      started_at: System.system_time(:millisecond),
+      trace_id: format_trace_id(Span.trace_id(span_ctx)),
+      span_id: format_span_id(Span.span_id(span_ctx))
     )
 
-    put_resp_header(conn, @correlation_header, correlation_id)
+    conn
+    |> put_resp_header(@correlation_header, correlation_id)
+    |> register_before_send(fn conn ->
+      # Close the span at response send: rename to the resolved route template,
+      # stamp status + the actor id (attached by auth mid-request), mark 5xx as
+      # span errors.
+      route = route_template(conn)
+      Span.update_name(span_ctx, "#{conn.method} #{route}")
+      Span.set_attribute(span_ctx, "http.route", route)
+      Span.set_attribute(span_ctx, "http.response.status_code", conn.status)
+
+      if actor = actor_id() do
+        Span.set_attribute(span_ctx, "loom.actor_id", actor)
+      end
+
+      if conn.status >= 500 do
+        Span.set_status(span_ctx, OpenTelemetry.status(:error, ""))
+      end
+
+      Span.end_span(span_ctx)
+      conn
+    end)
   end
 
   # Prefer the cross-backend X-Correlation-Id, then X-Request-Id, then the id
@@ -240,6 +281,32 @@ defmodule ${appModule}.RequestContext do
   end
 
   defp generate_id, do: Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
+
+  # The matched route's path template (\`/api/carts/:id\`) for a bounded
+  # http.route span attribute — resolved after routing (in before_send), falling
+  # back to the raw path before a match (probes are already their own template).
+  defp route_template(conn) do
+    case conn.private[:phoenix_router] do
+      nil ->
+        conn.request_path
+
+      router ->
+        case Phoenix.Router.route_info(router, conn.method, conn.request_path, conn.host) do
+          %{route: route} -> route
+          _ -> conn.request_path
+        end
+    end
+  end
+
+  # OTel ids are integers; render the canonical lowercase hex (32 / 16 chars)
+  # so the log envelope's trace_id / span_id join to the exported span.
+  defp format_trace_id(trace_id) do
+    trace_id |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(32, "0")
+  end
+
+  defp format_span_id(span_id) do
+    span_id |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(16, "0")
+  end
 
   @doc "The correlation id for the current request, or nil outside a request."
   def correlation_id, do: Logger.metadata()[:correlation_id]

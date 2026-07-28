@@ -34,6 +34,8 @@
 // ---------------------------------------------------------------------------
 
 import { renderHonoMetricsFile } from "../../../generator/_obs/render-hono-metrics.js";
+import { renderHonoTracingFile } from "../../../generator/_obs/render-hono-tracing.js";
+import { HttpSpanAttr, SpanAttr, TraceLogField } from "../../../generator/_obs/tracing.js";
 
 const LOG_TS = `// Auto-generated.
 import { pino, type Logger } from "pino";
@@ -68,9 +70,13 @@ export const baseLogger: Logger = pino({
   mixin() {
     const ctx = requestContextStore.getStore();
     if (ctx === undefined) return {};
+    // trace_id / span_id join every request-scoped line to its OTel span —
+    // the log↔trace correlation the tracing layer projects onto the frame
+    // (see obs/tracing.ts).  Present alongside scope_id (the audit join key).
+    const ids = { ${TraceLogField.traceId}: ctx.traceId, ${TraceLogField.spanId}: ctx.spanId };
     return ctx.actorId == null
-      ? { scope_id: ctx.scopeId }
-      : { scope_id: ctx.scopeId, actor_id: ctx.actorId };
+      ? { scope_id: ctx.scopeId, ...ids }
+      : { scope_id: ctx.scopeId, actor_id: ctx.actorId, ...ids };
   },
 });
 
@@ -114,6 +120,11 @@ export interface RequestContext {
   scopeId: string;
   /** Parent frame id — null at the root frame. */
   parentId: string | null;
+  /** The request's OTel trace id (hex) — the log↔trace join key stamped onto
+   *  every request-scoped line beside scope_id.  Constant for the request. */
+  traceId: string;
+  /** The request SERVER span's id (hex).  Constant for the request. */
+  spanId: string;
   /** The per-request child logger (the logger slice). */
   log: RequestLogger;
 }
@@ -160,11 +171,13 @@ export function requestLog(): RequestLogger {
 `;
 
 const REQUEST_ID_TS = `// Auto-generated.
+import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { createMiddleware } from "hono/factory";
 import { randomUUID } from "node:crypto";
 import { type RequestContext, requestContextStore } from "./als";
 import { baseLogger, type RequestLogger } from "./log";
 import { recordHttpRequest } from "./metrics";
+import { tracer } from "./tracing";
 
 export const CORRELATION_ID_HEADER = "X-Correlation-Id";
 export const REQUEST_ID_HEADER = "X-Request-Id";
@@ -192,6 +205,22 @@ export const requestIdMiddleware = createMiddleware<{
 
   const acceptLanguage = c.req.header("Accept-Language");
   const startedAt = Date.now();
+  const scopeId = randomUUID();
+  // Open the request's OTel SERVER span.  Created on EVERY request so its
+  // trace_id / span_id ride the logs (obs/tracing.ts's provider is always
+  // present); exported only when a collector endpoint is configured.  The
+  // route TEMPLATE isn't resolved until after routing, so the span opens on
+  // the raw path and is renamed to the low-cardinality template on exit.
+  const span = tracer.startSpan(\`\${c.req.method} \${url.pathname}\`, {
+    kind: SpanKind.SERVER,
+    attributes: {
+      "${HttpSpanAttr.method}": c.req.method,
+      "${HttpSpanAttr.path}": url.pathname,
+      "${SpanAttr.correlationId}": correlationId,
+      "${SpanAttr.scopeId}": scopeId,
+    },
+  });
+  const spanContext = span.spanContext();
   // The ambient RequestContext for the whole request.  The principal slot
   // starts null; auth middleware attaches it one step later.
   const ctx: RequestContext = {
@@ -200,8 +229,10 @@ export const requestIdMiddleware = createMiddleware<{
     actorId: null,
     locale: acceptLanguage && acceptLanguage.length > 0 ? acceptLanguage : "en",
     startedAt,
-    scopeId: randomUUID(),
+    scopeId,
     parentId: null,
+    traceId: spanContext.traceId,
+    spanId: spanContext.spanId,
     log,
   };
   // Wrap \`next()\` (and the request_end emission) in the AsyncLocalStorage
@@ -242,12 +273,25 @@ export const requestIdMiddleware = createMiddleware<{
       // route TEMPLATE (\`/api/carts/*\`), keeping label cardinality bounded
       // (raw \`url.pathname\` carries per-request ids).
       recordHttpRequest(c.req.method, c.req.routePath, c.res.status, durationMs);
+      // Close the SERVER span at the same seam: rename to the resolved route
+      // template (now available post-routing), stamp status + the actor id
+      // (attached by auth mid-request), and mark 5xx as span errors.
+      const route = c.req.routePath;
+      span.updateName(\`\${c.req.method} \${route}\`);
+      span.setAttribute("${HttpSpanAttr.route}", route);
+      span.setAttribute("${HttpSpanAttr.statusCode}", c.res.status);
+      const actorId = requestContextStore.getStore()?.actorId;
+      if (actorId != null) span.setAttribute("${SpanAttr.actorId}", actorId);
+      span.setStatus({
+        code: c.res.status >= 500 ? SpanStatusCode.ERROR : SpanStatusCode.OK,
+      });
+      span.end();
     }
   });
 });
 `;
 
-export function emitObservabilityFiles(out: Map<string, string>): void {
+export function emitObservabilityFiles(out: Map<string, string>, serviceName: string): void {
   out.set("obs/log.ts", LOG_TS);
   out.set("obs/als.ts", ALS_TS);
   out.set("obs/request-id.ts", REQUEST_ID_TS);
@@ -255,4 +299,8 @@ export function emitObservabilityFiles(out: Map<string, string>): void {
   // catalog's HTTP counter/histogram, served at GET /metrics (mounted in
   // http/index.ts).  Recorded from the request-id middleware above.
   out.set("obs/metrics.ts", renderHonoMetricsFile());
+  // obs/tracing.ts — OTel tracer provider (conditional OTLP export); the
+  // request-id middleware opens a SERVER span per request from its `tracer`,
+  // threading trace_id/span_id onto the frame (M-T7.1).
+  out.set("obs/tracing.ts", renderHonoTracingFile(serviceName));
 }

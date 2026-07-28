@@ -141,6 +141,8 @@ export function renderLogbackConfig(): string {
     `                    <includeMdcKeyName>correlation_id</includeMdcKeyName>`,
     `                    <includeMdcKeyName>scope_id</includeMdcKeyName>`,
     `                    <includeMdcKeyName>actor_id</includeMdcKeyName>`,
+    `                    <includeMdcKeyName>trace_id</includeMdcKeyName>`,
+    `                    <includeMdcKeyName>span_id</includeMdcKeyName>`,
     `                    <mdcKeyFieldName>correlation_id=request_id</mdcKeyFieldName>`,
     `                </mdc>`,
     `                <keyValuePairs/>`,

@@ -29,6 +29,8 @@ written in the same frame:
 |---|---|---|
 | `scope_id` | string | The frame's id — matches the `scope_id` column on `audit_records` / `provenance_records`. A workflow's child frame surfaces its own scope (Hono / .NET). |
 | `actor_id` | string | The principal's id; present only once auth has run (omitted under no-auth / on pre-auth lines). |
+| `trace_id` | string | The request's OTel trace id (32-char lowercase hex) — the log↔trace join key, so a dashboard can pivot from a slow `request_end` line straight to its trace. See [Tracing](#tracing-opentelemetry). |
+| `span_id` | string | The request SERVER span's id (16-char lowercase hex). |
 
 Both come from the ambient execution-context carrier — see
 [`request-context.md`](architecture/request-context.md).  Each backend binds
@@ -249,6 +251,72 @@ Every generated **backend** also exposes a Prometheus scrape target at
 
 Both are additive — a frontend-only system emits no collector.
 
+## Tracing (OpenTelemetry)
+
+Alongside the log stream and the Prometheus metrics, **every** backend
+deployable opens an **OpenTelemetry SERVER span per request** (M-T7.1) — the
+distributed-tracing layer, projected onto the same execution-context frame the
+logs and audit rows already ride.
+
+The design principle (from `execution-context.md`): the execution-context
+backbone mints the `correlationId` (request id) and per-frame `scopeId`;
+**tracing *projects* that frame onto a span**. So the carrier ids ride the span
+as attributes, and the span's own ids ride *back* onto every request-scoped log
+line:
+
+- **On the span** — the Loom ids as `loom.correlation_id` /
+  `loom.scope_id` / `loom.actor_id` (namespaced clear of the OTel
+  semantic-convention keys), plus the HTTP semantic attributes
+  `http.request.method` / `http.route` (route **template**, low cardinality) /
+  `url.path` / `http.response.status_code`, and the span name `{METHOD}
+  {route-template}`.
+- **On the logs** — the span's `trace_id` / `span_id` are stamped onto every
+  request-scoped line via the *same* ambient-carrier mechanism that stamps
+  `scope_id` (pino `mixin`, .NET `BeginScope`, Java `MDC`, the Python
+  contextvar formatter, Elixir `Logger.metadata`). That's **log↔trace
+  correlation**: pivot from a slow `request_end` line to its trace, or from a
+  trace to every log line it produced.
+
+**Always created, conditionally exported.** A span is created on *every*
+request — so `trace_id` is always present on the logs — but spans are
+**exported** (OTLP/HTTP) only when the standard `OTEL_EXPORTER_OTLP_ENDPOINT`
+env var is set. No endpoint, no exporter, no export attempt: a local boot
+without a collector stays quiet and cheap. The neutral descriptor pinning the
+attribute keys, env names, and log-field names is
+`src/generator/_obs/tracing.ts` — the log-catalog / metric-catalog pattern
+applied to tracing.
+
+Per-backend client library (the standard OTel SDK for each platform):
+
+| Backend | Packages | Span seam |
+|---|---|---|
+| **Hono** | `@opentelemetry/{api,sdk-trace-base,exporter-trace-otlp-http,resources,semantic-conventions}` | the request-id middleware (`obs/tracing.ts`) |
+| **.NET** | `OpenTelemetry.{Extensions.Hosting,Instrumentation.AspNetCore,Exporter.OpenTelemetryProtocol}` | AspNetCore instrumentation + `RequestContextMiddleware` tags `Activity.Current` |
+| **Java** | `io.opentelemetry:opentelemetry-{api,sdk,exporter-otlp}` (BOM-aligned) | `config/Tracing.java` + `ExecutionContextFilter` |
+| **Python** | `opentelemetry-{api,sdk,exporter-otlp-proto-http}` | `app/obs/tracing.py` + the ASGI `ObservabilityMiddleware` |
+| **Phoenix** | `opentelemetry_api` / `opentelemetry` / `opentelemetry_exporter` | the `RequestContext` Plug (`register_before_send` closes the span) |
+
+**Bundled collector.** The system composer wires a **Jaeger all-in-one**
+service into `docker-compose.yml` (OTLP ingest on `:4318`, query UI on
+**`:16686`** — the trace twin of the Prometheus UI on `:9090`) and points every
+backend's `OTEL_EXPORTER_OTLP_ENDPOINT` at it, so `docker compose up` gives a
+running trace surface with zero setup. On Kubernetes each backend carries
+`OTEL_SERVICE_NAME` plus an overridable (empty) `OTEL_EXPORTER_OTLP_ENDPOINT`
+that an operator points at their cluster collector via the chart's `env:`
+overlay — export stays off until then.
+
+```bash
+# The bundled Jaeger UI (after `docker compose up`).
+open http://localhost:16686
+
+# Repoint at any OTLP-compatible backend (Tempo, an OTel Collector, a vendor).
+OTEL_EXPORTER_OTLP_ENDPOINT=http://my-collector:4318 docker compose up
+```
+
+**Stability:** the span attribute keys / env names / log-field names are a wire
+contract — same governance as the log + metric catalogs. Additive changes are
+safe; renaming one breaks trace queries + log↔trace joins.
+
 ## Verification
 
 Five runtime end-to-end suites boot the generated server against a real
@@ -278,6 +346,11 @@ Prometheus exposition carries the `http_requests_total` /
 `http_request_duration_seconds` series for the `/health` request
 (route-template + status labels), plus the default runtime metrics on the
 backends whose client library ships them (Hono/Python/.NET/Java).
+
+They also assert **tracing**: `request_start` / `request_end` carry a canonical
+32-char-hex `trace_id` (16-char `span_id`), shared across the request bracket —
+proving the SERVER span is created and its ids are threaded onto the log stream
+(log↔trace correlation), independent of whether a collector is configured.
 
 `.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,

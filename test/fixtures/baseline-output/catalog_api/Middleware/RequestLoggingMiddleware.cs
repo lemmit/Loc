@@ -40,6 +40,15 @@ public sealed class RequestLoggingMiddleware
                     ?.RoutePattern.RawText ?? ctx.Request.Path.Value ?? "/";
             global::CatalogApi.Observability.HttpMetrics.Record(
                 ctx.Request.Method, metricRoute, ctx.Response.StatusCode, sw.Elapsed.TotalMilliseconds);
+            // Reflect the principal id (attached by auth mid-request) onto the
+            // request's OTel SERVER span (M-T7.1) — the loom.* attr the
+            // AspNetCore instrumentation doesn't know; http.* + span name it
+            // sets itself.
+            var actorId = global::CatalogApi.Domain.Common.RequestContext.Current?.ActorId;
+            if (actorId is not null)
+            {
+                System.Diagnostics.Activity.Current?.SetTag("loom.actor_id", actorId);
+            }
         }
     }
 }
