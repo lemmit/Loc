@@ -5,40 +5,56 @@
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
+  ActionDecl,
   Aggregate,
   AssignOrCallStmt,
   BuilderCall,
+  Component,
   Create,
+  Criterion,
   Destroy,
   EmitStmt,
   Expression,
+  FindDecl,
   FunctionDecl,
   LValue,
   Model,
   Operation,
   Parameter,
+  PolicyDecl,
+  Retrieval,
   Statement,
+  Store,
 } from "../generated/ast.js";
 import {
+  isActionDecl,
   isAssignOrCallStmt,
   isCallSuffix,
+  isComponent,
+  isCriterion,
   isDerivedProp,
   isEmitStmt,
+  isFindDecl,
   isFunctionDecl,
   isLetStmt,
   isMemberSuffix,
   isModel,
   isNameRef,
   isOperation,
+  isPolicyDecl,
   isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
+  isRetrieval,
   isRetrievalLiteral,
+  isStore,
   isThisRef,
+  isUi,
 } from "../generated/ast.js";
 import {
   type DddType,
   type Env,
+  envForNode,
   findFunction,
   findOperation,
   freeCallFunction,
@@ -57,6 +73,7 @@ import {
   typeToString,
   withTags,
 } from "../type-system.js";
+import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   canPromoteLiteralTo,
   checkBlankMessage,
@@ -449,6 +466,226 @@ export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcc
         }
       }
       curType = typeAfterSuffix(curType, s, env);
+    }
+  }
+}
+
+/** M-T6.18 gap #3 — arg-type + construction-value checking at the EXPRESSION
+ *  slots the operation/function/default/invariant/derived walk never reaches:
+ *  repository `find … where` / `… requires`, retrieval `where:` (named +
+ *  anonymous), criterion / policy-fn bodies, and operation `requires` / `when`
+ *  gates.  Each holds an `Expression` that can nest a criterion/policy predicate
+ *  call, a free/member domain call, or a record construction — all already
+ *  type-checkable by the shared `checkExprCallArgs` / `checkConstructionArgTypes`
+ *  under the slot's lexical env (`envForNode`, which binds a find's `for`
+ *  aggregate + params and an operation's `this` + params).  Predicate-call ARITY
+ *  is already model-wide (`loom.criterion-arity` / `loom.policy-fn-arity`); this
+ *  adds the per-argument TYPE those gates don't touch, reusing the same
+ *  `loom.call-arg-type` / `loom.construction-field-type` codes as the statement
+ *  walk.  These seven slots are disjoint from `checkExprCallArgs`'s eight
+ *  existing hook points, so no diagnostic is reported twice. */
+export function checkPredicateSlotArgs(model: Model, accept: ValidationAcceptor): void {
+  const visit = (expr: Expression | undefined): void => {
+    if (!expr) return;
+    const env = envForNode(expr);
+    checkConstructionArgTypes(expr, env, accept);
+    checkExprCallArgs(expr, env, accept);
+  };
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (isFindDecl(node)) {
+      visit((node as FindDecl).filter);
+      visit((node as FindDecl).gate);
+    } else if (isRetrieval(node)) {
+      visit((node as Retrieval).where);
+    } else if (isRetrievalLiteral(node)) {
+      visit(node.where);
+    } else if (isCriterion(node)) {
+      visit((node as Criterion).body);
+    } else if (isPolicyDecl(node)) {
+      visit((node as PolicyDecl).body);
+    } else if (isOperation(node)) {
+      visit((node as Operation).gate);
+      visit((node as Operation).when);
+    }
+  }
+}
+
+/** Resolve a store-action call `<store>.<action>(args)` to its `ActionDecl`, or
+ *  `undefined` when `head` names no store / `action` no action on it.  A store is
+ *  a `ui` member referenced by bare name; the enclosing `ui` wins, else any store
+ *  of that name in the model (matching the lowering's store index). */
+function resolveStoreAction(
+  head: string,
+  action: string,
+  node: AstNode,
+  model: Model,
+): ActionDecl | undefined {
+  const findIn = (store: Store): ActionDecl | undefined =>
+    store.decls.find((d): d is ActionDecl => isActionDecl(d) && d.name === action);
+  const ui = AstUtils.getContainerOfType(node, isUi);
+  if (ui) {
+    for (const m of ui.members) {
+      if (isStore(m) && m.name === head) {
+        const a = findIn(m);
+        if (a) return a;
+      }
+    }
+  }
+  for (const n of AstUtils.streamAllContents(model)) {
+    if (isStore(n) && n.name === head) {
+      const a = findIn(n);
+      if (a) return a;
+    }
+  }
+  return undefined;
+}
+
+/** M-T6.18 gap #3 — arity + per-argument type check for a store-action call
+ *  (`Cart.add(42)`).  Page / component / store `action` bodies are never fed to
+ *  the statement walk (that fires only for aggregate operations), so a
+ *  store-action call had NEITHER its arity NOR its argument types checked — a
+ *  wrong count or a `string` into an `int` action param compiled the .ddd and
+ *  only failed the emitted frontend.  Both invocation forms are covered: the bare
+ *  call STATEMENT (`Cart.add(42)` — an `AssignOrCallStmt` LValue) and the
+ *  expression form (a single-suffix `PostfixChain`, e.g. `x := Cart.add(42)`).
+ *  Reuses the shared `checkCallArgs` (arity + positional type, `unknown`
+ *  suppression, numeric-literal promotion) under the call site's lexical env. */
+export function checkStoreActionCallArgs(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    let head: string | undefined;
+    let action: string | undefined;
+    let args: Expression[] | undefined;
+    let argNode: AstNode = node;
+    if (isAssignOrCallStmt(node)) {
+      const lv = node.target;
+      if (!lv.call || lv.tail.length !== 1) continue;
+      head = lv.head;
+      action = lv.tail[0];
+      args = lv.args;
+      argNode = lv;
+    } else if (isPostfixChain(node)) {
+      const h = node.head;
+      const s = node.suffixes[0];
+      if (!isNameRef(h) || node.suffixes.length !== 1 || !s || !isMemberSuffix(s) || !s.call)
+        continue;
+      head = h.name;
+      action = s.member;
+      args = s.args.map((a) => a.value);
+      argNode = s;
+    } else {
+      continue;
+    }
+    if (head === undefined || action === undefined || args === undefined) continue;
+    const decl = resolveStoreAction(head, action, node, model);
+    if (!decl) continue; // head names no store / action — not this check's concern
+    checkCallArgs(
+      decl.params,
+      args,
+      envForNode(argNode),
+      `Store action '${head}.${action}'`,
+      argNode,
+      accept,
+    );
+  }
+}
+
+/** Resolve a page-body component invocation NAME to its `Component` declaration,
+ *  or `undefined` when the name isn't a reachable component.  Mirrors
+ *  `checkBuilderCallType`'s component resolution but returns the node (for its
+ *  typed params): the enclosing `ui`'s components win, else a top-level component
+ *  in the same document.  Cross-document components (workspace index) are skipped
+ *  — their params aren't in hand here, so the prop check fails open on them. */
+function resolveComponent(name: string, node: AstNode, model: Model): Component | undefined {
+  const ui = AstUtils.getContainerOfType(node, isUi);
+  if (ui) {
+    for (const m of ui.members) if (isComponent(m) && m.name === name) return m;
+  }
+  for (const m of model.members) if (isComponent(m) && m.name === name) return m;
+  return undefined;
+}
+
+/** M-T6.18 gap #3 — per-prop type check for a page-body COMPONENT invocation
+ *  (`Panel(amount: "x")` / `Panel { amount: "x" }`).  A user `component` declares
+ *  typed params, but neither invocation form had its prop VALUES checked — a
+ *  `string` into an `int` param compiled the .ddd and only failed the emitted
+ *  frontend's tsc.  Both forms are covered: the paren call (`Panel(amount: x)` — a
+ *  single-suffix `PostfixChain` `CallSuffix`, positional or named) and the brace
+ *  builder (`Panel { amount: x }` — a `BuilderCall`, which record constructions
+ *  also use, so a name resolving to a value object / part / payload is left to
+ *  `checkConstructionArgTypes`).  `slot`/`action`-typed params carry JSX / a
+ *  callback, not a value, so they're skipped; optional / defaulted params need no
+ *  arg, so only PROVIDED props are checked. */
+export function checkComponentPropTypes(model: Model, accept: ValidationAcceptor): void {
+  const checkProps = (
+    comp: Component,
+    provided: { name?: string; value: Expression | undefined; node: AstNode }[],
+    label: string,
+  ): void => {
+    provided.forEach((arg, i) => {
+      const param =
+        typeof arg.name === "string"
+          ? comp.params.find((p) => p.name === arg.name)
+          : comp.params[i];
+      if (!param) return; // unknown prop / excess positional — not this check's concern
+      const expected = paramType(param);
+      // `slot` (JSX child) / `action` (callback) params take no value; a loose
+      // `unknown` param type can't be compared.
+      if (expected.kind === "slot" || expected.kind === "action" || expected.kind === "unknown")
+        return;
+      const actual = typeOf(arg.value, envForNode(arg.node));
+      if (
+        actual.kind !== "unknown" &&
+        !isAssignable(actual, expected) &&
+        !canPromoteLiteralTo(arg.value, expected)
+      ) {
+        accept(
+          "error",
+          `Prop '${param.name}' of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          { node: arg.node, property: "value", code: "loom.component-prop-type" },
+        );
+      }
+    });
+  };
+
+  for (const node of AstUtils.streamAllContents(model)) {
+    // Brace form: `Panel { amount: x }`.  Skip record constructions (VO / part /
+    // payload — `checkConstructionArgTypes` owns those) and walker primitives.
+    if (node.$type === "BuilderCall") {
+      const bc = node as BuilderCall;
+      if (isWalkerPrimitive(bc.type) || resolveRecordDecl(bc, model)) continue;
+      const comp = resolveComponent(bc.type, bc, model);
+      if (!comp) continue;
+      checkProps(
+        comp,
+        bc.entries.map((e) => ({
+          name: typeof e.name === "string" ? e.name : undefined,
+          value: e.value,
+          node: e,
+        })),
+        `component '${bc.type}'`,
+      );
+      continue;
+    }
+    // Paren form: `Panel(amount: x)` / `Panel(x)` — a NameRef head with a single
+    // leading CallSuffix.  A name that resolves to a user FUNCTION is a call
+    // (`checkExprCallArgs`' job), not a component invocation.
+    if (isPostfixChain(node)) {
+      const head = node.head;
+      const first = node.suffixes[0];
+      if (!isNameRef(head) || node.suffixes.length !== 1 || !first || !isCallSuffix(first))
+        continue;
+      if (freeCallFunction(head.name, envForNode(node))) continue;
+      const comp = resolveComponent(head.name, node, model);
+      if (!comp) continue;
+      checkProps(
+        comp,
+        first.args.map((a) => ({
+          name: typeof a.name === "string" ? a.name : undefined,
+          value: a.value,
+          node: a,
+        })),
+        `component '${head.name}'`,
+      );
     }
   }
 }

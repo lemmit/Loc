@@ -3141,3 +3141,44 @@ establish a skip map, drive the compiles with a **shared hex-cache docker
 volume + deps.get retries** so tarballs download once — otherwise you can't tell
 a network flake from a real compile failure. (CI has direct hex.pm access, so
 the shipped test needs neither.)
+
+## 56. Systemic arg/param type-checking tail (M-T6.18 gap #3) — the two traps (2026-07-27)
+
+Closing the arg/param type-checking tail (predicate slots, factory-create
+values, workflow bodies, store-action calls, component props — one validator +
+one negative-test suite + full fast suite per slice, PR #2238). Two non-obvious
+traps cost real debugging time:
+
+- **`Agg.create({ … })` is a WIRE boundary, not a domain assignment — don't reuse
+  `isAssignable` for it.** Domain code rejects `string`→`datetime`/`X id` (`:=`
+  and `emit` both do), but the create-input DTO is JSON-shaped: a **string
+  literal is the idiomatic form** for `datetime`/`guid` (ISO / UUID text) and for
+  an `X id` reference (`holder: "0000…"`), and the shipping examples write them
+  that way. A naive `isAssignable(actual, expected)` reuse false-positived on
+  **14 real example fixtures** (banking/sales/storefront/erp + a conformance
+  sentinel). Fix: compare **wire families** (num / bool / text / object — ids +
+  enums are text, VOs are object-so-skipped) and flag only an unambiguous
+  cross-family scalar mismatch (`qty: "abc"`). **Lesson:** before type-checking a
+  value at a *construction/wire* site, verify against `:=`/`emit` whether the
+  target's accepted forms are the same as domain assignment — create-input,
+  seeds, and test-block factory args are more permissive than the domain body.
+
+- **A value object named `Money` (with `amount`/`currency`) is special-cased.**
+  A test fixture VO `Money { amount: decimal … }` does **not** flag
+  `Money { amount: "oops" }` via `construction-field-type` — the name is treated
+  as money-literal handling, so the construction resolves differently. Renaming
+  the VO to `Coin` made the exact same assertion fire. **Lesson:** when a
+  type-check unexpectedly passes on a VO/record fixture, rule out a magic name
+  (`Money`, …) before assuming a bug in the checker — use a neutral fixture name.
+
+- **`envForNode` has no anchor inside a workflow body.** A workflow has no `this`
+  aggregate, so `envForNode(workflowMember)` yields an env with no
+  `aggregate`/`part`/`vo` — and every `lookup*` helper that reaches the model
+  *through* `env.aggregate` (criteria, policy-fns, top-level functions) returns
+  `undefined` from a workflow body. So constructions / emit fields / param
+  defaults type-check in workflow bodies (they resolve via the model container,
+  not env), but free-call / predicate resolution silently fails open. Same reason
+  criterion/retrieval bodies needed an explicit `envForNode` arm (binding the
+  `of <T>` candidate as `aggregate`) for their predicate slots to resolve — and
+  that arm must **not** bind the `of T as o` alias, or `o.field` resolves against
+  the candidate and surfaces member errors a fixture had been getting away with.

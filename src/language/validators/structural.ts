@@ -43,7 +43,14 @@ import {
 } from "../generated/ast.js";
 import { envForNode, typeOf, typeToString } from "../type-system.js";
 import { envForAggregate, envForPart, envForValueObject } from "./_shared.js";
-import { checkCreate, checkDestroy, checkOperation } from "./statements.js";
+import {
+  checkConstructionArgTypes,
+  checkCreate,
+  checkDestroy,
+  checkEmit,
+  checkExprCallArgs,
+  checkOperation,
+} from "./statements.js";
 import {
   checkDerived,
   checkFunction,
@@ -279,6 +286,30 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
         node: m,
         property: "gate",
       });
+    }
+  }
+
+  // M-T6.18 gap #3 — a workflow's create / handle / on / apply bodies and its
+  // create/handle param defaults are never fed to the statement walk (that fires
+  // only for aggregate operations + create/destroy), so their record
+  // constructions (`X { … }`), free/member call args, emit-field types, and
+  // param defaults went unchecked — a wrong-typed one compiled the .ddd and only
+  // failed the emitted backend. Wire the SAME shared checks the aggregate body
+  // gets, under each executable member's lexical env (`envForNode` binds its
+  // params + threaded lets). Emit statements can nest inside if/for blocks, so
+  // they're found by streaming the member. (`Agg.create({ … })` create-input
+  // VALUES are already covered model-wide by `checkFactoryCreateFieldTypes`.)
+  for (const m of wf.members) {
+    if (isWorkflowCreateDecl(m) || isHandleDecl(m) || isOnDecl(m) || isApply(m)) {
+      const env = envForNode(m);
+      checkConstructionArgTypes(m, env, accept);
+      checkExprCallArgs(m, env, accept);
+      for (const n of AstUtils.streamAst(m)) {
+        if (isEmitStmt(n)) checkEmit(n, envForNode(n), accept);
+      }
+    }
+    if (isWorkflowCreateDecl(m) || isHandleDecl(m)) {
+      for (const p of m.params) checkParameterDefault(p, envForNode(p), accept);
     }
   }
 

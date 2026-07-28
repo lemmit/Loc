@@ -70,6 +70,7 @@ import {
   isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
+  isRetrieval,
   isSlotType,
   isStringLit,
   isSystem,
@@ -1289,6 +1290,15 @@ export function paramType(p: Parameter): DddType {
   return resolveTypeRef(p.type);
 }
 
+/** The aggregate a criterion/retrieval `of <T>` candidate names, or `undefined`
+ *  when the target isn't a bare (non-array, non-optional) aggregate — e.g. the
+ *  `of bool` pure-ambient criterion, which has no `this`. */
+function typeRefAggregate(t: TypeRef | undefined): Aggregate | undefined {
+  if (!t || t.array || t.optional) return undefined;
+  const dt = resolveTypeRef(t);
+  return dt.kind === "aggregate" ? dt.ref : undefined;
+}
+
 export type SymbolOrigin =
   | Parameter
   | { letBinding: import("./generated/ast.js").LetStmt }
@@ -1466,14 +1476,26 @@ export function envForNode(node: AstNode): Env {
   // LSP can reason about expressions inside their bodies.
   const page = AstUtils.getContainerOfType(node, isPage);
   const component = AstUtils.getContainerOfType(node, isComponent);
+  // Predicate-spec containers: a `criterion`/`retrieval` binds the candidate
+  // aggregate its `of <T>` names as `this` + its declared params; a FUNCTION-form
+  // `policy` binds only its params (it has no `this`).  Without these arms a
+  // predicate body typed every `this.field` / param / nested predicate call as
+  // `unknown`, so the M-T6.18 arg-type checks over these slots would silently
+  // fail open.
+  const crit = AstUtils.getContainerOfType(node, isCriterion);
+  const retr = AstUtils.getContainerOfType(node, isRetrieval);
+  const policy = AstUtils.getContainerOfType(node, isPolicyDecl);
 
   // The `this`/root aggregate: an enclosing aggregate container, else the
   // repository's `for` aggregate (find filters) — reached through a
-  // cross-reference, not containment.  Workflows orchestrate across aggregates
+  // cross-reference, not containment — else a criterion/retrieval candidate
+  // aggregate (its `of <T>` target).  Workflows orchestrate across aggregates
   // and have no `this`.
   const agg =
     AstUtils.getContainerOfType(node, isAggregate) ??
-    (find ? (find.$container as Repository | undefined)?.aggregate?.ref : undefined);
+    (find ? (find.$container as Repository | undefined)?.aggregate?.ref : undefined) ??
+    (crit ? typeRefAggregate(crit.target) : undefined) ??
+    (retr ? typeRefAggregate(retr.target) : undefined);
 
   const bindings = new Map<string, { type: DddType; origin: AstNode }>();
 
@@ -1508,6 +1530,9 @@ export function envForNode(node: AstNode): Env {
     handle?.params ??
     component?.params ??
     page?.params ??
+    crit?.params ??
+    retr?.params ??
+    policy?.params ??
     [];
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 

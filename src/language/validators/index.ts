@@ -9,6 +9,7 @@ export {
   checkBuilderCallType,
   checkConstructionFields,
   checkFactoryCreateFields,
+  checkFactoryCreateFieldTypes,
   checkFileUploadBinding,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
@@ -45,11 +46,14 @@ export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,
   checkCallStmt,
+  checkComponentPropTypes,
   checkConstructionArgTypes,
   checkEmit,
   checkOperation,
+  checkPredicateSlotArgs,
   checkRetrievalLiteral,
   checkStatement,
+  checkStoreActionCallArgs,
 } from "./statements.js";
 export {
   checkActionTypePosition,
