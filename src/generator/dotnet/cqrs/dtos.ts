@@ -28,6 +28,7 @@ import {
 } from "../dto-mapping.js";
 import { renderRequestDtos, renderResponseDtos } from "../emit.js";
 import { renderCsExpr } from "../render-expr.js";
+import { renderRequestValidators } from "../validator-emit.js";
 
 // ---------------------------------------------------------------------------
 // Response DTOs — value objects first (so subsequent records can reference
@@ -361,4 +362,14 @@ export function emitRequestDtos(
       extraUsings: needsCommon ? [`${ns}.Domain.Common`] : undefined,
     }),
   );
+
+  // VO-invariant → 422: a value-object's own invariants are validated at the
+  // wire boundary via a `<VO>RequestValidator` (SetValidator-referenced from
+  // each VO-typed request field), run in the controller before the domain VO
+  // is constructed.  Emitted only when some request field bears a VO with
+  // rules (null → no file, byte-identical for VO-invariant-free aggregates).
+  const requestValidators = renderRequestValidators(agg, ctx.valueObjects, ns);
+  if (requestValidators) {
+    out.set(`Application/${aggFolder}/Requests/${agg.name}RequestValidators.cs`, requestValidators);
+  }
 }

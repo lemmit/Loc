@@ -860,7 +860,7 @@ function emitProjectFromContexts(
   // has wire-translatable invariants / preconditions.  Computed
   // before the exception filter render so its FluentValidation
   // arm is gated on the same flag.
-  const usesValidators = merged.aggregates.some(hasAnyWireValidator);
+  const usesValidators = merged.aggregates.some((a) => hasAnyWireValidator(a, merged.valueObjects));
   // Only emit the 23505 → 409 arm when some aggregate declares a `unique (...)`
   // key — a unique-free project stays byte-identical (strict additivity).
   const hasUniqueKeys = aggregatesHaveUniqueKeys(merged.aggregates);
@@ -1135,7 +1135,7 @@ function emitContext(
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
-  const usesValidators = ctx.aggregates.some(hasAnyWireValidator);
+  const usesValidators = ctx.aggregates.some((a) => hasAnyWireValidator(a, ctx.valueObjects));
   emitInfrastructure(ctx, ns, out, usesValidators);
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
