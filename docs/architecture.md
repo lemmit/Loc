@@ -314,7 +314,7 @@ Validator obligations specific to fullstack platforms:
   `platform: elixir` with `framework: react` is rejected.
 - `ui:` may be sugar (`ui: SalesAdmin`) or compose-block, same
   semantics as for frontend deployables.
-- `design:` defaults to `ashPhoenix` (the built-in HEEx pack);
+- `design:` defaults to `coreComponents` (the baseline built-in HEEx pack);
   custom packs that declare `format: "heex"` are admissible.
 
 The platform contract knob `mountsUi: boolean` on `PlatformSurface`
