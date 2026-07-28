@@ -1387,7 +1387,12 @@ const lettingInFlight = new Set<import("./generated/ast.js").LetStmt>();
 function addTypedLets(
   bindings: Map<string, { type: DddType; origin: AstNode }>,
   stmts: import("./generated/ast.js").Statement[],
-  ctx: { aggregate?: Aggregate; part?: EntityPart; valueObject?: ValueObject },
+  ctx: {
+    aggregate?: Aggregate;
+    part?: EntityPart;
+    valueObject?: ValueObject;
+    context?: BoundedContext;
+  },
 ): void {
   // `env` reads `bindings` live (makeEnv closes over the map by reference),
   // so each let is typed against everything bound so far — params, members,
@@ -1580,6 +1585,10 @@ export function envForNode(node: AstNode): Env {
     aggregate: agg ?? undefined,
     part: part ?? undefined,
     valueObject: vo ?? undefined,
+    // The bounded-context anchor — so a let initializer in a workflow body
+    // (`let o = Order.create({ … })`) resolves context-level names (the
+    // aggregate `Order`) even though the workflow has no `this`.
+    context: AstUtils.getContainerOfType(node, isBoundedContext),
   };
   if (op) {
     addTypedLets(bindings, op.body, letCtx);

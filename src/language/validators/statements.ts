@@ -690,6 +690,56 @@ export function checkComponentPropTypes(model: Model, accept: ValidationAcceptor
   }
 }
 
+/** Arg-check ONE bare member-call statement (`recv.method(args)`) in a workflow
+ *  body.  A workflow has no `this` aggregate, so — unlike `checkCallStmt` — the
+ *  receiver is resolved ONLY through the body's typed lets / params (`envForNode`,
+ *  with the bounded-context anchor that lets `Agg.create({ … })` type as the
+ *  aggregate), with no aggregate-root fallback.  The check FAILS OPEN (returns
+ *  silently) whenever the receiver, an intermediate segment, or the final member
+ *  doesn't resolve to a callable — workflow-body receiver typing is still partial
+ *  (a repository-loaded receiver types `unknown`), so a miss must never become a
+ *  false positive.  When it all resolves, args are arity/type-checked by the
+ *  shared `checkCallArgs`. */
+function checkWorkflowMemberCallStmt(lv: LValue, accept: ValidationAcceptor): void {
+  const env = envForNode(lv);
+  const headSym = env.resolve(lv.head);
+  if (!headSym) return; // receiver isn't a typed local (domain service / criterion / …)
+  let recv: DddType = headSym.type;
+  for (let i = 0; i < lv.tail.length - 1; i++) {
+    recv = stepInto(recv, lv.tail[i]!);
+    if (recv.kind === "unknown") return;
+  }
+  const methodName = lv.tail[lv.tail.length - 1]!;
+  const memberNode = stepIntoNode(recv, methodName);
+  if (!memberNode || (!isOperation(memberNode) && !isFunctionDecl(memberNode))) return;
+  checkCallArgs(
+    (memberNode as Operation | FunctionDecl).params,
+    lv.args,
+    env,
+    `'${methodName}'`,
+    lv,
+    accept,
+  );
+}
+
+/** M-T6.18 gap #3 (follow-on to #2238) — bare operation/function-call STATEMENTS
+ *  in a workflow create/handle/on/apply body (`o.bump(x)`).  #2238 wired
+ *  `checkConstructionArgTypes` / `checkExprCallArgs` / `checkEmit` into workflow
+ *  bodies, but a bare call statement is an `AssignOrCallStmt` LValue (not a
+ *  PostfixChain), so `checkExprCallArgs` never sees it and `checkCallStmt` only
+ *  runs for aggregate operations (it needs a `this` aggregate a workflow lacks).
+ *  Streams the workflow member and arg-checks each MEMBER-call statement; a bare
+ *  `name(args)` free call has no `this`/aggregate to resolve against and is left
+ *  alone. */
+export function checkWorkflowBodyCallStmts(member: AstNode, accept: ValidationAcceptor): void {
+  for (const n of AstUtils.streamAst(member)) {
+    if (!isAssignOrCallStmt(n)) continue;
+    const lv = n.target;
+    if (!lv.call || lv.tail.length < 1) continue;
+    checkWorkflowMemberCallStmt(lv, accept);
+  }
+}
+
 export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor): void {
   const ev = stmt.event?.ref;
   if (!ev) return;
