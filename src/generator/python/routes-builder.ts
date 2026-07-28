@@ -56,7 +56,7 @@ import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds } from "./repository-builder.js";
+import { aggHasFieldMask, emittableFinds } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Routes emission — `app/http/<snake(agg)>_routes.py`.  One APIRouter
@@ -78,6 +78,16 @@ import { emittableFinds } from "./repository-builder.js";
 // User-declared finds land in S8; returning ops / unions / paged in
 // S12; currentUser threading in S16.
 // ---------------------------------------------------------------------------
+
+/** The response serializer call for one entity var — masked or plain.  A
+ *  `mask unless` aggregate routes every RESPONSE boundary through
+ *  `repo.to_wire_masked(x)` (which reads the ambient principal and redacts
+ *  fail-closed); a mask-free aggregate keeps `repo.to_wire(x)` verbatim so
+ *  non-mask projects stay byte-identical.  Internal (audit-snapshot) `to_wire`
+ *  uses stay unmasked. */
+function wireResp(agg: EnrichedAggregateIR, varExpr: string): string {
+  return aggHasFieldMask(agg) ? `repo.to_wire_masked(${varExpr})` : `repo.to_wire(${varExpr})`;
+}
 
 export function buildPyRoutesFile(
   agg: EnrichedAggregateIR,
@@ -421,7 +431,10 @@ function responseModel(
         wf.source === "containment"
           ? containmentResponseType(wf.type)
           : responsePyType(wf.type, ctx);
-      const optional = wf.optional || wf.type.kind === "optional";
+      // A `mask unless` field can be redacted to null on a response (fail-closed),
+      // so the wire schema must admit null even when the field is declared
+      // non-optional (authorization.md §5).
+      const optional = wf.optional || wf.type.kind === "optional" || wf.maskUnless !== undefined;
       const suffix =
         optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
       return `    ${wf.name}: ${t}${suffix}`;
@@ -874,7 +887,7 @@ function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): str
       "    repo = _repo(session)",
       "    result = await repo.all(page, pageSize, sort, dir)",
       "    return {",
-      '        "items": [repo.to_wire(r) for r in result.items],',
+      `        "items": [${wireResp(agg, "r")} for r in result.items],`,
       '        "page": result.page,',
       '        "pageSize": result.page_size,',
       '        "total": result.total,',
@@ -886,7 +899,7 @@ function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): str
     `@router.get("", response_model=${agg.name}ListResponse, operation_id="all${agg.name}")`,
     `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
-    "    return [repo.to_wire(root) for root in await repo.all()]",
+    `    return [${wireResp(agg, "root")} for root in await repo.all()]`,
   );
 }
 
@@ -895,7 +908,7 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
     `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}"${errorResponsesKwarg("getById")})`,
     `async def get_${snake(agg.name)}_by_id(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
-    `    return repo.to_wire(await repo.get_by_id(${agg.name}Id(id)))`,
+    `    return ${wireResp(agg, `await repo.get_by_id(${agg.name}Id(id))`)}`,
   );
 }
 
@@ -1189,7 +1202,7 @@ function findRoute(
       ...absent,
       // Found → the success variant directly (untagged); a single-success union
       // find is wire-identical to `<Agg>?` / `<Agg> option`.
-      `    return repo.to_wire(found)`,
+      `    return ${wireResp(agg, "found")}`,
     );
   }
   const paged = pagedReturn(find.returnType);
@@ -1221,7 +1234,7 @@ function findRoute(
       "    repo = _repo(session)",
       `    result = await repo.${findSnake}(${callArgs.join(", ")})`,
       "    return {",
-      '        "items": [repo.to_wire(r) for r in result.items],',
+      `        "items": [${wireResp(agg, "r")} for r in result.items],`,
       '        "page": result.page,',
       '        "pageSize": result.page_size,',
       '        "total": result.total,',
@@ -1236,7 +1249,7 @@ function findRoute(
       userBind,
       gateLines,
       "    repo = _repo(session)",
-      `    return [repo.to_wire(r) for r in await repo.${findSnake}(${args})]`,
+      `    return [${wireResp(agg, "r")} for r in await repo.${findSnake}(${args})]`,
     );
   }
   return lines(
@@ -1248,6 +1261,6 @@ function findRoute(
     `    found = await repo.${findSnake}(${args})`,
     "    if found is None:",
     `        raise AggregateNotFoundError("not_found")`,
-    "    return repo.to_wire(found)",
+    `    return ${wireResp(agg, "found")}`,
   );
 }

@@ -59,6 +59,7 @@ import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
+import { aggHasFieldMask } from "./repository-builder.js";
 import { pyWireToDomain } from "./routes-builder.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
@@ -289,6 +290,11 @@ function renderPagedRunHandlerModule(
   const rctx: PyRenderContext = { thisName: "self", recordParamNames: new Set() };
   const critArgs = run.retrievalArgs.map((a) => renderPyExpr(a, rctx));
   const callArgs = [...critArgs, "page", "page_size", "sort", "dir"].join(", ");
+  // A masked aggregate redacts its response fields fail-closed (authorization.md
+  // §5) — the paged run's items are a RESPONSE boundary, so route through
+  // `to_wire_masked` when the run's aggregate declares a `mask unless` field.
+  const runAgg = ctx.aggregates.find((a) => a.name === run.aggName);
+  const runWire = runAgg && aggHasFieldMask(runAgg) ? "to_wire_masked" : "to_wire";
   const sigParams = [
     "session: AsyncSession",
     ...h.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
@@ -302,7 +308,7 @@ function renderPagedRunHandlerModule(
     `    ${repoVar} = ${run.aggName}Repository(session, ${dispatcherExpr})`,
     `    result = await ${repoVar}.${snake(run.retrievalName)}(${callArgs})`,
     "    return {",
-    `        "items": [${repoVar}.to_wire(__e) for __e in result.items],`,
+    `        "items": [${repoVar}.${runWire}(__e) for __e in result.items],`,
     '        "page": result.page,',
     '        "pageSize": result.page_size,',
     '        "total": result.total,',
@@ -388,10 +394,16 @@ function renderHandlerModule(
   const normRet = normalizeHandlerReturn(h.returnType, ctx);
   let projectRepoHandle: string | undefined;
   let projectIsCollection = false;
+  // A `mask unless` aggregate redacts its response fields fail-closed
+  // (authorization.md §5) — a handler that projects such an aggregate to a
+  // RESPONSE routes through `to_wire_masked`.
+  let projectWire = "to_wire";
   if (normRet) {
     const info = wireTypeInfo(normRet, "response");
     if (info.refKind === "entity") {
       projectIsCollection = info.isCollection;
+      const projAgg = ctx.aggregates.find((a) => a.name === info.base);
+      if (projAgg && aggHasFieldMask(projAgg)) projectWire = "to_wire_masked";
       for (const [repo, agg] of repos) {
         if (agg === info.base) {
           projectRepoHandle = snake(repo);
@@ -434,8 +446,8 @@ function renderHandlerModule(
   const returnExpr = h.returnValue
     ? projectRepoHandle
       ? projectIsCollection
-        ? `[${projectRepoHandle}.to_wire(__e) for __e in ${renderPyExpr(h.returnValue, rctx)}]`
-        : `${projectRepoHandle}.to_wire(${renderPyExpr(h.returnValue, rctx)})`
+        ? `[${projectRepoHandle}.${projectWire}(__e) for __e in ${renderPyExpr(h.returnValue, rctx)}]`
+        : `${projectRepoHandle}.${projectWire}(${renderPyExpr(h.returnValue, rctx)})`
       : renderPyExpr(h.returnValue, rctx)
     : null;
   const returnLine = returnExpr ? `    return ${returnExpr}` : null;
