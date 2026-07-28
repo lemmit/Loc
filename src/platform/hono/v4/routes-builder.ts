@@ -10,6 +10,7 @@ import {
   unionMemberObjects,
   unionMembers,
 } from "../../../generator/_payload/union-wire.js";
+import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
@@ -1570,7 +1571,17 @@ function emitReturningOperationRoute(
     );
     out.push(`    }`);
   }
-  out.push(`    return c.json(result, 200);`);
+  // A scalar money RETURN carries the FIXED money wire scale (RS-12), same as a
+  // money field: decimal.js `.toJSON()` would normalize trailing zeros, so
+  // format to 4 dp for parity with the java/.NET/python scalar-return path.
+  const scalarMoneyReturn =
+    !u &&
+    op.returnType?.kind === "primitive" &&
+    (op.returnType as { name?: string }).name === "money";
+  const successResult = scalarMoneyReturn
+    ? `result === null ? null : result.toFixed(${MONEY_WIRE_SCALE})`
+    : "result";
+  out.push(`    return c.json(${successResult}, 200);`);
   out.push(`  },`);
   out.push(`);`);
   return out;

@@ -181,9 +181,7 @@ describe("python repository emission", () => {
     // byte-consistent with the other backends' 4-dp money.
     const files = await build();
     const repo = files.get("api/app/db/repositories/order_repository.py")!;
-    expect(repo).toContain(
-      '"unitBudget": str(root.unit_budget.quantize(Decimal("1e-4"), rounding="ROUND_HALF_UP")),',
-    );
+    expect(repo).toContain('"unitBudget": money_str(root.unit_budget),');
     // Request side: the wire string re-parses into Decimal for the domain
     // (the money-typed find param crosses as `str` and converts at the call).
     const routes = files.get("api/app/http/order_routes.py")!;

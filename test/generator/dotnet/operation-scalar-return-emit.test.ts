@@ -70,9 +70,9 @@ describe("dotnet — scalar operation returns (BUG-003)", () => {
     expect(find(f, "Commands/RestatedCommand.cs")).toContain("ICommand<string>");
     const h = find(f, "Commands/RestatedHandler.cs");
     expect(h).toContain("ICommandHandler<RestatedCommand, string>");
-    // Domain `decimal` → InvariantCulture wire string on the way out.
+    // Money → wire string at the FIXED NUMERIC(19,4) scale (RS-12).
     expect(h).toContain(
-      "return result.ToString(System.Globalization.CultureInfo.InvariantCulture);",
+      'return result.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);',
     );
     const c = find(f, "InvoicesController.cs");
     expect(c).toContain("[ProducesResponseType(typeof(string), 200)]");

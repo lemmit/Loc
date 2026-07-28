@@ -35,6 +35,7 @@ import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
 import { generateFelizForContexts } from "../feliz/index.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -1366,11 +1367,13 @@ def iso(dt: datetime) -> str:
 
 
 def money_str(amount: Decimal) -> str:
-    """Precise-decimal string with no exponent — wire parity with the other
-    backends (money travels as a string in both directions, matching Java's
-    \`toPlainString()\` / .NET's invariant decimal).  \`format(d, "f")\` avoids
-    the scientific notation bare \`str(Decimal)\` can emit (e.g. \`1E+2\`)."""
-    return format(amount, "f")
+    """Money → wire string at the FIXED NUMERIC(19,4) scale (RS-12): the same
+    canonical scale every backend serializes money at (node \`.toFixed(4)\`,
+    .NET \`ToString("F4")\`, Java \`setScale(4)\`, Elixir \`Decimal.round(_, 4)\`).
+    \`quantize\` pins the scale (a value/derived money carries its own scale
+    otherwise); \`format(d, "f")\` then avoids the scientific notation bare
+    \`str(Decimal)\` can emit (e.g. \`1E+2\`)."""
+    return format(amount.quantize(Decimal("1e-${MONEY_WIRE_SCALE}"), rounding="ROUND_HALF_UP"), "f")
 `;
 
 /** One exception-less op-return union to surface in the OpenAPI spec:
