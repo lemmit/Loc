@@ -18,6 +18,11 @@ on:
       - 'test/e2e/observability-events-java.test.ts'
   workflow_dispatch:
   merge_group:
+  # On-demand per-PR run: apply the `run-obs` label to a PR to run this
+  # otherwise push:main-only suite against that branch before merge.  The
+  # job-level `if` below restricts the labeled trigger to that one label.
+  pull_request:
+    types: [labeled]
 permissions:
   contents: read
 
@@ -28,6 +33,11 @@ concurrency:
 jobs:
   java-obs-e2e:
     runs-on: ubuntu-latest
+    # Skip the labeled trigger unless it's specifically `run-obs`; push,
+    # merge-queue, and manual (`workflow_dispatch`) runs always proceed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-obs'
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
