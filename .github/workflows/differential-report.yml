@@ -1,0 +1,79 @@
+name: Cross-backend response differential (report-only)
+
+# M-T9.11 slice (a) — the NON-BLOCKING runtime-value sensor.
+#
+# Boots the full five-backend compose stack (the same boot the nightly
+# `conformance-full` parity job uses) and, with LOOM_DIFF_REPORT=1, has the
+# parity e2e ALSO GET every backend's collection (findAll) endpoints, normalize
+# the bodies, and diff them all-pairs — surfacing the runtime-value divergences
+# the OpenAPI spec-diff is structurally blind to (enum casing, []-vs-null, a
+# leaked/dropped field, decimal serialization).
+#
+# This job NEVER gates: the capture is wrapped so it only writes a report + a
+# job summary, and the workflow is not a required check. It exists to answer
+# "how many unnamed RS-rules are hiding?" — read the artifact, then decide
+# whether the full per-request recorder + the fix campaign (slices b/c) are
+# worth it. Every bucket in the report is a candidate RS-rule.
+
+on:
+  schedule:
+    # 04:20 UTC nightly — after conformance-full (03:42) has usually finished,
+    # so the two heavy compose boots don't contend for the runner.
+    - cron: '20 4 * * *'
+  workflow_dispatch:
+  # Opt-in per-PR: apply the `run-differential` label to boot the stack and
+  # produce the report for that branch.
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: differential-report-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-differential'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Boot stack + capture response differential (non-blocking)
+        # continue-on-error: the whole POINT is a report, never a gate. A boot
+        # flake or a backend that failed to come up must not turn this red.
+        continue-on-error: true
+        env:
+          LOOM_E2E: '1'
+          LOOM_DIFF_REPORT: '1'
+        run: npx vitest run test/e2e/e2e.test.ts
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f /tmp/loom-differential-report.md ]; then
+            cat /tmp/loom-differential-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No differential report produced — the stack likely failed to boot; see the step log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: response-differential-report
+          path: /tmp/loom-differential-report.md
+          if-no-files-found: warn

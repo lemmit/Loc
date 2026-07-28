@@ -216,6 +216,42 @@ the conforming backends, and the fix that established it.
   gated statically per-PR by
   `test/conformance/rehydration-trust-parity.test.ts`.
 
+### RS-11 · A created `versioned` aggregate reads back at version 1
+- **Guarantee.** A freshly-created `versioned` aggregate reads back with
+  `version` = **1** — the canonical value, fixed by the capability declaration
+  `version: int token = 1` (`src/macros/prelude.ts`), mirrored to
+  `version INTEGER NOT NULL DEFAULT 1`.
+- **Trigger.** A `versioned` aggregate created via `POST`, then read.
+- **Observable.** node honors the `= 1` default; dotnet/java/python currently
+  seed `0` (they drop the default on the create/insert path). This is **not** a
+  majority vote — three backends agree on the *wrong* value; the source of
+  truth is the `= 1` declaration, so node conforms and the other three are the
+  fix targets. (A cautionary case: the differential found the *divergence*, but
+  the oracle came from the spec, not the majority.)
+- **Conforms.** node. **Targets (open, to fix):** dotnet, java, python.
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220);
+  `src/macros/prelude.ts` `versioned = 1`. Tier: **behavioral**.
+
+### RS-12 · Money wire scale is consistent across backends
+- **Guarantee.** A money-typed field has the same scale on every backend's
+  wire. *(Canonical format — `"0.00"` vs `"0"` — is an open owner decision;
+  unlike RS-11 no spec mandates it.)*
+- **Trigger.** A money field on the wire (e.g. `costFloor`).
+- **Observable.** dotnet/java/python preserve scale (`"0.00"`); node's
+  decimal.js `.toString()` normalizes to `"0"`. And java *itself* drops the
+  scale in derived string contexts (the deferred `seqTag` finding), so this is
+  a canonical-format decision, not a settled node-only bug. Provisional
+  direction below follows majority + the "money carries scale" convention.
+- **Conforms (provisional).** dotnet, java, python. **Target:** node.
+- **Provenance.** M-T9.11 differential (run 30277275068, PR #2220) — direction
+  pending owner confirmation. Tier: **behavioral**.
+
+> **Candidate (not yet a rule):** the same differential flagged a *derived*
+> field (`seqTag`) interpolating money into a string with a `budget 100` vs
+> `budget 100.0` split, but that evidence is contaminated by the slice-(a)
+> index-based row alignment (rows aren't id-keyed across backends). It needs
+> M-T9.11 slice (b)'s id-keyed capture to confirm before it earns an RS number.
+
 ---
 
 ## Adding a rule

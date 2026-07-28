@@ -10,6 +10,13 @@ import {
   isCleanDiff,
   type OpenApiSpec,
 } from "../_helpers/openapi-normalize.js";
+import {
+  type BackendCapture,
+  diffAllPairs,
+  type Json,
+  normalizeBody,
+  renderReport,
+} from "../_helpers/response-diff.js";
 
 // ---------------------------------------------------------------------------
 // E2E smoke: generate the acme system, `docker compose build && up`, poll
@@ -425,6 +432,37 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         "[parity] all five backends agree across all ten pairs (ops / cardinality / schemas / fields / required).",
       );
     }
+
+    // ── M-T9.11 slice (a): cross-backend response differential (NON-BLOCKING) ──
+    // The stack is booted right here with all five backends up, so this is the
+    // cheapest place to hang the runtime-value sensor the spec-diff above is
+    // blind to.  Default OFF (LOOM_DIFF_REPORT unset) so it can NEVER perturb
+    // the existing parity nightly; when on, it GETs each backend's collection
+    // (param-less GET) endpoints, normalizes the bodies, diffs all pairs, and
+    // writes a bucketed report — it only ever console.warns + writes a file,
+    // it never throws.  This is the "read the first report to size the fix"
+    // step: every bucket it prints is a candidate RS-rule.
+    if (process.env.LOOM_DIFF_REPORT === "1") {
+      try {
+        // showcase gates its reads (`auth: required`), so an unauthenticated
+        // capture 401s on every collection and diffs nothing — a false green.
+        // Reuse the same real Keycloak token the authz test below mints so the
+        // capture reads the SEEDED (populated, deterministic) collections.
+        // Best-effort: if the grant fails, fall back to an unauth capture
+        // rather than failing this non-blocking block.
+        let token: string | undefined;
+        try {
+          token = await keycloakPasswordGrantToken(outDir);
+        } catch (e) {
+          console.warn("[differential] token grant failed; capturing unauthenticated:", e);
+        }
+        const md = await captureDifferentialReport(specs, token);
+        fs.writeFileSync("/tmp/loom-differential-report.md", md);
+        console.warn(`\n${md}`);
+      } catch (err) {
+        console.warn("[differential] non-blocking capture failed (ignored):", err);
+      }
+    }
   }, 120_000);
 
   // Runtime authorization parity — distinct from the OpenAPI parity above.
@@ -619,6 +657,54 @@ async function fetchSpec(url: string): Promise<OpenApiSpec> {
     }
   }
   throw lastErr;
+}
+
+/** Base origin per backend — the same ports pollHealthy/fetchSpec use above. */
+const DIFF_BASES: Readonly<Record<string, string>> = {
+  node: "http://localhost:3000",
+  dotnet: "http://localhost:8080",
+  python: "http://localhost:8000",
+  java: "http://localhost:8081",
+  phoenix: "http://localhost:4000",
+};
+
+/** Collection (findAll) endpoints from a spec: GET paths with no path param
+ *  and no infra prefix.  The read surface the differential compares. */
+function collectionPaths(spec: OpenApiSpec): string[] {
+  const out: string[] = [];
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (p.includes("{") || p === "/health" || p === "/ready" || p === "/openapi.json") continue;
+    if (item && typeof item === "object" && "get" in item) out.push(p);
+  }
+  return out.sort();
+}
+
+/** GET every collection endpoint of every up backend, normalize the body, and
+ *  render the pairwise bucketed report.  Best-effort per request — a single
+ *  non-200 or non-array read is skipped, never fatal. */
+async function captureDifferentialReport(
+  specs: Record<string, OpenApiSpec>,
+  token?: string,
+): Promise<string> {
+  const headers: Record<string, string> = { connection: "close" };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const captures: BackendCapture[] = [];
+  for (const [backend, spec] of Object.entries(specs)) {
+    const base = DIFF_BASES[backend];
+    if (!base) continue;
+    const reads: Record<string, Json> = {};
+    for (const p of collectionPaths(spec)) {
+      try {
+        const r = await fetch(base + p, { headers });
+        if (!r.ok) continue;
+        reads[p] = normalizeBody((await r.json()) as Json);
+      } catch {
+        /* backend didn't serve this read — skip, don't fail the report */
+      }
+    }
+    captures.push({ backend, reads });
+  }
+  return renderReport(diffAllPairs(captures));
 }
 
 async function pollHealthy(url: string, timeoutMs: number): Promise<void> {
