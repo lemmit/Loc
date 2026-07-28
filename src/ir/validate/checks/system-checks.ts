@@ -2945,11 +2945,11 @@ export function validateFieldMask(
 //   - loom.field-write-gate-unsupported — the field is hosted by a backend whose
 //     create/op handlers don't yet enforce the gate.  A parsed-but-unenforced
 //     write gate is a SECURITY footgun (the client can set a field it shouldn't),
-//     so it fails fast rather than silently no-op'ing.  The supported set is EMPTY
-//     in this foundation slice (grammar + IR + validation + wire-spec landed; the
-//     per-backend enforcement is the stacked follow-on); each backend slice adds
-//     its platform here.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>([]);
+//     so it fails fast rather than silently no-op'ing.  `node` (Hono) enforces
+//     the gate in its create/op handlers (fail-closed 403 before the domain
+//     call); the other four backends are the stacked follow-on, each adding its
+//     platform here as enforcement lands.
+const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node"]);
 export function validateFieldWriteGate(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

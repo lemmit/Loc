@@ -64,15 +64,24 @@ describe("field write gate — IR gates", () => {
     expect((salary.writeGate as { op: string }).op).toBe("!");
   });
 
+  it("node enforces the write gate — no unsupported diagnostic", async () => {
+    // node (Hono) emits the fail-closed 403 in its create/op handlers, so a
+    // write-gated field hosted on node is no longer a compile error.
+    const codes = await diags(
+      "write(currentUser.permissions.contains(permissions.setSalary))",
+      "node",
+    );
+    expect(codes).not.toContain("loom.field-write-gate-unsupported");
+  });
+
   it.each([
-    "node",
     "dotnet",
     "python",
     "java",
     "elixir",
-  ])("%s compile-gates an unenforced write gate (foundation slice)", async (plat) => {
-    // No backend enforces yet (FIELD_WRITE_GATE_BACKENDS is empty), so a parsed
-    // write gate is a fail-closed compile error on every backend.
+  ])("%s still compile-gates an unenforced write gate (stacked follow-on)", async (plat) => {
+    // The other four backends don't enforce yet, so a parsed write gate stays a
+    // fail-closed compile error there until each backend slice lands.
     const codes = await diags(
       "write(currentUser.permissions.contains(permissions.setSalary))",
       plat,
