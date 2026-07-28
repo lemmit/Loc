@@ -179,14 +179,16 @@ function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR, usingMikro = false)
   const keyExpr = h.correlation
     ? renderTsExpr(h.correlation, { thisName: "state" })
     : `${h.param}.${corr}`;
-  // Allocate literal for a not-yet-seen key: just the correlation column (every
-  // other read-model column is nullable, so a partial row is valid — the fold
+  // Allocate for a not-yet-seen key: just the correlation column (every other
+  // read-model column is nullable, so a partial row is valid — the fold
   // assignments below populate the carried fields before the upsert).  Under
-  // MikroORM the state type is the `<Proj>Row` class (definite-assignment,
-  // non-optional fields), so the partial literal needs an `as unknown as` widen;
-  // Drizzle's `$inferInsert` makes nullable columns optional and accepts it directly.
+  // MikroORM the state type is the `<Proj>Row` class (definite-assignment
+  // fields), so a bare `{ corr }` literal doesn't satisfy it — seed a fresh
+  // UNMANAGED instance via `Object.assign` (typed `Row & { corr }` → `Row`, no
+  // cast; unmanaged, so no identity-map entry until the upsert).  Drizzle's
+  // `$inferInsert` makes nullable columns optional and accepts the bare literal.
   const allocate = usingMikro
-    ? `({ ${corr}: __key } as unknown as ${T}State)`
+    ? `Object.assign(new ${mikroProjectionRowClass(p)}(), { ${corr}: __key })`
     : `{ ${corr}: __key }`;
   const out = [
     `export async function fold${h.event}Into${T}(`,

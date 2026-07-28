@@ -92,10 +92,13 @@ describe("MikroORM folded-projection read model", () => {
     // load/save over the EntityManager.
     expect(proj).toContain("const row = await db.findOne(OrderBoardRow, { orderRef: key });");
     expect(proj).toContain("await db.upsert(OrderBoardRow, state);");
-    // the fold allocates on a not-yet-seen key, then applies the carried assigns.
+    // the fold allocates a fresh typed Row on a not-yet-seen key (no cast), then
+    // applies the carried assigns.
     expect(proj).toContain(
-      "const state = (await loadOrderBoard(db, __key)) ?? ({ orderRef: __key } as unknown as OrderBoardState);",
+      "const state = (await loadOrderBoard(db, __key)) ?? Object.assign(new OrderBoardRow(), { orderRef: __key });",
     );
+    // no type-erasing cast on the allocate.
+    expect(proj).not.toContain("as unknown as OrderBoardState");
     expect(proj).toContain("state.status = BoardStatus.Placed;");
     expect(proj).toContain("state.status = BoardStatus.Shipped;");
   });
