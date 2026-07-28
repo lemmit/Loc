@@ -83,7 +83,23 @@ export function buildOperationSpec(
     // Exception-less return-typed op: the controller-side translation spec
     // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
     returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),
+    // Scalar return-typed op (BUG-003): the value's wire type, driving the
+    // `[ProducesResponseType(typeof(<Wire>), 200)]` + `return Ok(result)` path.
+    returnScalar: buildReturnScalarSpec(op, ctx),
   };
+}
+
+/** Wire type for a SCALAR operation return (`operation describe(): string` —
+ *  non-void, non-`or`-union).  `undefined` for a void op (204) or a union op
+ *  (handled by `buildReturnUnionSpec`).  The handler already projects the
+ *  domain value to this wire type (`projectToResponse`), so the controller
+ *  returns it raw at 200 — no Union DTO wrapping. */
+function buildReturnScalarSpec(
+  op: OperationIR,
+  ctx: EnrichedBoundedContextIR,
+): { wireType: string } | undefined {
+  if (!op.returnType || op.returnType.kind === "union") return undefined;
+  return { wireType: wireType(op.returnType, ctx, "response") };
 }
 
 function buildReturnUnionSpec(

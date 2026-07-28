@@ -24,6 +24,7 @@ import {
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 import { javaCommandValidatorNames } from "./validator.js";
+import { collectWireImports, wireJavaType } from "./wire.js";
 
 // ---------------------------------------------------------------------------
 // REST controllers + the shared exception advice.  Route shape mirrors
@@ -188,6 +189,35 @@ export function renderJavaController(
           `        return switch (result) {`,
           ...arms,
           `        };`,
+          `    }`,
+          ``,
+          ...canRouteLines(op),
+        ];
+      }
+      if (op.returnType) {
+        // Scalar (non-union) return (BUG-003): 200 with the returned value
+        // serialized to wire, instead of computing-then-discarding as 204.
+        // The service already returns the wire-typed value (domain→wire happens
+        // there, parallel to the union path's captured `result`); the controller
+        // just wraps it in `ResponseEntity.ok`.  A CONCRETE `ResponseEntity<WireType>`
+        // lets springdoc infer the 200 body natively (unlike the union's
+        // `ResponseEntity<?>`, which needs the explicit `successRef`).  The
+        // type is BOXED (`Boolean`/`Integer`/`Long`, not the primitive) because
+        // it sits in a generic position — `ResponseEntity<boolean>` doesn't
+        // compile (`operation taken(): bool`).
+        const wireRet = wireJavaType(op.returnType, "Response", true);
+        collectWireImports(op.returnType, imports);
+        return [
+          `    @PostMapping("/{id}/${snake(op.name)}")`,
+          hasParams
+            ? `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+            : `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
+          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
+          hasParams
+            ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
+            : `        var result = service.${op.name}(new ${idClass}(id)${ifMatchServiceArg});`,
+          `        return ResponseEntity.ok(result);`,
           `    }`,
           ``,
           ...canRouteLines(op),

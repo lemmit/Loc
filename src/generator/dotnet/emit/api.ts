@@ -84,6 +84,11 @@ export interface ControllerShape {
      *  When set, the action returns the mapped ProblemDetails / wire DTO instead
      *  of 204 (exception-less.md). */
     returnUnion?: ReturnUnionSpec;
+    /** Scalar return-typed op (BUG-003): the value's C# wire type.  When set
+     *  (and `returnUnion` is not), the action declares
+     *  `[ProducesResponseType(typeof(<wireType>), 200)]` and returns the
+     *  mediator result via `Ok(result)` instead of 204. */
+    returnScalar?: { wireType: string };
   }>;
   finds: Array<{
     name: string;
@@ -446,6 +451,7 @@ export function renderOperationActionBlock(
   // stdlib default), a success variant to 200 wrapped in the Application wire
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
+  const rs = op.returnScalar;
   const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
   // A `when` state gate declares 409 (Disallowed); a versioned `update` can also
   // 409 on a stale `If-Match` (ConcurrencyConflict). Each status resolves
@@ -468,7 +474,17 @@ export function renderOperationActionBlock(
           .filter((s) => !STD.has(s))
           .map((s) => `    [ProducesResponseType(${s})]`),
       ]
-    : ["    [ProducesResponseType(204)]", ...producesProblem("operation", op.guarded), ...when409];
+    : rs
+      ? [
+          `    [ProducesResponseType(typeof(${rs.wireType}), 200)]`,
+          ...producesProblem("operation", op.guarded),
+          ...when409,
+        ]
+      : [
+          "    [ProducesResponseType(204)]",
+          ...producesProblem("operation", op.guarded),
+          ...when409,
+        ];
   const dispatchTail = ru
     ? [
         "        var result = await _mediator.Send(cmd);",
@@ -493,7 +509,11 @@ export function renderOperationActionBlock(
         '                return Problem(statusCode: 500, title: "Internal Server Error");',
         "        }",
       ]
-    : ["        await _mediator.Send(cmd);", "        return NoContent();"];
+    : rs
+      ? // Scalar return (BUG-003): the handler already projected the domain value
+        // to its wire type, so return it raw at 200.
+        ["        var result = await _mediator.Send(cmd);", "        return Ok(result);"]
+      : ["        await _mediator.Send(cmd);", "        return NoContent();"];
   // The side-effect-free can_<op> companion (criterion.md use site 2):
   // GET → loads the aggregate, evaluates the `when` predicate, returns
   // `{ allowed }` so a UI can enable/disable the action without invoking it.

@@ -7,7 +7,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
-import { projectEntityExpr } from "../dto-mapping.js";
+import { projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
@@ -282,6 +282,16 @@ export function emitOperationCommandAndHandler(
     // it to HTTP.  `null` ⇒ a plain void mutation command.
     const returnUnion =
       op.returnType?.kind === "union" ? unionInstanceName(op.returnType.variants) : undefined;
+    // A SCALAR return (`operation describe(): string` — non-void, non-`or`-union,
+    // BUG-003): the command carries the value's WIRE type as its result
+    // (`ICommand<string>` etc.), the handler projects the domain value to wire
+    // and returns it, and the controller returns `Ok(result)` at 200.  A union
+    // scalar-success arm serializes `v.Value` the same way (`wireType`), but here
+    // the RAW value is returned, not a Union wrapper.  `undefined` for void ops.
+    const scalarWireType =
+      op.returnType && op.returnType.kind !== "union"
+        ? wireType(op.returnType, ctx, "response")
+        : undefined;
     out.set(
       `Application/${aggFolder}/Commands/${upperFirst(op.name)}Command.cs`,
       renderCommand({
@@ -289,7 +299,7 @@ export function emitOperationCommandAndHandler(
         aggName: agg.name,
         commandName: `${upperFirst(op.name)}Command`,
         commandParams: params,
-        returnType: returnUnion,
+        returnType: returnUnion ?? scalarWireType,
         extraUsings: returnUnion ? [`${ns}.Domain.${plural(agg.name)}`] : undefined,
       }),
     );
@@ -386,12 +396,23 @@ export function emitOperationCommandAndHandler(
         auditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return result;\n`
-      : loadLine +
-        auditBefore +
-        `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
-        auditStage +
-        `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
-        `        return Unit.Value;\n`;
+      : scalarWireType
+        ? // Scalar return (BUG-003): capture the domain value, save, then project
+          // it to wire on the way out (`projectToResponse` handles money →
+          // InvariantCulture string, datetime → ISO-8601, identity for the plain
+          // scalars) so the handler's `<WireType>` result is returned, not Unit.
+          loadLine +
+          auditBefore +
+          `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+          auditStage +
+          `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
+          `        return ${projectToResponse("result", op.returnType!, ctx)};\n`
+        : loadLine +
+          auditBefore +
+          `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+          auditStage +
+          `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
+          `        return Unit.Value;\n`;
     out.set(
       `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
       renderCommandHandler({
@@ -399,7 +420,7 @@ export function emitOperationCommandAndHandler(
         aggName: agg.name,
         handlerName: `${upperFirst(op.name)}Handler`,
         commandName: `${upperFirst(op.name)}Command`,
-        returnType: returnUnion,
+        returnType: returnUnion ?? scalarWireType,
         extraDeps: [...userExtraDeps, ...auditDeps],
         extraUsings: [...userExtraUsings, ...auditUsings],
         body: handlerBody,

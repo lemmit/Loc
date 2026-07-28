@@ -266,6 +266,12 @@ export function buildPyRoutesFile(
       ? "from app.auth.user import User"
       : null,
     "from app.db.engine import get_session",
+    // Wire-format helpers for a scalar operation-return value (money → its
+    // canonical decimal string, datetime → ISO-8601) — the same projection
+    // `to_wire` uses, reused when a non-void/non-union op answers 200.
+    refersTo("iso") || refersTo("money_str")
+      ? `from app.db.wire import ${[refersTo("iso") ? "iso" : null, refersTo("money_str") ? "money_str" : null].filter(Boolean).join(", ")}`
+      : null,
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     errorImports(refersTo),
@@ -1036,6 +1042,20 @@ function versionedSave(
   };
 }
 
+/** Serialize a scalar operation-return domain value to its wire form —
+ *  the same per-scalar handling the repository's `to_wire` projection uses:
+ *  money → its canonical decimal string (`money_str`), datetime → ISO-8601
+ *  (`iso`), every other scalar rides as-is.  Optionals guard `None` so a
+ *  `T?` return doesn't feed `None` into the string helper. */
+function pyScalarReturnToWire(expr: string, t: TypeIR): string {
+  const inner = t.kind === "optional" ? t.inner : t;
+  if (inner.kind === "primitive" && (inner.name === "money" || inner.name === "datetime")) {
+    const wire = inner.name === "money" ? `money_str(${expr})` : `iso(${expr})`;
+    return t.kind === "optional" ? `${wire} if ${expr} is not None else None` : wire;
+  }
+  return expr;
+}
+
 function operationRoute(
   agg: EnrichedAggregateIR,
   op: OperationIR,
@@ -1109,6 +1129,34 @@ function operationRoute(
   const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
   if (usesUser) callArgs.push("current_user");
   const vsave = versionedSave(agg);
+  // A scalar (non-void, non-union) return type — `operation describe(): string`.
+  // Structurally a one-success / zero-error union: capture the returned domain
+  // value exactly as the union arm does (`result = found.<op>(...)`), serialize
+  // it to wire, and answer 200 with the value declared as `response_model` (so
+  // it lands in the OpenAPI spec), instead of the 204 that discarded it.
+  if (op.returnType) {
+    const wireType = responsePyType(op.returnType, ctx);
+    return lines(
+      `@router.post("/{id}/${opSnake}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+      `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> ${wireType}:`,
+      usesUser || stampUpdateUsesUser
+        ? "    current_user: User = request.state.current_user"
+        : null,
+      "    repo = _repo(session)",
+      `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
+      `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+      `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
+      ...whenGate(agg, op),
+      op.audited ? "    __before = repo.to_wire(found)" : null,
+      `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
+      hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
+      ...vsave.ifMatch,
+      vsave.save,
+      op.audited ? "    __after = repo.to_wire(found)" : null,
+      ...(op.audited ? auditRecordCall(agg, op) : []),
+      `    return ${pyScalarReturnToWire("result", op.returnType)}`,
+    );
+  }
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
