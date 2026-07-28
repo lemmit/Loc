@@ -26,11 +26,13 @@ name: Migration evolution (runtime e2e)
 # harness drops+creates `chain`/`fresh` itself).  Schema introspection uses host
 # `psql` (preinstalled on the runner, as the tenancy-hierarchy gate relies on).
 #
-# Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling to the
-# tenancy / obs e2e gates; same rationale: a docker-heavy multi-boot on every
-# migration-touching PR is a runner burst for a regression acceptable to catch
-# one merge later.  Heavier than tenancy (three boots + two build trees per
-# cell), so a 35-min cap.
+# Triggers `push: main` + manual dispatch + a per-PR `run-migration-e2e` label
+# (apply it to a PR to run all five legs against that branch before merge).  NOT
+# on every PR by default — sibling to the tenancy / obs e2e gates; same
+# rationale: a docker-heavy multi-boot on every migration-touching PR is a runner
+# burst for a regression acceptable to catch one merge later, and the labelled
+# pre-merge run is the honest opt-in.  Heavier than tenancy (three boots + two
+# build trees per cell), so a 35-min cap.
 on:
   push:
     branches: [main]
@@ -50,17 +52,30 @@ on:
       - 'test/e2e/fixtures/migration-evolution/**'
       - 'package.json'
       - '.github/workflows/migration-evolution-e2e.yml'
+  # On-demand per-PR run: apply the `run-migration-e2e` label to a PR to run this
+  # otherwise push:main-only gate against that branch BEFORE merge (a
+  # `synchronize` push to an already-labelled PR re-runs it).  The job-level `if`
+  # below restricts the labeled trigger to that one label so other labels don't
+  # kick off a docker-heavy multi-boot.
+  pull_request:
+    types: [labeled, synchronize, reopened]
   workflow_dispatch:
   merge_group:
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   migration-evolution-e2e:
+    # push:main / merge_group / manual always run; on a PR only when the
+    # `run-migration-e2e` label is set (a `synchronize` push to an already-
+    # labelled PR re-runs it).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'run-migration-e2e')
     runs-on: ubuntu-latest
     # Cold path is dominated by the generated project's build/dep install run
     # TWICE (evolution tree + fresh tree) plus three boots. 35min cap.

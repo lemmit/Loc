@@ -496,9 +496,11 @@ fingerprint, and both assertion sequences; a thin per-backend `BackendDriver`
 supplies only the boot mechanics (mirroring the `tenancy-isolation` recipes).
 Opt-in, per backend: `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}`
 (each gated on `LOOM_MIGRATION_E2E[_…]=1`; needs docker or `LOOM_MIGRATION_PG_URL`
-plus host `psql`). The gate is main-push + dispatch, not per-PR — a docker-heavy
-multi-boot on every migration-touching PR is a runner burst for a regression
-acceptable to catch one merge later.
+plus host `psql`). The gate is main-push + dispatch, not per-PR by default — a
+docker-heavy multi-boot on every migration-touching PR is a runner burst for a
+regression acceptable to catch one merge later — but applying the
+`run-migration-e2e` label to a PR runs all five legs against that branch before
+merge.
 
 ## Relationship to `.loom/` and `wire-spec.json`
 
