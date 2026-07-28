@@ -109,7 +109,10 @@ export function renderHttpIndex(
   // FOLDED projections drive the event-fold tee + `http/projections.ts` mount.
   // Query-time projections (read-path-architecture.md rev.13) have no folds —
   // they mount their own `/projections` router from `http/query-projections.ts`.
-  const hasProjections = ctx.projections.some(isMaterializedProjection) && !usingMikro;
+  // FOLDED projections now emit on BOTH persistence adapters (the MikroORM
+  // read-model store + fold routes land via `buildProjectionsFile(..., usingMikro)`),
+  // so the fold tee + `/projections` mount are no longer drizzle-gated.
+  const hasProjections = ctx.projections.some(isMaterializedProjection);
   const hasQueryProjections = ctx.projections.some(isQueryTimeProjection) && !usingMikro;
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's

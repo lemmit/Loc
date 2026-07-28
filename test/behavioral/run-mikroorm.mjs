@@ -81,19 +81,10 @@ function walk(dir, pred, out = []) {
 // A new entry here is a newly-found, tracked mikroorm-adapter runtime gap —
 // never a silent drop.
 const MIKRO_SKIP = {
-  // Folded projections are emitted on the node backend through the DRIZZLE
-  // persistence adapter only: `src/platform/hono/v4/adapters/drizzle-persistence.ts`
-  // wires the `<Proj>Row` read-model table + fold upsert into the schema/routes,
-  // and the mikroorm adapter (`mikroorm-persistence.ts`) has no projection
-  // wiring, so a `persistence: mikroorm` node backend emits no read-model entity,
-  // no fold, and no `/projections` route at all (GET 404s at runtime). This is
-  // the same Drizzle-only shape as the node outbox MikroORM gap. The five
-  // FIRST-CLASS backends (node/drizzle, python, java, dotnet, elixir) fold +
-  // read the projection at runtime — that is the M-T4.2 parity claim; the
-  // MikroORM read-model emitter is a distinct follow-up slice.
-  projection:
-    "folded projections are emitted through the drizzle persistence adapter only; " +
-    "the mikroorm adapter has no read-model/fold/route wiring yet (GET /projections 404s)",
+  // (Folded projections now emit on the mikroorm adapter too — the `<Proj>Row`
+  // EntitySchema + `em.upsert` fold + `em.find`/`em.findOne` read routes land
+  // via `buildProjectionsFile(..., usingMikro)`, so the `projection` case runs
+  // here on real Postgres just like the drizzle tier.)
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`

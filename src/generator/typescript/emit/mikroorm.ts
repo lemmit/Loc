@@ -43,6 +43,7 @@ import type {
   EventIR,
   ExprIR,
   FieldIR,
+  ProjectionIR,
   RepositoryIR,
   RetrievalIR,
   TypeIR,
@@ -52,6 +53,7 @@ import {
   aggregateUsesMoneyDeep,
   exprUsesCurrentUser,
   findUsesCurrentUser,
+  isMaterializedProjection,
   isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
 import {
@@ -567,6 +569,26 @@ function workflowStateColumns(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): Mi
   );
 }
 
+/** Row-entity class name for a folded projection's read-model row
+ *  (`OrderBoard` → `OrderBoardRow`).  Exported so the projection builder's
+ *  `usingMikro` store branch references the same symbol. */
+export const mikroProjectionRowClass = (proj: ProjectionIR): string =>
+  `${upperFirst(proj.name)}Row`;
+
+/** Columns for a folded projection's read-model Row: the correlation field is
+ *  the string PK, every other state field maps through the shared `fieldColumns`
+ *  but is forced NULLABLE — a fold upserts only the fields its event carries, so
+ *  a row is partial until every contributing event arrives.  Mirrors the drizzle
+ *  `emitProjectionTable`. */
+function projectionStateColumns(proj: ProjectionIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
+  const corr = proj.correlationField;
+  return proj.stateFields.flatMap((f): MikroColumn[] =>
+    f.name === corr
+      ? [{ prop: f.name, mikroType: "string", tsType: "string", nullable: false, primary: true }]
+      : fieldColumns(f, ctx).map((c) => ({ ...c, nullable: true })),
+  );
+}
+
 export function renderMikroEntities(
   aggs: readonly EnrichedAggregateIR[],
   ctx: EnrichedBoundedContextIR,
@@ -722,6 +744,21 @@ export function renderMikroEntities(
       mikroWorkflowRowClass(wf),
       snake(plural(wf.name)),
       workflowStateColumns(wf, ctx),
+    );
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
+  // Folded-projection read-model Row entities (projection.md): one Row per
+  // FOLDED projection — the MikroORM twin of the drizzle `emitProjectionTable`.
+  // The in-process dispatcher's fold helpers (http/projections.ts, usingMikro
+  // branch) load/upsert these; the by-key/list read routes read them.  Query-
+  // time projections have no read-model row and are skipped.
+  for (const proj of ctx.projections ?? []) {
+    if (!isMaterializedProjection(proj)) continue;
+    const { block, schemaName } = renderRecordRowEntity(
+      mikroProjectionRowClass(proj),
+      snake(plural(proj.name)),
+      projectionStateColumns(proj, ctx),
     );
     schemaNames.push(schemaName);
     blocks.push(block);

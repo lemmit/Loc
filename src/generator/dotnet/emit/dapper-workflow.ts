@@ -26,6 +26,7 @@ import {
   isMaterializedProjection,
   isSingletonProjection,
   type ProjectionIR,
+  type TypeIR,
   type WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
@@ -99,12 +100,18 @@ export function dapperProjectionColumns(proj: ProjectionIR): DapperColumn[] {
 }
 
 /** The read-model columns for a projection.  Non-key columns are NULLABLE (a
- *  fold upserts only the fields an event carries — projectionTableShape). */
+ *  fold upserts only the fields an event carries — projectionTableShape).  A
+ *  non-key field is lowered AS IF optional so the whole `DapperColumn` is
+ *  consistently nullable — nullable DDL, a nullable `rowCs` (else the Row DTO's
+ *  non-null reference-type field trips CS8618), and a null-safe `save`/`hydrate`
+ *  — matching the nullable `<Proj>Row` POCO the fold upserts. */
 function projectionColumns(proj: ProjectionIR, accBase = "s"): DapperColumn[] {
   const corr = proj.correlationField;
   return proj.stateFields.map((f) => {
-    const c = fieldColumn(f, accBase);
-    return f.name === corr ? c : { ...c, nullable: true };
+    if (f.name === corr) return fieldColumn(f, accBase);
+    const optionalType: TypeIR =
+      f.type.kind === "optional" ? f.type : { kind: "optional", inner: f.type };
+    return fieldColumn({ ...f, type: optionalType }, accBase);
   });
 }
 

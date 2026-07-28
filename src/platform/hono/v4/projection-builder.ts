@@ -1,3 +1,4 @@
+import { mikroProjectionRowClass } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import type {
   EnrichedBoundedContextIR,
@@ -7,6 +8,13 @@ import type {
 import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
+
+/** The `db` handle's TS type in an emitted projection function signature —
+ *  `EntityManager` under the MikroORM adapter (`persistence: mikroorm`), the
+ *  Drizzle `NodePgDatabase` otherwise.  Threaded from `buildProjectionsFile`
+ *  (mirrors the workflow builder's `wfDbType`). */
+const projDbType = (usingMikro: boolean): string =>
+  usingMikro ? "EntityManager" : "NodePgDatabase<typeof schema>";
 
 // ---------------------------------------------------------------------------
 // Hono projection emission (projection.md) — `http/projections.ts`.
@@ -31,8 +39,13 @@ import { zodForResponse } from "./routes-builder.js";
 // ---------------------------------------------------------------------------
 
 /** Emit `http/projections.ts` for a context that declares ≥1 projection.
- *  Empty string when none (the file is then not written). */
-export function buildProjectionsFile(ctx: EnrichedBoundedContextIR): string {
+ *  Empty string when none (the file is then not written).
+ *
+ *  `usingMikro` (`persistence: mikroorm`): the read-model store runs on the
+ *  MikroORM EntityManager over the generated `<Proj>Row` entities (db/entities.ts)
+ *  instead of Drizzle — load/save via `em.findOne`/`em.upsert`, routes via
+ *  `em.find`/`em.findOne` (mirrors the workflow builder's `usingMikro` branch). */
+export function buildProjectionsFile(ctx: EnrichedBoundedContextIR, usingMikro = false): string {
   // FOLDED (materialized) projections only — the event-folded read model with a
   // physical row table + by-key routes.  Query-time projections
   // (read-path-architecture.md rev.13) have no folds / table and are emitted by
@@ -43,11 +56,11 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR): string {
   const body: string[] = [];
   for (const p of folded) body.push(...emitResponseSchemas(p), "");
   for (const p of folded) {
-    body.push(...emitStateHelpers(p), "");
-    for (const h of p.handlers) body.push(...emitFoldHandler(p, h), "");
+    body.push(...emitStateHelpers(p, usingMikro), "");
+    for (const h of p.handlers) body.push(...emitFoldHandler(p, h, usingMikro), "");
   }
-  body.push(...emitProjectionTee(folded), "");
-  body.push(...emitProjectionRoutes(folded));
+  body.push(...emitProjectionTee(folded, usingMikro), "");
+  body.push(...emitProjectionRoutes(folded, usingMikro));
   const bodyText = body.join("\n");
 
   // Enum zod schemas are inlined (a `<E>Schema` referenced by a response DTO);
@@ -68,13 +81,25 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR): string {
       ? `import { ${enumValueImports.join(", ")} } from "../domain/value-objects";`
       : null;
 
+  // Persistence-layer imports: the MikroORM store branch reads/upserts the
+  // generated `<Proj>Row` entities via the EntityManager (db/entities.ts); the
+  // default Drizzle branch selects/inserts the `<Proj>` table (db/schema.ts).
+  const persistenceImports = usingMikro
+    ? [
+        'import { EntityManager } from "@mikro-orm/postgresql";',
+        `import { ${folded.map(mikroProjectionRowClass).join(", ")} } from "../db/entities";`,
+      ]
+    : [
+        'import { eq } from "drizzle-orm";',
+        'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
+        'import * as schema from "../db/schema";',
+      ];
+
   return (
     [
       "// Auto-generated.",
       'import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";',
-      'import { eq } from "drizzle-orm";',
-      'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
-      'import * as schema from "../db/schema";',
+      ...persistenceImports,
       'import { type DomainEventDispatcher } from "../domain/events";',
       'import type * as Events from "../domain/events";',
       'import { AggregateNotFoundError } from "../domain/errors";',
@@ -103,22 +128,42 @@ function emitResponseSchemas(p: ProjectionIR): string[] {
   return out;
 }
 
-/** `type <T>State` + load/save helpers over the projection's Drizzle table
- *  (mirrors `emitWorkflowStateHelpers`). */
-function emitStateHelpers(p: ProjectionIR): string[] {
+/** `type <T>State` + load/save helpers over the projection's read-model store
+ *  (mirrors `emitWorkflowStateHelpers`).  MikroORM: the correlation Row IS the
+ *  state type — load reads by the correlation PK (`findOne`), save upserts on it
+ *  (`em.upsert`); the EntityManager owns the schema (`updateSchema` at boot), so
+ *  no migration.  Drizzle: the `$inferInsert` row type over the projection table. */
+function emitStateHelpers(p: ProjectionIR, usingMikro = false): string[] {
   const T = upperFirst(p.name);
-  const table = `schema.${lowerFirst(plural(p.name))}`;
   const corr = p.correlationField;
+  const dbType = projDbType(usingMikro);
+  if (usingMikro) {
+    const rowClass = mikroProjectionRowClass(p);
+    return [
+      `type ${T}State = ${rowClass};`,
+      `async function load${T}(`,
+      `  db: ${dbType},`,
+      `  key: string,`,
+      `): Promise<${T}State | undefined> {`,
+      `  const row = await db.findOne(${rowClass}, { ${corr}: key });`,
+      `  return row ?? undefined;`,
+      `}`,
+      `async function save${T}(db: ${dbType}, state: ${T}State): Promise<void> {`,
+      `  await db.upsert(${rowClass}, state);`,
+      `}`,
+    ];
+  }
+  const table = `schema.${lowerFirst(plural(p.name))}`;
   return [
     `type ${T}State = typeof ${table}.$inferInsert;`,
     `async function load${T}(`,
-    `  db: NodePgDatabase<typeof schema>,`,
+    `  db: ${dbType},`,
     `  key: string,`,
     `): Promise<${T}State | undefined> {`,
     `  const rows = await db.select().from(${table}).where(eq(${table}.${corr}, key)).limit(1);`,
     `  return rows[0];`,
     `}`,
-    `async function save${T}(db: NodePgDatabase<typeof schema>, state: ${T}State): Promise<void> {`,
+    `async function save${T}(db: ${dbType}, state: ${T}State): Promise<void> {`,
     `  await db.insert(${table}).values(state).onConflictDoUpdate({ target: ${table}.${corr}, set: state });`,
     `}`,
   ];
@@ -127,20 +172,29 @@ function emitStateHelpers(p: ProjectionIR): string[] {
 /** One pure fold: load-or-allocate the row for the event's key, apply the
  *  assignment folds against `state` (this-props render as `state.<field>`),
  *  upsert. */
-function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR): string[] {
+function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR, usingMikro = false): string[] {
   const T = upperFirst(p.name);
   const corr = p.correlationField;
   // Key: the `by <expr>` extractor, else the event field name-matching the key.
   const keyExpr = h.correlation
     ? renderTsExpr(h.correlation, { thisName: "state" })
     : `${h.param}.${corr}`;
+  // Allocate literal for a not-yet-seen key: just the correlation column (every
+  // other read-model column is nullable, so a partial row is valid — the fold
+  // assignments below populate the carried fields before the upsert).  Under
+  // MikroORM the state type is the `<Proj>Row` class (definite-assignment,
+  // non-optional fields), so the partial literal needs an `as unknown as` widen;
+  // Drizzle's `$inferInsert` makes nullable columns optional and accepts it directly.
+  const allocate = usingMikro
+    ? `({ ${corr}: __key } as unknown as ${T}State)`
+    : `{ ${corr}: __key }`;
   const out = [
     `export async function fold${h.event}Into${T}(`,
-    `  db: NodePgDatabase<typeof schema>,`,
+    `  db: ${projDbType(usingMikro)},`,
     `  ${h.param}: Events.${h.event},`,
     `): Promise<void> {`,
     `  const __key = ${keyExpr};`,
-    `  const state = (await load${T}(db, __key)) ?? { ${corr}: __key };`,
+    `  const state = (await load${T}(db, __key)) ?? ${allocate};`,
   ];
   for (const stmt of h.statements) {
     if (stmt.kind === "assign") {
@@ -157,7 +211,7 @@ function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR): string[] {
 /** The dispatcher decorator: route each dispatched event to every matching
  *  projection fold, then delegate to the inner dispatcher (workflow saga /
  *  realtime / noop).  Composes without touching the workflow dispatcher. */
-function emitProjectionTee(projections: ProjectionIR[]): string[] {
+function emitProjectionTee(projections: ProjectionIR[], usingMikro = false): string[] {
   // event type → the fold calls it triggers (one per matching handler).
   const byEvent = new Map<string, string[]>();
   for (const p of projections) {
@@ -170,7 +224,7 @@ function emitProjectionTee(projections: ProjectionIR[]): string[] {
   }
   const out = [
     `export function projectionTee(`,
-    `  db: NodePgDatabase<typeof schema>,`,
+    `  db: ${projDbType(usingMikro)},`,
     `  inner: DomainEventDispatcher,`,
     `): DomainEventDispatcher {`,
     `  return {`,
@@ -192,9 +246,9 @@ function emitProjectionTee(projections: ProjectionIR[]): string[] {
 
 /** The read routes — GET /<snake> (list) + /<snake>/{key} (by correlation id).
  *  Mounted under `/api/projections` by createApp. */
-function emitProjectionRoutes(projections: ProjectionIR[]): string[] {
+function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): string[] {
   const out = [
-    `export function projectionsRoutes(db: NodePgDatabase<typeof schema>): OpenAPIHono {`,
+    `export function projectionsRoutes(db: ${projDbType(usingMikro)}): OpenAPIHono {`,
     `  const app = new OpenAPIHono();`,
     "",
   ];
@@ -202,6 +256,7 @@ function emitProjectionRoutes(projections: ProjectionIR[]): string[] {
     const T = upperFirst(p.name);
     const slug = snake(p.name);
     const table = `schema.${lowerFirst(plural(p.name))}`;
+    const rowClass = mikroProjectionRowClass(p);
     const corr = p.correlationField;
     // List.
     out.push(`  app.openapi(`);
@@ -215,7 +270,11 @@ function emitProjectionRoutes(projections: ProjectionIR[]): string[] {
     );
     out.push(`    }),`);
     out.push(`    async (httpCtx) => {`);
-    out.push(`      const rows = await db.select().from(${table});`);
+    out.push(
+      usingMikro
+        ? `      const rows = await db.find(${rowClass}, {});`
+        : `      const rows = await db.select().from(${table});`,
+    );
     out.push(
       `      return httpCtx.json(rows as unknown as z.infer<typeof ${T}ListResponse>, 200);`,
     );
@@ -240,10 +299,14 @@ function emitProjectionRoutes(projections: ProjectionIR[]): string[] {
     out.push(`    }),`);
     out.push(`    async (httpCtx) => {`);
     out.push(`      const { key } = httpCtx.req.valid("param");`);
-    out.push(
-      `      const rows = await db.select().from(${table}).where(eq(${table}.${corr}, key)).limit(1);`,
-    );
-    out.push(`      const row = rows[0];`);
+    if (usingMikro) {
+      out.push(`      const row = await db.findOne(${rowClass}, { ${corr}: key });`);
+    } else {
+      out.push(
+        `      const rows = await db.select().from(${table}).where(eq(${table}.${corr}, key)).limit(1);`,
+      );
+      out.push(`      const row = rows[0];`);
+    }
     out.push(`      if (!row) throw new AggregateNotFoundError("not_found");`);
     out.push(`      return httpCtx.json(row as unknown as z.infer<typeof ${T}Response>, 200);`);
     out.push(`    },`);
