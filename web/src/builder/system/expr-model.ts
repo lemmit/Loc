@@ -10,6 +10,8 @@ import { printExpr } from "../../../../src/language/print/index.js";
 // the operator tree (binary / unary / paren), literals, calls (`f(a, b)`),
 // member access (`a.b`, `a.b(c)`), `match`, ternary, builder calls (`T { … }`,
 // the v2 canonical form for value-object / entity-part construction), object literals,
+// list literals (`[a, b]`), backtick template strings (`` `text {hole}` ``),
+// `money("…")`, `now()`, primitive conversions (`string(x)`),
 // and lambdas — both expression-body (`p => expr`) and block-body
 // (`p => { … }`, modelled as editable statement rows).  Everything still
 // unmodelled is a `raw` leaf carrying its printed source verbatim —
@@ -47,6 +49,12 @@ export type EStmt =
 
 export const ASSIGN_OPS = [":=", "+=", "-="];
 
+/** `PrimitiveConversion.target` — the infallible conversion vocabulary
+ *  (`string(x)` / `long(x)` / `decimal(x)` / `money(x)`). */
+export type ConvertTarget = "string" | "long" | "decimal" | "money";
+
+export const CONVERT_TARGETS: ConvertTarget[] = ["string", "long", "decimal", "money"];
+
 export type EExpr =
   | { kind: "binary"; op: string; left: EExpr; right: EExpr }
   | { kind: "unary"; op: string; operand: EExpr }
@@ -60,6 +68,15 @@ export type EExpr =
   | { kind: "match"; arms: EMatchArm[]; else?: EExpr }
   | { kind: "builder"; type: string; entries: ECallArg[] }
   | { kind: "object"; fields: EObjField[] }
+  | { kind: "list"; elements: EExpr[] }
+  // Backtick template — `segments` are the N+1 literal texts (unescaped, as
+  // the value converter hands them over) interleaved with the N hole
+  // expressions: seg0 {hole0} seg1 {hole1} … segN.  A no-hole template is one
+  // segment and no holes (the `TEMPLATE_FULL` shape).
+  | { kind: "template"; segments: string[]; holes: EExpr[] }
+  | { kind: "money"; amount: string }
+  | { kind: "now" }
+  | { kind: "convert"; target: ConvertTarget; inner: EExpr }
   | { kind: "raw"; text: string };
 
 // BinaryExpr.op covers comparison, logical and arithmetic operators.
@@ -104,6 +121,26 @@ export function seedExpr(node: Expression): EExpr {
       return { kind: "builder", type: node.type, entries: node.entries.map(seedEntry) };
     case "ObjectLit":
       return { kind: "object", fields: node.fields.map(seedField) };
+    case "ListLit":
+      return { kind: "list", elements: node.elements.map(seedExpr) };
+    case "TemplateStr":
+      // `strings` carries N+1 delimiter-stripped, unescaped segments for N
+      // holes.  A mismatched pair can only come from a mid-edit parse error —
+      // keep it verbatim rather than structuring a template we can't reassemble.
+      return node.strings.length === node.holes.length + 1
+        ? { kind: "template", segments: [...node.strings], holes: node.holes.map(seedExpr) }
+        : { kind: "raw", text: printExpr(node) };
+    case "MoneyLit":
+      // Mirrors printMoney's `?? "0"` fallback for a half-typed literal.
+      return { kind: "money", amount: node.value ?? "0" };
+    case "NowExpr":
+      return { kind: "now" };
+    case "PrimitiveConversion":
+      // `target` / `value` are optional in the generated AST (a parse error
+      // mid-construction leaves them unset) — that shape stays a raw leaf.
+      return node.target && node.value
+        ? { kind: "convert", target: node.target, inner: seedExpr(node.value) }
+        : { kind: "raw", text: printExpr(node) };
     default:
       return { kind: "raw", text: printExpr(node) };
   }
@@ -184,6 +221,45 @@ function emitFields(fields: EObjField[]): string {
   return ` ${fields.map((f) => `${f.name}: ${emitExpr(f.value)}`).join(", ")} `;
 }
 
+// Mirrors `escapeTemplateSegment` in print-expr.ts — segments are held
+// unescaped (the `TEMPLATE_*` value converter strips the delimiters and
+// resolves `\.`), so the template-significant chars are re-escaped on the way
+// back out.  Duplicated rather than imported: the printer keeps it private.
+function escapeTemplateSegment(s: string): string {
+  return s.replace(/[\\`{}\n\r\t]/g, (c) => {
+    switch (c) {
+      case "\\":
+        return "\\\\";
+      case "`":
+        return "\\`";
+      case "{":
+        return "\\{";
+      case "}":
+        return "\\}";
+      case "\n":
+        return "\\n";
+      case "\r":
+        return "\\r";
+      default:
+        return "\\t";
+    }
+  });
+}
+
+/** Append a trailing `{hole}` to a template (a new empty segment closes it).
+ *  Keeps the `segments.length === holes.length + 1` invariant. */
+export function addTemplateHole(t: Extract<EExpr, { kind: "template" }>, hole: EExpr): EExpr {
+  return { ...t, segments: [...t.segments, ""], holes: [...t.holes, hole] };
+}
+
+/** Drop hole `i`, splicing the literal segments that surrounded it back
+ *  together so the rendered text is unchanged apart from the hole. */
+export function removeTemplateHole(t: Extract<EExpr, { kind: "template" }>, i: number): EExpr {
+  const segments = t.segments.slice();
+  segments.splice(i, 2, `${segments[i] ?? ""}${segments[i + 1] ?? ""}`);
+  return { ...t, segments, holes: t.holes.filter((_, j) => j !== i) };
+}
+
 export function emitExpr(e: EExpr): string {
   switch (e.kind) {
     case "binary":
@@ -219,7 +295,61 @@ export function emitExpr(e: EExpr): string {
       return `${e.type} {${emitEntries(e.entries)}}`;
     case "object":
       return `{${emitFields(e.fields)}}`;
+    case "list":
+      // Mirrors printExpr's ListLit arm: an empty list prints `[ ]` (spaced) —
+      // the bare `[]` token lexes as the array-type marker and wouldn't re-parse.
+      return e.elements.length === 0 ? "[ ]" : `[${e.elements.map(emitExpr).join(", ")}]`;
+    case "template": {
+      // Mirrors printExpr's TemplateStr arm: seg0 {hole0} seg1 … , re-escaped.
+      let out = "`";
+      for (let i = 0; i < e.segments.length; i++) {
+        out += escapeTemplateSegment(e.segments[i] ?? "");
+        const hole = e.holes[i];
+        if (hole) out += `{${emitExpr(hole)}}`;
+      }
+      return `${out}\``;
+    }
+    case "money":
+      return `money(${JSON.stringify(e.amount)})`;
+    case "now":
+      return "now()";
+    case "convert":
+      return `${e.target}(${emitExpr(e.inner)})`;
     case "raw":
       return e.text;
   }
 }
+
+/** The neutral placeholder a fresh slot starts as — `null` keeps the emitted
+ *  source parseable until it is edited (the same node the argument / field
+ *  "+" buttons append). */
+export function blankExpr(): EExpr {
+  return { kind: "lit", lit: "null", value: "null" };
+}
+
+/** Insert-menu catalogue — every expression form the editor can build from
+ *  scratch, in the order the leaf "▾" menu offers them.  `make()` returns a
+ *  blank node of that form whose emitted source already parses, so picking one
+ *  never breaks the commit round-trip. */
+export const NEW_EXPR_FORMS: { id: string; label: string; make: () => EExpr }[] = [
+  { id: "raw", label: "name / reference", make: () => ({ kind: "raw", text: "value" }) },
+  { id: "string", label: '"string"', make: () => ({ kind: "lit", lit: "string", value: "" }) },
+  { id: "int", label: "number", make: () => ({ kind: "lit", lit: "int", value: "0" }) },
+  { id: "bool", label: "true / false", make: () => ({ kind: "lit", lit: "bool", value: "true" }) },
+  { id: "null", label: "null", make: blankExpr },
+  { id: "template", label: "`template {…}`", make: () => ({ kind: "template", segments: ["text"], holes: [] }) },
+  { id: "list", label: "[ list ]", make: () => ({ kind: "list", elements: [] }) },
+  { id: "money", label: 'money("…")', make: () => ({ kind: "money", amount: "0.00" }) },
+  { id: "now", label: "now()", make: () => ({ kind: "now" }) },
+  { id: "convert", label: "string(…) — convert", make: () => ({ kind: "convert", target: "string", inner: blankExpr() }) },
+  { id: "binary", label: "a == b", make: () => ({ kind: "binary", op: "==", left: { kind: "raw", text: "a" }, right: blankExpr() }) },
+  { id: "unary", label: "!a", make: () => ({ kind: "unary", op: "!", operand: { kind: "raw", text: "a" } }) },
+  { id: "paren", label: "( … )", make: () => ({ kind: "paren", inner: blankExpr() }) },
+  { id: "call", label: "f(…)", make: () => ({ kind: "call", callee: { kind: "raw", text: "f" }, args: [] }) },
+  { id: "member", label: "a.b", make: () => ({ kind: "member", receiver: { kind: "raw", text: "a" }, member: "b", call: false, args: [] }) },
+  { id: "lambda", label: "p => …", make: () => ({ kind: "lambda", param: "p", body: blankExpr() }) },
+  { id: "ternary", label: "a ? b : c", make: () => ({ kind: "ternary", cond: { kind: "lit", lit: "bool", value: "true" }, then: blankExpr(), else: blankExpr() }) },
+  { id: "match", label: "match { … }", make: () => ({ kind: "match", arms: [{ cond: { kind: "lit", lit: "bool", value: "true" }, value: blankExpr() }] }) },
+  { id: "builder", label: "T { … }", make: () => ({ kind: "builder", type: "Type", entries: [] }) },
+  { id: "object", label: "{ field: … }", make: () => ({ kind: "object", fields: [{ name: "field", value: blankExpr() }] }) },
+];
