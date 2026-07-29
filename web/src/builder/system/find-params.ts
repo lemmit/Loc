@@ -10,7 +10,7 @@ import type {
 import { printStructural } from "../../../../src/language/print/index.js";
 import { mkParameter } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode } from "../edit-engine";
+import { spliceNodeIfParses } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
 import { baseLabel, baseSpecOf, buildTypeRef, type BaseSpec, type TypeSpec } from "./fields";
 
@@ -74,7 +74,7 @@ function commit(source: string, repoName: string, findName: string, mutate: (fin
   const find = repo?.finds.find((f) => f.name === findName);
   if (!repo || !find) return null;
   if (!mutate(find, repo)) return null;
-  return spliceNode(source, repo, printStructural(repo));
+  return spliceNodeIfParses(source, repo, printStructural(repo));
 }
 
 function buildParam(name: string, spec: TypeSpec): Parameter {

@@ -1,4 +1,5 @@
 import { CstUtils, type AstNode } from "langium";
+import { parseDdd } from "./parse";
 
 // ---------------------------------------------------------------------------
 // CST/text edit engine for the visual Builders.
@@ -7,6 +8,15 @@ import { CstUtils, type AstNode } from "langium";
 // file; they regenerate just the construct the user changed (via the
 // `src/language/print` printer) and splice it over that node's CST range, so
 // everything outside — comments, blank lines, hand-spacing — is byte-preserved.
+//
+// Every write-back is *validated before it commits*: a builder that splices a
+// regenerated fragment can produce text the parser rejects (a printer arm that
+// emits a malformed fragment, a rename to a non-identifier, a delete that
+// leaves a dangling brace).  Committing that would hand the user a broken
+// source they never typed — and, worse, one the builders then refuse to open.
+// `ifParses` is the shared gate: candidate text is re-parsed and only returned
+// when it still parses, so a bad write becomes a visible no-op instead of a
+// corrupted file.  See `docs/audits/playground-file-mgmt-review-2026-07.md` #12.
 // ---------------------------------------------------------------------------
 
 export interface TextEdit {
@@ -82,4 +92,25 @@ export function spliceNode(
   const range = nodeEditRange(node, options);
   if (!range) throw new Error("spliceNode: node has no CST range (not parsed from this source?)");
   return applyEdits(source, [{ ...range, newText }]);
+}
+
+/** Validate by re-parsing: return `candidate` only if it still parses. */
+export function ifParses(candidate: string): string | null {
+  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
+}
+
+// `spliceNode` + the parse gate: returns the spliced source, or null when the
+// node has no CST range (so it can't be addressed in `source` at all) or when
+// the splice would produce a source the parser rejects.  Callers already treat
+// null as "nothing to write", so the refusal needs no special handling beyond
+// telling the user (see `useRefusal` in `./refusal`).
+export function spliceNodeIfParses(
+  source: string,
+  node: AstNode,
+  newText: string,
+  options?: NodeRangeOptions,
+): string | null {
+  const range = nodeEditRange(node, options);
+  if (!range) return null;
+  return ifParses(applyEdits(source, [{ ...range, newText }]));
 }

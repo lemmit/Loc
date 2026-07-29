@@ -6,7 +6,8 @@ import type { LayoutCtx } from "../layout/ctx";
 import type { Component, EnumDecl } from "../../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isPage, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
-import { spliceNode } from "./edit-engine";
+import { ifParses, spliceNodeIfParses } from "./edit-engine";
+import { RefusalLine, useRefusal } from "./refusal";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -142,10 +143,20 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
   const stateTypes = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const enumCases = useMemo(() => collectEnums(parsed.ast), [parsed]);
+  const refusal = useRefusal();
 
   // Apply a source-level state edit (splice) and re-seed, like handleApply.
+  // The State panel's helpers splice a reprinted `state { … }` block; a bad
+  // reprint would otherwise commit a source the builder itself can't reopen,
+  // so the candidate is re-parsed here before it reaches the editor.
   const applyState = (next: string | null): void => {
+    // null here means the helper found nothing to edit — not a refusal.
     if (next == null) return;
+    if (ifParses(next) == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
@@ -233,13 +244,24 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return <Message>No <code>page</code> or <code>component</code> with a <code>body:</code> found. Add a <code>ui {"{ page { … } }"}</code> block.</Message>;
   }
 
+  // `source` is read ONCE and everything downstream — the parse that locates
+  // the page, the splice, and the re-parse that validates it — runs against
+  // that same snapshot.  The canvas is seeded off a 350 ms-debounced parse, so
+  // `ctx.getSource()` can have drifted from what the user sees; re-reading it
+  // between validate and commit would reopen exactly that window.
   const handleApply = (nodes: SerializedNodes): void => {
     const source = ctx.getSource();
     const fresh = parseDdd(source);
     const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    ctx.onSourceChange(spliceNode(source, page.expr, emitted), "builder");
+    const next = spliceNodeIfParses(source, page.expr, emitted);
+    if (next == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
+    ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
 
@@ -250,6 +272,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
         </Group>
       )}
+      <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder
           key={`${current.name}:${rev}`}

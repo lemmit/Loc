@@ -22,7 +22,7 @@ import {
   mkTypeRef,
 } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode } from "../edit-engine";
+import { spliceNodeIfParses } from "../edit-engine";
 import type { NodeKind } from "./model";
 
 export { PRIMITIVES, type PrimitiveName };
@@ -212,7 +212,9 @@ function commit(source: string, kind: NodeKind, name: string, mutate: (node: Ast
   const node = findConstruct(fresh.ast, kind, name);
   if (!node) return null;
   if (!mutate(node)) return null;
-  return spliceNode(source, node, printStructural(node));
+  // Gate the reprint: a printer arm that emits a malformed fragment must not
+  // reach the editor. Callers already treat null as "nothing written".
+  return spliceNodeIfParses(source, node, printStructural(node));
 }
 
 export function addField(

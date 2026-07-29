@@ -6,7 +6,7 @@
 // NameProvider + References (same machinery as the language server's Rename).
 
 import { AstUtils, type AstNode } from "langium";
-import { applyEdits, type TextEdit } from "../edit-engine";
+import { applyEdits, ifParses, type TextEdit } from "../edit-engine";
 import { buildLinkedDocument } from "../system/linked-doc";
 
 export async function renameByAstType(
@@ -49,5 +49,7 @@ export async function renameByAstType(
     seen.add(key);
     return true;
   });
-  return applyEdits(source, unique);
+  // Write-back gate (mirrors v1's `renameConstruct` / `renameMember`): refuse a
+  // rename whose result the parser rejects rather than committing it.
+  return ifParses(applyEdits(source, unique));
 }

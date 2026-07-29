@@ -2,7 +2,7 @@ import { AstUtils, type AstNode } from "langium";
 import type { Deployable, Model } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode } from "../edit-engine";
+import { spliceNodeIfParses } from "../edit-engine";
 
 // ---------------------------------------------------------------------------
 // Deployable composition bindings — the multi-valued / single references a
@@ -75,8 +75,7 @@ function commit(source: string, name: string, mutate: (d: Deployable) => void): 
   }
   if (!target) return null;
   mutate(target);
-  const next = spliceNode(source, target, printStructural(target));
-  return parseDdd(next).parserErrors.length === 0 ? next : null;
+  return spliceNodeIfParses(source, target, printStructural(target));
 }
 
 const ref = (refText: string): never => ({ $refText: refText }) as never;

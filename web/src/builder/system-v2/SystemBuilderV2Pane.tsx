@@ -48,10 +48,12 @@ import {
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
-import { spliceNode } from "../edit-engine";
+import { ifParses } from "../edit-engine";
+import { RefusalLine, useRefusal } from "../refusal";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
+import { deleteByAstType, deleteInvariant } from "./delete-extra";
 import { renameByAstType } from "./rename-extra";
 import {
   apiNames,
@@ -384,11 +386,26 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     [parsed, path, parseOk],
   );
 
+  const refusal = useRefusal();
+
   /** Single choke-point for source edits — bump `rev` so the next render
-   *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
+   *  re-parses, re-builds the view-graph and re-binds the per-stmt data.
+   *  Also the last line of defence for the write-back gate: whatever path
+   *  produced `next`, it doesn't reach the editor unless it parses. */
   const apply = (next: string): void => {
+    if (ifParses(next) == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
+  };
+
+  /** A helper returned null (nothing written) — surface it, don't no-op. */
+  const applyOrRefuse = (next: string | null): void => {
+    if (next == null) refusal.refuse();
+    else apply(next);
   };
 
   // When the path's leaf is an operation / workflow, materialise its statement
@@ -579,18 +596,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const aggName = aggOwner.name;
         const idx = Number(n.id.slice("invariant:".length));
         const onDelete = (): void => {
-          const agg = findAggregate(parsed.ast, aggName);
-          if (!agg) return;
-          let i = 0;
-          for (const member of agg.members) {
-            if (member.$type === "Invariant") {
-              if (i === idx) {
-                apply(spliceNode(ctx.getSource(), member, ""));
-                return;
-              }
-              i++;
-            }
-          }
+          applyOrRefuse(deleteInvariant(ctx.getSource(), aggName, idx));
         };
         const { expressionEditor, onToggleExpression } = buildExprToggle(
           { kind: "invariant", owner: aggName, index: idx },
@@ -618,9 +624,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const onRename = (next: string): void => {
           if (!IDENTIFIER.test(next) || next === n.name) return;
           void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next)
-            .then((result) => {
-              if (result != null) apply(result);
-            })
+            .then(applyOrRefuse)
             // A failed rename leaves the source untouched; log it rather than
             // letting the rejection surface as `unhandledrejection` noise.
             .catch((e: unknown) => {
@@ -657,9 +661,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           ? (next: string) => {
               if (!IDENTIFIER.test(next) || next === n.name) return;
               void renameByAstType(ctx.getSource(), astType, n.name, next)
-                .then((result) => {
-                  if (result != null) apply(result);
-                })
+                .then(applyOrRefuse)
                 .catch((e: unknown) => {
                   // eslint-disable-next-line no-console
                   console.error("rename failed:", e);
@@ -669,12 +671,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       const onDelete =
         astType != null
           ? () => {
-              for (const ast of AstUtils.streamAst(parsed.ast)) {
-                if (ast.$type === astType && (ast as { name?: string }).name === n.name) {
-                  apply(spliceNode(ctx.getSource(), ast, ""));
-                  return;
-                }
-              }
+              applyOrRefuse(deleteByAstType(ctx.getSource(), astType, n.name));
             }
           : undefined;
 
@@ -884,6 +881,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={jumpTo} />
       <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
+      <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}

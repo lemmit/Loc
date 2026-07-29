@@ -3,7 +3,7 @@ import type { BodyProp, Expression, Model, Page, StateBlock, StateField } from "
 import { printStructural } from "../../../../src/language/print/index.js";
 import { mkStateBlock, mkStateField } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { applyEdits, nodeEditRange, spliceNode } from "../edit-engine";
+import { applyEdits, nodeEditRange, spliceNodeIfParses } from "../edit-engine";
 import { baseLabel, baseSpecOf, buildTypeRef, type BaseSpec, type TypeSpec } from "../system/fields";
 
 // ---------------------------------------------------------------------------
@@ -91,8 +91,8 @@ function commit(source: string, pageName: string, mutate: (page: Page) => string
 }
 
 /** Reprint the page's existing StateBlock over its CST range. */
-function spliceState(source: string, sb: StateBlock): string {
-  return spliceNode(source, sb, printStructural(sb));
+function spliceState(source: string, sb: StateBlock): string | null {
+  return spliceNodeIfParses(source, sb, printStructural(sb));
 }
 
 export function addStateField(source: string, pageName: string, spec: TypeSpec = STRING_TYPE): string | null {

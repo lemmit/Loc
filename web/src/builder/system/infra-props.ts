@@ -2,7 +2,7 @@ import { AstUtils, type AstNode } from "langium";
 import type { Deployable, Model, Storage } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode } from "../edit-engine";
+import { spliceNodeIfParses } from "../edit-engine";
 
 // ---------------------------------------------------------------------------
 // Scalar property editing for the infra constructs (storage / deployable).
@@ -29,8 +29,7 @@ function commit(source: string, type: string, name: string, mutate: (node: AstNo
   const node = findByName(fresh.ast, type, name);
   if (!node) return null;
   mutate(node);
-  const next = spliceNode(source, node, printStructural(node));
-  return parseDdd(next).parserErrors.length === 0 ? next : null;
+  return spliceNodeIfParses(source, node, printStructural(node));
 }
 
 // --- storage ---------------------------------------------------------------

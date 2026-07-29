@@ -11,7 +11,7 @@ import type {
   WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
 import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 import { parseDdd } from "../parse";
 
 // ---------------------------------------------------------------------------
@@ -180,11 +180,6 @@ function lineIndent(source: string, offset: number): string {
   let i = start;
   while (i < source.length && (source[i] === " " || source[i] === "\t")) i++;
   return source.slice(start, i);
-}
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
 }
 
 export function editStatement(source: string, loc: BodyLocator, index: number, text: string): string | null {
