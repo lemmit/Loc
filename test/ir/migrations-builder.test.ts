@@ -16,6 +16,7 @@ import {
   BASE_TIMESTAMP,
   buildMigrations,
   diffSchema,
+  MigrationAmbiguousRenameError,
   MigrationDestructiveError,
   MigrationShapeChangeError,
   schemaFromModule,
@@ -1595,6 +1596,184 @@ describe("A8.3 — destructive-change gate", () => {
       module: "M",
     });
     expect(steps.every((s) => s.op === "createTable")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Silent-rename data-loss guard (weak-spot #1 / M-T2.1 residual).
+//
+// The rename heuristic in `applyDestructivePolicy` only collapses an EXACTLY
+// one-drop-one-add-same-type pair.  The two shapes it structurally can't
+// recognise — a rename that ALSO changes the column's type, and two renames at
+// once on one table — must NEVER pass through as a silent data-losing drop+add.
+// Absent `--allow-destructive` they fail fast with the dedicated
+// `loom.migration-ambiguous-rename` code; the explicit rename-intent block is
+// the non-lossy path.  These are the fast, daemonless per-PR pins that move
+// detection off the nightly boot gate.  Each risky shape is asserted to be
+// EITHER a safe migration OR the fail-fast diagnostic — never a silent drop+add.
+// ---------------------------------------------------------------------------
+
+describe("applyDestructivePolicy — silent-rename data-loss guard", () => {
+  const idCol = { name: "id", type: { kind: "uuid" as const }, nullable: false };
+  const users = (extra: TableShape["columns"]): SchemaSnapshot => ({
+    schemaVersion: 1,
+    tables: [tbl("users", [idCol, ...extra])],
+  });
+  const noFlag = { allowDestructive: false, module: "M" } as const;
+
+  it("plain rename (one-drop-one-add, same type) collapses to a safe renameColumn — no data loss", () => {
+    const prev = users([{ name: "full_name", type: { kind: "text" }, nullable: false }]);
+    const next = users([{ name: "name", type: { kind: "text" }, nullable: false }]);
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, noFlag);
+    expect(steps).toEqual([
+      { op: "renameColumn", table: "users", from: "full_name", to: "name", type: { kind: "text" } },
+    ]);
+    // The whole point: no drop/add smuggling the column's data away.
+    expect(steps.some((s) => s.op === "dropColumn" || s.op === "addColumn")).toBe(false);
+  });
+
+  it("rename+type-change fails fast with loom.migration-ambiguous-rename — never a silent drop+add", () => {
+    const prev = users([{ name: "age", type: { kind: "text" }, nullable: false }]);
+    const next = users([{ name: "years", type: { kind: "int" }, nullable: false }]);
+    let thrown: unknown;
+    try {
+      applyDestructivePolicy(diffSchema(prev, next), prev, noFlag);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(MigrationAmbiguousRenameError);
+    // Subclasses the destructive error so every existing catch still fires.
+    expect(thrown).toBeInstanceOf(MigrationDestructiveError);
+    const err = thrown as MigrationAmbiguousRenameError;
+    expect(err.code).toBe("loom.migration-ambiguous-rename");
+    expect(err.renames).toEqual([{ table: "users", drops: ["age"], adds: ["years"] }]);
+    // The remedy is spelled out in the message.
+    expect(err.message).toMatch(/migration "<name>" \{ <Aggregate>\.<oldField> -> <newField> \}/);
+  });
+
+  it("rename+type-change is annotatable → renameColumn in place, no drop (the type-cast is separately gated, not a data drop)", () => {
+    const prev = users([{ name: "age", type: { kind: "text" }, nullable: false }]);
+    const next = users([{ name: "years", type: { kind: "int" }, nullable: false }]);
+    // The annotation keeps the column IN PLACE (renameColumn), so its data is
+    // never dropped.  The residual `alterColumnType` is a cast, still gated as
+    // destructive on its own (text→int can truncate) — acknowledged here with
+    // the flag; the point is there is NO drop of the renamed column's data.
+    const steps = applyDestructivePolicy(
+      diffSchema(prev, next, [{ table: "users", from: "age", to: "years" }]),
+      prev,
+      { allowDestructive: true, module: "M" },
+    );
+    expect(steps.map((s) => s.op)).toEqual(["renameColumn", "alterColumnType"]);
+    expect(steps.some((s) => s.op === "dropColumn" || s.op === "addColumn")).toBe(false);
+  });
+
+  it("rename+type-change under --allow-destructive is the explicit opt-in drop+add (accepted loss)", () => {
+    const prev = users([{ name: "age", type: { kind: "text" }, nullable: false }]);
+    const next = users([{ name: "years", type: { kind: "int" }, nullable: false }]);
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, {
+      allowDestructive: true,
+      module: "M",
+    });
+    expect(steps.some((s) => s.op === "dropColumn" && s.name === "age")).toBe(true);
+    expect(steps.some((s) => s.op === "addColumn")).toBe(true);
+  });
+
+  it("two-renames-at-once (2 drops + 2 adds) fails fast — never a silent 2×drop+add", () => {
+    const prev = users([
+      { name: "qty", type: { kind: "int" }, nullable: false },
+      { name: "shipped_at", type: { kind: "datetime" }, nullable: false },
+    ]);
+    const next = users([
+      { name: "quantity", type: { kind: "int" }, nullable: false },
+      { name: "fulfilled_at", type: { kind: "datetime" }, nullable: false },
+    ]);
+    let thrown: unknown;
+    try {
+      applyDestructivePolicy(diffSchema(prev, next), prev, noFlag);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(MigrationAmbiguousRenameError);
+    const err = thrown as MigrationAmbiguousRenameError;
+    expect(err.renames).toHaveLength(1);
+    expect(err.renames[0]!.drops).toEqual(["qty", "shipped_at"]);
+    expect(err.renames[0]!.adds).toEqual(["quantity", "fulfilled_at"]);
+  });
+
+  it("two-renames-at-once is annotatable → two renameColumn, zero drops (the non-lossy path)", () => {
+    const prev = users([
+      { name: "qty", type: { kind: "int" }, nullable: false },
+      { name: "shipped_at", type: { kind: "datetime" }, nullable: false },
+    ]);
+    const next = users([
+      { name: "quantity", type: { kind: "int" }, nullable: false },
+      { name: "fulfilled_at", type: { kind: "datetime" }, nullable: false },
+    ]);
+    const steps = applyDestructivePolicy(
+      diffSchema(prev, next, [
+        { table: "users", from: "qty", to: "quantity" },
+        { table: "users", from: "shipped_at", to: "fulfilled_at" },
+      ]),
+      prev,
+      noFlag,
+    );
+    expect(steps.filter((s) => s.op === "renameColumn")).toHaveLength(2);
+    expect(steps.some((s) => s.op === "dropColumn" || s.op === "addColumn")).toBe(false);
+  });
+
+  it("a pure column drop (no matching add) stays the GENERIC destructive error — not misreported as a rename", () => {
+    const prev = users([{ name: "legacy", type: { kind: "text" }, nullable: false }]);
+    const next = users([]);
+    let thrown: unknown;
+    try {
+      applyDestructivePolicy(diffSchema(prev, next), prev, noFlag);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(MigrationDestructiveError);
+    expect(thrown).not.toBeInstanceOf(MigrationAmbiguousRenameError);
+    expect((thrown as MigrationDestructiveError).code).toBe("loom.migration-destructive");
+  });
+
+  it("a drop + a BACKFILLED add is an intentional new column, not flagged as a rename (still gated on the drop)", () => {
+    // The drop is genuinely destructive, so it still fails fast — but as the
+    // generic error, because a backfilled add carries explicit intent and is
+    // excluded from the rename-shape signature.  Types differ so the same-type
+    // heuristic does NOT pair them into a rename in the first place.
+    const prev = users([{ name: "legacy", type: { kind: "int" }, nullable: false }]);
+    const next = users([{ name: "note", type: { kind: "text" }, nullable: true }]);
+    let thrown: unknown;
+    try {
+      applyDestructivePolicy(diffSchema(prev, next), prev, {
+        ...noFlag,
+        backfills: [{ table: "users", column: "note", valueSql: "''" }],
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(MigrationDestructiveError);
+    expect(thrown).not.toBeInstanceOf(MigrationAmbiguousRenameError);
+  });
+
+  it("backfill weave keeps the safe order: add-nullable → UPDATE → SET NOT NULL (never flip-before-backfill)", () => {
+    // A mis-ordered weave (SET NOT NULL before the UPDATE) fails at apply time
+    // on a populated table.  Pin the ordering so a regression is caught here,
+    // per-PR, instead of only in the nightly boot gate.
+    const prev = { schemaVersion: 1 as const, tables: [tbl("orders", [idCol])] };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [tbl("orders", [idCol, { name: "status", type: { kind: "text" }, nullable: false }])],
+    };
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, {
+      ...noFlag,
+      backfills: [{ table: "orders", column: "status", valueSql: "'pending'" }],
+    });
+    expect(steps.map((s) => s.op)).toEqual(["addColumn", "backfillColumn", "alterColumnNullable"]);
+    const add = steps[0]!;
+    expect(add.op === "addColumn" && add.column.nullable).toBe(true); // added nullable first
+    const backfillIdx = steps.findIndex((s) => s.op === "backfillColumn");
+    const flipIdx = steps.findIndex((s) => s.op === "alterColumnNullable" && !s.nullable);
+    expect(backfillIdx).toBeLessThan(flipIdx); // UPDATE strictly precedes SET NOT NULL
   });
 });
 

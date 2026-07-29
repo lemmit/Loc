@@ -147,8 +147,15 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
 - **Rename detection (heuristic fallback).** With no explicit block, a table with
   *exactly one* `dropColumn` and *one* `addColumn` **of identical type** is an
   unambiguous rename → the pair collapses into a single non-destructive
-  `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO b`). Any other drop/add mix
-  stays drop+add and falls under the gate.
+  `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO b`). Any other drop/add mix on
+  one table — the two shapes the heuristic **cannot** collapse (a rename that also
+  changes type, or two renames at once) — is *rename-shaped* but ambiguous. Rather
+  than silently degrade to a data-losing drop+add, it **aborts** with the dedicated
+  **`loom.migration-ambiguous-rename`** error, which names the drop/add columns and
+  points at the explicit `migration "…" { Agg.old -> new }` block (the non-lossy
+  remedy). A backfilled add is an explicit new column, never treated as a rename.
+  As with every destructive step, `--allow-destructive` is the deliberate opt-in
+  that accepts the drop+add (and its data loss).
 - **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
   destructive → blocked unless `--allow-destructive`.
 - **Required-column adds.** A NOT-NULL `addColumn` with no default on a
