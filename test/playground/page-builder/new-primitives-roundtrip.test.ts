@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BodyProp } from "../../../src/language/generated/ast.js";
 import {
   type BuilderNode,
+  defaultForItemLambda,
   defaultNode,
   emitBody,
   PALETTE_PRIMITIVES,
@@ -201,4 +202,117 @@ describe("page-builder — palette seeds parseable source", () => {
       expect(parseRawResult(doc).parserErrors, `fresh ${name} emitted:\n${emitted}`).toEqual([]);
     });
   }
+
+  it("a fresh palette For is childless but still parses", () => {
+    // The palette click-add path has no primitive shaped like a bare `Lambda`,
+    // so a fresh `For` starts with no item renderer — the gap the "+ item"
+    // control (PageBuilder.tsx's addForItem, tested below) closes.
+    const node = defaultNode("For");
+    expect(node.children).toEqual([]);
+    expect(emitBody(node)).toBe("For {}");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The For "+ item" control (PageBuilder.tsx's addForItem) is the For twin of
+// Match's "+ arm" (addArm): a synthetic `Lambda` child isn't reachable from
+// the click-add palette, so a dedicated settings-panel control builds it.
+// Driving craft.js itself is out of this suite's scope (the "+ arm" control
+// it mirrors has no vitest coverage either — only the Playwright e2e spec
+// exercises the live button); these tests instead pin the exact subtree the
+// control builds (`defaultForItemLambda`, the single source of truth shared
+// with addForItem) and prove it behaves like any other structured node once
+// it lands on the canvas: it emits parseable source, seeds back as a
+// structured (non-Opaque) `Lambda` whose body is independently editable, its
+// binder renames like any other `param` field, and it coexists with a
+// previously-seeded `empty:` slot child.
+// ---------------------------------------------------------------------------
+describe('page-builder — For "+ item" control', () => {
+  it("builds a parseable item lambda with an editable placeholder body", () => {
+    const item = defaultForItemLambda();
+    expect(item).toMatchObject({ name: "Lambda", props: { param: "item" } });
+    expect(item.children).toHaveLength(1);
+    expect(item.children[0]).toMatchObject({ name: "Text" });
+
+    const forNode: BuilderNode = { name: "For", props: {}, children: [item] };
+    const emitted = emitBody(forNode);
+    const doc = `system S { ui U { page P { body: ${emitted} } } }`;
+    expect(parseRawResult(doc).parserErrors, `emitted:\n${emitted}`).toEqual([]);
+  });
+
+  it("adding the item lambda yields a structured (non-opaque) round-trip with the body editable", () => {
+    const item = defaultForItemLambda();
+    const forNode: BuilderNode = { name: "For", props: { each: "orders" }, children: [item] };
+    const emitted = emitBody(forNode);
+    const doc = `system S { ui U { page P { body: ${emitted} } } }`;
+    const parsed = parseRawResult(doc);
+    expect(parsed.parserErrors, `emitted:\n${emitted}`).toEqual([]);
+
+    const body = [...AstUtils.streamAst(parsed.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
+    const reseeded = seedFromBody(body.expr);
+    expect(reseeded.name).toBe("For");
+    const lambda = reseeded.children[0];
+    expect(lambda.name).toBe("Lambda"); // structured, not Opaque
+    expect(lambda.props.param).toBe("item");
+    const placeholder = lambda.children[0];
+    expect(placeholder.name).toBe("Text"); // the body is independently editable
+    expect(placeholder.props.text).toBe('"Text"');
+
+    // ...and it survives craft's SerializedNodes round-trip, same as any other
+    // seeded-from-source node (new-primitives-roundtrip's existing For case).
+    expect(emitBody(fromCraft(toCraft(reseeded)))).toBe(emitBody(reseeded));
+  });
+
+  it("renaming the item lambda's binder round-trips", () => {
+    const item = defaultForItemLambda();
+    // Simulates the settings panel's generic `param` field (test id
+    // `c4builder-prop-param`) — Lambda's binder is already editable there for
+    // any Lambda node, item lambdas included; no separate wiring needed.
+    item.props.param = "order";
+    const forNode: BuilderNode = { name: "For", props: { each: "orders" }, children: [item] };
+    const emitted = emitBody(forNode);
+    expect(emitted).toContain("order => ");
+    const doc = `system S { ui U { page P { body: ${emitted} } } }`;
+    const parsed = parseRawResult(doc);
+    expect(parsed.parserErrors, `emitted:\n${emitted}`).toEqual([]);
+
+    const body = [...AstUtils.streamAst(parsed.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
+    expect(seedFromBody(body.expr).children[0].props.param).toBe("order");
+  });
+
+  it("keeps a previously-seeded `empty:` slot child intact alongside the new item lambda", () => {
+    // A For seeded from source with only an `empty:` arm and no item renderer
+    // — the shape the control targets — then grown via the control (simulated
+    // here as `addForItem` mutates the craft tree: the new Lambda's node id is
+    // appended after the existing children, everything else untouched).
+    const doc0 = `system S { ui U { page P { body: For { each: orders, empty: Empty { "No orders yet." } } } } }`;
+    const original = parseRawResult(doc0);
+    expect(original.parserErrors).toEqual([]);
+    const body0 = [...AstUtils.streamAst(original.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
+    const seeded = seedFromBody(body0.expr);
+    expect(seeded.name).toBe("For");
+    expect(seeded.children.map((c) => c.slot)).toEqual(["empty"]);
+
+    seeded.children.push(defaultForItemLambda());
+
+    const emitted = emitBody(seeded);
+    const doc = `system S { ui U { page P { body: ${emitted} } } }`;
+    const parsed = parseRawResult(doc);
+    expect(parsed.parserErrors, `emitted:\n${emitted}`).toEqual([]);
+
+    const body = [...AstUtils.streamAst(parsed.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
+    const reseeded = seedFromBody(body.expr);
+    expect(reseeded.children.map((c) => [c.name, c.slot])).toEqual([
+      ["Empty", "empty"],
+      ["Lambda", undefined],
+    ]);
+  });
 });

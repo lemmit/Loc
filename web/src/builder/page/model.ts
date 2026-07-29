@@ -206,6 +206,17 @@ export function syntheticDefaultProps(name: string): Record<string, string> {
   return {};
 }
 
+/** Default item-lambda subtree for the "+ item" control a palette-added `For`
+ *  needs (PageBuilder.tsx, the For twin of Match's "+ arm"/addArm) — a
+ *  positional `Lambda` (binder `item`, a fresh name against the empty scope a
+ *  just-added `For` has) holding the same `Text` placeholder body a fresh
+ *  match-arm value gets, so the control emits something parseable
+ *  immediately.  Exported so tests can assert against the exact shape the
+ *  control builds without driving craft.js. */
+export function defaultForItemLambda(): BuilderNode {
+  return { name: "Lambda", props: { param: "item" }, children: [defaultNode("Text")] };
+}
+
 export type PrimitiveName = keyof typeof SPECS | SyntheticName | "Opaque";
 export const PRIMITIVES = Object.keys(SPECS) as (keyof typeof SPECS)[];
 
