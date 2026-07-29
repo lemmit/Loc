@@ -19,6 +19,16 @@ import { parseString } from "../_helpers/parse.js";
 // A plain-text column — the common case in the print/re-parse checks below.
 const text = (name: string): ScaffoldColumn => ({ name, kind: { tag: "text" } });
 
+/** Collapse the printer's wrapped argument lists back to their one-line form.
+ *  These assertions are about WHAT a builder emits, not where the line happened
+ *  to break — and the wrap budget is indent-aware (2026-07 unfold review), so a
+ *  deeply-nested call wraps at a narrower width than a shallow one. */
+const flat = (s: string): string =>
+  s
+    .replace(/\(\s*\n\s*/g, "(")
+    .replace(/,\s*\n\s*/g, ", ")
+    .replace(/\s*\n\s*\)/g, ")");
+
 // ---------------------------------------------------------------------------
 // Phase 1 of docs/old/proposals/unfoldable-page-scaffolding.md — the macro-layer
 // (AST→AST) scaffolders produce printable, re-parseable `.ddd` source from AST
@@ -381,7 +391,7 @@ describe("scaffold instance builders — observable workflow pages", () => {
     expect(errors).toEqual([]);
     const wf = findNode(model, "Workflow", "Fulfillment");
     const src = printExpr(scaffoldInstanceList(wf));
-    expect(src).toContain(
+    expect(flat(src)).toContain(
       'Column("Order Id", i => Anchor(i.orderId, to: "/workflows/fulfillment/instances/" + i.orderId))',
     );
     expect(src).toContain('Column("Status", i => EnumBadge(i.status))');

@@ -110,7 +110,26 @@ ejects 5–7 pages as one undifferentiated wall:
 
 The repo's own `.ddd` (e.g. `examples/acme.ddd`) blank-line-separates declarations.
 
-## Fix plan — all seven landed
+### 8. Unfolding into a single-line body strands the existing members
+
+Found on a second pass over the NON-UI hosts (`with crudish` / `with auditable`
+on an aggregate whose body is written on one line). Splitting only at the `}`
+left the body's existing member up on the header line while every inserted
+member landed indented below it:
+
+```ddd
+aggregate Order with auditable { subject: string }
+```
+```ddd
+aggregate Order { subject: string
+  createdAt: datetime managed
+  updatedAt: datetime managed
+}
+```
+
+Parses, but reads as two different files. This is the "unfolds inline" shape.
+
+## Fix plan — all eight landed
 
 | # | Fix | Files |
 |---|---|---|
@@ -119,6 +138,7 @@ The repo's own `.ddd` (e.g. `examples/acme.ddd`) blank-line-separates declaratio
 | 5 | An ambient print column (`withIndent` / `atColumn` in `print-expr.ts`) that `wrapArgList`/`wrapBraced` budget against. The `block`/`declBlock`/`commaBlock` helpers take a THUNK so they can run the item printers inside their own indent; `unfold-macro.ts` seeds the column with `memberIndent.length`. | `print-expr.ts`, `print-stmt.ts`, `print-structural.ts`, `unfold-macro.ts` |
 | 6 | The inline-`}` insert replaces the whitespace before the brace instead of inserting at it. | `unfold-macro.ts` |
 | 7 | `joinDecls` blank-line-separates a member from its neighbour when either spans multiple lines; only declaration CONTAINERS opt in (`declBlock`), so page props and field runs stay tight. | `print-structural.ts`, `unfold-macro.ts` |
+| 8 | A block that opens AND closes on one line is reflowed: existing content moves down to member indent (relocated as one line — its tokens are never re-wrapped), then the printed members, then the `}`. A body already spanning lines keeps the plain split. Both insert paths pick the separator with the same `joinDecls` rule, so `with crudish` (multi-line first member) gets a blank line and `with tenantOwned` (one-line fields) stays tight. | `unfold-macro.ts` |
 
 ### Why the column budget is exact, not a heuristic
 
@@ -136,4 +156,10 @@ bounds the whole line. Neither branch can exceed the budget.
 - `test/macro/unfold-layout.test.ts` — runs the real code action over every
   offered unfold and asserts: no trailing whitespace, blank-line-separated
   declarations, no blank line opening a block, no line past 100 columns, and a
-  clean re-parse.
+  clean re-parse. Plus the single-line-body reflow (defect 8) on both the
+  macro (`crudish`) and capability (`tenantOwned`) paths.
+
+One pre-existing assertion moved from an exact string to a wrap-insensitive one
+(`scaffold-body-builders.test.ts`): it pinned a `Column(…)` on one line, and
+that call sits deep enough that the now-indent-aware budget correctly wraps it.
+The assertion is about *what* the builder emits, not where the line breaks.

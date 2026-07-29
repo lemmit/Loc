@@ -131,3 +131,59 @@ describe("unfold output layout", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Single-line host bodies.
+//
+// `aggregate Order with crudish { subject: string }` opens and closes on ONE
+// line.  Splitting only at the `}` stranded the body's existing member up on
+// the header line while every inserted member landed indented below it:
+//
+//     aggregate Order { subject: string
+//       createdAt: datetime managed
+//     }
+//
+// The insert now reflows a same-line block — existing content moves down to
+// member indent (relocated, never re-wrapped), then the printed members.
+// ---------------------------------------------------------------------------
+
+const ONE_LINE_BODY = `system Demo {
+  context Sales {
+    aggregate Order with crudish { subject: string }
+    repository Orders for Order { }
+  }
+}
+`;
+
+describe("unfold into a single-line body", () => {
+  it("moves the existing member down instead of stranding it on the header line", async () => {
+    const text = (await allUnfolds(ONE_LINE_BODY, "crudish")).get("Unfold macro 'crudish'")!;
+    expect(text).toContain("    aggregate Order {\n      subject: string\n");
+    expect(text).not.toMatch(/aggregate Order \{ subject: string\n/);
+  });
+
+  it("separates the relocated member from a multi-line insertion", async () => {
+    const text = (await allUnfolds(ONE_LINE_BODY, "crudish")).get("Unfold macro 'crudish'")!;
+    // `operation update(…) { … }` spans lines, so `joinDecls`' rule applies.
+    expect(text).toMatch(/subject: string\n\n {6}operation update\(/);
+  });
+
+  it("re-parses cleanly", async () => {
+    const text = (await allUnfolds(ONE_LINE_BODY, "crudish")).get("Unfold macro 'crudish'")!;
+    const reparse = await validate(text);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1).map((e) => e.message)).toEqual([]);
+  });
+
+  it("keeps a single-line insertion tight against the relocated member", async () => {
+    // A capability's mixin fields are one-liners — no blank line wanted.
+    const src = `system Demo {
+  context Sales {
+    aggregate Order with tenantOwned { subject: string }
+    repository Orders for Order { }
+  }
+}
+`;
+    const text = (await allUnfolds(src, "tenantOwned")).get("Unfold capability 'tenantOwned'")!;
+    expect(text).toMatch(/aggregate Order \{\n {6}subject: string\n {6}\w/);
+  });
+});
