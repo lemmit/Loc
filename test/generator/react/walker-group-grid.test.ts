@@ -39,7 +39,7 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/import \{ Badge, Button, Group, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Group>/);
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Title"\)\}<\/Title>/);
-    expect(content).toMatch(/<Badge>Live<\/Badge>/);
+    expect(content).toMatch(/<Badge>\{t\("[^"]*", "Live"\)\}<\/Badge>/);
     expect(content).toMatch(/<Button>\{t\("[^"]*", "Save"\)\}<\/Button>/);
     expect(content).toMatch(/<\/Group>/);
   });

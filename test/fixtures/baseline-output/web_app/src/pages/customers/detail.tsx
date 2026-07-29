@@ -83,10 +83,10 @@ export default function CustomerDetail() {
     </Stack>
         ) }
         { customerById.isError && (
-          <Alert color="red" variant="light">Couldn't load customer</Alert>
+          <Alert color="red" variant="light">{t("page.Detail.alert.lz0k2j", "Couldn't load customer")}</Alert>
         ) }
         { !customerById.isLoading && !customerById.isError && !customerById.data && (
-          <Alert color="yellow" variant="light">No customer matches that id.</Alert>
+          <Alert color="yellow" variant="light">{t("page.Detail.alert.lf0b2h", "No customer matches that id.")}</Alert>
         ) }
         { customerById.data && (
           <Stack>

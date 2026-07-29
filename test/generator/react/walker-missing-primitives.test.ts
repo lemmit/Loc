@@ -57,12 +57,12 @@ describe("walker primitives — Card", () => {
   it('Card { "title" } emits a Mantine <Card> with a level-3 <Title>', async () => {
     const tsx = await emit(`Card { "Profile" }`);
     expect(tsx).toMatch(/<Card[^>]*>/);
-    expect(tsx).toMatch(/<Title order=\{3\}>Profile<\/Title>/);
+    expect(tsx).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "Profile"\)\}<\/Title>/);
   });
 
   it("Card { title, ...children } wraps children below the title", async () => {
     const tsx = await emit(`Card { "Bio", Text { "Hello" } }`);
-    expect(tsx).toMatch(/<Title order=\{3\}>Bio<\/Title>/);
+    expect(tsx).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "Bio"\)\}<\/Title>/);
     expect(tsx).toMatch(/<Text>\{t\("[^"]*", "Hello"\)\}<\/Text>/);
   });
 

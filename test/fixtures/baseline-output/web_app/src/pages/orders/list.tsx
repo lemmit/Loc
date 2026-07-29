@@ -36,7 +36,7 @@ export default function OrderList() {
     </Stack>
           ) }
           { orderByCustomer.isError && (
-            <Alert color="red" variant="light">Couldn't load orders</Alert>
+            <Alert color="red" variant="light">{t("page.List.alert.cpshqe", "Couldn't load orders")}</Alert>
           ) }
           { orderByCustomer.data && orderByCustomer.data.length === 0 && (
             <Center mih={200}><Text c="dimmed">{t("page.List.empty.louti1", "No orders yet.")}</Text></Center>
@@ -77,7 +77,7 @@ export default function OrderList() {
     </Stack>
           ) }
           { orderAll.isError && (
-            <Alert color="red" variant="light">Couldn't load orders</Alert>
+            <Alert color="red" variant="light">{t("page.List.alert.cpshqe", "Couldn't load orders")}</Alert>
           ) }
           { orderAll.data && orderAll.data.items.length === 0 && (
             <Center mih={200}><Text c="dimmed">{t("page.List.empty.louti1", "No orders yet.")}</Text></Center>
