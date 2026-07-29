@@ -1,0 +1,41 @@
+// Migration-evolution gate (M-T2.13) — the EVOLVED model (v2).  See base.ddd
+// for the harness flow.  Every change is data-preserving and gate-clean (no
+// `--allow-destructive` needed):
+//
+//   • `price` renamed to `unitPrice`  — explicit `migration` rename intent, so
+//     the diff emits `renameColumn` (value preserved), not drop+add.
+//   • `sku: string` added NOT NULL    — covered by the `Product.sku = "SEED"`
+//     backfill, so the add is the safe add-nullable → UPDATE → SET NOT NULL
+//     sequence (M-T2.3), no flag needed.
+//   • `description: string?` added     — a plain nullable column.
+//
+// The `migration` block is ledger-style: permanent in source, inert once baked
+// into the baseline snapshot.
+system ShopEvo {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product with crudish {
+        name: string
+        unitPrice: money
+        sku: string
+        description: string?
+      }
+      repository Products for Product { }
+    }
+  }
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
+
+migration "evolve-catalog" {
+  Product.price -> unitPrice
+  Product.sku = "SEED"
+}

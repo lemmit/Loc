@@ -102,6 +102,12 @@ npm run test:tenancy-{python,java,dotnet,elixir}   # LOOM_TENANCY_E2E_<BACKEND>=
 # + descendant-or-self predicate must AGREE → subtree-scoped reads):
 npm run test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir}
 
+# Migration-evolution runtime e2e — proves migrations EVOLVE on data, not just emit/first-boot: per SQL
+# backend, (1) migrate-chain schema ≡ fresh-create schema, and (2) seed v1 → evolve .ddd → forward-migrate
+# → the row survives with correct values (rename preserved, backfill populated, nullable add NULL).  Shared
+# harness (one pg server, chain+fresh DBs, order-independent schema fingerprint via host psql):
+npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}   # LOOM_MIGRATION_E2E[_<BACKEND>]=1
+
 # Auth/OIDC runtime e2e — generated OIDC code flow (PKCE + refresh rotation) against dockerized Keycloak:
 npm run test:auth-e2e              # LOOM_AUTH_E2E=1 — Hono, native boot
 npm run test:auth-e2e-{dotnet,java,python}         # LOOM_AUTH_E2E_<BACKEND>=1 — native per backend
@@ -325,6 +331,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch/label.
 - `elixir-vanilla-vo-e2e.yml` — vanilla-Phoenix value-object wire round-trip against postgres (main-push + `run-e2e` label).
 - `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch.
+- `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
