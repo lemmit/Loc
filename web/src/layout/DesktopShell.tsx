@@ -22,6 +22,7 @@ import { ExplorerTree } from "../preview/ExplorerTree";
 import { FileViewer } from "../preview/FileViewer";
 import { SourceFilesTree } from "./SourceFilesTree";
 import { usePersistedState } from "../util/usePersistedState";
+import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { modeLabel, type LayoutCtx } from "./ctx";
 
 type ExplorerMode = "user" | "generated";
@@ -282,30 +283,42 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       pick up edits the user makes in the Source tab. */}
                   {builderEverMounted && (
                     <Box style={{ flex: 1, minHeight: 0, display: centerView === "builder" ? "flex" : "none" }}>
-                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
-                        <BuilderPane ctx={ctx} />
-                      </Suspense>
+                      {/* The builder stays mounted in the background and
+                          re-parses the live source, so a throw here would
+                          otherwise white-screen the app while the user is
+                          typing in the Source tab. */}
+                      <PaneErrorBoundary name="Builder">
+                        <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
+                          <BuilderPane ctx={ctx} />
+                        </Suspense>
+                      </PaneErrorBoundary>
                     </Box>
                   )}
                   {centerView === "model" && (
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
-                        <SystemBuilderPane ctx={ctx} />
-                      </Suspense>
+                      <PaneErrorBoundary name="Model">
+                        <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
+                          <SystemBuilderPane ctx={ctx} />
+                        </Suspense>
+                      </PaneErrorBoundary>
                     </Box>
                   )}
                   {centerView === "model-v2" && (
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
-                        <SystemBuilderV2Pane ctx={ctx} />
-                      </Suspense>
+                      <PaneErrorBoundary name="Model v2">
+                        <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
+                          <SystemBuilderV2Pane ctx={ctx} />
+                        </Suspense>
+                      </PaneErrorBoundary>
                     </Box>
                   )}
                   {centerView === "requirements" && (
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
-                        <RequirementsPane ctx={ctx} />
-                      </Suspense>
+                      <PaneErrorBoundary name="Requirements">
+                        <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
+                          <RequirementsPane ctx={ctx} />
+                        </Suspense>
+                      </PaneErrorBoundary>
                     </Box>
                   )}
                   {secondaryDoc && (

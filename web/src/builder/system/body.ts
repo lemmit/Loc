@@ -79,7 +79,7 @@ export function listOperations(node: AstNode): string[] {
 export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
   const body = resolveBody(ast, loc);
   if (!body) return null;
-  return body.statements.map((s) => s.$cstNode?.text ?? "");
+  return (body.statements ?? []).map((s) => s.$cstNode?.text ?? "");
 }
 
 // A statement structured for the body editor: an assignment splits into a
@@ -94,21 +94,23 @@ export type StmtView =
   | { kind: "other"; src: string };
 
 function stmtView(s: Statement): StmtView {
+  // `target` (and its `tail`/`args` lists) can be undefined on a
+  // partially-recovered AST — the builders re-parse mid-keystroke.
   if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
     return {
       kind: "assign",
-      target: s.target.$cstNode?.text?.trim() ?? "",
+      target: s.target?.$cstNode?.text?.trim() ?? "",
       op: s.op,
       value: s.value.$cstNode?.text?.trim() ?? "",
     };
   }
   // Bare call: an LValue with a trailing call (`order.addLine(productId, qty)`),
   // no mutation suffix. The LValue carries the dotted head/tail + arg list.
-  if (s.$type === "AssignOrCallStmt" && !s.op && !s.value && s.target.call) {
+  if (s.$type === "AssignOrCallStmt" && !s.op && !s.value && s.target?.call) {
     return {
       kind: "call",
-      head: [s.target.head, ...s.target.tail].join("."),
-      args: s.target.args.map((a) => a.$cstNode?.text?.trim() ?? ""),
+      head: [s.target.head, ...(s.target.tail ?? [])].join("."),
+      args: (s.target.args ?? []).map((a) => a.$cstNode?.text?.trim() ?? ""),
     };
   }
   if (s.$type === "EmitStmt") {
@@ -118,7 +120,7 @@ function stmtView(s: Statement): StmtView {
       // `$refText` is the event name without triggering a linker deref (the
       // playground parse is unlinked).
       event: e.event?.$refText ?? "",
-      fields: e.fields.map((f) => ({ name: f.name, value: f.value.$cstNode?.text?.trim() ?? "" })),
+      fields: (e.fields ?? []).map((f) => ({ name: f.name, value: f.value?.$cstNode?.text?.trim() ?? "" })),
     };
   }
   return { kind: "other", src: s.$cstNode?.text ?? "" };
@@ -127,7 +129,7 @@ function stmtView(s: Statement): StmtView {
 export function listStatementViews(ast: Model, loc: BodyLocator): StmtView[] | null {
   const body = resolveBody(ast, loc);
   if (!body) return null;
-  return body.statements.map(stmtView);
+  return (body.statements ?? []).map(stmtView);
 }
 
 // --- function bodies (a single Expression, not Statement[]) ----------------

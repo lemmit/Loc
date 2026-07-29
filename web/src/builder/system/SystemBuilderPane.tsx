@@ -504,12 +504,21 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     else commit(next, keepSelection);
   };
 
+  // Both renames run through a throwaway linked Langium build, which can
+  // reject; the call sites are `void`-ed fire-and-forget, so swallow-and-log
+  // here rather than emitting `unhandledrejection` noise.  A failed rename
+  // leaves the source untouched.
   const renameField = async (oldName: string, rawNext: string): Promise<void> => {
     if (!selected) return;
     const next = rawNext.trim();
     if (!IDENTIFIER.test(next) || next === oldName) return;
-    const result = await renameMember(ctx.getSource(), selected.kind, selected.name, oldName, next);
-    if (result != null) apply(result, true);
+    try {
+      const result = await renameMember(ctx.getSource(), selected.kind, selected.name, oldName, next);
+      if (result != null) apply(result, true);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("rename failed:", e);
+    }
   };
 
   const renameSelected = async (): Promise<void> => {
@@ -520,6 +529,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     try {
       const result = await renameConstruct(ctx.getSource(), selected.kind, selected.name, next);
       if (result != null) apply(result);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("rename failed:", e);
     } finally {
       setRenaming(false);
     }

@@ -160,6 +160,11 @@ function toRfNodes(
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
 
+/** Stand-in graph used while the source doesn't parse — keeps the React Flow
+ *  hooks below fed with a valid (empty) shape instead of one derived from a
+ *  partially-recovered AST. */
+const EMPTY_GRAPH: ViewGraph = { title: "Model", nodes: [], edges: [] };
+
 /** Total budget for a drill transition: ~200ms zoom-into the clicked node
  *  (drill-in only), then ~250ms `fitView` to settle into the new view.
  *  Drill-out skips the pre-step and just animates the fit. */
@@ -368,7 +373,16 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
   // Re-parse after every commit by depending on `rev` (`apply` bumps it).
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
-  const graph = useMemo(() => buildViewGraph(parsed.ast, path), [parsed, path]);
+  // Same parse gate v1 carries (`SystemBuilderPane`): a recovered AST would
+  // otherwise yield a silently-partial graph whose delete/rename handlers
+  // splice CST ranges that no longer describe the user's source.  The gate has
+  // to live *inside* the derivations — hooks below must still run
+  // unconditionally — so the message renders at the end.
+  const parseOk = parsed.parserErrors.length === 0;
+  const graph = useMemo(
+    () => (parseOk ? buildViewGraph(parsed.ast, path) : EMPTY_GRAPH),
+    [parsed, path, parseOk],
+  );
 
   /** Single choke-point for source edits — bump `rev` so the next render
    *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
@@ -390,7 +404,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const stmtData = useMemo(() => {
     const m = new Map<string, Record<string, unknown>>();
-    if (!leafLoc) return m;
+    if (!leafLoc || !parseOk) return m;
     const views = listStatementViews(parsed.ast, leafLoc) ?? [];
     // Aggregate field names for the assignment-target Autocomplete; only
     // meaningful in an operation body, empty for workflows.
@@ -603,9 +617,16 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const aggName = aggOwner.name;
         const onRename = (next: string): void => {
           if (!IDENTIFIER.test(next) || next === n.name) return;
-          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next).then((result) => {
-            if (result != null) apply(result);
-          });
+          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next)
+            .then((result) => {
+              if (result != null) apply(result);
+            })
+            // A failed rename leaves the source untouched; log it rather than
+            // letting the rejection surface as `unhandledrejection` noise.
+            .catch((e: unknown) => {
+              // eslint-disable-next-line no-console
+              console.error("rename failed:", e);
+            });
         };
         const onDelete =
           n.kind === "field"
@@ -635,9 +656,14 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         astType != null
           ? (next: string) => {
               if (!IDENTIFIER.test(next) || next === n.name) return;
-              void renameByAstType(ctx.getSource(), astType, n.name, next).then((result) => {
-                if (result != null) apply(result);
-              });
+              void renameByAstType(ctx.getSource(), astType, n.name, next)
+                .then((result) => {
+                  if (result != null) apply(result);
+                })
+                .catch((e: unknown) => {
+                  // eslint-disable-next-line no-console
+                  console.error("rename failed:", e);
+                });
             }
           : undefined;
       const onDelete =
@@ -849,6 +875,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next);
   };
 
+  // Below every hook, so the gate above can't change the hook order.
+  if (!parseOk) {
+    return <Message>Source has syntax errors — fix them in the editor to use the model builder.</Message>;
+  }
+
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={jumpTo} />
@@ -894,6 +925,14 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           </Text>
         )}
       </Box>
+    </Box>
+  );
+}
+
+function Message({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <Box p="md">
+      <Text size="sm" c="dimmed">{children}</Text>
     </Box>
   );
 }

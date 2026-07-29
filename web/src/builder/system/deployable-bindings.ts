@@ -59,7 +59,9 @@ export function uiKind(node: AstNode): "sugar" | "compose" | "none" {
   return d.uiSugar ? "sugar" : "none";
 }
 export function deployableUi(node: AstNode): string | null {
-  return asDeployable(node)?.uiSugar?.ref.$refText ?? null;
+  // `ref` is undefined on a half-typed `ui:` — error recovery keeps the sugar
+  // clause but drops the unparsed reference.
+  return asDeployable(node)?.uiSugar?.ref?.$refText ?? null;
 }
 
 // --- mutating ops ----------------------------------------------------------

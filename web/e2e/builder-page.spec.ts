@@ -647,3 +647,83 @@ test("live sync — typing in Source updates the canvas without re-creating node
   await expect(page.getByTestId("c4node-Heading").filter({ hasText: "Original" }).first()).toHaveAttribute("data-selected", "1");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------
+// Recovered-AST survival (audit defects #2/#3).
+//
+// On desktop the builder stays mounted in the background and re-parses the live
+// source on a 350 ms debounce, so a transiently-broken `body:` / `state {}`
+// typed in the Source tab used to throw inside its memos — and with only an
+// app-level ErrorBoundary that white-screened the entire playground.
+//
+// NOTE: written against the existing helpers but NOT verified locally
+// (Playwright can't run in the authoring sandbox).
+// ---------------------------------------------------------------------------
+
+const BROKEN_BODY_SOURCE = `system S {
+  ui U {
+    page P {
+      body:
+    }
+  }
+}`;
+
+const BROKEN_STATE_SOURCE = `system S {
+  ui U {
+    page P {
+      state { x: }
+      body: Stack { Text { "Sibling" } }
+    }
+  }
+}`;
+
+for (const [label, broken] of [
+  ["an unparsed `body:`", BROKEN_BODY_SOURCE],
+  ["an unparsed `state {}` field type", BROKEN_STATE_SOURCE],
+] as const) {
+  test(`typing ${label} in Source does not crash the app`, async ({ page }) => {
+    await page.goto("/");
+    await waitForPlaygroundReady(page);
+    await setSource(page, LIVE_SYNC_SOURCE);
+
+    // Mount the builder once — from here it stays mounted behind the Source
+    // tab and re-parses on every debounce tick.
+    await page.getByTestId("doc-tab-builder").click();
+    await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+    // Back to Source and break the body/state, then wait past the 350 ms
+    // live-sync debounce so the background re-parse + re-seed actually runs.
+    await setSource(page, broken);
+    await page.waitForTimeout(1_500);
+
+    // Neither boundary fired, and the editor is still there.
+    await expect(page.getByTestId("app-crash-fallback")).toHaveCount(0);
+    await expect(page.getByTestId("pane-crash-fallback")).toHaveCount(0);
+    await expect(page.getByTestId("doc-tab-builder")).toBeVisible();
+
+    // Opening the Builder shows the syntax-error message, not a blank pane.
+    await page.getByTestId("doc-tab-builder").click();
+    await expect(page.getByText("Source has syntax errors")).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId("app-crash-fallback")).toHaveCount(0);
+
+    // Fixing the source brings the canvas back.
+    await setSource(page, LIVE_SYNC_SOURCE);
+    await page.getByTestId("doc-tab-builder").click();
+    await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 10_000 });
+  });
+}
+
+test("Model v2 shows the syntax-error message instead of a partial graph", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, LIVE_SYNC_SOURCE);
+
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 15_000 });
+
+  await setSource(page, BROKEN_BODY_SOURCE);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByText("Source has syntax errors")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByTestId("c4system-v2-pane")).toHaveCount(0);
+  await expect(page.getByTestId("app-crash-fallback")).toHaveCount(0);
+});

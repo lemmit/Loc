@@ -518,16 +518,29 @@ export function ExprSlotEditor({
   };
   useEffect(() => {
     let alive = true;
-    void loadHints().then((h) => {
-      if (!alive) return;
-      setMemberMap(h.members);
-      setArgLabels(h.argLabels);
-    });
-    if (loadEnumPicker) {
-      void loadEnumPicker().then((m) => {
+    // Hints are an enhancement, not a requirement — on rejection the editor
+    // keeps working with empty candidate maps.  Catch so a failed linked build
+    // doesn't surface as `unhandledrejection`.
+    void loadHints()
+      .then((h) => {
         if (!alive) return;
-        setEnumPicker(m);
+        setMemberMap(h.members);
+        setArgLabels(h.argLabels);
+      })
+      .catch((e: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error("expression hints failed:", e);
       });
+    if (loadEnumPicker) {
+      void loadEnumPicker()
+        .then((m) => {
+          if (!alive) return;
+          setEnumPicker(m);
+        })
+        .catch((e: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error("enum picker failed:", e);
+        });
     }
     return () => { alive = false; };
     // Run once per mount; the rev/slot-keyed remount drives recomputation.

@@ -3,10 +3,11 @@ import { Box, Group, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
-import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
+import type { Component, EnumDecl } from "../../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isPage, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
+import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
 import { availableTypes } from "./system/fields";
@@ -20,32 +21,6 @@ import StatePanel from "./page/StatePanel";
 // Apply tags the edit as "builder" origin so it's pushed back into the live
 // Monaco model + LSP (source tab and Problems panel reflect it immediately),
 // then re-seeds the canvas so the change persists visibly here too.
-interface BodyEntry {
-  name: string;
-  /** The body expression (its CST range is the splice target). */
-  expr: Expression;
-  /** The owning `Page` (absent for `component` bodies) — drives the state editor. */
-  page?: Page;
-}
-
-// Every editable body: a `page`'s `body:` and a `component`'s `body:` both
-// project a single expression onto the canvas.
-function collectBodies(ast: unknown): BodyEntry[] {
-  const out: BodyEntry[] = [];
-  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type === "Page") {
-      const body = (node as Page).props.find((p): p is BodyProp => p.$type === "BodyProp");
-      if (body) out.push({ name: (node as Page).name, expr: body.expr, page: node as Page });
-    } else if (node.$type === "Component") {
-      // Extern components have no `body:` (their rendering lives in a
-      // hand-written module), so there's nothing to project onto the canvas.
-      const comp = node as Component;
-      if (comp.body) out.push({ name: comp.name, expr: comp.body });
-    }
-  }
-  return out;
-}
-
 // Typed option sets for `ref` props (drives the binding dropdowns).  `operation`
 // is contextual (depends on a node's sibling `of:`) so it's collected separately.
 function collectOptions(ast: unknown): Record<string, string[]> {
@@ -80,7 +55,7 @@ function collectComponents(ast: unknown): Map<string, string[]> {
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "Component") {
       const c = node as Component;
-      out.set(c.name, c.params.map((p) => p.name));
+      out.set(c.name, (c.params ?? []).map((p) => p.name));
     }
   }
   return out;
@@ -93,7 +68,7 @@ function collectEnums(ast: unknown): Map<string, string[]> {
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "EnumDecl") {
       const e = node as EnumDecl;
-      out.set(e.name, e.values.map((v) => v.name));
+      out.set(e.name, (e.values ?? []).map((v) => v.name));
     }
   }
   return out;
@@ -190,7 +165,9 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // on the canvas so the builder flags problems without leaving for the
   // Problems panel.
   const bodyDiagnostics = useMemo(() => {
-    const r = current?.expr.$cstNode?.range;
+    // `expr` can be undefined on a recovered AST — the `?.` has to guard it,
+    // not just `current`.
+    const r = current?.expr?.$cstNode?.range;
     if (!r) return [];
     return ctx.diagnostics.filter((d) => d.range.start.line <= r.end.line && d.range.end.line >= r.start.line);
   }, [ctx.diagnostics, current]);
@@ -204,7 +181,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // settings-panel edits.
   const seedNodes = useMemo<SerializedNodes | null>(
     () => {
-      if (!current) return null;
+      if (!current?.expr) return null;
       return toCraft(seedFromBody(current.expr, components));
     },
     [current, components],
@@ -217,7 +194,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // per-node red outlines surface on the next live re-seed / Apply.
   const annotatedNodes = useMemo<SerializedNodes | null>(
     () => {
-      if (!current || !seedNodes) return null;
+      if (!current?.expr || !seedNodes) return null;
       const tree = seedFromBody(current.expr, components);
       annotateDiagnostics(tree, bodyDiagnostics);
       return toCraft(tree);

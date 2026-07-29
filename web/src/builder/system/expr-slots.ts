@@ -529,10 +529,31 @@ function setSuffixArgLabels(chain: PostfixChain, suffixIdx: number, path: string
 // Size-1 cache of the linked model by source text — switching between slots of
 // the same construct reuses one linked build; a commit changes the source and
 // rebuilds.
+//
+// A *rejected* build must not stay cached: the entry would be replayed for
+// every later slot on the same (unchanged) source, so one transient failure
+// would keep hints broken until the user edits.  Evict on rejection and
+// degrade to "no hints" instead.
 let linkedCache: { source: string; model: Promise<Model | null> } | null = null;
 function linkedModelFor(source: string): Promise<Model | null> {
-  if (linkedCache?.source !== source) linkedCache = { source, model: buildLinkedModel(source) };
+  if (linkedCache?.source !== source) {
+    const entry: { source: string; model: Promise<Model | null> } = {
+      source,
+      model: buildLinkedModel(source).catch((e: unknown) => {
+        if (linkedCache === entry) linkedCache = null;
+        // eslint-disable-next-line no-console
+        console.error("linked model build failed:", e);
+        return null;
+      }),
+    };
+    linkedCache = entry;
+  }
   return linkedCache.model;
+}
+
+/** Test seam — drop the size-1 linked-model cache. */
+export function clearLinkedModelCache(): void {
+  linkedCache = null;
 }
 
 /** Type-directed hints (member candidates + call arg labels) for a slot's
