@@ -11,10 +11,12 @@ Branch protection requires only **`tests-passed`** (the fast vitest rollup).
 Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
 *non-required* check. Two consequences:
 
-1. **Many heavy gates never run on a PR at all.** `tenancy-e2e`, the five
-   `*-obs-e2e`, the four `*-oidc-e2e`, `auth-oidc-compose-e2e`, and `pages`
+1. **Many heavy gates don't run on a PR by default.** `tenancy-e2e`, the five
+   `*-obs-e2e`, the five `*-oidc-e2e`, `auth-oidc-compose-e2e`, and `pages`
    trigger on `push: [main]` only. Whatever they catch, they catch *after*
-   merge — on `main`, where it sits red.
+   merge — on `main`, where it sits red. (All but `pages` now also accept a
+   per-PR **label** trigger as a manual escape hatch — see "The interim escape
+   hatch" below — but that's opt-in, so the default is still post-merge.)
 2. **A red heavy gate doesn't block anything.** A gate can be broken (even
    unparseable) and still merge green. `behavioral-e2e-dapper.yml` had an
    unquoted colon in its `name:`, was a permanent `startup_failure`, and stayed
@@ -57,6 +59,45 @@ A merge queue runs the required checks on the **rebased** merge candidate
 before it lands, so the exact combination that will be on `main` is what gets
 gated — this is what closes the "never ran on the PR" hole for the push-only
 gates without charging every push.
+
+## The interim escape hatch: force a post-merge gate with a label
+
+Until the queue is on, the push-only gates are invisible on a PR — you land,
+then find out. The manual workaround is a **label trigger**: each of these
+gates carries a `pull_request: types: [labeled]` trigger plus a job-level `if`
+that runs the job *only* when a specific label is present. Add the label to a
+PR and the otherwise-post-merge gate runs against that branch before merge.
+
+The label names a **feature / blast-radius**, and one label fires every backend
+of that feature at once — agents reason about *what they touched* ("I changed
+the OIDC emitter"), not about the workflow-file inventory. So there is no
+per-workflow label (`run-hono-oidc`), and no single mega `run-e2e` grab-bag —
+the size that matches the blast radius is one label per feature family:
+
+| Label | Fires | Notes |
+|---|---|---|
+| `run-obs` | `hono/dotnet/java/python/elixir-vanilla-obs-e2e` | observability runtime e2e, all five backends |
+| `run-oidc` | `hono/dotnet/java/python/elixir-oidc-e2e` + `auth-oidc-compose-e2e` | OIDC code flow, all backends + the compose stack |
+| `run-tenancy` | `tenancy-e2e` | already a 10-leg matrix internally |
+| `run-migration-e2e` | `migration-evolution-e2e` | migrate-chain ≡ fresh-create + data-survival, 5 SQL backends |
+| `run-conformance` | `conformance-full` | cross-backend runtime conformance |
+| `run-channels` | `channels-e2e` | cross-deployable eventing |
+| `run-differential` | `differential-report` | |
+| `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` | legacy cluster — a coherent Phoenix/playground group, *not* a run-everything button |
+| `frontend-fullstack` | `frontend-fullstack-e2e` | non-React fullstack round-trip |
+| `a11y` | `generated-a11y` | axe-core WCAG-AA scan |
+| `e2e-k8s` | `k8s-e2e` | kind-cluster smoke |
+
+The job `if` is uniform: `github.event_name != 'pull_request' || github.event.label.name == '<label>'`
+— so push, `merge_group`, and `workflow_dispatch` always run; a PR runs the gate
+only when tagged with that exact label. Concurrency stays keyed on `github.ref`
+with `cancel-in-progress: false`, so a labeled PR run (ref `refs/pull/N/merge`)
+never collides with or cancels a `push:main` run.
+
+This is a manual pre-merge check, **not** a replacement for the merge queue
+above — the queue is the structural fix; labels are the interim "80/20."
+**When you add a new post-merge gate, wire it to the matching `run-<feature>`
+label (or mint a new one) and add a row here + in `CLAUDE.md`.**
 
 ## Guardrails added alongside
 
