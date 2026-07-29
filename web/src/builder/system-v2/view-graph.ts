@@ -10,6 +10,7 @@ import type {
   Aggregate,
   AggregateMember,
   BoundedContext,
+  Containment,
   ContextMember,
   Deployable,
   EntityPart,
@@ -24,6 +25,8 @@ import type {
   Workflow,
 } from "../../../../src/language/generated/ast.js";
 import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
+import { spliceNode } from "../edit-engine";
+import { parseDdd } from "../parse";
 import { deployableContexts, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 import { computeAggregateRelations, computeEntityPartRelations } from "./aggregate-edges";
 import { computeContextRelations } from "./context-edges";
@@ -902,11 +905,21 @@ function aggregateView(ast: Model, name: string): ViewGraph {
 const EMPTY: ReadonlySet<string> = new Set();
 
 /** Walk the model to find an EntityPart by name. Entity parts live directly
- *  under aggregates; we search every aggregate we can reach. (Names can
- *  collide across aggregates — the drill path establishes which aggregate
- *  we're inside, but for v1 we just take the first match, which is right in
- *  every example we ship.) */
-function findEntityPart(ast: Model, name: string): EntityPart | undefined {
+ *  under aggregates. `partType` refs are scoped by `ddd-scope.ts` to entity
+ *  parts declared in the *same* aggregate, so a caller that knows which
+ *  aggregate it's drilling from (the usual case — see `buildViewGraph`'s
+ *  `"entity"` arm) should pass `aggName` to resolve the correct one even when
+ *  two aggregates each declare an entity part with the same name. Without an
+ *  `aggName` (or if it doesn't resolve), falls back to a global scan across
+ *  every aggregate we can reach — first match wins, which can pick the wrong
+ *  one under a cross-aggregate name collision. */
+function findEntityPart(ast: Model, name: string, aggName?: string): EntityPart | undefined {
+  if (aggName) {
+    const agg = findAggregate(ast, aggName);
+    if (agg) {
+      for (const am of agg.members) if (am.$type === "EntityPart" && am.name === name) return am;
+    }
+  }
   for (const m of ast.members) {
     if (m.$type === "BoundedContext") {
       for (const cm of m.members) {
@@ -942,8 +955,8 @@ function findEntityPart(ast: Model, name: string): EntityPart | undefined {
  *  bodies still read fields/containments — those edges are computed by
  *  `computeEntityPartRelations`. Layout / containment rules are identical
  *  to aggregateView. */
-function entityView(ast: Model, name: string): ViewGraph {
-  const part = findEntityPart(ast, name);
+function entityView(ast: Model, name: string, aggName?: string): ViewGraph {
+  const part = findEntityPart(ast, name, aggName);
   if (!part) return { title: `entity ${name}`, nodes: [], edges: [] };
   const rel = computeEntityPartRelations(part);
   const items: RawAggNode[] = [];
@@ -1057,6 +1070,27 @@ export function findAggregate(ast: Model, name: string): Aggregate | undefined {
     }
   }
   return undefined;
+}
+
+/** Delete a `contains <fieldName>: …` member from aggregate `aggName`, by
+ *  splicing its own CST range to "" — the same construct-splice pattern the
+ *  invariant delete handler in `SystemBuilderV2Pane.tsx` uses. Containment
+ *  isn't a `Property`, so it can't go through `deleteField`
+ *  (`system/fields.ts`) — that only reprints the Property-only sublist and
+ *  would silently drop it. Self-contained (re-parses `source`, like the
+ *  `system/*.ts` mutators) so callers don't have to keep a separately-parsed
+ *  AST in sync with the source they're splicing over. Returns `null` if the
+ *  source doesn't parse, or the aggregate / field isn't found. */
+export function deleteContainment(source: string, aggName: string, fieldName: string): string | null {
+  const { ast, parserErrors } = parseDdd(source);
+  if (parserErrors.length > 0) return null;
+  const agg = findAggregate(ast, aggName);
+  if (!agg) return null;
+  const target = agg.members.find(
+    (m): m is Containment => m.$type === "Containment" && m.name === fieldName,
+  );
+  if (!target) return null;
+  return spliceNode(source, target, "");
 }
 
 function findWorkflow(ast: Model, name: string): Workflow | undefined {
@@ -1184,8 +1218,15 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
       return contextView(ast, last.name);
     case "aggregate":
       return aggregateView(ast, last.name);
-    case "entity":
-      return entityView(ast, last.name);
+    case "entity": {
+      // Entity-part names can collide across aggregates, and `partType` refs
+      // are scoped by `ddd-scope.ts` to the same aggregate — so resolve
+      // against the nearest "aggregate" ancestor in the drill path (entity
+      // steps are only ever reached, directly or via other entity steps,
+      // from an aggregate's containment) instead of scanning every aggregate.
+      const aggStep = [...path].reverse().find((s) => s.kind === "aggregate");
+      return entityView(ast, last.name, aggStep?.name);
+    }
     case "operation": {
       // An operation only resolves below an aggregate step.
       const agg = path[path.length - 2];

@@ -66,7 +66,14 @@ import {
   rebindDeployableEdgeTarget,
 } from "./deployable-edge-rebind";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
-import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
+import {
+  buildViewGraph,
+  deleteContainment,
+  findAggregate,
+  type ViewGraph,
+  type ViewKind,
+  type ViewPath,
+} from "./view-graph";
 import {
   clearPersisted,
   loadPersisted,
@@ -617,7 +624,15 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 const next = deleteField(ctx.getSource(), "aggregate", aggName, idx);
                 if (next != null) apply(next);
               }
-            : undefined;
+            : () => {
+                // Containment ids are `containment:<field>` — the display
+                // name embeds the entity type ("lines : OrderLine") but the
+                // id keeps the plain field name (see aggregateLayout in
+                // view-graph.ts).
+                const fieldName = n.id.slice("containment:".length);
+                const next = deleteContainment(ctx.getSource(), aggName, fieldName);
+                if (next != null) apply(next);
+              };
         m.set(n.id, {
           kind: n.kind,
           name: n.name,
