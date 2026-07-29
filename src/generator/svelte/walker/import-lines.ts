@@ -11,12 +11,15 @@ import type { ApiHookUse, ImportMap } from "../../_walker/walker-core.js";
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Rewrite a walker-canonical module path to its SvelteKit home.
- *  `../api/X` → `$lib/api/X`; `../lib/X` → `$lib/X`; everything else
- *  (npm packages, `$lib/...` paths the svelte packs declare
- *  directly) passes through. */
+ *  `../api/X` → `$lib/api/X`; `../lib/X` → `$lib/X`; the i18n seam's
+ *  one-hop `../i18n` → `$lib/i18n` (the runtime lives at `src/lib/i18n.ts`,
+ *  so a `$lib` specifier resolves from any route depth — depth never
+ *  matters here); everything else (npm packages, `$lib/...` paths the
+ *  svelte packs declare directly) passes through. */
 export function svelteImportPath(path: string): string {
   if (path.startsWith("../api/")) return `$lib/api/${path.slice("../api/".length)}`;
   if (path.startsWith("../lib/")) return `$lib/${path.slice("../lib/".length)}`;
+  if (path === "../i18n") return "$lib/i18n";
   return path;
 }
 
