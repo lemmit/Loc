@@ -1,0 +1,52 @@
+{
+  "case": "payments",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/credit_cards",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/credit_cards/{id}",
+      "status": 200,
+      "body": {
+        "expiryMonth": 4,
+        "expiryYear": 2030,
+        "holderName": "Ada Lovelace",
+        "id": "<volatile:key>",
+        "last4": "4242",
+        "network": "Visa",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/bank_accounts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/bank_accounts/{id}",
+      "status": 200,
+      "body": {
+        "holderName": "Grace Hopper",
+        "id": "<volatile:key>",
+        "last4": "0007",
+        "routingNumber": "021000021",
+        "version": 1
+      }
+    }
+  ]
+}

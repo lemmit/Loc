@@ -82,7 +82,7 @@ the size that matches the blast radius is one label per feature family:
 | `run-migration-e2e` | `migration-evolution-e2e` | migrate-chain ≡ fresh-create + data-survival, 5 SQL backends |
 | `run-conformance` | `conformance-full` | cross-backend runtime conformance |
 | `run-channels` | `channels-e2e` | cross-deployable eventing |
-| `run-differential` | `differential-report` | |
+| `run-differential` | `differential-report` | the nightly all-pairs DISCOVERY sweep over the wider compose stack. The **enforcement** half is no longer here: since M-T9.11 slice (c) each backend diffs its recorded responses against `test/behavioral/wire-golden/` inside its own `behavioral-e2e*.yml` leg, so runtime-value parity is a per-PR blocking gate needing no label |
 | `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` | legacy cluster — a coherent Phoenix/playground group, *not* a run-everything button |
 | `frontend-fullstack` | `frontend-fullstack-e2e` | non-React fullstack round-trip |
 | `a11y` | `generated-a11y` | axe-core WCAG-AA scan |
