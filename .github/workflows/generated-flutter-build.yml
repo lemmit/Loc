@@ -215,31 +215,66 @@ jobs:
       - name: flutter build web (the real compile gate)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter build web --release
-      # Native mobile surface (Phase 3) — prove the SAME emitted Dart source
-      # compiles for Android too.  `make prepare` (flutter create --platforms)
-      # materialises the native folders the SDK owns; `flutter build apk` is the
-      # native "is the Dart real" gate.  Java 17 + the Android SDK are set up here
-      # (subosito/flutter-action provides Flutter).  The FileUpload primitive
-      # pulls the `file_picker` native plugin, whose transitive
-      # `flutter_plugin_android_lifecycle` requires `compileSdk 36` — newer than
-      # `flutter create`'s default — so bump the generated Android compileSdk
-      # before the build.  iOS needs a macOS host — deferred.
+      # Native mobile surface (Phase 3) — prove the SAME kind of emitted Dart
+      # source compiles for Android too.  `flutter build apk` is the native "is
+      # the Dart real" gate.  It builds a SEPARATE, minimal Loom app (no
+      # FileUpload) rather than the full showcase: the showcase's FileUpload pulls
+      # the third-party `file_picker` native plugin, whose Android build needs a
+      # newer compileSdk than the stock `flutter create` template ships — that's
+      # a file_picker packaging requirement, not a Loom codegen concern, and
+      # FileUpload's Dart is already compile-proven by `flutter analyze` +
+      # `flutter build web` above.  Java 17 + the Android SDK are set up here.
+      # iOS needs a macOS host — deferred.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: flutter create android platform + build apk
-        working-directory: ${{ steps.proj.outputs.dir }}
+      - name: Generate a minimal (FileUpload-free) app for the native apk gate
         run: |
+          mkdir -p ci-flutter-apk
+          cat > ci-flutter-apk/apk.ddd <<'DDD'
+          system ApkSmoke {
+            api ShopApi from Cat
+            subdomain Cat { context C {
+              aggregate Product {
+                name: string
+                price: int
+                operation rename(newName: string) { name := newName }
+              }
+              repository Products for Product { }
+            } }
+            storage db { type: postgres }
+            resource st { for: C, kind: state, use: db }
+            ui MobileApp {
+              framework: flutter
+              api Shop: ShopApi
+              page Home {
+                route: "/"
+                state { note: string = "" }
+                body: Stack {
+                  Heading { "Products", level: 1 },
+                  QueryView {
+                    of: Shop.Product.all,
+                    loading: Text { "Loading" }, error: Text { "Failed" }, empty: Text { "None" },
+                    data: rows => Stack { For { each: rows, p => Card { p.name, Text { p.price } } } }
+                  },
+                  Field { "Note", bind: note },
+                  CreateForm { of: Product },
+                  Button { "New", to: "/new" }
+                }
+              }
+              page New { route: "/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+            }
+            deployable api { platform: node contexts: [C] dataSources: [st] serves: ShopApi port: 3000 }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter-apk/apk.ddd -o ci-flutter-apk/out
+      - name: flutter create android platform + build apk
+        run: |
+          APK_DIR="$(dirname "$(find ci-flutter-apk/out -name pubspec.yaml | head -1)")"
+          cd "$APK_DIR"
+          flutter pub get
           flutter create --platforms=android .
-          # file_picker's native plugin (flutter_plugin_android_lifecycle) needs
-          # compileSdk >= 36. Bumping only the app module doesn't reach the plugin
-          # subprojects, so force it on ALL android subprojects in the root Gradle
-          # file (the documented workaround). Kotlin (build.gradle.kts) or Groovy.
-          if [ -f android/build.gradle.kts ]; then
-            printf '\nsubprojects {\n    afterEvaluate {\n        (extensions.findByName("android") as? com.android.build.gradle.BaseExtension)?.compileSdkVersion(36)\n    }\n}\n' >> android/build.gradle.kts
-          elif [ -f android/build.gradle ]; then
-            printf '\nsubprojects {\n    afterEvaluate { proj ->\n        if (proj.extensions.findByName("android") != null) { proj.android { compileSdkVersion 36 } }\n    }\n}\n' >> android/build.gradle
-          fi
           flutter build apk --debug

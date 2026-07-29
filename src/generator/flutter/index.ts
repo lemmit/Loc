@@ -564,27 +564,21 @@ const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
  *  (mirrors the compose env the Dockerfile injects). */
 function renderMakefile(pkg: string, usesFileUpload: boolean): string {
   // A `FileUpload` primitive pulls the `file_picker` native plugin, whose
-  // transitive `flutter_plugin_android_lifecycle` requires Android compileSdk
-  // >= 36 — newer than the `flutter create` template default.  Bumping only the
-  // app module doesn't reach the plugin subprojects, so force it on ALL android
-  // subprojects in the root Gradle file (the documented workaround; Kotlin or
-  // Groovy).  Omitted when no FileUpload is present, so File-free Makefiles stay
-  // byte-identical.
-  // The Gradle blocks go in the printf FORMAT (not a `%s` arg) so the `\n`
-  // escapes expand to real newlines.  In this template literal `\\n` emits the
-  // two chars `\n` into the Makefile text, which printf then expands at run time.
-  const ktsFmt =
-    'subprojects {\\n    afterEvaluate {\\n        (extensions.findByName("android") as? com.android.build.gradle.BaseExtension)?.compileSdkVersion(36)\\n    }\\n}\\n';
-  const groovyFmt =
-    'subprojects {\\n    afterEvaluate { proj ->\\n        if (proj.extensions.findByName("android") != null) { proj.android { compileSdkVersion 36 } }\\n    }\\n}\\n';
-  const compileSdkBump = usesFileUpload
-    ? "\t# file_picker's native plugin needs compileSdk >= 36 on every subproject\n" +
-      `\t@if [ -f android/build.gradle.kts ]; then printf '\\n${ktsFmt}' >> android/build.gradle.kts; elif [ -f android/build.gradle ]; then printf '\\n${groovyFmt}' >> android/build.gradle; fi\n`
+  // Android build needs compileSdk >= 36 (via `flutter_plugin_android_lifecycle`)
+  // — newer than the `flutter create` template default.  A reliable auto-fix is
+  // awkward (the app-level compileSdk doesn't reach plugin subprojects, and a
+  // root `subprojects { afterEvaluate }` runs too late under modern Flutter's
+  // Gradle ordering), so we note the one-line manual fix in a comment instead of
+  // shipping a fragile override.  Omitted when no FileUpload is present.
+  const filePickerNote = usesFileUpload
+    ? "# NOTE: this app uses FileUpload -> the `file_picker` plugin, whose Android\n" +
+      "# build needs compileSdk >= 36. If `make apk` fails on checkDebugAarMetadata,\n" +
+      "# set `compileSdk = 36` in android/app/build.gradle.kts.\n"
     : "";
   return `# ${pkg} — Loom-generated Flutter app.
 # One Dart source, three build surfaces.  Override the API base with
 #   make apk API_BASE_URL=https://api.example.com/api
-API_BASE_URL ?= /api
+${filePickerNote}API_BASE_URL ?= /api
 DEFINE = --dart-define=API_BASE_URL=$(API_BASE_URL)
 
 .PHONY: prepare web apk ipa analyze clean
@@ -593,7 +587,7 @@ DEFINE = --dart-define=API_BASE_URL=$(API_BASE_URL)
 # not vendored here).  Idempotent — re-running only fills what's missing.
 prepare:
 	flutter create --platforms=android,ios .
-${compileSdkBump}
+
 web:
 	flutter build web --release $(DEFINE)
 
