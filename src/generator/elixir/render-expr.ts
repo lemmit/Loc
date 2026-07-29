@@ -202,6 +202,8 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // Lower to `if … do … else … end`
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
   convert: (value, e) => renderElixirConvert(e.target, e.from, value),
+  // Transparent i18n wrapper (M-T1.11) — drop the format, emit the operand.
+  i18nFormat: (inner) => inner,
   // A5 temporal: an absolute duration is plain integer MILLISECONDS on this
   // backend (mirrors the TS representation, so cross-backend `dt − dt` /
   // duration-algebra values agree).  `duration ± duration` and

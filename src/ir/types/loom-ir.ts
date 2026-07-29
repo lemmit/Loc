@@ -3697,6 +3697,32 @@ export type ExprIR =
       origin?: OriginRef;
     }
   /**
+   * i18n ICU format suffix on an interpolation hole (M-T1.11, i18n.md) — a
+   * TRANSPARENT wrapper around a template hole's expression that carries the
+   * raw ICU format text (`", number, ::currency/USD"`, leading comma + spaces
+   * preserved).  Created by `lowerTemplateString` ONLY when the source hole
+   * spelled a `, format` suffix (`` `Total: {order.total, number,
+   * ::currency/USD}` ``); a format-less hole gets NO wrapper, so its lowering
+   * is byte-identical to before this node existed.
+   *
+   * INERT on the raw path: every backend + Feliz/Flutter/HEEx renders it as
+   * exactly `inner` (the string-converted concat operand) — the format is
+   * DROPPED, so a formatted template emits byte-identical to a format-less one.
+   * The format only comes alive on the four JS/TS frontends' i18n runtime,
+   * where `icuFromConcat` (src/generator/_walker/i18n-extract.ts) splices the
+   * suffix into the emitted ICU message and `@formatjs/intl-messageformat`
+   * locale-formats the value at runtime.  `inner` is the concat operand (the
+   * `convert`/`.display` string-coercion), which the extractor peels back to
+   * the raw value for the runtime `values` object.
+   */
+  | {
+      kind: "i18nFormat";
+      inner: ExprIR;
+      /** Raw ICU suffix incl. the leading comma, e.g. `", number, ::currency/USD"`. */
+      format: string;
+      origin?: OriginRef;
+    }
+  /**
    * Predicate-arms expression — first arm whose
    * `cond` evaluates to `true` returns its `value`; if no arm
    * matches, `otherwise` (when present) is the fallthrough.  Lives

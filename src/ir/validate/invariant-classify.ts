@@ -152,6 +152,9 @@ function constructionEvaluable(
       // The server applies the coercion; the wrapped value must itself be
       // evaluable.
       return constructionEvaluable(e.value, available, scope);
+    case "i18nFormat":
+      // Transparent i18n wrapper — evaluable iff the wrapped value is.
+      return constructionEvaluable(e.inner, available, scope);
     case "match":
       return (
         e.arms.every(
@@ -294,6 +297,9 @@ function exprIsTranslatable(
       // duration arm — temporal invariants enforce server-side only,
       // where `_assertInvariants` renders through the full ExprTarget.
       return false;
+    case "i18nFormat":
+      // Transparent i18n wrapper — translatable iff the wrapped value is.
+      return exprIsTranslatable(e.inner, ctx, scope);
     case "match":
       // A match expression is wire-translatable iff every arm
       // condition + value plus the `else` branch is.  Same posture
@@ -609,6 +615,9 @@ function firstFieldRef(e: ExprIR): string | null {
     case "convert":
       // The wrapped value may itself be a field reference; walk into it.
       return firstFieldRef(e.value);
+    case "i18nFormat":
+      // Transparent i18n wrapper — the field ref, if any, is inside it.
+      return firstFieldRef(e.inner);
     case "duration":
       // The amount may itself be a field reference; walk into it.
       return firstFieldRef(e.amount);

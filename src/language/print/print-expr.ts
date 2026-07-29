@@ -133,7 +133,10 @@ export function printExpr(node: Expression): string {
       for (let i = 0; i < node.strings.length; i++) {
         out += escapeTemplateSegment(node.strings[i] ?? "");
         const hole = node.holes[i];
-        if (hole) out += `{${printExpr(hole)}}`;
+        // A hole is `value` plus an optional raw ICU `format` suffix (i18n,
+        // M-T1.11); `format` already carries its leading comma + spacing, so it
+        // re-emits verbatim for a byte-exact round-trip (`{total, number}`).
+        if (hole) out += `{${printExpr(hole.value)}${hole.format ?? ""}}`;
       }
       return `${out}\``;
     }

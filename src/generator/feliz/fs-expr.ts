@@ -177,6 +177,10 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return FS_LEAVES.ternary(r(e.cond), r(e.then), r(e.otherwise));
     case "convert":
       return FS_LEAVES.convert(r(e.value), e.target, e.from);
+    case "i18nFormat":
+      // Transparent i18n wrapper (M-T1.11) — Feliz has no client i18n runtime,
+      // so the format is dropped: render the wrapped operand verbatim.
+      return r(e.inner);
     case "list":
       return FS_LEAVES.list(e.elements.map(r));
     case "object":

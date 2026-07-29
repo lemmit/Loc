@@ -94,18 +94,28 @@ function flattenConcatChain(e: ExprIR): ExprIR[] {
  *  a dotted path to its last segment (`order.id` → `id`).  Bare refs use their
  *  name; anything else (a call, arithmetic) has no natural name → undefined, and
  *  the caller falls back to a positional `argN`. */
-function holeName(expr: ExprIR): string | undefined {
+/** Peel a hole's wrapping layers down to the raw value expression, returning
+ *  both that expression and a translator-friendly placeholder name.  Layers:
+ *  the transparent `i18nFormat` i18n wrapper (M-T1.11), the `convert` /
+ *  `.display` string-coercion lowering injects for a `string + X` concat, and
+ *  `paren`.  The RAW `value` is what the runtime `values` object must carry for
+ *  a formatted hole (a number for `, number`, a Date for `, date` — not its
+ *  stringified form); `name` is the last path segment (`order.id` → `id`), or
+ *  undefined for an unnameable expression (a call / arithmetic). */
+function peelHole(expr: ExprIR): { value: ExprIR; name: string | undefined } {
   let e = expr;
   for (;;) {
-    if (e.kind === "convert" && e.target === "string") e = e.value;
+    if (e.kind === "i18nFormat") e = e.inner;
+    else if (e.kind === "convert" && e.target === "string") e = e.value;
     else if (e.kind === "member" && e.member === "display") e = e.receiver;
     else if (e.kind === "paren") e = e.inner;
     else break;
   }
-  if (e.kind === "member") return e.member;
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "method-call") return e.member;
-  return undefined;
+  let name: string | undefined;
+  if (e.kind === "member") name = e.member;
+  else if (e.kind === "ref") name = e.name;
+  else if (e.kind === "method-call") name = e.member;
+  return { value: e, name };
 }
 
 /** Re-detect an interpolated user-visible string from its lowered `+`-chain.
@@ -131,7 +141,19 @@ export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined 
       continue;
     }
     const index = holes.length;
-    let name = holeName(piece) ?? `arg${index}`;
+    // A `, format` suffix (i18n, M-T1.11) rides the transparent `i18nFormat`
+    // wrapper.  Splice its RAW ICU text into BOTH placeholders — the positional
+    // form is the rename-stable hash input, so a FORMAT change re-keys (a
+    // different rendering IS a different message) while a field rename (name →
+    // `{0}`) still does not.  The stored `expr` is the PEELED raw value (a
+    // number/Date), so the runtime `values` object hands the locale formatter
+    // the real value rather than its stringified form.
+    const peeled = peelHole(piece);
+    const format = piece.kind === "i18nFormat" ? piece.format : "";
+    // A format-less hole keeps its stringified concat operand verbatim (slice-8
+    // behaviour); a formatted hole carries the peeled raw value.
+    const holeExpr = piece.kind === "i18nFormat" ? peeled.value : piece;
+    let name = peeled.name ?? `arg${index}`;
     const seen = used.get(name);
     if (seen === undefined) used.set(name, 1);
     else {
@@ -139,9 +161,9 @@ export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined 
       used.set(name, n);
       name = `${name}_${n}`;
     }
-    holes.push({ name, expr: piece });
-    display += `{${name}}`;
-    positional += `{${index}}`;
+    holes.push({ name, expr: holeExpr });
+    display += `{${name}${format}}`;
+    positional += `{${index}${format}}`;
   }
   // Needs both translatable text and at least one hole to be a message.
   if (!hasLiteral || holes.length === 0) return undefined;

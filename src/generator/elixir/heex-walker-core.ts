@@ -573,6 +573,11 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       // rarely reach a page body (they mostly arise in domain expressions),
       // but a page-level `dt + days(n)` is valid DSL.
       return renderDuration(expr.unit, renderExpr(expr.amount, ctx));
+    case "i18nFormat":
+      // Transparent i18n wrapper (M-T1.11) — LiveView has no client-side i18n
+      // runtime, so the format is dropped: render the wrapped operand, exactly
+      // as a format-less hole would render.
+      return renderExpr(expr.inner, ctx);
     case "match":
       return renderMatch(expr, ctx);
     case "list":

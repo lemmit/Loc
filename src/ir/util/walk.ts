@@ -125,6 +125,10 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
     case "duration":
       expr?.(e.amount);
       break;
+    case "i18nFormat":
+      // Transparent i18n wrapper — its only child is the wrapped hole expr.
+      expr?.(e.inner);
+      break;
     case "match":
       if (e.subject) expr?.(e.subject);
       for (const a of e.arms) {

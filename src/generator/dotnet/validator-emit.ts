@@ -419,6 +419,9 @@ function renderFluentPredicate(e: ExprIR): string {
       return `false /* UNRENDERABLE:lambda-block */`;
     case "object":
       return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderFluentPredicate(f.value)}`).join(", ")} }`;
+    case "i18nFormat":
+      // Transparent i18n wrapper — render the wrapped predicate operand.
+      return renderFluentPredicate(e.inner);
     case "this":
     case "id":
     case "call":

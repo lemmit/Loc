@@ -94,6 +94,8 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderTsConvert(e.target, e.from, value),
+  // Transparent i18n wrapper (M-T1.11) — drop the format, emit the operand.
+  i18nFormat: (inner) => inner,
   // A5 temporal: a Loom duration value is plain MILLISECONDS (a `number`) on
   // this backend, so `duration ± duration` / `duration * int` fall through
   // to native numeric operators and `datetime ± duration` becomes
