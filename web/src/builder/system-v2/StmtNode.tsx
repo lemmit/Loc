@@ -6,7 +6,7 @@
 import { Box, Text } from "@mantine/core";
 import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { StmtRow } from "../system/BodyEditor";
+import { StmtRow, type NestedExprEditors } from "../system/BodyEditor";
 import type { StmtView } from "../system/body";
 import type { ReactNode } from "react";
 
@@ -30,6 +30,9 @@ export interface StmtNodeData {
    *  `onRepointEvent` to make the event re-pointable inline. */
   events?: string[];
   onRepointEvent?: (eventName: string) => void;
+  /** Path-addressed `ƒx` editors for statements nested inside this one's
+   *  `for` / `if let` / `match` blocks (the container rows hand them down). */
+  nested?: NestedExprEditors;
   /** Narrow the node for a phone-width canvas (~390px viewport). */
   compact?: boolean;
 }
@@ -96,6 +99,7 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
       onToggleField={d.onToggleField}
       events={d.events}
       onRepointEvent={d.onRepointEvent}
+      nested={d.nested}
     />
   );
 

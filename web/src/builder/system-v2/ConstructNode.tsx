@@ -20,6 +20,18 @@ export interface NodeMultiSelect {
   testid: string;
 }
 
+/** A small inline text field on the node — used for the single-clause header
+ *  edits that have no expression tree behind them (a find's `requires` gate,
+ *  its `ignoring` list).  Committed on blur, and only when the text actually
+ *  changed, so a stray focus never rewrites the source. */
+export interface NodeTextInput {
+  label: string;
+  value: string;
+  placeholder?: string;
+  testid: string;
+  onCommit: (value: string) => void;
+}
+
 export interface ConstructNodeData {
   kind: ViewKind;
   name: string;
@@ -31,6 +43,9 @@ export interface ConstructNodeData {
   onDelete?: () => void;
   /** Optional inline multi-selects (stacked below the name). */
   multiSelects?: NodeMultiSelect[];
+  /** Optional inline text fields (stacked below the name) for single-clause
+   *  header edits — a find's `requires` gate / `ignoring` list. */
+  inputs?: NodeTextInput[];
   /** Inline structured editor for the construct's expression (find filter,
    *  invariant condition, …) — rendered below the name while expanded. */
   expressionEditor?: ReactNode;
@@ -62,6 +77,33 @@ const BADGE_ICON: Record<VBadge["label"], string> = {
   when: "⚙",
   mask: "🔒",
 };
+
+/** One inline header field. Local draft state so typing doesn't re-parse the
+ *  document on every keystroke; the parent's re-derived `value` re-seeds it. */
+function NodeInput({ spec }: { spec: NodeTextInput }): JSX.Element {
+  const [draft, setDraft] = useState(spec.value);
+  useEffect(() => setDraft(spec.value), [spec.value]);
+  return (
+    <TextInput
+      size="xs"
+      label={spec.label}
+      value={draft}
+      placeholder={spec.placeholder}
+      className="nodrag"
+      data-testid={spec.testid}
+      aria-label={spec.label}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={() => {
+        if (draft.trim() !== spec.value.trim()) spec.onCommit(draft);
+      }}
+      styles={{
+        label: { fontSize: 9, color: "rgba(255,255,255,0.7)", marginBottom: 2 },
+        input: { fontSize: 11, minHeight: 24, fontFamily: "monospace" },
+      }}
+    />
+  );
+}
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as ConstructNodeData;
@@ -115,7 +157,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
             ? d.compact
               ? 320
               : 360
-            : d.multiSelects && d.multiSelects.length > 0
+            : (d.multiSelects && d.multiSelects.length > 0) || (d.inputs && d.inputs.length > 0)
               ? d.compact
                 ? 210
                 : 240
@@ -305,6 +347,13 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         <Box mt={6} className="nodrag" data-testid="c4system-v2-expression-editor">
           {d.expressionEditor}
         </Box>
+      )}
+      {d.inputs && d.inputs.length > 0 && (
+        <Stack gap={4} mt={6} className="nodrag" data-testid="c4system-v2-node-inputs">
+          {d.inputs.map((spec) => (
+            <NodeInput key={spec.testid} spec={spec} />
+          ))}
+        </Stack>
       )}
       {d.multiSelects && d.multiSelects.length > 0 && (
         <Stack gap={4} mt={6} className="nodrag">
