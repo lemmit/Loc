@@ -8,8 +8,11 @@ import {
   type EmitStmt,
   type Expression,
   type FindDecl,
+  type ForStmt,
   type FunctionDecl,
+  type IfLetStmt,
   type Invariant,
+  type MatchStmt,
   type Model,
   type Operation,
   type Parameter,
@@ -42,11 +45,17 @@ import { applyEdits } from "../edit-engine";
 import { buildLinkedModel } from "./linked-doc";
 import { parseDdd } from "../parse";
 import {
+  aggregateBodyParamNames,
+  aggregateBodyStatements,
   listBodies,
   listFunctions,
+  nestedStmtLists,
+  statementAt,
   workflowBodyParamNames,
   workflowBodyStatements,
   type BodyKey,
+  type StmtList,
+  type StmtPath,
 } from "./body";
 
 // Single-expression slots editable by the structured expression editor:
@@ -61,11 +70,75 @@ export type ExprSlot =
   | { kind: "derived"; owner: string; name: string }
   | { kind: "invariant"; owner: string; index: number }
   | { kind: "findFilter"; owner: string; name: string }
-  | { kind: "stmtExpr"; owner: string; op: string; index: number; field?: number }
+  // `index` is the TOP-LEVEL statement; `path` (when present) descends from it
+  // into a `for` / `if let` / `match` block, so a nested statement's expression
+  // is addressable too.  `member` addresses one statement-bearing member of the
+  // aggregate (`create`, `destroy:archive`, `apply:Paid`); omitted = the
+  // operation named by `op`, so pre-existing slots keep resolving unchanged.
+  | {
+      kind: "stmtExpr";
+      owner: string;
+      op: string;
+      member?: BodyKey;
+      index: number;
+      path?: StmtPath;
+      field?: number;
+    }
   // `member` addresses one statement-bearing workflow member (`handle:confirm`,
   // `on:PaymentReceived`, `apply:OrderPlaced`, `create:Name`); omitted = the
   // primary `create` starter, so pre-existing slots keep resolving unchanged.
-  | { kind: "wfStmt"; owner: string; member?: BodyKey; index: number; field?: number };
+  | {
+      kind: "wfStmt";
+      owner: string;
+      member?: BodyKey;
+      index: number;
+      path?: StmtPath;
+      field?: number;
+    };
+
+// --- nested-statement addressing -------------------------------------------
+//
+// A statement slot's full address is `index` followed by `path` — the same
+// `StmtAddr` shape `body.ts` splices with.  The option `value` strings the
+// picker keys on encode that path after the index, one `/`-separated segment
+// per descent step: `b<i>` (a `for` body / the default list), `t<i>` (an
+// `if let` then-branch), `e<i>` (an else block), `a<n>.<i>` (match arm `n`).
+// So `stmt:confirm:3/b1` is "statement 1 of the loop at top-level statement 3".
+
+const LIST_TAG: Record<"body" | "then" | "else", string> = { body: "b", then: "t", else: "e" };
+
+const stepTag = (list: StmtList | undefined): string =>
+  typeof list === "object" ? `a${list.arm}.` : LIST_TAG[list ?? "body"];
+
+/** Encode a descent path into an option-value suffix (empty for the top
+ *  level, so an unnested slot keeps its historical `…:<index>` value). */
+export function encodeStmtPath(path: StmtPath | undefined): string {
+  if (!path || path.length === 0) return "";
+  return path.map((s) => `/${stepTag(s.list)}${s.index}`).join("");
+}
+
+const STEP = /^(?:(b|t|e)|a(\d+)\.)(\d+)$/;
+
+/** Parse an option-value path suffix back into descent steps — the inverse of
+ *  `encodeStmtPath`.  Null (not `[]`) marks a malformed suffix, so a stale
+ *  value can't silently resolve to the top-level statement. */
+export function decodeStmtPath(encoded: string): StmtPath | null {
+  const body = encoded.startsWith("/") ? encoded.slice(1) : encoded;
+  if (body === "") return [];
+  const out: { index: number; list?: StmtList }[] = [];
+  for (const seg of body.split("/")) {
+    const m = STEP.exec(seg);
+    if (!m) return null;
+    const index = Number(m[3]);
+    const list: StmtList = m[1] === "t" ? "then" : m[1] === "e" ? "else" : m[1] === "b" ? "body" : { arm: Number(m[2]) };
+    out.push({ index, list });
+  }
+  return out;
+}
+
+/** The full `StmtAddr` a statement slot addresses. */
+const slotAddr = (index: number, path?: StmtPath): number | StmtPath =>
+  path && path.length > 0 ? [{ index }, ...path] : index;
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -138,45 +211,55 @@ function stmtLabel(stmt: Statement, expr: Expression): string {
   return printExpr(expr);
 }
 
+/** Label fragment for one descent step, so a nested option reads
+ *  `confirm: body › total += line.amount`. */
+const listLabel = (list: StmtList | undefined): string =>
+  typeof list === "object" ? `arm ${list.arm + 1}` : (list ?? "body");
+
 // Push one option per editable expression in a statement body — precondition /
 // requires / let / assignment value (one each), one per emit field, and one per
-// bare-call argument. Shared by operations (stmtExpr slots) and workflows
-// (wfStmt slots) via the slot/value factories.
+// bare-call argument — RECURSING into `for` / `if let` / `match` blocks so a
+// nested statement's expression is offered too (addressed by `index` + `path`).
+// Shared by aggregates (stmtExpr slots) and workflows (wfStmt slots) via the
+// slot/value factories.
 function pushStatementOptions(
   out: SlotOption[],
   body: readonly Statement[],
   labelPrefix: string,
-  mkSlot: (index: number, field?: number) => ExprSlot,
-  mkValue: (index: number, field?: number) => string,
+  mkSlot: (index: number, path: StmtPath, field?: number) => ExprSlot,
+  mkValue: (index: number, path: StmtPath, field?: number) => string,
 ): void {
-  body.forEach((stmt, index) => {
+  const push = (stmt: Statement, index: number, path: StmtPath, prefix: string): void => {
+    const add = (label: string, field?: number): void => {
+      out.push({ value: mkValue(index, path, field), label: `${prefix}${label}`, slot: mkSlot(index, path, field) });
+    };
     if (stmt.$type === "EmitStmt") {
       const emit = stmt as EmitStmt;
       // `$refText` is the event name without triggering a linker deref (the
       // playground parse is unlinked).
       const ev = emit.event?.$refText ?? "event";
-      emit.fields.forEach((f, field) => {
-        out.push({ value: mkValue(index, field), label: `${labelPrefix}emit ${ev}.${f.name} = ${printExpr(f.value)}`, slot: mkSlot(index, field) });
-      });
-      return;
-    }
-    if (stmt.$type === "AssignOrCallStmt") {
+      emit.fields.forEach((f, field) => add(`emit ${ev}.${f.name} = ${printExpr(f.value)}`, field));
+    } else if (stmt.$type === "AssignOrCallStmt") {
       const a = stmt as AssignOrCallStmt;
       if (a.value) {
-        out.push({ value: mkValue(index), label: `${labelPrefix}${stmtLabel(stmt, a.value)}`, slot: mkSlot(index) });
+        add(stmtLabel(stmt, a.value));
       } else if (a.target?.call) {
         // Bare call (`x.method(args)`) — one slot per argument.
         const name = lvalueName(a.target);
-        a.target.args.forEach((arg, field) => {
-          out.push({ value: mkValue(index, field), label: `${labelPrefix}${name}(…) arg ${field + 1}: ${printExpr(arg)}`, slot: mkSlot(index, field) });
-        });
+        a.target.args.forEach((arg, field) => add(`${name}(…) arg ${field + 1}: ${printExpr(arg)}`, field));
       }
-      return;
+    } else {
+      const expr = stmtSlotExpr(stmt);
+      if (expr) add(stmtLabel(stmt, expr));
     }
-    const expr = stmtSlotExpr(stmt);
-    if (!expr) return;
-    out.push({ value: mkValue(index), label: `${labelPrefix}${stmtLabel(stmt, expr)}`, slot: mkSlot(index) });
-  });
+    // Container forms carry their own nested statement lists.
+    for (const { list, items } of nestedStmtLists(stmt)) {
+      items.forEach((child, i) =>
+        push(child, index, [...path, { index: i, list }], `${prefix}${listLabel(list)} › `),
+      );
+    }
+  };
+  body.forEach((stmt, index) => push(stmt, index, [], labelPrefix));
 }
 
 function findWorkflow(ast: Model, name: string): Workflow | null {
@@ -193,19 +276,29 @@ function findRepo(ast: Model, name: string): Repository | null {
   return null;
 }
 
+/** The statement list a statement slot addresses into: an aggregate member
+ *  (operation by name, or any `listBodies` key) or a workflow member. */
+function slotStatements(ast: Model, slot: ExprSlot): readonly Statement[] {
+  if (slot.kind === "stmtExpr") {
+    const owner = findOwner(ast, slot.owner);
+    if (!owner) return [];
+    if (slot.member) return aggregateBodyStatements(owner, slot.member);
+    return findOperation(owner, slot.op)?.body ?? [];
+  }
+  if (slot.kind === "wfStmt") {
+    const wf = findWorkflow(ast, slot.owner);
+    return wf ? workflowBodyStatements(wf, slot.member) : [];
+  }
+  return [];
+}
+
 export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   if (slot.kind === "findFilter") {
     const find = findRepo(ast, slot.owner)?.finds.find((f: FindDecl) => f.name === slot.name);
     return find?.filter ?? null;
   }
-  if (slot.kind === "stmtExpr") {
-    const op = findOperation(findOwner(ast, slot.owner), slot.op);
-    const stmt = op?.body[slot.index];
-    return stmt ? stmtSlotExpr(stmt, slot.field) : null;
-  }
-  if (slot.kind === "wfStmt") {
-    const wf = findWorkflow(ast, slot.owner);
-    const stmt = wf ? workflowBodyStatements(wf, slot.member)[slot.index] : undefined;
+  if (slot.kind === "stmtExpr" || slot.kind === "wfStmt") {
+    const stmt = statementAt(slotStatements(ast, slot), slotAddr(slot.index, slot.path));
     return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   const owner = findOwner(ast, slot.owner);
@@ -245,6 +338,9 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
   listInvariants(node).forEach((preview, index) => {
     out.push({ value: `inv:${index}`, label: `invariant: ${preview}`, slot: { kind: "invariant", owner, index } });
   });
+  // Operations keep their bare `stmt:<op>:<index>` option value (and their
+  // member-less slot); the lifecycle bodies an operation name cannot address —
+  // `create` / `destroy` / `apply:<Event>` — come in keyed by `listBodies`.
   for (const m of membersOf(node)) {
     if (m.$type !== "Operation") continue;
     const op = m as Operation;
@@ -252,9 +348,38 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
       out,
       op.body,
       `${op.name}: `,
-      (index, field) => ({ kind: "stmtExpr", owner, op: op.name, index, ...(field !== undefined ? { field } : {}) }),
-      (index, field) => (field !== undefined ? `stmt:${op.name}:${index}:${field}` : `stmt:${op.name}:${index}`),
+      (index, path, field) => ({
+        kind: "stmtExpr",
+        owner,
+        op: op.name,
+        index,
+        ...(path.length > 0 ? { path } : {}),
+        ...(field !== undefined ? { field } : {}),
+      }),
+      (index, path, field) =>
+        `stmt:${op.name}:${index}${encodeStmtPath(path)}${field !== undefined ? `:${field}` : ""}`,
     );
+  }
+  if (node.$type === "Aggregate") {
+    for (const body of listBodies(node)) {
+      if (body.key.startsWith("op:")) continue; // already enumerated above
+      pushStatementOptions(
+        out,
+        aggregateBodyStatements(node, body.key),
+        `${body.label}: `,
+        (index, path, field) => ({
+          kind: "stmtExpr",
+          owner,
+          op: "",
+          member: body.key,
+          index,
+          ...(path.length > 0 ? { path } : {}),
+          ...(field !== undefined ? { field } : {}),
+        }),
+        (index, path, field) =>
+          `stmt@${body.key}:${index}${encodeStmtPath(path)}${field !== undefined ? `:${field}` : ""}`,
+      );
+    }
   }
   return out;
 }
@@ -276,16 +401,17 @@ export function workflowSlotOptions(node: AstNode): SlotOption[] {
       out,
       statements,
       isPrimary ? "" : `${body.label}: `,
-      (index, field) => ({
+      (index, path, field) => ({
         kind: "wfStmt",
         owner: wf.name,
         ...(isPrimary ? {} : { member: body.key }),
         index,
+        ...(path.length > 0 ? { path } : {}),
         ...(field !== undefined ? { field } : {}),
       }),
-      (index, field) => {
+      (index, path, field) => {
         const head = isPrimary ? "wf" : `wf@${body.key}`;
-        return field !== undefined ? `${head}:${index}:${field}` : `${head}:${index}`;
+        return `${head}:${index}${encodeStmtPath(path)}${field !== undefined ? `:${field}` : ""}`;
       },
     );
   }
@@ -337,6 +463,42 @@ function withParamsAndLets(env: Env, params: string[], lets: string[]): Env {
 const letsBefore = (body: readonly Statement[], index: number): string[] =>
   body.slice(0, index).filter((s) => s.$type === "LetStmt").map((s) => (s as { name: string }).name);
 
+const sameList = (a: StmtList | undefined, b: StmtList | undefined): boolean =>
+  typeof a === "object" || typeof b === "object"
+    ? typeof a === "object" && typeof b === "object" && a.arm === b.arm
+    : (a ?? "body") === (b ?? "body");
+
+/** Names bound BEFORE the addressed statement, walking the descent path: the
+ *  `let`s of each list the path passes through, plus each container's own
+ *  binder (`for x in …`, `if let x = …`, a match arm's binding) — all of which
+ *  are in scope inside the block the path descends into. */
+function localsAlongPath(
+  statements: readonly Statement[],
+  index: number,
+  path: StmtPath = [],
+): string[] {
+  const out: string[] = [];
+  let list: readonly Statement[] = statements;
+  let cursor = index;
+  for (let depth = 0; ; depth++) {
+    out.push(...letsBefore(list, cursor));
+    const stmt = list[cursor];
+    const step = path[depth];
+    if (!stmt || !step) break;
+    if (stmt.$type === "ForStmt") out.push((stmt as ForStmt).var);
+    else if (stmt.$type === "IfLetStmt" && !sameList(step.list, "else")) out.push((stmt as IfLetStmt).var);
+    else if (stmt.$type === "MatchStmt" && typeof step.list === "object") {
+      const binding = (stmt as MatchStmt).varArms[step.list.arm]?.binding;
+      if (binding) out.push(binding);
+    }
+    const sub = nestedStmtLists(stmt).find((n) => sameList(n.list, step.list));
+    if (!sub) break;
+    list = sub.items;
+    cursor = step.index;
+  }
+  return out;
+}
+
 function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   // Workflows orchestrate across aggregates — no `this`; bare names resolve to
   // params / earlier lets / enums only.
@@ -346,11 +508,16 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
     const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
     const base: Env = ctx ? newEnv(ctx) : { ctx: undefined, locals: new Map() };
     const body = workflowBodyStatements(wf, slot.member);
-    return withParamsAndLets(base, workflowBodyParamNames(wf, slot.member), letsBefore(body, slot.index));
+    return withParamsAndLets(
+      base,
+      workflowBodyParamNames(wf, slot.member),
+      localsAlongPath(body, slot.index, slot.path),
+    );
   }
 
   let owner: AstNode | null = null;
   let params: Parameter[] = [];
+  let paramNames: string[] | null = null;
   let lets: string[] = [];
   let ctxNode: AstNode | null = null;
 
@@ -366,10 +533,18 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
       const fn = owner ? membersOf(owner).find((m): m is FunctionDecl => m.$type === "FunctionDecl" && (m as FunctionDecl).name === slot.name) : undefined;
       params = (fn as FunctionDecl | undefined)?.params ?? [];
     } else if (slot.kind === "stmtExpr") {
-      const op = findOperation(owner, slot.op);
-      params = op?.params ?? [];
-      // `let`s declared earlier in the body are in scope for this statement.
-      lets = op ? letsBefore(op.body, slot.index) : [];
+      // A member key reaches the create / destroy / apply bodies an operation
+      // name can't; without one the slot addresses the operation, as before.
+      const body = owner && slot.member ? aggregateBodyStatements(owner, slot.member) : null;
+      if (body) {
+        paramNames = owner ? aggregateBodyParamNames(owner, slot.member as BodyKey) : [];
+        lets = localsAlongPath(body, slot.index, slot.path);
+      } else {
+        const op = findOperation(owner, slot.op);
+        params = op?.params ?? [];
+        // `let`s declared earlier in the body are in scope for this statement.
+        lets = op ? localsAlongPath(op.body, slot.index, slot.path) : [];
+      }
     }
   }
   if (!owner) return null;
@@ -377,7 +552,7 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
   const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
   const owned = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
-  return withParamsAndLets(owned, params.map((p) => p.name), lets);
+  return withParamsAndLets(owned, paramNames ?? params.map((p) => p.name), lets);
 }
 
 /** In-scope bare names for a slot's expression — drives the editor's name
