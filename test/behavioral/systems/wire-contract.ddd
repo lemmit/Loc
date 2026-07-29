@@ -1,0 +1,111 @@
+// Shared behavioural system — the WIRE-CONTRACT EDGES the other four shared
+// systems (`ledger`/`payments`/`sales`/`shapes`) never reach.
+//
+// Those four cover the happy path well: create→read round-trips, enum casing,
+// camelCase keys, associations, temporal, value objects, `version`.  Three
+// classes of wire contract stayed OUTSIDE the M-T9.11 golden gate, and each is
+// a documented RS-rule the gate could not actually enforce:
+//
+//   1. MONEY SCALE (RS-12).  A `money`-typed field must serialize at a FIXED
+//      scale of 4 on every backend (`MONEY_WIRE_SCALE`) — stored OR derived.
+//      The other systems use a `Money` VALUE OBJECT over a plain `decimal`, so
+//      the `money` primitive's wire form was verified only by the nightly
+//      compose sweep.  `price` (stored, submitted at a DIFFERENT scale) and
+//      `floorPrice` (derived from a `money("…")` literal) pin both contexts.
+//   2. ABSENCE SHAPE (RS-8).  `[]`-vs-`null` for an empty containment
+//      collection, and an unset `optional` field's key — present-and-null vs
+//      omitted.  A backend that drops the key, or sends `null` for an empty
+//      list, breaks a client that iterates without a guard.
+// A third class — the ERROR ENVELOPE (RS-9) — is deliberately NOT here yet.  A
+// draft of this system asserted that a tripped `precondition` is a 400 with a
+// 7807 body; node/python/dotnet agree on 400, but **elixir answers 422**, and
+// that is a DELIBERATE mapping (`when` → 409, `requires` → 403, `precondition`
+// → 422, api-emit.ts), not a bug.  Which status is canonical is an OPEN owner
+// decision — see RS-15 — and until it lands, an emitted `toThrow(<status>)`
+// assertion would simply encode one side of it.  Error-envelope coverage joins
+// this system once RS-15 is settled.
+//
+// Deliberately plain otherwise — one relational aggregate, no auth, no
+// tenancy, no inheritance — so a divergence here localizes to the edge under
+// test rather than to an interaction.
+system WireContract {
+
+  subdomain Catalog {
+    context Catalog {
+
+      enum Availability { InStock, BackOrdered, Discontinued }
+
+      aggregate Listing with crudish {
+        sku: string
+        // (1) money, STORED.  Submitted at a different scale than the canonical
+        // wire scale, so a backend that echoes the submitted scale (rather than
+        // normalizing to 4) diverges on the read.
+        price: money
+        availability: Availability
+        // (2) an OPTIONAL scalar left unset by the create — its key must still
+        // be present (and null) on the read, on every backend.
+        note: string?
+        // (2) a containment collection that starts EMPTY — the read must carry
+        // `[]`, never `null` and never a missing key.
+        contains tags: Tag[]
+        entity Tag { label: string }
+
+        // (1) money, DERIVED from a `money("…")` literal — the context where a
+        // backend is most likely to stringify at the literal's own scale.
+        derived floorPrice: money = money("0.00")
+
+        operation addTag(label: string) {
+          tags += Tag { label: label }
+        }
+
+        // (3) a precondition the second call trips → the 409 arm of the error
+        // envelope.  Discontinuing twice is the failure path.
+        operation discontinue() {
+          precondition availability != Availability.Discontinued
+          availability := Availability.Discontinued
+        }
+      }
+
+      repository Listings for Listing {
+        find bySku(sku: string): Listing? where this.sku == sku
+      }
+    }
+  }
+
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  deployable api {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 8000
+  }
+
+  // (1) RS-12 — money at the wire, stored AND derived, in one read.  `price` is
+  // submitted as "19.5"; every backend must read it back at the canonical fixed
+  // scale, and `floorPrice` (a `money("0.00")` literal) must use that same
+  // scale rather than the literal's own.
+  // (2) RS-8 — `tags` was never appended to, so the read must carry an EMPTY
+  // list; `note` was never supplied, so its key must be present and null.
+  test e2e "money scale, empty collection and unset optional on one read" against api {
+    let l = api.listings.create({ sku: "SKU-1", price: "19.5", availability: "InStock" })
+    let read = api.listings.getById(l)
+    expect(read.sku).toBe("SKU-1")
+    expect(read.availability).toBe("InStock")
+    expect(read.tags.length).toBe(0)
+  }
+
+  // (2) The same collection AFTER an append — the non-empty shape, so the
+  // golden pins both ends of the `[]`-vs-`null` axis rather than only the
+  // empty one.
+  test e2e "a containment collection round-trips once appended" against api {
+    let l = api.listings.create({ sku: "SKU-2", price: "5", availability: "BackOrdered" })
+    api.listings.addTag(l, { label: "clearance" })
+    let read = api.listings.getById(l)
+    expect(read.tags.length).toBe(1)
+  }
+
+}

@@ -117,6 +117,30 @@ export function templatePath(url: string, opts: NormalizeOpts = DEFAULT_NORMALIZ
   return params.length ? `${templated}?${params.join("&")}` : templated;
 }
 
+/** The wire gate's normalization: the shared defaults PLUS a rule for
+ *  path-shaped strings.  An RFC 7807 problem body carries
+ *  `instance: "/api/listings/<uuid>/discontinue"` — a per-run value embedded in
+ *  a ROUTE.  The default value-shape rules don't fire (it isn't a bare uuid), so
+ *  without this the error golden could never match twice; collapsing the whole
+ *  string to one token would instead discard the route, which is the part a
+ *  divergence actually shows up in.  Templating keeps the route and drops the
+ *  id, exactly as the request `path` is templated. */
+export const WIRE_NORMALIZE: NormalizeOpts = {
+  ...DEFAULT_NORMALIZE,
+  volatileValue: [
+    ...(DEFAULT_NORMALIZE.volatileValue ?? []),
+    {
+      token: "<path>",
+      test: (s) => s.startsWith("/") && s.split("/").some(isVolatileSegment),
+      rewrite: (s) =>
+        s
+          .split("/")
+          .map((seg) => (isVolatileSegment(seg) ? "{id}" : seg))
+          .join("/"),
+    },
+  ],
+};
+
 /** Build one normalized `WireEntry` from a raw dispatch result.  A non-JSON body
  *  (empty 204, a text/plain error) is kept as a string so the differ still sees
  *  it; JSON is parsed then normalized (uuids/timestamps → tokens, keys sorted,
@@ -127,7 +151,7 @@ export function toWireEntry(
   url: string,
   status: number,
   bodyText: string,
-  opts: NormalizeOpts = DEFAULT_NORMALIZE,
+  opts: NormalizeOpts = WIRE_NORMALIZE,
 ): WireEntry {
   let body: Json;
   const trimmed = bodyText.trim();

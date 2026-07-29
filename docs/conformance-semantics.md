@@ -326,6 +326,41 @@ the conforming backends, and the fix that established it.
   only — this is the **increment** path, and it is shape-dependent. Tier:
   **behavioral**.
 
+### RS-15 · A tripped operation `precondition` maps to one canonical status — **OPEN**
+- **Guarantee (pending).** A `precondition` that is false at call time produces
+  the SAME status and the same `detail` shape on every backend. Which status
+  that is has **not been decided**.
+- **Trigger.** An `operation` with a `precondition` invoked in a state that
+  fails it.
+- **Observable — the backends disagree.**
+
+  | backends | status | `detail` |
+  |---|---|---|
+  | node, python, dotnet | **400** Bad Request | `"Precondition failed: <the predicate>"` |
+  | elixir | **422** Unprocessable Entity | `"A precondition failed"` (generic) |
+
+  Two divergences in one: the status, and whether the failed predicate is
+  named. Java was not measured on this path.
+- **Why this is NOT a one-backend bug.** Elixir's mapping is *deliberate and
+  documented* — a coherent denial ladder (`when` → 409, `requires` → 403,
+  `precondition` → 422, `api-emit.ts`) that deliberately replaced an older
+  `raise ArgumentError` → 500. And 422 is arguably the better RFC 9110 fit: the
+  request is well-formed but semantically rejected. Against that, 400 is what
+  the other backends emit. **This is the RS-12 shape** — an open canonical
+  decision for the owner, not a majority vote. (RS-11 is the standing reminder
+  that the majority can be the wrong side.)
+- **Consequence for the gate.** The `wire-contract` shared system deliberately
+  carries **no error-status assertion** until this is settled: the emitted
+  `test e2e` DSL expresses the expectation as `toThrow(<status>)`, so any
+  assertion would silently encode one side of the undecided question — and a
+  wire *waiver* cannot help, because the failure is the emitted test's own
+  assertion, not a golden mismatch. Error-envelope coverage joins the golden
+  once the decision lands.
+- **Conforms (provisional).** node, dotnet, python. **Targets:** elixir
+  (measured divergent), java (unmeasured).
+- **Provenance.** Found by the M-T9.11 wire-golden gate while extending its
+  coverage. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule
