@@ -97,9 +97,17 @@ test("Restore this version creates a restore commit", async ({ page }) => {
 test("Restore this version reverts the visible editor content", async ({ page }) => {
   await wipeStorage(page);
 
-  // A marker that exists ONLY after the first edit, so any pre-edit
-  // commit is a valid "before" target.
+  // A marker that exists ONLY after the SECOND edit, so the oldest commit is
+  // always a valid "before" target.
+  //
+  // The base edit is load-bearing, not padding: opening a fresh workspace does
+  // not itself record a commit, so a single edit leaves history with exactly
+  // ONE row — and then `rows.count() > 1` below fails (and restoring that lone
+  // row would restore the marker itself).  Two edits give a pre-marker commit
+  // deterministically, the same shape the sibling "creates a restore commit"
+  // test already relies on.
   const marker = `// hist-visible-${Date.now()}`;
+  await editAndCommit(page, "// hist-visible-base");
   await editAndCommit(page, marker);
   const editor = page.locator(".monaco-editor").first();
   await expect(editor).toContainText(marker, { timeout: 10_000 });

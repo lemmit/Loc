@@ -172,6 +172,9 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   const [form, setForm] = useState<FormState>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
+  // The header "+" menu is CONTROLLED — see `addMenu` below for why the
+  // uncontrolled Mantine toggle can't survive this target sandwich.
+  const [addOpened, setAddOpened] = useState(false);
   const existingPaths = useMemo(() => new Set(props.files.keys()), [props.files]);
 
   const draftError =
@@ -371,8 +374,29 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     [actionItems],
   );
 
+  // Opening the "+" menu is DRIVEN BY US, not by Mantine's uncontrolled
+  // toggle.  Two forces collide on this one element:
+  //
+  //  1. In the accordion variant the button sits inside a `<summary>`, so a
+  //     plain click would toggle the `<details>` open/closed underneath the
+  //     menu.  That's what the `preventDefault()` is for.
+  //  2. `Menu.Target` injects its toggle as the CHILD's `onClick` — but the
+  //     child here is a `Tooltip`, and Tooltip re-spreads the grandchild's own
+  //     props AFTER the ones it received (`{...tooltipProps, ..._childrenProps}`).
+  //     So the `ActionIcon`'s local `onClick` silently REPLACED the toggle and
+  //     the menu never opened at all (the "+" was a dead affordance).
+  //
+  // Controlling `opened` keeps both: cancel the summary toggle, then flip the
+  // menu ourselves.  Mantine still closes it on item click / outside click via
+  // `onChange`.
+  const toggleAdd = (e: { preventDefault: () => void; stopPropagation: () => void }): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAddOpened((o) => !o);
+  };
+
   const addMenu = (
-    <Menu position="bottom-end" shadow="sm" withinPortal>
+    <Menu position="bottom-end" shadow="sm" withinPortal opened={addOpened} onChange={setAddOpened}>
       <Menu.Target>
         <Tooltip
           label={persistent ? "Add a new .ddd file or folder" : EPHEMERAL_MESSAGE}
@@ -387,12 +411,17 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
             variant="subtle"
             color="gray"
             data-testid="source-files-add"
+            role="button"
+            tabIndex={0}
             aria-label="Add a new .ddd file or folder"
             aria-disabled={!persistent}
             data-disabled={persistent ? undefined : true}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
+            onClick={toggleAdd}
+            // `component="span"` (a `<button>` isn't valid inside `<summary>`)
+            // means no built-in keyboard activation — wire it up explicitly so
+            // the menu is reachable without a pointer.
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") toggleAdd(e);
             }}
           >
             +

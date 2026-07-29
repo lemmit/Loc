@@ -96,6 +96,19 @@ function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: {
   }
 }
 
+/** Stable string describing which nodes of a serialized seed carry a
+ *  `__diag` annotation (and what it says).  `""` when none do — the common
+ *  case, which keeps the canvas mount key still. */
+function diagSignature(nodes: SerializedNodes | null): string {
+  if (!nodes) return "";
+  const parts: string[] = [];
+  for (const [id, node] of Object.entries(nodes)) {
+    const diag = (node as { props?: Record<string, unknown> }).props?.__diag;
+    if (typeof diag === "string" && diag !== "") parts.push(`${id}=${diag}`);
+  }
+  return parts.sort().join("|");
+}
+
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
@@ -176,9 +189,8 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Diagnostics overlay — annotate a separate copy so it doesn't disturb
   // the canonical seed.  `initialNodes` (below) is what `<Frame>` consumes,
   // and craft only honours its initial value, so a diagnostic-only refresh
-  // doesn't reach the canvas — that's acceptable: the diagnostics bar at
-  // the top of the canvas (separate component) updates immediately, and
-  // per-node red outlines surface on the next live re-seed / Apply.
+  // can't reach the canvas through the data prop — `diagKey` below carries it
+  // into the mount key instead.
   const annotatedNodes = useMemo<SerializedNodes | null>(
     () => {
       if (!current?.expr || !seedNodes) return null;
@@ -188,14 +200,24 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     },
     [current, components, seedNodes, bodyDiagnostics],
   );
+  // Which nodes of the annotated seed actually carry a diagnostic.  The
+  // per-node outlines are baked into the seed at MOUNT, and diagnostics arrive
+  // out-of-band of the parse (LSP round-trip) — so a warning that lands after
+  // the mount, or one whose range only lines up with the seed a re-emit later,
+  // would otherwise never reach the canvas at all: the problems bar showed it
+  // and the node stayed unmarked, permanently.  Folding the annotation set into
+  // the mount key re-bakes the seed exactly when it changes.  It is derived
+  // from the ATTACHED annotations, not from `ctx.diagnostics`, so an unmapped
+  // or unchanged diagnostic set leaves the key alone and the canvas mounted.
+  const diagKey = useMemo(() => diagSignature(annotatedNodes), [annotatedNodes]);
 
   // `initialNodes` is the **first** seed for the current Editor mount (i.e.
-  // the current page + Apply-rev pair).  It's what `<Frame data={...}>`
-  // consumes; craft ignores subsequent `data` changes, so a live re-seed
-  // can't go through here — see `liveNodes` below.  We snapshot the very
-  // first non-null annotated seed and pin it via a ref so live updates
-  // don't bleed into the Frame's data and trigger a Frame remount.
-  const mountKey = `${current?.name ?? ""}:${rev}`;
+  // the current page + Apply-rev + annotation triple).  It's what
+  // `<Frame data={...}>` consumes; craft ignores subsequent `data` changes, so
+  // a live re-seed can't go through here — see `liveNodes` below.  We snapshot
+  // the first non-null annotated seed per key and pin it via a ref so live
+  // updates don't bleed into the Frame's data and trigger a Frame remount.
+  const mountKey = `${current?.name ?? ""}:${rev}:${diagKey}`;
   const initialNodesRef = useRef<{ key: string; nodes: SerializedNodes } | null>(null);
   if (annotatedNodes && initialNodesRef.current?.key !== mountKey) {
     initialNodesRef.current = { key: mountKey, nodes: annotatedNodes };
@@ -251,7 +273,10 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder
-          key={`${current.name}:${rev}`}
+          // `mountKey` (page : Apply-rev : annotation-set) — remounting the
+          // craft Editor is the only way a freshly annotated seed reaches
+          // `<Frame data>`, which craft reads once.
+          key={mountKey}
           initialNodes={initialNodes}
           liveNodes={liveNodes ?? initialNodes}
           pages={pages.map((p) => p.name)}

@@ -169,7 +169,11 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
   const before = await nodes.count();
 
-  const kinds = ["valueobject", "event", "workflow", "repository", "view", "storage", "ui", "deployable", "api"];
+  // Every kind the palette offers.  Deliberately NOT a `view` — there is no
+  // `view` declaration in the Loom grammar (a read model is a `projection`),
+  // so neither `NodeKind` nor the palette has one; asserting a
+  // `c4system-add-view` button only tested a construct that has never existed.
+  const kinds = ["valueobject", "event", "workflow", "repository", "storage", "ui", "deployable", "api"];
   for (const kind of kinds) {
     await page.getByTestId(`c4system-add-${kind}`).click();
   }
@@ -178,7 +182,7 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBe(before + kinds.length);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   for (const id of [
-    "valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1", "view:View1",
+    "valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1",
     "storage:Storage1", "ui:Ui1", "deployable:Deployable1", "api:Api1",
   ]) {
     await expect(page.locator(`[data-testid="rf__node-${id}"]`)).toBeVisible();
@@ -525,27 +529,15 @@ test("edits an expression structurally (operator dropdown + leaf)", async ({ pag
   await expect(page.getByTestId("c4expr-text")).toHaveValue("amount >= 1");
 });
 
-test("edits a view's where filter through the expression editor", async ({ page }) => {
-  await page.goto("/");
-  await waitForPlaygroundReady(page);
-  await selectExample(page, /Storefront · fullstack \.NET/);
-
-  await page.getByTestId("doc-tab-model").click();
-  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
-  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
-
-  // `view ConfirmedOrders = Order where status == Confirmed` → editable where filter.
-  await page.locator('[data-testid="rf__node-view:ConfirmedOrders"]').click();
-  await page.getByTestId("c4system-expr-pick").click();
-  await page.getByRole("option", { name: "where: status == Confirmed" }).click();
-
-  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
-  await expect(op()).toHaveValue("==");
-  await op().click();
-  await page.getByRole("option", { name: "!=", exact: true }).click();
-  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
-  await expect(op()).toHaveValue("!=");
-});
+// There was a "edits a view's where filter through the expression editor" test
+// here.  It drove `rf__node-view:ConfirmedOrders` against
+// `view ConfirmedOrders = Order where status == Confirmed` — but the Loom
+// grammar has no `view` declaration (read models are `projection`s), no example
+// declares `ConfirmedOrders`, and the model builder's `NodeKind` has no `view`
+// member, so the node it clicked could never exist.  The real where-filter
+// surface — a repository `find … where …` — is covered below by "edits a
+// repository find's where filter through the expression editor", which is the
+// same assertion against a construct that exists.
 
 test("structures a member call and edits its arguments", async ({ page }) => {
   await page.goto("/");
