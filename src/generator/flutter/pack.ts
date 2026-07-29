@@ -49,6 +49,37 @@ function dartStr(s: string): string {
   return s;
 }
 
+/** Escape a value that did NOT come through the walker's `escapeText` seam
+ *  (e.g. a label parsed back out of the HTML-ish `a11yAttr` fragment) for a
+ *  single-quoted Dart string literal.  Unlike `dartStr` (identity by contract),
+ *  this must handle a raw apostrophe/backslash itself. */
+function dartLit(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/** Reverse the four HTML entities `a11y-emit.ts`'s `escapeHtmlAttr` introduces,
+ *  so an accessible name pulled out of an `aria-label="…"` fragment reads back
+ *  as plain text before it lands in a Dart string. */
+function unescapeHtmlEntities(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/** The accessible name carried by a walker `a11yAttr` fragment
+ *  (` role="toolbar" aria-label="Actions"`), Dart-string-ready.  Flutter's
+ *  markup is not HTML, so it can't splice the fragment; it parses the
+ *  `aria-label` back out (the same move `testidKey` makes for `testidAttr`)
+ *  and re-expresses it as a `Semantics(label:)`.  Defaults to "Actions" (the
+ *  `Toolbar` contract's default) when no name is present. */
+function ariaLabelFrom(c: Ctx, fallback: string): string {
+  const raw = String(c.a11yAttr ?? "");
+  const m = raw.match(/aria-label="([^"]*)"/);
+  return dartLit(unescapeHtmlEntities(m ? m[1] : fallback));
+}
+
 /** Apply a text style to a walked text value that may arrive EITHER as raw
  *  (walker-escaped) text OR as an already-built widget.  Flutter's
  *  `renderInterpolation` wraps a non-literal (e.g. `p.name`) into `Text('…')`,
@@ -171,10 +202,14 @@ function primitivePaper(c: Ctx): string {
   return `Card(${arg(testidKey(c))}child: Padding(padding: const EdgeInsets.all(16), child: ${inner}))`;
 }
 
-/** Toolbar — a page-header row (space-between). */
+/** Toolbar — a page-header row (space-between).  Its a11y contract
+ *  (`{ role: "toolbar", needsName }`) makes it a labelled group; the walker
+ *  hands the accessible name in `a11yAttr`, which a `Semantics(container:)`
+ *  wrapper re-expresses (the Dart twin of `role="toolbar" aria-label`). */
 function primitiveToolbar(c: Ctx): string {
   if (!c.hasChildren) return "const SizedBox.shrink()";
-  return `Row(${arg(testidKey(c))}mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.center, children: ${childrenList(c)})`;
+  const row = `Row(${arg(testidKey(c))}mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.center, children: ${childrenList(c)})`;
+  return `Semantics(container: true, label: '${ariaLabelFrom(c, "Actions")}', child: ${row})`;
 }
 
 /** Breadcrumbs — a nav trail (a horizontal `Wrap` of links/text). */
@@ -196,7 +231,10 @@ function primitiveHeading(c: Ctx): string {
           ? "titleMedium"
           : "titleSmall";
   const text = String(c.text ?? "").trim();
-  return styledText(text, `Theme.of(context).textTheme.${style}`);
+  // `headingLevel: derive` — the level already drives the text style; a
+  // `Semantics(header: true)` wrapper is the assistive-tech signal (Flutter's
+  // twin of an `<h1>`/`<h2>` element) so screen-reader heading navigation works.
+  return `Semantics(header: true, child: ${styledText(text, `Theme.of(context).textTheme.${style}`)})`;
 }
 
 function primitiveText(c: Ctx): string {
@@ -264,7 +302,10 @@ function primitiveAlert(c: Ctx): string {
     kids.push(styledText(String(c.title ?? ""), "const TextStyle(fontWeight: FontWeight.bold)"));
   kids.push(asText(String(c.message ?? "")));
   const color = alertColor(String(c.color ?? "red"));
-  return `Container(width: double.infinity, padding: const EdgeInsets.all(12), decoration: BoxDecoration(border: Border.all(color: ${color}), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}]))`;
+  const box = `Container(width: double.infinity, padding: const EdgeInsets.all(12), decoration: BoxDecoration(border: Border.all(color: ${color}), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}]))`;
+  // Contract `{ role: "alert", live: "assertive" }` — a `liveRegion` so an
+  // Alert inserted/updated after first paint is announced by assistive tech.
+  return `Semantics(container: true, liveRegion: true, child: ${box})`;
 }
 
 /** Empty("No results") — a centred, muted empty-state placeholder. */
@@ -277,9 +318,11 @@ function primitiveSkeleton(_c: Ctx): string {
   return "Container(height: 96, decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)))";
 }
 
-/** Loader() — a centred Material spinner. */
+/** Loader() — a centred Material spinner.  The JSX packs give the spinner a
+ *  `role="status" aria-label="Loading"`; the Dart twin is a `Semantics` with a
+ *  `Loading` label + `liveRegion` so the pending state is announced. */
 function primitiveLoader(_c: Ctx): string {
-  return "const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))";
+  return "Semantics(label: 'Loading', liveRegion: true, child: const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())))";
 }
 
 // --- Data-display -----------------------------------------------------------
@@ -356,17 +399,30 @@ function primitiveStat(c: Ctx): string {
   return `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${label}, ${value}])`;
 }
 
-/** Image(src, alt?) — a network image (`alt` maps to `semanticLabel`). */
+/** Image(src, alt?) — a network image.  A real `alt` maps to `semanticLabel`;
+ *  a `decorative` image (alt `""`) is hidden from assistive tech with
+ *  `excludeFromSemantics: true` rather than shipped as an empty-labelled node. */
 function primitiveImage(c: Ctx): string {
   const src = String(c.src ?? "''");
-  const alt = c.hasAlt ? `, semanticLabel: ${String(c.alt)}` : "";
-  return `Image.network(${src}${alt})`;
+  const a11y = c.hasAlt
+    ? String(c.alt) === '""'
+      ? ", excludeFromSemantics: true"
+      : `, semanticLabel: ${String(c.alt)}`
+    : "";
+  return `Image.network(${src}${a11y})`;
 }
 
-/** Avatar(src?, alt?) — a circle image or a neutral placeholder circle. */
+/** Avatar(src?, alt?) — a circle image or a neutral placeholder circle.  When
+ *  the avatar renders an image, `alt` becomes its accessible name via a
+ *  `Semantics(image:)` wrapper (`CircleAvatar` has no `semanticLabel` arg),
+ *  matching how `Image` honours alt; a decorative alt (`""`) is excluded. */
 function primitiveAvatar(c: Ctx): string {
-  if (!c.hasSrc) return "const CircleAvatar(radius: 20)";
-  return `CircleAvatar(radius: 20, backgroundImage: NetworkImage(${String(c.src)}))`;
+  const inner = c.hasSrc
+    ? `CircleAvatar(radius: 20, backgroundImage: NetworkImage(${String(c.src)}))`
+    : "const CircleAvatar(radius: 20)";
+  if (!c.hasSrc || !c.hasAlt) return inner;
+  if (String(c.alt) === '""') return `ExcludeSemantics(child: ${inner})`;
+  return `Semantics(label: ${String(c.alt)}, image: true, child: ${inner})`;
 }
 
 /** Icon(name|svg, size?, label?) — a Material icon placeholder.  The DSL icon

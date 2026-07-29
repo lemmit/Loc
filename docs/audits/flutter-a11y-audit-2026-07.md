@@ -10,6 +10,14 @@
 > (`ddd generate system` → the Dart in §4). **When this prose and the cited
 > lines disagree, the code wins.**
 >
+> **Update 2026-07-29 — Phase A + B landed in the same change.** The five 🔴
+> derived-drop findings below are **fixed**: `flutter/pack.ts` now wraps
+> `Heading`/`Alert`/`Loader`/`Toolbar`/`Avatar` in the right Dart `Semantics`,
+> pinned by `test/generator/flutter/a11y.test.ts`. The matrix and §4 below are
+> preserved as the *diagnosis*; the 🔴 verdicts are annotated **✅ fixed** and
+> the post-fix Dart is in §4. Phase C (a runtime `flutter_test` a11y gate)
+> remains open.
+>
 > Sibling reading: [`accessibility.md`](../old/proposals/accessibility.md) (the
 > proposal), [`frontend-parity-audit-2026-07.md`](frontend-parity-audit-2026-07.md)
 > (the general frontend-parity pass — a11y is out of its scope), and
@@ -18,18 +26,20 @@
 
 ## Headline
 
-Flutter has **partial, author-hint-only accessibility, and zero automated
-coverage.** Of the *underivable* a11y facts a human supplies, three of four are
-wired — `Image` alt → `semanticLabel`, `Icon` label → `semanticLabel`, `Button`
-label → `Semantics` — but `Avatar` alt is dropped. And every *derived
-whole-structure* obligation the contract declares — heading semantics, the
-`Toolbar` accessible name, the `Loader` status role, the `Alert` live region —
-is **silently dropped** on Flutter, because Flutter renders through its own
-procedural pack (`src/generator/flutter/pack.ts`) that never received the
-Slice 1–7 emit work the JSX/markup/HEEx targets did. And **no gate can see
-it**: Flutter is absent from the axe CI matrix (`generated-a11y.yml`), from the
-cross-pack render guard (`a11y-contract-cross-pack.test.ts`), and has no
-Semantics unit tests of its own.
+**As audited (pre-fix):** Flutter had **partial, author-hint-only
+accessibility, and zero automated coverage.** Of the *underivable* a11y facts a
+human supplies, three of four were wired — `Image` alt → `semanticLabel`,
+`Icon` label → `semanticLabel`, `Button` label → `Semantics` — but `Avatar` alt
+was dropped. And every *derived whole-structure* obligation the contract
+declares — heading semantics, the `Toolbar` accessible name, the `Loader`
+status role, the `Alert` live region — was **silently dropped** on Flutter,
+because Flutter renders through its own procedural pack
+(`src/generator/flutter/pack.ts`) that never received the Slice 1–7 emit work
+the JSX/markup/HEEx targets did. And **no gate could see it**: Flutter is absent
+from the axe CI matrix (`generated-a11y.yml`), from the cross-pack render guard
+(`a11y-contract-cross-pack.test.ts`), and had no Semantics unit tests of its
+own. (**Phase A + B in this change close all of it except axe** — see the update
+banner above.)
 
 The gaps are **not** WCAG failures the user authored — they are floor-clearing
 semantics the compiler emits *for free on the other five frontends* and drops
@@ -88,11 +98,11 @@ unless noted.
 | **Image** | `needsAlt` | `Image.network(src, semanticLabel: alt)` — `primitiveImage:360` | 🟢 **wired** (alt → `semanticLabel`) |
 | **Icon** | `decorativeByDefault`, `needsName` | `label`+non-decorative → `Icon(..., semanticLabel: label)`; decorative → bare `Icon` (Material auto-excludes from semantics) — `primitiveIcon:376` | 🟢 **wired** |
 | **Button** | `role: button, needsName` | `label:` → `Semantics(label: …, child: ElevatedButton(...))` — `primitiveButton:439` | 🟢 **wired** |
-| **Avatar** | `needsAlt` | `CircleAvatar(radius, backgroundImage: NetworkImage(src))` — **`alt` ctx ignored** — `primitiveAvatar:367` | 🔴 **alt dropped** — the image has no accessible name; the JS/markup packs honour `alt` on `Avatar` |
-| **Toolbar** | `role: toolbar, needsName` | bare `Row(...)` — **`a11yAttr` ctx ignored** — `primitiveToolbar:175` | 🔴 **name dropped** — no `role="toolbar"` / `aria-label` equivalent |
-| **Heading** | `headingLevel: derive` | `Text(text, style: textTheme.<level>)` — style only, **no `Semantics(header: true)`** — `primitiveHeading:188` | 🔴 **not a heading to AT** — screen-reader heading navigation lost |
-| **Alert** | `role: alert, live: assertive` | bare bordered `Container(...)` — **no `Semantics(liveRegion: true)`** — `primitiveAlert:261` | 🔴 **not announced** — async status is silent |
-| **Loader** | `busy` / status | `CircularProgressIndicator()` — **no `Semantics(label:'Loading', …)`** — `primitiveLoader:281` | 🔴 **silent spinner** — the raw JS packs emit `role="status" aria-label="Loading"` |
+| **Avatar** | `needsAlt` | ~~`CircleAvatar(...)` — `alt` ctx ignored~~ → now `Semantics(label: alt, image: true, child: CircleAvatar(...))`; decorative → `ExcludeSemantics` — `primitiveAvatar` | 🔴→✅ **fixed** — alt was dropped; now the avatar's accessible name |
+| **Toolbar** | `role: toolbar, needsName` | ~~bare `Row(...)` — `a11yAttr` ignored~~ → now `Semantics(container: true, label: '<name>', child: Row(...))` — `primitiveToolbar` | 🔴→✅ **fixed** — name was dropped; parsed from `a11yAttr` |
+| **Heading** | `headingLevel: derive` | ~~`Text(..., style)` only~~ → now `Semantics(header: true, child: Text(...))` — `primitiveHeading` | 🔴→✅ **fixed** — now a heading to AT |
+| **Alert** | `role: alert, live: assertive` | ~~bare `Container(...)`~~ → now `Semantics(container: true, liveRegion: true, child: Container(...))` — `primitiveAlert` | 🔴→✅ **fixed** — announced on insert |
+| **Loader** | `busy` / status | ~~`CircularProgressIndicator()` bare~~ → now `Semantics(label: 'Loading', liveRegion: true, child: …)` — `primitiveLoader` | 🔴→✅ **fixed** — the `role="status"` twin |
 | **Skeleton** | `busy` | bare `Container(height:96,…)` — no busy/hidden semantics — `primitiveSkeleton:276` | 🟡 **minor** — decorative placeholder, ideally `excludeSemantics` + an ancestor `aria-busy` analogue |
 | **Divider** | `role: separator` | `const Divider()` — Material `Divider` carries separator semantics | 🟢 **free from framework** |
 | **Anchor / IdLink** | link name | `TextButton(onPressed: nav, child: Text(label))` — button semantics + name from the child `Text` | 🟢 **free from framework** |
@@ -106,24 +116,26 @@ that carry semantics natively (`Divider`, links, forms, `Modal`). Every 🔴 row
 is a **derived** obligation whose emit work (Slices 1–7 of M-T1.12) landed on
 the string-fragment targets and never reached the procedural Dart pack.
 
-## 4 — Ground truth (emitted Dart)
+## 4 — Ground truth (emitted Dart, post-fix)
 
 `ddd generate system` on a scaffold page exercising the a11y primitives
-(`platform: flutter`), `app/lib/pages/product_list_page.dart`, verbatim:
+(`platform: flutter`), `app/lib/pages/product_list_page.dart`, verbatim **after
+the Phase A fix** (the pre-fix drops are noted in the trailing comments):
 
 ```dart
-Text('Products catalogue', style: Theme.of(context).textTheme.headlineMedium),   // Heading level 1 — no Semantics(header:true)
-Text('Featured', style: Theme.of(context).textTheme.titleLarge),                 // Heading level 2 — no Semantics(header:true)
-Container(width: double.infinity, padding: const EdgeInsets.all(12),
-  decoration: BoxDecoration(border: Border.all(color: Colors.green), …),
-  child: Column(… children: <Widget>[Text('Prices updated')])),                  // Alert — no liveRegion
-Image.network("/logo.png", semanticLabel: "Shop logo"),                          // 🟢 alt wired
-CircleAvatar(radius: 20, backgroundImage: NetworkImage("/u.png")),               // 🔴 alt "Owner avatar" dropped
-Icon(Icons.circle, size: 20.0, semanticLabel: 'Featured'),                       // 🟢 label wired
-Icon(Icons.circle, size: 20.0),                                                  // decorative — auto-excluded (ok)
+Semantics(header: true, child: Text('Products catalogue', style: …headlineMedium)),   // was: Text only, no header
+Semantics(header: true, child: Text('Featured', style: …titleLarge)),                 // was: Text only, no header
+Semantics(container: true, liveRegion: true, child: Container(… Border.all(color: Colors.green) …
+  child: Column(… children: <Widget>[Text('Prices updated')]))),                      // was: bare Container, no liveRegion
+Image.network("/logo.png", semanticLabel: "Shop logo"),                               // 🟢 always worked
+Semantics(label: "Owner avatar", image: true, child: CircleAvatar(radius: 20,
+  backgroundImage: NetworkImage("/u.png"))),                                          // was: CircleAvatar bare, alt dropped
+Icon(Icons.circle, size: 20.0, semanticLabel: 'Featured'),                            // 🟢 label wired
+Icon(Icons.circle, size: 20.0),                                                       // decorative — auto-excluded (ok)
 Semantics(label: 'Refresh products', child: ElevatedButton(onPressed: null, child: Text('Refresh'))), // 🟢 label wired
-const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),        // 🔴 Loader — silent
-Container(height: 96, decoration: BoxDecoration(color: …surfaceContainerHighest, …)),                 // 🟡 Skeleton
+Semantics(label: 'Loading', liveRegion: true, child: const Center(child: Padding(
+  padding: EdgeInsets.all(32), child: CircularProgressIndicator()))),                 // was: bare spinner, silent
+Container(height: 96, decoration: BoxDecoration(color: …surfaceContainerHighest, …)), // 🟡 Skeleton (unchanged, minor)
 ```
 
 (The `Icons.circle` placeholder for every named icon is a *separate* known
@@ -137,12 +149,14 @@ not an a11y finding; the `semanticLabel` wiring on top of it is correct.)
 | `generated-a11y.yml` (axe-core) | ❌ | matrix is 11 JSX/markup packs + `feliz`; `grep -c flutter` → 0. Structurally can't (canvas render). |
 | `a11y-contract-cross-pack.test.ts` | ❌ | `PACKS` list excludes the two non-Handlebars targets (Feliz, Flutter); `grep -c flutter` → 0 |
 | `generated-a11y-e2e.test.ts` | ❌ | has a `feliz` profile; no `flutter` profile |
-| `test/generator/flutter/*` | ❌ | 25 suites, **none** assert a `Semantics(`/`semanticLabel:` emit |
+| `test/generator/flutter/a11y.test.ts` | ✅ (added Phase B) | 11 assertions pinning the `Semantics(`/`semanticLabel:`/`ExcludeSemantics` emit per primitive |
 
-So the three 🟢 rows that *do* work (Image/Icon/Button) are also **unpinned** —
-a refactor of `pack.ts` could drop them with zero CI signal, exactly the
-contract↔emit drift the M-T1.12 audit called out for the JSX targets, still
-live for Flutter.
+Before this change the three 🟢 rows that *did* work (Image/Icon/Button) were
+also **unpinned** — a refactor of `pack.ts` could drop them with zero CI
+signal, exactly the contract↔emit drift the M-T1.12 audit called out for the
+JSX targets. `test/generator/flutter/a11y.test.ts` now pins the whole set (the
+fixed 🔴 rows *and* the three that already worked). axe remains structurally
+unavailable; Phase C proposes the runtime `flutter_test` analogue.
 
 ## 6 — Correction to the mission record
 
@@ -162,23 +176,22 @@ All fixes are localized to `src/generator/flutter/pack.ts` (+ tests); none
 touch the framework-neutral contract, which is already correct. The idiom is
 **wrap-in-`Semantics`**, the Dart twin of adding an ARIA attribute.
 
-**Phase A — clear the 🔴 derived drops (the priority, silent class):**
-1. `primitiveHeading` → wrap the styled `Text` in `Semantics(header: true, child: …)`. (Derived level already drives the text style; `header: true` is the AT signal.)
-2. `primitiveAlert` → wrap in `Semantics(liveRegion: true, container: true, child: …)` so the callout announces on insertion (contract `live: assertive`).
-3. `primitiveLoader` → `Semantics(label: 'Loading', liveRegion: true, child: CircularProgressIndicator())` — the `role="status"` twin.
-4. `primitiveToolbar` → read the `label`/`a11yAttr` ctx (as `primitiveButton` already reads `ariaLabel`) and wrap the `Row` in `Semantics(container: true, label: '<name>', child: …)`.
-5. `primitiveAvatar` → thread the `alt` ctx (already passed) into `Semantics(label: alt, image: true, child: CircleAvatar(...))`, matching `primitiveImage`.
+**Phase A — clear the 🔴 derived drops (the priority, silent class) — ✅ landed:**
+1. `primitiveHeading` → wraps the styled `Text` in `Semantics(header: true, child: …)`.
+2. `primitiveAlert` → wraps in `Semantics(container: true, liveRegion: true, child: …)` so the callout announces on insertion (contract `live: assertive`).
+3. `primitiveLoader` → `Semantics(label: 'Loading', liveRegion: true, child: …CircularProgressIndicator())` — the `role="status"` twin.
+4. `primitiveToolbar` → parses the accessible name out of `a11yAttr` (via `ariaLabelFrom`, the `testidKey` move) and wraps the `Row` in `Semantics(container: true, label: '<name>', child: …)`.
+5. `primitiveAvatar` → threads the `alt` ctx into `Semantics(label: alt, image: true, child: CircleAvatar(...))`; a decorative alt → `ExcludeSemantics`. (`primitiveImage`'s decorative case was made consistent — `excludeFromSemantics: true` rather than an empty `semanticLabel`.)
 
-**Phase B — pin what exists so it can't regress:**
-6. A `test/generator/flutter/a11y.test.ts` asserting the `Semantics(`/`semanticLabel:` emit per primitive — the Flutter analogue of the per-pack a11y unit tests. This is the only gate Flutter can realistically carry (axe is out).
-7. Optionally add Flutter to `a11y-contract-cross-pack.test.ts` via a Dart-shaped assertion set (it currently early-outs on non-Handlebars packs), so contract/caller drift is caught centrally.
+**Phase B — pin what exists so it can't regress — ✅ landed:**
+6. `test/generator/flutter/a11y.test.ts` — 11 assertions over the `Semantics(`/`semanticLabel:`/`ExcludeSemantics` emit per primitive, the Flutter analogue of the per-pack a11y unit tests. The only gate Flutter can realistically carry (axe is out).
 
-**Phase C — runtime (optional, heavier):**
-8. Emit a `flutter_test` using `SemanticsTester` / `meetsGuideline(textContrastGuideline, labeledTapTargetGuideline)` over the scaffold pages, run in `generated-flutter-build.yml` (which already boots a headless `flutter test` per M-T1.18 Phase 4). This is the closest Flutter analogue to the axe tripwire.
+**Phase C — runtime (optional, heavier) — open:**
+7. Emit a `flutter_test` using `SemanticsTester` / `meetsGuideline(textContrastGuideline, labeledTapTargetGuideline)` over the scaffold pages, run in `generated-flutter-build.yml` (which already boots a headless `flutter test` per M-T1.18 Phase 4). This is the closest Flutter analogue to the axe tripwire.
 
-Phase A is small and self-contained (five wraps + tests), removes the entire
-silent-drop set, and is the natural next slice of M-T1.12 — it brings the
-sixth frontend up to the floor the other five already clear.
+Phase A was small and self-contained (five `Semantics` wraps + tests), removed
+the entire silent-drop set, and brings the sixth frontend up to the floor the
+other five already clear — the natural next slice of M-T1.12.
 
 ## Appendix — reproduction
 
