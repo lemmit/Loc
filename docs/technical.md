@@ -660,7 +660,7 @@ consumed by multiple platforms.  The four principal ones:
 |---|---|---|
 | `_packs/` | the JSX/markup frontends (react, vue, svelte, angular) + the Phoenix HEEx path | Design-pack discovery + loader.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  (The pack-identity metadata — `BUILTIN_PACK_FORMATS` / `BUILTIN_PACK_LATEST` + the `parseBuiltinDesignRef` parser — lives in [`src/util/builtin-formats.ts`](../src/util/builtin-formats.ts): language validators and IR lowering consume it too, so it sits at the foundational `util/` layer.)  See [`design-packs.md`](design-packs.md). |
 | `_expr/` | every domain-logic backend (TS, .NET, Phoenix, Python, Java) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET` / `PY_TARGET` / `JAVA_TARGET`).  Expression-side analogue of `WalkerTarget`; already five backends — a 6th domain-logic backend writes one target, not a 6th dispatcher. |
-| `_walker/` | the JSX/markup frontends (react, vue, svelte, angular) + a parallel HEEx engine (phoenixLiveView) | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  The four JSX/markup targets are implemented and consumed: `react/walker/tsx-target.ts`, `vue/walker/vue-target.ts`, `svelte/walker/svelte-target.ts`, and `angular/walker/angular-target.ts` all drive the shared `walker-core.ts`; Phoenix/HEEx runs a parallel engine via `elixir/heex-target.ts` (its output topology diverges). |
+| `_walker/` | the six frontends (react, vue, svelte, angular, feliz, flutter) + a parallel HEEx engine (phoenixLiveView) | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  Six targets drive the shared `walker-core.ts`: `react/walker/tsx-target.ts`, `vue/walker/vue-target.ts`, `svelte/walker/svelte-target.ts`, `angular/walker/angular-target.ts`, `feliz/feliz-target.ts` (emits F#), and `flutter/flutter-target.ts` (emits Dart); Phoenix/HEEx runs a parallel engine via `elixir/heex-target.ts` (its output topology diverges). |
 | `_obs/` | hono, dotnet, phoenixLiveView, python | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation (hono / dotnet / phoenix; python wires the shared catalog from its own `emit/obs.ts`).  Java emits an equivalent catalog-JSON channel without sharing this subdir.  See [`observability.md`](observability.md). |
 
 Four more carry narrower shared seams: `_frontend/` (framework-neutral
@@ -779,17 +779,19 @@ walker-stdlib primitive into the active design pack's templates.
 (A legacy `pages-builder.ts` archetype renderer that this section
 previously mentioned no longer exists in tree.)
 
-The other four frontends mirror this layout, each driving the shared
+The other five frontends mirror this layout, each driving the shared
 `_walker/walker-core.ts` through its own `WalkerTarget`:
 `src/generator/vue/` (Vue 3 / vue-query, packs `vuetify` / `shadcnVue`),
 `src/generator/svelte/` (SvelteKit static SPA, packs `shadcnSvelte` /
-`flowbite`), `src/generator/angular/` (standalone Angular SPA, pack
-`angularMaterial`), and `src/generator/feliz/` (Feliz F#/Fable/Elmish
-SPA via `dotnet fable` + vite, daisyUI pack).  The three JSX/markup
-frontends, like React, emit no `render-expr.ts` / `render-stmt.ts` —
-they consume the wire shape only; Feliz is the exception, supplying its
-own F# expression leaves (`FS_LEAVES`) because its embedded language is
-F#, not JS.
+`flowbite`), `src/generator/angular/` (standalone Angular SPA, packs
+`angularMaterial` / `primeng` / `spartanNg`), `src/generator/feliz/`
+(Feliz F#/Fable/Elmish SPA via `dotnet fable` + vite), and
+`src/generator/flutter/` (Flutter/Dart + Riverpod app via the Flutter
+SDK).  The JSX/markup frontends (Vue/Svelte/Angular), like React, emit
+no `render-expr.ts` / `render-stmt.ts` — they consume the wire shape
+only; Feliz and Flutter are the exceptions, each supplying its own
+per-language expression leaves (`FS_LEAVES`, `DART_LEAVES`) because
+their embedded languages are F# and Dart, not JS.
 
 ### Scaffold expansion (compile-time sugar, not a codegen path)
 

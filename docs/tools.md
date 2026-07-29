@@ -84,7 +84,7 @@ nothing to an editable model without hand-assembling `system` /
 ```bash
 ddd new acme                                   # hono backend + React (mantine), crud template
 ddd new acme --platform dotnet --design shadcn # .NET backend + React (shadcn)
-ddd new acme --platform elixir                 # Phoenix LiveView fullstack (ashPhoenix)
+ddd new acme --platform elixir                 # Phoenix LiveView fullstack (coreComponents)
 ddd new acme --platform elixir --design mui    # Phoenix backend + a React (mui) frontend
 ddd new acme --platform java                   # Spring Boot backend + React (mantine)
 ddd new acme --platform python                 # FastAPI backend + React (mantine)
@@ -92,9 +92,9 @@ ddd new acme --platform python                 # FastAPI backend + React (mantin
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--platform <hono\|dotnet\|elixir\|java>` | `hono` | Backend platform (ports: hono 3000, dotnet 8080, elixir 4000, java 8081). Prints a hint listing the alternatives when defaulted. |
+| `--platform <node\|dotnet\|elixir\|java\|python>` | `node` | Backend platform (ports: node 3000, dotnet 8080, elixir 4000, java 8081, python 8000). Prints a hint listing the alternatives when defaulted. |
 | `--template <blank\|crud>` | `crud` | `blank` = one aggregate; `crud` = two aggregates with a repository `find`. |
-| `--design <mantine\|shadcn\|mui\|chakra\|ashPhoenix>` | `mantine` (`ashPhoenix` for elixir) | Frontend. A React pack scaffolds a separate React deployable; `ashPhoenix` makes Phoenix a single LiveView fullstack. `ashPhoenix` is only valid with `--platform elixir`. |
+| `--design <mantine\|shadcn\|mui\|chakra\|coreComponents\|shadcnSvelte\|flowbite\|vuetify\|shadcnVue>` | `mantine` (`coreComponents` for elixir) | Frontend. A React pack scaffolds a separate React deployable; a Svelte pack (`shadcnSvelte`/`flowbite`) a `platform: svelte` frontend, a Vue pack (`vuetify`/`shadcnVue`) a `platform: vue` frontend; `coreComponents` makes Phoenix a single LiveView fullstack. `coreComponents` is only valid with `--platform elixir`. |
 | `-o, --out <dir>` | `./<name>` | Output directory. |
 | `--force` | off | Scaffold into an existing, non-empty directory. |
 
