@@ -127,6 +127,7 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
   let hono: string | null = null;
   let react: string | null = null;
   const platformBySlug = new Map<string, UnsupportedPlatform>();
+  const angularSlugs = new Set<string>();
   for (const f of files) {
     if (!hono && /^[^/]+\/http\/index\.ts$/.test(f.path)) hono = f.path;
     if (!react && /^[^/]+\/src\/main\.tsx$/.test(f.path)) react = f.path;
@@ -136,15 +137,23 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
     if (phoenix) platformBySlug.set(phoenix[1], "elixir");
     // Frontend SPAs the preview engine doesn't bundle in-browser yet:
     // SvelteKit (`svelte.config.js`; its `$app/*` client + file routing
-    // aren't reproduced) and Vue (`src/main.ts` — the `.ts` entry, vs
-    // react's `src/main.tsx`; the `.vue` SFC pipeline isn't wired).
+    // aren't reproduced), Vue (`src/main.ts` — the `.ts` entry, vs
+    // react's `src/main.tsx`; the `.vue` SFC pipeline isn't wired), and
+    // Angular (`angular.json`; its AOT/`ng build` toolchain isn't run
+    // in-browser).  Angular *also* emits `src/main.ts`, so `angular.json`
+    // is the discriminator and takes precedence over the Vue match below
+    // (applied after the loop, order-independent of file iteration).
     // Surfaced like the backend platforms so Preview explains the grey
     // rather than showing a silent blank — the full project is in Files.
     const svelte = f.path.match(/^([^/]+)\/svelte\.config\.js$/);
     if (svelte) platformBySlug.set(svelte[1], "svelte");
+    const angular = f.path.match(/^([^/]+)\/angular\.json$/);
+    if (angular) angularSlugs.add(angular[1]);
     const vue = f.path.match(/^([^/]+)\/src\/main\.ts$/);
     if (vue) platformBySlug.set(vue[1], "vue");
   }
+  // Angular wins over the shared `src/main.ts` Vue heuristic.
+  for (const slug of angularSlugs) platformBySlug.set(slug, "angular");
   const unsupported: UnsupportedDeployable[] = [...platformBySlug]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([slug, platform]) => ({ slug, platform }));
@@ -998,7 +1007,8 @@ export default function App(): JSX.Element {
       // The playground's runtime is Hono + React only.  Spell out
       // why bundling can't proceed: either nothing recognisable was
       // emitted, or the system only declares deployables the
-      // browser can't run (.NET, Phoenix LiveView).
+      // browser can't run (.NET, Phoenix LiveView, or the non-React
+      // frontends — SvelteKit, Vue, Angular).
       const message =
         entries.unsupported.length > 0
           ? `Nothing to bundle in the browser — this system only declares ${formatUnsupportedDeployables(entries.unsupported)}, which run outside the playground.  Generated files are visible in the Files pane.`
