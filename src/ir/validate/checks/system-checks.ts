@@ -2640,7 +2640,6 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
   "dotnet",
   "java",
-  "python",
   "elixir",
 ]);
 

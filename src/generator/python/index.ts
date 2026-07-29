@@ -16,8 +16,10 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
+import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   effectiveSavingShape,
@@ -39,6 +41,7 @@ import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
+import { emitPythonApiClients } from "./api-client.js";
 import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
@@ -252,6 +255,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // / saga `resource-call`s import the verb helpers from these.
   const resources = emitPyResourceFiles(args.sys, args.deployable.dataSourceNames);
   for (const [path, content] of resources.files) out.set(path, content);
+  // Typed in-system api clients (M-T4.8).  Emitted alongside the sourceType
+  // adapters, not through them: an api-bound resource has no `storage`, so the
+  // sourceType-keyed grouping skips it by design.
+  const apiClients = emitPythonApiClients(apiResourceBindings(args.deployable, args.sys), args.sys);
+  if (apiClients) out.set("app/resources/api_clients.py", apiClients);
   // File upload/download (M-T1.2): when this deployable hosts a File-bearing
   // aggregate AND binds an objectStore, mount root `/files` routes over that
   // store's bytes adapter (`<res>_put_bytes` / `<res>_get_bytes`).  The IR
@@ -306,7 +314,18 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     "pyproject.toml",
     renderPyproject(
       slug,
-      [...resources.deps, ...oidcDeps, ...timerDeps, ...channelDeps],
+      // httpx for the typed in-system api client (M-T4.8).  The restApi
+      // ResourceAdapter declares it too, but an api-bound resource never
+      // reaches that adapter (no storage → no sourceType), so without this the
+      // emitted client imports a package the project doesn't depend on and
+      // `mypy --strict` fails on the missing stub.
+      [
+        ...resources.deps,
+        ...oidcDeps,
+        ...timerDeps,
+        ...channelDeps,
+        ...(apiClients ? ["httpx>=0.28,<1"] : []),
+      ],
       [...resources.devDeps],
       channelBindings.some((b) => b.transport === "kafka") ? ["aiokafka"] : [],
     ),
@@ -484,17 +503,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const hostedIdNames = new Set(
     merged.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]),
   );
-  const foreignIdNames = [
-    ...new Set(
-      [
-        ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
-        ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
-      ]
-        .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
-        .map((t) => t.targetName)
-        .filter((n) => !hostedIdNames.has(n)),
-    ),
-  ];
+  const foreignIdNames = foreignIdBrandNames(hostedIdNames, [
+    ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+    ...workflowIdTypeSources(merged.workflows),
+  ]);
   out.set("app/domain/ids.py", renderPyIds(merged, foreignIdNames));
   // `ConcurrencyError` (+ its 409 handler) rides on either the `versioned`
   // guarded write's stale-write rejection or an event-sourced aggregate's

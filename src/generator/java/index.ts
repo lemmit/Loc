@@ -31,6 +31,7 @@ import {
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
@@ -1107,19 +1108,10 @@ function emitProjectFromContexts(
         c.aggregates.flatMap((a) => [a.name, ...a.parts.map((pt) => pt.name)]),
       ),
     );
-    const foreignIdNames = [
-      ...new Set(
-        [
-          ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
-          ...contexts
-            .flatMap((c) => c.workflows)
-            .flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
-        ]
-          .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
-          .map((t) => t.targetName)
-          .filter((n) => !hostedIdNames.has(n)),
-      ),
-    ];
+    const foreignIdNames = foreignIdBrandNames(hostedIdNames, [
+      ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+      ...workflowIdTypeSources(contexts.flatMap((c) => c.workflows)),
+    ]);
     for (const name of foreignIdNames) {
       let idValueType = "uuid";
       for (const sub of system.sys.subdomains) {

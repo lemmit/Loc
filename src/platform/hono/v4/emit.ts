@@ -91,6 +91,7 @@ import { apiResourceBindings } from "../../../ir/util/api-resource-binding.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../../ir/util/foreign-ids.js";
 import {
   isTpcBase,
   isTphBase,
@@ -450,26 +451,10 @@ export function generateTypeScriptForContexts(
   const hostedIdNames = new Set(
     merged.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]),
   );
-  const foreignIdNames = [
-    ...new Set(
-      [
-        ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
-        ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
-        // Workflow starter PARAMS (M-T4.8).  A cross-service call is naturally
-        // written `create(orderId: Order id)` on a deployable that doesn't host
-        // `Order`; the route emits `Ids.OrderId(body.orderId)`, so without the
-        // brand here the generated project fails `tsc` on a missing export.
-        // Reproduces with no api call at all — the collection above simply
-        // never covered params, only state fields and foreign event fields.
-        ...merged.workflows.flatMap((w) =>
-          w.creates.flatMap((c) => c.params.map((prm) => prm.type)),
-        ),
-      ]
-        .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
-        .map((t) => t.targetName)
-        .filter((n) => !hostedIdNames.has(n)),
-    ),
-  ];
+  const foreignIdNames = foreignIdBrandNames(hostedIdNames, [
+    ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+    ...workflowIdTypeSources(merged.workflows),
+  ]);
   out.set("domain/ids.ts", renderIds(merged, foreignIdNames));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   const servicesFile = renderDomainServices(merged);

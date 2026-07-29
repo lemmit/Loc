@@ -589,16 +589,11 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       return `${ctx.thisName}.${prefix}${snake(e.name)}(${argList})`;
     }
     case "remote-api-op": {
-      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
-      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
-      // codegen, so this is unreachable — it throws rather than emitting a
-      // plausible-looking call that would 404 at runtime.
+      // A typed in-system call (M-T4.8).  `app/resources/api_clients.py`
+      // exports one `<resource>_<operation_id>` per operation the callee
+      // exposes; awaited inline like `resource-op`.
       const op = e.remoteApiOp!;
-      throw new Error(
-        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
-          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
-          `This should have been rejected by loom.remote-api-op-unsupported.`,
-      );
+      return `(await ${snake(op.resourceName)}_${snake(op.operationId)}(${argList}))`;
     }
     case "resource-op": {
       // Resource adapters land with the extern/auth slice (S16); the
