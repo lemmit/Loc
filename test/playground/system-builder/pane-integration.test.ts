@@ -8,6 +8,9 @@
 //  * picking the operation the drill path already names must resolve to the
 //    HISTORICAL member-less locator, byte for byte, or every pre-existing
 //    expression-slot key silently re-points;
+//  * the `body` step a lifecycle node drills into must carry the same
+//    `listBodies` key the locator, the flow view and the edges all use — the
+//    node id, the drill target and the edited body are one string;
 //  * the `StmtPath` the nested rows build (`[...enclosing, {index, list}]`)
 //    must be the same address `slotExpr` / `editExprSlot` resolve, and must
 //    key distinctly from its top-level statement;
@@ -41,6 +44,7 @@ import {
   setOpGate,
   setOpReturnType,
 } from "../../../web/src/builder/system/op-surface.js";
+import { buildViewGraph } from "../../../web/src/builder/system-v2/view-graph.js";
 import { parseRaw as parse } from "../../_helpers/index.js";
 
 const SRC = `system Shop {
@@ -158,6 +162,72 @@ describe("body picker — the keys the pane offers on an operation leaf", () => 
     expect(listStatements(parse(SRC), aggregateBody("Order", "apply:Paid"))).toEqual([
       'status := "paid"',
     ]);
+  });
+});
+
+describe("lifecycle flow path — the drill step the pane pushes and edits through", () => {
+  // The pane's own rule (`leafBodyLocator`): a `body` step carries the
+  // `listBodies` key, and the aggregate is the step immediately above it.
+  const locatorFor = (step: { kind: string; name: string }, aggName: string) =>
+    step.kind === "body"
+      ? aggregateBody(aggName, step.name)
+      : { kind: "operation" as const, aggregate: aggName, op: step.name };
+
+  const stepOf = (nodeId: string) => {
+    const g = buildViewGraph(parse(SRC), [{ kind: "aggregate", name: "Order" }]);
+    const n = g.nodes.find((x) => x.id === nodeId);
+    expect(n?.drillTo, `no drill target on ${nodeId}`).toBeDefined();
+    return n?.drillTo as { kind: string; name: string };
+  };
+
+  it("every lifecycle node's drill step resolves to that member's own body", () => {
+    for (const [id, statements] of [
+      ["create", ["total := initial"]],
+      ["destroy:archive", ["status := reason"]],
+      ["apply:Paid", ['status := "paid"']],
+    ] as const) {
+      const loc = locatorFor(stepOf(id), "Order");
+      expect(listStatements(parse(SRC), loc)).toEqual(statements);
+    }
+  });
+
+  it("the flow's statement mutators round-trip through that locator", () => {
+    const loc = locatorFor(stepOf("apply:Paid"), "Order");
+    const added = addStatement(SRC, loc, 'status := "x"') as string;
+    expect(listStatements(parse(added), loc)).toHaveLength(2);
+    const moved = moveStatement(added, loc, 0, 1) as string;
+    expect(listStatements(parse(moved), loc)?.[0]).toBe('status := "x"');
+    const edited = editStatement(moved, loc, 1, 'status := "y"') as string;
+    expect(listStatements(parse(edited), loc)?.[1]).toBe('status := "y"');
+    expect(listStatements(parse(deleteStatement(edited, loc, 1) as string), loc)).toHaveLength(1);
+  });
+
+  it("keys the lifecycle body's ƒx slots by its member, distinctly from the operation's", () => {
+    // The pane's key template is `${base}:${index}…`, where an operation's base
+    // is `<Agg>.<op>` and a lifecycle body's is the member-carrying locator.
+    const lifecycle = locatorFor(stepOf("apply:Paid"), "Order");
+    const slot: ExprSlot = {
+      kind: "stmtExpr",
+      owner: "Order",
+      op: lifecycle.op,
+      member: (lifecycle as { member?: string }).member,
+      index: 0,
+    };
+    expect(slotExpr(parse(SRC), slot)?.$cstNode?.text).toBe('"paid"');
+    const next = editExprSlot(SRC, slot, '"settled"');
+    expect(next as string).toContain('status := "settled"');
+    // The operation's own slots stay member-less, byte for byte.
+    expect(
+      slotExpr(parse(SRC), { kind: "stmtExpr", owner: "Order", op: "confirm", index: 0 })?.$cstNode
+        ?.text,
+    ).toBe("n > 0");
+  });
+
+  it("the operation drill keeps its `{kind:'operation'}` step — no body override", () => {
+    const g = buildViewGraph(parse(SRC), [{ kind: "aggregate", name: "Order" }]);
+    const op = g.nodes.find((n) => n.id === "operation:confirm");
+    expect(op?.drillable).toBe(true);
+    expect(op?.drillTo).toBeUndefined();
   });
 });
 

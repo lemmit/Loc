@@ -3,7 +3,7 @@
 // dispatcher) so edits happen right in the node — same controls, same `ƒx`
 // expansion, just laid out as a flow instead of a list.
 
-import { Box, Text } from "@mantine/core";
+import { Box, Button, Group, Text } from "@mantine/core";
 import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { StmtRow, type NestedExprEditors } from "../system/BodyEditor";
@@ -18,6 +18,13 @@ export interface StmtNodeData {
    *  whole emit / other text). Returns false on parse-failure, mirroring
    *  v1's `commitEdit` contract; the row flags the error locally. */
   onCommit: (text: string) => boolean;
+  /** Row commands — the flow twin of the list editor's ↑ / ↓ / × controls.
+   *  Optional, so a read-only flow can omit them; `canMove*` disable the
+   *  arrows at the ends of the body. */
+  onDelete?: () => void;
+  onMove?: (dir: -1 | 1) => void;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
   /** Inline structured editor for the value / single-expr / arg / field, or
    *  null when the corresponding row is collapsed. */
   valueEditor: ReactNode;
@@ -121,9 +128,48 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
       data-stmt-subkind={kind}
     >
       <Handle type="target" position={Position.Top} style={{ background: "var(--mantine-color-dark-3)" }} />
-      <Text size="xs" tt="uppercase" c="dimmed" mb={4}>
-        {KIND_LABEL[kind]}
-      </Text>
+      <Group gap={2} justify="space-between" wrap="nowrap" mb={4}>
+        <Text size="xs" tt="uppercase" c="dimmed">
+          {KIND_LABEL[kind]}
+        </Text>
+        {(d.onMove || d.onDelete) && (
+          <Group gap={0} wrap="nowrap">
+            {d.onMove && (
+              <>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  data-testid="c4system-v2-stmt-up"
+                  disabled={d.canMoveUp === false}
+                  onClick={() => d.onMove?.(-1)}
+                >
+                  ↑
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  data-testid="c4system-v2-stmt-down"
+                  disabled={d.canMoveDown === false}
+                  onClick={() => d.onMove?.(1)}
+                >
+                  ↓
+                </Button>
+              </>
+            )}
+            {d.onDelete && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                data-testid="c4system-v2-stmt-delete"
+                onClick={() => d.onDelete?.()}
+              >
+                ×
+              </Button>
+            )}
+          </Group>
+        )}
+      </Group>
       {body}
       <Handle type="source" position={Position.Bottom} style={{ background: "var(--mantine-color-dark-3)" }} />
     </Box>

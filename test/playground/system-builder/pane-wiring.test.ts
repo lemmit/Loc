@@ -80,10 +80,11 @@ describe("AddPalette — every v2-only construct kind is creatable", () => {
     expect(PALETTE).toContain("addPermissionsSource(source, last.name)");
   });
 
-  it("targets the selected aggregate member when adding a statement", () => {
-    // `+ Stmt` on an operation leaf with a lifecycle member selected must
-    // address THAT body, not the operation the path names.
-    expect(PALETTE).toContain('aggregateBody(agg?.name ?? "", bodyMember)');
+  it("targets the aggregate member the path leaf names when adding a statement", () => {
+    // `+ Stmt` on a lifecycle `body` leaf must address THAT body — the step
+    // carries the `listBodies` key — not the operation a sibling step names.
+    expect(PALETTE).toContain('last.kind === "body"');
+    expect(PALETTE).toContain('aggregateBody(agg?.name ?? "", last.name)');
   });
 });
 
@@ -144,9 +145,10 @@ describe("SystemBuilderV2Pane — find header inspector", () => {
 });
 
 describe("SystemBuilderV2Pane — body picker + nested slots", () => {
-  it("lists every statement-bearing member of the aggregate at an operation leaf", () => {
+  it("lists every statement-bearing member of the aggregate at an operation / body leaf", () => {
     expect(PANE).toContain("listBodies(agg)");
-    expect(PANE).toContain("aggregateBody(agg.name, member)");
+    expect(PANE).toContain("aggregateBody(agg.name, last.name)");
+    expect(PANE).toContain("AGG_BODY_LEAF");
   });
 
   it("keeps one picker component for workflows and aggregates", () => {
@@ -156,9 +158,26 @@ describe("SystemBuilderV2Pane — body picker + nested slots", () => {
     expect(PANE).toContain('"c4system-v2-body-member"');
   });
 
-  it("gives an aggregate lifecycle body the shared list editor", () => {
-    expect(PANE).toContain('data-testid="c4system-v2-body-panel"');
-    expect(PANE).toContain("<BodyEditor");
+  it("gives an aggregate lifecycle body the flow view, not a panel of its own", () => {
+    // The interim `BodyEditor` panel is gone — every aggregate member now
+    // renders as the same React Flow statement flow, so there is exactly one
+    // canvas branch below the palette.
+    expect(PANE).not.toContain("c4system-v2-body-panel");
+    expect(PANE).not.toContain("<BodyEditor");
+    expect(PANE).toContain('data-testid="c4system-v2-pane"');
+    // Picking a lifecycle member is navigation: the leaf step is swapped for a
+    // `body` step carrying the member key.
+    expect(PANE).toContain('{ kind: "body", name: key }');
+  });
+
+  it("gives the flow rows the list editor's move / delete commands", () => {
+    // Dropping the panel would otherwise lose reorder + delete, which the
+    // shared list editor had and the flow node did not.
+    expect(PANE).toContain("deleteStatement(ctx.getSource(), leafLoc, i)");
+    expect(PANE).toContain("moveStatement(ctx.getSource(), leafLoc, i, dir)");
+    for (const id of ["c4system-v2-stmt-up", "c4system-v2-stmt-down", "c4system-v2-stmt-delete"]) {
+      expect(STMT_NODE).toContain(`"${id}"`);
+    }
   });
 
   it("keys structured-editor slots by descent path", () => {
