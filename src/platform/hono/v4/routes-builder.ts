@@ -978,10 +978,10 @@ export function buildRoutesFile(
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 422`)}`,
   );
   lines.push(`      recordDomainFault("domain_error");`);
-  lines.push(`      return problem(400, "Bad Request", err.message);`);
+  lines.push(`      return problem(422, "Unprocessable Entity", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);

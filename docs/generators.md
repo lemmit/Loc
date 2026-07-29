@@ -89,11 +89,11 @@ lifecycle `audited` beyond node/dotnet (W3), and event-sourced workflow
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
 | `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ecto backend: a `many_to_many` association through the `<join>` table + the id-array wire shape projected from the loaded association, set on create/update via `put_assoc`; `.contains` lowers to an `EXISTS` subquery against the join table.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
-| `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
+| `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 422 in the UI) |
 | `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | `Domain/Common/ProvLineage.cs` SDK + inline lineage capture after each write; co-located `<field>_provenance` jsonb column; `provenance_records` flushed in the EF save transaction; current lineage exposed on `<Agg>Response`. **Elixir** emits the same shape — the `<App>.Provenance` SDK (process-dictionary trace buffer + `flush/1`), a co-located `<field>_provenance` jsonb column, inline capture at each named-op write site, and a `provenance_records` flush inside the save `Repo.transaction`. | (n/a — wire shape unaffected) |
 | `function` | Private method on the aggregate / part class | Private expression-bodied member | (server-only) |
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
-| `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
+| `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 422 surfaces as a Mantine error notification) |
 | `emit` | `_events.push({ type: "X", … })` | `_events.Add(new X(...))` | (server-side) |
 | `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter bar (one input per `where` param) that drives the hook, falling back to `useAll<Agg>()` when unfiltered |
 | `criterion` (inline use-site) | Predicate body re-lowered + substituted at each `where` / invariant / precondition (same Drizzle predicate as a hand-written filter) | Same — inlined into the LINQ `.Where(...)` / guard | (server-side; not surfaced) |
@@ -226,7 +226,7 @@ operations.
   - `GET /{id}` → findById (returns `<Agg>Response`)
   - `POST /{id}/<snake_op>` → operation (body = `<Op>Request`, returns 204)
   - `GET /<snake_find>` → user-declared find (query params = `<Find>Query`)
-- Domain-error handler maps `DomainError` → 400, `AggregateNotFoundError` → 404
+- Domain-error handler maps `DomainError` → 422 (RS-15), `AggregateNotFoundError` → 404
 
 Response schemas carry the **full wire shape**: every field, every
 contained part nested, every derived value (except the reserved
@@ -364,7 +364,7 @@ for deployables marked `platform: dotnet`.
 │   │   └── ProductRepository.cs
 │   └── Events/NoopDomainEventDispatcher.cs
 ├── Api/
-│   ├── DomainExceptionFilter.cs         # DomainException → 400, AggregateNotFoundException → 404
+│   ├── DomainExceptionFilter.cs         # DomainException → 422, AggregateNotFoundException → 404
 │   ├── OrdersController.cs              # [HttpPost], [HttpGet], [HttpPost("{id}/<op>")], [HttpGet("<find>")]
 │   └── ProductsController.cs
 └── Tests/<Namespace>.Tests/             # xUnit project — emitted only when `test` blocks exist
@@ -417,7 +417,7 @@ shape records (`<Agg>Response`, `<Part>Response`, `<Vo>Response`,
 **`Api/<Plural>Controller.cs`** — `[ApiController]` with one route per
 shape; converts wire-DTOs to commands, dispatches via `IMediator`,
 returns DTOs.  `DomainExceptionFilter` turns precondition failures
-into HTTP 400 and missing-aggregate into 404.
+into HTTP 422 (RS-15) and missing-aggregate into 404.
 
 **`Program.cs`** — hosting entry:
 
@@ -1031,7 +1031,7 @@ Per deployable it emits:
 | Domain | typed-id records (`@Embeddable`, `newId()`), enums (DSL-cased constants — the wire), VO records running invariants in the compact constructor, event records implementing a `DomainEvent` marker (jMolecules-annotated), aggregate/part classes with package-private fields + record-style accessors, `create(...)` factory, `pullEvents()`, positional part `_create` factories |
 | Persistence | JPA annotations mirroring the shared `MigrationsIR` schema (`@EmbeddedId` typed ids, flattened-VO `@AttributeOverride`s, unidirectional `@OneToMany` containments with `nullable = false` join columns, `@ElementCollection` join tables for `X id[]` + value collections, `@MappedSuperclass` TPC bases); repository triple — domain port (`save`/`findById`/`getById`/`findAll`/`delete` + declared finds), Spring Data interface with `@Query` JPQL finds, `@Repository` impl mapping misses to 404 |
 | Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |
-| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` brought to cross-backend parity by an `OpenApiContractCustomizer` (named `<Agg>ListResponse` array wrappers, RFC 7807 error responses, named enum components, empty request bodies for param-less ops, per-component `required` sets, `Workflow` operationId suffixes) |
+| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json — 400 only for a malformed body, the domain floor is 422), springdoc `/openapi.json` brought to cross-backend parity by an `OpenApiContractCustomizer` (named `<Agg>ListResponse` array wrappers, RFC 7807 error responses, named enum components, empty request bodies for param-less ops, per-component `required` sets, `Workflow` operationId suffixes) |
 | Auth | `auth: required` + `user {}` → typed `User` record, `UserVerifier` boundary + accept-all dev stub, 401 filter, ThreadLocal accessor; `currentUser` threads into ops as a trailing parameter |
 | Workflows | `POST /workflows/<snake>` via a per-context `@Service` (loops over `Repo.run(...)` retrievals incl. the call-site `page:` tuple, workflow-level `emit` logging the `domain_event` envelope) |
 | Retrievals / criteria | reified criteria → `<Agg>Criteria` `Specification<T>` factories (java consumes `CriterionIR` directly — the first backend to); `run<Name>` port methods: an exact-criterion-ref retrieval rides `JpaSpecificationExecutor.findAll(spec, Sort)`, composed `where`s fall back to `@Query` JPQL with `order by`; paged runs via the `OffsetLimitPageRequest` Pageable |

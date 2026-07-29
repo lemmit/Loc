@@ -593,11 +593,11 @@ ${actions.join("\n\n")}
   def respond(conn, {:error, :not_found}),
     do: ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
 
-  def respond(conn, {:error, :forbidden}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Handler guard rejected the request")
+  def respond(conn, {:error, {:forbidden, detail}}),
+    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
 
-  def respond(conn, {:error, :precondition_failed}),
-    do: ProblemDetails.problem_response(conn, 422, "Precondition Failed", "Handler precondition rejected the request")
+  def respond(conn, {:error, {:precondition_failed, detail}}),
+    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
 
   def respond(conn, {:error, reason}),
     do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))

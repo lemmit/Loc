@@ -277,7 +277,9 @@ describe(".NET generator", () => {
       // the RFC 7807 body); each arm returns a ProblemDetails via Problem(...).
       expect(filter).toMatch(/Response\.Headers\["x-request-id"\] = traceId;/);
       expect(filter).toMatch(/Problem\(context, 403, "Forbidden", fe\.Message, trace_id\)/);
-      expect(filter).toMatch(/Problem\(context, 400, "Bad Request", de\.Message, trace_id\)/);
+      expect(filter).toMatch(
+        /Problem\(context, 422, "Unprocessable Entity", de\.Message, trace_id\)/,
+      );
       expect(filter).toMatch(/Problem\(context, 404, "Not Found", nf\.Message, trace_id\)/);
       expect(filter).toMatch(
         /Problem\(context, 500, "Internal Server Error", xh\.Message, trace_id\)/,
@@ -289,7 +291,7 @@ describe(".NET generator", () => {
 
     it("DomainExceptionFilter logs the fault tier with each fault's real status", async () => {
       // S1 parity: every fault arm emits its catalog event at the real HTTP
-      // status (validation 422, domain 400, forbidden 403, disallowed 409,
+      // status (validation 422, domain 422 — RS-15, forbidden 403, disallowed 409,
       // not_found 404) — matching Hono/Python so a `jq select(.event==…)`
       // query is the same shape cross-backend.
       const model = await buildModel("examples/sales.ddd");
@@ -301,7 +303,7 @@ describe(".NET generator", () => {
         '_log.LogWarning("{Event} message={Message} status={Status}", "disallowed", dx.Message, 409);',
       );
       expect(filter).toContain(
-        '_log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);',
+        '_log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 422);',
       );
       expect(filter).toContain('_log.LogWarning("{Event} status={Status}", "not_found", 404);');
     });
@@ -1234,8 +1236,10 @@ describe(".NET generator", () => {
     // The Problem helper builds an RFC 7807 ProblemDetails with the status.
     expect(filter).toMatch(/new ProblemDetails/);
     expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
-    // Domain-specific paths still mapped (400 / 404).
-    expect(filter).toMatch(/Problem\(context, 400, "Bad Request", de\.Message, trace_id\)/);
+    // Domain-specific paths still mapped (422 / 404).
+    expect(filter).toMatch(
+      /Problem\(context, 422, "Unprocessable Entity", de\.Message, trace_id\)/,
+    );
     expect(filter).toMatch(/Problem\(context, 404, "Not Found", nf\.Message, trace_id\)/);
   });
 
@@ -1657,7 +1661,7 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("Domain/Orders/Order.cs")!;
       expect(order).toMatch(/throw new ForbiddenException\(/);
-      // The `precondition` 400-mapping path stays distinct.
+      // The `precondition` 422-mapping path stays distinct.
       expect(order).not.toMatch(/throw new DomainException\([^)]*Forbidden/);
     });
 

@@ -206,9 +206,9 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 400 });
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 422 });
       recordDomainFault("domain_error");
-      return problem(400, "Bad Request", err.message);
+      return problem(422, "Unprocessable Entity", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Product", status: 404 });

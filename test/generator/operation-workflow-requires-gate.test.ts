@@ -83,9 +83,9 @@ describe("operation + workflow-create requires gate — cross-backend 403 emissi
     expect(out).toContain('if not (current_user.role == "admin"):');
   });
 
-  it("Elixir/Phoenix: `ensure(_, :forbidden)` guard (403 via ProblemDetails)", async () => {
+  it("Elixir/Phoenix: `ensure(_, {:forbidden, msg})` guard (403 via ProblemDetails)", async () => {
     const out = await generate("elixir");
-    expect(out).toContain('ensure(current_user.role == "agent", :forbidden)');
+    expect(out).toContain('ensure(current_user.role == "agent", {:forbidden, ');
     // Workflow create renders the guard inline in the workflow module.
     expect(out).toContain('current_user.role == "admin"');
     expect(out).toContain(":forbidden");

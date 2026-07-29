@@ -326,40 +326,45 @@ the conforming backends, and the fix that established it.
   only — this is the **increment** path, and it is shape-dependent. Tier:
   **behavioral**.
 
-### RS-15 · A tripped operation `precondition` maps to one canonical status — **OPEN**
-- **Guarantee (pending).** A `precondition` that is false at call time produces
-  the SAME status and the same `detail` shape on every backend. Which status
-  that is has **not been decided**.
+### RS-15 · A domain-floor rejection is **422**, not 400
+- **Guarantee.** A request that parses and typechecks but is rejected by the
+  domain — a false `precondition`, a tripped aggregate-level `invariant`, any
+  `DomainError`-class throw the wire validator cannot express — answers
+  **422 Unprocessable Entity** with an RFC 7807 body titled
+  `"Unprocessable Entity"`, on every backend. **400 is reserved for genuinely
+  malformed input** (an unparseable body, a missing multipart field).
 - **Trigger.** An `operation` with a `precondition` invoked in a state that
-  fails it.
-- **Observable — the backends disagree.**
-
-  | backends | status | `detail` |
-  |---|---|---|
-  | node, python, dotnet | **400** Bad Request | `"Precondition failed: <the predicate>"` |
-  | elixir | **422** Unprocessable Entity | `"A precondition failed"` (generic) |
-
-  Two divergences in one: the status, and whether the failed predicate is
-  named. Java was not measured on this path.
-- **Why this is NOT a one-backend bug.** Elixir's mapping is *deliberate and
-  documented* — a coherent denial ladder (`when` → 409, `requires` → 403,
-  `precondition` → 422, `api-emit.ts`) that deliberately replaced an older
-  `raise ArgumentError` → 500. And 422 is arguably the better RFC 9110 fit: the
-  request is well-formed but semantically rejected. Against that, 400 is what
-  the other backends emit. **This is the RS-12 shape** — an open canonical
-  decision for the owner, not a majority vote. (RS-11 is the standing reminder
-  that the majority can be the wrong side.)
-- **Consequence for the gate.** The `wire-contract` shared system deliberately
-  carries **no error-status assertion** until this is settled: the emitted
-  `test e2e` DSL expresses the expectation as `toThrow(<status>)`, so any
-  assertion would silently encode one side of the undecided question — and a
-  wire *waiver* cannot help, because the failure is the emitted test's own
-  assertion, not a golden mismatch. Error-envelope coverage joins the golden
-  once the decision lands.
-- **Conforms (provisional).** node, dotnet, python. **Targets:** elixir
-  (measured divergent), java (unmeasured).
-- **Provenance.** Found by the M-T9.11 wire-golden gate while extending its
-  coverage. Tier: **behavioral**.
+  fails it; or an `invariant` that no Zod/DataAnnotations/Pydantic refine can
+  mirror, tripped on write.
+- **Why 422 and not 400.** RFC 9110 §15.5.21 defines 422 as "the request was
+  well-formed but was unable to be followed due to semantic errors" — which is
+  exactly the domain floor. §15.5.1's 400 is "the server cannot or will not
+  process the request due to something that is perceived to be a client error
+  (e.g., malformed request syntax)". A precondition failure is not a syntax
+  problem: the payload parsed, every field typechecked, and the server
+  understood it completely. Elixir already answered 422 here via a coherent
+  denial ladder (`when` → 409, `requires` → 403, `precondition` → 422), and
+  that ladder — not the four-backend majority — turned out to be the right
+  side. RS-11 is the standing reminder that a majority can be the wrong answer;
+  this rule is the second time it paid off.
+- **What this does NOT collapse.** 422 is now shared by the wire-validation
+  tier and the domain floor, but the two stay distinguishable: a wire-tier
+  rejection carries the §3.2 `errors[]` per-field extension, the domain floor
+  does not. The status was never the discriminator; the extension is.
+- **Known residual divergence — the `detail` wording.** node/dotnet/java/python
+  send `"Precondition failed: <the predicate source>"`; elixir's *typed-denial*
+  path (`{:error, :precondition_failed}`) sends a generic
+  `"A precondition failed"`, because the atom carries no message. (Elixir's
+  raise/rescue path already forwards the specific message.) The status, title,
+  `type` and `instance` agree on all five; only `detail` differs. Tracked
+  separately — the fix threads the predicate source through the denial tuple.
+  Until it lands, the golden's error-envelope coverage stays limited to the
+  fields that do agree.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Opened by the M-T9.11 wire-golden gate while extending its
+  coverage (the four-vs-one status split), decided by the owner in favour of
+  the RFC-idiomatic side, and closed in the same change that flipped the four
+  runtime mappings + their OpenAPI declarations. Tier: **behavioral**.
 
 ---
 

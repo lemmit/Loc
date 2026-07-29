@@ -87,7 +87,7 @@ describe("vanilla aggregate `function` emit (gap §11b)", () => {
     // op's `with ensure(...)` guard chain (403/422 typed denial, not a raise) —
     // the call site still renders `passed(record)`, resolving to the module-level
     // def above (the §11b call-site qualification, which is what this pins).
-    expect(ctx).toContain("ensure(passed(record), :precondition_failed)");
+    expect(ctx).toContain("ensure(passed(record), {:precondition_failed, ");
   });
 
   it("emits a block-body function as binding/guard lines + a trailing bare value", async () => {

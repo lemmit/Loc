@@ -20,7 +20,7 @@ Shipped over four slices:
   through as a closure-captured parameter on the generated method.
 - **Slice 2**  — `requires <expr>` statement: a declarative
   authorization gate that maps to HTTP 403, distinct from
-  `precondition` (which maps to 400).
+  `precondition` (which maps to 422 — RS-15).
 
 **Default-deny enforcement** is opt-in via
 `auth { enforcement: denyByDefault }` (the language default stays `opt`,
@@ -83,7 +83,7 @@ system Acme {
 
         // currentUser is in scope inside operation bodies.  The
         // precondition runs per request; failure throws
-        // DomainException → 400 from the framework filter.
+        // DomainException → 422 from the framework filter.
         // permissions.ordersCancel lowers to the literal
         // "sales.ordersCancel" so the runtime check reduces to
         // a plain string-array .includes(...) on the verified
@@ -243,7 +243,7 @@ route layer.
 
 `requires <expr>` is a declarative authorization gate at the top
 of an operation or workflow body.  Failure surfaces as HTTP 403,
-distinct from `precondition`'s 400 — the two are deliberately
+distinct from `precondition`'s 422 — the two are deliberately
 separate so domain validity (state) and authorization (caller)
 don't share an error class:
 
@@ -258,7 +258,7 @@ operation cancel() {
 
 | Statement | Maps to | Failure means |
 | --- | --- | --- |
-| `precondition` | HTTP 400 (`DomainException` / `DomainError`) | The request is malformed or the aggregate state is invalid for this op. |
+| `precondition` | HTTP 422 (`DomainException` / `DomainError`) | The request is well-formed but the aggregate state is invalid for this op (RFC 9110 §15.5.21; see RS-15 in `conformance-semantics.md`).  400 is reserved for a genuinely malformed body. |
 | `requires`     | HTTP 403 (`ForbiddenException` / `ForbiddenError`) | The caller isn't authorized to invoke this op. |
 
 Both type-check to `bool` and may reference `currentUser`,

@@ -138,8 +138,8 @@ describe("vanilla — guarded NAMED op denies 403/422 (not raise → 500)", () =
     const body = ctx.slice(ctx.indexOf("def withdraw_account(%"));
     const fn = body.slice(0, body.indexOf("\n  end"));
     // `requires` → 403 (`:forbidden`); `precondition` → 422 (`:precondition_failed`).
-    expect(fn).toContain("with :ok <- ensure(record.balance >= amount, :forbidden),");
-    expect(fn).toContain(":ok <- ensure(amount > 0, :precondition_failed) do");
+    expect(fn).toContain("with :ok <- ensure(record.balance >= amount, {:forbidden, ");
+    expect(fn).toContain(":ok <- ensure(amount > 0, {:precondition_failed, ");
     // Guards precede the mutation + persist.
     const withAt = fn.indexOf("with :ok <- ensure");
     const mutAt = fn.indexOf("record = %{record | balance:");
@@ -155,13 +155,11 @@ describe("vanilla — guarded NAMED op denies 403/422 (not raise → 500)", () =
 
   it("controller `else` maps the denial atoms to 403 / 422", async () => {
     const ctl = get(await generateSystemFiles(GUARDED_NAMED), "/controllers/account_controller.ex");
+    expect(ctl).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", detail)');
     expect(ctl).toContain(
-      'ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)',
     );
-    expect(ctl).toContain(
-      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
-    );
-    expect(ctl).toContain("{:error, :forbidden} ->");
-    expect(ctl).toContain("{:error, :precondition_failed} ->");
+    expect(ctl).toContain("{:error, {:forbidden, detail}} ->");
+    expect(ctl).toContain("{:error, {:precondition_failed, detail}} ->");
   });
 });

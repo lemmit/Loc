@@ -19,7 +19,9 @@ compose stack, nightly. Two problems, both fixed by this shape:
 - **No oracle.** Pairwise disagreement says *they differ*, never *who is right*.
   RS-11 is the cautionary tale: three backends agreed on `version: 0` and all
   three were **wrong** (the `versioned` capability declares `= 1`). A majority
-  vote would have broken the one correct backend.
+  vote would have broken the one correct backend. RS-15 is the second: four
+  backends answered `400` for a tripped `precondition` and the lone `422` was
+  the RFC-correct one, so the *majority* moved.
 - **Nightly.** A golden turns the N-way diff into N **independent one-way**
   gates — if A ≡ golden and B ≡ golden then A ≡ B — so each rides a workflow
   that already boots that backend on every PR. No new CI boot.
@@ -40,6 +42,7 @@ per-run values and keeps everything else:
 | `id` / `*Id` / `traceId` values → `<volatile:key>` | `[]`-vs-`null` absence shape |
 | uuid/int path segments → `{id}` | list ordering, decimal values, status codes |
 | query-param order | the request sequence itself |
+|  | RFC 7807 error bodies — `type`/`title`/`status`/`detail`/`instance` |
 
 Keys are **never** dropped — a missing timestamp key still surfaces as a
 `key-set` divergence even though its value is normalized away.

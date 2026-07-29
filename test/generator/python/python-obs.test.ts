@@ -188,7 +188,7 @@ describe("python observability", () => {
   it("problem handlers emit the catalog fault warns", async () => {
     const files = await build(FIXTURE);
     const problem = files.get("api/app/http/problem.py")!;
-    expect(problem).toContain('log("warn", "domain_error", message=str(err), status=400)');
+    expect(problem).toContain('log("warn", "domain_error", message=str(err), status=422)');
     expect(problem).toContain('log("warn", "forbidden", message=str(err), status=403)');
     expect(problem).toContain('log("warn", "not_found", message=str(err), status=404)');
     // Catch-all fallback: an otherwise-unhandled exception logs internal_error

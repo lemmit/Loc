@@ -274,7 +274,7 @@ system Demo {
       'problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()',
     );
     expect(advice).toContain('problem(403, "Forbidden", e.getMessage(), request), 403');
-    expect(advice).toContain('problem(400, "Bad Request", e.getMessage(), request), 400');
+    expect(advice).toContain('problem(422, "Unprocessable Entity", e.getMessage(), request), 422');
     expect(advice).toContain('problem(404, "Not Found", e.getMessage(), request), 404');
   });
 
@@ -290,7 +290,7 @@ system Demo {
       'CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", 403);',
     );
     expect(advice).toContain(
-      'CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 400);',
+      'CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 422);',
     );
     expect(advice).toContain(
       'CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", 409);',

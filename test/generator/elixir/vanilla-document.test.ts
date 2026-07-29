@@ -241,7 +241,7 @@ describe("vanilla shape: document scalar finds + named ops (Route A slice 2 — 
     expect(ctx).toContain("record = row.data");
     // A `precondition` guard hoists into a `with ensure(...)` denial chain (422,
     // not a raise → 500) — the struct-mode read `record.item_count` is preserved.
-    expect(ctx).toContain("with :ok <- ensure(record.item_count >= 0, :precondition_failed) do");
+    expect(ctx).toContain("with :ok <- ensure(record.item_count >= 0, {:precondition_failed, ");
     expect(ctx).not.toContain("raise(ArgumentError");
     expect(ctx).toContain("record = %{record | item_count: record.item_count + 1}");
     expect(ctx).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
@@ -316,9 +316,9 @@ describe("vanilla shape: document non-scalar residual (DEBT-07 follow-up)", () =
     // sub-field — now hoisted into a `with ensure(...)` denial chain (422, not a
     // raise → 500); the call-site qualification `is_cheap(record)` + the VO
     // subfield read are preserved inside the ensure clause.
-    expect(ctx).toContain("ensure(is_cheap(record), :precondition_failed)");
+    expect(ctx).toContain("ensure(is_cheap(record), {:precondition_failed, ");
     expect(ctx).toContain(
-      'ensure(Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) >= 0, :precondition_failed)',
+      'ensure(Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) >= 0, {:precondition_failed, ',
     );
     expect(ctx).not.toContain("raise(ArgumentError");
   });
@@ -551,7 +551,7 @@ system Shop {
     // The guard short-circuits BEFORE the transaction — a denied op writes nothing
     // and records no audit row.
     const bump = facade.slice(facade.indexOf("def bump_cart("));
-    expect(bump).toContain("with :ok <- ensure(by > 0, :forbidden) do");
+    expect(bump).toContain("with :ok <- ensure(by > 0, {:forbidden, ");
     // audit_before + record bind precede the `with`; the tx is inside the `do`.
     expect(bump.indexOf("audit_before =")).toBeLessThan(bump.indexOf("with :ok <-"));
     expect(bump.indexOf("with :ok <-")).toBeLessThan(bump.indexOf("Api.Repo.transaction"));
@@ -656,7 +656,7 @@ system Shop {
     expect(body).toContain(
       "audit_before = Map.merge(%{id: row.id}, (row.data && Map.from_struct(row.data)) || %{})",
     );
-    expect(body).toContain("with :ok <- ensure(record.total < 10, :precondition_failed) do");
+    expect(body).toContain("with :ok <- ensure(record.total < 10, {:precondition_failed, ");
     expect(body).toContain("Api.Repo.transaction(fn ->");
     expect(body).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(body).toContain('operation_id: "bumpCart"');
@@ -726,8 +726,8 @@ describe("vanilla shape: document op guards deny 403/422 (not raise → 500)", (
     // `record = row.data` + param binds precede the guards (guards read record).
     expect(body).toContain("record = row.data");
     // `requires` → 403 (`:forbidden`); `precondition` → 422 (`:precondition_failed`).
-    expect(body).toContain("with :ok <- ensure(by > 0, :forbidden),");
-    expect(body).toContain(":ok <- ensure(record.count >= 0, :precondition_failed) do");
+    expect(body).toContain("with :ok <- ensure(by > 0, {:forbidden, ");
+    expect(body).toContain(":ok <- ensure(record.count >= 0, {:precondition_failed, ");
     // The mutation + re-embed persist run INSIDE the with-do (denial short-circuits
     // before any write).
     const withAt = body.indexOf("with :ok <- ensure");
@@ -747,7 +747,7 @@ describe("vanilla shape: document op guards deny 403/422 (not raise → 500)", (
     const ctx = file(await generateSystemFiles(DOC_GUARDS), "lib/api/o.ex");
     const fn = ctx.slice(ctx.indexOf("def summary_note(%"));
     const body = fn.slice(0, fn.indexOf("\n  end"));
-    expect(body).toContain('with :ok <- ensure(record.title != "", :forbidden) do');
+    expect(body).toContain('with :ok <- ensure(record.title != "", {:forbidden, ');
     expect(body).toContain("{:ok, record.title}");
     expect(body).not.toContain("raise(ArgumentError");
   });
@@ -767,13 +767,13 @@ describe("vanilla shape: document op guards deny 403/422 (not raise → 500)", (
     const ctl = file(files, "/controllers/note_controller.ex");
     // NAMED op → `else` arms; RETURNING op → result-fn clauses.  Same status +
     // ProblemDetails body as the relational / ES-command path.
+    expect(ctl).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", detail)');
     expect(ctl).toContain(
-      'ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)',
     );
+    expect(ctl).toContain("def summary_note_result(conn, {:error, {:forbidden, detail}}),");
     expect(ctl).toContain(
-      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
+      "def summary_note_result(conn, {:error, {:precondition_failed, detail}}),",
     );
-    expect(ctl).toContain("def summary_note_result(conn, {:error, :forbidden}),");
-    expect(ctl).toContain("def summary_note_result(conn, {:error, :precondition_failed}),");
   });
 });

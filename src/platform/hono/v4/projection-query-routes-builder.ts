@@ -137,13 +137,13 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
   lines.push(
-    `    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: 400 | 403 | 404 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   lines.push(
     `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
   );
   lines.push(
-    `    if (err instanceof DomainError) return problem(400, "Bad Request", err.message);`,
+    `    if (err instanceof DomainError) return problem(422, "Unprocessable Entity", err.message);`,
   );
   lines.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,

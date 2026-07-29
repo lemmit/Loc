@@ -135,7 +135,7 @@ describe("vanilla — Slice P4.2 event-sourcing emit", () => {
     expect(ctx).toContain("id = UUIDv7.generate()");
     expect(ctx).toContain("Api.Accounts.AccountRepository.append(id, events)");
     expect(ctx).toContain("def deposit_account(%Api.Accounts.Account{} = state, attrs) do");
-    expect(ctx).toContain("ensure(amount > 0, :precondition_failed)");
+    expect(ctx).toContain("ensure(amount > 0, {:precondition_failed, ");
     expect(ctx).toContain("defp ensure(true, _reason), do: :ok");
     // delegate reads
     expect(ctx).toContain("defdelegate get_account(id)");
@@ -147,7 +147,7 @@ describe("vanilla — Slice P4.2 event-sourcing emit", () => {
     const ctl = get(f, "/controllers/account_controller.ex");
     expect(ctl).toContain('def deposit(conn, %{"id" => id} = params)');
     expect(ctl).toContain("send_resp(conn, 204");
-    expect(ctl).toContain("defp command_error(conn, :forbidden)");
+    expect(ctl).toContain("defp command_error(conn, {:forbidden, ");
     expect(ctl).toContain('ProblemDetails.problem_response(conn, 422, "Unprocessable Entity"');
     const router = get(f, "/router.ex");
     expect(router).toContain('post "/accounts/:id/deposit", AccountController, :deposit');

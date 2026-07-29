@@ -6,12 +6,12 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // `expr-let` on a vanilla workflow.  Each kind lands as a `with`-clause
 // in the lowered `run_inner/1` chain:
 //
-//   precondition <cond>  → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
-//   requires <cond>      → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
+//   precondition <cond>  → `:ok <- (if <cond>, do: :ok, else: {:error, {:precondition_failed, detail}})`
+//   requires <cond>      → `:ok <- (if <cond>, do: :ok, else: {:error, {:forbidden, detail}})`
 //   let foo = <expr>     → `foo <- (<expr>)` (always succeeds)
 //
 // The failure tags propagate through the with-chain so the workflow's
-// caller sees `{:error, :precondition_failed}` / `{:error, :forbidden}`,
+// caller sees `{:error, {:precondition_failed, detail}}` / `{:error, {:forbidden, detail}}`,
 // which the WorkflowsController maps to RFC 7807 responses (422 / 403).
 // ---------------------------------------------------------------------------
 
@@ -61,12 +61,14 @@ async function loadWorkflow() {
 describe("vanilla — workflow body lowering (precondition / requires / expr-let)", () => {
   it("lowers `precondition <cond>` to an `:ok` with-clause that tags failure as :precondition_failed", async () => {
     const wf = await loadWorkflow();
-    expect(wf).toMatch(/:ok <- \(if [^,]+, do: :ok, else: \{:error, :precondition_failed\}\)/);
+    expect(wf).toMatch(
+      /:ok <- \(if .+?, do: :ok, else: \{:error, \{:precondition_failed, .+?\}\}\)/,
+    );
   });
 
   it("lowers `requires <cond>` to an `:ok` with-clause that tags failure as :forbidden", async () => {
     const wf = await loadWorkflow();
-    expect(wf).toMatch(/:ok <- \(if [^,]+, do: :ok, else: \{:error, :forbidden\}\)/);
+    expect(wf).toMatch(/:ok <- \(if .+?, do: :ok, else: \{:error, \{:forbidden, .+?\}\}\)/);
   });
 
   it("lowers `let normalised = <expr>` to a binding with-clause", async () => {
@@ -101,7 +103,7 @@ describe("vanilla — WorkflowsController maps precondition failure to 422", () 
     const ctrl = files.get(
       [...files.keys()].find((k) => k.endsWith("/controllers/workflows_controller.ex"))!,
     )!;
-    expect(ctrl).toMatch(/def respond\(conn, \{:error, :precondition_failed\}\)/);
+    expect(ctrl).toMatch(/def respond\(conn, \{:error, \{:precondition_failed, detail\}\}\)/);
     expect(ctrl).toMatch(/problem_response\(conn, 422,/);
   });
 });

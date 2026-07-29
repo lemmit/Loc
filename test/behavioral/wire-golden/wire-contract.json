@@ -63,6 +63,35 @@
         ],
         "version": 2
       }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/listings",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/listings/{id}/discontinue",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/api/listings/{id}/discontinue",
+      "status": 422,
+      "body": {
+        "detail": "Precondition failed: availability != Availability.Discontinued",
+        "instance": "/api/listings/{id}/discontinue",
+        "status": 422,
+        "title": "Unprocessable Entity",
+        "type": "about:blank"
+      }
     }
   ]
 }

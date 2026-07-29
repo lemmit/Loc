@@ -580,7 +580,7 @@ describe("typescript generator", () => {
         /"content-type": "application\/problem\+json", "x-request-id": trace_id/,
       );
       expect(routes).toMatch(/return problem\(403, "Forbidden", err\.message\)/);
-      expect(routes).toMatch(/return problem\(400, "Bad Request", err\.message\)/);
+      expect(routes).toMatch(/return problem\(422, "Unprocessable Entity", err\.message\)/);
       expect(routes).toMatch(/return problem\(404, "Not Found", err\.message\)/);
       expect(routes).toMatch(/return problem\(500, "Internal Server Error", "internal"\)/);
     });
@@ -604,7 +604,7 @@ describe("typescript generator", () => {
         /\.get\("log"\)\.warn\(\{ event: "forbidden", aggregate: "Order", message: err\.message, status: 403 \}\)/,
       );
       expect(routes).toMatch(
-        /\.get\("log"\)\.warn\(\{ event: "domain_error", aggregate: "Order", message: err\.message, status: 400 \}\)/,
+        /\.get\("log"\)\.warn\(\{ event: "domain_error", aggregate: "Order", message: err\.message, status: 422 \}\)/,
       );
       expect(routes).toMatch(
         /\.get\("log"\)\.warn\(\{ event: "not_found", aggregate: "Order", status: 404 \}\)/,

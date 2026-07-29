@@ -9,12 +9,16 @@
 //   takes (its rule is also a Zod refine), which is why showcase's negative
 //   e2e cases assert `toThrow(422)`.
 // Tier 2 — DOMAIN floor: an aggregate-level throw the wire validator can't
-//   express reaches `app.onError` and maps by class — `DomainError → 400`
-//   (by design: no per-field pointer), `AggregateNotFoundError → 404`,
-//   `ForbiddenError → 403`, `DisallowedError → 409`.
+//   express reaches `app.onError` and maps by class — `DomainError → 422`
+//   (RS-15: the request parsed and typechecked, so it is well-formed; it was
+//   rejected on *semantics*, which RFC 9110 §15.5.21 spells 422, not 400.  The
+//   floor differs from tier 1 only in carrying no per-field `errors[]` pointer),
+//   `AggregateNotFoundError → 404`, `ForbiddenError → 403`,
+//   `DisallowedError → 409`.
 //
-// The reviewers read the 400 floor as a bug; it is the documented design.  This
-// test locks both tiers in place.
+// Both tiers therefore answer 422; the two are distinguished by the `errors[]`
+// extension, not by the status.  400 is left to genuinely MALFORMED input (an
+// unparseable body).  This test locks both tiers in place.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
@@ -61,14 +65,11 @@ describe("hono — two-tier error→status contract (validation-error-extension.
     const files = await generateSystemFiles(SYSTEM);
     const routes = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"))?.[1];
     expect(routes, "order.routes.ts").toBeDefined();
-    // Each pairing mirrors src/util/error-defaults.ts; 400 is the DomainError
-    // floor (intended, NOT 422).
     expect(routes).toContain(`problem(403, "Forbidden"`);
     expect(routes).toContain(`problem(409, "Disallowed"`);
-    expect(routes).toContain(`problem(400, "Bad Request"`);
+    expect(routes).toContain(`problem(422, "Unprocessable Entity"`);
     expect(routes).toContain(`problem(404, "Not Found"`);
-    // The domain floor never maps a throw to 422 — that status is reserved for
-    // the wire-validation tier.
-    expect(routes).not.toContain(`problem(422`);
+    // …and NOT 400: a domain-floor rejection is never "malformed request".
+    expect(routes).not.toContain(`problem(400`);
   });
 });
