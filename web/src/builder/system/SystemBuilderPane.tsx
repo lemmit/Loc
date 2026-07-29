@@ -36,10 +36,17 @@ import {
   availableTypes,
   baseLabel,
   deleteField,
+  FIELD_ACCESS,
   freshFieldName,
   isFieldKind,
+  listFieldModifiers,
   listFields,
   retypeField,
+  setFieldAccess,
+  setFieldCheck,
+  setFieldDefault,
+  setFieldMask,
+  setFieldSensitivity,
   type BaseSpec,
   type TypeSpec,
 } from "./fields";
@@ -276,6 +283,49 @@ function FieldNameInput({ name, onRename }: { name: string; onRename: (next: str
   );
 }
 
+// The keyword-less `editable` default, as the access Select's own option — the
+// grammar has no token for it, so picking it means "remove the access keyword".
+const EDITABLE = "editable";
+
+/** Identity of one field's modifier section, so expanding a field and then
+ *  selecting a different construct doesn't leave the wrong section open. */
+const modifierKey = (node: GraphNode, index: number): string => `${node.kind}:${node.name}:${index}`;
+
+// One property-modifier text box (default / check / message / mask unless /
+// sensitive tags). Commits on blur / Enter like the name input; an empty value
+// means "remove the clause", which is exactly what the mutators take. A failed
+// mutation returns null and the source is left alone, so the next render
+// re-seeds the draft from the unchanged model.
+function ModifierInput({
+  label,
+  value,
+  placeholder,
+  testId,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  testId: string;
+  onCommit: (next: string) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <TextInput
+      size="xs"
+      label={label}
+      placeholder={placeholder}
+      value={draft}
+      data-testid={testId}
+      styles={{ input: { fontFamily: "monospace", fontSize: 11 }, label: { fontSize: 10 } }}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={() => { if (draft.trim() !== value.trim()) onCommit(draft); }}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    />
+  );
+}
+
 // The inspector lives beside the canvas on desktop; on a narrow viewport it
 // slides up as a bottom drawer so the graph keeps the full width.
 function InspectorPanel({ compact, opened, onClose, children }: { compact: boolean; opened: boolean; onClose: () => void; children: ReactNode }): JSX.Element {
@@ -474,6 +524,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (addContext && !contextNames.includes(addContext)) setAddContext(null);
     if (addSubdomainName && !subdomainNameList.includes(addSubdomainName)) setAddSubdomainName(null);
   }, [contextNames, subdomainNameList, addContext, addSubdomainName]);
+  // Which field's modifier section is expanded, as `<construct>:<index>` — the
+  // inspector shows one at a time so the panel stays a panel.
+  const [openModifiers, setOpenModifiers] = useState<string | null>(null);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -569,6 +622,30 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (!selected) return;
     const next = deleteField(ctx.getSource(), selected.kind, selected.name, index);
     if (next != null) apply(next, true);
+  };
+
+  const fieldModifiers = selected && isFieldKind(selected.kind) ? listFieldModifiers(selected.ast) : [];
+
+  // Property modifiers. Every mutator returns null when the edit would not
+  // re-parse (a malformed expression, a bad tag) — the source is then left
+  // untouched, same contract as every other inspector input.
+  const applyModifier = (next: string | null): void => {
+    if (next != null) apply(next, true);
+  };
+  const editDefault = (index: number, text: string): void => {
+    if (selected) applyModifier(setFieldDefault(ctx.getSource(), selected.kind, selected.name, index, text));
+  };
+  const editCheck = (index: number, text: string, message?: string): void => {
+    if (selected) applyModifier(setFieldCheck(ctx.getSource(), selected.kind, selected.name, index, text, message));
+  };
+  const editMask = (index: number, text: string): void => {
+    if (selected) applyModifier(setFieldMask(ctx.getSource(), selected.kind, selected.name, index, text));
+  };
+  const editAccess = (index: number, value: string | null): void => {
+    if (selected) applyModifier(setFieldAccess(ctx.getSource(), selected.kind, selected.name, index, FIELD_ACCESS.find((a) => a === value) ?? null));
+  };
+  const editSensitivity = (index: number, text: string): void => {
+    if (selected) applyModifier(setFieldSensitivity(ctx.getSource(), selected.kind, selected.name, index, text.split(",")));
   };
 
   // Repository find params (only when a find is picked).
@@ -928,50 +1005,110 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                   </Button>
                 </Group>
                 {listFields(selected.ast).map((f, i) => (
-                  <Group key={`${f.name}-${i}`} gap={4} align="center" wrap="nowrap" data-testid="c4system-field-row">
-                    {selected.kind === "event" ? (
-                      <Text size="xs" style={{ flex: "0 0 70px", overflow: "hidden", textOverflow: "ellipsis" }} title={f.name}>
-                        {f.name}
-                      </Text>
-                    ) : (
-                      <FieldNameInput name={f.name} onRename={(next) => void renameField(f.name, next)} />
+                  <Stack key={`${f.name}-${i}`} gap={2}>
+                    <Group gap={4} align="center" wrap="nowrap" data-testid="c4system-field-row">
+                      {selected.kind === "event" ? (
+                        <Text size="xs" style={{ flex: "0 0 70px", overflow: "hidden", textOverflow: "ellipsis" }} title={f.name}>
+                          {f.name}
+                        </Text>
+                      ) : (
+                        <FieldNameInput name={f.name} onRename={(next) => void renameField(f.name, next)} />
+                      )}
+                      <Select
+                        size="xs"
+                        style={{ flex: 1, minWidth: 0 }}
+                        searchable
+                        data={typeOptions.map((o) => o.label)}
+                        value={f.baseLabel}
+                        data-testid="c4system-field-type"
+                        onChange={(label) => {
+                          const base = label ? baseByLabel.get(label) : undefined;
+                          if (base) setFieldType(i, { base, array: f.array, optional: f.optional });
+                        }}
+                      />
+                      <Checkbox
+                        size="xs"
+                        title="array []"
+                        checked={f.array}
+                        onChange={(e) => setFieldType(i, { base: f.base, array: e.currentTarget.checked, optional: f.optional })}
+                      />
+                      <Text size="xs" c="dimmed">[]</Text>
+                      <Checkbox
+                        size="xs"
+                        title="optional ?"
+                        checked={f.optional}
+                        onChange={(e) => setFieldType(i, { base: f.base, array: f.array, optional: e.currentTarget.checked })}
+                      />
+                      <Text size="xs" c="dimmed">?</Text>
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color={modifierKey(selected, i) === openModifiers ? "blue" : "gray"}
+                        title="modifiers — default, check, mask unless, access, sensitive"
+                        data-testid="c4system-field-modifiers-toggle"
+                        onClick={() => setOpenModifiers((k) => (k === modifierKey(selected, i) ? null : modifierKey(selected, i)))}
+                      >
+                        ƒ
+                      </Button>
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="red"
+                        data-testid="c4system-field-delete"
+                        onClick={() => removeField(i)}
+                      >
+                        ×
+                      </Button>
+                    </Group>
+                    {openModifiers === modifierKey(selected, i) && fieldModifiers[i] && (
+                      <Stack gap={4} pl={8} pb={4} data-testid="c4system-field-modifiers">
+                        <ModifierInput
+                          label="ƒ default"
+                          placeholder="expression"
+                          value={fieldModifiers[i].default ?? ""}
+                          testId="c4system-field-default"
+                          onCommit={(v) => editDefault(i, v)}
+                        />
+                        <ModifierInput
+                          label="check"
+                          placeholder="predicate"
+                          value={fieldModifiers[i].check ?? ""}
+                          testId="c4system-field-check"
+                          onCommit={(v) => editCheck(i, v)}
+                        />
+                        <ModifierInput
+                          label="check message"
+                          placeholder="user-facing text"
+                          value={fieldModifiers[i].checkMessage ?? ""}
+                          testId="c4system-field-check-message"
+                          onCommit={(v) => editCheck(i, fieldModifiers[i].check ?? "", v)}
+                        />
+                        <ModifierInput
+                          label="mask unless"
+                          placeholder="currentUser.…"
+                          value={fieldModifiers[i].maskUnless ?? ""}
+                          testId="c4system-field-mask"
+                          onCommit={(v) => editMask(i, v)}
+                        />
+                        <Select
+                          size="xs"
+                          label="access"
+                          data={[EDITABLE, ...FIELD_ACCESS]}
+                          value={fieldModifiers[i].access ?? EDITABLE}
+                          styles={{ label: { fontSize: 10 } }}
+                          data-testid="c4system-field-access"
+                          onChange={(v) => editAccess(i, v === EDITABLE ? null : v)}
+                        />
+                        <ModifierInput
+                          label="sensitive"
+                          placeholder="pii, phi"
+                          value={(fieldModifiers[i].sensitivity ?? []).join(", ")}
+                          testId="c4system-field-sensitive"
+                          onCommit={(v) => editSensitivity(i, v)}
+                        />
+                      </Stack>
                     )}
-                    <Select
-                      size="xs"
-                      style={{ flex: 1, minWidth: 0 }}
-                      searchable
-                      data={typeOptions.map((o) => o.label)}
-                      value={f.baseLabel}
-                      data-testid="c4system-field-type"
-                      onChange={(label) => {
-                        const base = label ? baseByLabel.get(label) : undefined;
-                        if (base) setFieldType(i, { base, array: f.array, optional: f.optional });
-                      }}
-                    />
-                    <Checkbox
-                      size="xs"
-                      title="array []"
-                      checked={f.array}
-                      onChange={(e) => setFieldType(i, { base: f.base, array: e.currentTarget.checked, optional: f.optional })}
-                    />
-                    <Text size="xs" c="dimmed">[]</Text>
-                    <Checkbox
-                      size="xs"
-                      title="optional ?"
-                      checked={f.optional}
-                      onChange={(e) => setFieldType(i, { base: f.base, array: f.array, optional: e.currentTarget.checked })}
-                    />
-                    <Text size="xs" c="dimmed">?</Text>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="red"
-                      data-testid="c4system-field-delete"
-                      onClick={() => removeField(i)}
-                    >
-                      ×
-                    </Button>
-                  </Group>
+                  </Stack>
                 ))}
               </Stack>
             )}
