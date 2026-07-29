@@ -931,10 +931,10 @@ export function isCommandHandler(item: unknown): item is CommandHandler {
     return reflection.isInstance(item, CommandHandler.$type);
 }
 
-export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use';
+export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 export function isCommonSoftKeywords(item: unknown): item is CommonSoftKeywords {
-    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'channels' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use';
+    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'channels' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
 }
 
 export interface Component extends langium.AstNode {
@@ -2910,10 +2910,8 @@ export interface Property extends langium.AstNode {
     message?: string;
     name: 'await' | CommonSoftKeywords | string;
     provenanced: boolean;
-    readonlyWhen?: Expression;
     sensitivity?: SensitivityClause;
     type: TypeRef;
-    write?: Expression;
 }
 
 export const Property = {
@@ -2925,10 +2923,8 @@ export const Property = {
     message: 'message',
     name: 'name',
     provenanced: 'provenanced',
-    readonlyWhen: 'readonlyWhen',
     sensitivity: 'sensitivity',
-    type: 'type',
-    write: 'write'
+    type: 'type'
 } as const;
 
 export function isProperty(item: unknown): item is Property {
@@ -6611,20 +6607,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     defaultValue: false,
                     optional: true
                 },
-                readonlyWhen: {
-                    name: Property.readonlyWhen,
-                    optional: true
-                },
                 sensitivity: {
                     name: Property.sensitivity,
                     optional: true
                 },
                 type: {
                     name: Property.type
-                },
-                write: {
-                    name: Property.write,
-                    optional: true
                 }
             },
             superTypes: [AggregateMember.$type, CapabilityMember.$type, EntityPartMember.$type, ProjectionMember.$type, ValueObjectMember.$type, WorkflowMember.$type]

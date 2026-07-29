@@ -2895,67 +2895,6 @@ export function validateFieldMask(
   }
 }
 
-// `write(<expr>)` / `readonly when <expr>` write-side authorization (authorization.md
-// §5) — the write-side twin of `mask unless`, normalised to a single ALLOWED-WHEN
-// `field.writeGate` at lowering (`write(X)` → `X`; `readonly when X` → `!(X)`).
-// Two gates, mirroring the mask ones:
-//   - loom.field-write-gate-not-current-user — the predicate references something
-//     other than `currentUser` (+ constants).  The slice-1 gate is a param-free
-//     caller check (mirroring the mask gate); a row/param reference is illegal
-//     until the row-aware follow-up.
-//   - loom.field-write-gate-unsupported — the field is hosted by a backend whose
-//     create/op handlers don't yet enforce the gate.  A parsed-but-unenforced
-//     write gate is a SECURITY footgun (the client can set a field it shouldn't),
-//     so it fails fast rather than silently no-op'ing.  All five backends now
-//     enforce it: `node` (Hono) in its create/op handlers (fail-closed 403 before
-//     the domain call); `dotnet` in its create/operation Mediator command
-//     handlers (fail-closed 403 before the domain method); `python` in its
-//     create/operation FastAPI route handlers (fail-closed 403 via ForbiddenError
-//     before the domain call); `java` in its create/operation @Service methods
-//     (fail-closed 403 via ForbiddenException before the domain call); `elixir`
-//     (plain Ecto/Phoenix) in its create/update/operation controller actions
-//     (fail-closed 403 `cond` reading `current_user` off `conn.assigns` before
-//     the domain call).  This diagnostic can no longer fire for a backend
-//     deployable, but the set is retained for out-of-tree / future backends.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
-export function validateFieldWriteGate(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-  backendPlatforms: Set<string>,
-): void {
-  const unsupported = [...backendPlatforms].filter((p) => !FIELD_WRITE_GATE_BACKENDS.has(p));
-  const anyBackend = backendPlatforms.size > 0;
-  for (const agg of ctx.aggregates) {
-    const gated = agg.fields.filter((f) => f.writeGate);
-    if (gated.length === 0) continue;
-    for (const f of gated) {
-      const offending = firstNonGateRef(f.writeGate!, GATE_ALLOWED_REFS);
-      if (offending !== null) {
-        diags.push({
-          severity: "error",
-          code: "loom.field-write-gate-not-current-user",
-          message:
-            `aggregate '${agg.name}' field '${f.name}': a \`write(...)\` / \`readonly when\` predicate ` +
-            `is a param-free caller check (slice 1), so it may only reference \`currentUser\` (and ` +
-            `constants) — \`${offending}\` is not available here.`,
-          source: `${ctx.name}/${agg.name}.${f.name}`,
-        });
-      }
-    }
-    if (anyBackend && unsupported.length === 0) continue;
-    const names = gated.map((f) => f.name).join(", ");
-    diags.push({
-      severity: "error",
-      code: "loom.field-write-gate-unsupported",
-      message:
-        `aggregate '${agg.name}' has write-gated field(s) ${names}, but write-side authorization is ` +
-        `not enforced by the ${unsupported.join("/")} backend(s) yet. Drop the \`write(...)\` / ` +
-        `\`readonly when\` clause for those targets, or track authorization.md §5 (M-T3.2 item 6).`,
-      source: `${ctx.name}/${agg.name}`,
-    });
-  }
-}
-
 // Per-operation audit-record emission (`operation … audited`) is implemented for
 // the Hono (`node`), .NET (`dotnet`), Java (`java`), Python (`python`) and
 // elixir-VANILLA backends — an audited public route / command handler / service
