@@ -110,6 +110,7 @@ import { emitCodeBlock } from "./primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function
 // takes `(call, ctx, depth)` and returns the JSX fragment.
 import { emitAction, emitButton, emitIdLink, emitQueryView } from "./primitives/controls.js";
+import { emitDataGrid } from "./primitives/data-grid.js";
 import {
   emitAlert,
   emitBadge,
@@ -151,7 +152,6 @@ import {
   emitToolbar,
 } from "./primitives/layout.js";
 import { emitProvenanceInfo } from "./primitives/provenance-info.js";
-import { emitDataGrid } from "./primitives/data-grid.js";
 import { emitTable } from "./primitives/table.js";
 import {
   emitAnchor,
