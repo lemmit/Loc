@@ -1,8 +1,9 @@
-import { AstUtils, GrammarUtils, type AstNode } from "langium";
+import { AstUtils, GrammarUtils, type AstNode, type CstNode } from "langium";
 import type {
   Aggregate,
   EnumDecl,
   EventDecl,
+  FieldAccess,
   Model,
   Property,
   TypeRef,
@@ -21,9 +22,13 @@ import {
 } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
 import { applyEdits } from "../edit-engine";
+import { IDENTIFIER } from "./rename";
 import type { NodeKind } from "./model";
 
 export { PRIMITIVES, type PrimitiveName };
+// The grammar's own access-modifier union, re-exported so the inspector and the
+// tests name it without reaching into the generated AST module.
+export type { FieldAccess };
 
 // ---------------------------------------------------------------------------
 // Inline field editing for the Model builder's Property-bearing constructs
@@ -71,6 +76,34 @@ export interface FieldInfo {
 export interface TypeOption {
   label: string;
   base: BaseSpec;
+}
+
+/** The five `FieldAccess` keywords, in the grammar's own order.  Absent = the
+ *  `editable` default, which has no keyword to write. */
+export const FIELD_ACCESS: readonly FieldAccess[] = [
+  "immutable",
+  "managed",
+  "token",
+  "internal",
+  "secret",
+] as const;
+
+/** A field's modifier state, read back as SOURCE TEXT (not re-printed AST) so
+ *  the inspector shows exactly what the author wrote and a round-trip through
+ *  the editors is a no-op. */
+export interface FieldModifiers {
+  /** `= <expr>` — the expression source, without the `=`. */
+  default: string | null;
+  /** `check <expr>` — the predicate source, without the `check`. */
+  check: string | null;
+  /** The check's `message "…"` payload, delimiters already stripped. */
+  checkMessage: string | null;
+  /** `mask unless <expr>` — the predicate source, without the keywords. */
+  maskUnless: string | null;
+  access: FieldAccess | null;
+  provenanced: boolean;
+  /** `sensitive(a, b)` tags; null when the clause is absent. */
+  sensitivity: string[] | null;
 }
 
 const FIELD_KINDS: NodeKind[] = ["aggregate", "valueobject", "event"];
@@ -186,6 +219,19 @@ export function listFields(node: AstNode): FieldInfo[] {
     const base = baseSpecOf(p.type);
     return { name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional };
   });
+}
+
+/** Per-field modifier state, positionally parallel to `listFields`. */
+export function listFieldModifiers(node: AstNode): FieldModifiers[] {
+  return propertyList(node).list.map((p) => ({
+    default: p.default?.$cstNode?.text ?? null,
+    check: p.check?.$cstNode?.text ?? null,
+    checkMessage: p.message ?? null,
+    maskUnless: p.maskUnless?.$cstNode?.text ?? null,
+    access: p.access ?? null,
+    provenanced: p.provenanced,
+    sensitivity: p.sensitivity ? [...p.sensitivity.tags] : null,
+  }));
 }
 
 /** Type options for the Select: the primitives, plus `Agg id` for each
@@ -305,6 +351,231 @@ export function retypeField(
   if (!cst) return null;
   return ifParses(
     applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]),
+  );
+}
+
+// --- property modifiers ----------------------------------------------------
+//
+// The grammar (`Property`, ddd.langium) fixes ONE order for the clauses that
+// carry expression content:
+//
+//   name ':' TypeRef  (provenanced | sensitive(…) | access)*  ('=' default)?
+//                     ('check' expr ('message' STRING)?)?  ('mask' 'unless' expr)?
+//
+// The three flag-like modifiers parse in any order among themselves, but the
+// group as a whole must precede `= default` — `x: int = 1 secret` is a parse
+// ERROR (an access keyword doubles as an identifier, so it would be swallowed
+// by the default expression).  So every "add" below splices at the anchor its
+// clause must follow, never simply at the end of the property:
+//
+//   a new flag / a new `= default`  →  end of the flag region (`spans.flags`)
+//   a new `check`                   →  end of the default     (`spans.afterDefault`)
+//   a new `mask unless`             →  end of the check       (`spans.afterCheck`)
+//
+// Each anchor falls back to the previous one when its clause is absent, so the
+// modifiers COMPOSE in any application order.  A "replace" rewrites exactly the
+// existing clause's span (keyword included); a removal additionally swallows the
+// one preceding space so no double space is left behind.  Passing `null` (or an
+// empty string) removes; removing an absent clause is a no-op that returns the
+// source unchanged.  Expression text is validated by the output re-parse alone —
+// there is no separate expression parser here.
+
+interface PropSpans {
+  prop: Property;
+  cst: CstNode;
+  /** After the type + every flag modifier — where a flag or `= default` goes. */
+  flags: number;
+  /** After the default when present, else `flags` — where `check` goes. */
+  afterDefault: number;
+  /** After the check (+ its message) when present, else `afterDefault`. */
+  afterCheck: number;
+}
+
+function propSpans(node: AstNode | null, index: number): PropSpans | null {
+  if (!node) return null;
+  const prop = propertyList(node).list[index];
+  const cst = prop?.$cstNode;
+  const typeCst = prop?.type.$cstNode;
+  if (!prop || !cst || !typeCst) return null;
+  let flags = typeCst.end;
+  const candidates = [
+    GrammarUtils.findNodeForProperty(cst, "access"),
+    GrammarUtils.findNodeForProperty(cst, "provenanced"),
+    prop.sensitivity?.$cstNode,
+  ];
+  for (const n of candidates) if (n && n.end > flags) flags = n.end;
+  const afterDefault = prop.default?.$cstNode?.end ?? flags;
+  const messageCst = GrammarUtils.findNodeForProperty(cst, "message");
+  const afterCheck = messageCst?.end ?? prop.check?.$cstNode?.end ?? afterDefault;
+  return { prop, cst, flags, afterDefault, afterCheck };
+}
+
+/** Extend a removal start over the one preceding space/tab run — but never over
+ *  a line's indentation, so a clause written on its own line keeps it. */
+function eatLeadingSpace(source: string, offset: number): number {
+  let start = offset;
+  while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
+  return start > 0 && source[start - 1] === "\n" ? offset : start;
+}
+
+/** Normalise a caller's clause text: trimmed, or null when it means "remove".
+ *  A multi-line value is rejected outright — these splices promise to stay on
+ *  the property's own line. */
+function clauseText(raw: string | null | undefined): string | null | undefined {
+  if (raw == null) return null;
+  const text = raw.trim();
+  if (text === "") return null;
+  return /[\r\n]/.test(text) ? undefined : text;
+}
+
+export function setFieldDefault(
+  source: string,
+  kind: NodeKind,
+  owner: string,
+  index: number,
+  exprText: string | null,
+): string | null {
+  const spans = propSpans(locate(source, kind, owner), index);
+  const text = clauseText(exprText);
+  if (!spans || text === undefined) return null;
+  const existing = spans.prop.default?.$cstNode;
+  const eq = existing ? GrammarUtils.findNodeForKeyword(spans.cst, "=") : undefined;
+  if (existing && eq) {
+    if (text === null) {
+      return ifParses(
+        applyEdits(source, [
+          { offset: eatLeadingSpace(source, eq.offset), end: existing.end, newText: "" },
+        ]),
+      );
+    }
+    return ifParses(
+      applyEdits(source, [{ offset: eq.offset, end: existing.end, newText: `= ${text}` }]),
+    );
+  }
+  if (text === null) return source;
+  return ifParses(
+    applyEdits(source, [{ offset: spans.flags, end: spans.flags, newText: ` = ${text}` }]),
+  );
+}
+
+export function setFieldCheck(
+  source: string,
+  kind: NodeKind,
+  owner: string,
+  index: number,
+  exprText: string | null,
+  /** `undefined` keeps the existing message; `null` / `""` removes it. */
+  message?: string | null,
+): string | null {
+  const spans = propSpans(locate(source, kind, owner), index);
+  const text = clauseText(exprText);
+  if (!spans || text === undefined) return null;
+  const keep = message === undefined ? (spans.prop.message ?? null) : message;
+  const msg = clauseText(keep);
+  if (msg === undefined) return null;
+  const existing = spans.prop.check?.$cstNode;
+  const checkKw = existing ? GrammarUtils.findNodeForKeyword(spans.cst, "check") : undefined;
+  // `msg` re-quotes through JSON.stringify — the STRING terminal hands back the
+  // value with its delimiters already stripped.
+  const clause = text === null ? "" : `check ${text}${msg === null ? "" : ` message ${JSON.stringify(msg)}`}`;
+  if (existing && checkKw) {
+    const offset = clause === "" ? eatLeadingSpace(source, checkKw.offset) : checkKw.offset;
+    return ifParses(
+      applyEdits(source, [{ offset, end: spans.afterCheck, newText: clause }]),
+    );
+  }
+  if (clause === "") return source;
+  return ifParses(
+    applyEdits(source, [
+      { offset: spans.afterDefault, end: spans.afterDefault, newText: ` ${clause}` },
+    ]),
+  );
+}
+
+export function setFieldMask(
+  source: string,
+  kind: NodeKind,
+  owner: string,
+  index: number,
+  exprText: string | null,
+): string | null {
+  const spans = propSpans(locate(source, kind, owner), index);
+  const text = clauseText(exprText);
+  if (!spans || text === undefined) return null;
+  const existing = spans.prop.maskUnless?.$cstNode;
+  const maskKw = existing ? GrammarUtils.findNodeForKeyword(spans.cst, "mask") : undefined;
+  if (existing && maskKw) {
+    if (text === null) {
+      return ifParses(
+        applyEdits(source, [
+          { offset: eatLeadingSpace(source, maskKw.offset), end: existing.end, newText: "" },
+        ]),
+      );
+    }
+    return ifParses(
+      applyEdits(source, [{ offset: maskKw.offset, end: existing.end, newText: `mask unless ${text}` }]),
+    );
+  }
+  if (text === null) return source;
+  return ifParses(
+    applyEdits(source, [
+      { offset: spans.afterCheck, end: spans.afterCheck, newText: ` mask unless ${text}` },
+    ]),
+  );
+}
+
+export function setFieldAccess(
+  source: string,
+  kind: NodeKind,
+  owner: string,
+  index: number,
+  /** One of the five keywords, or `null` for the keyword-less `editable` default. */
+  access: FieldAccess | null,
+): string | null {
+  if (access !== null && !FIELD_ACCESS.includes(access)) return null;
+  const spans = propSpans(locate(source, kind, owner), index);
+  if (!spans) return null;
+  const existing = GrammarUtils.findNodeForProperty(spans.cst, "access");
+  if (existing) {
+    if (access === null) {
+      return ifParses(
+        applyEdits(source, [
+          { offset: eatLeadingSpace(source, existing.offset), end: existing.end, newText: "" },
+        ]),
+      );
+    }
+    return ifParses(
+      applyEdits(source, [{ offset: existing.offset, end: existing.end, newText: access }]),
+    );
+  }
+  if (access === null) return source;
+  return ifParses(
+    applyEdits(source, [{ offset: spans.flags, end: spans.flags, newText: ` ${access}` }]),
+  );
+}
+
+export function setFieldSensitivity(
+  source: string,
+  kind: NodeKind,
+  owner: string,
+  index: number,
+  tags: string[] | null,
+): string | null {
+  const clean = (tags ?? []).map((t) => t.trim()).filter((t) => t !== "");
+  // Tags are bare identifiers; a stray comma or space inside one would silently
+  // re-split the clause on re-parse, so reject it here rather than write it.
+  if (clean.some((t) => !IDENTIFIER.test(t))) return null;
+  const spans = propSpans(locate(source, kind, owner), index);
+  if (!spans) return null;
+  const existing = spans.prop.sensitivity?.$cstNode;
+  const clause = clean.length === 0 ? "" : `sensitive(${clean.join(", ")})`;
+  if (existing) {
+    const offset = clause === "" ? eatLeadingSpace(source, existing.offset) : existing.offset;
+    return ifParses(applyEdits(source, [{ offset, end: existing.end, newText: clause }]));
+  }
+  if (clause === "") return source;
+  return ifParses(
+    applyEdits(source, [{ offset: spans.flags, end: spans.flags, newText: ` ${clause}` }]),
   );
 }
 

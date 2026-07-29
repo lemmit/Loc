@@ -8,7 +8,9 @@ import {
   replaceSpan,
   stmtText,
   swapSpans,
+  type StmtList,
   type StmtListView,
+  type StmtPath,
   type StmtView,
 } from "./body";
 
@@ -23,6 +25,19 @@ import {
 // (Single-expression bodies — `function … = <expr>`, derived props, invariants
 // — and a statement's *value* expression are edited by the structured
 // `ExpressionEditor`, not here.)
+
+/** Inline structured (`ƒx`) editors for statements addressed by a nested
+ *  `StmtPath` — the descent steps from a top-level statement into a `for` /
+ *  `if let` / `match` block, exactly the `path` an `ExprSlot` carries.  The
+ *  top-level row keeps its own flat `valueEditor` / `onToggleEditor` props;
+ *  this bundle is what a container row hands down to its children (and, by
+ *  recursion, to theirs).  `has` gates the toggle the way `hasValueEditor`
+ *  does at the top level — absent means "assume there is one". */
+export interface NestedExprEditors {
+  has?: (path: StmtPath, field?: number) => boolean;
+  render: (path: StmtPath, field?: number) => ReactNode;
+  toggle: (path: StmtPath, field?: number) => void;
+}
 
 interface BodyEditorProps {
   statements: StmtView[];
@@ -43,6 +58,9 @@ interface BodyEditorProps {
   renderValueEditor?: (index: number, field?: number) => ReactNode;
   /** Toggle the inline structured editor for a statement's expression. */
   onToggleValueEditor?: (index: number, field?: number) => void;
+  /** Path-addressed `ƒx` editors for statements NESTED inside a `for` /
+   *  `if let` / `match` block, scoped to top-level statement `index`. */
+  nested?: (index: number) => NestedExprEditors;
 }
 
 const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
@@ -477,41 +495,61 @@ export function SimpleStmtRow({ view, valueEditor, onToggleEditor, error, onComm
 // the rewritten statement text, which the parent commits as one CST splice, so
 // the untouched parts of the block (comments, spacing, sibling statements)
 // travel through byte-for-byte.
-function NestedList({ label, src, list, onSrc, error, onClearError }: {
+function NestedList({ label, src, list, step, path, nested, onSrc, error, onClearError }: {
   label: string;
   src: string;
   list: StmtListView;
+  /** Which of the enclosing statement's sub-lists this is — the `StmtList`
+   *  step a `StmtPath` uses to descend into it. */
+  step: StmtList;
+  /** Descent path of the ENCLOSING statement (empty at the top level). */
+  path?: StmtPath;
+  nested?: NestedExprEditors;
   onSrc: (next: string) => void;
   error: boolean;
   onClearError: () => void;
 }): JSX.Element {
   const [draft, setDraft] = useState("");
+  // A child's own descent path: the enclosing statement's, plus one step
+  // naming this list and the child's position in it.
+  const childPath = (i: number): StmtPath => [...(path ?? []), { index: i, list: step }];
   return (
     <Stack gap={2} style={{ paddingLeft: 12, borderLeft: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-stmt-nested">
       <Text size="xs" tt="uppercase" c="dimmed">{label}</Text>
       {list.items.length === 0 && <Text size="xs" c="dimmed">empty</Text>}
-      {list.items.map((child, i) => (
-        <Group key={`${i}-${stmtText(child)}`} gap={4} align="flex-start" wrap="nowrap" data-testid="c4system-stmt-nested-row">
-          <StmtRow
-            view={child}
-            error={false}
-            onClearError={onClearError}
-            onCommit={(t) => onSrc(replaceSpan(src, list.spans[i]!, t))}
-          />
-          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-up" disabled={i === 0}
-            onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i - 1]!))}>
-            ↑
-          </Button>
-          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-down" disabled={i === list.items.length - 1}
-            onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i + 1]!))}>
-            ↓
-          </Button>
-          <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-nested-delete"
-            onClick={() => onSrc(removeSpan(src, list.spans[i]!))}>
-            ×
-          </Button>
-        </Group>
-      ))}
+      {list.items.map((child, i) => {
+        const p = childPath(i);
+        return (
+          <Group key={`${i}-${stmtText(child)}`} gap={4} align="flex-start" wrap="nowrap" data-testid="c4system-stmt-nested-row">
+            <StmtRow
+              view={child}
+              error={false}
+              onClearError={onClearError}
+              onCommit={(t) => onSrc(replaceSpan(src, list.spans[i]!, t))}
+              path={p}
+              nested={nested}
+              valueEditor={nested?.render(p) ?? null}
+              onToggleEditor={nested && nested.has?.(p) !== false ? () => nested.toggle(p) : undefined}
+              renderArgEditor={(a) => (nested?.has?.(p, a) ? nested.render(p, a) : null)}
+              onToggleArg={nested ? (a) => nested.toggle(p, a) : undefined}
+              renderFieldEditor={(f) => (nested?.has?.(p, f) ? nested.render(p, f) : null)}
+              onToggleField={nested ? (f) => nested.toggle(p, f) : undefined}
+            />
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-up" disabled={i === 0}
+              onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i - 1]!))}>
+              ↑
+            </Button>
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-down" disabled={i === list.items.length - 1}
+              onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i + 1]!))}>
+              ↓
+            </Button>
+            <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-nested-delete"
+              onClick={() => onSrc(removeSpan(src, list.spans[i]!))}>
+              ×
+            </Button>
+          </Group>
+        );
+      })}
       <Group gap={4} wrap="nowrap" align="flex-start">
         <TextInput
           size="xs"
@@ -534,8 +572,10 @@ function NestedList({ label, src, list, onSrc, error, onClearError }: {
 }
 
 // `for <binder> in <iterable> { … }` — header inputs over a nested body list.
-export function ForRow({ view, error, onCommit, onClearError }: {
+export function ForRow({ view, path, nested, error, onCommit, onClearError }: {
   view: Extract<StmtView, { kind: "for" }>;
+  path?: StmtPath;
+  nested?: NestedExprEditors;
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
@@ -555,14 +595,17 @@ export function ForRow({ view, error, onCommit, onClearError }: {
           onFocus={onClearError} onChange={(e) => setIterable(e.currentTarget.value)}
           onBlur={() => onCommit(replaceSpan(view.src, view.iterableAt, iterable.trim()))} />
       </Group>
-      <NestedList label="body" src={view.src} list={view.body} onSrc={onCommit} error={error} onClearError={onClearError} />
+      <NestedList label="body" src={view.src} list={view.body} step="body" path={path} nested={nested}
+        onSrc={onCommit} error={error} onClearError={onClearError} />
     </Stack>
   );
 }
 
 // `if let <binder> = <subject> { … } else { … }`.
-export function IfLetRow({ view, error, onCommit, onClearError }: {
+export function IfLetRow({ view, path, nested, error, onCommit, onClearError }: {
   view: Extract<StmtView, { kind: "ifLet" }>;
+  path?: StmtPath;
+  nested?: NestedExprEditors;
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
@@ -582,9 +625,11 @@ export function IfLetRow({ view, error, onCommit, onClearError }: {
           onFocus={onClearError} onChange={(e) => setSubject(e.currentTarget.value)}
           onBlur={() => onCommit(replaceSpan(view.src, view.subjectAt, subject.trim()))} />
       </Group>
-      <NestedList label="then" src={view.src} list={view.then} onSrc={onCommit} error={error} onClearError={onClearError} />
+      <NestedList label="then" src={view.src} list={view.then} step="then" path={path} nested={nested}
+        onSrc={onCommit} error={error} onClearError={onClearError} />
       {view.else && (
-        <NestedList label="else" src={view.src} list={view.else} onSrc={onCommit} error={error} onClearError={onClearError} />
+        <NestedList label="else" src={view.src} list={view.else} step="else" path={path} nested={nested}
+          onSrc={onCommit} error={error} onClearError={onClearError} />
       )}
     </Stack>
   );
@@ -593,8 +638,10 @@ export function IfLetRow({ view, error, onCommit, onClearError }: {
 // The effect-form `match <subject> { Variant b => { … } … else => { … } }`.
 // Arm variant names are free text validated by the parent's re-parse (a full
 // payload-type-aware picker is a later slice).
-export function MatchRow({ view, error, onCommit, onClearError }: {
+export function MatchRow({ view, path, nested, error, onCommit, onClearError }: {
   view: Extract<StmtView, { kind: "match" }>;
+  path?: StmtPath;
+  nested?: NestedExprEditors;
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
@@ -634,11 +681,13 @@ export function MatchRow({ view, error, onCommit, onClearError }: {
               ×
             </Button>
           </Group>
-          <NestedList label="=>" src={view.src} list={arm.body} onSrc={onCommit} error={error} onClearError={onClearError} />
+          <NestedList label="=>" src={view.src} list={arm.body} step={{ arm: i }} path={path} nested={nested}
+            onSrc={onCommit} error={error} onClearError={onClearError} />
         </Stack>
       ))}
       {view.else && (
-        <NestedList label="else" src={view.src} list={view.else} onSrc={onCommit} error={error} onClearError={onClearError} />
+        <NestedList label="else" src={view.src} list={view.else} step="else" path={path} nested={nested}
+          onSrc={onCommit} error={error} onClearError={onClearError} />
       )}
       <Group gap={4} wrap="nowrap" align="center">
         <TextInput size="xs" w={130} value={newArm} placeholder="Variant…" data-testid="c4system-stmt-match-arm-new"
@@ -668,6 +717,11 @@ interface StmtRowProps {
   onToggleField?: (fieldIndex: number) => void;
   events?: string[];
   onRepointEvent?: (eventName: string) => void;
+  /** This statement's own descent path (empty / omitted at the top level).
+   *  A container row appends one step per child to address its nested rows. */
+  path?: StmtPath;
+  /** Path-addressed `ƒx` editors handed down to nested rows. */
+  nested?: NestedExprEditors;
 }
 
 /** One statement row, dispatched on the view's grammar form. Shared by the
@@ -700,11 +754,11 @@ export function StmtRow(p: StmtRowProps): JSX.Element {
           error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />
       );
     case "for":
-      return <ForRow view={v} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
+      return <ForRow view={v} path={p.path} nested={p.nested} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
     case "ifLet":
-      return <IfLetRow view={v} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
+      return <IfLetRow view={v} path={p.path} nested={p.nested} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
     case "match":
-      return <MatchRow view={v} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
+      return <MatchRow view={v} path={p.path} nested={p.nested} error={p.error} onCommit={p.onCommit} onClearError={p.onClearError} />;
     default:
       return (
         <OtherRow src={v.src} valueEditor={p.valueEditor ?? null} onToggleEditor={p.onToggleEditor}
@@ -713,7 +767,7 @@ export function StmtRow(p: StmtRowProps): JSX.Element {
   }
 }
 
-export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, headCandidates, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
+export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, headCandidates, renderValueEditor, onToggleValueEditor, nested }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -762,6 +816,7 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
               onToggleArg={onToggleValueEditor ? (a) => onToggleValueEditor(i, a) : undefined}
               renderFieldEditor={(f) => (hasValueEditor?.(i, f) ? (renderValueEditor?.(i, f) ?? null) : null)}
               onToggleField={onToggleValueEditor ? (f) => onToggleValueEditor(i, f) : undefined}
+              nested={nested?.(i)}
             />
             <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
               ↑
