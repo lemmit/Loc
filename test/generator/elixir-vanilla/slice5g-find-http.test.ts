@@ -48,8 +48,13 @@ describe("vanilla — custom-find HTTP surface", () => {
     expect(ctl).toContain("def by_customer(conn, params) do");
     expect(ctl).toContain('with {:ok, records} <- Shop.by_customer_order(params["customerId"]) do');
     expect(ctl).toContain("json(conn, Enum.map(records, &serialize/1))");
-    // single → one-or-nil
+    // optional (`Order?`) → 404 on absence (parity with the other backends +
+    // its declared OpenAPI `findOptional → [404]`), not a schema-invalid 200
+    // `null` body.
     expect(ctl).toContain("def latest(conn, _params) do");
-    expect(ctl).toContain("{:ok, nil} -> json(conn, nil)");
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 404, "Not Found", "Order not found")',
+    );
+    expect(ctl).not.toContain("{:ok, nil} -> json(conn, nil)");
   });
 });
