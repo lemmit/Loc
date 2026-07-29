@@ -58,6 +58,10 @@ export interface ControllerShape {
   idClass?: string;
   idClrType: string;
   createCmdArgs: string[];
+  /** VO-invariant → 422: the `<Create<Agg>Request>Validator` class the create
+   *  action runs before constructing domain VOs, or undefined when the create
+   *  request bears no value object carrying its own invariant. */
+  createRequestValidator?: string;
   /** When true, the aggregate has a canonical `create` — emit a
    *  `POST /` action dispatching `Create<Agg>Command`.  A non-constructible
    *  aggregate (no explicit/`crudish` create) emits no create action,
@@ -73,6 +77,10 @@ export interface ControllerShape {
     paramNames: string[];
     /** Has a `requires` guard → declares 403 (authorization denied). */
     guarded: boolean;
+    /** VO-invariant → 422: the `<Op><Agg>Request>Validator` class the op action
+     *  runs before constructing domain VOs, or undefined when the op request
+     *  bears no value object carrying its own invariant. */
+    requestValidator?: string;
     /** Has a `when` canCommand gate → declares 409 (Disallowed) on the
      *  action and emits the side-effect-free `GET {id}/can_<op>` companion
      *  returning `CanResponse { allowed }` (criterion.md use site 2). */
@@ -303,6 +311,11 @@ export function renderController(
       "using Mediator;",
       "using Microsoft.AspNetCore.Mvc;",
       "using Microsoft.Extensions.Logging;",
+      // FluentValidation's `ValidateAndThrow` extension — only when some action
+      // runs a VO-request validator (VO-invariant → 422), else CS8019 unused.
+      shape.createRequestValidator || shape.publicOps.some((o) => o.requestValidator)
+        ? "using FluentValidation;"
+        : null,
       hasCommands ? `using ${ns}.Application.${plural(agg.name)}.Commands;` : null,
       `using ${ns}.Application.${plural(agg.name)}.Queries;`,
       `using ${ns}.Application.${plural(agg.name)}.Requests;`,
@@ -334,6 +347,12 @@ export function renderController(
             ...producesProblem("create"),
             `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
             "    {",
+            // VO-invariant → 422: validate the wire request (safe DTO) BEFORE
+            // constructing the throwing domain VOs below, so a malformed VO
+            // field is a FluentValidation 422 (errors[]) not a domain 400.
+            ...(shape.createRequestValidator
+              ? [`        new ${shape.createRequestValidator}().ValidateAndThrow(request);`]
+              : []),
             `        var cmd = new Create${agg.name}Command(`,
             ...createBody,
             "        );",
@@ -539,6 +558,11 @@ export function renderOperationActionBlock(
     ...responseDecls,
     `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
     "    {",
+    // VO-invariant → 422: validate the wire request before constructing the
+    // throwing domain VOs, so a malformed VO field is a 422 not a 400.
+    ...(op.requestValidator
+      ? [`        new ${op.requestValidator}().ValidateAndThrow(request);`]
+      : []),
     ...wireInLine,
     // Business-narrative line — what the controller was asked to do,
     // before Mediator dispatches the command.  Mirrors the

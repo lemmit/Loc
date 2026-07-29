@@ -182,7 +182,7 @@ import {
   renderJavaDomainUnionFiles,
   renderJavaUnionWireFiles,
 } from "./emit/unions.js";
-import { renderJavaCommandValidators } from "./emit/validator.js";
+import { renderJavaCommandValidators, renderJavaVoValidators } from "./emit/validator.js";
 import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
 import {
@@ -1616,7 +1616,12 @@ function emitAggregate(
   }
   // Wire-boundary validators — one Spring Validator per command shape, run at
   // the controller's `@Valid` seam (registered via @InitBinder in api.ts).
-  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg)) {
+  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg, ctx.valueObjects)) {
+    place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
+  }
+  // VO-invariant → 422: the `<VO>Validator`s the command validators nest-invoke
+  // over each VO-typed wire request field (before the service builds domain VOs).
+  for (const v of renderJavaVoValidators(agg, ctx.valueObjects, applicationPkg, basePkg)) {
     place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
   }
   place(
