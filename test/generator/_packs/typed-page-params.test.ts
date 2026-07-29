@@ -128,7 +128,7 @@ describe("typed page parameters in walker-rendered pages", () => {
     const content = files.get("web/src/pages/welcome.tsx")!;
     expect(content).not.toMatch(/useParams/);
     expect(content).not.toMatch(/react-router/);
-    expect(content).toMatch(/<Title order=\{2\}>Welcome<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Welcome"\)\}<\/Title>/);
   });
 
   it("Text { name } — ref in Text position resolves to {name}", async () => {
@@ -203,6 +203,6 @@ describe("typed page parameters in walker-rendered pages", () => {
     expect(content).toMatch(/<Title order=\{3\}>\{userName\}<\/Title>/);
     // Card wraps the inner Stack with the static Text child.
     expect(content).toMatch(/<Card withBorder padding="md">/);
-    expect(content).toMatch(/<Text>hello<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "hello"\)\}<\/Text>/);
   });
 });
