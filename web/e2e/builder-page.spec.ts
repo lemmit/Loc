@@ -19,6 +19,16 @@ async function setSource(page: Page, source: string): Promise<void> {
 // move → up) rather than Playwright's one-shot dragTo.  `yFrac` picks where in
 // the target to drop — near the top (0.15) inserts before it.
 async function dragOnto(page: Page, source: Locator, target: Locator, yFrac = 0.5): Promise<void> {
+  // Both endpoints live in `overflow: auto` panes (the palette column, the
+  // canvas), and a raw `page.mouse` drag does NOT auto-scroll the way
+  // Playwright's own actions do.  An endpoint below its pane's fold still
+  // reports a `boundingBox()`, but the pixel it names is clipped — the
+  // pointer-down lands on whatever is actually painted there and the drag
+  // silently grabs nothing.  Scroll both into view FIRST, then measure: the
+  // palette grew past the fold when #2290 modelled 14 more primitives, which
+  // is exactly how this bit.
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
   const s = (await source.boundingBox())!;
   const t = (await target.boundingBox())!;
   const tx = t.x + t.width / 2;
