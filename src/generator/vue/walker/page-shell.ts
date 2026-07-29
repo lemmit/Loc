@@ -544,6 +544,16 @@ export function renderVuePage(input: VuePageShellInput): string {
     for (const n of clientNames) set.add(n);
     apiImports.set("../api/client", set);
   }
+  // The i18n `t` helper (M-T1.11) — the shared walker seam records
+  // `import { t } from "../i18n"` into `result.imports`, a relative specifier
+  // the pass-through loop below drops.  Fold it into `apiImports` so the
+  // `adjustDepth` pass rewrites `../i18n` → `../../i18n` for a nested page.
+  const i18nNames = result.imports.get("../i18n");
+  if (i18nNames && i18nNames.size > 0) {
+    const set = apiImports.get("../i18n") ?? new Set<string>();
+    for (const n of i18nNames) set.add(n);
+    apiImports.set("../i18n", set);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
     script.push(`import { ${[...names].sort().join(", ")} } from "${adjusted}";`);
@@ -894,6 +904,10 @@ export function renderVueComponentFile(
   /** The ui's `store` declarations — drives store-member binding (Stage 5).
    *  Components reference stores by dotted name exactly like pages do. */
   stores: readonly StoreIR[] = [],
+  /** i18n key prefix — `component.<Name>` (M-T1.11).  Set only when the UI has
+   *  extractable strings; undefined → user-visible text renders raw
+   *  (byte-identical to pre-i18n). */
+  i18nPrefix: string | undefined = undefined,
 ): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -922,6 +936,7 @@ export function renderVueComponentFile(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
   // Operation forms (Action dialogs).  Same op-dialog host + per-op
   // LoomForm the page shell emits — the only twist is the instance
@@ -1201,6 +1216,16 @@ export function renderVueComponentFile(
   }
   if (usesFormToast) {
     script.push(`import { pushToast } from "../lib/toast";`);
+  }
+  // The i18n `t` helper (M-T1.11) — folded out of `result.imports` (a relative
+  // specifier the pass-through loop drops) into the api-import block.  A
+  // component always sits at `src/components/<Name>.vue`, one hop from `src/`,
+  // so `../i18n` needs no depth adjustment.
+  const i18nNames = result.imports.get("../i18n");
+  if (i18nNames && i18nNames.size > 0) {
+    const set = apiImports.get("../i18n") ?? new Set<string>();
+    for (const n of i18nNames) set.add(n);
+    apiImports.set("../i18n", set);
   }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
