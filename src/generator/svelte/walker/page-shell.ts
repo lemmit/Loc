@@ -976,6 +976,10 @@ function stateTypeAsTsString(type: TypeIR): string {
   if (type.kind === "optional") {
     return `${stateTypeAsTsString(type.inner)} | undefined`;
   }
+  // `string[]` / `int[]` state — see the React page-shell twin.  `any` here
+  // also defeats `svelte-check --fail-on-warnings`, the generated-svelte-build
+  // gate, on every use of the field.
+  if (type.kind === "array") return `${stateTypeAsTsString(type.element)}[]`;
   return "any";
 }
 

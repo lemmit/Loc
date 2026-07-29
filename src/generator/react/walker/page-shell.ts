@@ -1276,6 +1276,10 @@ function stateTypeAsTsString(type: TypeIR): string {
   if (type.kind === "optional") {
     return `${stateTypeAsTsString(type.inner)} | undefined`;
   }
+  // `string[]` / `int[]` state — without this arm an array-typed field widened
+  // to `any`, which silently disables type-checking on every read of it (the
+  // generated-react-build `tsc` gate can't catch a bug behind `any`).
+  if (type.kind === "array") return `${stateTypeAsTsString(type.element)}[]`;
   return "any";
 }
 
