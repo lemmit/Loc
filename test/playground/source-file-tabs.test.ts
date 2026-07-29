@@ -6,6 +6,7 @@ import {
   normaliseNewFilePath,
   parentRelOf,
   renameTargetPath,
+  siblingFolders,
   validateNewFileBasename,
   validateNewFileInFolder,
   validateNewFolderName,
@@ -100,6 +101,74 @@ describe("SourceFileTabs — new-file basename validation", () => {
 
     it("rejects a folder that already exists at the root level", () => {
       expect(validateNewFolderName("shared", existing)).toMatch(/already exists/);
+    });
+
+    // The duplicate check used to inspect only the FIRST segment of every
+    // root-relative path, which was wrong in both directions.
+    describe("duplicates are checked among the actual siblings", () => {
+      it("a root-level folder does not block the same name inside another folder", () => {
+        // False positive: `shared` exists at the root, so creating
+        // `audit/shared` was rejected even though nothing lives there.
+        expect(validateNewFolderName("shared", existing, "audit")).toBeUndefined();
+      });
+
+      it("rejects a duplicate nested folder (mkdir is idempotent — it would silently do nothing)", () => {
+        // False negative: `audit/shared` already exists, and the root-only
+        // scan never saw it, so the create slipped through as a no-op.
+        const nested = new Set(["/workspace/main.ddd", "/workspace/audit/shared/log.ddd"]);
+        expect(validateNewFolderName("shared", nested, "audit")).toMatch(/already exists/);
+      });
+
+      it("names the folder-qualified path in the message", () => {
+        const nested = new Set(["/workspace/audit/shared/log.ddd"]);
+        expect(validateNewFolderName("shared", nested, "audit")).toMatch(/audit\/shared/);
+      });
+
+      it("counts EXPLICIT empty folders, which no file path reveals", () => {
+        const emptyFolders = new Set(["audit/shared", "billing"]);
+        expect(validateNewFolderName("shared", new Set(), "audit", emptyFolders)).toMatch(
+          /already exists/,
+        );
+        expect(validateNewFolderName("billing", new Set(), "", emptyFolders)).toMatch(
+          /already exists/,
+        );
+        // …and an empty folder nested elsewhere still doesn't block the root.
+        expect(validateNewFolderName("shared", new Set(), "", emptyFolders)).toBeUndefined();
+      });
+
+      it("a deeper descendant does not count as a direct sibling", () => {
+        const deep = new Set(["/workspace/a/b/c/d.ddd"]);
+        expect(validateNewFolderName("c", deep, "a")).toBeUndefined();
+        expect(validateNewFolderName("b", deep, "a")).toMatch(/already exists/);
+      });
+    });
+  });
+
+  describe("siblingFolders", () => {
+    const existing = new Set([
+      "/workspace/main.ddd",
+      "/workspace/shared/money.ddd",
+      "/workspace/audit/log/entry.ddd",
+    ]);
+
+    it("lists the folders directly inside a parent", () => {
+      expect([...siblingFolders("", existing)].sort()).toEqual(["audit", "shared"]);
+      expect([...siblingFolders("audit", existing)]).toEqual(["log"]);
+      expect([...siblingFolders("shared", existing)]).toEqual([]);
+    });
+
+    it("merges the explicit empty-folder set", () => {
+      const empties = new Set(["audit/archive", "scratch"]);
+      expect([...siblingFolders("", existing, empties)].sort()).toEqual([
+        "audit",
+        "scratch",
+        "shared",
+      ]);
+      expect([...siblingFolders("audit", existing, empties)].sort()).toEqual(["archive", "log"]);
+    });
+
+    it("ignores paths outside /workspace/", () => {
+      expect([...siblingFolders("", new Set(["/elsewhere/other/x.ddd"]))]).toEqual([]);
     });
   });
 

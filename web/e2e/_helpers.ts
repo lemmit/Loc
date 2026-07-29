@@ -1,4 +1,4 @@
-import { type Page, expect } from "@playwright/test";
+import { type Locator, type Page, expect } from "@playwright/test";
 
 // Probe the npm registry from the page context so the test can decide
 // whether to exercise the network-dependent bundle/boot stages.  The
@@ -24,6 +24,29 @@ export async function browserCanReachNetwork(page: Page): Promise<boolean> {
       clearTimeout(timer);
     }
   });
+}
+
+// The generated Explorer tree is a react-arborist virtualized list, so a row
+// far down (or a deep file) isn't in the DOM until scrolled into view.  Wheel
+// the scrollable descendant until the first row matching `name` mounts, then
+// return it.  Shared by every spec that opens a generated file.
+export async function revealTreeRow(
+  page: Page,
+  tree: Locator,
+  name: string | RegExp,
+): Promise<Locator> {
+  const row = tree.getByText(name).first();
+  for (let i = 0; i < 120 && (await row.count()) === 0; i++) {
+    await tree.evaluate((el) => {
+      const scroller = [el, ...el.querySelectorAll<HTMLElement>("*")].find(
+        (n): n is HTMLElement => n instanceof HTMLElement && n.scrollHeight > n.clientHeight + 4,
+      );
+      scroller?.scrollBy(0, 300);
+    });
+    await page.waitForTimeout(50);
+  }
+  await expect(row).toBeVisible();
+  return row;
 }
 
 // Wait for the playground to have rendered + the LSP worker to

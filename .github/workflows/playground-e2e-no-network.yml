@@ -9,7 +9,7 @@ name: Playground e2e (no-network)
 # more than it caught.
 #
 # But most of the suite never touches the network: the workspace /
-# history / builder / requirements / editor specs stop at Generate,
+# history / source-files / builder / requirements / editor specs stop at Generate,
 # which runs entirely in the build worker against the in-bundle VFS.
 # Those are exactly the specs that catch file-management and builder
 # regressions, and there is no reason to learn about such a regression
@@ -63,6 +63,7 @@ jobs:
       # instead of silently shrinking the lane.
       SPECS: >-
         e2e/editor.spec.ts
+        e2e/source-files.spec.ts
         e2e/workspace-history.spec.ts
         e2e/workspace-persistence.spec.ts
         e2e/requirements-pane.spec.ts

@@ -41,6 +41,9 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     deleteSourceFolder,
     emptySourceFolders,
     createEmptySourceFolder,
+    sourcesPersistent,
+    sourceError,
+    clearSourceError,
     workspace,
   } = ctx;
   if (!lspClient) return null;
@@ -61,6 +64,9 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       emptyFolders={emptySourceFolders}
       onCreateFolder={createEmptySourceFolder}
       onDeleteFolder={deleteSourceFolder}
+      persistent={sourcesPersistent}
+      error={sourceError}
+      onDismissError={clearSourceError}
     />
   );
 

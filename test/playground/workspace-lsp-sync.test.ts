@@ -80,7 +80,17 @@ class FakeController {
   private readonly listeners = new Set<(s: WorkspaceSourcesSnapshot) => void>();
 
   snapshot(): WorkspaceSourcesSnapshot {
-    return { files: this.files, emptyFolders: new Set<string>(), activePath: this.activePath };
+    // The sync reads only `files` / `activePath`; the rest are filled to
+    // satisfy the snapshot shape.
+    return {
+      files: this.files,
+      emptyFolders: new Set<string>(),
+      activePath: this.activePath,
+      epoch: 0,
+      hydrated: true,
+      persistent: true,
+      lastError: null,
+    };
   }
   subscribe(l: (s: WorkspaceSourcesSnapshot) => void): () => void {
     this.listeners.add(l);

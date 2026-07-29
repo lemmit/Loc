@@ -236,7 +236,15 @@ function MonacoViewer({ path, content }: FileViewerProps): JSX.Element {
     monaco.editor.setModelLanguage(model, languageFromPath(path));
   }, [path, content]);
 
-  return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
+  // The testid scopes e2e assertions to THIS read-only viewer — the page
+  // also hosts the editable source Monaco (kept mounted, just hidden).
+  return (
+    <div
+      ref={containerRef}
+      data-testid="file-viewer"
+      style={{ width: "100%", height: "100%" }}
+    />
+  );
 }
 
 let mermaidReady: Promise<typeof import("mermaid").default> | null = null;

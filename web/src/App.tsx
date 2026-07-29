@@ -50,6 +50,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { NEW_FILE_SEED, pickInitialSource } from "./workspace/initial-source";
 import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
 import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
 import {
@@ -246,27 +247,28 @@ export default function App(): JSX.Element {
     [exampleId, augmentedExamplesList],
   );
 
-  // Editor's seed value for the active file.  Precedence:
-  //   1. Persisted VFS content for this path (multi-file files
-  //      survive tab switches and reloads via IDB).
-  //   2. Chosen example (main.ddd only — examples are single-file).
-  //   3. Empty body with a stub comment (newly-created non-main
-  //      file before the user types anything).
-  // The editor remounts via `key={…activePath}` when the active
-  // path changes, picking up this freshly-computed value each time.
-  const initialSource = useMemo(() => {
-    const persisted = sources.files.get(sources.activePath);
-    if (persisted !== undefined) return persisted;
-    // For main.ddd the active workspace's persisted content is the
-    // authoritative seed (sync-read at store-open); it covers the gap
-    // before the sources controller finishes its async load on a
-    // workspace switch.  Falls back to the last-imported example for a
-    // brand-new / hostile-storage workspace.
-    if (sources.activePath === "/workspace/main.ddd") {
-      return workspace.persistedSource ?? exampleSource;
-    }
-    return "// New file — declare a context, valueobject, or enum here.\n";
-  }, [sources.files, sources.activePath, exampleSource, workspace.persistedSource]);
+  // Editor's seed value for the active file — the precedence rule (and
+  // why `persistedSource` may only be consulted pre-hydration) lives in
+  // `workspace/initial-source.ts`.  The editor remounts via
+  // `key={…activePath}:{sourceEpoch}` when either changes, picking up
+  // this freshly-computed value each time.
+  const initialSource = useMemo(
+    () =>
+      pickInitialSource({
+        files: sources.files,
+        activePath: sources.activePath,
+        hydrated: sources.hydrated,
+        persistedSource: workspace.persistedSource,
+        exampleSource,
+      }),
+    [
+      sources.files,
+      sources.activePath,
+      sources.hydrated,
+      exampleSource,
+      workspace.persistedSource,
+    ],
+  );
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
@@ -1331,8 +1333,15 @@ export default function App(): JSX.Element {
     const ctrl = s.controller;
     const content = s.files.get(oldPath) ?? "";
     const wasActive = s.activePath === oldPath;
-    await ctrl.write(newPath, content);
-    await ctrl.delete(oldPath);
+    // Callers invoke this without awaiting, so a rejection here would be an
+    // unhandled one.  The controller has already put it on its error channel
+    // (the tree renders it); swallow and leave the workspace as-is.
+    try {
+      await ctrl.write(newPath, content);
+      await ctrl.delete(oldPath);
+    } catch {
+      return;
+    }
     if (wasActive) ctrl.setActivePath(newPath);
     scheduleAutoGenerate();
   }
@@ -1345,13 +1354,22 @@ export default function App(): JSX.Element {
     const prefix = `/workspace/${clean}/`;
     const ctrl = sourcesRef.current.controller;
     void (async () => {
-      for (const path of [...sourcesRef.current.files.keys()]) {
-        if (path.startsWith(prefix)) await ctrl.delete(path);
+      try {
+        for (const path of [...sourcesRef.current.files.keys()]) {
+          if (path.startsWith(prefix)) await ctrl.delete(path);
+        }
+      } catch {
+        // On the controller's error channel already; stop rather than
+        // carry on rmdir-ing a folder whose files are still there.
+        return;
       }
       try {
         await ctrl.deleteEmptyFolder(clean);
       } catch {
-        /* implicit folders vanish with their last file; rmdir is a no-op */
+        // An implicit folder vanishes with its last file, so rmdir on it
+        // legitimately fails here — clear the error the controller just
+        // recorded rather than showing the user a failure that isn't one.
+        ctrl.clearError();
       }
       scheduleAutoGenerate();
     })();
@@ -1594,15 +1612,20 @@ export default function App(): JSX.Element {
     sourceFiles: sources.files,
     sourceEpoch: sources.epoch,
     setActiveSourcePath: sources.setActivePath,
-    // New-file: seed VFS with a stub body so the editor has
-    // something non-empty to mount against, then flip the active
-    // path.  The Files tab strip validates the basename before
-    // calling, so we trust `path` here.
+    // New-file: seed the VFS with a stub body, and only once that write
+    // has LANDED flip the active path + schedule a regenerate (matching
+    // rename / delete-folder).  This used to be fire-and-forget — an
+    // unawaited `write` plus an immediate `setActivePath` and no
+    // regenerate — so a failed or ephemeral-mode create left a phantom
+    // tree row that evaporated on the next refresh, and a successful one
+    // never reached the generator.  `createFile` reports both failure
+    // modes on the controller's error channel, which the tree renders.
     createSourceFile: (path: string) => {
-      const s = sourcesRef.current;
-      const seed = "// New file — declare a context, valueobject, or enum here.\n";
-      s.write(path, seed);
-      s.setActivePath(path);
+      void (async () => {
+        if (await sourcesRef.current.controller.createFile(path, NEW_FILE_SEED)) {
+          scheduleAutoGenerate();
+        }
+      })();
     },
     deleteSourceFile: sources.delete,
     renameSourceFile,
@@ -1610,6 +1633,9 @@ export default function App(): JSX.Element {
     emptySourceFolders: sources.emptyFolders,
     createEmptySourceFolder: sources.createEmptyFolder,
     deleteEmptySourceFolder: sources.deleteEmptyFolder,
+    sourcesPersistent: sources.persistent,
+    sourceError: sources.lastError,
+    clearSourceError: sources.clearError,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,

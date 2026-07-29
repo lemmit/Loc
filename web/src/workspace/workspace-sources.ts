@@ -33,6 +33,27 @@ export const DEFAULT_PATH = "/workspace/main.ddd";
 const GENERATED_SUBTREE = "/workspace/generated";
 const SKIP_GENERATED = { skip: [GENERATED_SUBTREE] } as const;
 
+/** Why the playground can't persist anything.  Shown verbatim by the
+ *  files UI, and mirrors the wording the History panel already uses for
+ *  the same condition. */
+export const EPHEMERAL_MESSAGE =
+  "Persistent storage isn't accessible in this browser, so the playground is " +
+  "running in ephemeral mode — file changes can't be saved.";
+
+/** The operation a failed mutation was attempting.  Kept coarse (one
+ *  value per user-visible affordance) — the UI titles the error with it. */
+export type WorkspaceSourcesOp = "write" | "create" | "create-folder" | "delete" | "delete-folder";
+
+/** Last failed mutation, held on the controller so the UI can SAY what
+ *  broke.  Before this every rejection was swallowed to `console.error`
+ *  in the hook and the user just watched a new file row evaporate. */
+export interface WorkspaceSourcesError {
+  op: WorkspaceSourcesOp;
+  /** The path / folder the operation targeted, when it had one. */
+  path?: string;
+  message: string;
+}
+
 export interface WorkspaceSourcesSnapshot {
   files: ReadonlyMap<string, string>;
   /** Workspace-relative folder paths that exist as empty folders
@@ -54,6 +75,21 @@ export interface WorkspaceSourcesSnapshot {
    *  external write is structurally invisible and the next keystroke
    *  writes the stale buffer back over it. */
   epoch: number;
+  /** False until the first store read has populated `files`.  Consumers
+   *  that hold a SEPARATE, earlier read of the same content (App's
+   *  `workspace.persistedSource`, captured once at store-open) must only
+   *  fall back to it while this is false — afterwards the controller's
+   *  snapshot is authoritative, and an absent file there means deleted,
+   *  not "not loaded yet".  Always false without a store. */
+  hydrated: boolean;
+  /** Whether mutations actually persist.  False in ephemeral mode (no
+   *  store: hostile storage policies, Safari private mode) — the file
+   *  UI disables its create/rename/delete affordances and says why
+   *  instead of painting rows that evaporate on the next refresh. */
+  persistent: boolean;
+  /** Last failed mutation, or null.  Cleared by `clearError` and by the
+   *  next explicit (non-autosave) mutation. */
+  lastError: WorkspaceSourcesError | null;
 }
 
 /** True iff `path` is a `.ddd` source under `/workspace/` (not e.g.
@@ -162,6 +198,7 @@ export class WorkspaceSourcesController {
    *  lands inside that window is our own echo, never an external
    *  change — see `write`. */
   private readonly inFlightWrites = new Map<string, number>();
+  private lastError: WorkspaceSourcesError | null = null;
   private readonly readyPromise: Promise<void>;
 
   constructor(private readonly store: GitStore | null) {
@@ -242,7 +279,43 @@ export class WorkspaceSourcesController {
       emptyFolders: this.emptyFolders,
       activePath: this.activePath,
       epoch: this.epoch,
+      hydrated: this.hydrated,
+      persistent: this.store !== null,
+      lastError: this.lastError,
     };
+  }
+
+  /** Dismiss the last mutation error (the Alert's close button). */
+  clearError(): void {
+    if (this.lastError === null) return;
+    this.lastError = null;
+    this.emit();
+  }
+
+  /** Record a failed mutation and emit.  Callers still throw (or return
+   *  a failure) — this channel REPORTS, it doesn't swallow. */
+  private recordError(op: WorkspaceSourcesOp, err: unknown, path?: string): void {
+    this.lastError = { op, path, message: err instanceof Error ? err.message : String(err) };
+    this.emit();
+  }
+
+  /** Run a mutation with the error channel attached.  Every op except
+   *  `write` is an explicit user action, so it also clears the previous
+   *  error up front — the banner then reflects the LAST thing the user
+   *  asked for.  `write` is the autosave hot path and must not, or a
+   *  single keystroke would wipe the create failure the user is reading. */
+  private async guard<T>(
+    op: WorkspaceSourcesOp,
+    path: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    if (op !== "write") this.clearError();
+    try {
+      return await fn();
+    } catch (err) {
+      this.recordError(op, err, path);
+      throw err;
+    }
   }
 
   /** Change which file the editor shows.  Pure UI state, no store
@@ -257,11 +330,19 @@ export class WorkspaceSourcesController {
    *  non-`.ddd` paths so design-pack writes don't accidentally route
    *  here. */
   async write(path: string, content: string): Promise<void> {
-    if (!isDddSource(path)) {
-      throw new Error(
-        `WorkspaceSourcesController.write: path must be a /workspace/*.ddd path; got "${path}"`,
-      );
-    }
+    return this.guard("write", path, async () => {
+      if (!isDddSource(path)) {
+        throw new Error(
+          `WorkspaceSourcesController.write: path must be a /workspace/*.ddd path; got "${path}"`,
+        );
+      }
+      await this.writeThrough(path, content);
+    });
+  }
+
+  /** The store-touching half of `write`, without the error-channel
+   *  wrapper — shared with `createFile` so each reports under its own op. */
+  private async writeThrough(path: string, content: string): Promise<void> {
     if (!this.store) return;
     // Record our own write in the resident snapshot BEFORE touching the
     // store: `writeFile` notifies synchronously, and the refresh that
@@ -282,37 +363,73 @@ export class WorkspaceSourcesController {
     }
   }
 
+  /** Create a new `.ddd` source seeded with `seed`, then make it active.
+   *  Resolves to whether the file was actually created.
+   *
+   *  Deliberately not "`write` + `setActivePath`" at the call site: a
+   *  create is an explicit user action, so it (a) waits for the write to
+   *  LAND before re-pointing `activePath` — a failed create must not park
+   *  the editor on a file that doesn't exist — (b) refuses in ephemeral
+   *  mode instead of painting a tree row the next refresh erases, and
+   *  (c) reports either failure on the error channel.  The boolean lets
+   *  the caller schedule a regenerate only when something really changed. */
+  async createFile(path: string, seed: string): Promise<boolean> {
+    if (!isDddSource(path)) {
+      this.recordError("create", new Error(`"${path}" is not a /workspace/*.ddd path`), path);
+      return false;
+    }
+    if (this.files.has(path)) {
+      this.recordError("create", new Error(`"${path}" already exists`), path);
+      return false;
+    }
+    if (!this.store) {
+      this.recordError("create", new Error(EPHEMERAL_MESSAGE), path);
+      return false;
+    }
+    try {
+      await this.guard("create", path, () => this.writeThrough(path, seed));
+    } catch {
+      return false; // already on the error channel
+    }
+    this.setActivePath(path);
+    return true;
+  }
+
   /** Create an empty folder via the store's first-class `mkdir`.
    *  `folder` is workspace-relative (no leading slash, e.g.
    *  `shared` or `audit/log`).  `mkdir` is mkdirp + idempotent. */
   async createEmptyFolder(folder: string): Promise<void> {
-    const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
-    if (cleaned === "") {
-      throw new Error(
-        `WorkspaceSourcesController.createEmptyFolder: folder name is required`,
-      );
-    }
-    if (!this.store) return;
-    await this.store.mkdir(`${WORKSPACE_PREFIX}${cleaned}`);
-    await this.refresh();
+    return this.guard("create-folder", folder, async () => {
+      const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
+      if (cleaned === "") {
+        throw new Error(
+          `WorkspaceSourcesController.createEmptyFolder: folder name is required`,
+        );
+      }
+      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      await this.store.mkdir(`${WORKSPACE_PREFIX}${cleaned}`);
+      await this.refresh();
+    });
   }
 
   /** Delete a file from the store.  If the active file was deleted,
    *  re-points `activePath` to the fallback after the refresh so
    *  consumers see a consistent snapshot. */
   async delete(path: string): Promise<void> {
-    if (!this.store) return;
-    const wasActive = this.activePath === path;
-    await this.store.deleteFile(path);
-    await this.refresh();
-    if (wasActive) {
-      // Filter the deleted path out explicitly rather than trusting the
-      // refresh to have already dropped it — the refresh can be superseded
-      // by a concurrent event under the sequence guard.
-      const remaining = [...this.files.keys()].filter((p) => p !== path);
-      this.activePath = pickFallbackActivePath(remaining);
-      this.emit();
-    }
+    return this.guard("delete", path, async () => {
+      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      const wasActive = this.activePath === path;
+      await this.store.deleteFile(path);
+      await this.refresh();
+      if (wasActive) {
+        // Filter the deleted path out explicitly rather than trusting the
+        // refresh to have already dropped it — the refresh can be superseded
+        // by a concurrent event under the sequence guard.
+        const remaining = [...this.files.keys()].filter((p) => p !== path);
+        this.activePath = pickFallbackActivePath(remaining);
+        this.emit();
+      }
+    });
   }
 
   /** Delete an empty folder via the store's `rmdir`.  Throws if the
@@ -320,11 +437,13 @@ export class WorkspaceSourcesController {
    *  this).  No-op when the folder doesn't exist or is a file path.
    *  Workspace-relative form (`shared`, `audit/log`). */
   async deleteEmptyFolder(folder: string): Promise<void> {
-    const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
-    if (cleaned === "") return;
-    if (!this.store) return;
-    await this.store.rmdir(`${WORKSPACE_PREFIX}${cleaned}`);
-    await this.refresh();
+    return this.guard("delete-folder", folder, async () => {
+      const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
+      if (cleaned === "") return;
+      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      await this.store.rmdir(`${WORKSPACE_PREFIX}${cleaned}`);
+      await this.refresh();
+    });
   }
 
   private emit(): void {
