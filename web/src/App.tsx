@@ -4,6 +4,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
+import { monacoModelHost } from "./lsp/model-host";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
 import { runLiveAgent } from "./agent/live";
@@ -487,6 +488,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const dispose = syncWorkspaceToLsp(sources.controller, {
       getActivePath: () => activePathRef.current,
+      host: monacoModelHost,
     });
     return dispose;
   }, [sources.controller]);
