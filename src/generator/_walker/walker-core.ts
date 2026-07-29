@@ -397,6 +397,11 @@ export function walkBody(
    *  default, and Svelte's omitted arg) → no button is gated and output
    *  stays byte-identical. */
   authUi = false,
+  /** i18n key prefix for this body — `page.<Page>` / `component.<Comp>`
+   *  (M-T1.11 React runtime).  Set by the React walk only when the UI has
+   *  extractable strings; every other caller omits it → text renders raw
+   *  (byte-identical). */
+  i18nPrefix: string | undefined = undefined,
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -408,6 +413,7 @@ export function walkBody(
     paramTypes,
     pageRoutes,
     authUi,
+    i18nPrefix,
     usedParams: new Set(),
     usesNavigate: false,
     usesTableSort: false,
@@ -572,6 +578,15 @@ export interface WalkEnv {
    *  param threaded through `walk()`.  Absent → 0 (page top → `<h2>`; the
    *  page chrome owns the single `<h1>`). */
   headingDepth?: number;
+  /** i18n key prefix for user-visible text in this body — `page.<Page>` /
+   *  `component.<Comp>` (M-T1.11, the React translation runtime).  When set
+   *  (only the React walk sets it, and only when the app has extractable
+   *  strings), a user-visible literal text slot emits a translation call
+   *  `{t("<prefix>.<role>.<hash>", "<default>")}` keyed IDENTICALLY to the
+   *  `.loom/messages.en.json` catalog (`i18n-emit.ts`).  Absent → text renders
+   *  as the raw escaped literal (every non-React target, and React apps with no
+   *  strings) — byte-identical to pre-i18n output. */
+  i18nPrefix?: string;
 }
 
 /** Mutable accumulators written during the walk; read by the page

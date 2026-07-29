@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router";
+import { t } from "../../i18n";
 import { IdValue } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllCustomers } from "../../api/customer";
@@ -14,12 +15,12 @@ export default function CustomerList() {
   return (
     <Stack data-testid="customers-list">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Text>Customers</Text>
+        <Anchor component={RouterLink} to="/">{t("page.List.anchor.n0mxf2", "Home")}</Anchor>
+        <Text>{t("page.List.text.vweyym", "Customers")}</Text>
       </Breadcrumbs>
       <Group justify="space-between" role="toolbar" aria-label="Actions">
-        <Title order={2}>Customers</Title>
-        <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create">New customer</Button>
+        <Title order={2}>{t("page.List.heading.vweyym", "Customers")}</Title>
+        <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create">{t("page.List.button.cq54sn", "New customer")}</Button>
       </Group>
       <>
         { customerAll.isLoading && (
@@ -33,7 +34,7 @@ export default function CustomerList() {
           <Alert color="red" variant="light">Couldn't load customers</Alert>
         ) }
         { customerAll.data && customerAll.data.items.length === 0 && (
-          <Center mih={200}><Text c="dimmed">No customers yet.</Text></Center>
+          <Center mih={200}><Text c="dimmed">{t("page.List.empty.u6pr2h", "No customers yet.")}</Text></Center>
         ) }
         { customerAll.data && customerAll.data.items.length > 0 && (
           <Paper p="md">

@@ -47,7 +47,9 @@ describe("function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Button onClick=\{\(\) => \{ saveOrder\(\); \}\}>Save<\/Button>/);
+    expect(content).toMatch(
+      /<Button onClick=\{\(\) => \{ saveOrder\(\); \}\}>\{t\("[^"]*", "Save"\)\}<\/Button>/,
+    );
   });
 
   it("function-call expression in let RHS emits inline", async () => {
@@ -75,7 +77,7 @@ describe("function + method calls in walker bodies", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ const n = inc\(count\); setCount\(n\); \}\}>Bump<\/Button>/,
+      /<Button onClick=\{\(\) => \{ const n = inc\(count\); setCount\(n\); \}\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/,
     );
   });
 

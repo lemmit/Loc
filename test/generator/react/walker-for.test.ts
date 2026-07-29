@@ -30,7 +30,7 @@ describe("walker primitive — For (list comprehension)", () => {
     const tsx = await emit(`Stack { For { each: [1, 2, 3], n => Heading { "Row" } } }`);
     expect(tsx).toMatch(/\[1, 2, 3\]\.map\(\(n, nIdx\) =>/);
     expect(tsx).toContain("<Fragment key={nIdx}>");
-    expect(tsx).toMatch(/<Title order=\{2\}[^>]*>Row<\/Title>/);
+    expect(tsx).toMatch(/<Title order=\{2\}[^>]*>\{t\("[^"]*", "Row"\)\}<\/Title>/);
     // The legacy "not supported" stub must be gone.
     expect(tsx).not.toContain("not supported by the React walker");
   });

@@ -50,21 +50,21 @@ describe("inline text emphasis primitives", () => {
     const files = await buildAndGenerate(pageSrc(`Bold { "hi" }`));
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(/<strong>hi<\/strong>/);
+    expect(content).toMatch(/<strong>\{t\("[^"]*", "hi"\)\}<\/strong>/);
   });
 
   it('Italic { "hi" } emits <em>hi</em>', async () => {
     const files = await buildAndGenerate(pageSrc(`Italic { "hi" }`));
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(/<em>hi<\/em>/);
+    expect(content).toMatch(/<em>\{t\("[^"]*", "hi"\)\}<\/em>/);
   });
 
   it('InlineCode { "x" } emits <code>x</code>', async () => {
     const files = await buildAndGenerate(pageSrc(`InlineCode { "x" }`));
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(/<code>x<\/code>/);
+    expect(content).toMatch(/<code>\{t\("[^"]*", "x"\)\}<\/code>/);
   });
 
   it("emphasis primitives compose inside a Stack with surrounding Text", async () => {
@@ -79,8 +79,8 @@ describe("inline text emphasis primitives", () => {
       }`),
     );
     const content = files.get("web/src/pages/home.tsx")!;
-    expect(content).toMatch(/<strong>strong<\/strong>/);
-    expect(content).toMatch(/<em>em<\/em>/);
-    expect(content).toMatch(/<code>\.ddd<\/code>/);
+    expect(content).toMatch(/<strong>\{t\("[^"]*", "strong"\)\}<\/strong>/);
+    expect(content).toMatch(/<em>\{t\("[^"]*", "em"\)\}<\/em>/);
+    expect(content).toMatch(/<code>\{t\("[^"]*", "\.ddd"\)\}<\/code>/);
   });
 });

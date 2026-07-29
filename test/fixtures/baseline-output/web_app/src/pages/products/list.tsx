@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router";
+import { t } from "../../i18n";
 import { IdValue } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllProducts } from "../../api/product";
@@ -14,12 +15,12 @@ export default function ProductList() {
   return (
     <Stack data-testid="products-list">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Text>Products</Text>
+        <Anchor component={RouterLink} to="/">{t("page.List.anchor.n0mxf2", "Home")}</Anchor>
+        <Text>{t("page.List.text.kdfstp", "Products")}</Text>
       </Breadcrumbs>
       <Group justify="space-between" role="toolbar" aria-label="Actions">
-        <Title order={2}>Products</Title>
-        <Button onClick={() => navigate("/products/new")} data-testid="products-list-create">New product</Button>
+        <Title order={2}>{t("page.List.heading.kdfstp", "Products")}</Title>
+        <Button onClick={() => navigate("/products/new")} data-testid="products-list-create">{t("page.List.button.j7i5mi", "New product")}</Button>
       </Group>
       <>
         { productAll.isLoading && (
@@ -33,7 +34,7 @@ export default function ProductList() {
           <Alert color="red" variant="light">Couldn't load products</Alert>
         ) }
         { productAll.data && productAll.data.items.length === 0 && (
-          <Center mih={200}><Text c="dimmed">No products yet.</Text></Center>
+          <Center mih={200}><Text c="dimmed">{t("page.List.empty.nnvlb2", "No products yet.")}</Text></Center>
         ) }
         { productAll.data && productAll.data.items.length > 0 && (
           <Paper p="md">

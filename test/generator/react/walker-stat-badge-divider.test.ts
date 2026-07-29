@@ -165,7 +165,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(
       /import \{ Badge, Divider, Stack, Text, Title \} from "@mantine\/core";/,
     );
-    expect(content).toMatch(/<Title order=\{2\}>Dashboard<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Dashboard"\)\}<\/Title>/);
     expect(content).toMatch(/<Text fw=\{700\} size="xl">\$12\.5k<\/Text>/);
     expect(content).toMatch(/<Divider \/>/);
     expect(content).toMatch(/<Badge>Live<\/Badge>/);

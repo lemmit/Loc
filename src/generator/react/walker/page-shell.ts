@@ -149,6 +149,10 @@ export function renderCustomLayoutPage(
    *  Stage 1).  Each referenced action hoists to a `const <name> = … =>`
    *  handler before the body; a bare `onSubmit: <name>` reference binds it. */
   actions: ActionIR[] = [],
+  /** i18n key prefix (`page.<Name>` / `component.<Name>`) — set only when the
+   *  UI has extractable strings, so literal text slots emit `{t(...)}`
+   *  (M-T1.11 React runtime).  Undefined → raw text (byte-identical). */
+  i18nPrefix: string | undefined = undefined,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -186,6 +190,7 @@ export function renderCustomLayoutPage(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
   // Page-derived bindings → hoisted `useMemo` computeds, in declaration
   // order (a derived may reference state, params, and EARLIER derived).
@@ -787,6 +792,10 @@ export function renderUserComponentFile(
   /** Named, typed component event handlers — the component twin of the page
    *  `actions` (Proposal A Stage 1). */
   actions: ActionIR[] = [],
+  /** i18n key prefix (`page.<Name>` / `component.<Name>`) — set only when the
+   *  UI has extractable strings, so literal text slots emit `{t(...)}`
+   *  (M-T1.11 React runtime).  Undefined → raw text (byte-identical). */
+  i18nPrefix: string | undefined = undefined,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -823,6 +832,7 @@ export function renderUserComponentFile(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
   // Component-derived bindings → hoisted `useMemo` computeds (same as the
   // page shell). Body refs resolve to the bare const via `derivedNames`.

@@ -40,9 +40,9 @@ describe("Toolbar + Empty in walker stdlib", () => {
     expect(content).toMatch(/import \{ Button, Group, Title \} from "@mantine\/core";/);
     // Toolbar is a labelled ARIA toolbar (a11y contract).
     expect(content).toMatch(/<Group justify="space-between" role="toolbar" aria-label="Actions">/);
-    expect(content).toMatch(/<Title order=\{2\}>Orders<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Orders"\)\}<\/Title>/);
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\("\/orders\/new"\)\}>Add<\/Button>/,
+      /<Button onClick=\{\(\) => navigate\("\/orders\/new"\)\}>\{t\("[^"]*", "Add"\)\}<\/Button>/,
     );
   });
 
@@ -92,7 +92,9 @@ describe("Toolbar + Empty in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/list.tsx")!;
     expect(content).toMatch(/import \{ Center, Text \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">No orders yet<\/Text><\/Center>/);
+    expect(content).toMatch(
+      /<Center mih=\{200\}><Text c="dimmed">\{t\("[^"]*", "No orders yet"\)\}<\/Text><\/Center>/,
+    );
   });
 
   it("Empty {} with no message falls back to default", async () => {

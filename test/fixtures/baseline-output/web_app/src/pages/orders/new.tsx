@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useNavigate, Link as RouterLink } from "react-router";
 import { CreateOrderRequest, useCreateOrder } from "../../api/order";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Group, Select, Stack, Text, TextInput, Title } from "@mantine/core";
@@ -17,11 +18,11 @@ export default function OrderNew() {
   return (
     <Stack data-testid="orders-new-page">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/orders">Orders</Anchor>
-        <Text>New</Text>
+        <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/orders">{t("page.New.anchor.xf3i18", "Orders")}</Anchor>
+        <Text>{t("page.New.text.2ludo1", "New")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Create order</Title>
+      <Title order={2}>{t("page.New.heading.9g1249", "Create order")}</Title>
       <Card withBorder padding="md">
         <form onSubmit={handleSubmit(async (vals) => {
                   try {

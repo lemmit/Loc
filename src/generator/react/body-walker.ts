@@ -45,6 +45,10 @@ export function walkBodyToTsx(
   /** True when the hosting frontend deployable has `auth: ui` — enables
    *  currentUser-only operation `requires` gating on `Action(...)` buttons. */
   authUi = false,
+  /** i18n key prefix (`page.<Page>` / `component.<Comp>`) — set only when the
+   *  UI has extractable strings, so literal text slots emit `{t(...)}`
+   *  (M-T1.11 React runtime).  Omitted → raw text (byte-identical). */
+  i18nPrefix: string | undefined = undefined,
 ): WalkResult {
   return walkBody(
     body,
@@ -63,5 +67,6 @@ export function walkBodyToTsx(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
 }
