@@ -43,8 +43,6 @@ export const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
   "primitive-modal",
   // Genuinely deferred — no renderer yet (kept in sync with set 2 below).
   "primitive-file-upload",
-  "primitive-number-field",
-  "primitive-tabs",
 ]);
 
 /** Pack primitive-template ids with NO Flutter renderer at all — a page using
@@ -52,14 +50,10 @@ export const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
  *  `platform: flutter` target.  STRICT SUBSET of {@link FLUTTER_INLINE_OR_DEFERRED}
  *  (excludes the seam-rendered form family + Modal). */
 export const FLUTTER_UNRENDERED_PRIMITIVES: ReadonlySet<string> = new Set([
-  // FileUpload — multipart POST to `/files`; folds into M-T1.2 slice 4.
+  // FileUpload — a standalone multipart POST to `/files` writing a `FileRef`
+  // back to state; it needs the File-type-on-Flutter foundation (a `FileRef`
+  // Dart model + a file picker), the cross-cutting M-T1.2 slice-4 story.
   "primitive-file-upload",
-  // NumberField — needs the bound field's int-vs-double type to parse the text
-  // input; the shared input Ctx carries only the bind NAME.
-  "primitive-number-field",
-  // Tabs — `DefaultTabController` + per-tab child panes (a container, not a
-  // leaf input).
-  "primitive-tabs",
 ]);
 
 // Maps each UNRENDERED pack-template id to the walker builder-call NAME(s) that
@@ -69,8 +63,6 @@ export const FLUTTER_UNRENDERED_PRIMITIVES: ReadonlySet<string> = new Set([
 // slip through the gate unmapped.
 const UNRENDERED_ID_TO_BUILDER_NAMES: ReadonlyMap<string, readonly string[]> = new Map([
   ["primitive-file-upload", ["FileUpload"]],
-  ["primitive-number-field", ["NumberField"]],
-  ["primitive-tabs", ["Tabs"]],
 ]);
 
 /** The flat set of walker builder-call NAMES the validator gates on a

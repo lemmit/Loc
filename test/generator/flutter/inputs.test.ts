@@ -75,3 +75,65 @@ describe("flutter standalone inputs (generate system)", () => {
     expect(page).toContain("onChanged: (v) => setTier(v ?? '')");
   });
 });
+
+const NUM_TABS_SRC = `
+system NT {
+  subdomain S {
+    context Shop {
+      aggregate Product { name: string }
+      repository Products for Product { }
+    }
+  }
+  api ShopApi from S
+  ui MobileApp {
+    framework: flutter
+    api Shop: ShopApi
+    page Panel {
+      route: "/panel"
+      state { qty: int = 0  price: decimal = 0 }
+      body: Stack {
+        Heading { "Panel", level: 1 },
+        Tabs {
+          Tab { "Numbers", Stack { NumberField { "Qty", bind: qty }, NumberField { "Price", bind: price } } },
+          Tab { "Info", Text { "second tab" } }
+        }
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api1 { platform: node contexts: [Shop] dataSources: [st] serves: ShopApi port: 8081 }
+  deployable app { platform: flutter targets: api1 ui: MobileApp { Shop: api1 } port: 3006 }
+}
+`;
+
+describe("flutter NumberField + Tabs (generate system)", () => {
+  it("renders NumberField as a numeric TextFormField with a string-parsing setter, and Tabs as DefaultTabController", async () => {
+    const files = await generateSystemFiles(NUM_TABS_SRC);
+    const key = [...files.keys()].find((k) => k.endsWith("app/lib/pages/panel_page.dart"));
+    expect(key, `no panel page in: ${[...files.keys()].join(", ")}`).toBeDefined();
+    const page = files.get(key!)!;
+
+    expect(page).not.toContain("no renderer");
+
+    // Both a typed setter and a string-parsing `set<Field>Text` per numeric cell.
+    expect(page).toContain("void setQty(int v) {");
+    expect(page).toContain("void setQtyText(String v) {");
+    expect(page).toContain("state = state.copyWith(qty: int.tryParse(v) ?? 0);");
+    expect(page).toContain("state = state.copyWith(price: double.tryParse(v) ?? 0);");
+
+    // Only the NumberField (Text) tear-offs are bound — the typed setters stay unused.
+    expect(page).toContain("final setQtyText = notifier.setQtyText;");
+    expect(page).not.toContain("final setQty = notifier.setQty;");
+
+    // NumberField widget: numeric keyboard + raw-string dispatch.
+    expect(page).toContain(
+      "TextFormField(initialValue: '${state.qty}', keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Qty'), onChanged: (v) => setQtyText(v))",
+    );
+
+    // Tabs → DefaultTabController + TabBar + a bounded TabBarView.
+    expect(page).toContain("DefaultTabController(length: 2");
+    expect(page).toContain("TabBar(tabs: <Widget>[ Tab(text: 'Numbers'), Tab(text: 'Info') ])");
+    expect(page).toContain("SizedBox(height: 360, child: TabBarView(children:");
+  });
+});

@@ -65,27 +65,26 @@ system FlutterGate {
 }
 
 describe("flutter unrendered-primitive honesty gate (`loom.flutter-primitive-unsupported`)", () => {
-  it("errors when a Flutter-targeted page uses NumberField (still unrendered)", async () => {
-    const errs = await flutterPrimitiveErrors(
-      sys("flutter", "flutter", 'NumberField { "Qty", bind: qty }'),
-    );
+  it("errors when a Flutter-targeted page uses FileUpload (the one still-unrendered primitive)", async () => {
+    const errs = await flutterPrimitiveErrors(sys("flutter", "flutter", 'FileUpload { "Doc" }'));
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("'NumberField'");
+    expect(errs[0]).toContain("'FileUpload'");
     expect(errs[0]).toContain("silently vanish");
     expect(errs[0]).toContain("platform 'flutter'");
   });
 
-  it("errors when a Flutter-targeted page uses Tabs (still unrendered)", async () => {
-    const errs = await flutterPrimitiveErrors(
-      sys("flutter", "flutter", 'Tabs { Tab { title: "a", Text { "x" } } }'),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("'Tabs'");
-  });
-
-  it("does NOT error for the now-rendered controlled inputs (Toggle) on flutter", async () => {
+  it("does NOT error for the now-rendered inputs (Toggle / NumberField) on flutter", async () => {
     expect(
       await flutterPrimitiveErrors(sys("flutter", "flutter", 'Toggle { "Notify", bind: enabled }')),
+    ).toEqual([]);
+    expect(
+      await flutterPrimitiveErrors(sys("flutter", "flutter", 'NumberField { "Qty", bind: qty }')),
+    ).toEqual([]);
+  });
+
+  it("does NOT error for the now-rendered Tabs container on flutter", async () => {
+    expect(
+      await flutterPrimitiveErrors(sys("flutter", "flutter", 'Tabs { Tab { "a", Text { "x" } } }')),
     ).toEqual([]);
   });
 
@@ -95,10 +94,8 @@ describe("flutter unrendered-primitive honesty gate (`loom.flutter-primitive-uns
     ).toEqual([]);
   });
 
-  it("does NOT error for NumberField on a Handlebars frontend (react)", async () => {
-    expect(
-      await flutterPrimitiveErrors(sys("react", "react", 'NumberField { "Qty", bind: qty }')),
-    ).toEqual([]);
+  it("does NOT error for FileUpload on a Handlebars frontend (react)", async () => {
+    expect(await flutterPrimitiveErrors(sys("react", "react", 'FileUpload { "Doc" }'))).toEqual([]);
   });
 
   it("does NOT error for a Flutter page using only supported display/layout primitives", async () => {
@@ -115,20 +112,20 @@ describe("flutter unrendered-primitive set (single source of truth)", () => {
     expect(UNMAPPED_DEFERRED_IDS).toEqual([]);
   });
 
-  it("gates the unrendered primitives, not the ones Flutter now renders", () => {
-    // Unrendered → gated.
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("NumberField")).toBe(true);
+  it("gates only FileUpload — every other input/container/form now renders", () => {
+    // The one still-unrendered primitive → gated.
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("FileUpload")).toBe(true);
-    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Tabs")).toBe(true);
     // Now rendered by the pack → NOT gated.
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Toggle")).toBe(false);
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Field")).toBe(false);
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("SelectField")).toBe(false);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("NumberField")).toBe(false);
+    expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Tabs")).toBe(false);
     // Seam-rendered → NOT gated.
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("CreateForm")).toBe(false);
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Modal")).toBe(false);
     // Supported display primitive → NOT gated.
     expect(FLUTTER_DEFERRED_BUILDER_NAMES.has("Text")).toBe(false);
-    expect(FLUTTER_UNRENDERED_PRIMITIVES.size).toBeGreaterThan(0);
+    expect(FLUTTER_UNRENDERED_PRIMITIVES.size).toBe(1);
   });
 });

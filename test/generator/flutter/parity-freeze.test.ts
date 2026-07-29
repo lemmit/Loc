@@ -24,11 +24,11 @@ import { analyzeFlutterParity } from "../../../src/generator/flutter/parity.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // A flutter ui whose CreateForm's aggregate exercises the four form-field drop
-// sites (M-A markers) and whose page hosts a standalone `NumberField` (a still-
-// unrendered input → the pack's no-renderer fallback, M-D).  The now-rendered
-// inputs (Field/Toggle/MultilineField/PasswordField/SelectField) would NOT
-// produce a marker, so the exerciser uses NumberField, still deferred.  Every
-// one of these is a KNOWN gap pinned below.
+// sites (M-A markers) and whose page hosts a standalone `FileUpload` (the one
+// still-unrendered primitive → the pack's no-renderer fallback, M-D).  The
+// now-rendered inputs (Field/Toggle/MultilineField/PasswordField/SelectField/
+// NumberField) and Tabs would NOT produce a marker, so the exerciser uses
+// FileUpload, still deferred.  Every one of these is a KNOWN gap pinned below.
 const GAP_EXERCISER = `
 system Par {
   api A from D
@@ -53,8 +53,7 @@ system Par {
     api Shop: A
     page Home {
       route: "/"
-      state { n: int = 0 }
-      body: Stack { Heading { "H", level: 1 }, NumberField("Qty", bind: n) }
+      body: Stack { Heading { "H", level: 1 }, FileUpload("Doc") }
     }
     page NewItem { route: "/new" body: Stack { Heading { "New", level: 1 }, CreateForm { of: Item } } }
   }
@@ -94,9 +93,9 @@ const KNOWN_FLUTTER_GAPS: Record<string, { reason: string; mission: "M-A" | "M-B
       "the scalar-array row editor renders text/number rows only; a repeatable enum (dropdown) row editor is unbuilt.",
     mission: "M-B",
   },
-  'flutter pack: no renderer for "primitive-number-field"': {
+  'flutter pack: no renderer for "primitive-file-upload"': {
     reason:
-      "NumberField needs the bound field's int-vs-double type to parse the text input; the shared input Ctx carries only the bind name, so it stays deferred (Field/Toggle/MultilineField/PasswordField/SelectField now render).",
+      "a standalone FileUpload is a multipart POST to /files writing a FileRef back to state; it needs the File-type-on-Flutter foundation (a FileRef Dart model + a file picker), the cross-cutting M-T1.2 slice-4 story. Every other input/container (Field/MultilineField/PasswordField/NumberField/Toggle/SelectField/Tabs) now renders.",
     mission: "M-B",
   },
 };

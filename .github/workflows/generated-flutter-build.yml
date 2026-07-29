@@ -154,14 +154,21 @@ jobs:
               page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
               page Preferences {
                 route: "/preferences"
-                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system" }
+                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system"  perPage: int = 20 }
                 body: Stack {
                   Heading { "Preferences", level: 1 },
-                  Toggle { "Notifications", bind: notify },
-                  Field { "Display name", bind: displayName },
-                  MultilineField { "About", bind: about },
-                  PasswordField { "Secret", bind: secret },
-                  SelectField { "Theme", bind: themePref, options: ["system", "light", "dark"] }
+                  Tabs {
+                    Tab { "Profile", Stack {
+                      Field { "Display name", bind: displayName },
+                      MultilineField { "About", bind: about },
+                      PasswordField { "Secret", bind: secret }
+                    } },
+                    Tab { "Settings", Stack {
+                      Toggle { "Notifications", bind: notify },
+                      SelectField { "Theme", bind: themePref, options: ["system", "light", "dark"] },
+                      NumberField { "Rows per page", bind: perPage }
+                    } }
+                  }
                 }
               }
               page RestockProduct {

@@ -17,16 +17,26 @@
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 
 /** Walker-primitive names of the controlled inputs the flutter pack renders —
- *  each binds a `state` field via `bind:`.  (NumberField / FileUpload are still
- *  deferred; a `bind:` on them never reaches here because the validator gate
- *  rejects them on a flutter target.) */
+ *  each binds a `state` field via `bind:`.  (FileUpload is still deferred; a
+ *  `bind:` on it never reaches here because the validator gate rejects it on a
+ *  flutter target.) */
 export const FLUTTER_BOUND_INPUT_NAMES: ReadonlySet<string> = new Set([
   "Field",
   "MultilineField",
   "PasswordField",
   "Toggle",
   "SelectField",
+  "NumberField",
 ]);
+
+/** The Notifier/State setter method name a bound input dispatches to.  A
+ *  `NumberField` uses the string-parsing `set<Field>Text` variant (the text
+ *  input hands a String; the setter parses per the field's numeric type); every
+ *  other input uses the typed `set<Field>`. */
+function setterFor(primitive: string, field: string): string {
+  const base = `set${field[0]!.toUpperCase()}${field.slice(1)}`;
+  return primitive === "NumberField" ? `${base}Text` : base;
+}
 
 /** Immediate child expressions of `e` — a generator-local shallow walk (the
  *  same shape `forms-emit.ts` uses) so we don't import the `ir/util` walker
@@ -74,20 +84,24 @@ function boundFieldOf(
   return arg && arg.kind === "ref" && stateNames.has(arg.name) ? arg.name : undefined;
 }
 
-/** State fields bound by a controlled input anywhere in `body` (deduped, in
- *  first-seen order).  Drives the page-shell setter tear-offs. */
+/** The setter tear-offs a page shell must bind — one per state field bound by a
+ *  controlled input anywhere in `body` (deduped by setter name, first-seen
+ *  order).  Each entry is the exact `notifier.<setter>` method to tear off. */
 export function collectBoundInputFields(
   body: ExprIR | undefined,
   stateNames: ReadonlySet<string>,
-): string[] {
-  const found: string[] = [];
+): { field: string; setter: string }[] {
+  const found: { field: string; setter: string }[] = [];
   const seen = new Set<string>();
   const visit = (e: ExprIR): void => {
     if (e.kind === "call" && FLUTTER_BOUND_INPUT_NAMES.has(e.name)) {
       const field = boundFieldOf(e, stateNames);
-      if (field && !seen.has(field)) {
-        seen.add(field);
-        found.push(field);
+      if (field) {
+        const setter = setterFor(e.name, field);
+        if (!seen.has(setter)) {
+          seen.add(setter);
+          found.push({ field, setter });
+        }
       }
     }
     for (const c of exprChildren(e)) visit(c);

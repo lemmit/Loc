@@ -455,12 +455,13 @@ function primitiveButton(c: Ctx): string {
 // so the widget tree still compiles.  Material widget shapes mirror the
 // CI-compiled form-field emitters in `forms-emit.ts`.
 //
-// Still deferred (kept in `FLUTTER_UNRENDERED_PRIMITIVES`, honest-gated by
-// `loom.flutter-primitive-unsupported`): NumberField (needs the bound field's
-// int-vs-double type to parse the text input), FileUpload (multipart POST to
-// `/files` — folds into M-T1.2 slice 4), and Tabs (`DefaultTabController` +
-// per-tab child panes).  Forms (Create/Operation/Workflow/Destroy) and Modal
-// are NOT here — they render via the `flutterTarget` walker SEAMS.
+// NumberField parses via the generated `set<Field>Text` setter (the pack stays
+// type-agnostic); Tabs is the one container here (DefaultTabController + TabBar +
+// TabBarView).  Only FileUpload stays deferred (honest-gated by
+// `loom.flutter-primitive-unsupported`) — a standalone multipart upload needs
+// the File-type-on-Flutter foundation (M-T1.2 slice 4).  Forms
+// (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render via
+// the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------
 
 /** `state.<bind>` — the reactive read of a bound state field. */
@@ -506,6 +507,29 @@ function primitiveSelectField(c: Ctx): string {
   const items = `(${options}).map((o) => DropdownMenuItem<String>(value: o, child: Text(o))).toList()`;
   const onChanged = c.hasBind ? `(v) => ${String(c.setter)}(v ?? '')` : "null";
   return `DropdownButtonFormField<String>(${arg(testidKey(c))}${init}decoration: ${inputDecoration(c)}, isExpanded: true, items: ${items}, onChanged: ${onChanged})`;
+}
+
+function primitiveNumberField(c: Ctx): string {
+  // The bound field is int/double; the generated `set<Field>Text(String)` setter
+  // (riverpod-emit / component-emit) parses per the field's Dart type, so the
+  // pack stays type-agnostic — it reads `'${state.<bind>}'` (interpolation is
+  // null-safe) and dispatches the raw text.
+  const init = c.hasBind ? `initialValue: '\${${boundRead(c)}}', ` : "";
+  const onChanged = c.hasBind ? `(v) => ${String(c.setter)}Text(v)` : "null";
+  return `TextFormField(${arg(testidKey(c))}${init}keyboardType: TextInputType.number, decoration: ${inputDecoration(c)}, onChanged: ${onChanged})`;
+}
+
+function primitiveTabs(c: Ctx): string {
+  // `Tabs { Tab { title, … } }` → `DefaultTabController` + `TabBar` + a
+  // fixed-height `TabBarView` (a `TabBarView` needs bounded height, and pages
+  // wrap the body in a scroll view where `Expanded` has no bound).  The walked
+  // per-tab body widget arrives as `tabs[i].bodyJsx`.
+  const tabs =
+    (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[] | undefined) ?? [];
+  if (tabs.length === 0) return "const SizedBox.shrink()";
+  const bar = tabs.map((t) => `Tab(text: '${dartStr(t.label)}')`).join(", ");
+  const views = tabs.map((t) => asWidget(t.bodyJsx)).join(", ");
+  return `DefaultTabController(length: ${tabs.length}, child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[ TabBar(tabs: <Widget>[ ${bar} ]), SizedBox(height: 360, child: TabBarView(children: <Widget>[ ${views} ])) ]))`;
 }
 
 const RENDERERS: Record<string, (c: Ctx) => string> = {
@@ -558,6 +582,9 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-password-field": primitivePasswordField,
   "primitive-toggle": primitiveToggle,
   "primitive-select-field": primitiveSelectField,
+  "primitive-number-field": primitiveNumberField,
+  // Container: a tab group (DefaultTabController + TabBar + TabBarView).
+  "primitive-tabs": primitiveTabs,
 };
 
 /** Build the procedural flutterMaterial pack.  Implements the `LoadedPack`

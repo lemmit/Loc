@@ -404,11 +404,12 @@ function renderConsumerPage(
   }
   if (b.stateful) {
     if (b.usesState) bindings.push(`    final state = ref.watch(${providerName});`);
-    // State fields a controlled input binds — each needs a `set<Field>` tear-off
-    // so the pack's bare `set<Field>(v)` write resolves.  Only the bound fields
-    // (an unused `final` tear-off is a `flutter analyze` warning → CI red).
-    const boundFields = collectBoundInputFields(page.body, new Set(page.state.map((s) => s.name)));
-    if (b.usedActions.size > 0 || boundFields.length > 0) {
+    // Controlled-input setter tear-offs — each bound input dispatches a bare
+    // `set<Field>(v)` (or `set<Field>Text(v)` for NumberField), which resolves
+    // to one of these page-shell locals.  Only the bound setters (an unused
+    // `final` tear-off is a `flutter analyze` warning → CI red).
+    const boundSetters = collectBoundInputFields(page.body, new Set(page.state.map((s) => s.name)));
+    if (b.usedActions.size > 0 || boundSetters.length > 0) {
       bindings.push(`    final notifier = ref.read(${providerName}.notifier);`);
       for (const a of [...b.usedActions].sort()) {
         // An async-effect action's method takes the route id; bind it as an
@@ -419,8 +420,7 @@ function renderConsumerPage(
             : `    final ${a} = notifier.${a};`,
         );
       }
-      for (const f of boundFields) {
-        const setter = `set${f[0]!.toUpperCase()}${f.slice(1)}`;
+      for (const { setter } of boundSetters) {
         bindings.push(`    final ${setter} = notifier.${setter};`);
       }
     }

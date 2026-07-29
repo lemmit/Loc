@@ -340,6 +340,49 @@ export function buildStateFields(state: readonly StateFieldIR[]): DartStateField
   });
 }
 
+/** The `String v` → numeric parse expression for a `NumberField`'s
+ *  `set<Field>Text` setter, or undefined for a non-numeric cell.  A nullable
+ *  numeric keeps the `tryParse` null (clears on bad input); a non-nullable
+ *  falls back to `0`. */
+function numericParse(dt: string): string | undefined {
+  const nullable = dt.endsWith("?");
+  const base = nullable ? dt.slice(0, -1) : dt;
+  if (base === "int") return nullable ? "int.tryParse(v)" : "int.tryParse(v) ?? 0";
+  if (base === "double") return nullable ? "double.tryParse(v)" : "double.tryParse(v) ?? 0";
+  return undefined;
+}
+
+/** Setter methods for a page/component's state cells: a typed `set<Field>` per
+ *  cell (the `state := …` seam + the string/bool/select inputs), plus a
+ *  string-parsing `set<Field>Text` for each numeric cell (the `NumberField`
+ *  write side).  `wrap` folds each `state = state.copyWith(...)` assignment into
+ *  the notifier (direct) or component (`setState`) form; it returns the
+ *  4-space-indented body lines. */
+export function stateSetterMethods(
+  fields: readonly DartStateField[],
+  wrap: (assign: string) => string[],
+): string[] {
+  const out: string[] = [];
+  for (const f of fields) {
+    out.push(
+      "",
+      `  void set${upperFirst(f.name)}(${f.dt} v) {`,
+      ...wrap(`state = state.copyWith(${f.name}: v);`),
+      "  }",
+    );
+    const parse = numericParse(f.dt);
+    if (parse) {
+      out.push(
+        "",
+        `  void set${upperFirst(f.name)}Text(String v) {`,
+        ...wrap(`state = state.copyWith(${f.name}: ${parse});`),
+        "  }",
+      );
+    }
+  }
+  return out;
+}
+
 /** Emit an immutable Dart data class (`const` ctor, `final` fields, `copyWith`)
  *  for a set of state cells — the `<Page>State` a Riverpod page's Notifier holds
  *  AND the `<Component>Model` a stateful component's `State` holds. */
@@ -453,17 +496,11 @@ export function renderRiverpod(
     notifierLines.push("  }");
   }
   // Per-state-field setters — the write side of a controlled input's `bind:`
-  // (`set<Field>` from `inputs.ts`) and the `notifier.set<Field>(…)` the render
-  // tree's `state := …` seam (`flutterTarget.renderStateWrite`) targets.  One
-  // typed setter per cell; an unused one is a harmless dead public method (Dart
-  // `analyze` flags unused LOCALS, not unused methods), so no bound-field
-  // collection is needed here.
-  for (const f of fields) {
-    notifierLines.push("");
-    notifierLines.push(`  void set${upperFirst(f.name)}(${f.dt} v) {`);
-    notifierLines.push(`    state = state.copyWith(${f.name}: v);`);
-    notifierLines.push("  }");
-  }
+  // (`set<Field>` / `set<Field>Text` from the pack) and the
+  // `notifier.set<Field>(…)` the render tree's `state := …` seam
+  // (`flutterTarget.renderStateWrite`) targets.  An unused setter is a harmless
+  // dead public method (Dart `analyze` flags unused LOCALS, not unused methods).
+  notifierLines.push(...stateSetterMethods(fields, (assign) => [`    ${assign}`]));
   notifierLines.push("}");
 
   const providerLine = `final ${providerName} = NotifierProvider<${notifierClass}, ${stateClass}>(${notifierClass}.new);`;
