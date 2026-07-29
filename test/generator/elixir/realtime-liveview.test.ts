@@ -101,8 +101,13 @@ describe("realtime LiveView wire — Phoenix (`on <channel>.<Event>`)", () => {
     const list = get(await generateSystemFiles(sys(WITH_HANDLER)), "/live/order_list_live.ex");
     // The handle_info clause re-runs the same list load the initial
     // handle_params ran — the realtime twin of a mutation's cache refresh.
+    // Since M-T1.1 slice 8 that load carries the page/sort assigns, so a
+    // realtime refresh re-reads the page the user is CURRENTLY on in their
+    // current order, instead of silently snapping them back to page 1.
     const clause = list.slice(list.indexOf("def handle_info(%PhoenixApp.Sales.Events.OrderPlaced"));
-    expect(clause).toContain("case PhoenixApp.Sales.list_orders() do");
+    expect(clause).toContain(
+      "case PhoenixApp.Sales.list_orders(socket.assigns.page_num, 10, socket.assigns.sort_key, socket.assigns.sort_dir) do",
+    );
     expect(clause).toContain("{:ok, items} -> assign(socket, :items, items)");
   });
 
