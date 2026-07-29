@@ -33,7 +33,7 @@ system Acme {
       aggregate Shipment with crudish { orderCode: string  status: string }
       repository Shipments for Shipment { }
       workflow fulfil {
-        create(orderId: Order id) {
+        create(orderId: string) {
           let o = orders.getOrderById(orderId)
           let s = Shipment.create({ orderCode: o.code, status: "Pending" })
         }
@@ -106,6 +106,18 @@ describe("Hono typed in-system api client", () => {
     const wf = files.get("shipping_svc/http/workflows.ts") ?? "";
     expect(wf).toContain(`import { orders$getOrderById } from "../resources/api-clients";`);
     expect(wf).toContain("(await orders$getOrderById(orderId))");
+  });
+
+  it("brands a foreign aggregate id used as a workflow starter param", async () => {
+    // The canonical cross-service shape: `create(orderId: Order id)` on a
+    // deployable that does NOT host `Order`.  The route emits
+    // `Ids.OrderId(body.orderId)`, so without the brand the generated project
+    // fails `tsc` on a missing export.  Pre-existing (it reproduces with no api
+    // call at all) — the foreign-id collection covered workflow STATE fields
+    // and foreign event fields, never starter params.
+    const files = await emit(SRC.replace("create(orderId: string)", "create(orderId: Order id)"));
+    const ids = files.get("shipping_svc/domain/ids.ts") ?? "";
+    expect(ids).toContain("export type OrderId =");
   });
 
   it("emits no client module for a deployable that binds no api", async () => {
