@@ -1,20 +1,23 @@
 // ---------------------------------------------------------------------------
-// The generated React translation runtime (M-T1.11, i18n.md Phase 2).
+// The generated frontend translation runtime (M-T1.11) — framework-AGNOSTIC,
+// shared across every JS/TS frontend (React, Vue, Svelte, …).  It lives in the
+// `_frontend/` shared seam (not `react/`) so a frontend generator imports it
+// without a sibling-platform edge (pipeline-layering.test.ts).
 //
-// Emits two files into each React app that has extractable user-visible text:
+// Emits two files into each app that has extractable user-visible text:
 //
-//   src/locales/en.json — the source-language catalog (key → English), the
-//     same `{ key: message }` shape as `.loom/messages.en.json`, scoped to this
+//   locales/en.json — the source-language catalog (key → English), the same
+//     `{ key: message }` shape as `.loom/messages.en.json`, scoped to this
 //     deployable's UI. Translators add `<locale>.json` siblings and PR them.
-//   src/i18n.ts — a tiny lookup shim: `t(key, default)` returns the active
-//     locale's string for `key`, falling back to the source-language default.
+//   i18n.ts — the `t(key, default, values?)` lookup shim: returns the active
+//     locale's string for `key` (falling back to the source-language default)
+//     and substitutes `{name}` ICU placeholders from `values`.
 //
-// Deliberately NOT react-intl: this slice extracts PLAIN literals only, so a
-// `messages[key] ?? default` lookup is exactly sufficient and needs no runtime
-// dependency, no <IntlProvider>, and no design-pack template change. ICU
-// (placeholders / plurals via react-intl) arrives with the template→ICU
-// interpolation slice, which upgrades this shim in place — the `t(key, default)`
-// call sites the walker emits stay the same.
+// Deliberately NOT react-intl: `messages[key] ?? default` + a `{name}` regex
+// covers plain literals and simple interpolation with no runtime dependency and
+// no design-pack template change. ICU format suffixes (plural/select/number)
+// arrive with a later react-intl slice that upgrades this shim in place — the
+// `t(...)` call sites the walker emits stay the same.
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";

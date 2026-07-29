@@ -241,6 +241,11 @@ export function renderSveltePage(
    *  Drives the `<script>` store-import + `$derived` field bindings for any
    *  store this page reads / calls (named-actions-and-stores.md §3, Stage 5). */
   stores: readonly StoreIR[] = [],
+  /** i18n key prefix — `page.<Name>` (M-T1.11).  Set only when the UI has
+   *  extractable strings; undefined → user-visible text renders raw
+   *  (byte-identical to pre-i18n).  Threaded into the body walk's last arg,
+   *  where the seam turns literal text slots into `{t("<key>", "<default>")}`. */
+  i18nPrefix: string | undefined = undefined,
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -280,6 +285,7 @@ export function renderSveltePage(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
   // Page `derived` bindings → hoisted `$derived` consts (runes auto-track).
   // A derived reading a state field forces the `$state` declaration even
@@ -546,6 +552,10 @@ export function renderSvelteComponentFile(
   /** Shared client-side stores declared on the hosting ui — drives the
    *  `<script>` store-import + `$derived` field bindings (Stage 5). */
   stores: readonly StoreIR[] = [],
+  /** i18n key prefix — `component.<Name>` (M-T1.11).  Set only when the UI has
+   *  extractable strings; undefined → user-visible text renders raw
+   *  (byte-identical to pre-i18n). */
+  i18nPrefix: string | undefined = undefined,
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
@@ -584,6 +594,7 @@ export function renderSvelteComponentFile(
     externFunctions,
     derivedNames,
     authUi,
+    i18nPrefix,
   );
   // currentUser binding for any gated `Action(...)` button in the body (the
   // action-level mirror of the page gate; binding-only — components have no

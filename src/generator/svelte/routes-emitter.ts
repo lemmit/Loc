@@ -64,6 +64,11 @@ export interface SveltePageEmitContext {
    *  then renders a client-side `{#if}`-guarded `<Forbidden/>` against the
    *  verified session claims.  Optional: absent ⇒ ungated. */
   authUi?: boolean;
+  /** True when the UI has extractable user-visible strings (M-T1.11) — pages
+   *  emit `page.<Name>` and components `component.<Name>` i18n key prefixes into
+   *  their body walks, so literal text renders through `t()`.  Absent ⇒ text
+   *  renders raw (byte-identical to pre-i18n). */
+  i18nEnabled?: boolean;
   /** Generate-time source-map recorder (`--sourcemap`) — see
    *  `PlatformSurface.emitProject`'s doc comment.  Absent means "record
    *  nothing" (the default, flag-off shape). */
@@ -197,6 +202,9 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       c.actions,
       // Shared client-side stores (Stage 5) — for store-import + bindings.
       ui.stores,
+      // i18n key prefix — `component.<Name>` matches the catalog; undefined when
+      // the UI has no extractable strings (byte-identical to pre-i18n).
+      ctx.i18nEnabled ? `component.${c.name}` : undefined,
     );
     out.set(componentPath, componentContent);
     ctx.sourcemap?.file(componentPath, componentContent, c.origin, componentConstruct);
@@ -240,6 +248,10 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       page.actions,
       // Shared client-side stores (Stage 5) — for store-import + bindings.
       ui.stores,
+      // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+      // role-scoped `page.name`, e.g. `List`, not the router emit name);
+      // undefined when the UI has no extractable strings (byte-identical).
+      ctx.i18nEnabled ? `page.${page.name}` : undefined,
     );
     out.set(emitPath, pageContent);
     ctx.sourcemap?.file(emitPath, pageContent, page.origin, pageConstructId(ui.name, page));
