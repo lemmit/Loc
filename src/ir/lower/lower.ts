@@ -701,12 +701,20 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     );
   const dataSources = members
     .filter((m): m is Resource => m.$type === "Resource")
-    .map(
-      (d): DataSourceIR => ({
+    .map((d): DataSourceIR => {
+      // `use:` binds a physical `storage` OR an in-system `api` (M-T4.8).
+      // Discriminate here rather than writing the ref name into
+      // `storageName` for both — a storage lookup keyed by an api's name
+      // resolves to nothing, which every downstream consumer would read as
+      // "no storage configured" instead of "bound to a sibling service".
+      const useRef = d.use?.ref;
+      const apiTarget = useRef !== undefined && isApi(useRef) ? useRef : undefined;
+      return {
         name: d.name,
         contextName: d.context?.ref?.name ?? "",
         kind: d.kind as DataSourceKind,
-        storageName: d.use?.ref?.name ?? "",
+        storageName: apiTarget ? "" : (useRef?.name ?? ""),
+        ...(apiTarget ? { apiName: apiTarget.name } : {}),
         ...(d.schema ? { schema: d.schema } : {}),
         ...(d.tablePrefix ? { tablePrefix: d.tablePrefix } : {}),
         ...(d.keyPrefix ? { keyPrefix: d.keyPrefix } : {}),
@@ -729,8 +737,8 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
             }
           : {}),
         ...(d.config.length ? { config: d.config.map(lowerConfigEntry) } : {}),
-      }),
-    );
+      };
+    });
   // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static

@@ -2623,6 +2623,67 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
+// In-system typed api bindings (M-T4.8).  `resource { kind: api, use: <Api> }`
+// derives its address from the deployable that `serves:` that api — so the
+// binding is only well-formed when exactly ONE backend deployable serves it.
+// These are IR-level (not AST) checks because they need the whole system's
+// deployable set, which the AST validator does not have resolved.
+// ---------------------------------------------------------------------------
+
+export function validateApiResourceBindings(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const apiBound = sys.dataSources.filter((r) => r.apiName);
+  if (apiBound.length === 0) return;
+  for (const r of apiBound) {
+    const apiName = r.apiName as string;
+    // Frontends `consumes:` an api; they never serve its routes, so a
+    // frontend in `serves:` can't supply an address for a backend caller.
+    const servers = sys.deployables.filter(
+      (d) => d.serves.includes(apiName) && !descriptorFor(d.platform).isFrontend,
+    );
+    if (servers.length === 0) {
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-unserved",
+        message:
+          `resource '${r.name}' binds api '${apiName}', but no backend deployable serves it, ` +
+          `so its address cannot be derived.  Add 'serves: ${apiName}' to the deployable that hosts it.`,
+        source: `${sys.name}/${r.name}`,
+      });
+      continue;
+    }
+    if (servers.length > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-ambiguous-server",
+        message:
+          `resource '${r.name}' binds api '${apiName}', which ${servers.length} deployables serve ` +
+          `(${servers.map((d) => `'${d.name}'`).join(", ")}).  The caller's address would be ambiguous — ` +
+          `have exactly one deployable serve it.`,
+        source: `${sys.name}/${r.name}`,
+      });
+      continue;
+    }
+    // Self-call: the deployable wiring this resource is the one serving the
+    // api.  That is always a mistake — the context is already in-process, so
+    // the call would leave the process only to re-enter it, paying a network
+    // hop and losing the ambient transaction.
+    const server = servers[0] as (typeof servers)[number];
+    for (const dep of sys.deployables) {
+      if (!dep.dataSourceNames.includes(r.name)) continue;
+      if (dep.name !== server.name) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-self-call",
+        message:
+          `deployable '${dep.name}' wires resource '${r.name}', which binds api '${apiName}' that ` +
+          `'${dep.name}' itself serves.  Call the context directly instead — it is already in-process.`,
+        source: `${sys.name}/${r.name}`,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic `config` map validation (RFC §8).  Keys are checked against
 // the sourceType's registry config schema: unknown keys warn (forward-
 // compatible), wrong-typed values error, and required keys missing from

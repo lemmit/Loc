@@ -37,6 +37,7 @@ import {
 } from "./checks/structural-checks.js";
 import {
   backendPlatformsHostingEachContext,
+  validateApiResourceBindings,
   validateAuditedOperationSupport,
   validateAuth,
   validateAuthUiFramework,
@@ -163,6 +164,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFindPredicateAdapterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
+    validateApiResourceBindings(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);

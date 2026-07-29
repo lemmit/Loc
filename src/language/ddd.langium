@@ -348,6 +348,15 @@ UiComposeBinding:
 UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
 
+// What a `resource` may bind to.  A `storage` is infrastructure Loom does NOT
+// own — its address and vendor parameters are facts only the author knows.  An
+// `api` is infrastructure Loom DOES own: a sibling deployable in the same
+// system `serves:` it, so both the address and the operation set are derivable
+// from the model, and binding one emits a TYPED client instead of the untyped
+// `get`/`post` verbs (M-T4.8).  Only `kind: api` accepts an `Api` target; the
+// IR validator pins the pairing.
+type ResourceTarget = Storage | Api;
+
 // The per-(context, kind) binding from a context's aggregates to a physical
 // `storage` — the configured realization of a logical need.  All `for:` /
 // `kind:` / `use:` are required by the validator; declared as optional in the
@@ -358,7 +367,7 @@ Resource:
     'resource' name=LooseName '{'
         ('for'  ':' context=[BoundedContext:ID] ','?)?
         ('kind' ':' kind=DataSourceKind ','?)?
-        ('use'  ':' use=[Storage:LooseName] ','?)?
+        ('use'  ':' use=[ResourceTarget:LooseName] ','?)?
         ('schema'         ':' schema=STRING ','?)?
         ('tablePrefix'    ':' tablePrefix=STRING ','?)?
         ('keyPrefix'      ':' keyPrefix=STRING ','?)?

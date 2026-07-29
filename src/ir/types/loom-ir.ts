@@ -2887,8 +2887,18 @@ export interface DataSourceIR {
   contextName: string;
   /** Which datalogue kind this binding satisfies for the context. */
   kind: DataSourceKind;
-  /** Name of the physical `storage` declaration this binding routes to. */
+  /** Name of the physical `storage` declaration this binding routes to.
+   *  Empty when the binding targets an in-system `api` instead — see
+   *  {@link DataSourceIR.apiName}. */
   storageName: string;
+  /** Name of the in-system `api` this binding routes to, when `use:` names an
+   *  `Api` rather than a `Storage` (M-T4.8).  The address and the operation
+   *  set are then DERIVED from the deployable that `serves:` it, so no
+   *  `baseUrl` is authored and the emitted client is typed.  Mutually
+   *  exclusive with {@link DataSourceIR.storageName} — exactly one is
+   *  non-empty on a well-formed binding, which `loom.resource-api-target-kind`
+   *  and the IR store checks pin. */
+  apiName?: string;
   schema?: string;
   tablePrefix?: string;
   keyPrefix?: string;
