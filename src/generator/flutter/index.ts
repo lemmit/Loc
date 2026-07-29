@@ -441,16 +441,23 @@ function renderConsumerPage(
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
   if (b.usesComponent) imports.push("import '../components.dart';");
-  // A `match await` Notifier method decodes JSON, POSTs via `apiUri`, and reifies
-  // wire models — so the file needs dart:convert + http + config + models when the
-  // projection uses them.
-  if (projSource.includes("jsonDecode") || projSource.includes("jsonEncode")) {
+  // Content scan over BOTH the Notifier projection AND the rendered body: a
+  // `match await` method (projSource) decodes JSON + reifies wire models, and a
+  // `FileUpload` (bodyWidget) does the same inline plus references `FileRef` in
+  // the state class — so both positions can pull dart:convert / models / http /
+  // config / file_picker.
+  const scan = `${projSource}\n${bodyWidget}`;
+  if (scan.includes("jsonDecode") || scan.includes("jsonEncode")) {
     imports.push("import 'dart:convert';");
   }
-  if (projSource.includes(".fromJson(")) imports.push("import '../models.dart';");
-  // `Action(<instance>.<op>)` buttons and async-effect methods POST inline via
-  // `apiUri(` — import http + the base-URL helper when either references it.
-  if (bodyWidget.includes("apiUri(") || projSource.includes("apiUri(")) {
+  // Wire-model reifications (`X.fromJson(`) and the `FileRef` state type both
+  // live in `../models.dart`.
+  if (scan.includes(".fromJson(") || scan.includes("FileRef")) {
+    imports.push("import '../models.dart';");
+  }
+  // `Action(<instance>.<op>)` buttons, async-effect methods, and FileUpload POST
+  // inline via `apiUri(` — import http + the base-URL helper when either does.
+  if (scan.includes("apiUri(")) {
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
   if (usesIntl(bodyWidget) || usesIntl(projSource)) {

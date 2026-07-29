@@ -187,10 +187,14 @@ describe("flutter FileUpload (generate system)", () => {
       "setDoc(FileRef.fromJson(jsonDecode(resp.body) as Map<String, dynamic>))",
     );
 
-    // Imports pulled in by the content scan.
+    // Imports pulled in by the content scan — ALL of them, incl. the ones the
+    // FileUpload references only in the BODY (models.dart for FileRef,
+    // dart:convert for jsonDecode) that an earlier projSource-only scan missed.
     expect(page).toContain("import 'package:file_picker/file_picker.dart';");
     expect(page).toContain("import 'package:http/http.dart' as http;");
     expect(page).toContain("import '../config.dart';");
+    expect(page).toContain("import '../models.dart';");
+    expect(page).toContain("import 'dart:convert';");
 
     // The FileRef model is emitted, and file_picker is a dependency.
     const models = files.get([...files.keys()].find((k) => k.endsWith("app/lib/models.dart"))!)!;
