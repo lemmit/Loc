@@ -71,6 +71,67 @@ export async function openGitFs(name: string = DEFAULT_GIT_DB): Promise<GitFs> {
   return gfs;
 }
 
+/** Close the IndexedDB connection behind a `GitFs`.
+ *
+ *  LightningFS has no public `close()` — it drains and deactivates its
+ *  backend 500 ms after the last operation — so this drives the same
+ *  internal pair (`_gracefulShutdown` waits for in-flight ops, then
+ *  `_deactivate` flushes the superblock and closes the IDB connection)
+ *  through one narrow structural cast, in the spirit of `asFsClient`'s
+ *  single-cast rule.  Best-effort and idempotent: a library build
+ *  without those internals simply no-ops, and any later fs op
+ *  transparently re-activates the connection.
+ *
+ *  Callers use it before `deleteGitDb` — `indexedDB.deleteDatabase`
+ *  against a still-open connection fires `blocked` and never completes. */
+export async function closeGitFs(gfs: GitFs): Promise<void> {
+  const p = gfs.fs.promises as unknown as {
+    _gracefulShutdown?: () => Promise<void>;
+    _deactivate?: () => Promise<void>;
+  };
+  try {
+    await p._gracefulShutdown?.();
+    await p._deactivate?.();
+  } catch {
+    /* best-effort teardown; the delete below reports what actually happened */
+  }
+}
+
+/** Outcome of a `deleteGitDb` attempt.  `blocked` means another
+ *  connection (typically a second tab) still holds the database — the
+ *  delete stays pending in the browser and completes once that closes. */
+export type DeleteDbResult = "deleted" | "blocked" | "error" | "unsupported";
+
+/** Drop an IndexedDB database and AWAIT the outcome, handling the
+ *  `blocked` event explicitly.  The bare `indexedDB.deleteDatabase(name)`
+ *  is fire-and-forget: when a connection is still open it silently fires
+ *  `blocked` and the DB lingers forever with nobody the wiser. */
+export function deleteGitDb(name: string, blockedTimeoutMs = 5000): Promise<DeleteDbResult> {
+  if (typeof indexedDB === "undefined") return Promise.resolve("unsupported");
+  return new Promise<DeleteDbResult>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const settle = (result: DeleteDbResult): void => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      resolve(result);
+    };
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.deleteDatabase(name);
+    } catch {
+      resolve("error");
+      return;
+    }
+    req.onsuccess = () => settle("deleted");
+    req.onerror = () => settle("error");
+    req.onblocked = () => {
+      // Keep waiting — the delete completes as soon as the other holder
+      // closes — but don't leave the caller's promise pending forever.
+      timer = setTimeout(() => settle("blocked"), blockedTimeoutMs);
+    };
+  });
+}
+
 async function isInitialised(fs: FS): Promise<boolean> {
   try {
     await fs.promises.stat(GITDIR);

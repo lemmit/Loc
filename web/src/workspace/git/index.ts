@@ -3,7 +3,16 @@
 // import from here, not from the individual files.
 // ---------------------------------------------------------------------------
 
-export { openGitFs, DEFAULT_GIT_DB, REPO_DIR, GITDIR, type GitFs } from "./git-fs.js";
+export {
+  openGitFs,
+  closeGitFs,
+  deleteGitDb,
+  DEFAULT_GIT_DB,
+  REPO_DIR,
+  GITDIR,
+  type DeleteDbResult,
+  type GitFs,
+} from "./git-fs.js";
 export {
   GitStore,
   normalizePath,

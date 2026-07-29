@@ -22,7 +22,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { requestPersistentStorage } from "../vfs/legacy-idb.js";
-import { DEFAULT_GIT_DB, GitStore, openGitFs } from "./git/index.js";
+import {
+  closeGitFs,
+  DEFAULT_GIT_DB,
+  deleteGitDb,
+  type GitFs,
+  GitStore,
+  openGitFs,
+} from "./git/index.js";
 import { importLegacyIdbWorkspace } from "./git/import-legacy.js";
 import {
   activeWorkspace,
@@ -78,6 +85,13 @@ export function useWorkspace(): WorkspaceState {
 
   const active = activeWorkspace(registry);
 
+  // Every LightningFS this tab has opened, keyed by IDB name.  A workspace
+  // delete must CLOSE the connection before `indexedDB.deleteDatabase`
+  // (an open one makes the delete `blocked` — it then never completes and
+  // the DB is orphaned), and the open effect's cleanup closes the one it
+  // opened when the active workspace switches away.
+  const openFsRef = useRef(new Map<string, GitFs>());
+
   // Persist the registry whenever it changes.  Best-effort inside
   // `saveRegistry`, so a hostile-storage failure can't wedge the session.
   useEffect(() => {
@@ -91,9 +105,11 @@ export function useWorkspace(): WorkspaceState {
     setStore(null);
     setLoaded(false);
     setPersistedSource(null);
+    const dbName = active.gitDb;
     void (async () => {
       try {
-        const gfs = await openGitFs(active.gitDb);
+        const gfs = await openGitFs(dbName);
+        openFsRef.current.set(dbName, gfs);
         const s = new GitStore(gfs);
         // The legacy pre-git IndexedDB workspace only belongs in the
         // original default store; importing it into a freshly-created
@@ -120,6 +136,14 @@ export function useWorkspace(): WorkspaceState {
     })();
     return () => {
       cancelled = true;
+      // Switching away: release this workspace's IDB connection so a later
+      // delete of it isn't blocked (LightningFS re-activates transparently
+      // if anything still holds the store and touches it).
+      const gfs = openFsRef.current.get(dbName);
+      if (gfs) {
+        openFsRef.current.delete(dbName);
+        void closeGitFs(gfs);
+      }
     };
   }, [active.gitDb]);
 
@@ -139,17 +163,31 @@ export function useWorkspace(): WorkspaceState {
 
   const deleteWorkspace = useCallback((id: string): void => {
     const removed = registryRef.current.workspaces.find((w) => w.id === id);
+    const wasActive = registryRef.current.activeId === id;
+    // Drop the store BEFORE the registry update so consumers stop issuing
+    // reads against the workspace we're about to tear down (the open effect
+    // would clear it anyway once the new active workspace opens, but that
+    // is a render later — the teardown below starts on this microtask).
+    if (wasActive) setStore(null);
     setRegistry((r) => removeWorkspaceFromRegistry(r, id));
     // Best-effort: drop the deleted workspace's backing IndexedDB so it
     // doesn't linger.  Never touch the legacy DB (it may still back the
     // default workspace under a different id in some migration paths).
-    if (removed && removed.gitDb !== DEFAULT_GIT_DB && typeof indexedDB !== "undefined") {
-      try {
-        indexedDB.deleteDatabase(removed.gitDb);
-      } catch {
-        /* connection may still be open; harmless to leave */
+    if (!removed || removed.gitDb === DEFAULT_GIT_DB) return;
+    void (async () => {
+      // Close this tab's connection first: `deleteDatabase` against an
+      // open one only fires `blocked`, leaving an orphan DB forever.
+      const gfs = openFsRef.current.get(removed.gitDb);
+      if (gfs) {
+        openFsRef.current.delete(removed.gitDb);
+        await closeGitFs(gfs);
       }
-    }
+      const result = await deleteGitDb(removed.gitDb);
+      if (result === "blocked" || result === "error") {
+        // eslint-disable-next-line no-console
+        console.warn(`workspace database "${removed.gitDb}" not deleted (${result})`);
+      }
+    })();
   }, []);
 
   // Memoised so the returned object has a STABLE identity between renders that

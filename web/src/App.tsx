@@ -50,6 +50,7 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { filesDroppedByExample } from "./workspace/example-import";
 import { NEW_FILE_SEED, pickInitialSource } from "./workspace/initial-source";
 import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
 import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
@@ -670,19 +671,25 @@ export default function App(): JSX.Element {
   // companion files the example doesn't include, reset downstream state,
   // and regenerate promptly.
   async function importExample(id: string): Promise<void> {
-    userPickedExampleRef.current = true;
     const ex = examples.find((e) => e.id === id) ?? defaultExample;
     const ctrl = sourcesRef.current.controller;
-    const keep = new Set<string>(["/workspace/main.ddd"]);
-    if (ex.files) {
-      for (const rel of Object.keys(ex.files)) {
-        const clean = rel.replace(/^\/+/, "");
-        if (clean.endsWith(".ddd")) keep.add(`/workspace/${clean}`);
-      }
+    // Importing overwrites the workspace with the example's file set, so any
+    // other source file is deleted.  Confirm ONLY when that would actually
+    // lose something — a switch between two single-file examples drops
+    // nothing and must not prompt.  Same idiom as the other destructive file
+    // actions (SourceFilesTree deletes, workspace delete): `window.confirm`.
+    const dropped = filesDroppedByExample(sourcesRef.current.files.keys(), ex.files);
+    if (dropped.length > 0 && typeof window !== "undefined") {
+      const list = dropped.map((p) => `  ${p.replace("/workspace/", "")}`).join("\n");
+      const ok = window.confirm(
+        `Loading "${ex.label}" replaces this workspace's files.\n\n` +
+          `${dropped.length} file${dropped.length === 1 ? "" : "s"} will be deleted:\n${list}\n\n` +
+          `Continue?`,
+      );
+      if (!ok) return;
     }
-    for (const path of [...sourcesRef.current.files.keys()]) {
-      if (!keep.has(path)) await ctrl.delete(path);
-    }
+    userPickedExampleRef.current = true;
+    for (const path of dropped) await ctrl.delete(path);
     await seedProject(ctrl, ex.source, ex.files);
     sourceRef.current = ex.source;
     writeHashSource(ex.source);

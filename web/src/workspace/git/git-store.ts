@@ -327,12 +327,26 @@ export class GitStore {
     const workingFiles = nodes
       .filter((n) => n.kind === "file")
       .map((n) => REPO_RELATIVE(n.path));
+    // Tolerate a file vanishing between the walk and its `git.add`: the
+    // walk is not atomic against concurrent writes (a delete from the UI
+    // can land mid-loop), and letting that reject would fail the WHOLE
+    // commit — for the debounced autosave that means the milestone is
+    // silently skipped (`auto-commit.ts` only console.warns).  A file
+    // that is genuinely gone is simply not staged as content; dropping
+    // it from `workingSet` lets the removal pass below stage the delete
+    // instead, so the commit still lands with a consistent tree.
+    const stagedFiles: string[] = [];
     for (const filepath of workingFiles) {
-      await git.add({ fs: this.fsc, dir: this.dir, filepath });
+      try {
+        await git.add({ fs: this.fsc, dir: this.dir, filepath });
+        stagedFiles.push(filepath);
+      } catch (err) {
+        if (await this.exists(ABSOLUTE(filepath))) throw err; // a real failure
+      }
     }
     // Removals: anything currently tracked in the index but gone from
     // the working tree.
-    const workingSet = new Set(workingFiles);
+    const workingSet = new Set(stagedFiles);
     let tracked: string[] = [];
     try {
       tracked = await git.listFiles({ fs: this.fsc, dir: this.dir });
