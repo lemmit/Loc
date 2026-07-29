@@ -1,0 +1,115 @@
+// End-to-end for the `ddd i18n` CLI handlers against a real temp tree:
+// extract → init → translate → sync, exercising the file layout and the lock
+// lag that makes the three-way merge work.
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { extractCatalog } from "../../src/cli/i18n/extract.js";
+import { runI18nInit, runI18nSync } from "../../src/cli/i18n/index.js";
+import { TODO_PREFIX } from "../../src/i18n/merge.js";
+
+const SOURCE = `
+  system S {
+    subdomain M { context C { } }
+    ui WebApp {
+      page Welcome {
+        route: "/welcome"
+        body:  Heading { "Welcome" }
+      }
+    }
+    deployable api { platform: node, contexts: [C], port: 3000 }
+    deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+  }
+`;
+
+let tmp: string;
+let ddd: string;
+let dir: string;
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-i18n-"));
+  ddd = path.join(tmp, "app.ddd");
+  dir = path.join(tmp, "locales");
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const readJson = (p: string) => JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, string>;
+
+describe("ddd i18n — extract/init/sync", () => {
+  it("extractCatalog surfaces user-visible page text keyed by content hash", async () => {
+    fs.writeFileSync(ddd, SOURCE);
+    const catalog = await extractCatalog(ddd);
+    const entries = Object.entries(catalog);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(Object.values(catalog)).toContain("Welcome");
+    // keys are the D-I18N-KEY page-scoped content-hash shape.
+    expect(entries.every(([k]) => /^page\.Welcome\./.test(k))).toBe(true);
+  });
+
+  it("init seeds a TODO locale file + a lock snapshot of the source", async () => {
+    fs.writeFileSync(ddd, SOURCE);
+    await runI18nInit(ddd, "fr", { dir });
+
+    const fr = readJson(path.join(dir, "fr.json"));
+    expect(Object.values(fr).every((v) => v.startsWith(TODO_PREFIX))).toBe(true);
+
+    const lock = readJson(path.join(dir, ".loom", "source.lock.json"));
+    expect(Object.values(lock)).toContain("Welcome");
+    // lock == source (BASE snapshot), no TODO prefix.
+    expect(Object.values(lock).every((v) => !v.startsWith(TODO_PREFIX))).toBe(true);
+  });
+
+  it("init leaves an existing locale untouched", async () => {
+    fs.writeFileSync(ddd, SOURCE);
+    await runI18nInit(ddd, "fr", { dir });
+    const frFile = path.join(dir, "fr.json");
+    const key = Object.keys(readJson(frFile))[0];
+    fs.writeFileSync(frFile, JSON.stringify({ [key]: "Bienvenue" }, null, 2));
+
+    await runI18nInit(ddd, "fr", { dir });
+    expect(readJson(frFile)).toEqual({ [key]: "Bienvenue" });
+  });
+
+  it("sync keeps a human translation and reports no new work when source is unchanged", async () => {
+    fs.writeFileSync(ddd, SOURCE);
+    await runI18nInit(ddd, "fr", { dir });
+    const frFile = path.join(dir, "fr.json");
+    const key = Object.keys(readJson(frFile))[0];
+    fs.writeFileSync(frFile, JSON.stringify({ [key]: "Bienvenue" }, null, 2));
+
+    await runI18nSync(ddd, { dir });
+    expect(readJson(frFile)).toEqual({ [key]: "Bienvenue" });
+  });
+
+  it("sync adds a fresh TODO when the source grows a new string", async () => {
+    fs.writeFileSync(ddd, SOURCE);
+    await runI18nInit(ddd, "fr", { dir });
+    const frFile = path.join(dir, "fr.json");
+    const key = Object.keys(readJson(frFile))[0];
+    fs.writeFileSync(frFile, JSON.stringify({ [key]: "Bienvenue" }, null, 2));
+    await runI18nSync(ddd, { dir });
+
+    // Add a second user-visible string, re-extract, re-sync.
+    fs.writeFileSync(
+      ddd,
+      SOURCE.replace(
+        'Heading { "Welcome" }',
+        'Stack { Heading { "Welcome" }, Text { "Sign in" } }',
+      ),
+    );
+    await runI18nSync(ddd, { dir });
+
+    const fr = readJson(frFile);
+    expect(fr[key]).toBe("Bienvenue"); // old translation preserved
+    const todos = Object.values(fr).filter((v) => v.startsWith(TODO_PREFIX));
+    expect(todos).toContain(`${TODO_PREFIX}Sign in`);
+  });
+});

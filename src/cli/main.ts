@@ -40,6 +40,14 @@ import {
 } from "../verify/render.js";
 import { computeVerification } from "../verify/verification.js";
 import {
+  runI18nCheck,
+  runI18nExtract,
+  runI18nInit,
+  runI18nPrune,
+  runI18nStatus,
+  runI18nSync,
+} from "./i18n/index.js";
+import {
   DESIGN_PACKS,
   type DesignPack,
   renderLoomignore,
@@ -1187,6 +1195,72 @@ program
   .option("--force", "scaffold into an existing, non-empty directory")
   .action(async (name: string, options: NewOptions) => {
     await runNew(name, options);
+  });
+
+const i18n = program
+  .command("i18n")
+  .description(
+    "Translator workflow: extract user-visible strings and three-way-merge locale files.",
+  );
+
+i18n
+  .command("extract <file>")
+  .description(
+    "Write the fresh source catalog to <out>/.loom/messages.en.json (phases ①–⑥, no codegen).",
+  )
+  .option("-o, --out <dir>", "output directory (default: ./out)")
+  .action(async (file: string, options: { out?: string }) => {
+    await runI18nExtract(file, options);
+  });
+
+i18n
+  .command("init <file> <locale>")
+  .description("Scaffold locales/<locale>.json (all keys as TODO) and the source lock if absent.")
+  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .action(async (file: string, locale: string, options: { dir?: string }) => {
+    await runI18nInit(file, locale, options);
+  });
+
+i18n
+  .command("sync <file>")
+  .description(
+    "Three-way merge (lock=BASE, locale=OURS, fresh extraction=THEIRS) for every locale; bump the lock.",
+  )
+  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--locale <locale>", "sync only this locale")
+  .option("--keep-stale", "keep source-deleted keys under `_stale.<key>` instead of dropping them")
+  .action(async (file: string, options: { dir?: string; locale?: string; keepStale?: boolean }) => {
+    await runI18nSync(file, options);
+  });
+
+i18n
+  .command("status <file>")
+  .description("Report what `sync` would do; exit non-zero if any locale has pending changes.")
+  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--locale <locale>", "check only this locale")
+  .action(async (file: string, options: { dir?: string; locale?: string }) => {
+    await runI18nStatus(file, options);
+  });
+
+i18n
+  .command("check <file>")
+  .description("CI gate: report TODO markers, unresolved conflicts, and missing keys per locale.")
+  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--locale <locale>", "check only this locale")
+  .option("--strict", "exit non-zero if any finding is present")
+  .action(async (file: string, options: { dir?: string; locale?: string; strict?: boolean }) => {
+    await runI18nCheck(file, options);
+  });
+
+i18n
+  .command("prune <file>")
+  .description(
+    "Delete keys the source no longer emits from every locale file (off by default; run deliberately).",
+  )
+  .option("--dir <dir>", "translator tree root (default: ./locales)")
+  .option("--locale <locale>", "prune only this locale")
+  .action(async (file: string, options: { dir?: string; locale?: string }) => {
+    await runI18nPrune(file, options);
   });
 
 async function watchAndRegenerate(
